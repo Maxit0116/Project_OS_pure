@@ -1,0 +1,42 @@
+name: Features CI
+on:
+  push:
+    paths:
+      - 'projectos/contracts/features*.ts'
+      - 'projectos/services/features*.ts'
+      - 'projectos/scripts/**'
+      - 'projectos/features/**'
+      - 'sample-graph-saas/.projectos/features.json'
+      - 'projectos/client/sample-projectos-fixtures/features.json'
+      - '.github/workflows/features.yml'
+  pull_request:
+    paths:
+      - 'projectos/contracts/features*.ts'
+      - 'projectos/services/features*.ts'
+      - 'projectos/scripts/**'
+      - 'projectos/features/**'
+      - 'sample-graph-saas/.projectos/features.json'
+      - 'projectos/client/sample-projectos-fixtures/features.json'
+      - '.github/workflows/features.yml'
+
+jobs:
+  features-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projectos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: projectos/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Unit tests (features)
+        run: npx vitest run contracts/features.test.ts contracts/features.sample.test.ts contracts/features-query.test.ts services/features-sync.test.ts services/features-sdd.test.ts services/features-staleness.test.ts services/agent-tools/features-tools.test.ts
+      - name: features:check
+        run: |
+          npm run features:check -- ../sample-graph-saas/.projectos/features.json
+          npm run features:check -- ./client/sample-projectos-fixtures/features.json

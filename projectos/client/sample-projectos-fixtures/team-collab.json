@@ -1,0 +1,13 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "nodes": [
+    {
+      "nodeId": "feat_login",
+      "ownerPersonId": "person_alice",
+      "collabStatus": "waiting_acceptance",
+      "relatedArtifactIds": [],
+      "relatedDecisionIds": ["decision_oauth_google"]
+    }
+  ]
+}

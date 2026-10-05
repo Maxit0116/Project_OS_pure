@@ -1,0 +1,263 @@
+.screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  position: relative;
+  background: var(--ambient-mesh);
+  background-attachment: fixed;
+}
+
+.themeBtn {
+  position: absolute;
+  top: var(--space-lg);
+  right: var(--space-lg);
+  padding: 4px 12px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background: var(--glass-bg-clear);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border-highlight);
+  border-radius: var(--radius-glass-lg);
+  box-shadow: var(--glass-shadow-regular);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+  z-index: 1;
+}
+
+.themeBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--glass-border-highlight);
+}
+
+.layout {
+  display: flex;
+  align-items: center;
+  gap: 48px;
+  max-width: 900px;
+  padding: 24px;
+}
+
+.preview {
+  display: grid;
+  grid-template-columns: 1fr 80px 100px;
+  gap: 12px;
+  opacity: 0.85;
+}
+
+.previewPanel,
+.previewTree,
+.previewChat {
+  background: var(--glass-bg-clear);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border-highlight);
+  border-radius: var(--radius-glass-lg);
+  padding: 12px;
+  min-height: 160px;
+  box-shadow: var(--glass-shadow-elevated);
+}
+
+.previewBar {
+  height: 4px;
+  width: 60%;
+  background: var(--color-bg-muted);
+  border-radius: 2px;
+  margin-bottom: 16px;
+}
+
+.previewNodes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nodeA,
+.nodeB,
+.nodeC {
+  width: 48px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+}
+
+.nodeA { background: var(--color-success-subtle); }
+.nodeB { background: var(--color-accent-subtle); }
+.nodeC { background: var(--color-bg-muted); border-style: dashed; }
+
+.treeLine,
+.treeLineShort {
+  height: 6px;
+  background: var(--color-bg-muted);
+  border-radius: 2px;
+  margin-bottom: 8px;
+}
+
+.treeLineShort {
+  width: 70%;
+}
+
+.chatBubble,
+.chatBubbleUser {
+  height: 20px;
+  border-radius: var(--radius-glass-sm);
+  margin-bottom: 8px;
+}
+
+.chatBubble {
+  width: 80%;
+  background: var(--color-bg-muted);
+}
+
+.chatBubbleUser {
+  width: 60%;
+  margin-left: auto;
+  background: var(--color-accent-subtle);
+}
+
+/* Background/border/shadow now come from GlassLens (Tier B true refraction). */
+.card {
+  text-align: center;
+  max-width: 400px;
+  padding: 40px 36px;
+  border-radius: var(--radius-glass-xl);
+}
+
+.title {
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.subtitle {
+  margin: 0 0 var(--space-xl);
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.error {
+  margin-bottom: var(--space-lg);
+  padding: 10px 12px;
+  font-size: var(--font-size-md);
+  color: var(--color-error);
+  background: var(--color-error-subtle);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-glass-sm);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  width: 100%;
+}
+
+.actions button {
+  width: 100%;
+}
+
+.cta {
+  width: 100%;
+  margin-bottom: var(--space-sm);
+}
+
+.secondaryCta {
+  width: 100%;
+  opacity: 0.5;
+}
+
+.hint {
+  margin: var(--space-lg) 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.dialog {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.dialog::backdrop {
+  background: transparent;
+}
+
+.dialogCard {
+  width: min(92vw, 420px);
+  padding: var(--space-xl);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-glass-lg);
+  box-shadow: var(--glass-shadow-elevated);
+}
+
+.dialogTitle {
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-lg);
+  color: var(--color-text-primary);
+}
+
+.dialogLabel {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.dialogInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+  background: var(--color-bg-muted);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.dialogHint {
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+@media (max-width: 768px) {
+  .layout {
+    flex-direction: column;
+  }
+  .preview {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .previewPanel,
+  .previewTree,
+  .previewChat {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--color-bg-elevated);
+  }
+}

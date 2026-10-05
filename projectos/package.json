@@ -1,0 +1,49 @@
+{
+  "name": "projectos",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts/index.d.ts",
+      "import": "./dist/contracts/index.js"
+    },
+    "./validation": {
+      "types": "./dist/validation/index.d.ts",
+      "import": "./dist/validation/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "fixtures:check": "npm run build --silent && node dist/scripts/sample-fixture-reconciler.js check",
+    "fixtures:scaffold": "npm run build --silent && node dist/scripts/sample-fixture-reconciler.js scaffold",
+    "fixtures:sync": "npm run build --silent && node dist/scripts/sample-fixture-reconciler.js sync",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "env PROJECTOS_REQUIRE_REAL_PREVIEW=1 vitest run --maxWorkers=1 --minWorkers=1",
+    "test:unit": "vitest run",
+    "test:agent-flow": "vitest run services/agent-orchestrator/index.test.ts services/project-os-local-api.test.ts services/model-json-output.test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "diff": "^7.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

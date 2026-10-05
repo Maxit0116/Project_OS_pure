@@ -1,0 +1,988 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "generatedAt": "2026-07-07T00:00:00.000Z",
+  "roots": [
+    {
+      "id": "tree_feat_home",
+      "label": "产品首页",
+      "kind": "feature",
+      "sourceNodeId": "feat_home",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_app_page",
+          "label": "app/page.tsx",
+          "kind": "route",
+          "path": "app/page.tsx",
+          "sourceNodeId": "feat_home",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_layout",
+          "label": "app/layout.tsx",
+          "kind": "file",
+          "path": "app/layout.tsx",
+          "sourceNodeId": "feat_home",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "tree_feat_login",
+      "label": "用户登录",
+      "kind": "feature",
+      "sourceNodeId": "feat_login",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_app_login_page",
+          "label": "app/login/page.tsx",
+          "kind": "route",
+          "path": "app/login/page.tsx",
+          "sourceNodeId": "feat_login",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_login_form",
+          "label": "components/LoginForm.tsx",
+          "kind": "file",
+          "path": "components/LoginForm.tsx",
+          "sourceNodeId": "feat_login",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_api_auth_route",
+          "label": "app/api/auth/route.ts",
+          "kind": "api",
+          "path": "app/api/auth/route.ts",
+          "sourceNodeId": "feat_login",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_lib_auth",
+          "label": "lib/auth.ts",
+          "kind": "file",
+          "path": "lib/auth.ts",
+          "sourceNodeId": "feat_login",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_lib_request_auth_ts_e73d45b4e9",
+          "label": "lib/request-auth.ts",
+          "kind": "file",
+          "path": "lib/request-auth.ts",
+          "sourceNodeId": "feat_login",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_middleware",
+          "label": "middleware.ts",
+          "kind": "file",
+          "path": "middleware.ts",
+          "sourceNodeId": "feat_login",
+          "status": "normal",
+          "children": []
+        }
+      ],
+      "badges": [
+        "演示目标"
+      ]
+    },
+    {
+      "id": "tree_feat_dashboard",
+      "label": "仪表盘",
+      "kind": "feature",
+      "sourceNodeId": "feat_dashboard",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_app_dashboard_page",
+          "label": "app/dashboard/page.tsx",
+          "kind": "route",
+          "path": "app/dashboard/page.tsx",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_projectos_generated_dashboard_view",
+          "label": "projectos-generated/design/doc1_dashboard/view.tsx",
+          "kind": "file",
+          "path": "projectos-generated/design/doc1_dashboard/view.tsx",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_projectos_generated_dashboard_styles",
+          "label": "projectos-generated/design/doc1_dashboard/styles.module.css",
+          "kind": "file",
+          "path": "projectos-generated/design/doc1_dashboard/styles.module.css",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_projectos_blocks_dashboard_loader",
+          "label": "projectos-blocks/loaders/dashboard.ts",
+          "kind": "file",
+          "path": "projectos-blocks/loaders/dashboard.ts",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_dashboard_layout",
+          "label": "app/dashboard/layout.tsx",
+          "kind": "file",
+          "path": "app/dashboard/layout.tsx",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_stats_card",
+          "label": "components/StatsCard.tsx",
+          "kind": "file",
+          "path": "components/StatsCard.tsx",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_stats_card_module_css",
+          "label": "components/StatsCard.module.css",
+          "kind": "file",
+          "path": "components/StatsCard.module.css",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_activityitem_tsx_480dedb441",
+          "label": "components/ActivityItem.tsx",
+          "kind": "file",
+          "path": "components/ActivityItem.tsx",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_activityitem_module_css_38976c30b1",
+          "label": "components/ActivityItem.module.css",
+          "kind": "file",
+          "path": "components/ActivityItem.module.css",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_sidebar",
+          "label": "components/Sidebar.tsx",
+          "kind": "file",
+          "path": "components/Sidebar.tsx",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_sidebar_module_css_1cf989de0e",
+          "label": "components/Sidebar.module.css",
+          "kind": "file",
+          "path": "components/Sidebar.module.css",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_babelrc",
+          "label": ".babelrc",
+          "kind": "config",
+          "path": ".babelrc",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_projectos_source_binding_babel_plugin",
+          "label": "tools/projectos-source-binding-babel-plugin.cjs",
+          "kind": "file",
+          "path": "tools/projectos-source-binding-babel-plugin.cjs",
+          "sourceNodeId": "feat_dashboard",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "tree_component_projectos_design_host",
+      "label": "ProjectOS 设计画布支持",
+      "kind": "feature",
+      "sourceNodeId": "component_projectos_design_host",
+      "status": "normal",
+      "children": [
+        {
+          "id": "tree_file_app_dashboard_projectos_design_host_dynamic_page",
+          "label": "app/dashboard/[projectosDesignHost]/page.tsx",
+          "kind": "route",
+          "path": "app/dashboard/[projectosDesignHost]/page.tsx",
+          "sourceNodeId": "component_projectos_design_host",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_dashboard_projectos_design_host_client",
+          "label": "app/dashboard/[projectosDesignHost]/DesignHostClient.tsx",
+          "kind": "file",
+          "path": "app/dashboard/[projectosDesignHost]/DesignHostClient.tsx",
+          "sourceNodeId": "component_projectos_design_host",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "tree_feat_projects",
+      "label": "团队项目",
+      "kind": "feature",
+      "sourceNodeId": "feat_projects",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_app_projects_page_tsx_44af416e72",
+          "label": "app/projects/page.tsx",
+          "kind": "route",
+          "path": "app/projects/page.tsx",
+          "sourceNodeId": "feat_projects",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_projects_id_page_tsx_5b4ace0a73",
+          "label": "app/projects/[id]/page.tsx",
+          "kind": "route",
+          "path": "app/projects/[id]/page.tsx",
+          "sourceNodeId": "feat_projects",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_projects_layout_tsx_f21484a2a9",
+          "label": "app/projects/layout.tsx",
+          "kind": "file",
+          "path": "app/projects/layout.tsx",
+          "sourceNodeId": "feat_projects",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_projects_id_not_found_tsx_d9d04142e8",
+          "label": "app/projects/[id]/not-found.tsx",
+          "kind": "file",
+          "path": "app/projects/[id]/not-found.tsx",
+          "sourceNodeId": "feat_projects",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_projects_actions_ts_362908b983",
+          "label": "app/projects/actions.ts",
+          "kind": "file",
+          "path": "app/projects/actions.ts",
+          "sourceNodeId": "feat_projects",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_projectforms_tsx_1748092613",
+          "label": "components/ProjectForms.tsx",
+          "kind": "file",
+          "path": "components/ProjectForms.tsx",
+          "sourceNodeId": "feat_projects",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_taskforms_tsx_8523dbfd10",
+          "label": "components/TaskForms.tsx",
+          "kind": "file",
+          "path": "components/TaskForms.tsx",
+          "sourceNodeId": "feat_projects",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_workspacenav_tsx_77af2546b1",
+          "label": "components/WorkspaceNav.tsx",
+          "kind": "file",
+          "path": "components/WorkspaceNav.tsx",
+          "sourceNodeId": "feat_projects",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_lib_projects_ts_b7ea33a853",
+          "label": "lib/projects.ts",
+          "kind": "file",
+          "path": "lib/projects.ts",
+          "sourceNodeId": "feat_projects",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_lib_tasks_ts_c4280cea74",
+          "label": "lib/tasks.ts",
+          "kind": "file",
+          "path": "lib/tasks.ts",
+          "sourceNodeId": "feat_projects",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_lib_react_dom_types_ts_5615a2b48f",
+          "label": "lib/react-dom-types.ts",
+          "kind": "file",
+          "path": "lib/react-dom-types.ts",
+          "sourceNodeId": "feat_projects",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "tree_feat_team",
+      "label": "团队与职责",
+      "kind": "feature",
+      "sourceNodeId": "feat_team",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_app_team_actions_ts_ac8c8ef470",
+          "label": "app/team/actions.ts",
+          "kind": "file",
+          "path": "app/team/actions.ts",
+          "sourceNodeId": "feat_team",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_team_layout_tsx_523874dc10",
+          "label": "app/team/layout.tsx",
+          "kind": "file",
+          "path": "app/team/layout.tsx",
+          "sourceNodeId": "feat_team",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_team_loading_tsx_1290dc6ff7",
+          "label": "app/team/loading.tsx",
+          "kind": "file",
+          "path": "app/team/loading.tsx",
+          "sourceNodeId": "feat_team",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_team_page_tsx_8c18669d31",
+          "label": "app/team/page.tsx",
+          "kind": "route",
+          "path": "app/team/page.tsx",
+          "sourceNodeId": "feat_team",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_teamroleform_tsx_b631b80c91",
+          "label": "components/TeamRoleForm.tsx",
+          "kind": "file",
+          "path": "components/TeamRoleForm.tsx",
+          "sourceNodeId": "feat_team",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_lib_team_ts_bc125d7873",
+          "label": "lib/team.ts",
+          "kind": "file",
+          "path": "lib/team.ts",
+          "sourceNodeId": "feat_team",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "tree_feat_profile",
+      "label": "个人资料",
+      "kind": "feature",
+      "sourceNodeId": "feat_profile",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_app_profile_page",
+          "label": "app/profile/page.tsx",
+          "kind": "route",
+          "path": "app/profile/page.tsx",
+          "sourceNodeId": "feat_profile",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_profile_form",
+          "label": "components/ProfileForm.tsx",
+          "kind": "file",
+          "path": "components/ProfileForm.tsx",
+          "sourceNodeId": "feat_profile",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "tree_feat_settings",
+      "label": "个人偏好",
+      "kind": "feature",
+      "sourceNodeId": "feat_settings",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_app_settings_actions_ts_0b832eb922",
+          "label": "app/settings/actions.ts",
+          "kind": "file",
+          "path": "app/settings/actions.ts",
+          "sourceNodeId": "feat_settings",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_settings_layout_tsx_8bff06dd32",
+          "label": "app/settings/layout.tsx",
+          "kind": "file",
+          "path": "app/settings/layout.tsx",
+          "sourceNodeId": "feat_settings",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_settings_loading_tsx_a7ec971f27",
+          "label": "app/settings/loading.tsx",
+          "kind": "file",
+          "path": "app/settings/loading.tsx",
+          "sourceNodeId": "feat_settings",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_settings_page",
+          "label": "app/settings/page.tsx",
+          "kind": "route",
+          "path": "app/settings/page.tsx",
+          "sourceNodeId": "feat_settings",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_settingsform_tsx_ae93c86abb",
+          "label": "components/SettingsForm.tsx",
+          "kind": "file",
+          "path": "components/SettingsForm.tsx",
+          "sourceNodeId": "feat_settings",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_api_settings_route",
+          "label": "app/api/settings/route.ts",
+          "kind": "api",
+          "path": "app/api/settings/route.ts",
+          "sourceNodeId": "feat_settings",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_lib_settings_ts_0ae03fd69f",
+          "label": "lib/settings.ts",
+          "kind": "file",
+          "path": "lib/settings.ts",
+          "sourceNodeId": "feat_settings",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "tree_feat_checkout",
+      "label": "账单与订阅",
+      "kind": "feature",
+      "sourceNodeId": "feat_checkout",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_app_billing_actions_ts_de320e15e1",
+          "label": "app/billing/actions.ts",
+          "kind": "file",
+          "path": "app/billing/actions.ts",
+          "sourceNodeId": "feat_checkout",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_billing_layout_tsx_254c2914ac",
+          "label": "app/billing/layout.tsx",
+          "kind": "file",
+          "path": "app/billing/layout.tsx",
+          "sourceNodeId": "feat_checkout",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_billing_loading_tsx_3bb43ddec4",
+          "label": "app/billing/loading.tsx",
+          "kind": "file",
+          "path": "app/billing/loading.tsx",
+          "sourceNodeId": "feat_checkout",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_billing_page_tsx_fb77c24fcb",
+          "label": "app/billing/page.tsx",
+          "kind": "route",
+          "path": "app/billing/page.tsx",
+          "sourceNodeId": "feat_checkout",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_billingforms_tsx_991e7b5b70",
+          "label": "components/BillingForms.tsx",
+          "kind": "file",
+          "path": "components/BillingForms.tsx",
+          "sourceNodeId": "feat_checkout",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_checkout_page",
+          "label": "app/checkout/page.tsx",
+          "kind": "route",
+          "path": "app/checkout/page.tsx",
+          "sourceNodeId": "feat_checkout",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_api_checkout_route",
+          "label": "app/api/checkout/route.ts",
+          "kind": "api",
+          "path": "app/api/checkout/route.ts",
+          "sourceNodeId": "feat_checkout",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_checkout_form",
+          "label": "components/CheckoutForm.tsx",
+          "kind": "file",
+          "path": "components/CheckoutForm.tsx",
+          "sourceNodeId": "feat_checkout",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_lib_payments_ts_e2f320a82d",
+          "label": "lib/payments.ts",
+          "kind": "file",
+          "path": "lib/payments.ts",
+          "sourceNodeId": "feat_checkout",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "tree_feat_notifications",
+      "label": "通知中心",
+      "kind": "feature",
+      "sourceNodeId": "feat_notifications",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_app_notifications_page",
+          "label": "app/notifications/page.tsx",
+          "kind": "route",
+          "path": "app/notifications/page.tsx",
+          "sourceNodeId": "feat_notifications",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_api_notifications_route",
+          "label": "app/api/notifications/route.ts",
+          "kind": "api",
+          "path": "app/api/notifications/route.ts",
+          "sourceNodeId": "feat_notifications",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_notificationlist_tsx_f533b80434",
+          "label": "components/NotificationList.tsx",
+          "kind": "file",
+          "path": "components/NotificationList.tsx",
+          "sourceNodeId": "feat_notifications",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "tree_feat_admin",
+      "label": "管理后台",
+      "kind": "feature",
+      "sourceNodeId": "feat_admin",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_app_admin_page",
+          "label": "app/admin/page.tsx",
+          "kind": "route",
+          "path": "app/admin/page.tsx",
+          "sourceNodeId": "feat_admin",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_admin_analytics",
+          "label": "app/admin/analytics/page.tsx",
+          "kind": "route",
+          "path": "app/admin/analytics/page.tsx",
+          "sourceNodeId": "feat_admin",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_admin_users",
+          "label": "app/admin/users/page.tsx",
+          "kind": "route",
+          "path": "app/admin/users/page.tsx",
+          "sourceNodeId": "feat_admin",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_admin_layout",
+          "label": "app/admin/layout.tsx",
+          "kind": "file",
+          "path": "app/admin/layout.tsx",
+          "sourceNodeId": "feat_admin",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_admin_error_tsx_08737724df",
+          "label": "app/admin/error.tsx",
+          "kind": "file",
+          "path": "app/admin/error.tsx",
+          "sourceNodeId": "feat_admin",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_admin_loading_tsx_24adc29de3",
+          "label": "app/admin/loading.tsx",
+          "kind": "file",
+          "path": "app/admin/loading.tsx",
+          "sourceNodeId": "feat_admin",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_app_api_users_route_ts_042f8df9a7",
+          "label": "app/api/users/route.ts",
+          "kind": "api",
+          "path": "app/api/users/route.ts",
+          "sourceNodeId": "feat_admin",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_components_admintable_tsx_faac6d2c37",
+          "label": "components/AdminTable.tsx",
+          "kind": "file",
+          "path": "components/AdminTable.tsx",
+          "sourceNodeId": "feat_admin",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_lib_admin_analytics_ts_d98b348283",
+          "label": "lib/admin-analytics.ts",
+          "kind": "file",
+          "path": "lib/admin-analytics.ts",
+          "sourceNodeId": "feat_admin",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "tree_feat_database",
+      "label": "数据访问层",
+      "kind": "feature",
+      "sourceNodeId": "feat_database",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_lib_db",
+          "label": "lib/db.ts",
+          "kind": "file",
+          "path": "lib/db.ts",
+          "sourceNodeId": "feat_database",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_lib_workspace_context_ts_3b236f31d5",
+          "label": "lib/workspace-context.ts",
+          "kind": "file",
+          "path": "lib/workspace-context.ts",
+          "sourceNodeId": "feat_database",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_prisma_schema",
+          "label": "prisma/schema.prisma",
+          "kind": "config",
+          "path": "prisma/schema.prisma",
+          "sourceNodeId": "feat_database",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_prisma_migration_lock",
+          "label": "prisma/migrations/migration_lock.toml",
+          "kind": "config",
+          "path": "prisma/migrations/migration_lock.toml",
+          "sourceNodeId": "feat_database",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_prisma_initial_migration",
+          "label": "prisma/migrations/20260719000000_init/migration.sql",
+          "kind": "config",
+          "path": "prisma/migrations/20260719000000_init/migration.sql",
+          "sourceNodeId": "feat_database",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_prisma_sample_models_migration",
+          "label": "prisma/migrations/20260720000000_add_sample_models/migration.sql",
+          "kind": "config",
+          "path": "prisma/migrations/20260720000000_add_sample_models/migration.sql",
+          "sourceNodeId": "feat_database",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_prisma_migrations_20260724000000_team_data_foundation_mi_b74f664f21",
+          "label": "prisma/migrations/20260724000000_team_data_foundation/migration.sql",
+          "kind": "config",
+          "path": "prisma/migrations/20260724000000_team_data_foundation/migration.sql",
+          "sourceNodeId": "feat_database",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_prisma_seed",
+          "label": "prisma/seed.cjs",
+          "kind": "file",
+          "path": "prisma/seed.cjs",
+          "sourceNodeId": "feat_database",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_lib_data",
+          "label": "lib/data.ts",
+          "kind": "file",
+          "path": "lib/data.ts",
+          "sourceNodeId": "feat_database",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "tree_other_features",
+      "label": "其他产品页面",
+      "kind": "folder",
+      "status": "normal",
+      "children": [
+        {
+          "id": "tree_feat_about",
+          "label": "关于产品",
+          "kind": "feature",
+          "sourceNodeId": "feat_about",
+          "status": "active",
+          "children": [
+            {
+              "id": "tree_file_app_about_page",
+              "label": "app/about/page.tsx",
+              "kind": "route",
+              "path": "app/about/page.tsx",
+              "sourceNodeId": "feat_about",
+              "status": "normal",
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "tree_feat_blog",
+          "label": "内容与博客",
+          "kind": "feature",
+          "sourceNodeId": "feat_blog",
+          "status": "active",
+          "children": [
+            {
+              "id": "tree_file_app_blog_page",
+              "label": "app/blog/page.tsx",
+              "kind": "route",
+              "path": "app/blog/page.tsx",
+              "sourceNodeId": "feat_blog",
+              "status": "normal",
+              "children": []
+            },
+            {
+              "id": "tree_file_app_blog_slug_page",
+              "label": "app/blog/[slug]/page.tsx",
+              "kind": "route",
+              "path": "app/blog/[slug]/page.tsx",
+              "sourceNodeId": "feat_blog",
+              "status": "normal",
+              "children": []
+            },
+            {
+              "id": "tree_file_app_api_posts_route_ts_bb4a4820bc",
+              "label": "app/api/posts/route.ts",
+              "kind": "api",
+              "path": "app/api/posts/route.ts",
+              "sourceNodeId": "feat_blog",
+              "status": "normal",
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "tree_feat_contact",
+          "label": "联系我们",
+          "kind": "feature",
+          "sourceNodeId": "feat_contact",
+          "status": "active",
+          "children": [
+            {
+              "id": "tree_file_app_contact_page",
+              "label": "app/contact/page.tsx",
+              "kind": "route",
+              "path": "app/contact/page.tsx",
+              "sourceNodeId": "feat_contact",
+              "status": "normal",
+              "children": []
+            },
+            {
+              "id": "tree_file_components_contactform_tsx_b194f05d40",
+              "label": "components/ContactForm.tsx",
+              "kind": "file",
+              "path": "components/ContactForm.tsx",
+              "sourceNodeId": "feat_contact",
+              "status": "normal",
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "tree_feat_pricing",
+          "label": "产品定价",
+          "kind": "feature",
+          "sourceNodeId": "feat_pricing",
+          "status": "active",
+          "children": [
+            {
+              "id": "tree_file_app_pricing_page",
+              "label": "app/pricing/page.tsx",
+              "kind": "route",
+              "path": "app/pricing/page.tsx",
+              "sourceNodeId": "feat_pricing",
+              "status": "normal",
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "tree_feat_search",
+          "label": "内容搜索",
+          "kind": "feature",
+          "sourceNodeId": "feat_search",
+          "status": "active",
+          "children": [
+            {
+              "id": "tree_file_app_search_page",
+              "label": "app/search/page.tsx",
+              "kind": "route",
+              "path": "app/search/page.tsx",
+              "sourceNodeId": "feat_search",
+              "status": "normal",
+              "children": []
+            },
+            {
+              "id": "tree_file_api_search_route",
+              "label": "app/api/search/route.ts",
+              "kind": "api",
+              "path": "app/api/search/route.ts",
+              "sourceNodeId": "feat_search",
+              "status": "normal",
+              "children": []
+            },
+            {
+              "id": "tree_file_components_searchresults_tsx_d295bc0b18",
+              "label": "components/SearchResults.tsx",
+              "kind": "file",
+              "path": "components/SearchResults.tsx",
+              "sourceNodeId": "feat_search",
+              "status": "normal",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tree_docs",
+      "label": "项目文档",
+      "kind": "feature",
+      "status": "active",
+      "children": [
+        {
+          "id": "tree_file_docs_readme",
+          "label": "docs/README.md",
+          "kind": "file",
+          "path": "docs/README.md",
+          "status": "normal",
+          "children": []
+        }
+      ]
+    }
+  ]
+}

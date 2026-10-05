@@ -1,0 +1,29 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "acceptances": [
+    {
+      "id": "acc_login_gap",
+      "nodeId": "feat_login",
+      "requestedBy": "person_alice",
+      "status": "open",
+      "checklist": [
+        {
+          "id": "chk_feat_login_1",
+          "requirement": "Must provide a fixed demo identity for sample login",
+          "result": "satisfied",
+          "evidence": ["app/login/page.tsx"],
+          "must": true
+        },
+        {
+          "id": "chk_feat_login_2",
+          "requirement": "Must implement Apple OAuth",
+          "result": "unsatisfied",
+          "evidence": ["missing"],
+          "must": true
+        }
+      ],
+      "createdAt": "2026-08-19T14:30:00.000Z"
+    }
+  ]
+}

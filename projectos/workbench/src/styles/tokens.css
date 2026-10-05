@@ -1,0 +1,284 @@
+:root,
+[data-theme='dark'] {
+  --color-bg-base: #0a0a0f;
+  --color-bg-canvas: #0d0d14;
+  /* Function map canvas — recessed vs side panels; dot grid sits on this fill. */
+  --color-bg-map: #15151c;
+  --color-bg-side-panel: #1c1c28;
+  --glass-panel-surface: rgba(44, 44, 58, 0.26);
+  --color-bg-elevated: rgba(28, 28, 36, 0.92);
+  --color-bg-muted: rgba(44, 44, 54, 0.85);
+  --color-map-artifact-chrome: var(--color-bg-muted);
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+
+  --color-text-primary: #f5f5f7;
+  --color-text-secondary: rgba(245, 245, 247, 0.72);
+  --color-text-muted: rgba(245, 245, 247, 0.45);
+
+  --color-accent: #0a84ff;
+  --color-accent-strong: #409cff;
+  --color-accent-subtle: rgba(10, 132, 255, 0.18);
+  --color-success: #30d158;
+  --color-warning: #ffd60a;
+  --color-error: #ff453a;
+  --color-violet: #bf5af2;
+
+  --glass-saturate: 200%;
+  --glass-blur-sm: 16px;
+  --glass-blur-md: 30px;
+  --glass-blur-lg: 44px;
+  --glass-blur-xl: 60px;
+  --glass-bg-regular: rgba(26, 26, 38, 0.24);
+  --glass-bg-clear: rgba(18, 18, 30, 0.1);
+  --glass-bg-raised: var(--glass-bg-regular);
+  --glass-bg-elevated: rgba(32, 32, 44, 0.32);
+  --glass-bg-overlay: rgba(34, 34, 48, 0.4);
+  --glass-border: rgba(255, 255, 255, 0.2);
+  --glass-border-subtle: rgba(255, 255, 255, 0.1);
+  --glass-border-highlight: rgba(255, 255, 255, 0.42);
+  --glass-shadow-regular: 0 1px 0 rgba(255, 255, 255, 0.14) inset, 0 8px 24px rgba(0, 0, 0, 0.28);
+  --glass-shadow-raised: var(--glass-shadow-regular);
+  --glass-shadow-elevated: 0 1px 0 rgba(255, 255, 255, 0.2) inset, 0 12px 40px rgba(0, 0, 0, 0.32);
+  --glass-shadow-overlay: 0 1px 0 rgba(255, 255, 255, 0.24) inset, 0 20px 56px rgba(0, 0, 0, 0.44);
+  --glass-focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.45);
+
+  --ambient-mesh: var(--color-bg-canvas);
+
+  --glass-bg-bleed: rgba(18, 18, 30, 0.03);
+  --glass-blur-bleed: 52px;
+  --glass-saturate-bleed: 220%;
+
+  --scrim: rgba(0, 0, 0, 0.35);
+  --scrim-heavy: rgba(0, 0, 0, 0.6);
+  --minimap-mask: rgba(10, 132, 255, 0.1);
+  --color-error-subtle: rgba(255, 69, 58, 0.12);
+  --color-error-border: rgba(255, 69, 58, 0.25);
+  --color-warning-subtle: rgba(255, 214, 10, 0.08);
+  --color-warning-border: rgba(255, 214, 10, 0.2);
+  --color-success-subtle: rgba(48, 209, 88, 0.12);
+  --color-diff-line-changed: rgba(255, 255, 255, 0.04);
+  --color-diff-char-added: var(--color-success);
+  --color-diff-char-removed: var(--color-error);
+  --color-code-bg: #0d0d14;
+  --color-bg-editor: #1e1e1e;
+  --color-hover-overlay: rgba(255, 255, 255, 0.06);
+  --color-shimmer-mid: rgba(255, 255, 255, 0.06);
+
+  /* Markdown preview code syntax — VS Code Dark+ token colors */
+  --markdown-syntax-foreground: #d4d4d4;
+  --markdown-syntax-keyword: #569cd6;
+  --markdown-syntax-string: #ce9178;
+  --markdown-syntax-number: #b5cea8;
+  --markdown-syntax-comment: #6a9955;
+  --markdown-syntax-function: #dcdcaa;
+  --markdown-syntax-type: #4ec9b0;
+  --markdown-syntax-variable: #9cdcfe;
+  --markdown-syntax-constant: #4fc1ff;
+  --markdown-syntax-regexp: #d16969;
+  --markdown-syntax-meta: #c586c0;
+  --markdown-syntax-tag: #569cd6;
+  --markdown-syntax-punctuation: #d4d4d4;
+
+  /* Window rim hairlines — brighter than each local surface (dark mode). */
+  --border-window-map: rgba(255, 255, 255, 0.12);
+  --border-window-side-panel: rgba(255, 255, 255, 0.16);
+  --border-window-center: rgba(255, 255, 255, 0.14);
+  --border-window-chrome: rgba(255, 255, 255, 0.18);
+  --window-rim-map: inset 0 0 0 1px var(--border-window-map);
+  --window-rim-side-panel: inset 0 0 0 1px var(--border-window-side-panel);
+  --window-rim-center: inset 0 0 0 1px var(--border-window-center);
+  --window-rim-chrome: inset 0 0 0 1px var(--border-window-chrome);
+
+  --map3d-bg: var(--color-bg-map);
+  --map3d-sun-core: #f8fafc;
+  --map3d-project-anchor-glow: #e2e8f0;
+  --map3d-satellite: #94a3b8;
+  --map3d-edge-sibling: #475569;
+  --map3d-edge-parent: #94a3b8;
+  --map3d-partition-experience: #38bdf8;
+  --map3d-partition-interface: #22d3ee;
+  --map3d-partition-application: #a78bfa;
+  --map3d-partition-infrastructure: #94a3b8;
+  --map3d-partition-data: #34d399;
+
+  --shadow-panel: var(--glass-shadow-raised);
+}
+
+[data-theme='light'] {
+  --color-bg-base: #f2f2f7;
+  --color-bg-canvas: #ffffff;
+  /* Function map canvas — slightly recessed vs side panels and chrome. */
+  --color-bg-map: #ebebf0;
+  --color-bg-side-panel: #f5f5fa;
+  --glass-panel-surface: rgba(255, 255, 255, 0.36);
+  --color-bg-elevated: rgba(255, 255, 255, 0.95);
+  --color-bg-muted: rgba(242, 242, 247, 0.95);
+  --color-map-artifact-chrome: var(--color-bg-muted);
+  --color-border: rgba(0, 0, 0, 0.08);
+  --color-border-subtle: rgba(0, 0, 0, 0.04);
+
+  --color-text-primary: #1d1d1f;
+  --color-text-secondary: rgba(29, 29, 31, 0.72);
+  --color-text-muted: rgba(29, 29, 31, 0.45);
+
+  --color-accent: #007aff;
+  --color-accent-strong: #0056b3;
+  --color-accent-subtle: rgba(0, 122, 255, 0.12);
+  --color-success: #34c759;
+  --color-warning: #ff9f0a;
+  --color-error: #ff3b30;
+  --color-violet: #af52de;
+
+  --glass-bg-regular: rgba(255, 255, 255, 0.34);
+  --glass-bg-clear: rgba(255, 255, 255, 0.18);
+  --glass-bg-raised: var(--glass-bg-regular);
+  --glass-bg-elevated: rgba(255, 255, 255, 0.48);
+  --glass-bg-overlay: rgba(255, 255, 255, 0.56);
+  --glass-border: rgba(255, 255, 255, 0.55);
+  --glass-border-subtle: rgba(0, 0, 0, 0.06);
+  --glass-border-highlight: rgba(255, 255, 255, 0.9);
+  --glass-shadow-regular: 0 1px 0 rgba(255, 255, 255, 0.95) inset, 0 8px 24px rgba(0, 0, 0, 0.1);
+  --glass-shadow-raised: var(--glass-shadow-regular);
+  --glass-shadow-elevated: 0 1px 0 rgba(255, 255, 255, 1) inset, 0 12px 40px rgba(0, 0, 0, 0.14);
+  --glass-shadow-overlay: 0 1px 0 rgba(255, 255, 255, 1) inset, 0 20px 56px rgba(0, 0, 0, 0.18);
+  --glass-focus-ring: 0 0 0 3px rgba(0, 122, 255, 0.35);
+
+  --ambient-mesh: var(--color-bg-canvas);
+
+  --glass-bg-bleed: rgba(255, 255, 255, 0.08);
+  --glass-blur-bleed: 52px;
+  --glass-saturate-bleed: 220%;
+
+  --scrim: rgba(0, 0, 0, 0.2);
+  --scrim-heavy: rgba(0, 0, 0, 0.45);
+  --minimap-mask: rgba(0, 122, 255, 0.08);
+  --color-error-subtle: rgba(255, 59, 48, 0.1);
+  --color-error-border: rgba(255, 59, 48, 0.2);
+  --color-warning-subtle: rgba(255, 159, 10, 0.08);
+  --color-warning-border: rgba(255, 159, 10, 0.18);
+  --color-success-subtle: rgba(52, 199, 89, 0.1);
+  --color-diff-line-changed: rgba(0, 0, 0, 0.035);
+  --color-diff-char-added: var(--color-success);
+  --color-diff-char-removed: var(--color-error);
+  --color-code-bg: #f6f8fa;
+  --color-bg-editor: #ffffff;
+  --color-hover-overlay: rgba(0, 0, 0, 0.04);
+  --color-shimmer-mid: rgba(0, 0, 0, 0.04);
+
+  /* Markdown preview code syntax — VS Code Light+ token colors */
+  --markdown-syntax-foreground: #000000;
+  --markdown-syntax-keyword: #0000ff;
+  --markdown-syntax-string: #a31515;
+  --markdown-syntax-number: #098658;
+  --markdown-syntax-comment: #008000;
+  --markdown-syntax-function: #795e26;
+  --markdown-syntax-type: #267f99;
+  --markdown-syntax-variable: #001080;
+  --markdown-syntax-constant: #795e26;
+  --markdown-syntax-regexp: #811f3f;
+  --markdown-syntax-meta: #af00db;
+  --markdown-syntax-tag: #800000;
+  --markdown-syntax-punctuation: #000000;
+
+  /* Window rim hairlines — darker than each local surface (light mode). */
+  --border-window-map: rgba(0, 0, 0, 0.1);
+  --border-window-side-panel: rgba(0, 0, 0, 0.07);
+  --border-window-center: rgba(0, 0, 0, 0.08);
+  --border-window-chrome: rgba(0, 0, 0, 0.1);
+  --window-rim-map: inset 0 0 0 1px var(--border-window-map);
+  --window-rim-side-panel: inset 0 0 0 1px var(--border-window-side-panel);
+  --window-rim-center: inset 0 0 0 1px var(--border-window-center);
+  --window-rim-chrome: inset 0 0 0 1px var(--border-window-chrome);
+
+  --shadow-panel: var(--glass-shadow-raised);
+}
+
+:root {
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-glass-sm: 14px;
+  --radius-glass-md: 18px;
+  --radius-glass-lg: 24px;
+  --radius-glass-xl: 34px;
+  --radius-pill: 9999px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 28px;
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Markdown preview typography — aligned with VS Code / Cursor markdown preview */
+  --markdown-preview-font-family: var(--font-sans);
+  --markdown-preview-font-size: var(--font-size-base);
+  --markdown-preview-line-height: 1.6;
+  --markdown-preview-padding-x: 26px;
+  --markdown-preview-padding-y: 20px;
+  --markdown-preview-h1-size: 2em;
+  --markdown-preview-h2-size: 1.5em;
+  --markdown-preview-h3-size: 1.25em;
+  --markdown-preview-h4-size: 1em;
+  --markdown-preview-h5-size: 0.875em;
+  --markdown-preview-h6-size: 0.85em;
+  --markdown-preview-heading-line-height: 1.25;
+  --markdown-preview-heading-weight: var(--font-weight-semibold);
+  --markdown-preview-heading-border: var(--glass-border-subtle);
+  --markdown-preview-inline-code-size: 0.9em;
+  --markdown-preview-code-block-size: var(--font-size-md);
+  --markdown-preview-code-block-line-height: 1.45;
+  --markdown-preview-block-margin: 0 0 10px;
+
+  --duration-fast: 120ms;
+  --duration-normal: 260ms;
+  --duration-slow: 420ms;
+  --duration-panel-enter: 480ms;
+  --duration-panel-exit: var(--duration-panel-enter);
+  --duration-map-layer-focus: 1000ms;
+  --duration-terminal-enter: 300ms;
+  --duration-terminal-exit: var(--duration-terminal-enter);
+  --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.28, 0.64, 1);
+
+  --titlebar-height: 28px;
+  --topbar-height: 48px;
+
+  --z-workbench-chrome: 20;
+  --z-workbench-side-panel: 20;
+  --z-workbench-terminal: 55;
+
+  /* Overlay side panels + terminal dock layout (runtime sizes set on .workbenchBody) */
+  --workbench-left-panel-width: 253px;
+  --workbench-right-panel-width: 380px;
+  --workbench-left-panel-min-width: 200px;
+  --workbench-left-panel-max-width: min(92vw, 480px);
+  --workbench-right-panel-min-width: 280px;
+  --workbench-right-panel-max-width: min(92vw, 480px);
+  --terminal-dock-min-height: 120px;
+  --terminal-dock-max-height: min(55vh, 480px);
+  --terminal-dock-height: 320px;
+
+  /* Two lines of placeholder + footer toolbar + vertical padding */
+  --chat-composer-footer-height: 36px;
+  --chat-input-min-height: calc(2 * 1.5 * var(--font-size-md) + 20px);
+  --chat-input-max-height: 240px;
+}

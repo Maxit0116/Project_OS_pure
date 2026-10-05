@@ -1,0 +1,18 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "persons": [
+    {
+      "id": "person_alice",
+      "displayName": "Alice",
+      "emails": ["alice@example.test"],
+      "gitAuthors": ["Alice <alice@example.test>"]
+    },
+    {
+      "id": "person_bob",
+      "displayName": "Bob",
+      "emails": ["bob@example.test"],
+      "gitAuthors": ["Bob <bob@example.test>"]
+    }
+  ]
+}

@@ -1,0 +1,430 @@
+.panel {
+  --browser-chrome-surface: #1c1c24;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  background: var(--color-bg-base);
+  overflow: hidden;
+}
+
+:global([data-theme='light']) .panel {
+  --browser-chrome-surface: #ffffff;
+}
+
+.tabBar {
+  --tab-radius: 12px;
+  --tab-gap: 4px;
+  --tab-row-height: 34px;
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  flex-shrink: 0;
+  background: var(--color-bg-muted);
+  padding: 0 var(--space-xs);
+  min-height: 38px;
+  overflow: visible;
+}
+
+.tabList {
+  display: flex;
+  align-items: flex-end;
+  flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: visible;
+  gap: var(--tab-gap);
+  padding: 0 var(--tab-radius);
+}
+
+.tabListScrollable {
+  overflow-x: auto;
+  scroll-behavior: smooth;
+}
+
+.tabListDragging {
+  cursor: grabbing;
+}
+
+.tabListDragging .tab {
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.tabListDragging .tabTitleDraggable {
+  cursor: grabbing;
+}
+
+.tabList::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  flex: 0 0 var(--tab-width, 200px);
+  width: var(--tab-width, 200px);
+  min-width: var(--tab-width, 200px);
+  max-width: var(--tab-width, 200px);
+  min-height: var(--tab-row-height, 34px);
+  height: var(--tab-row-height, 34px);
+  margin-inline: calc(var(--tab-gap) / 2);
+  padding: 0 12px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border-radius: 0;
+  user-select: none;
+}
+
+/* Partial-height divider centered in the gap between inactive tabs only */
+.tab + .tab:not(.tabActive)::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--tab-gap) / -2);
+  top: 22%;
+  bottom: 22%;
+  width: 1px;
+  background: var(--color-border-subtle);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.tab:hover:not(.tabActive)::before,
+.tab:hover:not(.tabActive) + .tab:not(.tabActive)::before,
+.tabActive + .tab:not(.tabActive)::before {
+  opacity: 0;
+}
+
+/* Hover: pill highlight without layout shift */
+.tab:hover:not(.tabActive) {
+  border-radius: var(--tab-radius);
+  background: var(--color-hover-overlay);
+  color: var(--color-text-primary);
+  z-index: 2;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+/* Active: merge with toolbar; bottom curves extend into adjacent gap — no transition so chrome paints atomically */
+.tabActive {
+  margin-bottom: -1px;
+  border-radius: var(--tab-radius) var(--tab-radius) 0 0;
+  background: var(--browser-chrome-surface);
+  color: var(--color-text-primary);
+  z-index: 3;
+}
+
+.tabActive::before,
+.tabActive::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: var(--tab-radius);
+  height: var(--tab-radius);
+  pointer-events: none;
+  transform: none;
+  top: auto;
+  opacity: 1;
+  background: transparent;
+}
+
+.tabActive::before {
+  left: calc(-1 * var(--tab-radius));
+  border-bottom-right-radius: var(--tab-radius);
+  box-shadow:
+    calc(var(--tab-radius) / 2) calc(var(--tab-radius) / 2) 0 calc(var(--tab-radius) / 2)
+    var(--browser-chrome-surface);
+}
+
+.tabActive::after {
+  right: calc(-1 * var(--tab-radius));
+  border-bottom-left-radius: var(--tab-radius);
+  box-shadow:
+    calc(var(--tab-radius) / -2) calc(var(--tab-radius) / 2) 0 calc(var(--tab-radius) / 2)
+    var(--browser-chrome-surface);
+}
+
+.tabIcon {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.tabActive .tabIcon {
+  opacity: 0.85;
+}
+
+.tabTitle {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.tabTitleDraggable {
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.tabSpacer {
+  flex: 0 0 var(--tab-width, 200px);
+  width: var(--tab-width, 200px);
+  min-width: var(--tab-width, 200px);
+  max-width: var(--tab-width, 200px);
+  height: var(--tab-row-height, 34px);
+  margin-inline: calc(var(--tab-gap) / 2);
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    flex-basis 160ms var(--ease-out),
+    width 160ms var(--ease-out),
+    min-width 160ms var(--ease-out),
+    max-width 160ms var(--ease-out),
+    margin 160ms var(--ease-out);
+}
+
+.tabDragGhost {
+  --browser-chrome-surface: #1c1c24;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: var(--tab-radius);
+  background: var(--color-hover-overlay);
+  color: var(--color-text-primary);
+  box-shadow: var(--glass-shadow-elevated);
+  pointer-events: none;
+  user-select: none;
+  will-change: transform;
+  --tab-radius: 12px;
+}
+
+:global([data-theme='light']) .tabDragGhost {
+  --browser-chrome-surface: #ffffff;
+}
+
+.tabDragGhostActive {
+  border-radius: var(--tab-radius) var(--tab-radius) 0 0;
+  background: var(--browser-chrome-surface);
+  box-shadow:
+    var(--glass-shadow-elevated),
+    0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+.tabDragGhostClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.tabTitleCompressed {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+}
+
+.tabClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+
+.tabActive .tabClose,
+.tab:hover .tabClose {
+  opacity: 1;
+}
+
+.tabClose:hover {
+  background: var(--color-error-subtle);
+  color: var(--color-error);
+}
+
+.tabNew {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--tab-radius);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: flex-end;
+  margin: 0 0 6px calc(var(--tab-gap) / 2);
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+/* Divider between last inactive tab and new-tab button */
+.tab:not(.tabActive) + .tabNew::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--tab-gap) / -2);
+  top: 22%;
+  bottom: 22%;
+  width: 1px;
+  background: var(--color-border-subtle);
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.tab:hover:not(.tabActive) + .tabNew::before {
+  opacity: 0;
+}
+
+.tabNew:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+}
+
+.toolbar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--border-window-chrome);
+  background: var(--browser-chrome-surface);
+}
+
+.navActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.urlForm {
+  flex: 1;
+  min-width: 0;
+}
+
+.urlInput {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--color-text-primary);
+  background: var(--color-bg-base);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.urlInput:focus {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--glass-border));
+}
+
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--color-bg-base);
+}
+
+.webview {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: color-mix(in srgb, var(--color-bg-base) 88%, transparent);
+  pointer-events: none;
+  animation: browserOverlayIn var(--duration-fast) var(--ease-out);
+}
+
+@keyframes browserOverlayIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.overlayText {
+  max-width: 28rem;
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.spin {
+  animation: browserSpin 0.8s linear infinite;
+}
+
+@keyframes browserSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+
+  .overlay {
+    animation: none;
+  }
+
+  .tabListScrollable {
+    scroll-behavior: auto;
+  }
+
+  .tabListDragging .tab {
+    transition:
+      background var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+
+  .tabTitleDraggable {
+    cursor: pointer;
+  }
+}

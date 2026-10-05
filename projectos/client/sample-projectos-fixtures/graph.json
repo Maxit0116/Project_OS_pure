@@ -1,0 +1,3932 @@
+{
+  "version": "0.2.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "projectName": "saas-starter",
+  "projectType": "nextjs-app",
+  "analyzedAt": "2026-06-23T11:54:08.188Z",
+  "analysisStatus": "complete",
+  "architecture": {
+    "notation": "c4",
+    "defaultLevel": "context",
+    "layers": [
+      {
+        "id": "experience",
+        "label": "用户入口",
+        "order": 0,
+        "description": "用户以及他们能直接看到和操作的产品入口"
+      },
+      {
+        "id": "interface",
+        "label": "接口层",
+        "order": 1,
+        "description": "接收页面操作与 API 请求的边界"
+      },
+      {
+        "id": "application",
+        "label": "核心功能",
+        "order": 2,
+        "description": "承载产品业务功能与流程"
+      },
+      {
+        "id": "infrastructure",
+        "label": "技术支撑",
+        "order": 3,
+        "description": "框架、工具和数据库访问能力"
+      },
+      {
+        "id": "data",
+        "label": "数据存储",
+        "order": 4,
+        "description": "长期保存的用户与业务数据"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "actor_visitor",
+      "type": "capability",
+      "name": "访客",
+      "nameEn": "Visitor",
+      "status": "active",
+      "description": "尚未登录、正在了解产品的潜在用户。",
+      "summary": "浏览公开页面并进入登录流程。",
+      "responsibility": "浏览产品内容，并在需要时开始登录。",
+      "elementType": "person",
+      "level": "context",
+      "layer": "experience",
+      "technology": "网页浏览器",
+      "linkedFiles": [],
+      "upstream": [],
+      "downstream": [
+        "system_saas_starter"
+      ],
+      "confidence": 1,
+      "tags": [
+        "actor"
+      ],
+      "parentId": null,
+      "children": [],
+      "refs": [],
+      "depth": 0
+    },
+    {
+      "id": "actor_member",
+      "type": "capability",
+      "name": "会员",
+      "nameEn": "Member",
+      "status": "active",
+      "description": "已经登录并使用产品服务的用户。",
+      "summary": "管理账户、通知与订阅。",
+      "responsibility": "使用登录后的产品功能，并管理自己的订阅。",
+      "elementType": "person",
+      "level": "context",
+      "layer": "experience",
+      "technology": "网页浏览器",
+      "linkedFiles": [],
+      "upstream": [],
+      "downstream": [
+        "system_saas_starter"
+      ],
+      "confidence": 1,
+      "tags": [
+        "actor"
+      ],
+      "parentId": null,
+      "children": [],
+      "refs": [],
+      "depth": 0
+    },
+    {
+      "id": "actor_administrator",
+      "type": "capability",
+      "name": "管理员",
+      "nameEn": "Administrator",
+      "status": "active",
+      "description": "负责用户管理和运营分析的管理人员。",
+      "summary": "管理用户并查看产品运营数据。",
+      "responsibility": "执行后台管理流程，并查看产品分析结果。",
+      "elementType": "person",
+      "level": "context",
+      "layer": "experience",
+      "technology": "网页浏览器",
+      "linkedFiles": [],
+      "upstream": [],
+      "downstream": [
+        "system_saas_starter"
+      ],
+      "confidence": 1,
+      "tags": [
+        "actor"
+      ],
+      "parentId": null,
+      "children": [],
+      "refs": [],
+      "depth": 0
+    },
+    {
+      "id": "system_saas_starter",
+      "type": "capability",
+      "name": "SaaS 启动平台",
+      "nameEn": "SaaS Starter",
+      "status": "active",
+      "description": "由产品团队维护的完整 SaaS 产品系统。",
+      "summary": "提供团队项目、任务、账户、订阅、内容和后台管理流程。",
+      "responsibility": "向用户提供端到端的 SaaS 产品体验。",
+      "elementType": "software_system",
+      "level": "context",
+      "layer": "application",
+      "technology": "Next.js",
+      "linkedFiles": [
+        {
+          "path": "package.json",
+          "role": "primary",
+          "summary": "运行环境与框架定义"
+        }
+      ],
+      "upstream": [
+        "actor_visitor",
+        "actor_member",
+        "actor_administrator"
+      ],
+      "downstream": [],
+      "confidence": 1,
+      "tags": [
+        "system"
+      ],
+      "parentId": null,
+      "children": [
+        "container_next_web",
+        "container_saas_database"
+      ],
+      "refs": [],
+      "depth": 0
+    },
+    {
+      "id": "container_next_web",
+      "type": "capability",
+      "name": "Next.js Web 应用",
+      "nameEn": "Next.js Web Application",
+      "status": "active",
+      "description": "负责页面、接口与服务端逻辑的可运行 Web 应用。",
+      "summary": "渲染浏览器界面并执行服务端业务逻辑。",
+      "responsibility": "提供 React 页面、API 路由和应用功能模块。",
+      "elementType": "container",
+      "level": "container",
+      "layer": "application",
+      "technology": "Next.js / React / Node.js",
+      "linkedFiles": [
+        {
+          "path": "package.json",
+          "role": "primary"
+        },
+        {
+          "path": "next.config.js",
+          "role": "config"
+        }
+      ],
+      "upstream": [],
+      "downstream": [
+        "container_saas_database"
+      ],
+      "confidence": 1,
+      "tags": [
+        "container",
+        "web"
+      ],
+      "parentId": "system_saas_starter",
+      "children": [
+        "feat_home",
+        "component_route_api",
+        "feat_dashboard",
+        "component_projectos_design_host",
+        "feat_projects",
+        "feat_team",
+        "feat_login",
+        "feat_profile",
+        "feat_settings",
+        "feat_checkout",
+        "feat_blog",
+        "feat_notifications",
+        "feat_admin",
+        "feat_database"
+      ],
+      "refs": [],
+      "depth": 1
+    },
+    {
+      "id": "container_saas_database",
+      "type": "capability",
+      "name": "SaaS 数据库",
+      "nameEn": "SaaS Database",
+      "status": "active",
+      "description": "用于长期保存产品状态的业务数据库。",
+      "summary": "保存团队、成员、项目、任务、活动、订阅、文章和通知。",
+      "responsibility": "持久保存团队工作空间的业务关系、生命周期与内容数据。",
+      "elementType": "data_store",
+      "level": "container",
+      "layer": "data",
+      "technology": "SQLite / Prisma schema",
+      "linkedFiles": [
+        {
+          "path": "prisma/schema.prisma",
+          "role": "primary"
+        }
+      ],
+      "upstream": [
+        "container_next_web"
+      ],
+      "downstream": [],
+      "confidence": 1,
+      "tags": [
+        "container",
+        "database"
+      ],
+      "parentId": "system_saas_starter",
+      "children": [],
+      "refs": [],
+      "depth": 1
+    },
+    {
+      "id": "component_route_api",
+      "type": "capability",
+      "name": "路由处理 API",
+      "nameEn": "Route Handler API",
+      "status": "active",
+      "description": "接收应用操作与查询请求的 HTTP 边界。",
+      "summary": "验证请求身份与输入，并把操作分发给对应功能。",
+      "responsibility": "向产品界面提供结构清晰的 JSON API。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "interface",
+      "technology": "Next.js Route Handlers / JSON",
+      "linkedFiles": [
+        {
+          "path": "app/api/auth/route.ts",
+          "role": "primary",
+          "summary": "明确进入或退出固定演示身份，不接收密码或宣称生产认证。"
+        },
+        {
+          "path": "app/api/checkout/route.ts",
+          "role": "primary",
+          "summary": "接收套餐选择请求，并以服务端工作空间身份更新团队订阅。"
+        },
+        {
+          "path": "app/api/notifications/route.ts",
+          "role": "primary",
+          "summary": "按服务端工作空间身份读取通知并标记当前会员通知为已读。"
+        },
+        {
+          "path": "app/api/search/route.ts",
+          "role": "primary",
+          "summary": "接收至少两个字符的关键词，并返回限量的公开文章摘要。"
+        },
+        {
+          "path": "app/api/settings/route.ts",
+          "role": "supporting",
+          "summary": "以兼容 JSON 边界读取并保存当前会员的个人偏好。"
+        },
+        {
+          "path": "app/api/users/route.ts",
+          "role": "primary",
+          "summary": "以精确演示令牌与请求会话读取活动团队成员姓名，拒绝创建用户。"
+        },
+        {
+          "path": "app/api/posts/route.ts",
+          "role": "primary",
+          "summary": "仅返回限量的公开文章摘要，拒绝兼容接口写入。"
+        },
+        {
+          "path": "lib/auth.ts",
+          "role": "supporting",
+          "summary": "提供明确固定的演示会话与精确兼容令牌校验。"
+        },
+        {
+          "path": "lib/request-auth.ts",
+          "role": "supporting",
+          "summary": "让路由处理器拒绝明确退出或降级的演示 Cookie。"
+        },
+        {
+          "path": "lib/db.ts",
+          "role": "supporting",
+          "summary": "向 API 提供统一的数据库访问入口。"
+        },
+        {
+          "path": "lib/payments.ts",
+          "role": "supporting",
+          "summary": "验证团队角色并更新套餐，不伪造支付结果。"
+        }
+      ],
+      "upstream": [
+        "feat_home"
+      ],
+      "downstream": [
+        "feat_login",
+        "feat_settings",
+        "feat_checkout",
+        "feat_blog",
+        "feat_notifications",
+        "feat_admin",
+        "feat_search"
+      ],
+      "confidence": 1,
+      "tags": [
+        "component",
+        "api"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_about",
+      "type": "capability",
+      "name": "关于",
+      "nameEn": "About",
+      "status": "active",
+      "description": "关于 (About)",
+      "summary": "包含 1 个文件，1 条路由",
+      "linkedFiles": [
+        {
+          "path": "app/about/page.tsx",
+          "role": "primary"
+        }
+      ],
+      "upstream": [],
+      "downstream": [],
+      "preview": {
+        "route": "/about",
+        "thumbnail": null
+      },
+      "confidence": 0.65,
+      "tags": [
+        "page"
+      ],
+      "parentId": null,
+      "children": [],
+      "refs": [],
+      "depth": 0
+    },
+    {
+      "id": "feat_admin",
+      "type": "capability",
+      "name": "管理与分析",
+      "nameEn": "Admin & Analytics",
+      "status": "active",
+      "description": "面向演示管理员的只读用户目录与数据库计数。",
+      "summary": "汇总真实用户、文章与套餐选择，不虚构趋势或收入。",
+      "responsibility": "提供只读演示管理视图，并明确静态目录金额不是收入。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "application",
+      "technology": "Next.js / React",
+      "linkedFiles": [
+        {
+          "path": "app/admin/layout.tsx",
+          "role": "supporting",
+          "summary": "保护管理后台，并提供管理员页面布局。"
+        },
+        {
+          "path": "app/admin/page.tsx",
+          "role": "primary",
+          "summary": "展示数据库用户、文章与活动套餐选择数量。"
+        },
+        {
+          "path": "app/admin/users/page.tsx",
+          "role": "primary",
+          "summary": "以 UTC 日期展示只读用户目录。"
+        },
+        {
+          "path": "app/admin/analytics/page.tsx",
+          "role": "primary",
+          "summary": "展示当前数据库计数与静态套餐目录金额并解释其边界。"
+        },
+        {
+          "path": "app/admin/error.tsx",
+          "role": "supporting",
+          "summary": "在管理数据读取失败时提供不泄露内部细节的重试界面。"
+        },
+        {
+          "path": "app/admin/loading.tsx",
+          "role": "supporting",
+          "summary": "在读取管理数据期间展示明确的加载状态。"
+        },
+        {
+          "path": "components/AdminTable.tsx",
+          "role": "supporting",
+          "summary": "以稳定用户标识渲染类型化只读目录表格。"
+        },
+        {
+          "path": "app/api/users/route.ts",
+          "role": "supporting",
+          "summary": "仅提供活动团队成员姓名，不暴露全局邮箱或角色目录。"
+        },
+        {
+          "path": "lib/auth.ts",
+          "role": "supporting",
+          "summary": "确认当前用户拥有管理员权限。"
+        },
+        {
+          "path": "lib/admin-analytics.ts",
+          "role": "supporting",
+          "summary": "从数据库汇总真实管理计数并生成安全用户目录。"
+        },
+        {
+          "path": "lib/db.ts",
+          "role": "supporting",
+          "summary": "执行后台数据查询。"
+        }
+      ],
+      "upstream": [
+        "component_route_api"
+      ],
+      "downstream": [
+        "feat_database"
+      ],
+      "preview": {
+        "route": "/admin",
+        "thumbnail": null
+      },
+      "confidence": 0.8,
+      "tags": [
+        "page"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_blog",
+      "type": "capability",
+      "name": "内容与搜索",
+      "nameEn": "Content & Search",
+      "status": "active",
+      "description": "负责公开文章的只读浏览与标题搜索。",
+      "summary": "展示数据库文章，并返回限量且净化的标题搜索结果。",
+      "responsibility": "提供公开内容读取体验，不暴露用户目录或文章写入能力。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "application",
+      "technology": "Next.js / Prisma",
+      "linkedFiles": [
+        {
+          "path": "app/blog/page.tsx",
+          "role": "primary",
+          "summary": "展示文章列表并读取最新内容。"
+        },
+        {
+          "path": "app/blog/[slug]/page.tsx",
+          "role": "primary",
+          "summary": "根据文章地址展示单篇内容。"
+        },
+        {
+          "path": "app/search/page.tsx",
+          "role": "primary",
+          "summary": "接收用户关键词并展示搜索结果。"
+        },
+        {
+          "path": "components/SearchResults.tsx",
+          "role": "supporting",
+          "summary": "呈现公开文章搜索的加载、失败与结果状态。"
+        },
+        {
+          "path": "app/api/search/route.ts",
+          "role": "supporting",
+          "summary": "按标题查询最多十篇公开文章摘要。"
+        },
+        {
+          "path": "app/api/posts/route.ts",
+          "role": "supporting",
+          "summary": "提供只读且字段受限的文章列表接口。"
+        },
+        {
+          "path": "lib/data.ts",
+          "role": "supporting",
+          "summary": "封装文章列表和详情查询。"
+        },
+        {
+          "path": "lib/db.ts",
+          "role": "supporting",
+          "summary": "执行文章与搜索数据查询。"
+        }
+      ],
+      "upstream": [
+        "component_route_api"
+      ],
+      "downstream": [
+        "feat_database"
+      ],
+      "preview": {
+        "route": "/blog",
+        "thumbnail": null
+      },
+      "confidence": 0.7,
+      "tags": [
+        "page"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_checkout",
+      "type": "capability",
+      "name": "账单与订阅",
+      "nameEn": "Billing & Subscription",
+      "status": "active",
+      "description": "读取活动团队的真实订阅状态，并安全管理静态套餐选择与取消生命周期。",
+      "summary": "从服务端会话解析活动团队，在串行事务中复核实时角色、更新订阅并写入活动记录。",
+      "responsibility": "提供数据库支持的团队订阅管理，同时明确静态价格不收费、权益不执行。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "application",
+      "technology": "Next.js / TypeScript",
+      "linkedFiles": [
+        {
+          "path": "app/billing/page.tsx",
+          "role": "primary",
+          "summary": "展示活动团队的真实订阅状态、静态套餐目录和付款诚实说明。"
+        },
+        {
+          "path": "app/billing/actions.ts",
+          "role": "supporting",
+          "summary": "严格解析表单字段，并返回服务端确认的套餐选择或取消结果。"
+        },
+        {
+          "path": "app/billing/layout.tsx",
+          "role": "supporting",
+          "summary": "强制动态渲染受保护的团队账单页面并复用工作区导航。"
+        },
+        {
+          "path": "app/billing/loading.tsx",
+          "role": "supporting",
+          "summary": "在读取活动团队订阅期间显示明确的加载状态。"
+        },
+        {
+          "path": "components/BillingForms.tsx",
+          "role": "supporting",
+          "summary": "提供带提交中状态和类型化结果提示的套餐与取消表单。"
+        },
+        {
+          "path": "app/checkout/page.tsx",
+          "role": "supporting",
+          "summary": "保留旧结算路由，并引导会员使用主要账单页面。"
+        },
+        {
+          "path": "app/api/checkout/route.ts",
+          "role": "supporting",
+          "summary": "为旧客户端严格解析 JSON，并调用同一服务端套餐事务。"
+        },
+        {
+          "path": "components/CheckoutForm.tsx",
+          "role": "supporting",
+          "summary": "保留旧结算入口，并明确只保存套餐选择而不处理付款。"
+        },
+        {
+          "path": "lib/auth.ts",
+          "role": "supporting",
+          "summary": "提供固定演示用户与活动团队标识。"
+        },
+        {
+          "path": "lib/constants.ts",
+          "role": "config",
+          "summary": "定义可选择的静态套餐、价格和成员容量。"
+        },
+        {
+          "path": "lib/payments.ts",
+          "role": "supporting",
+          "summary": "读取团队订阅，并以团队锁、实时角色和活动日志原子管理生命周期。"
+        },
+        {
+          "path": "lib/db.ts",
+          "role": "supporting",
+          "summary": "保存订阅状态。"
+        },
+        {
+          "path": "components/WorkspaceNav.tsx",
+          "role": "supporting",
+          "summary": "从真实工作区导航进入团队账单页面。"
+        },
+        {
+          "path": "middleware.ts",
+          "role": "supporting",
+          "summary": "在账单页面渲染前执行演示会话登录门禁。"
+        }
+      ],
+      "upstream": [
+        "component_route_api"
+      ],
+      "downstream": [
+        "feat_database"
+      ],
+      "preview": {
+        "route": "/billing",
+        "thumbnail": null
+      },
+      "confidence": 1,
+      "tags": [
+        "page",
+        "api",
+        "server-action"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_contact",
+      "type": "capability",
+      "name": "联系我们",
+      "nameEn": "Contact",
+      "status": "active",
+      "description": "公开说明本地样例未配置联系投递。",
+      "summary": "展示诚实的不可发送状态，不伪造邮件或支持请求。",
+      "linkedFiles": [
+        {
+          "path": "app/contact/page.tsx",
+          "role": "primary",
+          "summary": "展示联系页面与未配置投递的明确说明。"
+        },
+        {
+          "path": "components/ContactForm.tsx",
+          "role": "supporting",
+          "summary": "呈现不可发送状态，不调用不存在的联系接口。"
+        }
+      ],
+      "upstream": [],
+      "downstream": [],
+      "preview": {
+        "route": "/contact",
+        "thumbnail": null
+      },
+      "confidence": 0.65,
+      "tags": [
+        "page"
+      ],
+      "parentId": null,
+      "children": [],
+      "refs": [],
+      "depth": 0
+    },
+    {
+      "id": "feat_dashboard",
+      "type": "capability",
+      "name": "仪表盘",
+      "nameEn": "Dashboard",
+      "status": "active",
+      "description": "从提交的区块文档生成活动团队的真实指标、近期活动与可排序实例。",
+      "summary": "以区块为唯一视觉来源，经类型化加载器读取 SQLite 数据并生成受管 React 页面。",
+      "responsibility": "维护仪表盘区块树、生成输出与预览验证；布局拥有的侧边栏仍由源码管理。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "application",
+      "technology": "Next.js / React / Prisma",
+      "linkedFiles": [
+        {
+          "path": "app/dashboard/page.tsx",
+          "role": "primary",
+          "summary": "由 ProjectOS 区块生成器维护的仪表盘路由入口。"
+        },
+        {
+          "path": "projectos-generated/design/doc1_dashboard/view.tsx",
+          "role": "supporting",
+          "summary": "从规范区块树确定性生成仪表盘 intrinsic 语义结构与六个页面实例。"
+        },
+        {
+          "path": "projectos-generated/design/doc1_dashboard/styles.module.css",
+          "role": "supporting",
+          "summary": "承载生成区块的布局与绘制样式，类名与区块 id 稳定对应。"
+        },
+        {
+          "path": "projectos-blocks/loaders/dashboard.ts",
+          "role": "supporting",
+          "summary": "保留服务端会话、成员校验、真实指标与近期活动加载逻辑。"
+        },
+        {
+          "path": "app/dashboard/layout.tsx",
+          "role": "supporting",
+          "summary": "为仪表盘页面提供仍由源码拥有的侧边导航与主内容布局。"
+        },
+        {
+          "path": "components/StatsCard.tsx",
+          "role": "supporting",
+          "summary": "以可转发区块身份的真实根展示单项仪表盘指标。"
+        },
+        {
+          "path": "components/StatsCard.module.css",
+          "role": "supporting",
+          "summary": "为仪表盘指标值提供单一 CSS Module 样式来源。"
+        },
+        {
+          "path": "components/ActivityItem.tsx",
+          "role": "supporting",
+          "summary": "以可转发区块身份的真实根展示一条团队活动摘要。"
+        },
+        {
+          "path": "components/ActivityItem.module.css",
+          "role": "supporting",
+          "summary": "为活动条目提供单一 CSS Module 样式来源。"
+        },
+        {
+          "path": "components/Sidebar.tsx",
+          "role": "supporting",
+          "summary": "提供布局拥有且本增量不可拖动的侧边导航。"
+        },
+        {
+          "path": "components/Sidebar.module.css",
+          "role": "supporting",
+          "summary": "为侧边导航提供独立 CSS Module 样式。"
+        },
+        {
+          "path": ".babelrc",
+          "role": "config",
+          "summary": "为尚未迁移的源码路由保留 Next Babel 与源码绑定插件。"
+        },
+        {
+          "path": "tools/projectos-source-binding-babel-plugin.cjs",
+          "role": "supporting",
+          "summary": "仅为 source-v1 路由生成源码绑定；blocks-v1 仪表盘不授予其写权限。"
+        }
+      ],
+      "upstream": [
+        "feat_login"
+      ],
+      "downstream": [
+        "feat_database"
+      ],
+      "preview": {
+        "route": "/dashboard",
+        "thumbnail": null
+      },
+      "confidence": 0.7,
+      "tags": [
+        "page"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "component_projectos_design_host",
+      "type": "capability",
+      "name": "ProjectOS 设计画布支持",
+      "nameEn": "ProjectOS Design Canvas Support",
+      "status": "active",
+      "description": "为 ProjectOS 工作台提供开发/验证用的仪表盘 design-host 入口,让画布在真实 Next 布局段内加载但不成为产品功能。",
+      "summary": "只在开发预览中承载只读区块画布;生产环境返回 404。",
+      "responsibility": "隔离 ProjectOS 设计画布入口、精确匹配受管路由参数,并复用仪表盘生成视图作为只读验证表面。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "infrastructure",
+      "technology": "ProjectOS Design Preview / Next.js App Router",
+      "linkedFiles": [
+        {
+          "path": "app/dashboard/[projectosDesignHost]/page.tsx",
+          "role": "primary",
+          "summary": "ProjectOS 管理的开发/验证动态路由,在真实仪表盘布局下只允许 /dashboard/__projectos-design-host 承载只读区块画布;生产环境返回 404,不是产品功能。"
+        },
+        {
+          "path": "app/dashboard/[projectosDesignHost]/DesignHostClient.tsx",
+          "role": "supporting",
+          "summary": "接收 main 下发的只读区块 snapshot 并在浏览器中渲染 design-host 画布。"
+        }
+      ],
+      "upstream": [],
+      "downstream": [],
+      "preview": {
+        "route": null,
+        "thumbnail": null
+      },
+      "confidence": 1,
+      "tags": [
+        "projectos",
+        "design-host",
+        "tooling"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_projects",
+      "type": "capability",
+      "name": "团队项目",
+      "nameEn": "Team Projects",
+      "status": "active",
+      "description": "按活动团队浏览并管理项目与当前任务。",
+      "summary": "提供项目列表、详情、任务分派、状态流转与保留历史的归档流程。",
+      "responsibility": "从服务端会话解析工作空间权限，并以事务保存项目、任务与活动记录。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "application",
+      "technology": "Next.js / React Server Actions / Prisma",
+      "linkedFiles": [
+        {
+          "path": "app/projects/page.tsx",
+          "role": "primary",
+          "summary": "按活动团队展示未归档项目、当前任务数量与创建表单。"
+        },
+        {
+          "path": "app/projects/[id]/page.tsx",
+          "role": "primary",
+          "summary": "展示团队范围内的项目详情、当前任务以及分派、状态和归档操作。"
+        },
+        {
+          "path": "app/projects/layout.tsx",
+          "role": "supporting",
+          "summary": "为项目列表与详情提供工作区侧边导航和主内容布局。"
+        },
+        {
+          "path": "app/projects/[id]/not-found.tsx",
+          "role": "supporting",
+          "summary": "以不泄露团队边界的方式处理缺失或外部项目。"
+        },
+        {
+          "path": "app/projects/actions.ts",
+          "role": "supporting",
+          "summary": "把项目与任务表单交给服务端领域函数，并返回类型化错误与刷新路径。"
+        },
+        {
+          "path": "components/ProjectForms.tsx",
+          "role": "supporting",
+          "summary": "提供创建、编辑和归档项目的服务端确认表单与等待状态。"
+        },
+        {
+          "path": "components/TaskForms.tsx",
+          "role": "supporting",
+          "summary": "提供任务创建、详情编辑、独立状态流转与归档表单。"
+        },
+        {
+          "path": "components/WorkspaceNav.tsx",
+          "role": "supporting",
+          "summary": "为非画布工作区页面提供仪表盘、项目、团队、账单与设置导航。"
+        },
+        {
+          "path": "lib/projects.ts",
+          "role": "supporting",
+          "summary": "查询团队项目、当前任务与可分派成员，并隐藏跨团队人员关系。"
+        },
+        {
+          "path": "lib/tasks.ts",
+          "role": "supporting",
+          "summary": "复核任务权限与团队分派关系，并原子保存任务、项目时间和活动记录。"
+        },
+        {
+          "path": "lib/constants.ts",
+          "role": "config",
+          "summary": "定义任务状态白名单、表单值类型与面向用户的状态标签。"
+        },
+        {
+          "path": "lib/react-dom-types.ts",
+          "role": "supporting",
+          "summary": "为示例依赖中缺失的表单状态与等待 Hook 提供最小本地类型声明。"
+        },
+        {
+          "path": "middleware.ts",
+          "role": "supporting",
+          "summary": "把项目列表与详情纳入演示会话保护范围。"
+        }
+      ],
+      "upstream": [
+        "feat_login"
+      ],
+      "downstream": [
+        "feat_database"
+      ],
+      "preview": {
+        "route": "/projects",
+        "thumbnail": null
+      },
+      "confidence": 1,
+      "tags": [
+        "page",
+        "server-action"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_team",
+      "type": "capability",
+      "name": "团队与职责",
+      "nameEn": "Team & Roles",
+      "status": "active",
+      "description": "按活动团队查看成员、开放工作量与职责。",
+      "summary": "展示真实成员工作量，并由团队所有者安全调整职责。",
+      "responsibility": "从服务端会话确定团队范围，串行复核所有者权限并原子记录职责变化。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "application",
+      "technology": "Next.js / React Server Actions / Prisma",
+      "linkedFiles": [
+        {
+          "path": "app/team/page.tsx",
+          "role": "primary",
+          "summary": "展示活动团队成员、真实开放任务工作量与职责管理状态。"
+        },
+        {
+          "path": "app/team/actions.ts",
+          "role": "supporting",
+          "summary": "把成员职责表单交给服务端领域函数，并返回类型化错误与刷新相关页面。"
+        },
+        {
+          "path": "app/team/layout.tsx",
+          "role": "supporting",
+          "summary": "为团队页面提供工作区导航与动态服务端布局。"
+        },
+        {
+          "path": "app/team/loading.tsx",
+          "role": "supporting",
+          "summary": "在团队成员与工作量查询期间显示明确的加载状态。"
+        },
+        {
+          "path": "components/TeamRoleForm.tsx",
+          "role": "supporting",
+          "summary": "提供服务端确认的成员职责调整表单、等待状态与类型化反馈。"
+        },
+        {
+          "path": "lib/team.ts",
+          "role": "supporting",
+          "summary": "查询团队范围成员与开放任务，并串行复核所有者职责变更。"
+        },
+        {
+          "path": "components/WorkspaceNav.tsx",
+          "role": "supporting",
+          "summary": "为项目与团队页面提供一致的工作区导航。"
+        },
+        {
+          "path": "middleware.ts",
+          "role": "supporting",
+          "summary": "把团队职责页面纳入演示会话保护范围。"
+        },
+        {
+          "path": "lib/workspace-context.ts",
+          "role": "supporting",
+          "summary": "从数据库成员关系解析并复核活动团队职责。"
+        }
+      ],
+      "upstream": [
+        "feat_login"
+      ],
+      "downstream": [
+        "feat_database"
+      ],
+      "preview": {
+        "route": "/team",
+        "thumbnail": null
+      },
+      "confidence": 1,
+      "tags": [
+        "page",
+        "server-action"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_login",
+      "type": "capability",
+      "name": "身份与访问",
+      "nameEn": "Identity & Access",
+      "status": "active",
+      "description": "明确提供固定演示身份，并保护演示页面访问。",
+      "summary": "进入或退出固定演示模式，不接收密码或宣称生产认证。",
+      "responsibility": "让样例访问边界可测试，同时清楚标示它不是生产认证。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "application",
+      "technology": "Next.js / TypeScript",
+      "linkedFiles": [
+        {
+          "path": "app/login/page.tsx",
+          "role": "primary",
+          "summary": "说明固定演示身份，并提供单一进入操作。"
+        },
+        {
+          "path": "components/LoginForm.tsx",
+          "role": "supporting",
+          "summary": "提交固定演示模式请求并处理等待与失败状态。"
+        },
+        {
+          "path": "app/api/auth/route.ts",
+          "role": "primary",
+          "summary": "设置进入或退出演示模式的 HttpOnly Cookie。"
+        },
+        {
+          "path": "lib/auth.ts",
+          "role": "supporting",
+          "summary": "提供固定用户、活动团队、请求 Cookie 撤销与精确演示令牌。"
+        },
+        {
+          "path": "lib/request-auth.ts",
+          "role": "supporting",
+          "summary": "从路由请求 Cookie 派生可撤销的固定演示会话。"
+        },
+        {
+          "path": "middleware.ts",
+          "role": "supporting",
+          "summary": "执行受保护页面的登录检查与管理角色检查。"
+        }
+      ],
+      "upstream": [
+        "component_route_api"
+      ],
+      "downstream": [],
+      "preview": {
+        "route": "/login",
+        "thumbnail": null
+      },
+      "confidence": 0.65,
+      "tags": [
+        "page"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_notifications",
+      "type": "capability",
+      "name": "通知与偏好",
+      "nameEn": "Notifications & Preferences",
+      "status": "active",
+      "description": "按服务端工作空间身份读取并更新当前会员通知。",
+      "summary": "展示数据库通知，并把当前会员的未读记录标记为已读。",
+      "responsibility": "隔离其他会员通知，并提供加载、失败、空态与已读状态。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "application",
+      "technology": "Next.js / Prisma",
+      "linkedFiles": [
+        {
+          "path": "app/notifications/page.tsx",
+          "role": "primary",
+          "summary": "展示会员的通知列表。"
+        },
+        {
+          "path": "components/NotificationList.tsx",
+          "role": "supporting",
+          "summary": "加载安全通知摘要并处理空态、错误与全部已读操作。"
+        },
+        {
+          "path": "app/api/notifications/route.ts",
+          "role": "primary",
+          "summary": "按当前工作空间会员读取通知并仅更新该会员记录。"
+        },
+        {
+          "path": "lib/db.ts",
+          "role": "supporting",
+          "summary": "读写通知数据。"
+        }
+      ],
+      "upstream": [
+        "component_route_api"
+      ],
+      "downstream": [
+        "feat_database"
+      ],
+      "preview": {
+        "route": "/notifications",
+        "thumbnail": null
+      },
+      "confidence": 0.7,
+      "tags": [
+        "page",
+        "api"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_home",
+      "type": "capability",
+      "name": "Web 体验",
+      "nameEn": "Web Experience",
+      "status": "active",
+      "description": "用户在浏览器里直接看到和操作的产品体验。",
+      "summary": "呈现公开页面与登录后流程，并提交用户操作。",
+      "responsibility": "展示产品流程，并把用户操作发送给路由处理 API。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "experience",
+      "technology": "React / Next.js App Router",
+      "linkedFiles": [
+        {
+          "path": "app/layout.tsx",
+          "role": "supporting",
+          "summary": "为所有公开页面提供统一的页面外壳。"
+        },
+        {
+          "path": "app/page.tsx",
+          "role": "primary",
+          "summary": "展示产品首页，并根据登录状态引导用户。"
+        },
+        {
+          "path": "app/about/page.tsx",
+          "role": "supporting",
+          "summary": "介绍产品定位与价值。"
+        },
+        {
+          "path": "app/contact/page.tsx",
+          "role": "supporting",
+          "summary": "说明本地样例未配置联系投递能力。"
+        },
+        {
+          "path": "components/ContactForm.tsx",
+          "role": "supporting",
+          "summary": "明确说明本地样例没有联系投递能力。"
+        },
+        {
+          "path": "app/pricing/page.tsx",
+          "role": "supporting",
+          "summary": "展示套餐和价格。"
+        },
+        {
+          "path": "lib/auth.ts",
+          "role": "supporting",
+          "summary": "为首页判断当前登录状态。"
+        },
+        {
+          "path": "lib/constants.ts",
+          "role": "config",
+          "summary": "向定价页面提供套餐配置。"
+        }
+      ],
+      "upstream": [],
+      "downstream": [
+        "component_route_api"
+      ],
+      "preview": {
+        "route": "/",
+        "thumbnail": null
+      },
+      "confidence": 0.75,
+      "tags": [
+        "page"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_pricing",
+      "type": "capability",
+      "name": "定价",
+      "nameEn": "Pricing",
+      "status": "active",
+      "description": "定价 (Pricing)",
+      "summary": "包含 1 个文件，1 条路由",
+      "linkedFiles": [
+        {
+          "path": "app/pricing/page.tsx",
+          "role": "primary"
+        }
+      ],
+      "upstream": [],
+      "downstream": [],
+      "preview": {
+        "route": "/pricing",
+        "thumbnail": null
+      },
+      "confidence": 0.65,
+      "tags": [
+        "page"
+      ],
+      "parentId": null,
+      "children": [],
+      "refs": [],
+      "depth": 0
+    },
+    {
+      "id": "feat_profile",
+      "type": "capability",
+      "name": "账户管理",
+      "nameEn": "Account Management",
+      "status": "active",
+      "description": "只读展示固定演示会员的数据库资料。",
+      "summary": "读取并展示会员资料，并引导到真实可保存的个人偏好。",
+      "responsibility": "保留兼容资料页面，但不伪造资料更新。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "application",
+      "technology": "Next.js / React",
+      "linkedFiles": [
+        {
+          "path": "app/profile/page.tsx",
+          "role": "primary",
+          "summary": "读取并展示会员个人资料。"
+        },
+        {
+          "path": "components/ProfileForm.tsx",
+          "role": "supporting",
+          "summary": "以只读字段展示资料并链接到真实个人偏好。"
+        },
+        {
+          "path": "lib/auth.ts",
+          "role": "supporting",
+          "summary": "确认当前会员身份和会话。"
+        },
+        {
+          "path": "lib/db.ts",
+          "role": "supporting",
+          "summary": "读取会员个人资料。"
+        }
+      ],
+      "upstream": [
+        "feat_login"
+      ],
+      "downstream": [
+        "feat_database"
+      ],
+      "preview": {
+        "route": "/profile",
+        "thumbnail": null
+      },
+      "confidence": 0.65,
+      "tags": [
+        "page"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_search",
+      "type": "capability",
+      "name": "搜索",
+      "nameEn": "Search",
+      "status": "active",
+      "description": "按标题搜索数据库中的公开文章。",
+      "summary": "要求至少两个字符，返回最多十篇安全文章摘要。",
+      "linkedFiles": [
+        {
+          "path": "app/search/page.tsx",
+          "role": "primary",
+          "summary": "展示文章标题搜索输入与结果状态。"
+        },
+        {
+          "path": "components/SearchResults.tsx",
+          "role": "supporting",
+          "summary": "呈现加载、失败、空态与限量文章结果。"
+        },
+        {
+          "path": "app/api/search/route.ts",
+          "role": "supporting",
+          "summary": "净化关键词并仅返回公开文章摘要字段。"
+        }
+      ],
+      "upstream": [
+        "component_route_api"
+      ],
+      "downstream": [
+        "feat_database"
+      ],
+      "preview": {
+        "route": "/search",
+        "thumbnail": null
+      },
+      "confidence": 0.7,
+      "tags": [
+        "page",
+        "api"
+      ],
+      "parentId": null,
+      "children": [],
+      "refs": [],
+      "depth": 0
+    },
+    {
+      "id": "feat_settings",
+      "type": "capability",
+      "name": "个人偏好",
+      "nameEn": "Personal Preferences",
+      "status": "active",
+      "description": "为当前登录会员读取并保存个人通知与主题偏好。",
+      "summary": "以服务端会话所有权保存个人偏好，并记录不泄露偏好值的活动。",
+      "responsibility": "验证个人偏好输入、复核活动团队成员关系，并原子保存设置与活动。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "application",
+      "technology": "Next.js Server Actions / Prisma",
+      "linkedFiles": [
+        {
+          "path": "app/settings/page.tsx",
+          "role": "primary",
+          "summary": "展示当前会员真实保存的偏好及缺失或不支持状态。"
+        },
+        {
+          "path": "app/api/settings/route.ts",
+          "role": "supporting",
+          "summary": "提供经过身份匹配和字段白名单验证的兼容设置接口。"
+        },
+        {
+          "path": "app/settings/actions.ts",
+          "role": "supporting",
+          "summary": "严格解析个人偏好表单，并返回服务端确认结果与刷新路径。"
+        },
+        {
+          "path": "app/settings/layout.tsx",
+          "role": "supporting",
+          "summary": "为个人偏好页面提供动态工作区布局与导航。"
+        },
+        {
+          "path": "app/settings/loading.tsx",
+          "role": "supporting",
+          "summary": "在个人偏好查询期间显示明确的加载状态。"
+        },
+        {
+          "path": "components/SettingsForm.tsx",
+          "role": "supporting",
+          "summary": "提供服务端确认的通知与主题偏好表单及等待反馈。"
+        },
+        {
+          "path": "lib/settings.ts",
+          "role": "supporting",
+          "summary": "按会话用户复核成员关系，并原子保存个人偏好与活动记录。"
+        },
+        {
+          "path": "components/WorkspaceNav.tsx",
+          "role": "supporting",
+          "summary": "为个人偏好页面提供一致的工作区导航。"
+        },
+        {
+          "path": "lib/workspace-context.ts",
+          "role": "supporting",
+          "summary": "从数据库成员关系复核当前用户的活动团队访问权。"
+        }
+      ],
+      "upstream": [
+        "component_route_api",
+        "feat_login"
+      ],
+      "downstream": [
+        "feat_database"
+      ],
+      "preview": {
+        "route": "/settings",
+        "thumbnail": null
+      },
+      "confidence": 1,
+      "tags": [
+        "page",
+        "server-action"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    },
+    {
+      "id": "feat_database",
+      "type": "capability",
+      "name": "Prisma 数据访问",
+      "nameEn": "Prisma Data Access",
+      "status": "active",
+      "description": "应用访问数据库时使用的统一数据适配层。",
+      "summary": "提供团队、成员、项目、任务、活动、订阅和个人偏好的类型安全数据访问。",
+      "responsibility": "封装 Prisma 查询、工作空间权限复核与可复现数据库准备。",
+      "elementType": "component",
+      "level": "component",
+      "layer": "infrastructure",
+      "technology": "Prisma Client",
+      "linkedFiles": [
+        {
+          "path": "prisma/schema.prisma",
+          "role": "config",
+          "summary": "定义团队、成员、项目、任务、活动、团队订阅及兼容模型。"
+        },
+        {
+          "path": "prisma/migrations/migration_lock.toml",
+          "role": "config",
+          "summary": "锁定 Prisma 迁移使用 SQLite 数据库提供方。"
+        },
+        {
+          "path": "prisma/migrations/20260719000000_init/migration.sql",
+          "role": "config",
+          "summary": "创建仪表盘用户计数所需的 User 表和邮箱唯一索引。"
+        },
+        {
+          "path": "prisma/migrations/20260720000000_add_sample_models/migration.sql",
+          "role": "config",
+          "summary": "扩展用户角色并创建文章、订阅、设置和通知数据表。"
+        },
+        {
+          "path": "prisma/migrations/20260724000000_team_data_foundation/migration.sql",
+          "role": "config",
+          "summary": "创建团队项目数据模型，并确定性回填原有团队订阅。"
+        },
+        {
+          "path": "prisma/seed.cjs",
+          "role": "supporting",
+          "summary": "以保留真实修改的幂等事务写入团队、项目、任务、活动和准备标记。"
+        },
+        {
+          "path": "lib/db.ts",
+          "role": "primary",
+          "summary": "创建并导出统一的 Prisma 数据库客户端。"
+        },
+        {
+          "path": "lib/data.ts",
+          "role": "supporting",
+          "summary": "按活动团队查询仪表盘指标与近期活动，并保留兼容页面查询。"
+        },
+        {
+          "path": "lib/auth.ts",
+          "role": "supporting",
+          "summary": "提供服务端拥有的固定演示用户与活动团队标识。"
+        },
+        {
+          "path": "lib/payments.ts",
+          "role": "supporting",
+          "summary": "复核团队角色并在同一事务更新订阅与活动记录。"
+        },
+        {
+          "path": "lib/workspace-context.ts",
+          "role": "supporting",
+          "summary": "从服务端或请求会话解析活动团队，并以数据库成员关系执行权限复核。"
+        }
+      ],
+      "upstream": [
+        "feat_profile",
+        "feat_checkout",
+        "feat_blog",
+        "feat_notifications",
+        "feat_admin",
+        "feat_search",
+        "feat_dashboard",
+        "feat_projects",
+        "feat_team",
+        "feat_settings"
+      ],
+      "downstream": [],
+      "preview": null,
+      "confidence": 0.8,
+      "tags": [
+        "database",
+        "infrastructure"
+      ],
+      "parentId": "container_next_web",
+      "children": [],
+      "refs": [],
+      "depth": 2
+    }
+  ],
+  "edges": [
+    {
+      "id": "arch_context_visitor",
+      "source": "actor_visitor",
+      "target": "system_saas_starter",
+      "relation": "uses",
+      "label": "浏览产品并进入登录",
+      "technology": "HTTPS",
+      "confidence": 1,
+      "evidence": "app/page.tsx; app/login/page.tsx"
+    },
+    {
+      "id": "arch_context_member",
+      "source": "actor_member",
+      "target": "system_saas_starter",
+      "relation": "uses",
+      "label": "使用登录后的产品功能",
+      "technology": "HTTPS",
+      "confidence": 1,
+      "evidence": "app/profile/page.tsx; app/notifications/page.tsx; app/checkout/page.tsx"
+    },
+    {
+      "id": "arch_context_admin",
+      "source": "actor_administrator",
+      "target": "system_saas_starter",
+      "relation": "uses",
+      "label": "管理用户并查看运营数据",
+      "technology": "HTTPS",
+      "confidence": 1,
+      "evidence": "app/admin/users/page.tsx; app/admin/analytics/page.tsx"
+    },
+    {
+      "id": "arch_container_database",
+      "source": "container_next_web",
+      "target": "container_saas_database",
+      "relation": "writes_to",
+      "label": "保存产品与业务数据",
+      "technology": "Prisma / SQLite",
+      "confidence": 1,
+      "evidence": "lib/db.ts; prisma/schema.prisma"
+    },
+    {
+      "id": "arch_component_web_api",
+      "source": "feat_home",
+      "target": "component_route_api",
+      "relation": "calls",
+      "label": "发送操作与查询请求",
+      "technology": "HTTPS / JSON",
+      "confidence": 1,
+      "evidence": "app/**/*.tsx -> app/api/**/route.ts"
+    },
+    {
+      "id": "arch_component_api_identity",
+      "source": "component_route_api",
+      "target": "feat_login",
+      "relation": "calls",
+      "label": "进入或退出固定演示模式",
+      "technology": "TypeScript",
+      "confidence": 1,
+      "evidence": "components/LoginForm.tsx -> app/api/auth/route.ts -> lib/auth.ts; lib/request-auth.ts"
+    },
+    {
+      "id": "arch_component_api_account",
+      "source": "component_route_api",
+      "target": "feat_settings",
+      "relation": "calls",
+      "label": "验证并分发个人偏好请求",
+      "technology": "TypeScript",
+      "confidence": 1,
+      "evidence": "app/api/settings/route.ts -> lib/settings.ts"
+    },
+    {
+      "id": "arch_component_api_subscription",
+      "source": "component_route_api",
+      "target": "feat_checkout",
+      "relation": "calls",
+      "label": "选择套餐并更新团队订阅",
+      "technology": "TypeScript",
+      "confidence": 1,
+      "evidence": "app/api/checkout/route.ts -> lib/payments.ts"
+    },
+    {
+      "id": "arch_component_api_content",
+      "source": "component_route_api",
+      "target": "feat_blog",
+      "relation": "calls",
+      "label": "读取公开文章摘要",
+      "technology": "TypeScript",
+      "confidence": 1,
+      "evidence": "app/api/posts/route.ts"
+    },
+    {
+      "id": "arch_component_api_search",
+      "source": "component_route_api",
+      "target": "feat_search",
+      "relation": "calls",
+      "label": "查询公开文章标题",
+      "technology": "TypeScript",
+      "confidence": 1,
+      "evidence": "components/SearchResults.tsx -> app/api/search/route.ts"
+    },
+    {
+      "id": "arch_component_api_notifications",
+      "source": "component_route_api",
+      "target": "feat_notifications",
+      "relation": "calls",
+      "label": "读取并更新通知",
+      "technology": "TypeScript",
+      "confidence": 1,
+      "evidence": "app/api/notifications/route.ts"
+    },
+    {
+      "id": "arch_component_api_admin",
+      "source": "component_route_api",
+      "target": "feat_admin",
+      "relation": "calls",
+      "label": "读取后台管理数据",
+      "technology": "TypeScript",
+      "confidence": 0.9,
+      "evidence": "app/api/users/route.ts; app/admin/**/page.tsx"
+    },
+    {
+      "id": "arch_component_identity_dashboard",
+      "source": "feat_login",
+      "target": "feat_dashboard",
+      "relation": "depends_on",
+      "label": "以固定演示会话保护工作区概览",
+      "technology": "Next.js Middleware / TypeScript",
+      "confidence": 1,
+      "evidence": "middleware.ts; app/dashboard/page.tsx -> lib/auth.ts"
+    },
+    {
+      "id": "arch_component_identity_profile",
+      "source": "feat_login",
+      "target": "feat_profile",
+      "relation": "depends_on",
+      "label": "以固定演示会话保护只读资料",
+      "technology": "Next.js Middleware / TypeScript",
+      "confidence": 1,
+      "evidence": "middleware.ts; app/profile/page.tsx -> lib/auth.ts"
+    },
+    {
+      "id": "arch_component_account_data",
+      "source": "feat_profile",
+      "target": "feat_database",
+      "relation": "reads_from",
+      "label": "读取会员个人资料",
+      "technology": "Prisma Client",
+      "confidence": 0.9,
+      "evidence": "app/profile/page.tsx -> lib/db.ts"
+    },
+    {
+      "id": "arch_component_subscription_data",
+      "source": "feat_checkout",
+      "target": "feat_database",
+      "relation": "writes_to",
+      "label": "复核团队成员并写入订阅与活动",
+      "technology": "Prisma Client",
+      "confidence": 1,
+      "evidence": "lib/payments.ts:57-101,103-167,169-235 -> lib/db.ts:6; lib/payments.ts:60,110-114,173-177 -> lib/workspace-context.ts:42-63"
+    },
+    {
+      "id": "arch_component_content_data",
+      "source": "feat_blog",
+      "target": "feat_database",
+      "relation": "reads_from",
+      "label": "读取公开文章内容",
+      "technology": "Prisma Client",
+      "confidence": 1,
+      "evidence": "app/blog/page.tsx -> lib/data.ts; app/api/posts/route.ts -> lib/db.ts"
+    },
+    {
+      "id": "arch_component_search_data",
+      "source": "feat_search",
+      "target": "feat_database",
+      "relation": "reads_from",
+      "label": "读取限量文章搜索结果",
+      "technology": "Prisma Client",
+      "confidence": 1,
+      "evidence": "app/api/search/route.ts -> lib/db.ts"
+    },
+    {
+      "id": "arch_component_notifications_data",
+      "source": "feat_notifications",
+      "target": "feat_database",
+      "relation": "writes_to",
+      "label": "读取通知并写入当前会员已读状态",
+      "technology": "Prisma Client",
+      "confidence": 1,
+      "evidence": "app/api/notifications/route.ts -> lib/db.ts"
+    },
+    {
+      "id": "arch_component_admin_data",
+      "source": "feat_admin",
+      "target": "feat_database",
+      "relation": "reads_from",
+      "label": "读取用户、文章与套餐选择计数",
+      "technology": "Prisma Client",
+      "confidence": 1,
+      "evidence": "app/admin/**/page.tsx -> lib/admin-analytics.ts -> lib/db.ts; app/api/users/route.ts -> lib/db.ts"
+    },
+    {
+      "id": "arch_component_dashboard_data",
+      "source": "feat_dashboard",
+      "target": "feat_database",
+      "relation": "reads_from",
+      "label": "读取活动团队任务数量",
+      "technology": "Prisma Client / SQLite",
+      "confidence": 1,
+      "evidence": "projectos-blocks/loaders/dashboard.ts:8-11 -> lib/data.ts:3-33 -> lib/db.ts:5 -> prisma/schema.prisma:70-89"
+    },
+    {
+      "id": "arch_component_projects_data",
+      "source": "feat_projects",
+      "target": "feat_database",
+      "relation": "writes_to",
+      "label": "复核团队权限并写入项目、任务与活动",
+      "technology": "React Server Actions / Prisma Client / SQLite",
+      "confidence": 1,
+      "evidence": "app/projects/actions.ts -> lib/projects.ts, lib/tasks.ts -> lib/workspace-context.ts, lib/db.ts -> prisma/schema.prisma"
+    },
+    {
+      "id": "arch_component_team_data",
+      "source": "feat_team",
+      "target": "feat_database",
+      "relation": "writes_to",
+      "label": "读取开放工作量并原子写入成员职责与活动",
+      "technology": "React Server Actions / Prisma Client / SQLite",
+      "confidence": 1,
+      "evidence": "app/team/actions.ts -> lib/team.ts -> lib/workspace-context.ts, lib/db.ts -> prisma/schema.prisma"
+    },
+    {
+      "id": "arch_component_settings_data",
+      "source": "feat_settings",
+      "target": "feat_database",
+      "relation": "writes_to",
+      "label": "复核当前会员并原子保存偏好与活动",
+      "technology": "React Server Actions / Prisma Client / SQLite",
+      "confidence": 1,
+      "evidence": "app/settings/actions.ts, app/api/settings/route.ts -> lib/settings.ts -> lib/workspace-context.ts, lib/db.ts -> prisma/schema.prisma"
+    }
+  ],
+  "fileRelations": [
+    {
+      "id": "arch_file_feat_search_components_SearchResults_tsx_app_api_search_route_ts",
+      "sourcePath": "components/SearchResults.tsx",
+      "targetPath": "app/api/search/route.ts",
+      "relation": "calls",
+      "label": "提交文章标题搜索",
+      "technology": "HTTPS / JSON",
+      "confidence": 1,
+      "evidence": "components/SearchResults.tsx:34 -> app/api/search/route.ts"
+    },
+    {
+      "id": "arch_file_feat_search_app_search_page_tsx_components_SearchResults_tsx",
+      "sourcePath": "app/search/page.tsx",
+      "targetPath": "components/SearchResults.tsx",
+      "relation": "imports",
+      "label": "渲染文章搜索结果状态",
+      "technology": "TypeScript / React",
+      "confidence": 1,
+      "evidence": "app/search/page.tsx:2,13 -> components/SearchResults.tsx"
+    },
+    {
+      "id": "arch_file_feat_admin_app_admin_page_tsx_lib_admin_analytics_ts",
+      "sourcePath": "app/admin/page.tsx",
+      "targetPath": "lib/admin-analytics.ts",
+      "relation": "calls",
+      "label": "读取真实管理计数",
+      "technology": "TypeScript / Prisma Client",
+      "confidence": 1,
+      "evidence": "app/admin/page.tsx:2,7 -> lib/admin-analytics.ts"
+    },
+    {
+      "id": "arch_file_feat_admin_app_admin_analytics_page_tsx_lib_admin_analytics_ts",
+      "sourcePath": "app/admin/analytics/page.tsx",
+      "targetPath": "lib/admin-analytics.ts",
+      "relation": "calls",
+      "label": "读取数据库与静态目录计数",
+      "technology": "TypeScript / Prisma Client",
+      "confidence": 1,
+      "evidence": "app/admin/analytics/page.tsx:1,6 -> lib/admin-analytics.ts"
+    },
+    {
+      "id": "arch_file_feat_admin_app_admin_users_page_tsx_lib_admin_analytics_ts",
+      "sourcePath": "app/admin/users/page.tsx",
+      "targetPath": "lib/admin-analytics.ts",
+      "relation": "calls",
+      "label": "读取安全只读用户目录",
+      "technology": "TypeScript / Prisma Client",
+      "confidence": 1,
+      "evidence": "app/admin/users/page.tsx:2,7 -> lib/admin-analytics.ts"
+    },
+    {
+      "id": "arch_file_feat_admin_app_admin_users_page_tsx_components_AdminTable_tsx",
+      "sourcePath": "app/admin/users/page.tsx",
+      "targetPath": "components/AdminTable.tsx",
+      "relation": "imports",
+      "label": "渲染只读用户目录",
+      "technology": "TypeScript / React",
+      "confidence": 1,
+      "evidence": "app/admin/users/page.tsx:1,15-18 -> components/AdminTable.tsx"
+    },
+    {
+      "id": "arch_file_feat_admin_lib_admin_analytics_ts_lib_db_ts",
+      "sourcePath": "lib/admin-analytics.ts",
+      "targetPath": "lib/db.ts",
+      "relation": "imports",
+      "label": "导入 Prisma 数据库客户端",
+      "technology": "TypeScript / Prisma Client",
+      "confidence": 1,
+      "evidence": "lib/admin-analytics.ts:4 -> lib/db.ts"
+    },
+    {
+      "id": "arch_file_feat_checkout_app_billing_layout_tsx_components_WorkspaceNav_tsx",
+      "sourcePath": "app/billing/layout.tsx",
+      "targetPath": "components/WorkspaceNav.tsx",
+      "relation": "imports",
+      "label": "导入工作区账单导航",
+      "technology": "TypeScript / React",
+      "confidence": 1,
+      "evidence": "app/billing/layout.tsx:1,12 -> components/WorkspaceNav.tsx"
+    },
+    {
+      "id": "arch_file_feat_checkout_app_billing_page_tsx_app_billing_actions_ts",
+      "sourcePath": "app/billing/page.tsx",
+      "targetPath": "app/billing/actions.ts",
+      "relation": "imports",
+      "label": "绑定团队订阅服务端操作",
+      "technology": "React Server Actions",
+      "confidence": 1,
+      "evidence": "app/billing/page.tsx:1-4,90-116 -> app/billing/actions.ts:17-58"
+    },
+    {
+      "id": "arch_file_feat_checkout_app_billing_page_tsx_components_BillingForms_tsx",
+      "sourcePath": "app/billing/page.tsx",
+      "targetPath": "components/BillingForms.tsx",
+      "relation": "imports",
+      "label": "渲染套餐选择与取消表单",
+      "technology": "TypeScript / React",
+      "confidence": 1,
+      "evidence": "app/billing/page.tsx:5-8,94-115 -> components/BillingForms.tsx"
+    },
+    {
+      "id": "arch_file_feat_checkout_app_billing_page_tsx_lib_payments_ts",
+      "sourcePath": "app/billing/page.tsx",
+      "targetPath": "lib/payments.ts",
+      "relation": "calls",
+      "label": "读取活动团队真实订阅",
+      "technology": "TypeScript / Prisma Client",
+      "confidence": 1,
+      "evidence": "app/billing/page.tsx:10,15 -> lib/payments.ts:57-101"
+    },
+    {
+      "id": "arch_file_feat_checkout_app_billing_actions_ts_lib_payments_ts",
+      "sourcePath": "app/billing/actions.ts",
+      "targetPath": "lib/payments.ts",
+      "relation": "calls",
+      "label": "原子选择或取消团队套餐",
+      "technology": "React Server Actions / Prisma Client",
+      "confidence": 1,
+      "evidence": "app/billing/actions.ts:4-9,28,47 -> lib/payments.ts:103-235"
+    },
+    {
+      "id": "arch_file_feat_checkout_app_checkout_page_tsx_components_CheckoutForm_tsx",
+      "sourcePath": "app/checkout/page.tsx",
+      "targetPath": "components/CheckoutForm.tsx",
+      "relation": "imports",
+      "label": "渲染旧套餐选择表单",
+      "technology": "TypeScript / React",
+      "confidence": 1,
+      "evidence": "app/checkout/page.tsx:2,17 -> components/CheckoutForm.tsx"
+    },
+    {
+      "id": "arch_file_feat_checkout_components_CheckoutForm_tsx_app_api_checkout_route_ts",
+      "sourcePath": "components/CheckoutForm.tsx",
+      "targetPath": "app/api/checkout/route.ts",
+      "relation": "calls",
+      "label": "提交旧客户端套餐选择",
+      "technology": "HTTPS / JSON",
+      "confidence": 1,
+      "evidence": "components/CheckoutForm.tsx:30-34 -> app/api/checkout/route.ts:8-48"
+    },
+    {
+      "id": "arch_file_feat_checkout_app_api_checkout_route_ts_lib_payments_ts",
+      "sourcePath": "app/api/checkout/route.ts",
+      "targetPath": "lib/payments.ts",
+      "relation": "calls",
+      "label": "通过共享领域边界选择套餐",
+      "technology": "Next.js Route Handlers / Prisma Client",
+      "confidence": 1,
+      "evidence": "app/api/checkout/route.ts:2-6,32 -> lib/payments.ts:103-167"
+    },
+    {
+      "id": "arch_file_feat_checkout_lib_payments_ts_lib_workspace_context_ts",
+      "sourcePath": "lib/payments.ts",
+      "targetPath": "lib/workspace-context.ts",
+      "relation": "calls",
+      "label": "复核活动团队实时成员角色",
+      "technology": "TypeScript / Prisma Client",
+      "confidence": 1,
+      "evidence": "lib/payments.ts:7-11,110-114,173-177 -> lib/workspace-context.ts:42-63"
+    },
+    {
+      "id": "arch_file_feat_login_components_LoginForm_tsx_app_api_auth_route_ts",
+      "sourcePath": "components/LoginForm.tsx",
+      "targetPath": "app/api/auth/route.ts",
+      "relation": "calls",
+      "label": "进入固定演示模式",
+      "technology": "HTTPS / JSON",
+      "confidence": 1,
+      "evidence": "components/LoginForm.tsx:13-17 -> app/api/auth/route.ts"
+    },
+    {
+      "id": "arch_file_feat_login_app_login_page_tsx_components_LoginForm_tsx",
+      "sourcePath": "app/login/page.tsx",
+      "targetPath": "components/LoginForm.tsx",
+      "relation": "imports",
+      "label": "渲染固定演示入口",
+      "technology": "TypeScript / React",
+      "confidence": 1,
+      "evidence": "app/login/page.tsx:1,11 -> components/LoginForm.tsx"
+    },
+    {
+      "id": "arch_file_feat_login_lib_request_auth_ts_lib_auth_ts",
+      "sourcePath": "lib/request-auth.ts",
+      "targetPath": "lib/auth.ts",
+      "relation": "imports",
+      "label": "派生可撤销的固定演示请求会话",
+      "technology": "TypeScript",
+      "confidence": 1,
+      "evidence": "lib/request-auth.ts:3,5-8 -> lib/auth.ts:14-16"
+    },
+    {
+      "id": "arch_file_feat_login_middleware_ts_app_login_page_tsx",
+      "sourcePath": "middleware.ts",
+      "targetPath": "app/login/page.tsx",
+      "relation": "redirects_to",
+      "label": "拦截跳转",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "middleware.ts -> app/login/page.tsx"
+    },
+    {
+      "id": "arch_file_feat_notifications_components_NotificationList_tsx_app_api_notifications_route_ts",
+      "sourcePath": "components/NotificationList.tsx",
+      "targetPath": "app/api/notifications/route.ts",
+      "relation": "calls",
+      "label": "请求并更新通知",
+      "technology": "HTTPS / JSON",
+      "confidence": 1,
+      "evidence": "components/NotificationList.tsx:29,54 -> app/api/notifications/route.ts"
+    },
+    {
+      "id": "arch_file_feat_notifications_app_notifications_page_tsx_components_NotificationList_tsx",
+      "sourcePath": "app/notifications/page.tsx",
+      "targetPath": "components/NotificationList.tsx",
+      "relation": "imports",
+      "label": "渲染当前会员通知状态",
+      "technology": "TypeScript / React",
+      "confidence": 1,
+      "evidence": "app/notifications/page.tsx:1,10 -> components/NotificationList.tsx"
+    },
+    {
+      "id": "arch_file_feat_home_app_layout_tsx_app_page_tsx",
+      "sourcePath": "app/layout.tsx",
+      "targetPath": "app/page.tsx",
+      "relation": "uses",
+      "label": "提供全局页面外壳",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "app/layout.tsx -> app/page.tsx"
+    },
+    {
+      "id": "arch_file_feat_home_app_layout_tsx_app_about_page_tsx",
+      "sourcePath": "app/layout.tsx",
+      "targetPath": "app/about/page.tsx",
+      "relation": "uses",
+      "label": "提供全局页面外壳",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "app/layout.tsx -> app/about/page.tsx"
+    },
+    {
+      "id": "arch_file_feat_contact_app_contact_page_tsx_components_ContactForm_tsx",
+      "sourcePath": "app/contact/page.tsx",
+      "targetPath": "components/ContactForm.tsx",
+      "relation": "imports",
+      "label": "渲染未配置联系投递状态",
+      "technology": "TypeScript / React",
+      "confidence": 1,
+      "evidence": "app/contact/page.tsx:1,9 -> components/ContactForm.tsx"
+    },
+    {
+      "id": "arch_file_feat_profile_app_profile_page_tsx_components_ProfileForm_tsx",
+      "sourcePath": "app/profile/page.tsx",
+      "targetPath": "components/ProfileForm.tsx",
+      "relation": "imports",
+      "label": "渲染只读演示资料",
+      "technology": "TypeScript / React",
+      "confidence": 1,
+      "evidence": "app/profile/page.tsx:4,16 -> components/ProfileForm.tsx"
+    },
+    {
+      "id": "arch_file_feat_home_app_layout_tsx_app_pricing_page_tsx",
+      "sourcePath": "app/layout.tsx",
+      "targetPath": "app/pricing/page.tsx",
+      "relation": "uses",
+      "label": "提供全局页面外壳",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "app/layout.tsx -> app/pricing/page.tsx"
+    },
+    {
+      "id": "arch_file_feat_settings_app_settings_layout_tsx_components_WorkspaceNav_tsx",
+      "sourcePath": "app/settings/layout.tsx",
+      "targetPath": "components/WorkspaceNav.tsx",
+      "relation": "imports",
+      "label": "导入工作区导航",
+      "technology": "TypeScript / React",
+      "confidence": 1,
+      "evidence": "app/settings/layout.tsx:1,12 -> components/WorkspaceNav.tsx"
+    },
+    {
+      "id": "arch_file_feat_settings_app_settings_page_tsx_app_settings_actions_ts",
+      "sourcePath": "app/settings/page.tsx",
+      "targetPath": "app/settings/actions.ts",
+      "relation": "imports",
+      "label": "绑定个人偏好服务端操作",
+      "technology": "React Server Actions",
+      "confidence": 1,
+      "evidence": "app/settings/page.tsx:1,33 -> app/settings/actions.ts:15-50"
+    },
+    {
+      "id": "arch_file_feat_settings_app_settings_page_tsx_components_SettingsForm_tsx",
+      "sourcePath": "app/settings/page.tsx",
+      "targetPath": "components/SettingsForm.tsx",
+      "relation": "imports",
+      "label": "渲染个人偏好表单",
+      "technology": "TypeScript / React",
+      "confidence": 1,
+      "evidence": "app/settings/page.tsx:2,32-36 -> components/SettingsForm.tsx"
+    },
+    {
+      "id": "arch_file_feat_settings_app_settings_page_tsx_lib_settings_ts",
+      "sourcePath": "app/settings/page.tsx",
+      "targetPath": "lib/settings.ts",
+      "relation": "imports",
+      "label": "读取当前会员个人偏好",
+      "technology": "TypeScript / Prisma Client",
+      "confidence": 1,
+      "evidence": "app/settings/page.tsx:3,8 -> lib/settings.ts:38-73"
+    },
+    {
+      "id": "arch_file_feat_settings_app_settings_actions_ts_lib_settings_ts",
+      "sourcePath": "app/settings/actions.ts",
+      "targetPath": "lib/settings.ts",
+      "relation": "calls",
+      "label": "验证并保存个人偏好",
+      "technology": "React Server Actions / Prisma Client",
+      "confidence": 1,
+      "evidence": "app/settings/actions.ts:4-7,36-39 -> lib/settings.ts:75-157"
+    },
+    {
+      "id": "arch_file_feat_settings_app_api_settings_route_ts_lib_settings_ts",
+      "sourcePath": "app/api/settings/route.ts",
+      "targetPath": "lib/settings.ts",
+      "relation": "calls",
+      "label": "通过共享领域边界读写个人偏好",
+      "technology": "Next.js Route Handlers / Prisma Client",
+      "confidence": 1,
+      "evidence": "app/api/settings/route.ts:3-7,15,37 -> lib/settings.ts:38-157"
+    },
+    {
+      "id": "arch_file_feat_settings_lib_settings_ts_lib_workspace_context_ts",
+      "sourcePath": "lib/settings.ts",
+      "targetPath": "lib/workspace-context.ts",
+      "relation": "calls",
+      "label": "复核活动团队成员关系",
+      "technology": "TypeScript / Prisma Client",
+      "confidence": 1,
+      "evidence": "lib/settings.ts:6-9,41,90 -> lib/workspace-context.ts:42-63"
+    },
+    {
+      "id": "arch_file_feat_dashboard_components_ActivityItem_tsx_components_ActivityItem_module_css",
+      "sourcePath": "components/ActivityItem.tsx",
+      "targetPath": "components/ActivityItem.module.css",
+      "relation": "imports",
+      "label": "导入活动条目 CSS Module 样式",
+      "technology": "CSS Modules",
+      "confidence": 1,
+      "evidence": "components/ActivityItem.tsx:3 -> components/ActivityItem.module.css:1-6"
+    },
+    {
+      "id": "arch_file_feat_dashboard_components_StatsCard_tsx_components_StatsCard_module_css",
+      "sourcePath": "components/StatsCard.tsx",
+      "targetPath": "components/StatsCard.module.css",
+      "relation": "imports",
+      "label": "导入指标值 CSS Module 样式",
+      "technology": "CSS Modules",
+      "confidence": 1,
+      "evidence": "components/StatsCard.tsx:3 -> components/StatsCard.module.css:1-4"
+    },
+    {
+      "id": "arch_file_feat_dashboard_components_Sidebar_tsx_components_Sidebar_module_css",
+      "sourcePath": "components/Sidebar.tsx",
+      "targetPath": "components/Sidebar.module.css",
+      "relation": "imports",
+      "label": "导入侧边导航 CSS Module 样式",
+      "technology": "CSS Modules",
+      "confidence": 1,
+      "evidence": "components/Sidebar.tsx:2 -> components/Sidebar.module.css:1-3"
+    },
+    {
+      "id": "arch_file_feat_dashboard_app_dashboard_layout_tsx_components_Sidebar_tsx",
+      "sourcePath": "app/dashboard/layout.tsx",
+      "targetPath": "components/Sidebar.tsx",
+      "relation": "imports",
+      "label": "导入仪表盘侧边栏",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "app/dashboard/layout.tsx:1 -> components/Sidebar.tsx:3"
+    },
+    {
+      "id": "arch_file_feat_database_lib_data_ts_lib_db_ts",
+      "sourcePath": "lib/data.ts",
+      "targetPath": "lib/db.ts",
+      "relation": "imports",
+      "label": "导入 Prisma 数据库客户端",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "lib/data.ts:1 -> lib/db.ts:5"
+    },
+    {
+      "id": "arch_file_feat_database_lib_db_ts_prisma_schema_prisma",
+      "sourcePath": "lib/db.ts",
+      "targetPath": "prisma/schema.prisma",
+      "relation": "reads_from",
+      "label": "依据数据模型访问数据",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "lib/db.ts -> prisma/schema.prisma"
+    },
+    {
+      "id": "arch_file_feat_projects_page_actions",
+      "sourcePath": "app/projects/page.tsx",
+      "targetPath": "app/projects/actions.ts",
+      "relation": "imports",
+      "label": "绑定创建项目服务端操作",
+      "technology": "React Server Actions",
+      "confidence": 1,
+      "evidence": "app/projects/page.tsx:2 -> app/projects/actions.ts"
+    },
+    {
+      "id": "arch_file_feat_projects_layout_workspace_nav",
+      "sourcePath": "app/projects/layout.tsx",
+      "targetPath": "components/WorkspaceNav.tsx",
+      "relation": "imports",
+      "label": "导入工作区侧边导航",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "app/projects/layout.tsx:1 -> components/WorkspaceNav.tsx"
+    },
+    {
+      "id": "arch_file_feat_projects_page_forms",
+      "sourcePath": "app/projects/page.tsx",
+      "targetPath": "components/ProjectForms.tsx",
+      "relation": "imports",
+      "label": "渲染创建项目表单",
+      "technology": "React",
+      "confidence": 1,
+      "evidence": "app/projects/page.tsx:3 -> components/ProjectForms.tsx"
+    },
+    {
+      "id": "arch_file_feat_projects_page_domain",
+      "sourcePath": "app/projects/page.tsx",
+      "targetPath": "lib/projects.ts",
+      "relation": "reads_from",
+      "label": "读取活动团队项目列表",
+      "technology": "项目领域服务",
+      "confidence": 1,
+      "evidence": "app/projects/page.tsx:4 -> lib/projects.ts"
+    },
+    {
+      "id": "arch_file_feat_projects_detail_actions",
+      "sourcePath": "app/projects/[id]/page.tsx",
+      "targetPath": "app/projects/actions.ts",
+      "relation": "imports",
+      "label": "绑定项目与任务服务端操作",
+      "technology": "React Server Actions",
+      "confidence": 1,
+      "evidence": "app/projects/[id]/page.tsx:3-10 -> app/projects/actions.ts"
+    },
+    {
+      "id": "arch_file_feat_projects_detail_forms",
+      "sourcePath": "app/projects/[id]/page.tsx",
+      "targetPath": "components/ProjectForms.tsx",
+      "relation": "imports",
+      "label": "渲染项目生命周期表单",
+      "technology": "React",
+      "confidence": 1,
+      "evidence": "app/projects/[id]/page.tsx:11-14 -> components/ProjectForms.tsx"
+    },
+    {
+      "id": "arch_file_feat_projects_detail_task_forms",
+      "sourcePath": "app/projects/[id]/page.tsx",
+      "targetPath": "components/TaskForms.tsx",
+      "relation": "imports",
+      "label": "渲染任务生命周期表单",
+      "technology": "React",
+      "confidence": 1,
+      "evidence": "app/projects/[id]/page.tsx:15-20 -> components/TaskForms.tsx"
+    },
+    {
+      "id": "arch_file_feat_projects_detail_domain",
+      "sourcePath": "app/projects/[id]/page.tsx",
+      "targetPath": "lib/projects.ts",
+      "relation": "reads_from",
+      "label": "读取团队范围项目详情",
+      "technology": "项目领域服务",
+      "confidence": 1,
+      "evidence": "app/projects/[id]/page.tsx:22 -> lib/projects.ts"
+    },
+    {
+      "id": "arch_file_feat_projects_detail_constants",
+      "sourcePath": "app/projects/[id]/page.tsx",
+      "targetPath": "lib/constants.ts",
+      "relation": "imports",
+      "label": "格式化任务状态标签",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "app/projects/[id]/page.tsx:21 -> lib/constants.ts"
+    },
+    {
+      "id": "arch_file_feat_projects_actions_domain",
+      "sourcePath": "app/projects/actions.ts",
+      "targetPath": "lib/projects.ts",
+      "relation": "writes_to",
+      "label": "调用项目领域写入并返回类型化结果",
+      "technology": "React Server Actions",
+      "confidence": 1,
+      "evidence": "app/projects/actions.ts:4-9 -> lib/projects.ts"
+    },
+    {
+      "id": "arch_file_feat_projects_actions_tasks",
+      "sourcePath": "app/projects/actions.ts",
+      "targetPath": "lib/tasks.ts",
+      "relation": "writes_to",
+      "label": "调用任务领域写入并返回类型化结果",
+      "technology": "React Server Actions",
+      "confidence": 1,
+      "evidence": "app/projects/actions.ts:10-16 -> lib/tasks.ts"
+    },
+    {
+      "id": "arch_file_feat_projects_task_forms_constants",
+      "sourcePath": "components/TaskForms.tsx",
+      "targetPath": "lib/constants.ts",
+      "relation": "imports",
+      "label": "复用任务状态选项与类型",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "components/TaskForms.tsx:4-7 -> lib/constants.ts"
+    },
+    {
+      "id": "arch_file_feat_projects_domain_constants",
+      "sourcePath": "lib/projects.ts",
+      "targetPath": "lib/constants.ts",
+      "relation": "imports",
+      "label": "校验并规范任务状态",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "lib/projects.ts:4-7 -> lib/constants.ts"
+    },
+    {
+      "id": "arch_file_feat_projects_tasks_constants",
+      "sourcePath": "lib/tasks.ts",
+      "targetPath": "lib/constants.ts",
+      "relation": "imports",
+      "label": "校验任务状态写入",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "lib/tasks.ts:5-8 -> lib/constants.ts"
+    },
+    {
+      "id": "arch_file_feat_team_layout_workspace_nav",
+      "sourcePath": "app/team/layout.tsx",
+      "targetPath": "components/WorkspaceNav.tsx",
+      "relation": "imports",
+      "label": "导入工作区侧边导航",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "app/team/layout.tsx:1 -> components/WorkspaceNav.tsx"
+    },
+    {
+      "id": "arch_file_feat_team_page_actions",
+      "sourcePath": "app/team/page.tsx",
+      "targetPath": "app/team/actions.ts",
+      "relation": "imports",
+      "label": "绑定成员职责服务端操作",
+      "technology": "React Server Actions",
+      "confidence": 1,
+      "evidence": "app/team/page.tsx:1 -> app/team/actions.ts"
+    },
+    {
+      "id": "arch_file_feat_team_page_form",
+      "sourcePath": "app/team/page.tsx",
+      "targetPath": "components/TeamRoleForm.tsx",
+      "relation": "imports",
+      "label": "渲染成员职责表单",
+      "technology": "React",
+      "confidence": 1,
+      "evidence": "app/team/page.tsx:2 -> components/TeamRoleForm.tsx"
+    },
+    {
+      "id": "arch_file_feat_team_page_domain",
+      "sourcePath": "app/team/page.tsx",
+      "targetPath": "lib/team.ts",
+      "relation": "reads_from",
+      "label": "读取团队成员与开放工作量",
+      "technology": "团队领域服务",
+      "confidence": 1,
+      "evidence": "app/team/page.tsx:3 -> lib/team.ts"
+    },
+    {
+      "id": "arch_file_feat_team_actions_domain",
+      "sourcePath": "app/team/actions.ts",
+      "targetPath": "lib/team.ts",
+      "relation": "writes_to",
+      "label": "调用成员职责领域写入并返回类型化结果",
+      "technology": "React Server Actions",
+      "confidence": 1,
+      "evidence": "app/team/actions.ts:4-7 -> lib/team.ts"
+    },
+    {
+      "id": "arch_file_feat_team_domain_workspace_context",
+      "sourcePath": "lib/team.ts",
+      "targetPath": "lib/workspace-context.ts",
+      "relation": "imports",
+      "label": "复用团队职责白名单与成员权限复核",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "lib/team.ts:6-11 -> lib/workspace-context.ts"
+    },
+    {
+      "id": "arch_file_feat_team_middleware_route",
+      "sourcePath": "app/team/page.tsx",
+      "targetPath": "middleware.ts",
+      "relation": "depends_on",
+      "label": "依赖中间件保护团队职责页面",
+      "technology": "Next.js Middleware",
+      "confidence": 1,
+      "evidence": "app/team/page.tsx -> middleware.ts"
+    },
+    {
+      "id": "arch_file_feat_dashboard_app_dashboard_page_tsx_projectos_blocks_loaders_dashboard_ts",
+      "sourcePath": "app/dashboard/page.tsx",
+      "targetPath": "projectos-blocks/loaders/dashboard.ts",
+      "relation": "imports",
+      "label": "导入仪表盘类型化数据加载器",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "app/dashboard/page.tsx:8 -> projectos-blocks/loaders/dashboard.ts:5"
+    },
+    {
+      "id": "arch_file_feat_dashboard_app_dashboard_page_tsx_projectos_generated_design_doc1_dashboard_view_tsx",
+      "sourcePath": "app/dashboard/page.tsx",
+      "targetPath": "projectos-generated/design/doc1_dashboard/view.tsx",
+      "relation": "imports",
+      "label": "导入区块生成的仪表盘视图",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "app/dashboard/page.tsx:9-10 -> projectos-generated/design/doc1_dashboard/view.tsx:26-36"
+    },
+    {
+      "id": "arch_file_component_projectos_design_host_app_dashboard_projectos_design_host_dynamic_page_tsx_app_dashboard_projectos_design_host_client_tsx",
+      "sourcePath": "app/dashboard/[projectosDesignHost]/page.tsx",
+      "targetPath": "app/dashboard/[projectosDesignHost]/DesignHostClient.tsx",
+      "relation": "imports",
+      "label": "开发验证动态路由在精确参数匹配后加载区块 snapshot 客户端渲染器",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "app/dashboard/[projectosDesignHost]/page.tsx:10 -> app/dashboard/[projectosDesignHost]/DesignHostClient.tsx:1"
+    },
+    {
+      "id": "arch_file_feat_dashboard_projectos_generated_design_doc1_dashboard_view_tsx_components_StatsCard_tsx",
+      "sourcePath": "projectos-generated/design/doc1_dashboard/view.tsx",
+      "targetPath": "components/StatsCard.tsx",
+      "relation": "imports",
+      "label": "生成视图引用指标卡片渲染器",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "projectos-generated/design/doc1_dashboard/view.tsx:10,103-145 -> components/StatsCard.tsx:17"
+    },
+    {
+      "id": "arch_file_feat_dashboard_projectos_generated_design_doc1_dashboard_view_tsx_components_ActivityItem_tsx",
+      "sourcePath": "projectos-generated/design/doc1_dashboard/view.tsx",
+      "targetPath": "components/ActivityItem.tsx",
+      "relation": "imports",
+      "label": "生成视图引用活动条目渲染器",
+      "technology": "项目内部关系",
+      "confidence": 1,
+      "evidence": "projectos-generated/design/doc1_dashboard/view.tsx:8,192-234 -> components/ActivityItem.tsx:17"
+    },
+    {
+      "id": "arch_file_feat_dashboard_projectos_generated_design_doc1_dashboard_view_tsx_projectos_generated_design_doc1_dashboard_styles_module_css",
+      "sourcePath": "projectos-generated/design/doc1_dashboard/view.tsx",
+      "targetPath": "projectos-generated/design/doc1_dashboard/styles.module.css",
+      "relation": "imports",
+      "label": "生成视图导入受管 CSS Module 样式",
+      "technology": "CSS Modules",
+      "confidence": 1,
+      "evidence": "projectos-generated/design/doc1_dashboard/view.tsx:10 -> projectos-generated/design/doc1_dashboard/styles.module.css:1-52"
+    }
+  ],
+  "fileIndex": [
+    {
+      "path": ".babelrc",
+      "type": "config",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [],
+      "exports": []
+    },
+    {
+      "path": "app/about/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_about"
+      ],
+      "imports": [],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 312,
+      "lastModified": "2026-06-22T13:13:31.365Z"
+    },
+    {
+      "path": "app/admin/analytics/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_admin"
+      ],
+      "imports": [
+        "lib/admin-analytics.ts"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 477,
+      "lastModified": "2026-06-22T13:13:45.461Z"
+    },
+    {
+      "path": "app/admin/layout.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_admin"
+      ],
+      "imports": [
+        "lib/auth.ts",
+        "components/AdminNav.tsx"
+      ],
+      "exports": [
+        "dynamic",
+        "default"
+      ],
+      "size": 342,
+      "lastModified": "2026-06-22T13:13:38.607Z"
+    },
+    {
+      "path": "app/admin/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_admin"
+      ],
+      "imports": [
+        "components/StatsCard.tsx",
+        "lib/admin-analytics.ts"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 550,
+      "lastModified": "2026-06-22T13:13:41.171Z"
+    },
+    {
+      "path": "app/admin/users/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_admin"
+      ],
+      "imports": [
+        "components/AdminTable.tsx",
+        "lib/admin-analytics.ts"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 512,
+      "lastModified": "2026-06-22T13:13:43.154Z"
+    },
+    {
+      "path": "app/api/auth/route.ts",
+      "type": "api",
+      "nodeIds": [
+        "feat_login"
+      ],
+      "imports": [
+        "lib/auth.ts"
+      ],
+      "exports": [
+        "GET",
+        "POST",
+        "DELETE"
+      ],
+      "size": 579,
+      "lastModified": "2026-06-22T10:45:51.034Z"
+    },
+    {
+      "path": "app/api/checkout/route.ts",
+      "type": "api",
+      "nodeIds": [
+        "feat_checkout"
+      ],
+      "imports": [
+        "lib/request-auth.ts",
+        "lib/payments.ts"
+      ],
+      "exports": [
+        "POST"
+      ],
+      "size": 1887
+    },
+    {
+      "path": "app/api/notifications/route.ts",
+      "type": "api",
+      "nodeIds": [
+        "feat_notifications"
+      ],
+      "imports": [
+        "lib/db.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "GET",
+        "PATCH"
+      ],
+      "size": 716,
+      "lastModified": "2026-06-22T13:14:02.709Z"
+    },
+    {
+      "path": "app/api/posts/route.ts",
+      "type": "api",
+      "nodeIds": [
+        "feat_blog"
+      ],
+      "imports": [
+        "lib/db.ts"
+      ],
+      "exports": [
+        "GET"
+      ],
+      "size": 553,
+      "lastModified": "2026-06-22T13:14:00.141Z"
+    },
+    {
+      "path": "app/api/search/route.ts",
+      "type": "api",
+      "nodeIds": [
+        "feat_search"
+      ],
+      "imports": [
+        "lib/db.ts"
+      ],
+      "exports": [
+        "GET"
+      ],
+      "size": 398,
+      "lastModified": "2026-06-22T13:14:05.005Z"
+    },
+    {
+      "path": "app/api/settings/route.ts",
+      "type": "api",
+      "nodeIds": [
+        "feat_settings"
+      ],
+      "imports": [
+        "lib/auth.ts",
+        "lib/request-auth.ts",
+        "lib/settings.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "GET",
+        "PUT"
+      ],
+      "size": 3284
+    },
+    {
+      "path": "app/api/users/route.ts",
+      "type": "api",
+      "nodeIds": [
+        "feat_admin"
+      ],
+      "imports": [
+        "lib/auth.ts",
+        "lib/db.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "GET"
+      ],
+      "size": 571,
+      "lastModified": "2026-06-22T10:45:52.923Z"
+    },
+    {
+      "path": "app/billing/actions.ts",
+      "type": "other",
+      "nodeIds": [
+        "feat_checkout"
+      ],
+      "imports": [
+        "lib/payments.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "BillingActionState",
+        "selectBillingPlanAction",
+        "cancelBillingSubscriptionAction"
+      ],
+      "size": 3057
+    },
+    {
+      "path": "app/billing/layout.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_checkout"
+      ],
+      "imports": [
+        "components/WorkspaceNav.tsx"
+      ],
+      "exports": [
+        "dynamic",
+        "default"
+      ],
+      "size": 343
+    },
+    {
+      "path": "app/billing/loading.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_checkout"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ],
+      "size": 242
+    },
+    {
+      "path": "app/billing/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_checkout"
+      ],
+      "imports": [
+        "app/billing/actions.ts",
+        "components/BillingForms.tsx",
+        "lib/constants.ts",
+        "lib/payments.ts"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 4160
+    },
+    {
+      "path": "app/blog/[slug]/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_blog"
+      ],
+      "imports": [
+        "lib/data.ts"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 739,
+      "lastModified": "2026-06-22T13:13:22.804Z"
+    },
+    {
+      "path": "app/blog/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_blog"
+      ],
+      "imports": [
+        "components/BlogCard.tsx",
+        "lib/data.ts"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 437,
+      "lastModified": "2026-06-22T13:13:19.137Z"
+    },
+    {
+      "path": "app/checkout/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_checkout"
+      ],
+      "imports": [
+        "components/CheckoutForm.tsx",
+        "lib/auth.ts",
+        "lib/constants.ts"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 813
+    },
+    {
+      "path": "app/contact/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_contact"
+      ],
+      "imports": [
+        "components/ContactForm.tsx"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 257,
+      "lastModified": "2026-06-22T13:13:34.307Z"
+    },
+    {
+      "path": "app/dashboard/layout.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [
+        "components/Sidebar.tsx"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 265,
+      "lastModified": "2026-06-22T10:45:44.815Z"
+    },
+    {
+      "path": "app/dashboard/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [
+        "projectos-blocks/loaders/dashboard.ts",
+        "projectos-generated/design/doc1_dashboard/view.tsx"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 639,
+      "lastModified": "2026-06-22T10:45:44.382Z"
+    },
+    {
+      "path": "app/admin/error.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_admin"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ]
+    },
+    {
+      "path": "app/layout.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_home"
+      ],
+      "imports": [],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 308,
+      "lastModified": "2026-06-22T10:45:37.733Z"
+    },
+    {
+      "path": "app/admin/loading.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_admin"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ]
+    },
+    {
+      "path": "app/login/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_login"
+      ],
+      "imports": [
+        "components/LoginForm.tsx"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 167,
+      "lastModified": "2026-06-22T10:45:40.993Z"
+    },
+    {
+      "path": "middleware.ts",
+      "type": "other",
+      "nodeIds": [
+        "feat_login"
+      ],
+      "imports": [],
+      "exports": [
+        "middleware",
+        "config"
+      ],
+      "size": 1705,
+      "lastModified": "2026-07-24T00:00:00.000Z"
+    },
+    {
+      "path": "app/notifications/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_notifications"
+      ],
+      "imports": [
+        "components/NotificationList.tsx"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 396,
+      "lastModified": "2026-06-22T13:13:47.896Z"
+    },
+    {
+      "path": "app/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_home"
+      ],
+      "imports": [
+        "lib/auth.ts"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 339,
+      "lastModified": "2026-06-22T10:45:39.631Z"
+    },
+    {
+      "path": "app/pricing/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_pricing"
+      ],
+      "imports": [
+        "lib/constants.ts"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 582,
+      "lastModified": "2026-06-22T13:13:28.757Z"
+    },
+    {
+      "path": "app/profile/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_profile"
+      ],
+      "imports": [
+        "components/ProfileForm.tsx",
+        "lib/auth.ts",
+        "lib/db.ts"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 438,
+      "lastModified": "2026-06-22T10:45:46.220Z"
+    },
+    {
+      "path": "app/projects/[id]/not-found.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ],
+      "size": 323
+    },
+    {
+      "path": "app/projects/[id]/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [
+        "app/projects/actions.ts",
+        "components/ProjectForms.tsx",
+        "components/TaskForms.tsx",
+        "lib/constants.ts",
+        "lib/projects.ts"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 5072
+    },
+    {
+      "path": "app/projects/actions.ts",
+      "type": "other",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [
+        "lib/projects.ts",
+        "lib/tasks.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "ProjectActionState",
+        "TaskActionState",
+        "createProjectAction",
+        "updateProjectAction",
+        "archiveProjectAction",
+        "createTaskAction",
+        "updateTaskAction",
+        "updateTaskStatusAction",
+        "archiveTaskAction"
+      ],
+      "size": 8764
+    },
+    {
+      "path": "app/projects/layout.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [
+        "components/WorkspaceNav.tsx"
+      ],
+      "exports": [
+        "dynamic",
+        "default"
+      ],
+      "size": 339
+    },
+    {
+      "path": "app/projects/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [
+        "app/projects/actions.ts",
+        "components/ProjectForms.tsx",
+        "lib/projects.ts"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 2941
+    },
+    {
+      "path": "app/search/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_search"
+      ],
+      "imports": [
+        "components/ui/SearchBar.tsx",
+        "components/SearchResults.tsx"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 486,
+      "lastModified": "2026-06-22T13:13:49.992Z"
+    },
+    {
+      "path": "app/settings/actions.ts",
+      "type": "other",
+      "nodeIds": [
+        "feat_settings"
+      ],
+      "imports": [
+        "lib/settings.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "SettingsActionState",
+        "updateSettingsAction"
+      ],
+      "size": 2490
+    },
+    {
+      "path": "app/settings/layout.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_settings"
+      ],
+      "imports": [
+        "components/WorkspaceNav.tsx"
+      ],
+      "exports": [
+        "dynamic",
+        "default"
+      ],
+      "size": 344
+    },
+    {
+      "path": "app/settings/loading.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_settings"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ],
+      "size": 219
+    },
+    {
+      "path": "app/settings/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_settings"
+      ],
+      "imports": [
+        "app/settings/actions.ts",
+        "components/SettingsForm.tsx",
+        "lib/settings.ts"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 1282
+    },
+    {
+      "path": "app/team/actions.ts",
+      "type": "other",
+      "nodeIds": [
+        "feat_team"
+      ],
+      "imports": [
+        "lib/team.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "TeamRoleActionState",
+        "updateTeamRoleAction"
+      ],
+      "size": 2493
+    },
+    {
+      "path": "app/team/layout.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_team"
+      ],
+      "imports": [
+        "components/WorkspaceNav.tsx"
+      ],
+      "exports": [
+        "dynamic",
+        "default"
+      ],
+      "size": 335
+    },
+    {
+      "path": "app/team/loading.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_team"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ],
+      "size": 242
+    },
+    {
+      "path": "app/team/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "feat_team"
+      ],
+      "imports": [
+        "app/team/actions.ts",
+        "components/TeamRoleForm.tsx",
+        "lib/team.ts"
+      ],
+      "exports": [
+        "metadata",
+        "default"
+      ],
+      "size": 3321
+    },
+    {
+      "path": "components/ActivityItem.module.css",
+      "type": "style",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [],
+      "exports": [],
+      "size": 138
+    },
+    {
+      "path": "components/ActivityItem.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [
+        "components/ActivityItem.module.css"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 361
+    },
+    {
+      "path": "components/AdminNav.tsx",
+      "type": "component",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "AdminNav"
+      ],
+      "size": 476,
+      "lastModified": "2026-06-22T13:14:39.392Z"
+    },
+    {
+      "path": "components/AdminTable.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_admin"
+      ],
+      "imports": [
+        "lib/admin-analytics.ts"
+      ],
+      "exports": [
+        "AdminTable"
+      ],
+      "size": 545,
+      "lastModified": "2026-06-22T13:14:41.670Z"
+    },
+    {
+      "path": "components/BillingForms.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_checkout"
+      ],
+      "imports": [],
+      "exports": [
+        "BillingPlanForm",
+        "BillingCancelForm"
+      ],
+      "size": 2306
+    },
+    {
+      "path": "components/BlogCard.tsx",
+      "type": "component",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "BlogCard"
+      ],
+      "size": 317,
+      "lastModified": "2026-06-22T13:14:29.751Z"
+    },
+    {
+      "path": "components/CheckoutForm.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_checkout"
+      ],
+      "imports": [
+        "lib/utils.ts"
+      ],
+      "exports": [
+        "CheckoutForm"
+      ],
+      "size": 1822
+    },
+    {
+      "path": "components/ContactForm.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_contact"
+      ],
+      "imports": [],
+      "exports": [
+        "ContactForm"
+      ],
+      "size": 1046,
+      "lastModified": "2026-06-22T13:14:36.288Z"
+    },
+    {
+      "path": "components/Header.tsx",
+      "type": "component",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "Header"
+      ],
+      "size": 638,
+      "lastModified": "2026-06-22T13:14:52.916Z"
+    },
+    {
+      "path": "components/LoginForm.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_login"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ],
+      "size": 1038,
+      "lastModified": "2026-06-22T10:46:09.552Z"
+    },
+    {
+      "path": "components/NotificationList.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_notifications"
+      ],
+      "imports": [
+        "lib/utils.ts"
+      ],
+      "exports": [
+        "NotificationList"
+      ],
+      "size": 633,
+      "lastModified": "2026-06-22T13:14:43.982Z"
+    },
+    {
+      "path": "components/PricingCard.tsx",
+      "type": "component",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "PricingCard"
+      ],
+      "size": 641,
+      "lastModified": "2026-06-22T13:14:34.176Z"
+    },
+    {
+      "path": "components/ProfileForm.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_profile"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ],
+      "size": 776,
+      "lastModified": "2026-06-22T10:46:15.129Z"
+    },
+    {
+      "path": "components/ProjectForms.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [],
+      "exports": [
+        "CreateProjectForm",
+        "EditProjectForm",
+        "ArchiveProjectForm"
+      ],
+      "size": 4552
+    },
+    {
+      "path": "components/TaskForms.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [
+        "lib/constants.ts"
+      ],
+      "exports": [
+        "TaskMemberOption",
+        "TaskFormValue",
+        "CreateTaskForm",
+        "EditTaskForm",
+        "TaskStatusForm",
+        "ArchiveTaskForm"
+      ],
+      "size": 6936
+    },
+    {
+      "path": "components/SearchResults.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_search"
+      ],
+      "imports": [
+        "components/BlogCard.tsx"
+      ],
+      "exports": [
+        "SearchResults"
+      ],
+      "size": 933,
+      "lastModified": "2026-06-22T13:14:46.303Z"
+    },
+    {
+      "path": "components/SettingsForm.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_settings"
+      ],
+      "imports": [],
+      "exports": [
+        "SettingsForm"
+      ],
+      "size": 2223
+    },
+    {
+      "path": "components/Sidebar.module.css",
+      "type": "style",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [],
+      "exports": [],
+      "size": 27,
+      "lastModified": "2026-07-28T00:00:00.000Z"
+    },
+    {
+      "path": "components/Sidebar.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [
+        "components/Sidebar.module.css"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 599,
+      "lastModified": "2026-07-24T00:00:00.000Z"
+    },
+    {
+      "path": "components/TeamRoleForm.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_team"
+      ],
+      "imports": [],
+      "exports": [
+        "TeamRoleForm"
+      ],
+      "size": 2100
+    },
+    {
+      "path": "components/WorkspaceNav.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ],
+      "size": 568
+    },
+    {
+      "path": "components/StatsCard.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [
+        "components/StatsCard.module.css"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 402,
+      "lastModified": "2026-07-24T00:00:00.000Z"
+    },
+    {
+      "path": "components/StatsCard.module.css",
+      "type": "style",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [],
+      "exports": [],
+      "size": 98,
+      "lastModified": "2026-07-24T00:00:00.000Z"
+    },
+    {
+      "path": "components/ui/ChartContainer.tsx",
+      "type": "component",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "ChartContainer"
+      ],
+      "size": 304,
+      "lastModified": "2026-06-22T13:15:09.496Z"
+    },
+    {
+      "path": "components/ui/Modal.tsx",
+      "type": "component",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "Modal"
+      ],
+      "size": 868,
+      "lastModified": "2026-06-22T13:15:16.572Z"
+    },
+    {
+      "path": "components/ui/NotificationBell.tsx",
+      "type": "component",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "NotificationBell"
+      ],
+      "size": 457,
+      "lastModified": "2026-06-22T13:15:04.230Z"
+    },
+    {
+      "path": "components/ui/SearchBar.tsx",
+      "type": "component",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "SearchBar"
+      ],
+      "size": 577,
+      "lastModified": "2026-06-22T13:15:01.312Z"
+    },
+    {
+      "path": "components/ui/ShareButton.tsx",
+      "type": "component",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "ShareButton"
+      ],
+      "size": 271,
+      "lastModified": "2026-06-22T13:15:07.210Z"
+    },
+    {
+      "path": "lib/admin-analytics.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_admin"
+      ],
+      "imports": [
+        "lib/constants.ts",
+        "lib/db.ts"
+      ],
+      "exports": [
+        "AdminAnalytics",
+        "AdminUserRow",
+        "getAdminAnalytics",
+        "getAdminUserDirectory"
+      ]
+    },
+    {
+      "path": "lib/auth.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_login"
+      ],
+      "imports": [],
+      "exports": [
+        "getSession",
+        "getCurrentUser",
+        "requireAdmin",
+        "validateToken"
+      ],
+      "size": 1174
+    },
+    {
+      "path": "lib/constants.ts",
+      "type": "lib",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "PLANS",
+        "APP_NAME",
+        "APP_URL",
+        "ITEMS_PER_PAGE",
+        "TASK_STATUSES",
+        "TaskStatus",
+        "isTaskStatus",
+        "taskStatusLabel"
+      ],
+      "size": 1178,
+      "lastModified": "2026-06-22T13:15:23.845Z"
+    },
+    {
+      "path": "lib/data.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_database"
+      ],
+      "imports": [
+        "lib/db.ts"
+      ],
+      "exports": [
+        "requireDashboardMembership",
+        "getStats",
+        "getRecentActivity",
+        "fetchPosts",
+        "fetchPostBySlug"
+      ],
+      "size": 2092,
+      "lastModified": "2026-06-22T13:16:07.827Z"
+    },
+    {
+      "path": "lib/db.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_database"
+      ],
+      "imports": [],
+      "exports": [
+        "prisma",
+        "db",
+        "getUserById",
+        "getUserSettings"
+      ],
+      "size": 698,
+      "lastModified": "2026-06-22T10:46:02.938Z"
+    },
+    {
+      "path": "lib/hooks/useAuth.ts",
+      "type": "lib",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "useAuth"
+      ],
+      "size": 488,
+      "lastModified": "2026-06-22T13:15:40.191Z"
+    },
+    {
+      "path": "lib/payments.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_checkout"
+      ],
+      "imports": [
+        "lib/auth.ts",
+        "lib/constants.ts",
+        "lib/db.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "TeamBillingOverview",
+        "PlanSelectionError",
+        "SubscriptionMutationError",
+        "getTeamBillingOverview",
+        "selectTeamPlan",
+        "cancelTeamSubscription"
+      ],
+      "size": 8573
+    },
+    {
+      "path": "lib/projects.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [
+        "lib/auth.ts",
+        "lib/constants.ts",
+        "lib/db.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "ProjectListItem",
+        "ProjectDetail",
+        "ProjectMutationError",
+        "listWorkspaceProjects",
+        "getWorkspaceProject",
+        "createWorkspaceProject",
+        "updateWorkspaceProject",
+        "archiveWorkspaceProject"
+      ],
+      "size": 11592
+    },
+    {
+      "path": "lib/react-dom-types.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [],
+      "exports": [],
+      "size": 265
+    },
+    {
+      "path": "lib/request-auth.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_login"
+      ],
+      "imports": [
+        "lib/auth.ts"
+      ],
+      "exports": [
+        "getRequestSession",
+        "hasExplicitDemoAdminCookie"
+      ]
+    },
+    {
+      "path": "lib/settings.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_settings"
+      ],
+      "imports": [
+        "lib/auth.ts",
+        "lib/db.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "ThemePreference",
+        "UserSettingsOverview",
+        "SettingsMutationError",
+        "getCurrentUserSettings",
+        "updateCurrentUserSettings"
+      ],
+      "size": 4980
+    },
+    {
+      "path": "lib/tasks.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [
+        "lib/auth.ts",
+        "lib/constants.ts",
+        "lib/db.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "TaskMutationError",
+        "createWorkspaceTask",
+        "updateWorkspaceTask",
+        "updateWorkspaceTaskStatus",
+        "archiveWorkspaceTask"
+      ],
+      "size": 14277
+    },
+    {
+      "path": "lib/team.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_team"
+      ],
+      "imports": [
+        "lib/auth.ts",
+        "lib/db.ts",
+        "lib/workspace-context.ts"
+      ],
+      "exports": [
+        "TeamMemberOverview",
+        "TeamOverview",
+        "TeamMutationError",
+        "getTeamOverview",
+        "updateTeamMemberRole"
+      ],
+      "size": 7579
+    },
+    {
+      "path": "lib/workspace-context.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_database"
+      ],
+      "imports": [
+        "lib/auth.ts",
+        "lib/db.ts",
+        "lib/request-auth.ts"
+      ],
+      "exports": [
+        "WORKSPACE_ROLES",
+        "WorkspaceRole",
+        "WorkspaceContext",
+        "WorkspaceAccessError",
+        "getWorkspaceContext",
+        "getRequestWorkspaceContext",
+        "requireWorkspaceMembership",
+        "isWorkspaceRole"
+      ],
+      "size": 1889
+    },
+    {
+      "path": "lib/utils.ts",
+      "type": "lib",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "formatDate",
+        "formatCurrency",
+        "slugify",
+        "truncate",
+        "cn"
+      ],
+      "size": 738,
+      "lastModified": "2026-06-22T13:15:21.622Z"
+    },
+    {
+      "path": "lib/validators.ts",
+      "type": "lib",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [
+        "validateEmail",
+        "validatePassword",
+        "validateSlug"
+      ],
+      "size": 588,
+      "lastModified": "2026-06-22T13:15:26.107Z"
+    },
+    {
+      "path": "next.config.js",
+      "type": "config",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [],
+      "size": 1982,
+      "lastModified": "2026-06-22T10:45:32.526Z"
+    },
+    {
+      "path": "package.json",
+      "type": "config",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [],
+      "size": 440,
+      "lastModified": "2026-06-22T10:45:31.065Z"
+    },
+    {
+      "path": "prisma/migrations/20260719000000_init/migration.sql",
+      "type": "config",
+      "nodeIds": [
+        "feat_database"
+      ],
+      "imports": [],
+      "exports": []
+    },
+    {
+      "path": "prisma/migrations/20260720000000_add_sample_models/migration.sql",
+      "type": "config",
+      "nodeIds": [
+        "feat_database"
+      ],
+      "imports": [],
+      "exports": []
+    },
+    {
+      "path": "prisma/migrations/20260724000000_team_data_foundation/migration.sql",
+      "type": "config",
+      "nodeIds": [
+        "feat_database"
+      ],
+      "imports": [],
+      "exports": [],
+      "size": 6260
+    },
+    {
+      "path": "prisma/migrations/migration_lock.toml",
+      "type": "config",
+      "nodeIds": [
+        "feat_database"
+      ],
+      "imports": [],
+      "exports": []
+    },
+    {
+      "path": "prisma/schema.prisma",
+      "type": "config",
+      "nodeIds": [
+        "feat_database"
+      ],
+      "imports": [],
+      "exports": [],
+      "size": 5039
+    },
+    {
+      "path": "prisma/seed.cjs",
+      "type": "other",
+      "nodeIds": [
+        "feat_database"
+      ],
+      "imports": [],
+      "exports": [],
+      "size": 11385
+    },
+    {
+      "path": "tsconfig.json",
+      "type": "other",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [],
+      "size": 485,
+      "lastModified": "2026-06-22T10:45:33.592Z"
+    },
+    {
+      "path": "tools/projectos-source-binding-babel-plugin.cjs",
+      "type": "other",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [],
+      "exports": []
+    },
+    {
+      "path": "app/dashboard/[projectosDesignHost]/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "component_projectos_design_host"
+      ],
+      "imports": [
+        "app/dashboard/[projectosDesignHost]/DesignHostClient.tsx"
+      ],
+      "exports": [
+        "dynamic",
+        "default"
+      ],
+      "size": 933
+    },
+    {
+      "path": "app/dashboard/[projectosDesignHost]/DesignHostClient.tsx",
+      "type": "component",
+      "nodeIds": [
+        "component_projectos_design_host"
+      ],
+      "imports": [
+        "components/ActivityItem.tsx",
+        "components/StatsCard.tsx"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 6415
+    },
+    {
+      "path": "projectos-generated/design/doc1_dashboard/view.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [
+        "components/ActivityItem.tsx",
+        "components/StatsCard.tsx",
+        "projectos-generated/design/doc1_dashboard/styles.module.css"
+      ],
+      "exports": [
+        "DashboardDesignViewModel",
+        "DashboardDesignViewProps",
+        "DashboardDesignView"
+      ],
+      "size": 6229
+    },
+    {
+      "path": "projectos-generated/design/doc1_dashboard/styles.module.css",
+      "type": "style",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [],
+      "exports": [],
+      "size": 976
+    },
+    {
+      "path": "projectos-blocks/loaders/dashboard.ts",
+      "type": "other",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
+      "imports": [
+        "lib/auth.ts",
+        "lib/data.ts"
+      ],
+      "exports": [
+        "loadDashboardViewModel"
+      ],
+      "size": 514
+    }
+  ],
+  "topology": {
+    "rootIds": [
+      "actor_visitor",
+      "actor_member",
+      "actor_administrator",
+      "system_saas_starter",
+      "feat_about",
+      "feat_contact",
+      "feat_pricing",
+      "feat_search"
+    ],
+    "maxDepth": 2,
+    "totalNodes": 24
+  },
+  "analysisError": null
+}

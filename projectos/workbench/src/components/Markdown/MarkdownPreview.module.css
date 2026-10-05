@@ -1,0 +1,330 @@
+.preview {
+  font-family: var(--markdown-preview-font-family);
+  font-size: var(--markdown-preview-font-size);
+  line-height: var(--markdown-preview-line-height);
+  font-weight: var(--font-weight-regular);
+  color: var(--color-text-primary);
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  -webkit-font-smoothing: antialiased;
+}
+
+.preview > :first-child {
+  margin-top: 0;
+}
+
+.preview > :last-child {
+  margin-bottom: 0;
+}
+
+.preview h1,
+.preview h2,
+.preview h3,
+.preview h4,
+.preview h5,
+.preview h6,
+.preview .heading {
+  margin: 24px 0 16px;
+  font-weight: var(--markdown-preview-heading-weight);
+  line-height: var(--markdown-preview-heading-line-height);
+  color: var(--color-text-primary);
+}
+
+.preview > h1:first-child,
+.preview > h2:first-child,
+.preview > h3:first-child,
+.preview > h4:first-child,
+.preview > h5:first-child,
+.preview > h6:first-child {
+  margin-top: 0;
+}
+
+.preview h1,
+.preview h1.heading {
+  font-size: var(--markdown-preview-h1-size);
+}
+
+.preview h2,
+.preview h2.heading {
+  font-size: var(--markdown-preview-h2-size);
+}
+
+.preview h3,
+.preview h3.heading {
+  font-size: var(--markdown-preview-h3-size);
+}
+
+.preview h4,
+.preview h4.heading {
+  font-size: var(--markdown-preview-h4-size);
+}
+
+.preview h5,
+.preview h5.heading {
+  font-size: var(--markdown-preview-h5-size);
+}
+
+.preview h6,
+.preview h6.heading {
+  font-size: var(--markdown-preview-h6-size);
+  color: var(--color-text-secondary);
+}
+
+.heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 24px 0 16px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.preview h1.heading,
+.preview h2.heading {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--markdown-preview-heading-border);
+}
+
+.headingText {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+
+.headingAnchor {
+  flex-shrink: 0;
+  opacity: 0;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-size: 0.85em;
+  font-weight: var(--font-weight-regular);
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.heading:hover .headingAnchor,
+.headingAnchor:focus-visible {
+  opacity: 1;
+}
+
+.preview p,
+.preview ul,
+.preview ol,
+.preview pre,
+.preview blockquote,
+.preview table {
+  margin: var(--markdown-preview-block-margin);
+  color: var(--color-text-primary);
+}
+
+.preview ul,
+.preview ol {
+  padding-left: 2em;
+}
+
+.preview li + li {
+  margin-top: 0.25em;
+}
+
+.preview ul.contains-task-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.preview li.task-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.preview li.task-list-item input[type='checkbox'] {
+  margin-top: 0.35em;
+  pointer-events: none;
+}
+
+.preview code {
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  background: var(--color-code-bg);
+  font-family: var(--font-mono);
+  font-size: var(--markdown-preview-inline-code-size);
+  color: var(--markdown-syntax-string);
+  white-space: break-spaces;
+}
+
+.preview pre {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: var(--markdown-preview-block-margin);
+  padding: 16px;
+  border-radius: var(--radius-glass-sm);
+  background: var(--color-code-bg);
+  font-family: var(--font-mono);
+  font-size: var(--markdown-preview-code-block-size);
+  line-height: var(--markdown-preview-code-block-line-height);
+}
+
+.preview pre code {
+  padding: 0;
+  background: transparent;
+  font-size: inherit;
+  color: var(--markdown-syntax-foreground);
+  white-space: pre;
+}
+
+.preview a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+.preview blockquote {
+  padding: 0 1em;
+  border-left: 4px solid var(--markdown-preview-heading-border);
+  color: var(--color-text-secondary);
+}
+
+.preview table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--markdown-preview-font-size);
+  line-height: var(--markdown-preview-line-height);
+}
+
+.preview th,
+.preview td {
+  border: 1px solid var(--glass-border-subtle);
+  padding: 6px 13px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.preview th {
+  background: var(--color-bg-muted);
+  font-weight: var(--markdown-preview-heading-weight);
+}
+
+.preview del {
+  color: var(--color-text-muted);
+}
+
+.preview hr {
+  height: 1px;
+  margin: 24px 0;
+  border: none;
+  background: var(--markdown-preview-heading-border);
+}
+
+.image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.75em 0;
+  border-radius: var(--radius-glass-sm);
+  border: 1px solid var(--glass-border-subtle);
+}
+
+.imageFallback,
+.imageLoading {
+  display: inline-block;
+  margin: 0.5em 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-glass-sm);
+  background: var(--color-bg-muted);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.preview :global(.hljs) {
+  background: transparent;
+  color: var(--markdown-syntax-foreground);
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.preview :global(.hljs-keyword),
+.preview :global(.hljs-selector-tag),
+.preview :global(.hljs-built_in),
+.preview :global(.hljs-meta .hljs-keyword) {
+  color: var(--markdown-syntax-keyword);
+}
+
+.preview :global(.hljs-string),
+.preview :global(.hljs-char),
+.preview :global(.hljs-template-string),
+.preview :global(.hljs-addition) {
+  color: var(--markdown-syntax-string);
+}
+
+.preview :global(.hljs-number),
+.preview :global(.hljs-literal) {
+  color: var(--markdown-syntax-number);
+}
+
+.preview :global(.hljs-comment),
+.preview :global(.hljs-quote),
+.preview :global(.hljs-doctag) {
+  color: var(--markdown-syntax-comment);
+  font-style: italic;
+}
+
+.preview :global(.hljs-title),
+.preview :global(.hljs-title.function_),
+.preview :global(.hljs-function),
+.preview :global(.hljs-section) {
+  color: var(--markdown-syntax-function);
+}
+
+.preview :global(.hljs-type),
+.preview :global(.hljs-class .hljs-title),
+.preview :global(.hljs-title.class_),
+.preview :global(.hljs-built_in.hljs-type) {
+  color: var(--markdown-syntax-type);
+}
+
+.preview :global(.hljs-variable),
+.preview :global(.hljs-template-variable),
+.preview :global(.hljs-params),
+.preview :global(.hljs-attr),
+.preview :global(.hljs-attribute),
+.preview :global(.hljs-property) {
+  color: var(--markdown-syntax-variable);
+}
+
+.preview :global(.hljs-symbol),
+.preview :global(.hljs-bullet),
+.preview :global(.hljs-link) {
+  color: var(--markdown-syntax-constant);
+}
+
+.preview :global(.hljs-regexp) {
+  color: var(--markdown-syntax-regexp);
+}
+
+.preview :global(.hljs-meta),
+.preview :global(.hljs-meta-string) {
+  color: var(--markdown-syntax-meta);
+}
+
+.preview :global(.hljs-name),
+.preview :global(.hljs-tag),
+.preview :global(.hljs-selector-id),
+.preview :global(.hljs-selector-class) {
+  color: var(--markdown-syntax-tag);
+}
+
+.preview :global(.hljs-operator),
+.preview :global(.hljs-punctuation) {
+  color: var(--markdown-syntax-punctuation);
+}
+
+.preview :global(.hljs-emphasis) {
+  font-style: italic;
+}
+
+.preview :global(.hljs-strong) {
+  font-weight: var(--font-weight-bold);
+}
+
+.preview :global(.hljs-deletion) {
+  color: var(--color-error);
+}

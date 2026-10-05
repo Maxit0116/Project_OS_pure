@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "**/*.test.ts",
+    "**/test-fixtures/**",
+    "dist",
+    "node_modules",
+    "workbench"
+  ]
+}

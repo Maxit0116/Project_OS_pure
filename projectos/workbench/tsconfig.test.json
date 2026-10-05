@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["vitest/globals", "vite/client"]
+  },
+  "include": [
+    "src/**/*.test.ts",
+    "src/**/*.d.ts",
+    "../client/desktop-bridge.d.ts",
+    "../validation/node-compat.d.ts"
+  ],
+  "exclude": []
+}

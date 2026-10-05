@@ -1,0 +1,64 @@
+.menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 200px;
+  padding: 4px 0;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--glass-border-subtle);
+  border-radius: var(--radius-glass-sm);
+  box-shadow: var(--glass-shadow-regular);
+  color: var(--color-text-primary);
+}
+
+.groupLabel {
+  padding: 6px 12px 4px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+.separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--glass-border-subtle);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover,
+.menuItem:focus-visible {
+  outline: none;
+  background: var(--color-bg-muted);
+}
+
+.menuItem:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menuItem:disabled:hover,
+.menuItem:disabled:focus-visible {
+  background: transparent;
+}
+
+.menuItemIcon {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}

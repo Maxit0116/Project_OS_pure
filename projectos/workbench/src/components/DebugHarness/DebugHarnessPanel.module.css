@@ -1,0 +1,139 @@
+.panel {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-md);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.summaryCard {
+  margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  background: var(--color-success-subtle);
+  border: 1px solid color-mix(in srgb, var(--color-success) 25%, transparent);
+  border-radius: var(--radius-glass-md);
+}
+
+.summaryCard h3 {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  color: var(--color-success);
+}
+
+.summaryCard p {
+  margin: 0;
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.sectionToggle {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  margin-bottom: var(--space-sm);
+}
+
+.section {
+  margin-bottom: 16px;
+}
+
+.section h3 {
+  margin: 0 0 8px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.error {
+  margin: 0 0 8px;
+  padding: 10px;
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  color: var(--color-error);
+  background: var(--color-error-subtle);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-glass-sm);
+  white-space: pre-wrap;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.chip {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 3px 8px;
+  background: var(--color-bg-muted);
+  border: 1px solid var(--glass-border-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-primary);
+}
+
+.patchKind {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--color-success);
+}
+
+.rootCause {
+  font-size: var(--font-size-md);
+  color: var(--color-success);
+  margin: 0;
+}
+
+.verification {
+  font-size: var(--font-size-md);
+  margin: 0 0 4px;
+  color: var(--color-text-primary);
+}
+
+.verifyOutput {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.fixBtn {
+  width: 100%;
+  padding: 10px;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: #fff;
+  background: var(--color-accent);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-glass-sm);
+  margin-top: 8px;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-spring);
+}
+
+.fixBtn:hover {
+  background: var(--color-accent-strong);
+}
+
+.fixBtn:active {
+  transform: scale(0.98);
+}

@@ -1,0 +1,223 @@
+.header {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--glass-border-subtle);
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-xs) var(--space-md) var(--space-sm);
+  font-family: inherit;
+  text-align: left;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.trigger:hover {
+  background: var(--color-hover-overlay);
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+.triggerLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.triggerSkeleton {
+  flex: 1;
+  min-width: 0;
+}
+
+.triggerHandoff {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-warning-subtle);
+  border: 1px solid var(--color-warning-border);
+  color: var(--color-text-primary);
+  max-width: 42%;
+}
+
+.triggerScope {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--glass-border-subtle);
+  color: var(--color-accent);
+}
+
+.dropdownPanel {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 0 var(--space-md) var(--space-sm);
+}
+
+.loading,
+.empty {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.boundScope {
+  display: grid;
+  gap: 4px;
+  margin-bottom: var(--space-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.boundScope strong {
+  color: var(--color-text-muted);
+}
+
+.boundScope code {
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+}
+
+.ownerChoice {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--glass-border-subtle);
+  border-radius: var(--radius-glass-sm);
+  background: var(--color-bg-muted);
+}
+
+.ownerButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ownerButtons button {
+  padding: 4px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-accent);
+  background: var(--color-bg-elevated);
+  cursor: pointer;
+}
+
+.scopeError {
+  color: var(--color-danger, #d14343);
+}
+
+.details {
+  margin-top: var(--space-xs);
+}
+
+.scopeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.scope {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--glass-border-subtle);
+  color: var(--color-accent);
+}
+
+.title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.summary {
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.section {
+  margin-bottom: var(--space-sm);
+}
+
+.toggle {
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  text-decoration: underline;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--space-sm);
+}
+
+.chipRole {
+  font-size: 9px;
+  color: var(--color-text-muted);
+}
+
+.relationsInline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.relationSep {
+  color: var(--color-text-muted);
+}
+
+.relationsInline strong {
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-semibold);
+}

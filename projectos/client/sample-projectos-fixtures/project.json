@@ -1,0 +1,10 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "workspaceRoot": ".",
+  "displayName": "saas-starter",
+  "framework": "nextjs-app",
+  "createdAt": "2026-06-23T11:54:08.188Z",
+  "updatedAt": "2026-07-07T00:00:00.000Z",
+  "presentationMode": true
+}

@@ -1,0 +1,143 @@
+.tabStrip {
+  display: flex;
+  align-items: flex-end;
+  padding: 0;
+  width: 100%;
+  min-height: 26px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 4;
+}
+
+.tabTabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  flex-shrink: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabTabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tabStripDragPad {
+  flex: 1;
+  align-self: stretch;
+  min-width: 8px;
+  min-height: 26px;
+  cursor: grab;
+}
+
+:global(.react-flow__node.dragging) .tabStripDragPad {
+  cursor: grabbing;
+}
+
+.tabStripDragPad:active {
+  cursor: grabbing;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 140px;
+  padding: 4px 6px 4px 8px;
+  border: 1px solid var(--glass-border-subtle);
+  border-bottom: none;
+  border-radius: var(--radius-glass-sm) var(--radius-glass-sm) 0 0;
+  background: color-mix(in srgb, var(--color-bg-map) 55%, var(--color-map-artifact-chrome));
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.2;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.tabSlot:first-child .tab {
+  border-top-left-radius: var(--radius-glass-sm);
+}
+
+.tab:hover:not(.tabActive) {
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--color-bg-map) 35%, var(--color-map-artifact-chrome));
+}
+
+.tabActive {
+  background: var(--color-map-artifact-chrome);
+  color: var(--color-text-primary);
+  border-color: var(--glass-border-subtle);
+  border-bottom: none;
+  margin-bottom: -1px;
+  position: relative;
+  z-index: 2;
+}
+
+.tabLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.tabClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.tabClose:hover {
+  background: var(--color-hover-overlay);
+  color: var(--color-text-primary);
+}
+
+.dropHighlight {
+  outline: 1px dashed var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-glass-sm) var(--radius-glass-sm) 0 0;
+}
+
+.dropReject {
+  outline: 1px dashed var(--color-error);
+  outline-offset: 2px;
+  border-radius: var(--radius-glass-sm) var(--radius-glass-sm) 0 0;
+}
+
+.tabSlot {
+  display: inline-flex;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.insertIndicator {
+  width: 2px;
+  align-self: stretch;
+  margin: 2px 0 0;
+  border-radius: 1px;
+  background: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.tabDragging {
+  opacity: 0.55;
+}
+
+.tabSolo {
+  min-width: 72px;
+  max-width: 180px;
+}

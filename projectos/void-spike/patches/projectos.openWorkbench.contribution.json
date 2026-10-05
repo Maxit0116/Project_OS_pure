@@ -1,0 +1,19 @@
+{
+  "contributes": {
+    "commands": [
+      {
+        "command": "projectos.openWorkbench",
+        "title": "Project OS: Open Workbench",
+        "category": "Project OS"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "projectos.openWorkbench",
+          "when": "true"
+        }
+      ]
+    }
+  }
+}

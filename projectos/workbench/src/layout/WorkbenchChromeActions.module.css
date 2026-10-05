@@ -1,0 +1,67 @@
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.compact .panelToggle {
+  width: 26px;
+  height: 22px;
+}
+
+.compact .settingsBtn {
+  width: 28px;
+  height: 28px;
+}
+
+.panelToggles {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.panelToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.panelToggle:hover {
+  color: var(--color-text-primary);
+}
+
+.panelToggleActive {
+  color: var(--color-accent);
+}
+
+.settingsBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.panelToggle:focus-visible,
+.settingsBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--glass-focus-ring);
+}

@@ -1,0 +1,23 @@
+appId: com.projectos.app
+productName: Project OS
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: ../../sample-graph-saas
+    to: sample-graph-saas
+    filter:
+      - "**/*"
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    NSCameraUsageDescription: Project OS uses the camera for hand gesture control in the Function Map.
+    NSMicrophoneUsageDescription: Project OS uses the microphone for voice input in chat.

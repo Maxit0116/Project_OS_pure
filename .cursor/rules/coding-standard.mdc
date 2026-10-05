@@ -1,0 +1,54 @@
+---
+description: TypeScript and React coding standards for Project OS workbench
+globs: projectos/workbench/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Coding Standards
+
+## TypeScript
+
+- Prefer `interface` for component props; `type` for unions and mapped types.
+- Export components as `default` from feature files; named exports for hooks/utils.
+- No `any`. Use `unknown` + narrowing at API boundaries.
+- Import contract types from `projectos/contracts` via relative path (`../../../contracts/...`).
+
+## React
+
+- Functional components only. No class components.
+- Props interface named `Props` when single component per file.
+- Destructure with defaults in signature: `variant = 'primary'`.
+- Side effects in `useEffect` with explicit deps; subscriptions must clean up.
+- Prefer Zustand selectors over prop-drilling for cross-panel state.
+
+## CSS Modules
+
+```tsx
+// ✅ GOOD — token-driven, variant via module classes
+<button className={`${styles.btn} ${styles[variant]} ${className}`} />
+
+// ❌ BAD — inline styles for design tokens
+<button style={{ background: '#161b22', borderRadius: 8 }} />
+```
+
+- Class order: base → variant → size → external `className`.
+- Use `:focus-visible`, not `:focus`, for keyboard rings.
+- Respect `prefers-reduced-motion` — never add infinite animations without a media-query guard.
+
+## Accessibility
+
+- Interactive elements: native `<button>`, `<a>`, or correct ARIA role + keyboard handler.
+- Icon-only buttons: `aria-label` required.
+- Glass overlays: maintain 4.5:1 text contrast on `--color-text-primary` backgrounds.
+- Modals/menus: trap focus or use native focus management patterns.
+
+## i18n
+
+- User-visible strings via `useI18n()` / locale files — not inline English in JSX.
+- Exception: developer-only debug labels behind `import.meta.env.DEV`.
+
+## File Naming
+
+- Components: `PascalCase.tsx` + `PascalCase.module.css`
+- Hooks: `useThing.ts`
+- One main component per file; sub-components only if tightly coupled and unexported.

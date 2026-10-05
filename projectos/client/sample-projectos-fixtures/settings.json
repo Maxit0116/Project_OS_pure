@@ -1,0 +1,46 @@
+{
+  "version": "0.1.0",
+  "projectId": "sample-graph-saas",
+  "updatedAt": "2026-07-07T00:00:00.000Z",
+  "presentationMode": false,
+  "execution": {
+    "mode": "auto",
+    "defaultAgentProfileId": "default-feature"
+  },
+  "modelProfiles": [],
+  "agentProfiles": [
+    {
+      "id": "default-feature",
+      "name": "Feature Agent",
+      "kind": "feature_change",
+      "systemPrompt": "You are a feature development agent. Understand the user's request, plan changes, and generate minimal diffs.",
+      "modelProfileId": "",
+      "enabledTools": ["readFile", "listFiles", "getContext"],
+      "stepSequence": [
+        "understand",
+        "retrieve_context",
+        "inspect_files",
+        "plan",
+        "generate_diff",
+        "verify"
+      ]
+    },
+    {
+      "id": "default-debug",
+      "name": "Debug Agent",
+      "kind": "debug_fix",
+      "systemPrompt": "You are a root-cause debug agent. Diagnose errors, form hypotheses, and propose targeted fixes.",
+      "modelProfileId": "",
+      "enabledTools": ["readFile", "listFiles", "getContext"],
+      "stepSequence": [
+        "understand",
+        "retrieve_context",
+        "inspect_files",
+        "debug",
+        "plan",
+        "generate_diff",
+        "verify"
+      ]
+    }
+  ]
+}

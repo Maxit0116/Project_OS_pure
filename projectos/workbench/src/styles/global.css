@@ -1,0 +1,247 @@
+@import './tokens.css';
+@import './motion.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--ambient-mesh);
+  background-attachment: fixed;
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: none;
+  box-shadow: var(--glass-focus-ring);
+}
+
+a {
+  color: var(--color-accent);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .glass,
+  .glass-raised,
+  .glass-elevated,
+  .glass-overlay {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-nav,
+  .glass-nav-clear,
+  .glass-raised,
+  .glass-elevated,
+  .glass-overlay {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .glass-nav,
+  .glass-nav-clear,
+  .glass-raised { background: var(--color-bg-elevated) !important; }
+  .glass-elevated { background: var(--color-bg-elevated) !important; }
+  .glass-overlay { background: var(--color-bg-elevated) !important; }
+}
+
+.glass-nav {
+  background: var(--glass-bg-regular);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow-regular);
+}
+
+.glass-nav-clear {
+  background: var(--glass-bg-clear);
+  backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border-highlight);
+  box-shadow: var(--glass-shadow-elevated);
+}
+
+.glass-raised {
+  background: var(--glass-bg-regular);
+  backdrop-filter: blur(var(--glass-blur-md)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-md)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow-raised);
+}
+
+.glass-elevated {
+  background: var(--glass-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border-highlight);
+  box-shadow: var(--glass-shadow-elevated);
+}
+
+.glass-overlay {
+  background: var(--glass-bg-overlay);
+  backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border-highlight);
+  box-shadow: var(--glass-shadow-overlay);
+}
+
+/* Codex-style inset window rim — follows border-radius on the same element */
+.window-rim-side {
+  box-shadow: var(--window-rim-side-panel);
+}
+
+.window-rim-map {
+  box-shadow: var(--window-rim-map);
+}
+
+.window-rim-center {
+  box-shadow: var(--window-rim-center);
+}
+
+.window-rim-chrome {
+  box-shadow: var(--window-rim-chrome);
+}
+
+/* Side panel frost-chrome — single layer, shared by tree, chat, terminal. */
+.glass-panel-edge-right,
+.glass-panel-edge-left,
+.glass-panel-edge-left-drawer,
+.glass-panel-edge-right-drawer,
+.glass-panel-edge-bottom {
+  background: var(--glass-panel-surface);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border: none;
+  outline: none;
+  box-shadow: var(--window-rim-side-panel);
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.glass-panel-edge-right {
+  border-radius: 0;
+}
+
+.glass-panel-edge-left {
+  border-radius: 0;
+}
+
+.glass-panel-edge-left-drawer {
+  border-radius: 0;
+}
+
+.glass-panel-edge-right-drawer {
+  border-radius: 0;
+}
+
+.glass-panel-edge-bottom {
+  border-radius: 0;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass-panel-edge-right,
+  .glass-panel-edge-left,
+  .glass-panel-edge-left-drawer,
+  .glass-panel-edge-right-drawer,
+  .glass-panel-edge-bottom {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: var(--color-bg-side-panel) !important;
+  }
+}
+
+.map-artifact-tab-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  max-width: 160px;
+  padding: 4px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-glass-sm) var(--radius-glass-sm) 0 0;
+  background: var(--color-map-artifact-chrome);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  line-height: 1.2;
+  box-shadow: var(--glass-shadow-regular);
+  opacity: 0.92;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* IDE shell defaults to non-selectable chrome; opt content surfaces back in. */
+#root {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+select,
+[contenteditable='true'],
+.selectable-text {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.monaco-editor,
+.monaco-editor * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.xterm,
+.xterm *,
+.xterm-helper-textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ProseMirror,
+.ProseMirror * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.interactive-canvas,
+[data-canvas='interactive'] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+

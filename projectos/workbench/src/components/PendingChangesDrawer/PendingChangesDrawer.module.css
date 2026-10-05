@@ -1,0 +1,137 @@
+.pendingChangesDrawer {
+  border: 1px solid var(--glass-border-subtle);
+  border-radius: var(--radius-glass-sm);
+  background: var(--color-bg-elevated);
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid transparent;
+}
+
+.headerExpanded {
+  border-bottom-color: var(--glass-border-subtle);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.filesToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-muted);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.filesToggle:hover {
+  background: var(--color-bg-subtle);
+}
+
+.chevron {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.fileList {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 220ms var(--ease-out);
+}
+
+.fileListExpanded {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-top: 1px solid var(--glass-border-subtle);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.fileRow:first-child {
+  border-top: 0;
+}
+
+.fileRow:hover {
+  background: var(--color-bg-muted);
+}
+
+.fileIcon {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.fileMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fileBasename {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fileDirname {
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fileStats {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.statsAdded {
+  color: var(--color-diff-char-added);
+}
+
+.statsRemoved {
+  color: var(--color-diff-char-removed);
+}
+
+.changeBadge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  width: 14px;
+  text-align: center;
+}

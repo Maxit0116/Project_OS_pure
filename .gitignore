@@ -1,0 +1,25 @@
+node_modules/
+out/
+dist/
+.next/
+*.db
+.env
+.env.local
+.DS_Store
+.projectos/
+# Nested git created by Team Mode sync for the sample workspace
+sample-graph-saas/.git/
+**/projectos-design/**/.*.projectos-*.tmp
+*.tsbuildinfo
+# Offline speech runtime (ONNX WASM + transformers.js bundle), staged out of
+# node_modules at dev/build start by projectos/workbench/vite/offlineSpeechAssets.ts.
+projectos/workbench/public/ort/
+projectos/workbench/public/vendor/
+projectos/workbench/public/mediapipe/
+projectos/workbench/public/models/
+.omx/
+.gstack/
+api_key.md
+
+# Local research clones
+.tmp-codesee/

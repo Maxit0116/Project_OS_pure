@@ -1,0 +1,30 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "decisions": [
+    {
+      "id": "decision_oauth_google",
+      "title": "Use Google OAuth for sample login",
+      "date": "2026-08-17T00:00:00.000Z",
+      "participantPersonIds": ["person_alice", "person_bob"],
+      "choice": "Google OAuth plus a fixed demo identity",
+      "reasons": [
+        "Sample needs a bounded demo login",
+        "Not a production auth system"
+      ],
+      "alternativesConsidered": ["Password-only form", "Apple OAuth"],
+      "rejectedBecause": "Apple OAuth is out of sample scope",
+      "relatedNodeIds": ["feat_login"]
+    },
+    {
+      "id": "decision_session_cookie",
+      "title": "Demo session uses HttpOnly cookie",
+      "date": "2026-08-18T00:00:00.000Z",
+      "participantPersonIds": ["person_alice"],
+      "choice": "HttpOnly cookie rather than localStorage",
+      "reasons": ["Sample pages need a bounded session"],
+      "alternativesConsidered": ["localStorage token"],
+      "relatedNodeIds": ["feat_login"]
+    }
+  ]
+}

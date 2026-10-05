@@ -1,0 +1,397 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 1024px;
+  position: relative;
+  background: var(--ambient-mesh);
+  overflow: hidden;
+}
+
+.welcomeHost {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.topBar {
+  position: relative;
+  z-index: var(--z-workbench-chrome);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  min-height: var(--topbar-height);
+  padding: 0 var(--space-md);
+  -webkit-app-region: no-drag;
+  background: var(--glass-bg-clear);
+  backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
+  border-bottom: 1px solid var(--border-window-chrome);
+  box-shadow: var(--window-rim-chrome), var(--glass-shadow-elevated);
+  border-radius: 0;
+  flex-shrink: 0;
+}
+
+.topBarLeading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.topBarPrimary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.topBarDivider {
+  width: 1px;
+  height: 20px;
+  background: var(--glass-border);
+  flex-shrink: 0;
+}
+
+.mapChrome {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.topBarContextCentered {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  max-width: min(42vw, 360px);
+  pointer-events: none;
+}
+
+.topBarContext {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+}
+
+.projectName {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.sep {
+  color: var(--color-text-muted);
+}
+
+.fileCrumb {
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.panelToggles {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--glass-border-highlight);
+  border-radius: var(--radius-pill);
+  padding: 2px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset;
+}
+
+[data-theme='light'] .panelToggles {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.panelToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.panelToggle:hover {
+  color: var(--color-text-primary);
+  background: var(--color-hover-overlay);
+}
+
+.panelToggleActive {
+  color: var(--color-text-primary);
+  background: var(--color-accent-subtle);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.settingsBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--glass-border-highlight);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+[data-theme='light'] .settingsBtn {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.settingsBtn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-hover-overlay);
+}
+
+.demoMenu {
+  position: relative;
+}
+
+/* Background/border/shadow now come from GlassLens (Tier B true refraction). */
+.demoDropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 100;
+  padding: var(--space-sm);
+  border-radius: var(--radius-glass-lg);
+}
+
+.errorBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
+  font-size: var(--font-size-sm);
+  color: var(--color-error);
+  background: var(--color-error-subtle);
+  border-bottom: 1px solid var(--color-error-border);
+  flex-shrink: 0;
+}
+
+.dismissBtn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  opacity: 0.8;
+  cursor: pointer;
+}
+
+.dismissBtn:hover {
+  opacity: 1;
+  background: var(--color-hover-overlay);
+}
+
+.main {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: transparent;
+  overflow: hidden;
+  height: 100%;
+}
+
+.workbenchBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workbenchBodyResizing [data-panel-resize-handle] {
+  touch-action: none;
+}
+
+/* Code/Diff + Agent Flow — side panels squeeze center (mirror chat on the right). */
+.workbenchBodyCenterSideInset .main {
+  transition:
+    margin-left var(--duration-panel-enter) var(--ease-spring),
+    margin-right var(--duration-panel-enter) var(--ease-spring);
+}
+
+.workbenchBodyCenterSideInset.workbenchBodyLeftOpen .main {
+  margin-left: var(--workbench-left-panel-width);
+}
+
+.workbenchBodyCenterSideInset.workbenchBodyRightOpen .main {
+  margin-right: var(--workbench-right-panel-width);
+}
+
+.workbenchBodyResizing.workbenchBodyCenterSideInset .main {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbenchBodyCenterSideInset .main {
+    transition: none;
+  }
+}
+
+.shellChromeBleed {
+  position: relative;
+  z-index: 3;
+  background: transparent;
+  pointer-events: none;
+}
+
+.shellChromeBleed .workbenchBody {
+  background: transparent;
+  pointer-events: none;
+}
+
+/* Non-map tabs — opaque centre column must receive clicks; map tab passes through to bleed canvas. */
+.shellChromeBleed.shellCenterCapturesInput .workbenchBody {
+  pointer-events: auto;
+}
+
+.shellChromeBleed .topBar,
+.shellChromeBleed :global([data-desktop-title-bar]),
+.shellChromeBleed [data-terminal-dock],
+.shellChromeBleed :global([data-edge-rail]),
+.shellChromeBleed :global([data-workbench-side-panel-content]) {
+  pointer-events: auto;
+}
+
+.shellMapPassThrough .main {
+  pointer-events: none;
+}
+
+.shellChromeBleed .topBar {
+  background: var(--glass-bg-bleed);
+  backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
+  -webkit-backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
+}
+
+.shellChromeBleed :global([data-desktop-title-bar]) {
+  background: var(--glass-bg-bleed);
+  backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
+  -webkit-backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
+}
+
+.shellGraphBleed .terminalBar {
+  background: var(--glass-bg-bleed);
+  backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
+  -webkit-backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
+}
+
+.terminalBar {
+  position: relative;
+  z-index: 20;
+  height: 32px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-md);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  background: var(--glass-bg-clear);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border-top: 1px solid var(--border-window-chrome);
+  box-shadow: var(--window-rim-chrome), 0 -1px 0 rgba(255, 255, 255, 0.08) inset;
+  border-top-left-radius: var(--radius-glass-md);
+  border-top-right-radius: var(--radius-glass-md);
+}
+
+.terminalBtn {
+  padding: 2px 8px;
+  font-size: 10px;
+  color: var(--color-warning);
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.terminalBtn:hover {
+  background: var(--color-warning-subtle);
+}
+
+.terminalHint {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .topBar,
+  .terminalBar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .topBar {
+    background: var(--color-bg-elevated);
+  }
+
+  .terminalBar {
+    background: var(--color-bg-muted);
+  }
+}

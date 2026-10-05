@@ -1,0 +1,968 @@
+{
+  "version": "0.1.0",
+  "manifest": {
+    "repo": "sample-graph-saas",
+    "generated_at": "2026-09-07T02:30:00.000Z",
+    "generator": "projectos@semantic-flow",
+    "lang": "zh-CN"
+  },
+  "epics": [
+    {
+      "id": "epic_access",
+      "name": "访问与认证",
+      "summary": "访客进入产品、登录鉴权与个人偏好设置",
+      "tags": ["auth", "onboarding"],
+      "order": 0,
+      "importance": "core"
+    },
+    {
+      "id": "epic_collab",
+      "name": "团队协作",
+      "summary": "登录后的工作台、项目与团队职责管理",
+      "tags": ["dashboard", "team"],
+      "order": 1,
+      "importance": "core"
+    },
+    {
+      "id": "epic_content",
+      "name": "内容与增长",
+      "summary": "博客内容、搜索发现与站内通知",
+      "tags": ["blog", "growth"],
+      "order": 2,
+      "importance": "normal"
+    },
+    {
+      "id": "epic_billing",
+      "name": "账单与订阅",
+      "summary": "定价展示、结账与订阅账单管理",
+      "tags": ["billing", "checkout"],
+      "order": 3,
+      "importance": "core"
+    },
+    {
+      "id": "epic_platform",
+      "name": "平台底座",
+      "summary": "Prisma 数据访问与管理分析后台",
+      "tags": ["infra", "admin"],
+      "order": 4,
+      "importance": "auxiliary"
+    }
+  ],
+  "features": [
+    {
+      "id": "f_home",
+      "name": "首页与公开入口",
+      "summary": "访客落地页、关于与定价入口，引导进入登录或订阅",
+      "epicId": "epic_access",
+      "nodeId": "feat_home",
+      "triggers": [{ "kind": "ui", "detail": "访问 / 或导航到公开页" }],
+      "steps": [
+        {
+          "id": "home_route",
+          "name": "匹配公开路由",
+          "role": "input",
+          "refs": [{ "file": "app/page.tsx" }]
+        },
+        {
+          "id": "home_layout",
+          "name": "渲染站点布局",
+          "role": "transform",
+          "refs": [{ "file": "app/layout.tsx" }]
+        },
+        {
+          "id": "home_hero",
+          "name": "展示产品价值主张",
+          "role": "output",
+          "refs": [{ "file": "app/page.tsx" }]
+        },
+        {
+          "id": "home_pricing_link",
+          "name": "挂载定价入口",
+          "role": "side-effect",
+          "refs": [{ "file": "app/pricing/page.tsx" }]
+        },
+        {
+          "id": "home_cta",
+          "name": "引导登录或试用",
+          "role": "output"
+        },
+        {
+          "id": "home_error",
+          "name": "页面加载失败提示",
+          "role": "error"
+        }
+      ],
+      "flow": [
+        { "from": "home_route", "to": "home_layout", "kind": "next" },
+        { "from": "home_layout", "to": "home_hero", "kind": "next" },
+        { "from": "home_hero", "to": "home_pricing_link", "kind": "next" },
+        { "from": "home_pricing_link", "to": "home_cta", "kind": "next" },
+        { "from": "home_layout", "to": "home_error", "kind": "error", "condition": "渲染异常" }
+      ],
+      "confidence": 0.9,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["public", "landing"]
+    },
+    {
+      "id": "f_login",
+      "name": "登录与会话",
+      "summary": "表单登录、鉴权 API 与中间件会话校验",
+      "epicId": "epic_access",
+      "nodeId": "feat_login",
+      "triggers": [
+        { "kind": "ui", "detail": "提交登录表单" },
+        { "kind": "http", "detail": "POST /api/auth" }
+      ],
+      "steps": [
+        {
+          "id": "login_input",
+          "name": "接收凭证输入",
+          "role": "input",
+          "refs": [{ "file": "components/LoginForm.tsx" }]
+        },
+        {
+          "id": "login_validate",
+          "name": "校验邮箱与密码格式",
+          "role": "validation",
+          "refs": [{ "file": "lib/validators.ts" }]
+        },
+        {
+          "id": "login_auth",
+          "name": "核验身份并签发会话",
+          "role": "auth",
+          "refs": [
+            { "file": "app/api/auth/route.ts" },
+            { "file": "lib/auth.ts" }
+          ]
+        },
+        {
+          "id": "login_mw",
+          "name": "中间件附着请求身份",
+          "role": "side-effect",
+          "refs": [
+            { "file": "middleware.ts" },
+            { "file": "lib/request-auth.ts" }
+          ]
+        },
+        {
+          "id": "login_redirect",
+          "name": "跳转到仪表盘",
+          "role": "output",
+          "refs": [{ "file": "app/login/page.tsx" }]
+        },
+        {
+          "id": "login_denied",
+          "name": "凭证无效返回错误",
+          "role": "error"
+        }
+      ],
+      "flow": [
+        { "from": "login_input", "to": "login_validate", "kind": "next" },
+        { "from": "login_validate", "to": "login_auth", "kind": "next" },
+        { "from": "login_validate", "to": "login_denied", "kind": "conditional", "condition": "格式校验失败" },
+        { "from": "login_auth", "to": "login_mw", "kind": "next" },
+        { "from": "login_auth", "to": "login_denied", "kind": "error", "condition": "鉴权失败" },
+        { "from": "login_mw", "to": "login_redirect", "kind": "next" }
+      ],
+      "confidence": 0.93,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["auth", "session"]
+    },
+    {
+      "id": "f_settings",
+      "name": "个人偏好设置",
+      "summary": "已登录用户读写通知与界面偏好",
+      "epicId": "epic_access",
+      "nodeId": "feat_settings",
+      "triggers": [
+        { "kind": "ui", "detail": "打开设置页并保存" },
+        { "kind": "http", "detail": "GET/POST /api/settings" }
+      ],
+      "steps": [
+        {
+          "id": "set_auth",
+          "name": "确认登录态",
+          "role": "auth",
+          "refs": [{ "file": "app/settings/layout.tsx" }]
+        },
+        {
+          "id": "set_load",
+          "name": "读取当前偏好",
+          "role": "data-read",
+          "refs": [
+            { "file": "app/api/settings/route.ts" },
+            { "file": "lib/settings.ts" }
+          ]
+        },
+        {
+          "id": "set_form",
+          "name": "展示设置表单",
+          "role": "output",
+          "refs": [{ "file": "components/SettingsForm.tsx" }]
+        },
+        {
+          "id": "set_validate",
+          "name": "校验提交字段",
+          "role": "validation"
+        },
+        {
+          "id": "set_write",
+          "name": "持久化偏好",
+          "role": "data-write",
+          "refs": [{ "file": "app/settings/actions.ts" }]
+        },
+        {
+          "id": "set_done",
+          "name": "反馈保存成功",
+          "role": "output",
+          "refs": [{ "file": "app/settings/page.tsx" }]
+        },
+        {
+          "id": "set_error",
+          "name": "保存失败回滚提示",
+          "role": "error"
+        }
+      ],
+      "flow": [
+        { "from": "set_auth", "to": "set_load", "kind": "next" },
+        { "from": "set_load", "to": "set_form", "kind": "next" },
+        { "from": "set_form", "to": "set_validate", "kind": "next" },
+        { "from": "set_validate", "to": "set_write", "kind": "next" },
+        { "from": "set_validate", "to": "set_error", "kind": "conditional", "condition": "字段非法" },
+        { "from": "set_write", "to": "set_done", "kind": "next" },
+        { "from": "set_write", "to": "set_error", "kind": "error" }
+      ],
+      "confidence": 0.88,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["settings"]
+    },
+    {
+      "id": "f_dashboard",
+      "name": "工作台仪表盘",
+      "summary": "登录后聚合统计卡片与活动摘要",
+      "epicId": "epic_collab",
+      "nodeId": "feat_dashboard",
+      "triggers": [{ "kind": "ui", "detail": "进入 /dashboard" }],
+      "steps": [
+        {
+          "id": "dash_auth",
+          "name": "校验工作区会话",
+          "role": "auth",
+          "refs": [{ "file": "app/dashboard/layout.tsx" }]
+        },
+        {
+          "id": "dash_load",
+          "name": "加载仪表盘数据块",
+          "role": "data-read",
+          "refs": [{ "file": "projectos-blocks/loaders/dashboard.ts" }]
+        },
+        {
+          "id": "dash_compute",
+          "name": "计算统计指标",
+          "role": "compute",
+          "refs": [{ "file": "components/StatsCard.tsx" }]
+        },
+        {
+          "id": "dash_transform",
+          "name": "映射为视图模型",
+          "role": "transform",
+          "refs": [{ "file": "projectos-generated/design/doc1_dashboard/view.tsx" }]
+        },
+        {
+          "id": "dash_render",
+          "name": "渲染仪表盘页面",
+          "role": "output",
+          "refs": [{ "file": "app/dashboard/page.tsx" }]
+        },
+        {
+          "id": "dash_error",
+          "name": "数据不可用占位",
+          "role": "error"
+        }
+      ],
+      "flow": [
+        { "from": "dash_auth", "to": "dash_load", "kind": "next" },
+        { "from": "dash_load", "to": "dash_compute", "kind": "async" },
+        { "from": "dash_compute", "to": "dash_transform", "kind": "next" },
+        { "from": "dash_transform", "to": "dash_render", "kind": "next" },
+        { "from": "dash_load", "to": "dash_error", "kind": "error", "condition": "查询失败" }
+      ],
+      "confidence": 0.91,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["dashboard"]
+    },
+    {
+      "id": "f_projects",
+      "name": "项目列表与详情",
+      "summary": "团队项目的列表、详情与表单变更",
+      "epicId": "epic_collab",
+      "nodeId": "feat_projects",
+      "triggers": [
+        { "kind": "ui", "detail": "浏览 /projects 或打开项目详情" },
+        { "kind": "manual", "detail": "通过 ProjectForms 创建/更新" }
+      ],
+      "steps": [
+        {
+          "id": "proj_auth",
+          "name": "确认成员权限",
+          "role": "auth",
+          "refs": [{ "file": "app/projects/layout.tsx" }]
+        },
+        {
+          "id": "proj_list",
+          "name": "读取项目列表",
+          "role": "data-read",
+          "refs": [
+            { "file": "lib/projects.ts" },
+            { "file": "app/projects/page.tsx" }
+          ]
+        },
+        {
+          "id": "proj_detail",
+          "name": "加载项目详情",
+          "role": "data-read",
+          "refs": [{ "file": "app/projects/[id]/page.tsx" }]
+        },
+        {
+          "id": "proj_validate",
+          "name": "校验项目表单",
+          "role": "validation",
+          "refs": [{ "file": "components/ProjectForms.tsx" }]
+        },
+        {
+          "id": "proj_write",
+          "name": "写入项目变更",
+          "role": "data-write",
+          "refs": [{ "file": "app/projects/actions.ts" }]
+        },
+        {
+          "id": "proj_output",
+          "name": "刷新列表与详情",
+          "role": "output"
+        },
+        {
+          "id": "proj_missing",
+          "name": "项目不存在 404",
+          "role": "error",
+          "refs": [{ "file": "app/projects/[id]/not-found.tsx" }]
+        }
+      ],
+      "flow": [
+        { "from": "proj_auth", "to": "proj_list", "kind": "next" },
+        { "from": "proj_list", "to": "proj_detail", "kind": "conditional", "condition": "打开某个项目" },
+        { "from": "proj_detail", "to": "proj_missing", "kind": "error", "condition": "id 无效" },
+        { "from": "proj_list", "to": "proj_validate", "kind": "conditional", "condition": "提交表单" },
+        { "from": "proj_detail", "to": "proj_validate", "kind": "conditional", "condition": "编辑详情" },
+        { "from": "proj_validate", "to": "proj_write", "kind": "next" },
+        { "from": "proj_write", "to": "proj_output", "kind": "next" }
+      ],
+      "confidence": 0.9,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["projects"]
+    },
+    {
+      "id": "f_team",
+      "name": "团队与职责",
+      "summary": "成员角色分配与团队上下文维护",
+      "epicId": "epic_collab",
+      "nodeId": "feat_team",
+      "triggers": [{ "kind": "ui", "detail": "打开 /team 并调整角色" }],
+      "steps": [
+        {
+          "id": "team_auth",
+          "name": "校验团队访问权",
+          "role": "auth",
+          "refs": [{ "file": "app/team/layout.tsx" }]
+        },
+        {
+          "id": "team_read",
+          "name": "读取成员与角色",
+          "role": "data-read",
+          "refs": [{ "file": "lib/team.ts" }]
+        },
+        {
+          "id": "team_form",
+          "name": "展示角色表单",
+          "role": "input",
+          "refs": [{ "file": "components/TeamRoleForm.tsx" }]
+        },
+        {
+          "id": "team_validate",
+          "name": "校验角色变更",
+          "role": "validation"
+        },
+        {
+          "id": "team_write",
+          "name": "保存角色分配",
+          "role": "data-write",
+          "refs": [{ "file": "app/team/actions.ts" }]
+        },
+        {
+          "id": "team_notify",
+          "name": "触发成员变更副作用",
+          "role": "side-effect"
+        },
+        {
+          "id": "team_output",
+          "name": "更新团队页展示",
+          "role": "output",
+          "refs": [{ "file": "app/team/page.tsx" }]
+        },
+        {
+          "id": "team_error",
+          "name": "无权限或保存失败",
+          "role": "error"
+        }
+      ],
+      "flow": [
+        { "from": "team_auth", "to": "team_read", "kind": "next" },
+        { "from": "team_auth", "to": "team_error", "kind": "error", "condition": "未授权" },
+        { "from": "team_read", "to": "team_form", "kind": "next" },
+        { "from": "team_form", "to": "team_validate", "kind": "next" },
+        { "from": "team_validate", "to": "team_write", "kind": "next" },
+        { "from": "team_validate", "to": "team_error", "kind": "conditional", "condition": "角色非法" },
+        { "from": "team_write", "to": "team_notify", "kind": "async" },
+        { "from": "team_notify", "to": "team_output", "kind": "next" }
+      ],
+      "confidence": 0.89,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["team", "roles"]
+    },
+    {
+      "id": "f_blog",
+      "name": "博客与内容发现",
+      "summary": "文章列表、详情与内容 API",
+      "epicId": "epic_content",
+      "nodeId": "feat_blog",
+      "triggers": [
+        { "kind": "ui", "detail": "浏览 /blog 或文章详情" },
+        { "kind": "http", "detail": "GET /api/posts" }
+      ],
+      "steps": [
+        {
+          "id": "blog_input",
+          "name": "接收列表或 slug",
+          "role": "input",
+          "refs": [{ "file": "app/blog/page.tsx" }]
+        },
+        {
+          "id": "blog_read",
+          "name": "读取文章数据",
+          "role": "data-read",
+          "refs": [{ "file": "app/api/posts/route.ts" }]
+        },
+        {
+          "id": "blog_transform",
+          "name": "整理卡片与正文",
+          "role": "transform",
+          "refs": [{ "file": "components/BlogCard.tsx" }]
+        },
+        {
+          "id": "blog_detail",
+          "name": "渲染文章详情",
+          "role": "output",
+          "refs": [{ "file": "app/blog/[slug]/page.tsx" }]
+        },
+        {
+          "id": "blog_search_handoff",
+          "name": "提供搜索入口",
+          "role": "side-effect",
+          "refs": [{ "file": "app/search/page.tsx" }]
+        },
+        {
+          "id": "blog_missing",
+          "name": "文章不存在",
+          "role": "error"
+        }
+      ],
+      "flow": [
+        { "from": "blog_input", "to": "blog_read", "kind": "next" },
+        { "from": "blog_read", "to": "blog_transform", "kind": "next" },
+        { "from": "blog_transform", "to": "blog_detail", "kind": "conditional", "condition": "有 slug" },
+        { "from": "blog_transform", "to": "blog_search_handoff", "kind": "next" },
+        { "from": "blog_read", "to": "blog_missing", "kind": "error", "condition": "无匹配文章" }
+      ],
+      "confidence": 0.87,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["blog", "content"]
+    },
+    {
+      "id": "f_notifications",
+      "name": "通知中心",
+      "summary": "站内通知列表与 API 拉取",
+      "epicId": "epic_content",
+      "nodeId": "feat_notifications",
+      "triggers": [
+        { "kind": "ui", "detail": "打开 /notifications" },
+        { "kind": "http", "detail": "GET /api/notifications" }
+      ],
+      "steps": [
+        {
+          "id": "notif_auth",
+          "name": "确认用户身份",
+          "role": "auth"
+        },
+        {
+          "id": "notif_read",
+          "name": "拉取通知列表",
+          "role": "data-read",
+          "refs": [{ "file": "app/api/notifications/route.ts" }]
+        },
+        {
+          "id": "notif_transform",
+          "name": "按时间排序分组",
+          "role": "transform"
+        },
+        {
+          "id": "notif_render",
+          "name": "渲染通知列表",
+          "role": "output",
+          "refs": [
+            { "file": "components/NotificationList.tsx" },
+            { "file": "app/notifications/page.tsx" }
+          ]
+        },
+        {
+          "id": "notif_mark",
+          "name": "标记已读副作用",
+          "role": "side-effect"
+        },
+        {
+          "id": "notif_error",
+          "name": "拉取失败提示",
+          "role": "error"
+        }
+      ],
+      "flow": [
+        { "from": "notif_auth", "to": "notif_read", "kind": "async" },
+        { "from": "notif_read", "to": "notif_transform", "kind": "next" },
+        { "from": "notif_transform", "to": "notif_render", "kind": "next" },
+        { "from": "notif_render", "to": "notif_mark", "kind": "conditional", "condition": "用户点击已读" },
+        { "from": "notif_read", "to": "notif_error", "kind": "error" }
+      ],
+      "confidence": 0.86,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["notifications"]
+    },
+    {
+      "id": "f_checkout",
+      "name": "结账与订阅",
+      "summary": "定价引导、结账表单与账单页",
+      "epicId": "epic_billing",
+      "nodeId": "feat_checkout",
+      "triggers": [
+        { "kind": "ui", "detail": "从定价进入结账或打开账单" },
+        { "kind": "http", "detail": "POST /api/checkout" }
+      ],
+      "steps": [
+        {
+          "id": "chk_input",
+          "name": "选择套餐与结账意图",
+          "role": "input",
+          "refs": [
+            { "file": "app/pricing/page.tsx" },
+            { "file": "components/PricingCard.tsx" }
+          ]
+        },
+        {
+          "id": "chk_auth",
+          "name": "要求登录后结账",
+          "role": "auth"
+        },
+        {
+          "id": "chk_validate",
+          "name": "校验套餐与支付字段",
+          "role": "validation",
+          "refs": [{ "file": "components/CheckoutForm.tsx" }]
+        },
+        {
+          "id": "chk_pay",
+          "name": "调用支付处理",
+          "role": "side-effect",
+          "refs": [
+            { "file": "lib/payments.ts" },
+            { "file": "app/api/checkout/route.ts" }
+          ]
+        },
+        {
+          "id": "chk_write",
+          "name": "写入订阅状态",
+          "role": "data-write",
+          "refs": [{ "file": "app/billing/actions.ts" }]
+        },
+        {
+          "id": "chk_output",
+          "name": "展示账单确认",
+          "role": "output",
+          "refs": [
+            { "file": "app/checkout/page.tsx" },
+            { "file": "app/billing/page.tsx" }
+          ]
+        },
+        {
+          "id": "chk_error",
+          "name": "支付或校验失败",
+          "role": "error"
+        }
+      ],
+      "flow": [
+        { "from": "chk_input", "to": "chk_auth", "kind": "next" },
+        { "from": "chk_auth", "to": "chk_validate", "kind": "next" },
+        { "from": "chk_validate", "to": "chk_pay", "kind": "next" },
+        { "from": "chk_validate", "to": "chk_error", "kind": "conditional", "condition": "字段非法" },
+        { "from": "chk_pay", "to": "chk_write", "kind": "async" },
+        { "from": "chk_pay", "to": "chk_error", "kind": "error", "condition": "支付网关失败" },
+        { "from": "chk_write", "to": "chk_output", "kind": "next" }
+      ],
+      "confidence": 0.9,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["billing", "checkout"]
+    },
+    {
+      "id": "f_database",
+      "name": "Prisma 数据访问",
+      "summary": "schema、迁移与应用侧数据读写底座",
+      "epicId": "epic_platform",
+      "nodeId": "feat_database",
+      "triggers": [{ "kind": "startup", "detail": "应用启动连接数据库" }],
+      "steps": [
+        {
+          "id": "db_schema",
+          "name": "定义领域模型",
+          "role": "other",
+          "refs": [{ "file": "prisma/schema.prisma" }]
+        },
+        {
+          "id": "db_migrate",
+          "name": "应用迁移",
+          "role": "side-effect",
+          "refs": [{ "file": "prisma/migrations/20260719000000_init/migration.sql" }]
+        },
+        {
+          "id": "db_client",
+          "name": "初始化 Prisma Client",
+          "role": "compute",
+          "refs": [{ "file": "lib/db.ts" }]
+        },
+        {
+          "id": "db_read",
+          "name": "提供查询能力",
+          "role": "data-read"
+        },
+        {
+          "id": "db_write",
+          "name": "提供写入能力",
+          "role": "data-write"
+        },
+        {
+          "id": "db_error",
+          "name": "连接或查询错误",
+          "role": "error"
+        }
+      ],
+      "flow": [
+        { "from": "db_schema", "to": "db_migrate", "kind": "next" },
+        { "from": "db_migrate", "to": "db_client", "kind": "next" },
+        { "from": "db_client", "to": "db_read", "kind": "next" },
+        { "from": "db_client", "to": "db_write", "kind": "next" },
+        { "from": "db_client", "to": "db_error", "kind": "error", "condition": "连接失败" },
+        { "from": "db_read", "to": "db_error", "kind": "error" },
+        { "from": "db_write", "to": "db_error", "kind": "error" }
+      ],
+      "confidence": 0.92,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["prisma", "infra"]
+    },
+    {
+      "id": "f_admin",
+      "name": "管理与分析",
+      "summary": "管理员用户列表与分析看板",
+      "epicId": "epic_platform",
+      "nodeId": "feat_admin",
+      "triggers": [{ "kind": "ui", "detail": "访问 /admin" }],
+      "steps": [
+        {
+          "id": "admin_auth",
+          "name": "校验管理员身份",
+          "role": "auth",
+          "refs": [{ "file": "app/admin/layout.tsx" }]
+        },
+        {
+          "id": "admin_users",
+          "name": "读取用户列表",
+          "role": "data-read",
+          "refs": [{ "file": "app/admin/users/page.tsx" }]
+        },
+        {
+          "id": "admin_analytics",
+          "name": "计算分析指标",
+          "role": "compute",
+          "refs": [
+            { "file": "lib/admin-analytics.ts" },
+            { "file": "app/admin/analytics/page.tsx" }
+          ]
+        },
+        {
+          "id": "admin_table",
+          "name": "渲染管理表格",
+          "role": "output",
+          "refs": [
+            { "file": "components/AdminTable.tsx" },
+            { "file": "app/admin/page.tsx" }
+          ]
+        },
+        {
+          "id": "admin_error",
+          "name": "管理页错误边界",
+          "role": "error",
+          "refs": [{ "file": "app/admin/error.tsx" }]
+        },
+        {
+          "id": "admin_loading",
+          "name": "加载态占位",
+          "role": "other",
+          "refs": [{ "file": "app/admin/loading.tsx" }]
+        }
+      ],
+      "flow": [
+        { "from": "admin_auth", "to": "admin_loading", "kind": "next" },
+        { "from": "admin_loading", "to": "admin_users", "kind": "async" },
+        { "from": "admin_users", "to": "admin_analytics", "kind": "next" },
+        { "from": "admin_analytics", "to": "admin_table", "kind": "next" },
+        { "from": "admin_auth", "to": "admin_error", "kind": "error", "condition": "非管理员" },
+        { "from": "admin_users", "to": "admin_error", "kind": "error" }
+      ],
+      "confidence": 0.85,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["admin"]
+    },
+    {
+      "id": "f_invite_link",
+      "name": "邀请链接入驻",
+      "summary": "规划中：通过一次性邀请链接把同事拉进项目（尚未实现）",
+      "epicId": "epic_collab",
+      "triggers": [{ "kind": "ui", "detail": "项目设置 → 邀请" }],
+      "steps": [
+        {
+          "id": "invite_compose",
+          "name": "生成邀请令牌",
+          "role": "compute",
+          "note": "planned：待实现签发服务"
+        },
+        {
+          "id": "invite_share",
+          "name": "展示可分享链接",
+          "role": "output"
+        },
+        {
+          "id": "invite_accept",
+          "name": "接受邀请并加入项目",
+          "role": "data-write"
+        }
+      ],
+      "flow": [
+        { "from": "invite_compose", "to": "invite_share", "kind": "next" },
+        { "from": "invite_share", "to": "invite_accept", "kind": "async" }
+      ],
+      "confidence": 0.35,
+      "provenance": "ai",
+      "updated_at": "2026-09-07T02:30:00.000Z",
+      "tags": ["planned", "growth", "team"]
+    }
+  ],
+  "cross_feature": [
+    {
+      "from": "f_home",
+      "to": "f_login",
+      "kind": "triggers",
+      "mode": "sync",
+      "note": "首页 CTA 引导访客进入登录"
+    },
+    {
+      "from": "f_home",
+      "to": "f_checkout",
+      "kind": "triggers",
+      "mode": "sync",
+      "note": "定价入口可直接进入结账旅程"
+    },
+    {
+      "from": "f_login",
+      "to": "f_dashboard",
+      "kind": "flow",
+      "mode": "sync",
+      "note": "登录成功后进入工作台"
+    },
+    {
+      "from": "f_dashboard",
+      "to": "f_projects",
+      "kind": "flow",
+      "mode": "sync",
+      "note": "仪表盘导航到项目协作"
+    },
+    {
+      "from": "f_projects",
+      "to": "f_team",
+      "kind": "depends_on",
+      "mode": "sync",
+      "note": "项目成员权限依赖团队角色定义"
+    },
+    {
+      "from": "f_blog",
+      "to": "f_notifications",
+      "kind": "triggers",
+      "mode": "async",
+      "note": "新内容可异步触发站内通知"
+    },
+    {
+      "from": "f_checkout",
+      "to": "f_login",
+      "kind": "depends_on",
+      "mode": "sync",
+      "note": "结账要求已建立会话"
+    },
+    {
+      "from": "f_dashboard",
+      "to": "f_database",
+      "kind": "depends_on",
+      "mode": "sync",
+      "note": "仪表盘指标来自 Prisma 查询"
+    },
+    {
+      "from": "f_projects",
+      "to": "f_database",
+      "kind": "depends_on",
+      "mode": "sync",
+      "note": "项目 CRUD 落库"
+    },
+    {
+      "from": "f_team",
+      "to": "f_database",
+      "kind": "depends_on",
+      "mode": "sync",
+      "note": "角色分配写入团队表"
+    },
+    {
+      "from": "f_settings",
+      "to": "f_database",
+      "kind": "depends_on",
+      "mode": "sync",
+      "note": "偏好持久化依赖数据层"
+    },
+    {
+      "from": "f_admin",
+      "to": "f_database",
+      "kind": "depends_on",
+      "mode": "sync",
+      "note": "管理分析读取全库用户与事件"
+    },
+    {
+      "from": "f_login",
+      "to": "f_settings",
+      "kind": "flow",
+      "mode": "sync",
+      "note": "登录后可管理个人偏好"
+    }
+  ],
+  "epic_flow": [
+    {
+      "from": "epic_access",
+      "to": "epic_collab",
+      "kind": "next",
+      "note": "完成访问认证后进入团队协作主线"
+    },
+    {
+      "from": "epic_collab",
+      "to": "epic_content",
+      "kind": "next",
+      "note": "协作稳定后扩展内容与增长触点"
+    },
+    {
+      "from": "epic_access",
+      "to": "epic_billing",
+      "kind": "next",
+      "note": "访客/用户从公开入口走向订阅变现"
+    },
+    {
+      "from": "epic_collab",
+      "to": "epic_platform",
+      "kind": "depends_on",
+      "note": "协作功能依赖平台数据与管理底座"
+    },
+    {
+      "from": "epic_billing",
+      "to": "epic_platform",
+      "kind": "depends_on",
+      "note": "订阅状态持久化依赖数据层"
+    },
+    {
+      "from": "epic_content",
+      "to": "epic_platform",
+      "kind": "depends_on",
+      "note": "内容与通知读写落在 Prisma 底座"
+    }
+  ],
+  "tours": [
+    {
+      "id": "onboarding",
+      "title": "Sample SaaS 用户旅程导览",
+      "goal": "用 7 步理解从公开访问到协作、内容、订阅与平台底座的故事线",
+      "steps": [
+        {
+          "focus": ["epic_access", "epic_collab", "epic_billing"],
+          "gap": "一个 SaaS 产品的核心用户旅程，通常先覆盖哪三条主线？",
+          "reveal": "访问与认证、团队协作、账单与订阅构成样本产品的核心旅程骨架。",
+          "quiz": {
+            "options": [
+              "访问与认证 · 团队协作 · 账单与订阅",
+              "仅内容与增长 · 平台底座",
+              "只有管理后台与数据库"
+            ],
+            "answer": 0,
+            "wrong_note": "先抓住认证、协作与变现三条核心 epic，再看内容与底座。"
+          }
+        },
+        {
+          "focus": ["f_home", "f_login"],
+          "gap": "访客从公开首页迈向可用产品，关键闸门是什么？",
+          "reveal": "首页 CTA 触发登录；会话签发后才能进入受保护工作区。"
+        },
+        {
+          "focus": ["f_dashboard", "f_projects"],
+          "gap": "登录成功后，用户首先在哪里感知「已经开始协作」？",
+          "reveal": "仪表盘聚合状态，再导航到项目列表与详情继续干活。"
+        },
+        {
+          "focus": ["f_team"],
+          "gap": "项目权限边界由哪一层功能来定义？",
+          "reveal": "团队与职责功能维护角色分配，项目协作依赖它。"
+        },
+        {
+          "focus": ["f_blog", "f_notifications"],
+          "gap": "增长侧如何让用户在站内持续回来？",
+          "reveal": "博客内容提供发现，通知中心异步提醒新动态。"
+        },
+        {
+          "focus": ["f_checkout"],
+          "gap": "变现闭环落在哪个功能节点？",
+          "reveal": "结账与订阅连接定价、支付与账单确认。"
+        },
+        {
+          "focus": ["f_database", "f_admin"],
+          "gap": "前面所有功能最后都托在什么底座上？",
+          "reveal": "Prisma 数据访问承载读写；管理分析则面向运营侧。"
+        }
+      ]
+    }
+  ]
+}

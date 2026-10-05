@@ -1,0 +1,33 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "handoffs": [
+    {
+      "id": "handoff_alice_login",
+      "fromPersonId": "person_alice",
+      "toPersonId": "person_bob",
+      "createdAt": "2026-08-19T15:00:00.000Z",
+      "currentWorkSnapshot": {
+        "version": "0.1.0",
+        "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+        "focusedNodeId": "feat_login",
+        "recentChanges": [],
+        "unresolvedErrors": []
+      },
+      "completedNodeIds": [],
+      "currentSummary": "Identity & Access UI is in progress. Demo login exists; Apple OAuth is not implemented.",
+      "blocked": [
+        {
+          "detail": "Waiting for Bob to review the login acceptance checklist"
+        }
+      ],
+      "nextSteps": [
+        "Review feat_login acceptance",
+        "Write regression tests for the demo identity"
+      ],
+      "importantContext": "The sample uses a fixed demo identity, not production passwords.",
+      "uncommittedPaths": [],
+      "suggestedOwnerPersonId": "person_bob"
+    }
+  ]
+}

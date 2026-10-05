@@ -1,0 +1,267 @@
+{
+  "version": "0.1.0",
+  "scenarioId": "google-login",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "title": "Add Google Login",
+  "description": "Deterministic feature-change scenario for adding Google login and redirecting signed-in users to their profile.",
+  "kind": "feature_change",
+  "nodeIds": [
+    "feat_login",
+    "feat_profile"
+  ],
+  "files": [
+    "app/login/page.tsx",
+    "app/api/auth/route.ts",
+    "lib/auth.ts"
+  ],
+  "prompt": {
+    "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+    "nodeId": "feat_login",
+    "rawPrompt": "Add Google login and redirect users to profile after successful sign in."
+  },
+  "refinement": {
+    "id": "ref_google_login",
+    "understood": "Add a Google sign-in option to the existing auth surface and route successful sign-ins to the profile page.",
+    "ambiguities": [
+      "Whether the production OAuth credentials are already configured.",
+      "Whether the profile redirect should apply to all providers or only Google."
+    ],
+    "suggestions": [
+      "Reuse the existing auth route and auth helper instead of introducing a second auth stack.",
+      "Keep the login page as the primary user-facing entry point.",
+      "Treat /profile as the post-login destination for this demo path."
+    ],
+    "affectedNodeIds": [
+      "feat_login",
+      "feat_profile"
+    ],
+    "affectedFiles": [
+      "app/login/page.tsx",
+      "app/api/auth/route.ts",
+      "lib/auth.ts"
+    ],
+    "confidence": 0.88,
+    "mode": "deterministic_fixture"
+  },
+  "run": {
+    "runId": "run_google_login",
+    "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+    "kind": "feature_change",
+    "status": "complete",
+    "relatedNodeIds": [
+      "feat_login",
+      "feat_profile"
+    ],
+    "relatedFiles": [],
+    "scope": {
+      "kind": "component",
+      "nodeId": "feat_login"
+    },
+    "role": "node_planner",
+    "startedAt": "2026-07-07T00:00:01.000Z",
+    "completedAt": "2026-07-07T00:00:07.000Z"
+  },
+  "events": [
+    {
+      "eventId": "evt_google_001",
+      "runId": "run_google_login",
+      "timestamp": "2026-07-07T00:00:01.000Z",
+      "type": "run_started"
+    },
+    {
+      "eventId": "evt_google_002",
+      "runId": "run_google_login",
+      "timestamp": "2026-07-07T00:00:01.500Z",
+      "type": "prompt_refined",
+      "payload": {
+        "refinementId": "ref_google_login"
+      }
+    },
+    {
+      "eventId": "evt_google_003",
+      "runId": "run_google_login",
+      "timestamp": "2026-07-07T00:00:02.000Z",
+      "type": "step_started",
+      "step": {
+        "id": "step_understand",
+        "label": "Understand auth request",
+        "kind": "understand",
+        "status": "running",
+        "inputSummary": "User asked for Google login and profile redirect.",
+        "relatedNodeIds": [
+          "feat_login"
+        ],
+        "relatedFiles": [
+          "app/login/page.tsx"
+        ]
+      }
+    },
+    {
+      "eventId": "evt_google_004",
+      "runId": "run_google_login",
+      "timestamp": "2026-07-07T00:00:02.700Z",
+      "type": "step_completed",
+      "step": {
+        "id": "step_understand",
+        "label": "Understand auth request",
+        "kind": "understand",
+        "status": "complete",
+        "outputSummary": "Scope is login UI, auth route/provider config, and profile redirect.",
+        "relatedNodeIds": [
+          "feat_login",
+          "feat_profile"
+        ],
+        "relatedFiles": [
+          "app/login/page.tsx",
+          "app/api/auth/route.ts",
+          "lib/auth.ts"
+        ]
+      }
+    },
+    {
+      "eventId": "evt_google_005",
+      "runId": "run_google_login",
+      "timestamp": "2026-07-07T00:00:03.000Z",
+      "type": "step_started",
+      "step": {
+        "id": "step_context",
+        "label": "Retrieve feature context",
+        "kind": "retrieve_context",
+        "status": "running",
+        "relatedNodeIds": [
+          "feat_login",
+          "feat_profile"
+        ],
+        "relatedFiles": [
+          "app/login/page.tsx",
+          "app/api/auth/route.ts",
+          "lib/auth.ts"
+        ]
+      }
+    },
+    {
+      "eventId": "evt_google_006",
+      "runId": "run_google_login",
+      "timestamp": "2026-07-07T00:00:03.800Z",
+      "type": "step_completed",
+      "step": {
+        "id": "step_context",
+        "label": "Retrieve feature context",
+        "kind": "retrieve_context",
+        "status": "complete",
+        "outputSummary": "Loaded login page, auth route, auth helper, and profile route.",
+        "relatedNodeIds": [
+          "feat_login",
+          "feat_profile"
+        ],
+        "relatedFiles": [
+          "app/login/page.tsx",
+          "app/api/auth/route.ts",
+          "lib/auth.ts",
+          "app/profile/page.tsx"
+        ]
+      }
+    },
+    {
+      "eventId": "evt_google_007",
+      "runId": "run_google_login",
+      "timestamp": "2026-07-07T00:00:04.200Z",
+      "type": "step_started",
+      "step": {
+        "id": "step_diff",
+        "label": "Draft auth diff",
+        "kind": "generate_diff",
+        "status": "running",
+        "relatedNodeIds": [
+          "feat_login",
+          "feat_profile"
+        ],
+        "relatedFiles": [
+          "app/login/page.tsx",
+          "app/api/auth/route.ts",
+          "lib/auth.ts"
+        ]
+      }
+    },
+    {
+      "eventId": "evt_google_008",
+      "runId": "run_google_login",
+      "timestamp": "2026-07-07T00:00:05.100Z",
+      "type": "step_completed",
+      "step": {
+        "id": "step_diff",
+        "label": "Draft auth diff",
+        "kind": "generate_diff",
+        "status": "complete",
+        "outputSummary": "Prepared Google provider wiring and login UI changes.",
+        "relatedNodeIds": [
+          "feat_login",
+          "feat_profile"
+        ],
+        "relatedFiles": [
+          "app/login/page.tsx",
+          "app/api/auth/route.ts",
+          "lib/auth.ts"
+        ]
+      }
+    },
+    {
+      "eventId": "evt_google_009",
+      "runId": "run_google_login",
+      "timestamp": "2026-07-07T00:00:05.200Z",
+      "type": "diff_ready",
+      "payload": {
+        "runId": "run_google_login"
+      }
+    },
+    {
+      "eventId": "evt_google_010",
+      "runId": "run_google_login",
+      "timestamp": "2026-07-07T00:00:06.000Z",
+      "type": "verification_completed",
+      "payload": {
+        "verificationStatus": "demo_passed"
+      }
+    },
+    {
+      "eventId": "evt_google_011",
+      "runId": "run_google_login",
+      "timestamp": "2026-07-07T00:00:07.000Z",
+      "type": "run_completed"
+    }
+  ],
+  "diff": {
+    "runId": "run_google_login",
+    "summary": "Add Google sign-in affordance, provider wiring, and profile redirect behavior.",
+    "files": [
+      {
+        "path": "app/login/page.tsx",
+        "changeType": "modify",
+        "before": "import LoginForm from '@/components/LoginForm'\n\nexport default function LoginPage() {\n  return (\n    <div>\n      <h1>Demo access</h1>\n      <p>\n        This fixture has no production authentication or stored passwords.\n        Continue as the fixed Demo User in the Northstar Studio workspace.\n      </p>\n      <LoginForm />\n    </div>\n  )\n}\n",
+        "after": "import LoginForm from '@/components/LoginForm'\n\nexport default function LoginPage() {\n  return (\n    <div>\n      <h1>Demo access</h1>\n      <p>\n        This fixture has no production authentication or stored passwords.\n        Continue as the fixed Demo User in the Northstar Studio workspace.\n      </p>\n      <LoginForm />\n    </div>\n  )\n}\n// projectos-prefab-demo: google sign-in affordance\n"
+      },
+      {
+        "path": "app/api/auth/route.ts",
+        "changeType": "modify",
+        "before": "import { NextResponse } from 'next/server'\nimport { getCurrentUser } from '@/lib/auth'\n\nconst DEMO_COOKIE = 'auth-token'\nconst DEMO_COOKIE_OPTIONS = {\n  httpOnly: true,\n  path: '/',\n  sameSite: 'lax',\n} as const\n\nexport async function GET() {\n  return NextResponse.json({\n    mode: 'fixed-demo',\n    user: await getCurrentUser(),\n  })\n}\n\nexport async function POST(request: Request) {\n  const mediaType = request.headers\n    .get('content-type')\n    ?.toLowerCase()\n    .split(';', 1)[0]\n    ?.trim()\n  if (mediaType !== 'application/json') {\n    return NextResponse.json(\n      { error: 'unsupported_media_type' },\n      { status: 415 },\n    )\n  }\n\n  let body: unknown\n  try {\n    body = await request.json()\n  } catch {\n    return NextResponse.json({ error: 'invalid_demo_request' }, { status: 400 })\n  }\n  if (!isDemoEntryRequest(body)) {\n    return NextResponse.json({ error: 'invalid_demo_request' }, { status: 400 })\n  }\n\n  const response = NextResponse.json({\n    mode: 'fixed-demo',\n    user: await getCurrentUser(),\n  })\n  response.cookies.set(DEMO_COOKIE, 'demo-admin', DEMO_COOKIE_OPTIONS)\n  return response\n}\n\nexport async function DELETE() {\n  const response = NextResponse.json({ mode: 'signed-out' })\n  response.cookies.set(DEMO_COOKIE, 'demo-signed-out', DEMO_COOKIE_OPTIONS)\n  return response\n}\n\nfunction isDemoEntryRequest(value: unknown): boolean {\n  if (!value || typeof value !== 'object' || Array.isArray(value)) return false\n  const record = value as Record<string, unknown>\n  return Object.keys(record).length === 1 && record['mode'] === 'fixed-demo'\n}\n",
+        "after": "import { NextResponse } from 'next/server'\nimport { getCurrentUser } from '@/lib/auth'\n\nconst DEMO_COOKIE = 'auth-token'\nconst DEMO_COOKIE_OPTIONS = {\n  httpOnly: true,\n  path: '/',\n  sameSite: 'lax',\n} as const\n\nexport async function GET() {\n  return NextResponse.json({\n    mode: 'fixed-demo',\n    user: await getCurrentUser(),\n  })\n}\n\nexport async function POST(request: Request) {\n  const mediaType = request.headers\n    .get('content-type')\n    ?.toLowerCase()\n    .split(';', 1)[0]\n    ?.trim()\n  if (mediaType !== 'application/json') {\n    return NextResponse.json(\n      { error: 'unsupported_media_type' },\n      { status: 415 },\n    )\n  }\n\n  let body: unknown\n  try {\n    body = await request.json()\n  } catch {\n    return NextResponse.json({ error: 'invalid_demo_request' }, { status: 400 })\n  }\n  if (!isDemoEntryRequest(body)) {\n    return NextResponse.json({ error: 'invalid_demo_request' }, { status: 400 })\n  }\n\n  const response = NextResponse.json({\n    mode: 'fixed-demo',\n    user: await getCurrentUser(),\n  })\n  response.cookies.set(DEMO_COOKIE, 'demo-admin', DEMO_COOKIE_OPTIONS)\n  return response\n}\n\nexport async function DELETE() {\n  const response = NextResponse.json({ mode: 'signed-out' })\n  response.cookies.set(DEMO_COOKIE, 'demo-signed-out', DEMO_COOKIE_OPTIONS)\n  return response\n}\n\nfunction isDemoEntryRequest(value: unknown): boolean {\n  if (!value || typeof value !== 'object' || Array.isArray(value)) return false\n  const record = value as Record<string, unknown>\n  return Object.keys(record).length === 1 && record['mode'] === 'fixed-demo'\n}\n// projectos-prefab-demo: route google provider through the auth handler\n"
+      },
+      {
+        "path": "lib/auth.ts",
+        "changeType": "modify",
+        "before": "interface Session {\n  userId: string\n  activeTeamId: string\n  token: string\n}\n\ninterface User {\n  id: string\n  name: string\n  email: string\n  role: string\n}\n\nexport async function getSession(): Promise<Session | null> {\n  return { userId: 'user_1', activeTeamId: 'team_1', token: 'mock-token' }\n}\n\nexport async function getCurrentUser(): Promise<User> {\n  return { id: 'user_1', name: 'Demo User', email: 'demo@example.com', role: 'admin' }\n}\n\nexport async function requireAdmin(): Promise<void> {\n  const user = await getCurrentUser()\n  if (user.role !== 'admin') throw new Error('Unauthorized')\n}\n\nexport async function validateToken(request: Request): Promise<User | null> {\n  if (request.headers.get('authorization') !== 'Bearer mock-token') return null\n  return getCurrentUser()\n}\n",
+        "after": "interface Session {\n  userId: string\n  activeTeamId: string\n  token: string\n}\n\ninterface User {\n  id: string\n  name: string\n  email: string\n  role: string\n}\n\nexport async function getSession(): Promise<Session | null> {\n  return { userId: 'user_1', activeTeamId: 'team_1', token: 'mock-token' }\n}\n\nexport async function getCurrentUser(): Promise<User> {\n  return { id: 'user_1', name: 'Demo User', email: 'demo@example.com', role: 'admin' }\n}\n\nexport async function requireAdmin(): Promise<void> {\n  const user = await getCurrentUser()\n  if (user.role !== 'admin') throw new Error('Unauthorized')\n}\n\nexport async function validateToken(request: Request): Promise<User | null> {\n  if (request.headers.get('authorization') !== 'Bearer mock-token') return null\n  return getCurrentUser()\n}\n// projectos-prefab-demo: google provider configuration\n"
+      }
+    ]
+  },
+  "applyResult": {
+    "runId": "run_google_login",
+    "applied": false,
+    "filesChanged": [
+      "app/login/page.tsx",
+      "app/api/auth/route.ts",
+      "lib/auth.ts"
+    ],
+    "verificationStatus": "not_run"
+  }
+}

@@ -1,0 +1,100 @@
+.trace {
+  display: grid;
+  gap: var(--space-md);
+  width: min(100%, 720px);
+  overflow: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.card {
+  padding: var(--space-md);
+  border: 1px solid var(--glass-border-subtle);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-glass-sm);
+  background: var(--color-bg-elevated);
+}
+
+.card h3 {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-md);
+}
+
+.card p {
+  margin: var(--space-xs) 0;
+}
+
+.scope {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-sm);
+}
+
+.scope div {
+  display: grid;
+  grid-template-columns: minmax(56px, auto) 1fr;
+  gap: var(--space-sm);
+}
+
+.scope dt {
+  color: var(--color-text-muted);
+}
+
+.scope dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.scope code,
+.bundleHash,
+.files code {
+  font-family: var(--font-mono);
+}
+
+.contextMeta,
+.bundleHash,
+.files,
+.truncated {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.bundleHash {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.files {
+  display: grid;
+  gap: 5px;
+  margin: var(--space-sm) 0 0;
+  padding-left: 18px;
+}
+
+.files li {
+  display: grid;
+  gap: 2px;
+}
+
+.card summary {
+  cursor: pointer;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+}
+
+.truncated {
+  font-style: italic;
+}
+
+.languageNotice {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+
+.error {
+  border-left-color: var(--color-error);
+}

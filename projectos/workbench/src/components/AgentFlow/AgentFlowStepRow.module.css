@@ -1,0 +1,128 @@
+.wrapper {
+  animation: glassEnter var(--duration-normal) var(--ease-spring) both;
+}
+
+.card {
+  width: 100%;
+  text-align: left;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--glass-border-subtle);
+  border-radius: var(--radius-glass-md);
+  padding: var(--space-md);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.card:hover {
+  border-color: var(--color-accent);
+}
+
+.selected {
+  border-color: var(--color-accent);
+  box-shadow: var(--glass-focus-ring);
+}
+
+.running {
+  border-color: var(--color-warning);
+}
+
+.complete {
+  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
+}
+
+.error {
+  border-color: var(--color-error);
+}
+
+.pending,
+.skipped,
+.warning {
+  opacity: 0.85;
+}
+
+.row {
+  display: flex;
+  gap: var(--space-md);
+}
+
+.dot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  padding-top: 2px;
+}
+
+.iconComplete { color: var(--color-success); }
+.iconRunning { color: var(--color-warning); }
+.iconError { color: var(--color-error); }
+.iconPending { color: var(--color-text-muted); }
+
+.content {
+  flex: 1;
+  min-width: 0;
+}
+
+.label {
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-base);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.correctionBadge {
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-warning) 20%, transparent);
+  color: var(--color-warning);
+}
+
+.kind {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-transform: capitalize;
+  margin-top: 2px;
+}
+
+.summary {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.fileChip {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+  background: var(--color-bg-muted);
+  border: 1px solid var(--glass-border-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+}
+
+.connector {
+  width: 2px;
+  height: 16px;
+  background: var(--glass-border);
+  margin: 4px 0 4px 20px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wrapper {
+    animation: none;
+  }
+}

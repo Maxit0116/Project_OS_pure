@@ -1,0 +1,56 @@
+---
+description: Project OS workbench frontend architecture and module boundaries
+globs: projectos/workbench/**/*
+alwaysApply: false
+---
+
+# Frontend Architecture
+
+## Stack
+
+- **Workbench**: `projectos/workbench` — Vite + React 18 + TypeScript
+- **State**: Zustand (`src/state/workbenchStore.ts`)
+- **Styling**: CSS Modules + global tokens (`src/styles/tokens.css`)
+- **Icons**: `lucide-react` only — no ad-hoc SVGs in feature code
+- **Contracts**: shared types in `projectos/contracts/` — UI must not redefine API shapes
+
+## Directory Layout
+
+```
+workbench/src/
+├── components/     # Feature + shared UI (ui/ = design-system primitives)
+├── layout/         # App shell, panels, zone layout
+├── state/          # Zustand store
+├── styles/         # tokens.css, motion.css, global.css
+└── i18n/           # en/zh strings — no hardcoded user-facing copy
+```
+
+## Layer Rules
+
+1. **`components/ui/`** — reusable primitives (Button, Chip, TabBar). No business logic or API calls.
+2. **Feature components** — compose `ui/` primitives; read/write via store or props only.
+3. **`layout/`** — structural chrome (AppShell, ThreeZoneLayout). Apply frost glass (Tier A) here first.
+4. **`components/Glass/`** (when added) — Tier B true lens (`GlassScene`, `GlassLens`). Hero overlays only.
+5. **Contracts** — import from `projectos/contracts`; never duplicate type definitions in workbench.
+
+## Styling Conventions
+
+- One `*.module.css` per component, colocated with its `.tsx`.
+- Use CSS variables from `tokens.css` — never hardcode colors/spacing in modules.
+- Glass on **navigation chrome only** — never on chat cards, lists, graph nodes (see `liquid-glass-ui.mdc`).
+- **Two tiers:** Tier A = `backdrop-filter` frost for bulk nav; Tier B = `GlassLens` SVG refraction for palette/dropdowns (see `apple-inspired-ui` skill).
+- New surfaces: start from `.cursor/skills/apple-inspired-ui/components/` recipes.
+
+## Data Flow
+
+```
+contracts → client (Mock/Real) → workbenchStore → components
+```
+
+Mock fixtures live in `projectos/client/fixtures/`. UI code must work in both mock and real modes.
+
+## Do Not
+
+- Add CSS-in-JS or Tailwind — stay on CSS Modules + tokens.
+- Put fetch/API logic inside presentational components.
+- Create one-off panel styles — extend glass surface patterns instead.

@@ -1,0 +1,45 @@
+.tabBar {
+  --strip-chrome-surface: var(--color-bg-editor);
+  --tab-radius: 12px;
+  --tab-gap: 4px;
+  --tab-row-height: 34px;
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  width: 100%;
+  flex-shrink: 0;
+  min-height: 38px;
+  background: var(--color-bg-muted);
+  padding: 0 var(--space-xs);
+  overflow: visible;
+}
+
+.tools {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 0 var(--space-xs) 6px;
+}
+
+.toolBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.toolBtn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+}

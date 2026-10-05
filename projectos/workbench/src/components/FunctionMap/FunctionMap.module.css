@@ -1,0 +1,817 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.layerSwitch {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  margin: 8px 12px 0;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--surface-muted, rgba(0, 0, 0, 0.04));
+  z-index: 2;
+}
+
+.toolbar .layerSwitch,
+.toolbarInline .layerSwitch {
+  margin: 0;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.layerButton {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary, #666);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.layerButtonActive {
+  background: var(--surface-elevated, #fff);
+  color: var(--text-primary, #111);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.staleChip {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: #7a4b00;
+  background: color-mix(in srgb, #f59e0b 18%, transparent);
+  border: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+  flex-shrink: 1;
+}
+
+/* Shared flat / galaxy / branch map canvas — matches React Flow Background gap 20, size 1. */
+.mapCanvasBg {
+  background-color: var(--color-bg-map);
+  background-image: radial-gradient(circle, var(--color-border) 0.5px, transparent 0.5px);
+  background-size: 20px 20px;
+}
+
+.mapViewHost {
+  composes: mapCanvasBg;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.toolbarInline {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  flex: 1;
+}
+
+.toolbarInline .search {
+  flex: 0 1 180px;
+  min-width: 120px;
+  max-width: 200px;
+  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+}
+
+.toolbarInline .legend {
+  flex: 1;
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 6px;
+  font-size: 10px;
+  overflow: hidden;
+}
+
+.toolbarInline .legendTitle {
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.toolbarInline .legendItem {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 1440px) {
+  .toolbarInline .legend {
+    display: none;
+  }
+}
+
+.createActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.levelSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.levelNavigator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.levelBack {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  place-items: center;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.levelBack:focus-visible,
+.levelButton:focus-visible {
+  outline: none;
+  box-shadow: var(--glass-focus-ring);
+}
+
+.scopeLabel {
+  max-width: 122px;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.levelSeparator {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  line-height: 1;
+  user-select: none;
+  pointer-events: none;
+  padding: 0 1px;
+}
+
+.levelButton {
+  appearance: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.levelButton:hover {
+  color: var(--color-text-primary);
+}
+
+.levelButtonActive {
+  color: var(--color-accent);
+  font-weight: var(--font-weight-semibold);
+}
+
+.addMenuAnchor {
+  flex-shrink: 0;
+}
+
+.createLabel {
+  margin-left: 4px;
+}
+
+@media (max-width: 1280px) {
+  .createLabel {
+    display: none;
+  }
+
+  .scopeLabel {
+    display: none;
+  }
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--glass-bg-clear);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border-bottom: 1px solid var(--border-window-chrome);
+  box-shadow: var(--window-rim-chrome), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
+  flex-shrink: 0;
+}
+
+.search {
+  flex: 1;
+  min-width: 140px;
+  max-width: 220px;
+  padding: 6px 10px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  background: var(--color-bg-muted);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-glass-sm);
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.search:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.legendTitle {
+  font-weight: var(--font-weight-semibold);
+  margin-right: 4px;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.flowBleed {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: visible;
+  background: transparent;
+}
+
+.flowBleed :global(.react-flow),
+.flowBleed :global(.react-flow__viewport) {
+  overflow: visible !important;
+}
+
+.flowBleed :global(.react-flow__controls) {
+  /* Fixed 10px from the bottom of main (= immediately above the terminal bar). */
+  left: calc(var(--map-inset-left, 0px) + 12px) !important;
+  bottom: 10px !important;
+  z-index: 5;
+  pointer-events: auto;
+}
+
+.flowBleed :global(.react-flow__minimap) {
+  right: calc(var(--map-inset-right, 0px) + 12px) !important;
+  bottom: 10px !important;
+  z-index: 5;
+  pointer-events: auto;
+}
+
+.flow {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: transparent;
+  transition: opacity 120ms var(--ease-out);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.flowLayoutPending {
+  /* Avoid visibility:hidden — a missed layout pass left the bleed canvas blank after
+     HMR/remount or mid-drag resize. Opacity-only pending state keeps layout alive. */
+  opacity: 0;
+  pointer-events: none;
+}
+
+.flowLayoutReady {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.nodePreview {
+  position: absolute;
+  width: 240px;
+  min-height: 0;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-glass-md);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--glass-border-highlight);
+  box-shadow: var(--glass-shadow-elevated);
+  z-index: 12;
+  pointer-events: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.nodePreviewFixed {
+  position: fixed;
+  z-index: 8;
+}
+
+.nodePreviewTitle {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.nodePreviewSubtitle {
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.nodePreviewSummary {
+  margin: 6px 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+.nodePreviewMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.nodePreviewTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--space-sm);
+}
+
+.nodePreviewTag {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-muted);
+  border: 1px solid var(--glass-border-subtle);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+}
+
+.nodePreviewHint {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.flow :global(.react-flow__pane),
+.flow :global(.react-flow__node),
+.flow :global(.react-flow__edge) {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.flow :global(.react-flow__edge.selected .react-flow__edge-path),
+.flow :global(.react-flow__edge:focus .react-flow__edge-path),
+.flow :global(.react-flow__edge:focus-visible .react-flow__edge-path) {
+  outline: none;
+}
+
+.flow :global(.react-flow__edge-labels) {
+  z-index: 10000;
+  pointer-events: none;
+}
+
+.flow > div {
+  width: 100%;
+  height: 100%;
+}
+
+.flow :global(.react-flow) {
+  --xy-controls-button-background-color-default: var(--glass-bg-elevated);
+  --xy-controls-button-background-color-hover-default: var(--color-bg-muted);
+  --xy-controls-button-color-default: var(--color-text-secondary);
+  --xy-controls-button-color-hover-default: var(--color-text-primary);
+  --xy-controls-button-border-color-default: var(--glass-border);
+  --xy-controls-box-shadow-default: none;
+}
+
+.flow :global(.react-flow__controls) {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-glass-sm);
+  box-shadow: var(--glass-shadow-regular);
+  overflow: hidden;
+}
+
+.flow :global(.react-flow__controls-button) {
+  background: transparent;
+  border-color: var(--glass-border-subtle);
+  color: var(--color-text-secondary);
+  fill: var(--color-text-secondary);
+}
+
+.flow :global(.react-flow__controls-button:hover) {
+  background: var(--color-bg-muted);
+  color: var(--color-text-primary);
+  fill: var(--color-text-primary);
+}
+
+.flow :global(.react-flow__controls-button svg) {
+  fill: currentColor;
+}
+
+/* MiniMap — Tier A frost (small nav-adjacent utility, not a hero overlay).
+   bgColor="transparent" on the component lets this glass show through the
+   real SVG canvas so node thumbnails render on frosted glass, not a solid box. */
+.miniMap.miniMap {
+  background: var(--glass-bg-clear);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border-highlight);
+  border-radius: var(--radius-glass-md);
+  box-shadow: var(--glass-shadow-elevated);
+  overflow: hidden;
+}
+
+.flow :global(.react-flow__minimap-mask) {
+  fill: var(--minimap-mask);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .miniMap.miniMap {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--color-bg-elevated);
+  }
+}
+
+.empty {
+  padding: var(--space-xl);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.galaxyCanvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  touch-action: none;
+  overflow: hidden;
+  background: transparent;
+}
+
+.galaxyCanvasSurface {
+  position: relative;
+  z-index: 1;
+}
+
+.galaxyLayerTransition {
+  composes: mapCanvasBg;
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  opacity: 0;
+  transition-property: opacity;
+  transition-timing-function: var(--ease-out);
+}
+
+.branchScreenEdges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 2;
+}
+
+.galaxyLabelLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* The 3D canvas is full-bleed behind the side panels, so the overlay tracks the
+   center column's right edge (published by MapChromeAnchor) instead of the
+   window edge — otherwise the AI Chat sidebar covers it. */
+.galaxyCameraOverlay {
+  position: absolute;
+  right: calc(var(--map-inset-right, 0px) + 12px);
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.galaxyCameraHint {
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(11, 16, 32, 0.72);
+  border: 1px solid var(--glass-border-subtle);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  line-height: 1.4;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.galaxyCinemaBadge {
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(107, 159, 255, 0.16);
+  border: 1px solid rgba(107, 159, 255, 0.35);
+  color: var(--color-accent-primary, #6b9fff);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.galaxyCameraButtons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-glass-md);
+  background: rgba(11, 16, 32, 0.82);
+  border: 1px solid var(--glass-border-subtle);
+  box-shadow: var(--glass-shadow-regular);
+  pointer-events: auto;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.galaxyOrbitSpeed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-glass-md);
+  background: rgba(11, 16, 32, 0.82);
+  border: 1px solid var(--glass-border-subtle);
+  box-shadow: var(--glass-shadow-regular);
+  pointer-events: auto;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.galaxyOrbitSpeedLabel {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.galaxyOrbitSpeedSlider {
+  width: 96px;
+  accent-color: var(--color-accent-primary, #6b9fff);
+  cursor: pointer;
+}
+
+.galaxyOrbitSpeedValue {
+  flex-shrink: 0;
+  min-width: 36px;
+  color: var(--color-text-primary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.galaxyEdgeLabelSetting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-glass-md);
+  background: rgba(11, 16, 32, 0.82);
+  border: 1px solid var(--glass-border-subtle);
+  box-shadow: var(--glass-shadow-regular);
+  pointer-events: auto;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.galaxyEdgeLabelSettingLabel {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.galaxyEdgeLabelSelect {
+  min-width: 108px;
+  padding: 4px 8px;
+  border: 1px solid var(--glass-border-subtle);
+  border-radius: var(--radius-sm);
+  background: rgba(11, 16, 32, 0.65);
+  color: var(--color-text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.galaxyEdgeLabel {
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid;
+  background: rgba(11, 16, 32, 0.82);
+  color: var(--color-text-primary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.galaxyNodeLabel {
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(11, 16, 32, 0.78);
+  border: 1px solid var(--glass-border-subtle);
+  color: var(--color-text-primary);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.galaxyClusterTitle {
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(11, 16, 32, 0.82);
+  border: 1px solid var(--glass-border-subtle);
+  color: var(--color-text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.galaxyCameraButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.galaxyCameraButton:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-hover-overlay);
+}
+
+.galaxyCameraButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.galaxyCameraButtonActive {
+  color: var(--color-accent-primary, #6b9fff);
+  background: rgba(107, 159, 255, 0.12);
+}
+
+.galaxyCanvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+}
+
+.galaxyFallback {
+  composes: mapCanvasBg;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 200px;
+  padding: var(--space-lg);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.branchFallbackBanner {
+  position: absolute;
+  top: var(--space-sm);
+  left: 50%;
+  z-index: 2;
+  transform: translateX(-50%);
+  max-width: min(92%, 520px);
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--color-bg) 82%, transparent);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-align: center;
+  pointer-events: none;
+}
+
+.viewModeSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-muted);
+  flex-shrink: 0;
+}
+
+.viewModeButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.viewModeButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-hover-overlay);
+}
+
+.viewModeButtonActive {
+  color: var(--color-text-primary);
+  background: var(--color-accent-subtle);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .toolbar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--color-bg-elevated);
+  }
+
+  .nodePreview {
+    box-shadow: none;
+  }
+}

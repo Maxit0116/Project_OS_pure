@@ -1,0 +1,14 @@
+.orb {
+  display: block;
+  flex-shrink: 0;
+}
+
+.size20 {
+  width: 20px;
+  height: 20px;
+}
+
+.size64 {
+  width: 64px;
+  height: 64px;
+}

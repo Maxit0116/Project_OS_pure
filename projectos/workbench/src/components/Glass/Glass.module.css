@@ -1,0 +1,166 @@
+.lens {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+/* Live copy of the ambient-mesh backdrop, bent by the SVG filter.
+   background-attachment: fixed keeps it pixel-aligned to the real
+   viewport-fixed backdrop with zero position math. */
+.refractCopy {
+  position: absolute;
+  inset: -20%;
+  background: var(--ambient-mesh);
+  background-attachment: fixed;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.regular::before,
+.clear::before,
+.overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.regular::before {
+  background: var(--glass-bg-regular);
+}
+
+.clear::before {
+  background: var(--glass-bg-clear);
+}
+
+.overlay::before {
+  background: var(--glass-bg-overlay);
+}
+
+.lens::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  border: 1px solid var(--glass-border-highlight);
+  box-shadow: var(--glass-shadow-overlay);
+  pointer-events: none;
+}
+
+.filterDefs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.lensContent {
+  position: relative;
+  z-index: 3;
+  height: 100%;
+}
+
+/* Tier B bleed-mode panel shell — live backdrop sampling + rim refraction */
+.panelShell {
+  position: relative;
+  height: 100%;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.edgeRight.panelShell {
+  border-radius: 0;
+}
+
+.edgeLeft.panelShell {
+  border-radius: 0;
+}
+
+.edgeTop.panelShell {
+  border-radius: 0;
+}
+
+.panelGlassLive {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: var(--glass-panel-surface);
+  backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
+  -webkit-backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
+  pointer-events: none;
+}
+
+.panelRimRefract {
+  position: absolute;
+  inset: -8%;
+  z-index: 1;
+  border-radius: inherit;
+  background: var(--ambient-mesh);
+  background-attachment: fixed;
+  opacity: 0.35;
+  pointer-events: none;
+  mask-image: linear-gradient(to center, black 0%, transparent 22%);
+  -webkit-mask-image: linear-gradient(to center, black 0%, transparent 22%);
+}
+
+.edgeRight .panelRimRefract {
+  mask-image: linear-gradient(to left, black 0%, transparent 18%);
+  -webkit-mask-image: linear-gradient(to left, black 0%, transparent 18%);
+}
+
+.edgeLeft .panelRimRefract {
+  mask-image: linear-gradient(to right, black 0%, transparent 18%);
+  -webkit-mask-image: linear-gradient(to right, black 0%, transparent 18%);
+}
+
+.edgeTop .panelRimRefract {
+  mask-image: linear-gradient(to bottom, black 0%, transparent 18%);
+  -webkit-mask-image: linear-gradient(to bottom, black 0%, transparent 18%);
+}
+
+/* Rim highlight — inset hairline follows shell border-radius (Codex-style). */
+.panelShell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  box-shadow: var(--window-rim-side-panel);
+  pointer-events: none;
+}
+
+.panelContent {
+  position: relative;
+  z-index: 3;
+  height: 100%;
+  min-height: 0;
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .refractCopy {
+    display: none;
+  }
+
+  .regular::before,
+  .clear::before,
+  .overlay::before {
+    background: var(--color-bg-elevated);
+  }
+
+  .lens::after {
+    box-shadow: none;
+  }
+
+  .panelGlassLive,
+  .panelRimRefract {
+    display: none;
+  }
+
+  .panelShell {
+    background: var(--color-bg-side-panel);
+  }
+}

@@ -1,0 +1,136 @@
+.drawerEnter {
+  animation: drawerSlideRight var(--duration-panel-enter) var(--ease-spring) both;
+  height: 100%;
+  min-height: 0;
+}
+
+.drawerExit {
+  animation: drawerSlideRightExit var(--duration-panel-enter) var(--ease-spring) both;
+  height: 100%;
+  min-height: 0;
+  pointer-events: none;
+}
+
+@keyframes drawerSlideRight {
+  from {
+    opacity: 0.55;
+    transform: translateX(28px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes drawerSlideRightExit {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%) scale(0.985);
+  }
+}
+
+.shell {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  transition: background var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-spring);
+}
+
+.inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.panelBleed {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md) var(--space-xs);
+  flex-shrink: 0;
+  border-radius: 0;
+  overflow: hidden;
+  box-shadow: inset 0 -1px 0 var(--glass-border-subtle);
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.badge {
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-muted);
+  border: 1px solid var(--glass-border-subtle);
+  color: var(--color-text-secondary);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chatLayout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.harnessPane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.harnessEmpty {
+  padding: var(--space-xl) var(--space-lg);
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed, 1.6);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .panelBleed {
+    background: var(--color-bg-side-panel);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawerEnter,
+  .drawerExit {
+    animation: none;
+  }
+}

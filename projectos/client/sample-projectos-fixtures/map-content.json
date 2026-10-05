@@ -1,0 +1,69 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "artifacts": [
+    {
+      "id": "art_project_vision",
+      "type": "note",
+      "scope": "project",
+      "position": { "x": 24, "y": -200 },
+      "size": { "width": 280, "height": 160 },
+      "createdAt": "2026-07-11T06:00:00.000Z",
+      "updatedAt": "2026-07-11T06:00:00.000Z",
+      "note": {
+        "title": "Product vision",
+        "body": "SaaS starter for indie founders — ship auth, billing, and dashboard fast."
+      }
+    },
+    {
+      "id": "art_login_plan_oauth",
+      "type": "plan",
+      "scope": "node",
+      "nodeId": "feat_login",
+      "position": { "x": 24, "y": 20 },
+      "size": { "width": 300, "height": 220 },
+      "createdAt": "2026-07-11T06:00:00.000Z",
+      "updatedAt": "2026-07-11T06:00:00.000Z",
+      "plan": {
+        "title": "Google OAuth button",
+        "items": [
+          {
+            "id": "plan_step_oauth",
+            "text": "One-click sign-in on the login page",
+            "done": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "art_login_acceptance",
+      "type": "acceptance_list",
+      "scope": "node",
+      "nodeId": "feat_login",
+      "position": { "x": 24, "y": 200 },
+      "size": { "width": 300, "height": 220 },
+      "createdAt": "2026-07-11T06:00:00.000Z",
+      "updatedAt": "2026-07-11T06:00:00.000Z",
+      "acceptance": {
+        "title": "Login acceptance",
+        "items": [
+          {
+            "id": "ac_login_form",
+            "text": "Login form renders email and password fields",
+            "done": true
+          },
+          {
+            "id": "ac_oauth",
+            "text": "Google OAuth redirects back to dashboard",
+            "done": false
+          },
+          {
+            "id": "ac_error",
+            "text": "Invalid credentials show a clear error message",
+            "done": false
+          }
+        ]
+      }
+    }
+  ]
+}

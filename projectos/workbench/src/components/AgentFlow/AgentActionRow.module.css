@@ -1,0 +1,50 @@
+.card {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-border-subtle);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-glass-sm);
+  background: var(--color-bg-elevated);
+  animation: glassEnter var(--duration-normal) var(--ease-spring) both;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.heading time {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: var(--font-weight-regular);
+}
+
+.meta {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.meta code,
+.card li {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.card ul {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}

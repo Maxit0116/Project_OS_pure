@@ -1,0 +1,37 @@
+import { getSession } from '@/lib/auth'
+import { redirect } from 'next/navigation'
+import { getRecentActivity, getStats, requireDashboardMembership } from '@/lib/data'
+import StatsCard from '@/components/StatsCard'
+import ActivityItem from '@/components/ActivityItem'
+
+export default async function DashboardPage() {
+  const session = await getSession()
+  if (!session) redirect('/login')
+
+  const membership = await requireDashboardMembership(session.activeTeamId, session.userId)
+  const stats = await getStats(session.activeTeamId)
+  const activity = await getRecentActivity(session.activeTeamId)
+
+  return (
+    <main style={{ padding: 36, color: '#0f172a' }}>
+      <header style={{ marginBottom: 30 }}>
+        <p style={{ color: '#4f46e5', fontSize: 12, fontWeight: 800, margin: 0, textTransform: 'uppercase' }}>Active workspace</p>
+        <h1 style={{ margin: 0 }}>Workspace overview</h1>
+        <p style={{ margin: 0, maxWidth: 720, color: '#64748b', fontSize: 15, lineHeight: 1.6 }}>Live team health, active-project momentum, and the latest operational updates for your workspace.</p>
+      </header>
+      <section style={{ marginBottom: 28 }} aria-label="Workspace metrics">
+        <StatsCard title="Members" value={stats.memberCount} />
+        <StatsCard title="Active projects" value={stats.projectCount} />
+        <StatsCard title="Tasks" value={stats.taskCount} />
+      </section>
+      <section style={{ border: '1px solid #e2e8f0', borderRadius: 24, backgroundColor: '#ffffff', padding: 22 }} aria-label="Recent activity">
+        <h2 style={{ margin: 0 }}>Recent activity</h2>
+        <ol style={{ margin: 0, padding: 0 }}>
+          <ActivityItem title="Latest" label={activity.firstSummary} />
+          <ActivityItem title="Earlier" label={activity.secondSummary} />
+          <ActivityItem title="Previous" label={activity.thirdSummary} />
+        </ol>
+      </section>
+    </main>
+  )
+}

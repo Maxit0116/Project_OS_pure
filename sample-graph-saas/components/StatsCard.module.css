@@ -1,0 +1,16 @@
+.metricValue {
+  min-height: 150px;
+  margin-bottom: 16px;
+  background-color: #ffffff;
+  border-color: #dbe4f0;
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.metricTitle {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: inherit;
+  text-transform: uppercase;
+}

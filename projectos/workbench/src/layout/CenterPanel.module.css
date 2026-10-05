@@ -1,0 +1,91 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: transparent;
+  position: relative;
+}
+
+/* Pass clicks through to the bleed canvas; chrome uses data-zone-interactive. */
+.mapBleed.panel {
+  pointer-events: none;
+}
+
+.mapBleed .body {
+  pointer-events: none;
+}
+
+.mapBleed .tabPane {
+  pointer-events: none;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.mapBleedViewport {
+  flex: 1;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Non-map tabs sit on top of the shared map backdrop — stay opaque so only
+   frost chrome samples it, never the centre content area. */
+.panel:not(.mapBleed) .body {
+  background: var(--color-bg-base);
+}
+
+.tabPane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-base);
+  border-radius: 0;
+  border: none;
+  box-shadow: var(--window-rim-center);
+  overflow: hidden;
+  position: relative;
+}
+
+.tabPane[data-tour='function-map'] {
+  border-radius: var(--radius-glass-md) var(--radius-glass-md) 0 0;
+}
+
+.browserHidden {
+  display: none !important;
+}
+
+.browserVisible {
+  flex: 1;
+  min-height: 0;
+}
+
+.codePanel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-bg-base);
+  border-radius: 0;
+  border: none;
+  box-shadow: var(--window-rim-center);
+  overflow: hidden;
+  position: relative;
+}
+
+.browserPanel {
+  border-radius: 0;
+}
+
+.codePanelHidden {
+  display: none !important;
+}

@@ -1,0 +1,9 @@
+{
+  "presets": [["next/babel", {
+    "transform-runtime": {
+      "helpers": false,
+      "regenerator": false
+    }
+  }]],
+  "plugins": ["./tools/projectos-source-binding-babel-plugin.cjs"]
+}

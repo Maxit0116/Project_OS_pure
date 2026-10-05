@@ -1,0 +1,196 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  padding: var(--space-lg) 20px;
+  border-bottom: 1px solid var(--glass-border-subtle);
+  flex-shrink: 0;
+}
+
+.header h2 {
+  margin: 0 0 4px;
+  font-size: var(--font-size-lg);
+}
+
+.summary {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.headerActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.changeCount {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.appliedBadge {
+  font-size: var(--font-size-sm);
+  color: var(--color-success);
+  padding: 6px 10px;
+  background: var(--color-success-subtle);
+  border: 1px solid color-mix(in srgb, var(--color-success) 25%, transparent);
+  border-radius: var(--radius-glass-sm);
+}
+
+.verificationBadge {
+  max-width: 260px;
+  padding: 6px 10px;
+  border-radius: var(--radius-glass-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.verification_passed {
+  color: var(--color-success);
+  background: var(--color-success-subtle);
+}
+
+.verification_failed {
+  color: var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
+}
+
+.verification_not_run {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-muted);
+}
+
+.verificationApproval {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-sm);
+  width: min(420px, 45vw);
+  padding: var(--space-md);
+  color: var(--color-text-primary);
+  text-align: left;
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-bg-elevated));
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  border-radius: var(--radius-glass-sm);
+}
+
+.verificationApproval > span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.verificationCommands {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.verificationCommands code {
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  background: var(--color-bg-muted);
+  border-radius: var(--radius-glass-sm);
+}
+
+.files {
+  padding: var(--space-lg) 20px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.fileBlock {
+  border: 1px solid var(--glass-border-subtle);
+  border-radius: var(--radius-glass-md);
+  overflow: hidden;
+}
+
+.fileHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  background: var(--color-bg-elevated);
+  border: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.fileHeader:hover {
+  background: var(--color-bg-muted);
+}
+
+.chevron {
+  flex-shrink: 0;
+  width: 12px;
+  color: var(--color-text-muted);
+}
+
+.fileIcon {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.fileMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fileBasename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileDirname {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileStats {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.statsAdded {
+  color: var(--color-diff-char-added);
+}
+
+.statsRemoved {
+  color: var(--color-diff-char-removed);
+}
+
+.filePath {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

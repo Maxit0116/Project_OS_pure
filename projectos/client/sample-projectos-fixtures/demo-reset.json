@@ -1,0 +1,35 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "resetId": "reset_opening_scene",
+  "description": "Return the showcase workspace to the clean opening scene, including source files listed in workspaceFiles and Project OS demo state.",
+  "projectOSFiles": [
+    ".projectos/project.json",
+    ".projectos/graph.json",
+    ".projectos/semantic-tree.json",
+    ".projectos/current-work.json",
+    ".projectos/map-content.json",
+    ".projectos/demo-scenarios/google-login.json",
+    ".projectos/demo-scenarios/auth-bugfix.json",
+    ".projectos/harness/err_auth_provider_callback.json"
+  ],
+  "scenarioIds": [
+    "google-login",
+    "auth-bugfix"
+  ],
+  "harnessErrorIds": [
+    "err_auth_provider_callback"
+  ],
+  "workspaceFiles": [
+    "app/login/page.tsx",
+    "app/api/auth/route.ts",
+    "lib/auth.ts",
+    "app/profile/page.tsx"
+  ],
+  "cleanState": {
+    "version": "0.1.0",
+    "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+    "recentChanges": [],
+    "unresolvedErrors": []
+  }
+}

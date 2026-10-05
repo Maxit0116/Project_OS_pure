@@ -1,0 +1,39 @@
+.detailLabel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10000;
+  display: flex;
+  width: max-content;
+  max-width: 260px;
+  padding: 5px 8px 6px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, var(--glass-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 96%, transparent);
+  box-shadow: 0 3px 12px color-mix(in srgb, #000 10%, transparent);
+  color: var(--color-text-primary);
+  line-height: 1.25;
+  pointer-events: none;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detailLabel strong {
+  font-size: 10.5px;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.detailLabel span {
+  color: var(--color-text-secondary);
+  font-size: 9.5px;
+}
+
+.interactionPath {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 20px;
+  cursor: help;
+  pointer-events: stroke;
+  outline: none;
+}

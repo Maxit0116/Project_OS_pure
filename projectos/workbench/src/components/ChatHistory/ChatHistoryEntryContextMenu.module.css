@@ -1,0 +1,45 @@
+.portal {
+  position: fixed;
+  z-index: 70;
+}
+
+.menu {
+  min-width: 168px;
+  padding: 4px;
+  border-radius: var(--radius-glass-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: var(--font-size-xs);
+  font-family: inherit;
+  text-align: left;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--color-hover-overlay);
+}
+
+.menuItemDanger {
+  color: var(--color-error);
+}
+
+.menuItemDanger:hover {
+  background: var(--color-error-subtle);
+}
+
+.separator {
+  height: 1px;
+  margin: 2px 4px;
+  background: var(--glass-border-subtle);
+}

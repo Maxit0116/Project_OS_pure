@@ -1,0 +1,277 @@
+/* Positioning shell — clips slide motion; frost chrome lives on the inner panel. */
+.shell {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-workbench-terminal);
+  pointer-events: none;
+  overflow: hidden;
+  transition:
+    left var(--duration-panel-enter) var(--ease-spring),
+    right var(--duration-terminal-enter) var(--ease-spring);
+}
+
+.shellExiting {
+  pointer-events: none;
+}
+
+.shellExiting :global([data-panel-resize-handle]) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.shellMotionEnter {
+  animation: terminalSlideIn var(--duration-terminal-enter) var(--ease-spring) both;
+  will-change: transform;
+}
+
+.shellMotionExit {
+  animation: terminalSlideOut var(--duration-terminal-enter) var(--ease-spring) both;
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* Semantic tree open — terminal yields the left column to the tree sidebar. */
+.yieldLeftPanel {
+  left: var(--workbench-left-panel-width);
+}
+
+/* AI Chat open — terminal yields the right column to the chat sidebar. */
+.yieldRightPanel {
+  right: var(--workbench-right-panel-width);
+}
+
+@keyframes terminalSlideIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes terminalSlideOut {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+.shellMotion {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  transform-origin: bottom center;
+  min-height: 0;
+}
+
+.shellChrome {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.expanded {
+  height: var(--terminal-dock-height);
+  min-height: var(--terminal-dock-height);
+  max-height: var(--terminal-dock-height);
+}
+
+.splitGrid {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.splitVertical {
+  flex-direction: column;
+}
+
+.splitHorizontal {
+  flex-direction: row;
+}
+
+.paneWrap {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.paneDivider {
+  flex-shrink: 0;
+  background: var(--glass-border-subtle);
+}
+
+.splitVertical .paneDivider {
+  height: 1px;
+  width: 100%;
+}
+
+.splitHorizontal .paneDivider {
+  width: 1px;
+  height: 100%;
+}
+
+.pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.paneFocused {
+  outline: none;
+}
+
+.paneBar {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-sm);
+  border-top: 1px solid var(--glass-border-subtle);
+  flex-shrink: 0;
+}
+
+.tabStack {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tabView {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 72px;
+  border-top: 1px solid var(--glass-border-subtle);
+  cursor: text;
+}
+
+.tabViewActive {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.tabViewLabel {
+  flex-shrink: 0;
+  padding: 2px var(--space-sm) 0;
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.tabViewHost {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-xs) var(--space-sm) var(--space-sm);
+  overflow: hidden;
+}
+
+.tabViewHost :global(.xterm) {
+  height: 100%;
+}
+
+.tabViewHost :global(.xterm-viewport) {
+  background: transparent !important;
+}
+
+.bar {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-md);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.simulateBtn {
+  padding: 2px 8px;
+  font-size: 10px;
+  color: var(--color-warning);
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.simulateBtn:hover {
+  background: var(--color-warning-subtle);
+}
+
+.body {
+  flex: 1;
+  margin: 0;
+  padding: var(--space-sm) var(--space-md) var(--space-md);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border-top: 1px solid var(--glass-border-subtle);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.xtermHost {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-xs) var(--space-sm) var(--space-sm);
+  overflow: hidden;
+}
+
+.xtermHost :global(.xterm) {
+  height: 100%;
+}
+
+.xtermHost :global(.xterm-viewport) {
+  background: transparent !important;
+}
+
+.placeholder {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.shellResizing {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shellMotionEnter,
+  .shellMotionExit {
+    animation: none;
+    will-change: auto;
+  }
+
+  .shell {
+    transition: none;
+  }
+}

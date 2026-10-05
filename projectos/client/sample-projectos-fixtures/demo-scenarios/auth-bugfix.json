@@ -1,0 +1,163 @@
+{
+  "version": "0.1.0",
+  "scenarioId": "auth-bugfix",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "title": "Repair Auth Provider Callback",
+  "description": "Deterministic debug scenario that maps an auth callback failure to the User Login node and repairs the root provider configuration issue.",
+  "kind": "debug_fix",
+  "nodeIds": [
+    "feat_login"
+  ],
+  "files": [
+    "app/api/auth/route.ts",
+    "lib/auth.ts",
+    "app/login/page.tsx"
+  ],
+  "harnessErrorId": "err_auth_provider_callback",
+  "run": {
+    "runId": "run_auth_bugfix",
+    "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+    "kind": "debug_fix",
+    "status": "complete",
+    "relatedNodeIds": [
+      "feat_login"
+    ],
+    "relatedFiles": [],
+    "scope": {
+      "kind": "component",
+      "nodeId": "feat_login"
+    },
+    "role": "node_planner",
+    "startedAt": "2026-07-07T00:01:00.000Z",
+    "completedAt": "2026-07-07T00:01:06.000Z"
+  },
+  "events": [
+    {
+      "eventId": "evt_authfix_001",
+      "runId": "run_auth_bugfix",
+      "timestamp": "2026-07-07T00:01:00.000Z",
+      "type": "run_started"
+    },
+    {
+      "eventId": "evt_authfix_002",
+      "runId": "run_auth_bugfix",
+      "timestamp": "2026-07-07T00:01:01.000Z",
+      "type": "step_started",
+      "step": {
+        "id": "step_collect_error",
+        "label": "Collect auth error evidence",
+        "kind": "debug",
+        "status": "running",
+        "inputSummary": "Runtime error points at the auth callback route.",
+        "relatedNodeIds": [
+          "feat_login"
+        ],
+        "relatedFiles": [
+          "app/api/auth/route.ts",
+          "lib/auth.ts"
+        ]
+      }
+    },
+    {
+      "eventId": "evt_authfix_003",
+      "runId": "run_auth_bugfix",
+      "timestamp": "2026-07-07T00:01:02.000Z",
+      "type": "step_completed",
+      "step": {
+        "id": "step_collect_error",
+        "label": "Collect auth error evidence",
+        "kind": "debug",
+        "status": "complete",
+        "outputSummary": "Mapped the failure to feat_login and the auth provider configuration files.",
+        "relatedNodeIds": [
+          "feat_login"
+        ],
+        "relatedFiles": [
+          "app/api/auth/route.ts",
+          "lib/auth.ts"
+        ]
+      }
+    },
+    {
+      "eventId": "evt_authfix_004",
+      "runId": "run_auth_bugfix",
+      "timestamp": "2026-07-07T00:01:03.000Z",
+      "type": "step_started",
+      "step": {
+        "id": "step_root_cause",
+        "label": "Choose root cause fix",
+        "kind": "plan",
+        "status": "running",
+        "relatedNodeIds": [
+          "feat_login"
+        ],
+        "relatedFiles": [
+          "app/api/auth/route.ts",
+          "lib/auth.ts"
+        ]
+      }
+    },
+    {
+      "eventId": "evt_authfix_005",
+      "runId": "run_auth_bugfix",
+      "timestamp": "2026-07-07T00:01:04.000Z",
+      "type": "step_completed",
+      "step": {
+        "id": "step_root_cause",
+        "label": "Choose root cause fix",
+        "kind": "plan",
+        "status": "complete",
+        "outputSummary": "Rejected a UI-only retry patch and selected provider callback normalization.",
+        "relatedNodeIds": [
+          "feat_login"
+        ],
+        "relatedFiles": [
+          "app/api/auth/route.ts",
+          "lib/auth.ts"
+        ]
+      }
+    },
+    {
+      "eventId": "evt_authfix_006",
+      "runId": "run_auth_bugfix",
+      "timestamp": "2026-07-07T00:01:05.000Z",
+      "type": "verification_completed",
+      "payload": {
+        "verificationStatus": "demo_passed"
+      }
+    },
+    {
+      "eventId": "evt_authfix_007",
+      "runId": "run_auth_bugfix",
+      "timestamp": "2026-07-07T00:01:06.000Z",
+      "type": "run_completed"
+    }
+  ],
+  "diff": {
+    "runId": "run_auth_bugfix",
+    "summary": "Normalize auth provider callback handling at the route and shared auth helper.",
+    "files": [
+      {
+        "path": "app/api/auth/route.ts",
+        "changeType": "modify",
+        "before": "import { NextResponse } from 'next/server'\nimport { getCurrentUser } from '@/lib/auth'\n\nconst DEMO_COOKIE = 'auth-token'\nconst DEMO_COOKIE_OPTIONS = {\n  httpOnly: true,\n  path: '/',\n  sameSite: 'lax',\n} as const\n\nexport async function GET() {\n  return NextResponse.json({\n    mode: 'fixed-demo',\n    user: await getCurrentUser(),\n  })\n}\n\nexport async function POST(request: Request) {\n  const mediaType = request.headers\n    .get('content-type')\n    ?.toLowerCase()\n    .split(';', 1)[0]\n    ?.trim()\n  if (mediaType !== 'application/json') {\n    return NextResponse.json(\n      { error: 'unsupported_media_type' },\n      { status: 415 },\n    )\n  }\n\n  let body: unknown\n  try {\n    body = await request.json()\n  } catch {\n    return NextResponse.json({ error: 'invalid_demo_request' }, { status: 400 })\n  }\n  if (!isDemoEntryRequest(body)) {\n    return NextResponse.json({ error: 'invalid_demo_request' }, { status: 400 })\n  }\n\n  const response = NextResponse.json({\n    mode: 'fixed-demo',\n    user: await getCurrentUser(),\n  })\n  response.cookies.set(DEMO_COOKIE, 'demo-admin', DEMO_COOKIE_OPTIONS)\n  return response\n}\n\nexport async function DELETE() {\n  const response = NextResponse.json({ mode: 'signed-out' })\n  response.cookies.set(DEMO_COOKIE, 'demo-signed-out', DEMO_COOKIE_OPTIONS)\n  return response\n}\n\nfunction isDemoEntryRequest(value: unknown): boolean {\n  if (!value || typeof value !== 'object' || Array.isArray(value)) return false\n  const record = value as Record<string, unknown>\n  return Object.keys(record).length === 1 && record['mode'] === 'fixed-demo'\n}\n// projectos-prefab-demo: route google provider through the auth handler\n",
+        "after": "import { NextResponse } from 'next/server'\nimport { getCurrentUser } from '@/lib/auth'\n\nconst DEMO_COOKIE = 'auth-token'\nconst DEMO_COOKIE_OPTIONS = {\n  httpOnly: true,\n  path: '/',\n  sameSite: 'lax',\n} as const\n\nexport async function GET() {\n  return NextResponse.json({\n    mode: 'fixed-demo',\n    user: await getCurrentUser(),\n  })\n}\n\nexport async function POST(request: Request) {\n  const mediaType = request.headers\n    .get('content-type')\n    ?.toLowerCase()\n    .split(';', 1)[0]\n    ?.trim()\n  if (mediaType !== 'application/json') {\n    return NextResponse.json(\n      { error: 'unsupported_media_type' },\n      { status: 415 },\n    )\n  }\n\n  let body: unknown\n  try {\n    body = await request.json()\n  } catch {\n    return NextResponse.json({ error: 'invalid_demo_request' }, { status: 400 })\n  }\n  if (!isDemoEntryRequest(body)) {\n    return NextResponse.json({ error: 'invalid_demo_request' }, { status: 400 })\n  }\n\n  const response = NextResponse.json({\n    mode: 'fixed-demo',\n    user: await getCurrentUser(),\n  })\n  response.cookies.set(DEMO_COOKIE, 'demo-admin', DEMO_COOKIE_OPTIONS)\n  return response\n}\n\nexport async function DELETE() {\n  const response = NextResponse.json({ mode: 'signed-out' })\n  response.cookies.set(DEMO_COOKIE, 'demo-signed-out', DEMO_COOKIE_OPTIONS)\n  return response\n}\n\nfunction isDemoEntryRequest(value: unknown): boolean {\n  if (!value || typeof value !== 'object' || Array.isArray(value)) return false\n  const record = value as Record<string, unknown>\n  return Object.keys(record).length === 1 && record['mode'] === 'fixed-demo'\n}\n// projectos-prefab-demo: route google provider through the auth handler\n// projectos-prefab-demo: normalize provider callback at the route\n"
+      },
+      {
+        "path": "lib/auth.ts",
+        "changeType": "modify",
+        "before": "interface Session {\n  userId: string\n  activeTeamId: string\n  token: string\n}\n\ninterface User {\n  id: string\n  name: string\n  email: string\n  role: string\n}\n\nexport async function getSession(): Promise<Session | null> {\n  return { userId: 'user_1', activeTeamId: 'team_1', token: 'mock-token' }\n}\n\nexport async function getCurrentUser(): Promise<User> {\n  return { id: 'user_1', name: 'Demo User', email: 'demo@example.com', role: 'admin' }\n}\n\nexport async function requireAdmin(): Promise<void> {\n  const user = await getCurrentUser()\n  if (user.role !== 'admin') throw new Error('Unauthorized')\n}\n\nexport async function validateToken(request: Request): Promise<User | null> {\n  if (request.headers.get('authorization') !== 'Bearer mock-token') return null\n  return getCurrentUser()\n}\n// projectos-prefab-demo: google provider configuration\n",
+        "after": "interface Session {\n  userId: string\n  activeTeamId: string\n  token: string\n}\n\ninterface User {\n  id: string\n  name: string\n  email: string\n  role: string\n}\n\nexport async function getSession(): Promise<Session | null> {\n  return { userId: 'user_1', activeTeamId: 'team_1', token: 'mock-token' }\n}\n\nexport async function getCurrentUser(): Promise<User> {\n  return { id: 'user_1', name: 'Demo User', email: 'demo@example.com', role: 'admin' }\n}\n\nexport async function requireAdmin(): Promise<void> {\n  const user = await getCurrentUser()\n  if (user.role !== 'admin') throw new Error('Unauthorized')\n}\n\nexport async function validateToken(request: Request): Promise<User | null> {\n  if (request.headers.get('authorization') !== 'Bearer mock-token') return null\n  return getCurrentUser()\n}\n// projectos-prefab-demo: google provider configuration\n// projectos-prefab-demo: normalize provider callback in the helper\n"
+      }
+    ]
+  },
+  "applyResult": {
+    "runId": "run_auth_bugfix",
+    "applied": false,
+    "filesChanged": [
+      "app/api/auth/route.ts",
+      "lib/auth.ts"
+    ],
+    "verificationStatus": "not_run"
+  }
+}

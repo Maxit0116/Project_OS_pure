@@ -1,0 +1,53 @@
+.fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  height: 100%;
+  padding: var(--space-xl);
+  text-align: center;
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.message {
+  margin: 0;
+  max-width: 520px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.btn,
+.btnPrimary {
+  padding: 8px 14px;
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.btn {
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 1px solid var(--glass-border);
+}
+
+.btnPrimary {
+  color: #fff;
+  background: var(--color-accent);
+  border: 1px solid transparent;
+}

@@ -1,0 +1,98 @@
+---
+description: Apple Liquid Glass — two tiers (true lens + frost chrome), navigation only
+globs: projectos/workbench/**/*.{tsx,css}
+alwaysApply: false
+---
+
+# Liquid Glass UI
+
+Read `.cursor/skills/apple-inspired-ui/SKILL.md` and [true-glass-engine.md](../skills/apple-inspired-ui/references/true-glass-engine.md).
+
+> **Blur isn't glass.** ([Outpace Studios](https://glass.outpacestudios.com/))  
+> `backdrop-filter: blur()` = **frost chrome** (Tier A). Real liquid glass = **edge refraction** via SVG displacement (Tier B).
+
+## Rule #1: Navigation Only
+
+Glass (frost or lens) is **only** for: top bar, side panel chrome, tab bars, toolbars, menus, command palette, toasts, drawer scrim, secondary controls.
+
+**Never** on: chat bubbles, timeline cards, graph nodes, tree rows, diff/code, harness cards, list items.
+
+## Rule #2: Two Tiers
+
+| Tier | CSS / component | Label in code |
+|------|-----------------|---------------|
+| **A — Frost chrome** | `backdrop-filter` + `--glass-bg-*` tokens | `frost-chrome` |
+| **B — True lens** | `GlassScene` + `GlassLens` + `feDisplacementMap` | `glass-lens` |
+
+```tsx
+// ✅ Tier B — hero overlay (command palette, dropdown)
+<GlassScene content={<AmbientBackdrop />}>
+  {open && <GlassLens bounds={bounds}>{items}</GlassLens>}
+</GlassScene>
+
+// ✅ Tier A — bulk side panel (performance)
+.panel {
+  background: var(--glass-bg-clear);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+}
+
+// ❌ Tier B trap — SVG displacement via backdrop-filter (Safari/Firefox = flat frost only)
+.menu { backdrop-filter: blur(20px) url(#glass-filter); }
+
+// ✅ Content card — solid, no blur
+.stepCard {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--glass-border-subtle);
+}
+```
+
+## Tier B Requirements (True Glass)
+
+When implementing hero overlays:
+
+1. **Refract a copy**, not live backdrop — `filter` on counter-positioned copy ([Outpace](https://glass.outpacestudios.com/))
+2. Displacement map from **Snell's law** squircle dome — not painted gradient
+3. `feImage` href = **`blob:` URL** — never `data:` (WebKit silent fail)
+4. Filter `colorInterpolationFilters="sRGB"`
+5. Clip copy to **lens box** (Safari size cap)
+6. **Fresh filter `id`** per animated rebuild (Safari cache)
+7. Chromium: optional chromatic fringe passes; Safari: single pass
+
+Recipe: `.cursor/skills/apple-inspired-ui/components/glass-lens.md`
+
+## Tier A Frost Tokens
+
+| Style | Token | When |
+|-------|-------|------|
+| regular | `--glass-bg-regular` | Toolbars, side panels |
+| clear | `--glass-bg-clear` | Over `--ambient-mesh` backgrounds |
+| identity | solid `--color-bg-elevated` | `prefers-reduced-transparency` |
+
+Place `--ambient-mesh` behind frost so blur has visible content to sample.
+
+## GlassEffectContainer (Tier A)
+
+Nearby frost elements share one parent blur. Max 2 blurred layers per viewport column.
+
+## Interactive
+
+- Primary: solid accent (glassProminent) — no blur, no lens
+- Secondary: solid transparent inside glass container
+- `:active` → `scale(0.98)`; `:focus-visible` → `--glass-focus-ring`
+- Min hit target 44×32px on icon buttons
+
+## Accessibility
+
+```css
+@media (prefers-reduced-transparency: reduce) {
+  .glass-nav, .glass-lens .refractCopy {
+    backdrop-filter: none;
+    filter: none;
+  }
+  .glass-nav, .glass-lens {
+    background: var(--color-bg-elevated);
+  }
+}
+```
+
+Tier B: drop refraction entirely under reduced-transparency; UI stays on opaque panel.

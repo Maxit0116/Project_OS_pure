@@ -1,0 +1,62 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--glass-border-subtle);
+  border-radius: var(--radius-glass-sm);
+  background: var(--color-bg-elevated);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.header h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+}
+
+.phase {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.progressStep {
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-muted);
+}
+
+.progressActive {
+  color: var(--color-text-primary);
+  background: var(--color-accent-muted);
+}
+
+.section h4 {
+  margin: 0 0 6px;
+  font-size: var(--font-size-sm);
+}
+
+.section p,
+.section ol {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-sm);
+}

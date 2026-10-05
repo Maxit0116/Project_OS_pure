@@ -1,0 +1,30 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "meetings": [
+    {
+      "id": "meeting_login_followup",
+      "title": "Login follow-up standup",
+      "rawTranscript": "Alice: We decided to keep Google OAuth for the sample login. Bob: New feature: session timeout reminder on feat_login.",
+      "proposedDecisions": [
+        {
+          "tempRef": "meet_dec_1",
+          "title": "Keep Google OAuth",
+          "choice": "keep Google OAuth for the sample login",
+          "reasons": ["Extracted from imported meeting transcript"],
+          "relatedNodeIds": ["feat_login"]
+        }
+      ],
+      "proposedNodes": [
+        {
+          "tempRef": "meet_node_1",
+          "name": "session timeout reminder",
+          "summary": "Proposed from imported meeting transcript; create only after human confirm.",
+          "suggestedParentId": "feat_login"
+        }
+      ],
+      "status": "draft",
+      "createdAt": "2026-08-19T08:00:00.000Z"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+.root {
+  flex-shrink: 0;
+  padding: var(--space-sm) var(--space-md) var(--space-xs);
+  border-bottom: 1px solid var(--glass-border-subtle);
+}
+
+.title {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.titleText {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.titleTextScrollable {
+  transform: translateX(0);
+  transition-property: transform;
+  transition-timing-function: ease-out;
+  will-change: transform;
+}
+
+.titleTextScrolling {
+  width: auto;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  transition-timing-function: linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .titleTextScrollable {
+    transition: none;
+    will-change: auto;
+  }
+}

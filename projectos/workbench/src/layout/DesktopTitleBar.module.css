@@ -1,0 +1,69 @@
+/* Tier A frost-chrome — dedicated macOS drag strip; native traffic lights sit on the left. */
+.titleBar {
+  height: var(--titlebar-height);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md);
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: calc(var(--z-workbench-chrome) + 1);
+  background: color-mix(in srgb, var(--color-bg-elevated) 72%, transparent);
+  backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
+  border-bottom: 1px solid var(--border-window-chrome);
+  box-shadow: var(--window-rim-chrome);
+}
+
+.titleBarWindowed {
+  padding-left: 78px;
+}
+
+.leading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.centerLabel {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: min(42vw, 360px);
+  pointer-events: none;
+  -webkit-app-region: drag;
+}
+
+.label {
+  min-width: 0;
+  flex-shrink: 1;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  text-align: center;
+}
+
+.spacer {
+  flex: 1;
+  min-width: var(--space-sm);
+  -webkit-app-region: drag;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .titleBar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--color-bg-elevated);
+  }
+}

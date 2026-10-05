@@ -1,0 +1,43 @@
+{
+  "version": "0.1.0",
+  "errorId": "err_auth_provider_callback",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "source": "demo",
+  "rawError": "Error: OAuth provider callback failed while resolving /api/auth for the login flow.",
+  "businessNodeId": "feat_login",
+  "technicalFiles": ["app/api/auth/route.ts", "lib/auth.ts", "app/login/page.tsx"],
+  "hypotheses": [
+    {
+      "id": "hyp_retry_button",
+      "summary": "The login page could retry the failed callback request.",
+      "confidence": 0.24,
+      "evidence": [
+        "The visible error starts after the login action.",
+        "The route handler still fails when called directly."
+      ],
+      "rejected": true,
+      "rejectionReason": "A retry hides the symptom but does not repair the provider callback configuration."
+    },
+    {
+      "id": "hyp_provider_callback",
+      "summary": "The auth route and shared auth helper disagree about provider callback handling.",
+      "confidence": 0.88,
+      "evidence": [
+        "The stack points at app/api/auth/route.ts.",
+        "lib/auth.ts owns the provider configuration used by the route.",
+        "The User Login graph node redirects to profile and dashboard after auth succeeds."
+      ]
+    }
+  ],
+  "chosenRootCauseId": "hyp_provider_callback",
+  "proposedFix": {
+    "summary": "Normalize provider callback handling in the auth route and shared auth helper instead of adding a UI retry.",
+    "touchedFiles": ["app/api/auth/route.ts", "lib/auth.ts"],
+    "patchKind": "root_cause"
+  },
+  "verification": {
+    "status": "demo_passed",
+    "command": "npm run build",
+    "outputSummary": "Presentation fixture marks the auth route and helper repair as verified."
+  }
+}

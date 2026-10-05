@@ -1,0 +1,57 @@
+.card {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--glass-border-subtle);
+  border-radius: var(--radius-glass-sm);
+  background: var(--color-bg-elevated);
+}
+
+.rejected {
+  opacity: 0.75;
+  border-style: dashed;
+}
+
+.chosen {
+  border-color: var(--color-success);
+  background: var(--color-success-subtle);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.summary {
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  flex: 1;
+}
+
+.confidence {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.rejectedLabel {
+  font-size: var(--font-size-xs);
+  color: var(--color-error);
+  margin-bottom: 6px;
+}
+
+.chosenLabel {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-success);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.evidence {
+  margin: 0;
+  padding-left: 16px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}

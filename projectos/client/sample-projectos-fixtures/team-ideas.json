@@ -1,0 +1,17 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "ideas": [
+    {
+      "id": "idea_regression_from_logs",
+      "rawText": "Should AI generate regression tests from error logs?",
+      "problem": "Demo failures are replayed manually",
+      "proposedSolution": "Turn harness evidence into a regression test",
+      "potentialBenefit": "Faster follow-up after a seeded bug",
+      "relatedNodeIds": ["feat_login"],
+      "suggestedImplementation": "Attach a test artifact to feat_login after harness verification",
+      "createdBy": "person_alice",
+      "createdAt": "2026-08-18T09:00:00.000Z"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "name": "projectos-desktop",
+  "version": "0.1.0",
+  "description": "Project OS desktop app (Electron)",
+  "main": "./out/main/index.js",
+  "private": true,
+  "scripts": {
+    "postinstall": "node scripts/ensure-native-binaries.js",
+    "predev": "node scripts/ensure-native-binaries.js",
+    "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "rebuild:native": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "diff": "^9.0.0",
+    "node-pty": "^1.0.0",
+    "typescript-language-server": "^4.3.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.0"
+  }
+}

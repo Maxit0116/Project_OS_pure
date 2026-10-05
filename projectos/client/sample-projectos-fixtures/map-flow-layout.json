@@ -1,0 +1,21 @@
+{
+  "version": "0.1.0",
+  "projectId": "a41ce3a4-8ba8-43ec-9ad6-285811867d28",
+  "trunk": [
+    { "nodeId": "actor_member" },
+    { "nodeId": "system_saas_starter" },
+    { "nodeId": "container_next_web" },
+    { "nodeId": "component_route_api" },
+    { "nodeId": "feat_login" }
+  ],
+  "branches": [
+    {
+      "fromNodeId": "container_next_web",
+      "steps": [
+        { "nodeId": "feat_profile", "laneOffset": 2 },
+        { "nodeId": "feat_checkout", "laneOffset": 4 }
+      ]
+    }
+  ],
+  "updatedAt": "2026-07-26T09:00:00.000Z"
+}

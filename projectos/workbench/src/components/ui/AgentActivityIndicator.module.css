@@ -1,0 +1,25 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--color-text-secondary);
+}
+
+.inline {
+  font-size: var(--font-size-sm);
+}
+
+.pill {
+  width: fit-content;
+  max-width: 100%;
+  padding: 5px var(--space-lg) 5px 5px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border-subtle);
+  background: var(--color-bg-muted);
+  font-size: var(--font-size-md);
+}
+
+.label {
+  min-width: 0;
+  line-height: 1.4;
+}

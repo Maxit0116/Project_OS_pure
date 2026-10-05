@@ -1,0 +1,25 @@
+.layer {
+  position: fixed;
+  inset: 0;
+  /* Above ambient background, below panel chrome (z-index 3). */
+  z-index: 2;
+  overflow: visible;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.layerPassive {
+  pointer-events: none;
+}
+
+.bleedRoot {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+
+.layer > * {
+  width: 100%;
+  height: 100%;
+}

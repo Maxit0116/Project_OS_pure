@@ -1,0 +1,41 @@
+.root {
+  min-height: 100vh;
+  outline: none;
+}
+
+.brandMark {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  color: #c4b5fd;
+  background-color: rgba(99, 102, 241, 0.24);
+  font-weight: 900;
+  text-align: center;
+  line-height: 42px;
+}
+
+.subtitle {
+  margin: 0 0 14px;
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.link {
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: #cbd5e1;
+  text-decoration: none;
+  background-color: rgba(148, 163, 184, 0.08);
+}
+
+.activeLink {
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: #ffffff;
+  text-decoration: none;
+  background-color: rgba(148, 163, 184, 0.08);
+  border-left: 3px solid #818cf8;
+}
