@@ -158,6 +158,7 @@ describe("openWorkspace structure graph AI scan", () => {
     const api = new ProjectOSLocalApi({ modelGateway: gateway });
 
     const project = await api.openWorkspace(root);
+    expect(project.workspaceRoot).toBe(root);
     const upgraded = await api.getProjectGraph(project.projectId);
     const tree = await api.getSemanticTree(project.projectId);
 

@@ -3,7 +3,11 @@ import { FolderOpen, GitBranch } from 'lucide-react'
 import { useI18n } from '../i18n'
 import { useWorkbenchStore } from '../state/workbenchStore'
 import { isDesktopApp } from '../data/clientMode'
-import { readRecentWorkspaces, recentWorkspaceLocation } from '../state/recentWorkspaces'
+import {
+  MAX_RECENT_WORKSPACES,
+  readRecentWorkspaces,
+  recentWorkspaceLocation,
+} from '../state/recentWorkspaces'
 import type { ThemePreference } from '../styles/theme'
 import Button from './ui/Button'
 import styles from './WelcomeScreen.module.css'
@@ -14,7 +18,7 @@ import {
 } from './welcomeDialog'
 
 const THEME_CYCLE: ThemePreference[] = ['system', 'dark', 'light']
-const RECENT_PREVIEW = 5
+
 
 interface Props {
   loading: boolean
@@ -38,8 +42,7 @@ export default function WelcomeScreen({
   const [cloneUrl, setCloneUrl] = useState('')
   const [cloneError, setCloneError] = useState<string | null>(null)
   const [cloning, setCloning] = useState(false)
-  const recent = readRecentWorkspaces()
-  const [showAllRecent, setShowAllRecent] = useState(false)
+  const recent = readRecentWorkspaces().slice(0, MAX_RECENT_WORKSPACES)
   const desktopApp = isDesktopApp()
   const busy = loading || cloning
 
@@ -101,7 +104,6 @@ export default function WelcomeScreen({
     return () => closeWelcomeImportDialog(dialog)
   }, [dialogMode])
 
-  const visibleRecent = showAllRecent ? recent : recent.slice(0, RECENT_PREVIEW)
   const status = cloning ? ts('welcome.cloning') : loading ? (loadingMessage ?? ts('welcome.opening')) : null
   const welcomeError =
     error == null
@@ -160,23 +162,12 @@ export default function WelcomeScreen({
         <section className={styles.recent} aria-label={ts('welcome.recentProjects')}>
           <div className={styles.recentHeader}>
             <span>{ts('welcome.recentProjects')}</span>
-            {recent.length > RECENT_PREVIEW && (
-              <button
-                type="button"
-                className={styles.viewAll}
-                onClick={() => setShowAllRecent((open) => !open)}
-              >
-                {showAllRecent
-                  ? ts('welcome.showLess')
-                  : ts('welcome.viewAll').replace('{count}', String(recent.length))}
-              </button>
-            )}
           </div>
-          {visibleRecent.length === 0 ? (
+          {recent.length === 0 ? (
             <p className={styles.recentEmpty}>{ts('welcome.recentEmpty')}</p>
           ) : (
             <ul className={styles.recentList}>
-              {visibleRecent.map((item) => (
+              {recent.map((item) => (
                 <li key={item.path}>
                   <button
                     type="button"

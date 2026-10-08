@@ -14,10 +14,10 @@ import {
 import type { C4Boundary, C4Diagram, C4DiagramInput, C4DiagramNode } from '../types'
 import { layoutCodeNodesByImports } from './layoutCodeNodes'
 
-const BOUNDARY_PAD = 48
-const INNER_PAD_X = 28
-const INNER_PAD_TOP = 56
-const INNER_PAD_BOTTOM = 28
+const BOUNDARY_PAD = 56
+const INNER_PAD_X = 48
+const INNER_PAD_TOP = 72
+const INNER_PAD_BOTTOM = 48
 const MEMBER_LINE = 14
 const BASE_CODE_HEIGHT = 88
 const MAX_MEMBERS = 6

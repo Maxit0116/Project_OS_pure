@@ -10,15 +10,16 @@ import {
 
 const BOUNDARY_ORIGIN = { x: 48, y: 48 }
 /** Inner padding: left/right around containers; top leaves room for the boundary label. */
-const INNER_PAD_X = 32
-const INNER_PAD_TOP = 56
-const INNER_PAD_BOTTOM = 32
+const INNER_PAD_X = 56
+const INNER_PAD_TOP = 72
+const INNER_PAD_BOTTOM = 48
 const COLS = 3
-const GAP_X = 28
-const GAP_Y = 28
-const EXTERNAL_GAP = 48
-const MIN_BOUNDARY_WIDTH = 420
-const MIN_BOUNDARY_HEIGHT = 260
+/** Wide gaps so orthogonal edges + labels clear neighbouring boxes. */
+const GAP_X = 96
+const GAP_Y = 88
+const EXTERNAL_GAP = 120
+const MIN_BOUNDARY_WIDTH = 520
+const MIN_BOUNDARY_HEIGHT = 320
 
 function resolveSystem(input: C4DiagramInput): FunctionalNode | undefined {
   const parentId = input.scope?.parentId

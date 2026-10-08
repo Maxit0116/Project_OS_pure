@@ -12,15 +12,15 @@ import {
 /** Sparse horizontal gaps between classic C4 context columns. */
 const COL_X = {
   person: 80,
-  system: 420,
-  external: 820,
+  system: 480,
+  external: 960,
 } as const
 
 /** Vertical gap between stacked nodes in a column. */
-const GAP_Y = 64
+const GAP_Y = 96
 
 /** Top padding after vertical centering. */
-const TOP_Y = 80
+const TOP_Y = 96
 
 /**
  * System Context diagram: people left, software system center, externals right.

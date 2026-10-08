@@ -1,18 +1,25 @@
 import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js'
 import type { C4Boundary, C4Diagram, C4DiagramNode } from './types'
 import { computeBounds, emptyBounds } from './diagramShared'
+import { fitEdgeLabel, horizontalGap, verticalGap } from './edgeLabelFit'
+import { formatC4EdgeLabel } from '../edgePresentation'
+import { minNodeGap, type RouteRect } from './orthogonalRoute'
 
 const elk = new ELK()
 
+/** Generous padding so orthogonal edges + labels have room inside boundaries. */
 const BOUNDARY_PAD = {
-  left: 32,
-  right: 32,
-  top: 56,
-  bottom: 32,
+  left: 56,
+  right: 56,
+  top: 72,
+  bottom: 48,
 } as const
 
+/** Target clear gap between node boxes after layout (room for labels + bends). */
+const TARGET_NODE_GAP = 96
+
 /**
- * Re-layout a C4 diagram with ELK hierarchical packing.
+ * Re-layout a C4 diagram with ELK hierarchical packing + orthogonal routing space.
  * Falls back to the input diagram (grid positions) on failure.
  */
 export async function applyElkLayoutToDiagram(
@@ -22,9 +29,9 @@ export async function applyElkLayoutToDiagram(
 
   try {
     const laidOut = await layoutWithElk(diagram)
-    return laidOut
+    return separateNodesForLabels(expandIfCramped(laidOut))
   } catch {
-    return diagram
+    return separateNodesForLabels(expandIfCramped(diagram))
   }
 }
 
@@ -44,25 +51,19 @@ export async function layoutWithElk(diagram: C4Diagram): Promise<C4Diagram> {
           boundary.position.y + boundary.height + 1
       if (inside) insideIds.add(node.id)
     }
-    // Prefer children that were placed inside the boundary by builders.
     if (insideIds.size === 0) {
       for (const node of diagram.nodes) {
         if (
-          node.level === 'container' ||
-          node.level === 'component' ||
-          node.level === 'code' ||
-          node.elementType === 'data_store' ||
-          node.elementType === 'container' ||
-          node.elementType === 'component'
+          node.elementType !== 'external_system' &&
+          node.elementType !== 'person' &&
+          (node.level === 'container' ||
+            node.level === 'component' ||
+            node.level === 'code' ||
+            node.elementType === 'data_store' ||
+            node.elementType === 'container' ||
+            node.elementType === 'component')
         ) {
-          // Heuristic: non-external/person are inside when a boundary exists
-          // at container/component/code levels.
-          if (
-            node.elementType !== 'external_system' &&
-            node.elementType !== 'person'
-          ) {
-            insideIds.add(node.id)
-          }
+          insideIds.add(node.id)
         }
       }
     }
@@ -80,10 +81,14 @@ export async function layoutWithElk(diagram: C4Diagram): Promise<C4Diagram> {
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': 'RIGHT',
-      'elk.spacing.nodeNode': '48',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '72',
-      'elk.padding': '[top=24,left=24,bottom=24,right=24]',
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.spacing.nodeNode': '100',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '160',
+      'elk.spacing.edgeNode': '48',
+      'elk.spacing.edgeEdge': '28',
+      'elk.padding': '[top=40,left=40,bottom=40,right=40]',
       'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
     },
     children: [],
     edges: diagram.edges.map((edge) => ({
@@ -99,8 +104,10 @@ export async function layoutWithElk(diagram: C4Diagram): Promise<C4Diagram> {
       labels: [{ text: boundary.label }],
       layoutOptions: {
         'elk.padding': `[top=${BOUNDARY_PAD.top},left=${BOUNDARY_PAD.left},bottom=${BOUNDARY_PAD.bottom},right=${BOUNDARY_PAD.right}]`,
-        'elk.spacing.nodeNode': '36',
-        'elk.layered.spacing.nodeNodeBetweenLayers': '48',
+        'elk.spacing.nodeNode': '88',
+        'elk.layered.spacing.nodeNodeBetweenLayers': '120',
+        'elk.spacing.edgeNode': '40',
+        'elk.edgeRouting': 'ORTHOGONAL',
       },
       children: insideNodes.map((node) => elkLeaf(node)),
     })
@@ -140,8 +147,8 @@ export async function layoutWithElk(diagram: C4Diagram): Promise<C4Diagram> {
         {
           ...boundary,
           position: { x: compound.x ?? 0, y: compound.y ?? 0 },
-          width: Math.max(compound.width ?? boundary.width, 200),
-          height: Math.max(compound.height ?? boundary.height, 160),
+          width: Math.max(compound.width ?? boundary.width, 280),
+          height: Math.max(compound.height ?? boundary.height, 200),
         },
       ]
     } else if (insideNodes.length > 0) {
@@ -167,6 +174,239 @@ export async function layoutWithElk(diagram: C4Diagram): Promise<C4Diagram> {
   return {
     ...diagram,
     nodes: placedNodes,
+    boundaries,
+    bounds: frame.length > 0 ? computeBounds(frame) : emptyBounds(),
+  }
+}
+
+/**
+ * If nodes are still closer than TARGET_NODE_GAP, uniformly expand around the
+ * centroid so orthogonal edges and labels have breathing room.
+ */
+export function expandIfCramped(diagram: C4Diagram): C4Diagram {
+  if (diagram.nodes.length < 2) return diagram
+
+  const rects: RouteRect[] = diagram.nodes.map((node) => ({
+    id: node.id,
+    x: node.position.x,
+    y: node.position.y,
+    width: node.width,
+    height: node.height,
+  }))
+  const gap = minNodeGap(rects)
+  if (gap >= TARGET_NODE_GAP) return diagram
+
+  const scale = Math.min(2.2, Math.max(1.15, (TARGET_NODE_GAP + 24) / Math.max(gap, 12)))
+  const cx =
+    diagram.nodes.reduce((sum, node) => sum + node.position.x + node.width / 2, 0) /
+    diagram.nodes.length
+  const cy =
+    diagram.nodes.reduce((sum, node) => sum + node.position.y + node.height / 2, 0) /
+    diagram.nodes.length
+
+  const nodes = diagram.nodes.map((node) => {
+    const nx = node.position.x + node.width / 2
+    const ny = node.position.y + node.height / 2
+    return {
+      ...node,
+      position: {
+        x: cx + (nx - cx) * scale - node.width / 2,
+        y: cy + (ny - cy) * scale - node.height / 2,
+      },
+    }
+  })
+
+  const boundaries = diagram.boundaries.map((boundary) => {
+    const bx = boundary.position.x + boundary.width / 2
+    const by = boundary.position.y + boundary.height / 2
+    const width = boundary.width * scale
+    const height = boundary.height * scale
+    return {
+      ...boundary,
+      position: {
+        x: cx + (bx - cx) * scale - width / 2,
+        y: cy + (by - cy) * scale - height / 2,
+      },
+      width,
+      height,
+    }
+  })
+
+  // Recompute boundary to tightly wrap inside nodes if we have a single boundary.
+  if (boundaries.length === 1) {
+    const boundary = boundaries[0]!
+    const inside = nodes.filter((node) => {
+      const nc = {
+        x: node.position.x + node.width / 2,
+        y: node.position.y + node.height / 2,
+      }
+      return (
+        nc.x >= boundary.position.x &&
+        nc.x <= boundary.position.x + boundary.width &&
+        nc.y >= boundary.position.y &&
+        nc.y <= boundary.position.y + boundary.height
+      )
+    })
+    if (inside.length > 0) {
+      const bounds = computeBounds(inside, 0)
+      boundaries[0] = {
+        ...boundary,
+        position: {
+          x: bounds.minX - BOUNDARY_PAD.left,
+          y: bounds.minY - BOUNDARY_PAD.top,
+        },
+        width: bounds.width + BOUNDARY_PAD.left + BOUNDARY_PAD.right,
+        height: bounds.height + BOUNDARY_PAD.top + BOUNDARY_PAD.bottom,
+      }
+    }
+  }
+
+  const frame = [...nodes, ...boundaries]
+  return {
+    ...diagram,
+    nodes,
+    boundaries,
+    bounds: frame.length > 0 ? computeBounds(frame) : emptyBounds(),
+  }
+}
+
+/**
+ * When an edge label needs a clear corridor, push endpoints apart:
+ * - vertically (for wrap / detour lanes)
+ * - horizontally (so the mid segment can host a centered label without
+ *   covering either node or sibling wires)
+ */
+export function separateNodesForLabels(diagram: C4Diagram): C4Diagram {
+  if (diagram.nodes.length < 2 || diagram.edges.length === 0) return diagram
+
+  const positions = new Map(
+    diagram.nodes.map((node) => [node.id, { ...node.position }]),
+  )
+  const sizeById = new Map(
+    diagram.nodes.map((node) => [
+      node.id,
+      { width: node.width, height: node.height },
+    ]),
+  )
+
+  let changed = false
+  // Multiple passes so chains of edges can cascade spacing.
+  for (let pass = 0; pass < 4; pass += 1) {
+    let passChanged = false
+    for (const edge of diagram.edges) {
+      const sourcePos = positions.get(edge.source)
+      const targetPos = positions.get(edge.target)
+      const sourceSize = sizeById.get(edge.source)
+      const targetSize = sizeById.get(edge.target)
+      if (!sourcePos || !targetPos || !sourceSize || !targetSize) continue
+
+      const sourceRect: RouteRect = {
+        id: edge.source,
+        x: sourcePos.x,
+        y: sourcePos.y,
+        width: sourceSize.width,
+        height: sourceSize.height,
+      }
+      const targetRect: RouteRect = {
+        id: edge.target,
+        x: targetPos.x,
+        y: targetPos.y,
+        width: targetSize.width,
+        height: targetSize.height,
+      }
+      const labelText = formatC4EdgeLabel(
+        edge.label,
+        edge.technology,
+        edge.relation,
+      )
+      if (!labelText) continue
+
+      const fit = fitEdgeLabel(labelText, sourceRect, targetRect)
+      const hGap = horizontalGap(sourceRect, targetRect)
+      const vGap = verticalGap(sourceRect, targetRect)
+      const sourceCenterX = sourceRect.x + sourceRect.width / 2
+      const targetCenterX = targetRect.x + targetRect.width / 2
+      const sourceCenterY = sourceRect.y + sourceRect.height / 2
+      const targetCenterY = targetRect.y + targetRect.height / 2
+
+      // Prefer a horizontal corridor at least as wide as the label box.
+      const neededH = fit.boxWidth + 48
+      if (hGap > 0 && hGap < neededH) {
+        const delta = neededH - hGap
+        if (targetCenterX >= sourceCenterX) {
+          targetPos.x += delta
+        } else {
+          sourcePos.x += delta
+        }
+        passChanged = true
+        changed = true
+        continue
+      }
+
+      // Vertical room for centered labels + optional detour lanes above/below.
+      const neededV = Math.max(
+        fit.requestedVerticalGap,
+        fit.boxHeight + 56,
+        fit.needsVerticalSeparation ? fit.boxHeight + 72 : 0,
+      )
+      if (neededV > 0 && vGap < neededV) {
+        const delta = neededV - vGap
+        if (targetCenterY >= sourceCenterY) {
+          targetPos.y += delta
+        } else {
+          sourcePos.y += delta
+        }
+        passChanged = true
+        changed = true
+      }
+    }
+    if (!passChanged) break
+  }
+
+  if (!changed) return diagram
+
+  const nodes = diagram.nodes.map((node) => {
+    const position = positions.get(node.id)
+    return position ? { ...node, position } : node
+  })
+
+  const boundaries =
+    diagram.boundaries.length === 1
+      ? (() => {
+          const boundary = diagram.boundaries[0]!
+          const inside = nodes.filter((node) => {
+            // Keep nodes that were previously near the boundary centroid.
+            const prev = diagram.nodes.find((candidate) => candidate.id === node.id)
+            if (!prev) return false
+            const wasInside =
+              prev.position.x + prev.width / 2 >= boundary.position.x &&
+              prev.position.x + prev.width / 2 <=
+                boundary.position.x + boundary.width &&
+              prev.position.y + prev.height / 2 >= boundary.position.y &&
+              prev.position.y + prev.height / 2 <=
+                boundary.position.y + boundary.height
+            return wasInside
+          })
+          if (inside.length === 0) return diagram.boundaries
+          const bounds = computeBounds(inside, 0)
+          return [
+            {
+              ...boundary,
+              position: {
+                x: bounds.minX - BOUNDARY_PAD.left,
+                y: bounds.minY - BOUNDARY_PAD.top,
+              },
+              width: bounds.width + BOUNDARY_PAD.left + BOUNDARY_PAD.right,
+              height: bounds.height + BOUNDARY_PAD.top + BOUNDARY_PAD.bottom,
+            },
+          ]
+        })()
+      : diagram.boundaries
+
+  const frame = [...nodes, ...boundaries]
+  return {
+    ...diagram,
+    nodes,
     boundaries,
     bounds: frame.length > 0 ? computeBounds(frame) : emptyBounds(),
   }

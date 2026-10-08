@@ -20,6 +20,9 @@ import { useFunctionMap } from './FunctionMapContext'
 import FeatureNode, { isPurposeFirstArchitectureLevel } from './FeatureNode'
 import ArchitectureLayerNode from './ArchitectureLayerNode'
 import FloatingStraightEdge from './FloatingStraightEdge'
+import C4OrthogonalEdge from './c4/C4OrthogonalEdge'
+import { fitEdgeLabel } from './c4/edgeLabelFit'
+import { routeAllOrthogonalEdges } from './c4/orthogonalRoute'
 import { mapArtifactNodeTypes } from './mapArtifactNodeTypes'
 import C4FlowNode from './c4/C4FlowNode'
 import C4BoundaryFlowNode from './c4/C4BoundaryFlowNode'
@@ -215,7 +218,26 @@ const nodeTypes = {
 
 /** Dashed C4 system/container frame — below feature nodes. */
 const Z_C4_BOUNDARY = 1
-const edgeTypes = { floatingStraight: FloatingStraightEdge }
+const edgeTypes = {
+  floatingStraight: FloatingStraightEdge,
+  c4Orthogonal: C4OrthogonalEdge,
+}
+
+function parallelEdgeIndex(
+  edges: Array<{ id: string; source: string; target: string }>,
+  edgeId: string,
+  source: string,
+  target: string,
+): { parallelIndex: number; parallelCount: number } {
+  const key = (a: string, b: string) => (a < b ? `${a}::${b}` : `${b}::${a}`)
+  const pair = key(source, target)
+  const siblings = edges.filter((edge) => key(edge.source, edge.target) === pair)
+  const parallelIndex = Math.max(
+    0,
+    siblings.findIndex((edge) => edge.id === edgeId),
+  )
+  return { parallelIndex, parallelCount: Math.max(1, siblings.length) }
+}
 
 // Allow nodes to grow past native size so the graph fills the panel instead of
 // sitting small in the middle. The edge-aware layout already matches the panel
@@ -2536,7 +2558,59 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         matchingIds && (!matchingIds.has(sourceId) || !matchingIds.has(targetId)) ? 0.2 : 1
       return focusOpacity * searchOpacity
     }
-    const graphEdges = displayEdges.map((e) => {
+    const c4Obstacles = useC4Visuals
+      ? displayFeatureNodes.map((node) => {
+          const c4 = c4NodeById?.get(node.id)
+          const pos = positionsById[node.id] ?? c4?.position ?? { x: 0, y: 0 }
+          return {
+            id: node.id,
+            x: pos.x,
+            y: pos.y,
+            width: c4?.width ?? NODE_WIDTH,
+            height: c4?.height ?? NODE_HEIGHT,
+          }
+        })
+      : undefined
+    const c4ObstacleById = c4Obstacles
+      ? new Map(c4Obstacles.map((rect) => [rect.id, rect]))
+      : null
+    const c4Routes =
+      useC4Visuals && c4Obstacles && c4ObstacleById
+        ? routeAllOrthogonalEdges({
+            nodes: c4Obstacles,
+            clearance: 36,
+            edges: displayEdges.map((e) => {
+              const source = c4ObstacleById.get(e.source)
+              const target = c4ObstacleById.get(e.target)
+              const relationI18n =
+                messages.map.relations[
+                  e.relation as keyof typeof messages.map.relations
+                ]
+              const denseC4 = displayEdges.length > 8
+              const compactLabel = formatC4EdgeLabel(
+                e.label,
+                e.technology,
+                e.relation,
+                relationI18n,
+                denseC4 ? 'tech' : 'full',
+              )
+              const fit =
+                compactLabel && source && target
+                  ? fitEdgeLabel(compactLabel, source, target)
+                  : null
+              return {
+                id: e.id,
+                source: e.source,
+                target: e.target,
+                labelText: compactLabel || undefined,
+                labelBox: fit
+                  ? { width: fit.boxWidth, height: fit.boxHeight }
+                  : { width: 96, height: 22 },
+              }
+            }),
+          })
+        : null
+    const graphEdges = displayEdges.map((e, edgeIndex) => {
       const color = EDGE_COLORS[e.relation]
       const relationI18n =
         messages.map.relations[e.relation as keyof typeof messages.map.relations]
@@ -2548,11 +2622,17 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         relationI18n,
         denseC4 ? 'tech' : 'full',
       )
+      const parallel = useC4Visuals
+        ? parallelEdgeIndex(displayEdges, e.id, e.source, e.target)
+        : { parallelIndex: 0, parallelCount: 1 }
+      const precomputed = c4Routes?.get(e.id)
       return {
         id: e.id,
         source: e.source,
         target: e.target,
-        type: 'floatingStraight' as const,
+        type: (useC4Visuals ? 'c4Orthogonal' : 'floatingStraight') as
+          | 'c4Orthogonal'
+          | 'floatingStraight',
         animated: false,
         data: {
           evidence: e.evidence,
@@ -2567,6 +2647,24 @@ function FunctionMapCanvasInner({ bleed }: Props) {
                 : 'always',
           technology: e.technology,
           relationship: e.label,
+          ...(useC4Visuals
+            ? {
+                parallelIndex: parallel.parallelIndex,
+                parallelCount: parallel.parallelCount,
+                edgeIndex,
+                obstacles: c4Obstacles,
+                ...(precomputed
+                  ? {
+                      precomputedRoute: {
+                        points: precomputed.points,
+                        label: precomputed.label,
+                        path: precomputed.path,
+                        labelRect: precomputed.labelRect,
+                      },
+                    }
+                  : {}),
+              }
+            : {}),
         },
         markerEnd: {
           type: MarkerType.ArrowClosed,
@@ -2697,6 +2795,8 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     showArtifacts,
     layerFocusTransitionSample,
     useC4Visuals,
+    c4NodeById,
+    positionsById,
   ])
 
   const pendingClickRef = useRef<ReturnType<typeof setTimeout> | null>(null)

@@ -745,7 +745,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       projectId,
       new ScenarioRegistry(workspace),
     );
-    return workspace.project;
+    // project.json keeps a portable relative root ("."); the client needs the
+    // absolute path of the opened workspace for recent-list identity and shell cwd.
+    return {
+      ...workspace.project,
+      workspaceRoot: workspace.workspaceRoot,
+    };
   }
 
   async analyzeWorkspace(

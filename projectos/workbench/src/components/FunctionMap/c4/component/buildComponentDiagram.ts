@@ -64,12 +64,12 @@ export function buildComponentDiagram(input: C4DiagramInput): C4Diagram {
     }
   }
 
-  const PAD = 48
+  const PAD = 56
   const COLS = 3
-  const GAP_X = 24
-  const GAP_Y = 24
-  const startX = PAD + 24
-  const startY = PAD + 56
+  const GAP_X = 88
+  const GAP_Y = 80
+  const startX = PAD + 32
+  const startY = PAD + 64
 
   const placedComponents = components.map((node, index) => {
     const col = index % COLS
