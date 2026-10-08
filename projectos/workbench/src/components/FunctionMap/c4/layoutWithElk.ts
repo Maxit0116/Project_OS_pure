@@ -329,8 +329,9 @@ export function separateNodesForLabels(diagram: C4Diagram): C4Diagram {
       const sourceCenterY = sourceRect.y + sourceRect.height / 2
       const targetCenterY = targetRect.y + targetRect.height / 2
 
-      // Prefer a horizontal corridor at least as wide as the label box.
-      const neededH = fit.boxWidth + 48
+      // Prefer a horizontal corridor wider than the label box (+ pad) so the
+      // centered mid-edge label never covers either endpoint node.
+      const neededH = fit.boxWidth + 72
       if (hGap > 0 && hGap < neededH) {
         const delta = neededH - hGap
         if (targetCenterX >= sourceCenterX) {

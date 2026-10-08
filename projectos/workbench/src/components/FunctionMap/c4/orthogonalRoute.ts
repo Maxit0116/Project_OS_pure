@@ -1,7 +1,9 @@
 /**
- * Classic C4-style orthogonal (multi-bend) edge routing with label-aware
- * placement: labels sit centered on a clear segment; parallel approach lanes
- * fan out by label height; labels slide away from wire crossings.
+ * Classic C4-style orthogonal (multi-bend) edge routing with:
+ * - ports on all four sides of each node
+ * - same-side sharing when space allows (readability)
+ * - hard per-side port limit to avoid crowded attachments
+ * - label-aware lane spacing + crossing avoidance
  */
 
 export interface RoutePoint {
@@ -19,59 +21,147 @@ export interface RouteRect {
 
 export type RouteSide = 'left' | 'right' | 'top' | 'bottom'
 
+/** Left/right sides: 3 fixed ports, evenly dividing the edge. */
+export const PORTS_LEFT_RIGHT = 3
+/** Top/bottom sides: 4 fixed ports, evenly dividing the edge. */
+export const PORTS_TOP_BOTTOM = 4
+/** Largest per-side count (kept for callers that pass a single max). */
+export const MAX_PORTS_PER_SIDE = PORTS_TOP_BOTTOM
+/** Minimum spacing along a side used when shrinking tiny-node capacity. */
+export const MIN_PORT_GAP = 28
+/** @deprecated Equal division uses (i+1)/(n+1); kept for tests/compat. */
+export const PORT_INSET = 0.2
+/** Extra pad so labels never touch node chrome. */
+export const LABEL_NODE_PAD = 8
+
 export interface OrthogonalRouteInput {
   source: RouteRect
   target: RouteRect
-  /** Other nodes the route should try to avoid. */
   obstacles?: RouteRect[]
-  /** Already-placed label boxes from sibling edges. */
   reservedLabels?: RouteRect[]
-  /** Already-routed foreign polylines (wires) to keep clear of labels. */
   foreignWires?: RoutePoint[][]
-  /** Desired label box size (centered on the chosen segment). */
   labelBox?: { width: number; height: number }
-  /** Index among edges sharing the same unordered pair (for parallel offset). */
+  /** Forced attachment sides (from global port assignment). */
+  sourceSide?: RouteSide
+  targetSide?: RouteSide
+  /** Fixed port index on that side (0-based into fixedPortAlongs). */
+  sourceSlot?: number
+  sourceSlotCount?: number
+  targetSlot?: number
+  targetSlotCount?: number
+  /** Exact along fraction from fixed port grid (preferred). */
+  sourceAlong?: number
+  targetAlong?: number
   parallelIndex?: number
   parallelCount?: number
-  /** Fan-in to the same target (different sources). */
   fanInIndex?: number
   fanInCount?: number
-  /** Fan-out from the same source (different targets). */
   fanOutIndex?: number
   fanOutCount?: number
-  /** Minimum clear gap between parallel lanes (label-aware). */
   laneGap?: number
-  /** Global index used to stagger bend channels across the diagram. */
   edgeIndex?: number
-  /** Minimum clear gap between nodes when scoring / offsetting. */
   clearance?: number
+  maxPortsPerSide?: number
 }
 
 export interface OrthogonalRouteResult {
   points: RoutePoint[]
-  /** Center of the label box — sits on the edge midline. */
   label: RoutePoint
-  /** Axis-aligned label occupancy used by subsequent edges. */
   labelRect: RouteRect
   sourceSide: RouteSide
   targetSide: RouteSide
+  sourceAlong: number
+  targetAlong: number
   path: string
 }
 
-const DEFAULT_CLEARANCE = 36
+export interface PortAssignment {
+  sourceSide: RouteSide
+  targetSide: RouteSide
+  sourceSlot: number
+  sourceSlotCount: number
+  targetSlot: number
+  targetSlotCount: number
+  sourceAlong: number
+  targetAlong: number
+  sourceShared: boolean
+  targetShared: boolean
+}
+
+const DEFAULT_CLEARANCE = 40
 const CORNER_RADIUS = 10
 const MIN_LABEL_SEGMENT = 72
-/** Extra air between a label box and a foreign wire. */
 const LABEL_WIRE_PAD = 10
-/** Minimum centre-to-centre gap for parallel horizontal lanes. */
 const MIN_LANE_GAP = 40
+const ALL_SIDES: RouteSide[] = ['right', 'left', 'bottom', 'top']
+
+/** Target fixed-port count for a side on a typical rectangular node. */
+export function portsForSide(side: RouteSide): number {
+  return side === 'left' || side === 'right' ? PORTS_LEFT_RIGHT : PORTS_TOP_BOTTOM
+}
+
+/**
+ * Fixed ports that equally divide a side: at (i+1)/(count+1).
+ * - 3 → 0.25, 0.5, 0.75
+ * - 4 → 0.2, 0.4, 0.6, 0.8
+ */
+export function fixedPortAlongs(count: number): number[] {
+  if (count <= 1) return [0.5]
+  const out: number[] = []
+  for (let i = 0; i < count; i += 1) {
+    out.push((i + 1) / (count + 1))
+  }
+  return out
+}
+
+/**
+ * Which port indices to use when `need` stubs share a side of `count` ports.
+ * Prefer centered slots for 1–2 stubs (symmetric when possible).
+ */
+export function selectCenteredPortIndices(count: number, need: number): number[] {
+  const n = Math.max(1, count)
+  const take = Math.max(1, Math.min(need, n))
+  if (take >= n) return Array.from({ length: n }, (_, i) => i)
+
+  if (take === 1) {
+    // Exact center when odd; nearer-center lower index when even.
+    return [Math.floor((n - 1) / 2)]
+  }
+
+  if (take === 2) {
+    if (n === 3) return [0, 2] // 0.25 & 0.75 — symmetric about center
+    if (n === 4) return [1, 2] // 0.4 & 0.6 — the two middle ports
+    if (n % 2 === 0) {
+      const mid = n / 2
+      return [mid - 1, mid]
+    }
+    const mid = Math.floor(n / 2)
+    return [mid - 1, mid + 1]
+  }
+
+  // 3+ but under capacity: grow outward from center.
+  const alongs = fixedPortAlongs(n)
+  return alongs
+    .map((_, index) => index)
+    .sort(
+      (a, b) =>
+        Math.abs(alongs[a]! - 0.5) - Math.abs(alongs[b]! - 0.5) || a - b,
+    )
+    .slice(0, take)
+    .sort((a, b) => a - b)
+}
 
 function center(rect: RouteRect): RoutePoint {
   return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
 }
 
-function attach(rect: RouteRect, side: RouteSide, along = 0.5): RoutePoint {
-  const t = Math.min(0.88, Math.max(0.12, along))
+/** Attach at an exact along fraction (0–1). No clamp — fixed ports use 0.25/0.5/0.75. */
+export function attach(
+  rect: RouteRect,
+  side: RouteSide,
+  along = 0.5,
+): RoutePoint {
+  const t = Math.min(1, Math.max(0, along))
   switch (side) {
     case 'left':
       return { x: rect.x, y: rect.y + rect.height * t }
@@ -82,6 +172,46 @@ function attach(rect: RouteRect, side: RouteSide, along = 0.5): RoutePoint {
     case 'bottom':
       return { x: rect.x + rect.width * t, y: rect.y + rect.height }
   }
+}
+
+/**
+ * Force polyline endpoints (and their exit/approach stubs) onto fixed ports.
+ * Mid-corridor bends may move; port positions on the node border stay exact.
+ */
+export function pinRouteToPorts(
+  points: RoutePoint[],
+  source: RouteRect,
+  target: RouteRect,
+  sourceSide: RouteSide,
+  targetSide: RouteSide,
+  sourceAlong: number,
+  targetAlong: number,
+): RoutePoint[] {
+  if (points.length < 2) return points
+  const start = attach(source, sourceSide, sourceAlong)
+  const end = attach(target, targetSide, targetAlong)
+  const next = points.map((point) => ({ ...point }))
+  next[0] = start
+  next[next.length - 1] = end
+
+  if (next.length >= 2) {
+    const stub = next[1]!
+    if (sourceSide === 'left' || sourceSide === 'right') {
+      next[1] = { x: stub.x, y: start.y }
+    } else {
+      next[1] = { x: start.x, y: stub.y }
+    }
+  }
+  if (next.length >= 3) {
+    const i = next.length - 2
+    const stub = next[i]!
+    if (targetSide === 'left' || targetSide === 'right') {
+      next[i] = { x: stub.x, y: end.y }
+    } else {
+      next[i] = { x: end.x, y: stub.y }
+    }
+  }
+  return simplify(next)
 }
 
 function inflate(rect: RouteRect, pad: number): RouteRect {
@@ -145,7 +275,7 @@ function polylineHitsObstacles(
   return hits
 }
 
-/** Orthogonal segment crossing (H×V). Returns the intersection point or null. */
+/** Orthogonal segment crossing (H×V). */
 export function orthogonalCrossing(
   a1: RoutePoint,
   a2: RoutePoint,
@@ -244,46 +374,103 @@ function vhv(start: RoutePoint, end: RoutePoint, midY: number): RoutePoint[] {
   ])
 }
 
-/** Exit → vertical corridor → long horizontal → rejoin (creates a long label lane). */
-function detourHorizontalLane(
-  start: RoutePoint,
-  end: RoutePoint,
-  sourceSide: RouteSide,
-  laneY: number,
-  exit: number,
-): RoutePoint[] {
-  const dir = sourceSide === 'left' ? -1 : 1
-  const x1 = start.x + dir * exit
-  const x2 = end.x - dir * exit
-  return simplify([
-    start,
-    { x: x1, y: start.y },
-    { x: x1, y: laneY },
-    { x: x2, y: laneY },
-    { x: x2, y: end.y },
-    end,
-  ])
+function outward(side: RouteSide): RoutePoint {
+  switch (side) {
+    case 'left':
+      return { x: -1, y: 0 }
+    case 'right':
+      return { x: 1, y: 0 }
+    case 'top':
+      return { x: 0, y: -1 }
+    case 'bottom':
+      return { x: 0, y: 1 }
+  }
 }
 
-function pickSides(
-  source: RouteRect,
-  target: RouteRect,
-): { sourceSide: RouteSide; targetSide: RouteSide; mode: 'hvh' | 'vhv' } {
-  const sc = center(source)
-  const tc = center(target)
+function exitFrom(point: RoutePoint, side: RouteSide, dist: number): RoutePoint {
+  const d = outward(side)
+  return { x: point.x + d.x * dist, y: point.y + d.y * dist }
+}
+
+/**
+ * How many ports fit on a side for a rectangular node.
+ * Default: left/right = 3, top/bottom = 4; shrink only if the side is tiny.
+ */
+export function sidePortCapacity(
+  rect: RouteRect,
+  side: RouteSide,
+  maxPerSide?: number,
+  minGap = MIN_PORT_GAP,
+): number {
+  const target = maxPerSide ?? portsForSide(side)
+  const length =
+    side === 'left' || side === 'right' ? rect.height : rect.width
+  const bySpace = Math.max(1, Math.floor((length - 20) / minGap) + 1)
+  return Math.min(target, bySpace)
+}
+
+/**
+ * Rank sides for leaving `from` toward `to` (source) or entering `to` from `from` (target).
+ * All four sides are candidates; preferred face ranks first.
+ */
+export function rankSides(
+  from: RouteRect,
+  to: RouteRect,
+  role: 'source' | 'target',
+): RouteSide[] {
+  const sc = center(from)
+  const tc = center(to)
   const dx = tc.x - sc.x
   const dy = tc.y - sc.y
 
-  if (Math.abs(dx) >= Math.abs(dy) * 0.85) {
-    if (dx >= 0) {
-      return { sourceSide: 'right', targetSide: 'left', mode: 'hvh' }
-    }
-    return { sourceSide: 'left', targetSide: 'right', mode: 'hvh' }
+  // Source: leave on the side facing the target.
+  // Target: enter on the side facing the source.
+  const facing: RouteSide =
+    role === 'source'
+      ? Math.abs(dx) >= Math.abs(dy)
+        ? dx >= 0
+          ? 'right'
+          : 'left'
+        : dy >= 0
+          ? 'bottom'
+          : 'top'
+      : Math.abs(dx) >= Math.abs(dy)
+        ? dx >= 0
+          ? 'left'
+          : 'right'
+        : dy >= 0
+          ? 'top'
+          : 'bottom'
+
+  const secondary: RouteSide =
+    role === 'source'
+      ? Math.abs(dx) >= Math.abs(dy)
+        ? dy >= 0
+          ? 'bottom'
+          : 'top'
+        : dx >= 0
+          ? 'right'
+          : 'left'
+      : Math.abs(dx) >= Math.abs(dy)
+        ? dy >= 0
+          ? 'top'
+          : 'bottom'
+        : dx >= 0
+          ? 'left'
+          : 'right'
+
+  const opposite: Record<RouteSide, RouteSide> = {
+    left: 'right',
+    right: 'left',
+    top: 'bottom',
+    bottom: 'top',
   }
-  if (dy >= 0) {
-    return { sourceSide: 'bottom', targetSide: 'top', mode: 'vhv' }
-  }
-  return { sourceSide: 'top', targetSide: 'bottom', mode: 'vhv' }
+  const rest = ALL_SIDES.filter(
+    (side) => side !== facing && side !== secondary && side !== opposite[facing],
+  )
+  return [facing, secondary, opposite[facing], ...rest].filter(
+    (side, index, arr) => arr.indexOf(side) === index,
+  )
 }
 
 function fanOffset(index: number, count: number, gap: number): number {
@@ -292,7 +479,14 @@ function fanOffset(index: number, count: number, gap: number): number {
   return (index - mid) * gap
 }
 
-/** Minimum centre-to-centre lane gap so two label boxes don't cover each other's wire. */
+export function labelOverlapsNodes(
+  rect: RouteRect,
+  nodes: RouteRect[],
+  pad = LABEL_NODE_PAD,
+): boolean {
+  return nodes.some((node) => rectsOverlap(rect, node, pad))
+}
+
 export function laneGapForLabels(
   heightA: number,
   heightB: number = heightA,
@@ -341,10 +535,6 @@ function labelRectAt(
   }
 }
 
-/**
- * Pick a label center that sits on the edge midline and whose box clears
- * nodes, reserved labels, foreign wires, and crossing points.
- */
 export function placeCenteredLabel(
   points: RoutePoint[],
   box: { width: number; height: number },
@@ -364,7 +554,6 @@ export function placeCenteredLabel(
 
   for (const seg of ranked) {
     const crossings = collectCrossings(seg, foreignWires)
-    // Dense samples so we can slide off crossings / wires.
     const samples = seg.horizontal
       ? [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78, 0.15, 0.85, 0.1, 0.9]
       : [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8]
@@ -384,8 +573,9 @@ export function placeCenteredLabel(
       score += (1 - Math.abs(t - 0.5) * 2) * 28
 
       for (const obstacle of obstacles) {
-        if (rectsOverlap(rect, obstacle, 4)) {
-          score -= 500
+        if (rectsOverlap(rect, obstacle, LABEL_NODE_PAD)) {
+          // Hard reject — labels must never cover node boxes.
+          score -= 2000
           clear = false
         }
       }
@@ -402,7 +592,12 @@ export function placeCenteredLabel(
         clear = false
       }
 
-      // Keep label boxes off crossings / bend junctions.
+      // Prefer host segments that can fully contain the label box.
+      if (seg.horizontal && seg.length + 4 < box.width) {
+        score -= 800
+        clear = false
+      }
+
       for (const cross of crossings) {
         const dx = Math.abs(mid.x - cross.x)
         const dy = Math.abs(mid.y - cross.y)
@@ -440,7 +635,6 @@ export function placeCenteredLabel(
   )
 }
 
-/** Build an SVG path with slight corner rounding for classic C4 look. */
 export function pointsToRoundedPath(
   points: RoutePoint[],
   radius = CORNER_RADIUS,
@@ -506,13 +700,428 @@ function scoreRoute(
     labelId,
     foreignWires,
   )
-  // Prefer clear routes; mild length reward when it buys label clearance.
   const total =
     placement.score -
     hits * 500 -
     Math.max(0, len - 560) * 0.06 +
     Math.min(len, 480) * 0.02
   return { total, placement }
+}
+
+/**
+ * Build orthogonal candidates between arbitrary attachment sides.
+ * Always exits outward from source side and approaches from outside target side.
+ */
+function candidatesForSides(
+  start: RoutePoint,
+  end: RoutePoint,
+  sourceSide: RouteSide,
+  targetSide: RouteSide,
+  clearance: number,
+  laneGap: number,
+  channelBias: number,
+): RoutePoint[][] {
+  const sExit = exitFrom(start, sourceSide, clearance)
+  const tApproach = exitFrom(end, targetSide, clearance)
+  const candidates: RoutePoint[][] = [
+    simplify([start, sExit, { x: tApproach.x, y: sExit.y }, tApproach, end]),
+    simplify([start, sExit, { x: sExit.x, y: tApproach.y }, tApproach, end]),
+  ]
+
+  const midXs = [
+    (sExit.x + tApproach.x) / 2 + channelBias * 0.2,
+    (sExit.x + tApproach.x) / 2 + 64,
+    (sExit.x + tApproach.x) / 2 - 64,
+    (sExit.x + tApproach.x) / 2 + 128,
+    (sExit.x + tApproach.x) / 2 - 128,
+  ]
+  for (const midX of midXs) {
+    candidates.push(
+      simplify([
+        start,
+        sExit,
+        { x: midX, y: sExit.y },
+        { x: midX, y: tApproach.y },
+        tApproach,
+        end,
+      ]),
+    )
+  }
+
+  const midYs = [
+    (sExit.y + tApproach.y) / 2 + channelBias * 0.2,
+    (sExit.y + tApproach.y) / 2 + laneGap,
+    (sExit.y + tApproach.y) / 2 - laneGap,
+    (sExit.y + tApproach.y) / 2 + laneGap * 2,
+    (sExit.y + tApproach.y) / 2 - laneGap * 2,
+  ]
+  for (const midY of midYs) {
+    candidates.push(
+      simplify([
+        start,
+        sExit,
+        { x: sExit.x, y: midY },
+        { x: tApproach.x, y: midY },
+        tApproach,
+        end,
+      ]),
+    )
+  }
+
+  const far = clearance + 72
+  const sFar = exitFrom(start, sourceSide, far)
+  const tFar = exitFrom(end, targetSide, far)
+  candidates.push(
+    simplify([start, sFar, { x: sFar.x, y: tFar.y }, tFar, end]),
+    simplify([start, sFar, { x: tFar.x, y: sFar.y }, tFar, end]),
+  )
+
+  return candidates
+}
+
+interface FixedPort {
+  side: RouteSide
+  index: number
+  along: number
+}
+
+function buildNodePortGrid(node: RouteRect): FixedPort[] {
+  const ports: FixedPort[] = []
+  for (const side of ALL_SIDES) {
+    const cap = sidePortCapacity(node, side)
+    const alongs = fixedPortAlongs(cap)
+    alongs.forEach((along, index) => {
+      ports.push({ side, index, along })
+    })
+  }
+  return ports
+}
+
+/**
+ * Assign fixed port slots on all four sides.
+ * - Left/right: 3 equally spaced ports; top/bottom: 4.
+ * - Unique ports while stubs ≤ total capacity; share only when over capacity.
+ * - When a side has only 1–2 stubs, prefer the centered port(s).
+ */
+export function assignEdgePorts(input: {
+  nodes: RouteRect[]
+  edges: Array<{ id: string; source: string; target: string }>
+  maxPortsPerSide?: number
+}): Map<string, PortAssignment> {
+  const byId = new Map(input.nodes.map((node) => [node.id, node]))
+  const grids = new Map<string, FixedPort[]>()
+  const stubCount = new Map<string, number>()
+  const sideUsage = new Map<string, number>() // `${nodeId}:${side}` → reserved count
+
+  for (const node of input.nodes) {
+    grids.set(node.id, buildNodePortGrid(node))
+    stubCount.set(node.id, 0)
+  }
+  for (const edge of input.edges) {
+    stubCount.set(edge.source, (stubCount.get(edge.source) ?? 0) + 1)
+    stubCount.set(edge.target, (stubCount.get(edge.target) ?? 0) + 1)
+  }
+
+  const sideKey = (nodeId: string, side: RouteSide) => `${nodeId}:${side}`
+
+  const canReserveSide = (nodeId: string, side: RouteSide): boolean => {
+    const node = byId.get(nodeId)
+    if (!node) return false
+    const cap = sidePortCapacity(node, side)
+    return (sideUsage.get(sideKey(nodeId, side)) ?? 0) < cap
+  }
+
+  const reserveSide = (nodeId: string, side: RouteSide) => {
+    const k = sideKey(nodeId, side)
+    sideUsage.set(k, (sideUsage.get(k) ?? 0) + 1)
+  }
+
+  // Pass 1 — pick sides (facing preferred; spill when a side is full).
+  const ordered = [...input.edges].sort((a, b) => {
+    const aHard =
+      (stubCount.get(a.source) ?? 0) /
+        Math.max(1, (grids.get(a.source) ?? []).length) +
+      (stubCount.get(a.target) ?? 0) /
+        Math.max(1, (grids.get(a.target) ?? []).length)
+    const bHard =
+      (stubCount.get(b.source) ?? 0) /
+        Math.max(1, (grids.get(b.source) ?? []).length) +
+      (stubCount.get(b.target) ?? 0) /
+        Math.max(1, (grids.get(b.target) ?? []).length)
+    return bHard - aHard
+  })
+
+  const sideChoice = new Map<
+    string,
+    { sourceSide: RouteSide; targetSide: RouteSide }
+  >()
+
+  for (const edge of ordered) {
+    const source = byId.get(edge.source)
+    const target = byId.get(edge.target)
+    if (!source || !target) continue
+    const sourceRanks = rankSides(source, target, 'source')
+    const targetRanks = rankSides(source, target, 'target')
+
+    let chosenSource = sourceRanks[0]!
+    let chosenTarget = targetRanks[0]!
+    let best = Number.NEGATIVE_INFINITY
+
+    for (const sSide of sourceRanks) {
+      if (!canReserveSide(edge.source, sSide)) continue
+      for (const tSide of targetRanks) {
+        if (!canReserveSide(edge.target, tSide)) continue
+        let score = 0
+        score += (sourceRanks.length - sourceRanks.indexOf(sSide)) * 10
+        score += (targetRanks.length - targetRanks.indexOf(tSide)) * 10
+        const opposite =
+          (sSide === 'right' && tSide === 'left') ||
+          (sSide === 'left' && tSide === 'right') ||
+          (sSide === 'top' && tSide === 'bottom') ||
+          (sSide === 'bottom' && tSide === 'top')
+        if (opposite) score += 8
+        if (score > best) {
+          best = score
+          chosenSource = sSide
+          chosenTarget = tSide
+        }
+      }
+    }
+
+    if (best === Number.NEGATIVE_INFINITY) {
+      // Over-subscribed node — still take preferred faces (will share ports).
+      chosenSource = sourceRanks[0]!
+      chosenTarget = targetRanks[0]!
+    }
+
+    reserveSide(edge.source, chosenSource)
+    reserveSide(edge.target, chosenTarget)
+    sideChoice.set(edge.id, {
+      sourceSide: chosenSource,
+      targetSide: chosenTarget,
+    })
+  }
+
+  // Pass 2 — on each node+side, assign centered fixed ports for 1–2 stubs.
+  type Stub = { edgeId: string; role: 'source' | 'target' }
+  const sideGroups = new Map<string, Stub[]>()
+  for (const edge of input.edges) {
+    const choice = sideChoice.get(edge.id)
+    if (!choice) continue
+    const sk = sideKey(edge.source, choice.sourceSide)
+    const tk = sideKey(edge.target, choice.targetSide)
+    const sList = sideGroups.get(sk) ?? []
+    sList.push({ edgeId: edge.id, role: 'source' })
+    sideGroups.set(sk, sList)
+    const tList = sideGroups.get(tk) ?? []
+    tList.push({ edgeId: edge.id, role: 'target' })
+    sideGroups.set(tk, tList)
+  }
+
+  const stubPort = new Map<
+    string,
+    { side: RouteSide; index: number; along: number; shared: boolean; cap: number }
+  >() // key: `${edgeId}:${role}`
+
+  for (const [groupKey, stubs] of sideGroups) {
+    const [nodeId, side] = groupKey.split(':') as [string, RouteSide]
+    const node = byId.get(nodeId)
+    if (!node) continue
+    const cap = sidePortCapacity(node, side)
+    const alongs = fixedPortAlongs(cap)
+    const indices = selectCenteredPortIndices(cap, stubs.length)
+
+    // Stable order: by other endpoint position along the side axis.
+    const sorted = [...stubs].sort((a, b) => {
+      const edgeA = input.edges.find((e) => e.id === a.edgeId)
+      const edgeB = input.edges.find((e) => e.id === b.edgeId)
+      if (!edgeA || !edgeB) return 0
+      const otherA = byId.get(
+        a.role === 'source' ? edgeA.target : edgeA.source,
+      )
+      const otherB = byId.get(
+        b.role === 'source' ? edgeB.target : edgeB.source,
+      )
+      if (!otherA || !otherB) return 0
+      if (side === 'left' || side === 'right') {
+        return center(otherA).y - center(otherB).y
+      }
+      return center(otherA).x - center(otherB).x
+    })
+
+    sorted.forEach((stub, i) => {
+      const portIndex =
+        i < indices.length
+          ? indices[i]!
+          : indices[i % Math.max(1, indices.length)]!
+      // When over capacity, wrap / share from the centered set then full grid.
+      const resolvedIndex =
+        stubs.length <= cap
+          ? portIndex
+          : i % cap
+      const along = alongs[resolvedIndex] ?? 0.5
+      stubPort.set(`${stub.edgeId}:${stub.role}`, {
+        side,
+        index: resolvedIndex,
+        along,
+        shared: stubs.length > cap,
+        cap,
+      })
+    })
+  }
+
+  const result = new Map<string, PortAssignment>()
+  for (const edge of input.edges) {
+    const sourceStub = stubPort.get(`${edge.id}:source`)
+    const targetStub = stubPort.get(`${edge.id}:target`)
+    const choice = sideChoice.get(edge.id)
+    if (!sourceStub || !targetStub || !choice) continue
+    result.set(edge.id, {
+      sourceSide: sourceStub.side,
+      targetSide: targetStub.side,
+      sourceSlot: sourceStub.index,
+      sourceSlotCount: sourceStub.cap,
+      targetSlot: targetStub.index,
+      targetSlotCount: targetStub.cap,
+      sourceAlong: sourceStub.along,
+      targetAlong: targetStub.along,
+      sourceShared: sourceStub.shared,
+      targetShared: targetStub.shared,
+    })
+  }
+  return result
+}
+
+/**
+ * Stretch the longest horizontal lane so a label box can sit clear of nodes.
+ */
+export function elongateRouteForLabel(
+  points: RoutePoint[],
+  minSegmentLength: number,
+  outward = 48,
+): RoutePoint[] {
+  if (points.length < 4) return points
+  const segs = segmentsOf(points)
+  let bestIdx = -1
+  let bestLen = -1
+  segs.forEach((seg, index) => {
+    if (seg.horizontal && seg.length > bestLen) {
+      bestLen = seg.length
+      bestIdx = index
+    }
+  })
+  if (bestIdx < 0 || bestLen >= minSegmentLength) return points
+
+  // Rebuild with a longer mid horizontal detour between exit stubs.
+  const start = points[0]!
+  const end = points[points.length - 1]!
+  const sExit = points[1] ?? start
+  const tApproach = points[points.length - 2] ?? end
+  const midY =
+    (sExit.y + tApproach.y) / 2 +
+    (Math.abs(sExit.y - tApproach.y) < 8 ? -outward : 0)
+  const left = Math.min(sExit.x, tApproach.x) - outward
+  const right = Math.max(sExit.x, tApproach.x) + outward
+  return simplify([
+    start,
+    sExit,
+    { x: sExit.x, y: midY },
+    { x: left, y: midY },
+    { x: right, y: midY },
+    { x: tApproach.x, y: midY },
+    tApproach,
+    end,
+  ])
+}
+
+/**
+ * Acceptance pass: if a label still covers a node / wire / crossing, slide it
+ * densely along the polyline; if still blocked, elongate then retry.
+ */
+export function auditAndFixLabel(input: {
+  points: RoutePoint[]
+  labelBox: { width: number; height: number }
+  nodes: RouteRect[]
+  reservedLabels?: RouteRect[]
+  foreignWires?: RoutePoint[][]
+  labelId: string
+}): { points: RoutePoint[]; label: RoutePoint; labelRect: RouteRect } {
+  const nodeObstacles = input.nodes.map((node) => inflate(node, LABEL_NODE_PAD))
+  const reserved = input.reservedLabels ?? []
+  const wires = input.foreignWires ?? []
+
+  const place = (pts: RoutePoint[]) =>
+    placeCenteredLabel(
+      pts,
+      input.labelBox,
+      nodeObstacles,
+      reserved,
+      input.labelId,
+      wires,
+    )
+
+  let points = input.points
+  let placement = place(points)
+
+  const isClear = (rect: RouteRect) =>
+    !labelOverlapsNodes(rect, input.nodes, LABEL_NODE_PAD) &&
+    labelOverlapsWire(rect, wires, LABEL_WIRE_PAD) === 0
+
+  if (!isClear(placement.labelRect)) {
+    // Dense micro-adjust along every segment.
+    let best = placement
+    for (const seg of segmentsOf(points)) {
+      for (let step = 0; step <= 20; step += 1) {
+        const t = step / 20
+        const mid = {
+          x: seg.a.x + (seg.b.x - seg.a.x) * t,
+          y: seg.a.y + (seg.b.y - seg.a.y) * t,
+        }
+        const rect = labelRectAt(
+          mid,
+          input.labelBox.width,
+          input.labelBox.height,
+          input.labelId,
+        )
+        if (!isClear(rect)) continue
+        const score = placeCenteredLabel(
+          points,
+          input.labelBox,
+          nodeObstacles,
+          reserved,
+          input.labelId,
+          wires,
+        ).score
+        if (!best || score >= best.score) {
+          best = { label: mid, labelRect: rect, score }
+        }
+        if (isClear(rect)) {
+          return { points, label: mid, labelRect: rect }
+        }
+      }
+    }
+    placement = best
+
+    if (!isClear(placement.labelRect)) {
+      points = elongateRouteForLabel(
+        points,
+        input.labelBox.width + 40,
+        56,
+      )
+      placement = place(points)
+      if (!isClear(placement.labelRect)) {
+        // Second elongation pass with a larger detour.
+        points = elongateRouteForLabel(points, input.labelBox.width + 80, 96)
+        placement = place(points)
+      }
+    }
+  }
+
+  return {
+    points,
+    label: placement.label,
+    labelRect: placement.labelRect,
+  }
 }
 
 /**
@@ -524,170 +1133,95 @@ export function buildOrthogonalRoute(
   const clearance = input.clearance ?? DEFAULT_CLEARANCE
   const parallelIndex = input.parallelIndex ?? 0
   const parallelCount = input.parallelCount ?? 1
-  const fanInIndex = input.fanInIndex ?? 0
-  const fanInCount = input.fanInCount ?? 1
-  const fanOutIndex = input.fanOutIndex ?? 0
-  const fanOutCount = input.fanOutCount ?? 1
   const edgeIndex = input.edgeIndex ?? parallelIndex
   const labelBox = input.labelBox ?? { width: 96, height: 22 }
   const laneGap = input.laneGap ?? laneGapForLabels(labelBox.height)
   const labelId = `label:${input.source.id}->${input.target.id}:${parallelIndex}`
 
-  const { sourceSide, targetSide, mode } = pickSides(input.source, input.target)
+  const sourceRanks = rankSides(input.source, input.target, 'source')
+  const targetRanks = rankSides(input.source, input.target, 'target')
+  const sourceSide = input.sourceSide ?? sourceRanks[0]!
+  const targetSide = input.targetSide ?? targetRanks[0]!
 
-  // Spread attach points so parallel / fan-in edges stay parallel but spaced
-  // by at least one label-box height (prevents label covering neighbour wire).
-  const pairBias = fanOffset(parallelIndex, parallelCount, laneGap * 0.55)
-  const inBias = fanOffset(fanInIndex, fanInCount, laneGap)
-  const outBias = fanOffset(fanOutIndex, fanOutCount, laneGap * 0.85)
-  const approachBias = pairBias + inBias
-  const departBias = pairBias + outBias
+  const sourceSlot = input.sourceSlot ?? 0
+  const sourceSlotCount = Math.max(1, input.sourceSlotCount ?? 1)
+  const targetSlot = input.targetSlot ?? 0
+  const targetSlotCount = Math.max(1, input.targetSlotCount ?? 1)
 
+  const sourceAlongs = fixedPortAlongs(sourceSlotCount)
+  const targetAlongs = fixedPortAlongs(targetSlotCount)
   const sourceAlong =
-    sourceSide === 'left' || sourceSide === 'right'
-      ? 0.5 + departBias / Math.max(48, input.source.height)
-      : 0.5 + departBias / Math.max(48, input.source.width)
+    input.sourceAlong ??
+    sourceAlongs[Math.min(sourceSlot, sourceAlongs.length - 1)] ??
+    0.5
   const targetAlong =
-    targetSide === 'left' || targetSide === 'right'
-      ? 0.5 + approachBias / Math.max(48, input.target.height)
-      : 0.5 + approachBias / Math.max(48, input.target.width)
+    input.targetAlong ??
+    targetAlongs[Math.min(targetSlot, targetAlongs.length - 1)] ??
+    0.5
 
   const start = attach(input.source, sourceSide, sourceAlong)
   const end = attach(input.target, targetSide, targetAlong)
 
-  const obstacles = (input.obstacles ?? [])
+  // Route geometry avoids foreign nodes; labels also treat endpoints as taboo.
+  const routeObstacles = (input.obstacles ?? [])
     .filter(
       (obstacle) =>
         obstacle.id !== input.source.id && obstacle.id !== input.target.id,
     )
-    .map((obstacle) => inflate(obstacle, clearance * 0.4))
+    .map((obstacle) => inflate(obstacle, clearance * 0.45))
+
+  const labelObstacles = [
+    ...routeObstacles,
+    inflate(input.source, LABEL_NODE_PAD),
+    inflate(input.target, LABEL_NODE_PAD),
+  ]
 
   const reservedLabels = input.reservedLabels ?? []
   const foreignWires = input.foreignWires ?? []
-  const sc = center(input.source)
-  const tc = center(input.target)
-  const candidates: RoutePoint[][] = []
-  const channelStagger = approachBias + (edgeIndex % 3) * 12
+  const channelBias =
+    fanOffset(targetSlot, targetSlotCount, laneGap) + (edgeIndex % 3) * 10
 
-  if (mode === 'hvh') {
-    const gapMid = (sc.x + tc.x) / 2
-    const mids = [
-      gapMid + channelStagger * 0.2,
-      gapMid + 56 + channelStagger * 0.1,
-      gapMid - 56 + channelStagger * 0.1,
-      gapMid + 112,
-      gapMid - 112,
-      gapMid + 168,
-      gapMid - 168,
-      input.source.x + input.source.width + clearance + 24 + channelStagger * 0.1,
-      input.target.x - clearance - 24 + channelStagger * 0.1,
-    ]
-    for (const midX of mids) {
+  const candidates = candidatesForSides(
+    start,
+    end,
+    sourceSide,
+    targetSide,
+    clearance,
+    laneGap,
+    channelBias,
+  )
+  // Extra elongated candidates when the label is wide.
+  if (labelBox.width > 120) {
+    candidates.push(
+      ...candidatesForSides(
+        start,
+        end,
+        sourceSide,
+        targetSide,
+        clearance + 48,
+        laneGap + 24,
+        channelBias,
+      ),
+    )
+  }
+
+  // Facing left↔right / top↔bottom: also try classic mid channels.
+  if (
+    (sourceSide === 'right' && targetSide === 'left') ||
+    (sourceSide === 'left' && targetSide === 'right')
+  ) {
+    const gapMid = (start.x + end.x) / 2
+    for (const midX of [gapMid, gapMid + 64, gapMid - 64, gapMid + 120, gapMid - 120]) {
       candidates.push(hvh(start, end, midX))
     }
-
-    // Parallel horizontal approach lanes: keep wires parallel, spaced by laneGap.
-    const baseLaneYs = [
-      start.y,
-      end.y,
-      (start.y + end.y) / 2,
-      Math.min(start.y, end.y) - laneGap,
-      Math.max(start.y, end.y) + laneGap,
-      Math.min(input.source.y, input.target.y) - clearance - laneGap,
-      Math.max(
-        input.source.y + input.source.height,
-        input.target.y + input.target.height,
-      ) +
-        clearance +
-        laneGap,
-    ]
-    for (const laneY of baseLaneYs) {
-      candidates.push(
-        detourHorizontalLane(
-          start,
-          end,
-          sourceSide,
-          laneY,
-          clearance + 36 + Math.abs(approachBias) * 0.3,
-        ),
-      )
-      candidates.push(
-        detourHorizontalLane(
-          start,
-          end,
-          sourceSide,
-          laneY,
-          clearance + 88 + Math.abs(approachBias) * 0.3,
-        ),
-      )
-    }
-
-    // Extra elongated mid-channel: exit further, hold a long H lane at approach Y.
-    if (fanInCount > 1 || fanOutCount > 1 || parallelCount > 1) {
-      const holdY = end.y
-      const exit = clearance + 50 + Math.abs(approachBias)
-      candidates.push(
-        detourHorizontalLane(start, end, sourceSide, holdY, exit),
-      )
-      candidates.push(
-        detourHorizontalLane(
-          start,
-          end,
-          sourceSide,
-          holdY + (fanInIndex % 2 === 0 ? laneGap : -laneGap),
-          exit + 40,
-        ),
-      )
-    }
-  } else {
-    const gapMid = (sc.y + tc.y) / 2
-    const mids = [
-      gapMid + channelStagger * 0.2,
-      gapMid + 56,
-      gapMid - 56,
-      gapMid + 112,
-      gapMid - 112,
-      input.source.y + input.source.height + clearance + 24,
-      input.target.y - clearance - 24,
-    ]
-    for (const midY of mids) {
+  }
+  if (
+    (sourceSide === 'bottom' && targetSide === 'top') ||
+    (sourceSide === 'top' && targetSide === 'bottom')
+  ) {
+    const gapMid = (start.y + end.y) / 2
+    for (const midY of [gapMid, gapMid + 64, gapMid - 64, gapMid + laneGap]) {
       candidates.push(vhv(start, end, midY))
-    }
-    const leftLane =
-      Math.min(input.source.x, input.target.x) - clearance - 40 - Math.abs(approachBias)
-    const rightLane =
-      Math.max(
-        input.source.x + input.source.width,
-        input.target.x + input.target.width,
-      ) +
-      clearance +
-      40 +
-      Math.abs(approachBias)
-    for (const laneX of [
-      leftLane,
-      rightLane,
-      leftLane - laneGap,
-      rightLane + laneGap,
-    ]) {
-      candidates.push(
-        simplify([
-          start,
-          {
-            x: start.x,
-            y:
-              start.y +
-              (sourceSide === 'bottom' ? clearance + 20 : -(clearance + 20)),
-          },
-          {
-            x: laneX,
-            y:
-              start.y +
-              (sourceSide === 'bottom' ? clearance + 20 : -(clearance + 20)),
-          },
-          { x: laneX, y: end.y },
-          end,
-        ]),
-      )
     }
   }
 
@@ -696,35 +1230,81 @@ export function buildOrthogonalRoute(
   let bestPlacement = placeCenteredLabel(
     bestPoints,
     labelBox,
-    obstacles,
+    labelObstacles,
     reservedLabels,
     labelId,
     foreignWires,
   )
 
   for (const candidate of candidates) {
+    const routeHits = polylineHitsObstacles(candidate, routeObstacles)
     const { total, placement } = scoreRoute(
       candidate,
-      obstacles,
+      labelObstacles,
       reservedLabels,
       foreignWires,
       labelBox,
       labelId,
     )
-    if (total > bestScore) {
-      bestScore = total
+    // Prefer routes whose label clears endpoint nodes.
+    const labelClear = !labelOverlapsNodes(
+      placement.labelRect,
+      [input.source, input.target],
+      LABEL_NODE_PAD,
+    )
+    const adjusted =
+      total - routeHits * 200 + (labelClear ? 400 : -1200)
+    if (adjusted > bestScore) {
+      bestScore = adjusted
       bestPoints = candidate
       bestPlacement = placement
     }
   }
 
-  const points = simplify(bestPoints)
-  return {
+  let points = simplify(bestPoints)
+  // Per-edge acceptance: elongate / micro-slide if label still hits a node.
+  const audited = auditAndFixLabel({
     points,
-    label: bestPlacement.label,
-    labelRect: bestPlacement.labelRect,
+    labelBox,
+    nodes: [
+      input.source,
+      input.target,
+      ...(input.obstacles ?? []).filter(
+        (obstacle) =>
+          obstacle.id !== input.source.id && obstacle.id !== input.target.id,
+      ),
+    ],
+    reservedLabels,
+    foreignWires,
+    labelId,
+  })
+  // Re-pin ports after elongation so labels never drag attachments to corners.
+  points = pinRouteToPorts(
+    audited.points,
+    input.source,
+    input.target,
     sourceSide,
     targetSide,
+    sourceAlong,
+    targetAlong,
+  )
+  const labelPlacement = placeCenteredLabel(
+    points,
+    labelBox,
+    labelObstacles,
+    reservedLabels,
+    labelId,
+    foreignWires,
+  )
+
+  return {
+    points,
+    label: labelPlacement.label,
+    labelRect: labelPlacement.labelRect,
+    sourceSide,
+    targetSide,
+    sourceAlong,
+    targetAlong,
     path: pointsToRoundedPath(points),
   }
 }
@@ -737,39 +1317,6 @@ export interface RoutedEdgeSpec {
   labelBox?: { width: number; height: number }
 }
 
-function groupFanIndexes(edges: RoutedEdgeSpec[]): {
-  fanIn: Map<string, { index: number; count: number }>
-  fanOut: Map<string, { index: number; count: number }>
-} {
-  const byTarget = new Map<string, string[]>()
-  const bySource = new Map<string, string[]>()
-  for (const edge of edges) {
-    const t = byTarget.get(edge.target) ?? []
-    t.push(edge.id)
-    byTarget.set(edge.target, t)
-    const s = bySource.get(edge.source) ?? []
-    s.push(edge.id)
-    bySource.set(edge.source, s)
-  }
-  const fanIn = new Map<string, { index: number; count: number }>()
-  const fanOut = new Map<string, { index: number; count: number }>()
-  for (const ids of byTarget.values()) {
-    ids.forEach((id, index) => {
-      fanIn.set(id, { index, count: ids.length })
-    })
-  }
-  for (const ids of bySource.values()) {
-    ids.forEach((id, index) => {
-      fanOut.set(id, { index, count: ids.length })
-    })
-  }
-  return { fanIn, fanOut }
-}
-
-/**
- * Shift nearly-parallel horizontal lanes further apart when a label would
- * cover a neighbour wire — keeps them parallel, just with more air.
- */
 function separateParallelLanes(
   routes: Map<string, OrthogonalRouteResult>,
   labelHeights: Map<string, number>,
@@ -799,15 +1346,34 @@ function separateParallelLanes(
             const delta = (need - dy) / 2 + 2
             const shiftA = sa.a.y <= sb.a.y ? -delta : delta
             const shiftB = -shiftA
-            // Shift only the overlapping horizontal band of each polyline.
             const bandA = sa.a.y
             const bandB = sb.a.y
-            routeA.points = routeA.points.map((p) =>
-              Math.abs(p.y - bandA) < 1e-3 ? { x: p.x, y: p.y + shiftA } : p,
-            )
-            routeB.points = routeB.points.map((p) =>
-              Math.abs(p.y - bandB) < 1e-3 ? { x: p.x, y: p.y + shiftB } : p,
-            )
+            // Never move port attachment Y — only mid-corridor horizontals.
+            const pinYa = [
+              routeA.points[0]!.y,
+              routeA.points[routeA.points.length - 1]!.y,
+            ]
+            const pinYb = [
+              routeB.points[0]!.y,
+              routeB.points[routeB.points.length - 1]!.y,
+            ]
+            const shiftBand = (
+              points: RoutePoint[],
+              band: number,
+              shift: number,
+              pinnedYs: number[],
+            ) =>
+              points.map((p, idx, arr) => {
+                if (idx === 0 || idx === arr.length - 1) return p
+                if (pinnedYs.some((y) => Math.abs(p.y - y) < 1e-3)) return p
+                if (Math.abs(p.y - band) < 1e-3) {
+                  return { x: p.x, y: p.y + shift }
+                }
+                return p
+              })
+
+            routeA.points = shiftBand(routeA.points, bandA, shiftA, pinYa)
+            routeB.points = shiftBand(routeB.points, bandB, shiftB, pinYb)
             routeA.path = pointsToRoundedPath(routeA.points)
             routeB.path = pointsToRoundedPath(routeB.points)
             moved = true
@@ -820,19 +1386,22 @@ function separateParallelLanes(
 }
 
 /**
- * Route all edges: fan-in/out lane spacing by label height, then place labels
- * so they clear foreign wires and crossings (slide along segment / prefer
- * elongated lanes).
+ * Route all edges with four-side port assignment + label-aware clearance.
  */
 export function routeAllOrthogonalEdges(input: {
   nodes: RouteRect[]
   edges: RoutedEdgeSpec[]
   clearance?: number
+  maxPortsPerSide?: number
 }): Map<string, OrthogonalRouteResult> {
   const byId = new Map(input.nodes.map((node) => [node.id, node]))
   const results = new Map<string, OrthogonalRouteResult>()
   const labelHeights = new Map<string, number>()
-  const { fanIn, fanOut } = groupFanIndexes(input.edges)
+  const ports = assignEdgePorts({
+    nodes: input.nodes,
+    edges: input.edges,
+    maxPortsPerSide: input.maxPortsPerSide,
+  })
 
   const pairKey = (a: string, b: string) => (a < b ? `${a}::${b}` : `${b}::${a}`)
   const pairCounts = new Map<string, number>()
@@ -842,7 +1411,6 @@ export function routeAllOrthogonalEdges(input: {
     pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1)
   }
 
-  // Phase 1 — geometry with fan spacing; accumulate wires for later edges.
   const foreignWires: RoutePoint[][] = []
   const reservedLabels: RouteRect[] = []
 
@@ -856,8 +1424,7 @@ export function routeAllOrthogonalEdges(input: {
     pairSeen.set(key, parallelIndex + 1)
     const labelBox = edge.labelBox ?? { width: 96, height: 22 }
     labelHeights.set(edge.id, labelBox.height)
-    const fi = fanIn.get(edge.id) ?? { index: 0, count: 1 }
-    const fo = fanOut.get(edge.id) ?? { index: 0, count: 1 }
+    const assignment = ports.get(edge.id)
 
     const routed = buildOrthogonalRoute({
       source,
@@ -866,31 +1433,37 @@ export function routeAllOrthogonalEdges(input: {
       reservedLabels: [...reservedLabels],
       foreignWires: [...foreignWires],
       labelBox,
+      sourceSide: assignment?.sourceSide,
+      targetSide: assignment?.targetSide,
+      sourceSlot: assignment?.sourceSlot,
+      sourceSlotCount: assignment?.sourceSlotCount,
+      targetSlot: assignment?.targetSlot,
+      targetSlotCount: assignment?.targetSlotCount,
+      sourceAlong: assignment?.sourceAlong,
+      targetAlong: assignment?.targetAlong,
       parallelIndex,
       parallelCount,
-      fanInIndex: fi.index,
-      fanInCount: fi.count,
-      fanOutIndex: fo.index,
-      fanOutCount: fo.count,
       laneGap: laneGapForLabels(labelBox.height),
       edgeIndex,
       clearance: input.clearance,
+      maxPortsPerSide: input.maxPortsPerSide,
     })
     results.set(edge.id, routed)
     foreignWires.push(routed.points)
     reservedLabels.push(routed.labelRect)
   })
 
-  // Phase 2 — pull nearly-parallel lanes further apart (label-height aware).
   separateParallelLanes(results, labelHeights)
 
-  // Phase 3 — re-place every label against the final set of wires so a label
-  // never sits on a crossing or covers a neighbour wire.
+  // Global acceptance pass — re-audit every label against final wires + all nodes.
   const allIds = [...results.keys()]
-  for (let pass = 0; pass < 2; pass += 1) {
+  for (let pass = 0; pass < 3; pass += 1) {
+    let dirty = false
     for (const id of allIds) {
       const route = results.get(id)!
       const edge = input.edges.find((candidate) => candidate.id === id)
+      const source = edge ? byId.get(edge.source) : undefined
+      const target = edge ? byId.get(edge.target) : undefined
       const labelBox = edge?.labelBox ?? {
         width: route.labelRect.width,
         height: route.labelRect.height,
@@ -901,31 +1474,94 @@ export function routeAllOrthogonalEdges(input: {
       const otherLabels = allIds
         .filter((otherId) => otherId !== id)
         .map((otherId) => results.get(otherId)!.labelRect)
-      const obstacles = input.nodes
-        .filter(
-          (node) =>
-            node.id !== edge?.source && node.id !== edge?.target,
+
+      const audited = auditAndFixLabel({
+        points: route.points,
+        labelBox,
+        nodes: input.nodes,
+        reservedLabels: otherLabels,
+        foreignWires: others,
+        labelId: `label:${id}`,
+      })
+
+      let points = audited.points
+      if (source && target) {
+        points = pinRouteToPorts(
+          points,
+          source,
+          target,
+          route.sourceSide,
+          route.targetSide,
+          route.sourceAlong,
+          route.targetAlong,
         )
-        .map((node) => inflate(node, (input.clearance ?? DEFAULT_CLEARANCE) * 0.35))
+      }
 
       const placement = placeCenteredLabel(
-        route.points,
+        points,
         labelBox,
-        obstacles,
+        input.nodes.map((node) => inflate(node, LABEL_NODE_PAD)),
         otherLabels,
         `label:${id}`,
         others,
       )
+
+      const moved =
+        points !== route.points ||
+        placement.label.x !== route.label.x ||
+        placement.label.y !== route.label.y
+      if (moved) dirty = true
+      route.points = points
       route.label = placement.label
       route.labelRect = placement.labelRect
-      route.path = pointsToRoundedPath(route.points)
+      route.path = pointsToRoundedPath(points)
     }
+    if (!dirty) break
+  }
+
+  // Final guarantee: every edge ends exactly on its fixed port fractions,
+  // then re-seat labels on the pinned polylines.
+  for (const id of allIds) {
+    const route = results.get(id)!
+    const edge = input.edges.find((candidate) => candidate.id === id)
+    const source = edge ? byId.get(edge.source) : undefined
+    const target = edge ? byId.get(edge.target) : undefined
+    if (!source || !target) continue
+    route.points = pinRouteToPorts(
+      route.points,
+      source,
+      target,
+      route.sourceSide,
+      route.targetSide,
+      route.sourceAlong,
+      route.targetAlong,
+    )
+    const labelBox = edge?.labelBox ?? {
+      width: route.labelRect.width,
+      height: route.labelRect.height,
+    }
+    const others = allIds
+      .filter((otherId) => otherId !== id)
+      .map((otherId) => results.get(otherId)!.points)
+    const otherLabels = allIds
+      .filter((otherId) => otherId !== id)
+      .map((otherId) => results.get(otherId)!.labelRect)
+    const placement = placeCenteredLabel(
+      route.points,
+      labelBox,
+      input.nodes.map((node) => inflate(node, LABEL_NODE_PAD)),
+      otherLabels,
+      `label:${id}`,
+      others,
+    )
+    route.label = placement.label
+    route.labelRect = placement.labelRect
+    route.path = pointsToRoundedPath(route.points)
   }
 
   return results
 }
 
-/** Estimate spacing pressure — used by layout to expand when nodes are cramped. */
 export function minNodeGap(nodes: RouteRect[]): number {
   let min = Number.POSITIVE_INFINITY
   for (let i = 0; i < nodes.length; i += 1) {

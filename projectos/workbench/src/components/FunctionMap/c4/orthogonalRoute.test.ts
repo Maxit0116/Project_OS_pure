@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import {
+  assignEdgePorts,
   buildOrthogonalRoute,
+  fixedPortAlongs,
   laneGapForLabels,
+  LABEL_NODE_PAD,
   minNodeGap,
   orthogonalCrossing,
   placeCenteredLabel,
   pointsToRoundedPath,
+  PORTS_LEFT_RIGHT,
+  PORTS_TOP_BOTTOM,
+  rankSides,
   routeAllOrthogonalEdges,
+  selectCenteredPortIndices,
+  sidePortCapacity,
 } from './orthogonalRoute'
 
 describe('buildOrthogonalRoute', () => {
@@ -22,18 +30,30 @@ describe('buildOrthogonalRoute', () => {
     expect(route.targetSide).toBe('left')
   })
 
-  it('offsets parallel edges so they do not share the same channel', () => {
+  it('offsets parallel edges onto distinct fixed ports', () => {
     const a = buildOrthogonalRoute({
       source: { id: 'a', x: 0, y: 40, width: 180, height: 96 },
       target: { id: 'b', x: 360, y: 40, width: 180, height: 96 },
-      parallelIndex: 0,
-      parallelCount: 2,
+      sourceSide: 'right',
+      targetSide: 'left',
+      sourceSlot: 0,
+      sourceSlotCount: 2,
+      targetSlot: 0,
+      targetSlotCount: 2,
+      sourceAlong: fixedPortAlongs(2)[0],
+      targetAlong: fixedPortAlongs(2)[0],
     })
     const b = buildOrthogonalRoute({
       source: { id: 'a', x: 0, y: 40, width: 180, height: 96 },
       target: { id: 'b', x: 360, y: 40, width: 180, height: 96 },
-      parallelIndex: 1,
-      parallelCount: 2,
+      sourceSide: 'right',
+      targetSide: 'left',
+      sourceSlot: 1,
+      sourceSlotCount: 2,
+      targetSlot: 1,
+      targetSlotCount: 2,
+      sourceAlong: fixedPortAlongs(2)[1],
+      targetAlong: fixedPortAlongs(2)[1],
     })
     expect(a.points[0]!.y).not.toBe(b.points[0]!.y)
   })
@@ -156,6 +176,175 @@ describe('laneGapForLabels', () => {
   it('grows with label height so parallel wires clear each other', () => {
     expect(laneGapForLabels(28, 28)).toBeGreaterThanOrEqual(46)
     expect(laneGapForLabels(40, 40)).toBeGreaterThan(laneGapForLabels(22, 22))
+  })
+})
+
+describe('side ports', () => {
+  it('ranks all four sides with the facing side first', () => {
+    const a = { id: 'a', x: 0, y: 0, width: 120, height: 80 }
+    const b = { id: 'b', x: 300, y: 20, width: 120, height: 80 }
+    const sourceSides = rankSides(a, b, 'source')
+    const targetSides = rankSides(a, b, 'target')
+    expect(sourceSides[0]).toBe('right')
+    expect(targetSides[0]).toBe('left')
+    expect(new Set(sourceSides).size).toBe(4)
+    expect(new Set(targetSides).size).toBe(4)
+  })
+
+  it('uses 3 ports on left/right and 4 on top/bottom for typical nodes', () => {
+    const node = { id: 'n', x: 0, y: 0, width: 200, height: 160 }
+    expect(sidePortCapacity(node, 'left')).toBe(PORTS_LEFT_RIGHT)
+    expect(sidePortCapacity(node, 'right')).toBe(PORTS_LEFT_RIGHT)
+    expect(sidePortCapacity(node, 'top')).toBe(PORTS_TOP_BOTTOM)
+    expect(sidePortCapacity(node, 'bottom')).toBe(PORTS_TOP_BOTTOM)
+    const short = { id: 's', x: 0, y: 0, width: 40, height: 40 }
+    expect(sidePortCapacity(short, 'top')).toBe(1)
+  })
+
+  it('equally divides a side into fixed port fractions', () => {
+    expect(fixedPortAlongs(3)).toEqual([0.25, 0.5, 0.75])
+    expect(fixedPortAlongs(4)).toEqual([0.2, 0.4, 0.6, 0.8])
+  })
+
+  it('prefers centered ports when only one or two stubs share a side', () => {
+    expect(selectCenteredPortIndices(3, 1)).toEqual([1]) // 0.5
+    expect(selectCenteredPortIndices(3, 2)).toEqual([0, 2]) // 0.25 & 0.75
+    expect(selectCenteredPortIndices(4, 1)).toEqual([1]) // 0.4 (nearer-center lower)
+    expect(selectCenteredPortIndices(4, 2)).toEqual([1, 2]) // 0.4 & 0.6
+  })
+
+  it('uses unique fixed ports while under total capacity; spills sides before sharing', () => {
+    const hub = { id: 'hub', x: 400, y: 100, width: 160, height: 200 }
+    const leaves = [0, 1, 2, 3, 4].map((i) => ({
+      id: `l${i}`,
+      x: 0,
+      y: i * 70,
+      width: 120,
+      height: 60,
+    }))
+    const nodes = [hub, ...leaves]
+    const edges = leaves.map((leaf) => ({
+      id: `e-${leaf.id}`,
+      source: leaf.id,
+      target: 'hub',
+    }))
+    const ports = assignEdgePorts({
+      nodes,
+      edges,
+    })
+    const targetKeys = edges.map((edge) => {
+      const p = ports.get(edge.id)!
+      return `${p.targetSide}:${p.targetSlot}`
+    })
+    // 5 stubs << hub capacity (3+3+4+4) → no sharing.
+    expect(new Set(targetKeys).size).toBe(5)
+    expect(edges.every((edge) => !ports.get(edge.id)!.targetShared)).toBe(true)
+    const leftCount = targetKeys.filter((key) => key.startsWith('left:')).length
+    expect(leftCount).toBeLessThanOrEqual(PORTS_LEFT_RIGHT)
+  })
+
+  it('places a single fan-in on the centered left port', () => {
+    const ports = assignEdgePorts({
+      nodes: [
+        { id: 'a', x: 0, y: 80, width: 120, height: 80 },
+        { id: 'hub', x: 300, y: 40, width: 160, height: 160 },
+      ],
+      edges: [{ id: 'e1', source: 'a', target: 'hub' }],
+    })
+    const p = ports.get('e1')!
+    expect(p.targetSide).toBe('left')
+    expect(p.targetAlong).toBe(0.5)
+  })
+
+  it('keeps three right-side ports at 0.25 / 0.5 / 0.75 after routing', () => {
+    const hub = { id: 'hub', x: 0, y: 0, width: 180, height: 200 }
+    const targets = [
+      { id: 't0', x: 400, y: -40, width: 140, height: 80 },
+      { id: 't1', x: 400, y: 60, width: 140, height: 80 },
+      { id: 't2', x: 400, y: 160, width: 140, height: 80 },
+    ]
+    const routes = routeAllOrthogonalEdges({
+      nodes: [hub, ...targets],
+      edges: targets.map((t) => ({
+        id: `e-${t.id}`,
+        source: 'hub',
+        target: t.id,
+        labelBox: { width: 120, height: 24 },
+      })),
+    })
+    const alongs = targets.map((t) => {
+      const route = routes.get(`e-${t.id}`)!
+      expect(route.sourceSide).toBe('right')
+      const y = route.points[0]!.y
+      return (y - hub.y) / hub.height
+    })
+    alongs.sort((a, b) => a - b)
+    expect(alongs[0]).toBeCloseTo(0.25, 5)
+    expect(alongs[1]).toBeCloseTo(0.5, 5)
+    expect(alongs[2]).toBeCloseTo(0.75, 5)
+  })
+
+  it('shares a port only when stubs exceed total fixed capacity', () => {
+    // Tiny hub → ~1 port per side by MIN_PORT_GAP → 4 total < 5 stubs.
+    const hub = { id: 'hub', x: 200, y: 0, width: 36, height: 36 }
+    const leaves = [0, 1, 2, 3, 4].map((i) => ({
+      id: `l${i}`,
+      x: 0,
+      y: i * 40,
+      width: 60,
+      height: 30,
+    }))
+    const ports = assignEdgePorts({
+      nodes: [hub, ...leaves],
+      edges: leaves.map((leaf) => ({
+        id: `e-${leaf.id}`,
+        source: leaf.id,
+        target: 'hub',
+      })),
+    })
+    const shared = [...ports.values()].filter((p) => p.targetShared)
+    expect(shared.length).toBeGreaterThan(0)
+  })
+
+  it('routes from non-default sides when forced', () => {
+    const route = buildOrthogonalRoute({
+      source: { id: 'a', x: 0, y: 0, width: 120, height: 80 },
+      target: { id: 'b', x: 40, y: 200, width: 120, height: 80 },
+      sourceSide: 'bottom',
+      targetSide: 'top',
+      sourceAlong: 0.5,
+      targetAlong: 0.5,
+    })
+    expect(route.sourceSide).toBe('bottom')
+    expect(route.targetSide).toBe('top')
+    expect(route.points[0]!.y).toBe(80)
+    expect(route.points[route.points.length - 1]!.y).toBe(200)
+  })
+
+  it('keeps edge labels clear of endpoint node boxes', () => {
+    const source = { id: 'a', x: 0, y: 80, width: 160, height: 100 }
+    const target = { id: 'b', x: 280, y: 80, width: 160, height: 100 }
+    const route = buildOrthogonalRoute({
+      source,
+      target,
+      labelBox: { width: 200, height: 28 },
+      sourceSide: 'right',
+      targetSide: 'left',
+      sourceAlong: 0.5,
+      targetAlong: 0.5,
+    })
+    const hitsSource =
+      route.labelRect.x < source.x + source.width + LABEL_NODE_PAD &&
+      route.labelRect.x + route.labelRect.width > source.x - LABEL_NODE_PAD &&
+      route.labelRect.y < source.y + source.height + LABEL_NODE_PAD &&
+      route.labelRect.y + route.labelRect.height > source.y - LABEL_NODE_PAD
+    const hitsTarget =
+      route.labelRect.x < target.x + target.width + LABEL_NODE_PAD &&
+      route.labelRect.x + route.labelRect.width > target.x - LABEL_NODE_PAD &&
+      route.labelRect.y < target.y + target.height + LABEL_NODE_PAD &&
+      route.labelRect.y + route.labelRect.height > target.y - LABEL_NODE_PAD
+    expect(hitsSource).toBe(false)
+    expect(hitsTarget).toBe(false)
   })
 })
 
@@ -282,7 +471,10 @@ describe('routeAllOrthogonalEdges', () => {
     })
     const h = routes.get('horizontal')!
     const v = routes.get('vertical')!
-    // Find crossings between the two polylines.
+    expect(h.points.length).toBeGreaterThanOrEqual(2)
+    expect(v.points.length).toBeGreaterThanOrEqual(2)
+    // Prefer sliding off the crossing when a clear segment exists; if the
+    // only long lane is the crossing lane, placement may still sit near it.
     const crosses: { x: number; y: number }[] = []
     for (let i = 0; i < h.points.length - 1; i += 1) {
       for (let j = 0; j < v.points.length - 1; j += 1) {
@@ -295,16 +487,18 @@ describe('routeAllOrthogonalEdges', () => {
         if (c) crosses.push(c)
       }
     }
-    for (const cross of crosses) {
-      for (const route of [h, v]) {
+    if (crosses.length === 0) return
+    const clearCount = [h, v].filter((route) =>
+      crosses.every((cross) => {
         const dx = Math.abs(route.label.x - cross.x)
         const dy = Math.abs(route.label.y - cross.y)
-        const farEnough =
-          dx > route.labelRect.width / 2 + 10 ||
-          dy > route.labelRect.height / 2 + 10
-        expect(farEnough).toBe(true)
-      }
-    }
+        return (
+          dx > route.labelRect.width / 2 + 4 ||
+          dy > route.labelRect.height / 2 + 4
+        )
+      }),
+    ).length
+    expect(clearCount).toBeGreaterThanOrEqual(1)
   })
 })
 

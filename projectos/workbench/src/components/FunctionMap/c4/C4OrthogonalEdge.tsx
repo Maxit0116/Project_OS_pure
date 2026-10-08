@@ -13,10 +13,13 @@ import { Z_EDGE_DETAIL } from '../mapWorkGroupOverlap'
 import { fitEdgeLabel } from './edgeLabelFit'
 import {
   buildOrthogonalRoute,
+  pinRouteToPorts,
+  placeCenteredLabel,
   pointsToRoundedPath,
   type OrthogonalRouteResult,
   type RoutePoint,
   type RouteRect,
+  type RouteSide,
 } from './orthogonalRoute'
 import styles from '../FloatingStraightEdge.module.css'
 
@@ -34,10 +37,21 @@ type EdgeMeta = {
   obstacles?: RouteRect[]
   reservedLabels?: RouteRect[]
   foreignWires?: RoutePoint[][]
+  sourceSide?: RouteSide
+  targetSide?: RouteSide
+  sourceAlong?: number
+  targetAlong?: number
   /** Precomputed global route (preferred — reserves sibling labels). */
   precomputedRoute?: Pick<
     OrthogonalRouteResult,
-    'points' | 'label' | 'path' | 'labelRect'
+    | 'points'
+    | 'label'
+    | 'path'
+    | 'labelRect'
+    | 'sourceSide'
+    | 'targetSide'
+    | 'sourceAlong'
+    | 'targetAlong'
   >
 }
 
@@ -100,17 +114,51 @@ function C4OrthogonalEdge({
       height: th,
     }
 
-    // Prefer canvas-global route (sibling label reservation).
+    // Prefer canvas-global route, but re-pin ports onto measured node boxes
+    // so 0.25/0.5/0.75 stay correct even when layout height ≠ measured height.
     if (metadata?.precomputedRoute?.points?.length) {
-      const points = metadata.precomputedRoute.points as RoutePoint[]
+      const sourceSide =
+        metadata.precomputedRoute.sourceSide ?? metadata.sourceSide ?? 'right'
+      const targetSide =
+        metadata.precomputedRoute.targetSide ?? metadata.targetSide ?? 'left'
+      const sourceAlong =
+        metadata.precomputedRoute.sourceAlong ?? metadata.sourceAlong ?? 0.5
+      const targetAlong =
+        metadata.precomputedRoute.targetAlong ?? metadata.targetAlong ?? 0.5
+      const points = pinRouteToPorts(
+        metadata.precomputedRoute.points as RoutePoint[],
+        sourceRect,
+        targetRect,
+        sourceSide,
+        targetSide,
+        sourceAlong,
+        targetAlong,
+      )
+      const approxFit = labelText
+        ? fitEdgeLabel(labelText, sourceRect, targetRect, points)
+        : null
+      const placement = approxFit
+        ? placeCenteredLabel(
+            points,
+            { width: approxFit.boxWidth, height: approxFit.boxHeight },
+            [sourceRect, targetRect, ...(metadata.obstacles ?? [])],
+            metadata.reservedLabels ?? [],
+            `label:${source}->${target}`,
+            metadata.foreignWires ?? [],
+          )
+        : {
+            label: metadata.precomputedRoute.label,
+            labelRect: metadata.precomputedRoute.labelRect,
+          }
       return {
         points,
-        label: metadata.precomputedRoute.label,
-        labelRect: metadata.precomputedRoute.labelRect,
-        path:
-          metadata.precomputedRoute.path || pointsToRoundedPath(points),
-        sourceSide: 'right' as const,
-        targetSide: 'left' as const,
+        label: placement.label,
+        labelRect: placement.labelRect,
+        path: pointsToRoundedPath(points),
+        sourceSide,
+        targetSide,
+        sourceAlong,
+        targetAlong,
       }
     }
 
@@ -127,6 +175,10 @@ function C4OrthogonalEdge({
       labelBox: approxFit
         ? { width: approxFit.boxWidth, height: approxFit.boxHeight }
         : { width: 96, height: 22 },
+      sourceSide: metadata?.sourceSide,
+      targetSide: metadata?.targetSide,
+      sourceAlong: metadata?.sourceAlong,
+      targetAlong: metadata?.targetAlong,
       parallelIndex: metadata?.parallelIndex,
       parallelCount: metadata?.parallelCount,
       edgeIndex: metadata?.edgeIndex,
@@ -144,6 +196,10 @@ function C4OrthogonalEdge({
     metadata?.parallelIndex,
     metadata?.parallelCount,
     metadata?.edgeIndex,
+    metadata?.sourceSide,
+    metadata?.targetSide,
+    metadata?.sourceAlong,
+    metadata?.targetAlong,
     metadata?.precomputedRoute,
   ])
 

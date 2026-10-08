@@ -2655,11 +2655,19 @@ function FunctionMapCanvasInner({ bleed }: Props) {
                 obstacles: c4Obstacles,
                 ...(precomputed
                   ? {
+                      sourceSide: precomputed.sourceSide,
+                      targetSide: precomputed.targetSide,
+                      sourceAlong: precomputed.sourceAlong,
+                      targetAlong: precomputed.targetAlong,
                       precomputedRoute: {
                         points: precomputed.points,
                         label: precomputed.label,
                         path: precomputed.path,
                         labelRect: precomputed.labelRect,
+                        sourceSide: precomputed.sourceSide,
+                        targetSide: precomputed.targetSide,
+                        sourceAlong: precomputed.sourceAlong,
+                        targetAlong: precomputed.targetAlong,
                       },
                     }
                   : {}),
