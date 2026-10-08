@@ -15,6 +15,7 @@ import {
   routeAllOrthogonalEdges,
   selectCenteredPortIndices,
   sidePortCapacity,
+  uncrossSidePortsByApproach,
 } from './orthogonalRoute'
 
 describe('buildOrthogonalRoute', () => {
@@ -254,6 +255,55 @@ describe('side ports', () => {
     const p = ports.get('e1')!
     expect(p.targetSide).toBe('left')
     expect(p.targetAlong).toBe(0.5)
+  })
+
+  it('matches higher neighbour to higher port (no swapped 0.25/0.5)', () => {
+    const hub = { id: 'hub', x: 400, y: 40, width: 160, height: 160 }
+    const high = { id: 'high', x: 0, y: 0, width: 120, height: 80 }
+    const low = { id: 'low', x: 0, y: 160, width: 120, height: 80 }
+    const routes = routeAllOrthogonalEdges({
+      nodes: [hub, high, low],
+      edges: [
+        { id: 'e-high', source: 'high', target: 'hub', labelBox: { width: 80, height: 20 } },
+        { id: 'e-low', source: 'low', target: 'hub', labelBox: { width: 80, height: 20 } },
+      ],
+    })
+    const highRoute = routes.get('e-high')!
+    const lowRoute = routes.get('e-low')!
+    expect(highRoute.targetSide).toBe('left')
+    expect(lowRoute.targetSide).toBe('left')
+    expect(highRoute.targetAlong).toBeLessThan(lowRoute.targetAlong)
+  })
+
+  it('uncrossSidePortsByApproach swaps inverted target ports', () => {
+    const hub = { id: 'hub', x: 300, y: 0, width: 120, height: 120 }
+    const high = { id: 'high', x: 0, y: 0, width: 100, height: 60 }
+    const low = { id: 'low', x: 0, y: 100, width: 100, height: 60 }
+    const routes = routeAllOrthogonalEdges({
+      nodes: [hub, high, low],
+      edges: [
+        { id: 'e-high', source: 'high', target: 'hub' },
+        { id: 'e-low', source: 'low', target: 'hub' },
+      ],
+    })
+    // Force an inversion, then uncross.
+    const highRoute = routes.get('e-high')!
+    const lowRoute = routes.get('e-low')!
+    const highAlong = highRoute.targetAlong
+    const lowAlong = lowRoute.targetAlong
+    highRoute.targetAlong = lowAlong
+    lowRoute.targetAlong = highAlong
+    uncrossSidePortsByApproach({
+      nodes: [hub, high, low],
+      edges: [
+        { id: 'e-high', source: 'high', target: 'hub' },
+        { id: 'e-low', source: 'low', target: 'hub' },
+      ],
+      routes,
+    })
+    expect(routes.get('e-high')!.targetAlong).toBeLessThan(
+      routes.get('e-low')!.targetAlong,
+    )
   })
 
   it('keeps three right-side ports at 0.25 / 0.5 / 0.75 after routing', () => {

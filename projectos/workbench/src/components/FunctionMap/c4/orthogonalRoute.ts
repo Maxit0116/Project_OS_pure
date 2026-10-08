@@ -580,15 +580,17 @@ export function placeCenteredLabel(
         }
       }
       for (const reserved of reservedLabels) {
-        if (rectsOverlap(rect, reserved, 8)) {
-          score -= 480
+        if (rectsOverlap(rect, reserved, 10)) {
+          // Hard reject — labels must not stack on each other.
+          score -= 1600
           clear = false
         }
       }
 
       const wireHits = labelOverlapsWire(rect, foreignWires, LABEL_WIRE_PAD)
       if (wireHits > 0) {
-        score -= wireHits * 420
+        // Hard reject — labels must not cover other wires / crossings.
+        score -= wireHits * 900
         clear = false
       }
 
@@ -677,6 +679,23 @@ export function pointsToRoundedPath(
   return d
 }
 
+function countPolylineCrossings(
+  points: RoutePoint[],
+  foreignWires: RoutePoint[][],
+): number {
+  let count = 0
+  for (let i = 0; i < points.length - 1; i += 1) {
+    for (const wire of foreignWires) {
+      for (let j = 0; j < wire.length - 1; j += 1) {
+        if (orthogonalCrossing(points[i]!, points[i + 1]!, wire[j]!, wire[j + 1]!)) {
+          count += 1
+        }
+      }
+    }
+  }
+  return count
+}
+
 function scoreRoute(
   points: RoutePoint[],
   obstacles: RouteRect[],
@@ -686,6 +705,8 @@ function scoreRoute(
   labelId: string,
 ): { total: number; placement: ReturnType<typeof placeCenteredLabel> } {
   const hits = polylineHitsObstacles(points, obstacles)
+  const crossings = countPolylineCrossings(points, foreignWires)
+  const bends = Math.max(0, points.length - 2)
   let len = 0
   for (let i = 0; i < points.length - 1; i += 1) {
     const a = points[i]!
@@ -700,9 +721,13 @@ function scoreRoute(
     labelId,
     foreignWires,
   )
+  // Priority: label/node clearance (in placement.score) ≫ obstacle hits
+  // ≫ fewer bends ≫ fewer edge crossings (crossings are soft).
   const total =
     placement.score -
     hits * 500 -
+    bends * 35 -
+    crossings * 70 -
     Math.max(0, len - 560) * 0.06 +
     Math.min(len, 480) * 0.02
   return { total, placement }
@@ -929,9 +954,13 @@ export function assignEdgePorts(input: {
     if (!node) continue
     const cap = sidePortCapacity(node, side)
     const alongs = fixedPortAlongs(cap)
-    const indices = selectCenteredPortIndices(cap, stubs.length)
+    // Ports sorted along the side (top→bottom / left→right).
+    const portIndices = selectCenteredPortIndices(cap, stubs.length).sort(
+      (a, b) => (alongs[a] ?? 0) - (alongs[b] ?? 0),
+    )
 
-    // Stable order: by other endpoint position along the side axis.
+    // Match by other-endpoint position on the same axis — top source → top port
+    // — so approach paths do not cross at the node border.
     const sorted = [...stubs].sort((a, b) => {
       const edgeA = input.edges.find((e) => e.id === a.edgeId)
       const edgeB = input.edges.find((e) => e.id === b.edgeId)
@@ -950,14 +979,9 @@ export function assignEdgePorts(input: {
     })
 
     sorted.forEach((stub, i) => {
-      const portIndex =
-        i < indices.length
-          ? indices[i]!
-          : indices[i % Math.max(1, indices.length)]!
-      // When over capacity, wrap / share from the centered set then full grid.
       const resolvedIndex =
         stubs.length <= cap
-          ? portIndex
+          ? (portIndices[i] ?? portIndices[portIndices.length - 1] ?? 0)
           : i % cap
       const along = alongs[resolvedIndex] ?? 0.5
       stubPort.set(`${stub.edgeId}:${stub.role}`, {
@@ -1317,6 +1341,233 @@ export interface RoutedEdgeSpec {
   labelBox?: { width: number; height: number }
 }
 
+/**
+ * Rematch ports on each node side by the other endpoint's position so a
+ * geometrically higher neighbour always gets the higher port (0.25 before 0.5).
+ * Uses neighbour centres — not pinned stub Y (which always equals the port).
+ */
+export function uncrossSidePortsByApproach(input: {
+  nodes: RouteRect[]
+  edges: RoutedEdgeSpec[]
+  routes: Map<string, OrthogonalRouteResult>
+}): void {
+  const byId = new Map(input.nodes.map((node) => [node.id, node]))
+
+  type Member = {
+    edgeId: string
+    role: 'source' | 'target'
+    /** Sort key: other node centre on the side axis. */
+    rank: number
+    along: number
+  }
+
+  const groups = new Map<string, Member[]>()
+
+  for (const edge of input.edges) {
+    const route = input.routes.get(edge.id)
+    const source = byId.get(edge.source)
+    const target = byId.get(edge.target)
+    if (!route || !source || !target) continue
+
+    const sourceKey = `${edge.source}:${route.sourceSide}`
+    const targetKey = `${edge.target}:${route.targetSide}`
+
+    const sourceRank =
+      route.sourceSide === 'left' || route.sourceSide === 'right'
+        ? center(target).y
+        : center(target).x
+    const targetRank =
+      route.targetSide === 'left' || route.targetSide === 'right'
+        ? center(source).y
+        : center(source).x
+
+    const sList = groups.get(sourceKey) ?? []
+    sList.push({
+      edgeId: edge.id,
+      role: 'source',
+      rank: sourceRank,
+      along: route.sourceAlong,
+    })
+    groups.set(sourceKey, sList)
+
+    const tList = groups.get(targetKey) ?? []
+    tList.push({
+      edgeId: edge.id,
+      role: 'target',
+      rank: targetRank,
+      along: route.targetAlong,
+    })
+    groups.set(targetKey, tList)
+  }
+
+  for (const [, members] of groups) {
+    if (members.length < 2) continue
+    const byRank = [...members].sort((a, b) => a.rank - b.rank)
+    const alongsSorted = [...members]
+      .map((m) => m.along)
+      .sort((a, b) => a - b)
+
+    let inverted = false
+    for (let i = 0; i < byRank.length; i += 1) {
+      if (Math.abs(byRank[i]!.along - alongsSorted[i]!) > 1e-6) {
+        inverted = true
+        break
+      }
+    }
+    if (!inverted) continue
+
+    byRank.forEach((member, i) => {
+      const route = input.routes.get(member.edgeId)
+      const edge = input.edges.find((e) => e.id === member.edgeId)
+      if (!route || !edge) return
+      const newAlong = alongsSorted[i]!
+      if (member.role === 'source') route.sourceAlong = newAlong
+      else route.targetAlong = newAlong
+      const source = byId.get(edge.source)
+      const target = byId.get(edge.target)
+      if (!source || !target) return
+      route.points = pinRouteToPorts(
+        route.points,
+        source,
+        target,
+        route.sourceSide,
+        route.targetSide,
+        route.sourceAlong,
+        route.targetAlong,
+      )
+      route.path = pointsToRoundedPath(route.points)
+    })
+  }
+}
+
+/**
+ * Overlay acceptance: keep micro-adjusting labels (and elongating lanes) until
+ * no label covers a node, another label, a foreign wire, or a crossing — or
+ * until the iteration budget is exhausted.
+ */
+export function resolveOverlayConflicts(input: {
+  nodes: RouteRect[]
+  edges: RoutedEdgeSpec[]
+  routes: Map<string, OrthogonalRouteResult>
+  maxPasses?: number
+}): { resolved: boolean; passes: number } {
+  const maxPasses = input.maxPasses ?? 10
+  const allIds = [...input.routes.keys()]
+  let passes = 0
+
+  const isClear = (
+    rect: RouteRect,
+    nodes: RouteRect[],
+    otherLabels: RouteRect[],
+    wires: RoutePoint[][],
+  ) =>
+    !labelOverlapsNodes(rect, nodes, LABEL_NODE_PAD) &&
+    !otherLabels.some((other) => rectsOverlap(rect, other, 10)) &&
+    labelOverlapsWire(rect, wires, LABEL_WIRE_PAD) === 0
+
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    passes = pass + 1
+    let dirty = false
+
+    for (const id of allIds) {
+      const route = input.routes.get(id)!
+      const edge = input.edges.find((candidate) => candidate.id === id)
+      const source = edge ? input.nodes.find((n) => n.id === edge.source) : undefined
+      const target = edge ? input.nodes.find((n) => n.id === edge.target) : undefined
+      const labelBox = edge?.labelBox ?? {
+        width: route.labelRect.width,
+        height: route.labelRect.height,
+      }
+      const others = allIds
+        .filter((otherId) => otherId !== id)
+        .map((otherId) => input.routes.get(otherId)!.points)
+      const otherLabels = allIds
+        .filter((otherId) => otherId !== id)
+        .map((otherId) => input.routes.get(otherId)!.labelRect)
+
+      if (isClear(route.labelRect, input.nodes, otherLabels, others)) continue
+
+      dirty = true
+      const audited = auditAndFixLabel({
+        points: route.points,
+        labelBox,
+        nodes: input.nodes,
+        reservedLabels: otherLabels,
+        foreignWires: others,
+        labelId: `label:${id}`,
+      })
+      let points = audited.points
+      if (source && target) {
+        points = pinRouteToPorts(
+          points,
+          source,
+          target,
+          route.sourceSide,
+          route.targetSide,
+          route.sourceAlong,
+          route.targetAlong,
+        )
+      }
+
+      // If still blocked, force a longer horizontal detour for more label room.
+      let placement = placeCenteredLabel(
+        points,
+        labelBox,
+        input.nodes.map((node) => inflate(node, LABEL_NODE_PAD)),
+        otherLabels,
+        `label:${id}`,
+        others,
+      )
+      if (!isClear(placement.labelRect, input.nodes, otherLabels, others)) {
+        points = elongateRouteForLabel(points, labelBox.width + 96, 72 + pass * 24)
+        if (source && target) {
+          points = pinRouteToPorts(
+            points,
+            source,
+            target,
+            route.sourceSide,
+            route.targetSide,
+            route.sourceAlong,
+            route.targetAlong,
+          )
+        }
+        placement = placeCenteredLabel(
+          points,
+          labelBox,
+          input.nodes.map((node) => inflate(node, LABEL_NODE_PAD)),
+          otherLabels,
+          `label:${id}`,
+          others,
+        )
+      }
+
+      route.points = points
+      route.label = placement.label
+      route.labelRect = placement.labelRect
+      route.path = pointsToRoundedPath(points)
+    }
+
+    if (!dirty) return { resolved: true, passes }
+  }
+
+  // Final check.
+  let allClear = true
+  for (const id of allIds) {
+    const route = input.routes.get(id)!
+    const others = allIds
+      .filter((otherId) => otherId !== id)
+      .map((otherId) => input.routes.get(otherId)!.points)
+    const otherLabels = allIds
+      .filter((otherId) => otherId !== id)
+      .map((otherId) => input.routes.get(otherId)!.labelRect)
+    if (!isClear(route.labelRect, input.nodes, otherLabels, others)) {
+      allClear = false
+      break
+    }
+  }
+  return { resolved: allClear, passes }
+}
+
 function separateParallelLanes(
   routes: Map<string, OrthogonalRouteResult>,
   labelHeights: Map<string, number>,
@@ -1453,74 +1704,32 @@ export function routeAllOrthogonalEdges(input: {
     reservedLabels.push(routed.labelRect)
   })
 
+  // Smart port rematch from real approach geometry (fixes swapped 0.25/0.5).
+  uncrossSidePortsByApproach({
+    nodes: input.nodes,
+    edges: input.edges,
+    routes: results,
+  })
+
   separateParallelLanes(results, labelHeights)
 
-  // Global acceptance pass — re-audit every label against final wires + all nodes.
+  // Re-uncross after lane shifts (ports stay pinned; approach order may change).
+  uncrossSidePortsByApproach({
+    nodes: input.nodes,
+    edges: input.edges,
+    routes: results,
+  })
+
+  // Acceptance loop: remove label↔label / label↔wire / label↔node overlays.
+  resolveOverlayConflicts({
+    nodes: input.nodes,
+    edges: input.edges,
+    routes: results,
+    maxPasses: 10,
+  })
+
+  // Final pin + label seat so ports stay exact.
   const allIds = [...results.keys()]
-  for (let pass = 0; pass < 3; pass += 1) {
-    let dirty = false
-    for (const id of allIds) {
-      const route = results.get(id)!
-      const edge = input.edges.find((candidate) => candidate.id === id)
-      const source = edge ? byId.get(edge.source) : undefined
-      const target = edge ? byId.get(edge.target) : undefined
-      const labelBox = edge?.labelBox ?? {
-        width: route.labelRect.width,
-        height: route.labelRect.height,
-      }
-      const others = allIds
-        .filter((otherId) => otherId !== id)
-        .map((otherId) => results.get(otherId)!.points)
-      const otherLabels = allIds
-        .filter((otherId) => otherId !== id)
-        .map((otherId) => results.get(otherId)!.labelRect)
-
-      const audited = auditAndFixLabel({
-        points: route.points,
-        labelBox,
-        nodes: input.nodes,
-        reservedLabels: otherLabels,
-        foreignWires: others,
-        labelId: `label:${id}`,
-      })
-
-      let points = audited.points
-      if (source && target) {
-        points = pinRouteToPorts(
-          points,
-          source,
-          target,
-          route.sourceSide,
-          route.targetSide,
-          route.sourceAlong,
-          route.targetAlong,
-        )
-      }
-
-      const placement = placeCenteredLabel(
-        points,
-        labelBox,
-        input.nodes.map((node) => inflate(node, LABEL_NODE_PAD)),
-        otherLabels,
-        `label:${id}`,
-        others,
-      )
-
-      const moved =
-        points !== route.points ||
-        placement.label.x !== route.label.x ||
-        placement.label.y !== route.label.y
-      if (moved) dirty = true
-      route.points = points
-      route.label = placement.label
-      route.labelRect = placement.labelRect
-      route.path = pointsToRoundedPath(points)
-    }
-    if (!dirty) break
-  }
-
-  // Final guarantee: every edge ends exactly on its fixed port fractions,
-  // then re-seat labels on the pinned polylines.
   for (const id of allIds) {
     const route = results.get(id)!
     const edge = input.edges.find((candidate) => candidate.id === id)
@@ -1558,6 +1767,14 @@ export function routeAllOrthogonalEdges(input: {
     route.labelRect = placement.labelRect
     route.path = pointsToRoundedPath(route.points)
   }
+
+  // One more overlay pass after final pin.
+  resolveOverlayConflicts({
+    nodes: input.nodes,
+    edges: input.edges,
+    routes: results,
+    maxPasses: 4,
+  })
 
   return results
 }
