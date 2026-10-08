@@ -47,7 +47,7 @@
   padding: 4px 6px 4px 8px;
   border: 1px solid var(--glass-border-subtle);
   border-bottom: none;
-  border-radius: var(--radius-glass-sm) var(--radius-glass-sm) 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   background: color-mix(in srgb, var(--color-bg-map) 55%, var(--color-map-artifact-chrome));
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
@@ -61,7 +61,7 @@
 }
 
 .tabSlot:first-child .tab {
-  border-top-left-radius: var(--radius-glass-sm);
+  border-top-left-radius: var(--radius-sm);
 }
 
 .tab:hover:not(.tabActive) {
@@ -109,13 +109,13 @@
 .dropHighlight {
   outline: 1px dashed var(--color-accent);
   outline-offset: 2px;
-  border-radius: var(--radius-glass-sm) var(--radius-glass-sm) 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 .dropReject {
   outline: 1px dashed var(--color-error);
   outline-offset: 2px;
-  border-radius: var(--radius-glass-sm) var(--radius-glass-sm) 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 .tabSlot {

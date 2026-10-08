@@ -1,36 +1,47 @@
-# Structure Graph Scan（Project OS Pure）
+# Structure Graph Scan（Project OS Pure）— L2
 
-为陌生本地仓库生成 **结构层 C4** `ProjectGraph`（`.projectos/graph.json`），效果要对齐 sample 仓库那种**可读 Function Map**：产品语言命名、清晰分层、真实文件挂载——不是目录壳。
+为陌生本地仓库生成 **sample 级可读 C4** `ProjectGraph`。模型只出语义骨架；文件挂载与 code 层由程序补齐。
 
-## 任务
+## 两轮输出（均只要小 JSON，不要 fileIndex / fileRelations）
 
-阅读仓库文件树与关键片段，输出一个完整的 `ProjectGraph` JSON 对象（version `0.3.0`）：
+### Round A
 
-1. **context**：1 个 software_system；可选 1–2 个 person（如访客/会员）
-2. **container**：按真实部署/包边界划分（如 Android 客户端、macOS 客户端、共享核心），用产品职责命名，**禁止** `android module` / `src module`
-3. **component**：每个 container 下 1–3 个组件，用能力语言命名（录音引擎、同步服务、设置页）
-4. **edges**：容器/组件之间的真实依赖（`depends_on` / `calls` / `data_flows_to` 等），每条边需要短 `label` 与 `evidence`
-5. **fileIndex**：只列你挂到组件上的真实相对路径（优先入口/核心文件）；`imports`/`exports` 一律 `[]`
-6. **linkedFiles**：把源文件挂到对应 component；`path` 必须落在 `fileIndex` 中
+`{ architecture, nodes, edges }`
 
-## 体积硬上限（必须遵守，否则输出会被截断）
+- 0–4 person（context）
+- 1 software_system（context）
+- 0–4 external_system（context）：SaaS / 云 / 第三方（Stripe、Auth0、OpenAI、AWS…）；建议 `tags: ["External"]`
+- 2–6 container，产品/部署边界命名，禁止 `android module` / `src module`
+- 数据库 / 缓存用 `elementType: "data_store"`（`level: "container"`），不要只写普通 container
+- 每个 container / data_store / 关键的 external_system 填短 `technology`，供 C4 形状选择：
+  - Web：`Next.js` / `React` / `Vue` / `Angular` / `Svelte`
+  - Mobile：`React Native` / `Flutter` / `iOS` / `Android` / `SwiftUI`
+  - Server：`Node.js / Express` / `NestJS` / `Django` / `FastAPI` / `Go`
+  - Data：`PostgreSQL` / `MySQL` / `MongoDB` / `SQLite` / `Redis`
+  - Queue：`Kafka` / `RabbitMQ` / `SQS` / `NATS` / `Pub/Sub`
+- **每条边带协议 `technology`**（HTTP / HTTPS / gRPC / Kafka / SQL …）+ 短 `label` + `evidence`
+- 嵌套：`container` / `data_store` 的 `parentId` = software_system id
+- 低置信（低于 0.6）节点写 `openQuestions`；有路径证据写 `notes`
+- 可选 `owners`
 
-- nodes ≤ 16（含 system/person/container/component）
-- edges ≤ 20
-- fileIndex ≤ 40
-- 每个文本字段（description/summary/responsibility/label/evidence）≤ 100 字符
-- 省略 `nameEn` / `refs` / `preview` / `fileRelations` / `technology`（不确定时）
+### Round B
 
-## 输出
+`{ components, edges }`
 
-- 只返回 **一个** JSON 对象；首字符 `{`，末字符 `}`
-- 不要 markdown 围栏（除非环境强制）
-- 不要编造不存在的文件路径
-- `analysisStatus` 设为 `"complete"`
-- 节点 `tags` 使用 `["ai-scan"]`，不要保留 `bootstrap` / `heuristic`
+- 每个 container 2–6 个 component（全仓约 8–20）
+- 能力命名（录音引擎、身份与访问…）
+- 每组件 `pathHints: string[]`，必须是真实路径前缀（如 `android/app`, `src/auth`）
+- 组件可带短 `technology`、`notes`、`openQuestions`、`owners`
+- 组件边同样带协议 `technology`
 
-## 命名
+## 语言
 
-- 优先用户/产品语言（中文仓库用中文名）
-- 坏例子：`android`、`android module`、`shared module`
-- 好例子：`Android 客户端`、`情侣录音核心`、`本地存储`
+跟随仓库 README：中文 README 用中文名，否则英文名。
+
+## MUST NOT
+
+- 不要输出 `fileIndex` / `fileRelations` / 完整文件列表
+- 不要编造路径
+- 不要用目录壳当最终名称
+- 不要发明 schema 以外的 `elementType` 枚举值
+- 不要输出布局坐标或画布状态

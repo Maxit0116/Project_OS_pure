@@ -1,4 +1,4 @@
-import { ThinkingOrb as ThinkingOrbCanvas, type OrbSize, type OrbState, type OrbTheme } from 'thinking-orbs'
+import type { OrbSize, OrbState, OrbTheme } from 'thinking-orbs'
 import styles from './ThinkingOrb.module.css'
 
 export type { OrbSize, OrbState, OrbTheme }
@@ -13,24 +13,18 @@ interface Props {
   className?: string
 }
 
+/** Status dot. Agent activity is a state, not an animated avatar. */
 export default function ThinkingOrb({
   state = 'working',
-  size = 20,
-  theme = 'auto',
-  speed,
-  paused,
   label,
   className = '',
 }: Props) {
   return (
-    <ThinkingOrbCanvas
-      state={state}
-      size={size}
-      theme={theme}
-      speed={speed}
-      paused={paused}
+    <span
+      className={`${styles.dot} ${className}`.trim()}
+      data-state={state}
+      role={label ? 'img' : undefined}
       aria-label={label}
-      className={`${styles.orb} ${styles[`size${size}`]} ${className}`.trim()}
     />
   )
 }

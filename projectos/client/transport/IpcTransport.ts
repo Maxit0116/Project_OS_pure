@@ -9,7 +9,7 @@ import type { ApplyResult, GeneratedDiff, RestoreApplyResult } from "../../contr
 import type { VerificationRunResult } from "../../contracts/exec-command.js";
 import type { VerificationCommandApprovalStatus } from "../../contracts/verification-command-approval.js";
 import type { AgentRunEvent, AgentTransientTrace } from "../../contracts/events.js";
-import type { ProjectGraph } from "../../contracts/graph.js";
+import type { ProjectGraph, StructureScanOptions } from "../../contracts/graph.js";
 import type { HarnessRecord } from "../../contracts/harness.js";
 import type {
   CreatePlanRequest,
@@ -163,8 +163,8 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("openWorkspace", path);
   }
 
-  analyzeWorkspace(projectId: string): Promise<ProjectGraph> {
-    return this.invoke("analyzeWorkspace", projectId);
+  analyzeWorkspace(projectId: string, options?: StructureScanOptions): Promise<ProjectGraph> {
+    return this.invoke("analyzeWorkspace", projectId, options ?? { mode: "regenerate" });
   }
 
   getProjectGraph(projectId: string): Promise<ProjectGraph> {

@@ -58,8 +58,8 @@
 
 /* Shared flat / galaxy / branch map canvas — matches React Flow Background gap 20, size 1. */
 .mapCanvasBg {
-  background-color: var(--color-bg-map);
-  background-image: radial-gradient(circle, var(--color-border) 0.5px, transparent 0.5px);
+  background-color: var(--tech-bg-map);
+  background-image: radial-gradient(circle, var(--tech-border) 0.5px, transparent 0.5px);
   background-size: 20px 20px;
 }
 
@@ -157,7 +157,7 @@
 .levelBack:focus-visible,
 .levelButton:focus-visible {
   outline: none;
-  box-shadow: var(--glass-focus-ring);
+  box-shadow: var(--tech-shadow-focus);
 }
 
 .scopeLabel {
@@ -228,11 +228,11 @@
   align-items: center;
   gap: var(--space-md);
   padding: var(--space-sm) var(--space-md);
-  background: var(--glass-bg-clear);
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  border-bottom: 1px solid var(--border-window-chrome);
-  box-shadow: var(--window-rim-chrome), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
+  background: var(--tech-bg-side-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-bottom: 1px solid var(--tech-border);
+  box-shadow: none;
   flex-shrink: 0;
 }
 
@@ -242,15 +242,15 @@
   max-width: 220px;
   padding: 6px 10px;
   font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
-  background: var(--color-bg-muted);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-glass-sm);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
 .search:focus {
-  border-color: var(--color-accent);
+  border-color: var(--tech-accent);
   outline: none;
 }
 
@@ -335,10 +335,10 @@
   width: 240px;
   min-height: 0;
   padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-glass-md);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--glass-border-highlight);
-  box-shadow: var(--glass-shadow-elevated);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+  box-shadow: var(--tech-shadow-md);
   z-index: 12;
   pointer-events: none;
   user-select: text;
@@ -353,20 +353,20 @@
 .nodePreviewTitle {
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
+  color: var(--tech-text-primary);
 }
 
 .nodePreviewSubtitle {
   margin-top: 2px;
   font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
 }
 
 .nodePreviewSummary {
   margin: 6px 0;
   font-size: var(--font-size-xs);
   line-height: 1.4;
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
 }
 
 .nodePreviewMeta {
@@ -374,7 +374,7 @@
   justify-content: space-between;
   gap: var(--space-sm);
   font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
 }
 
 .nodePreviewTags {
@@ -386,17 +386,17 @@
 
 .nodePreviewTag {
   font-size: 10px;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-muted);
-  border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-pill);
+  color: var(--tech-text-secondary);
+  background: var(--tech-bg-muted);
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
   padding: 2px 8px;
 }
 
 .nodePreviewHint {
   margin-top: 6px;
   font-size: 10px;
-  color: var(--color-text-muted);
+  color: var(--tech-text-muted);
 }
 
 .flow :global(.react-flow__pane),
@@ -423,49 +423,47 @@
 }
 
 .flow :global(.react-flow) {
-  --xy-controls-button-background-color-default: var(--glass-bg-elevated);
-  --xy-controls-button-background-color-hover-default: var(--color-bg-muted);
-  --xy-controls-button-color-default: var(--color-text-secondary);
-  --xy-controls-button-color-hover-default: var(--color-text-primary);
-  --xy-controls-button-border-color-default: var(--glass-border);
+  --xy-controls-button-background-color-default: var(--tech-bg-elevated);
+  --xy-controls-button-background-color-hover-default: var(--tech-bg-muted);
+  --xy-controls-button-color-default: var(--tech-text-secondary);
+  --xy-controls-button-color-hover-default: var(--tech-text-primary);
+  --xy-controls-button-border-color-default: var(--tech-border);
   --xy-controls-box-shadow-default: none;
 }
 
 .flow :global(.react-flow__controls) {
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-glass-sm);
-  box-shadow: var(--glass-shadow-regular);
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  box-shadow: var(--tech-shadow-sm);
   overflow: hidden;
 }
 
 .flow :global(.react-flow__controls-button) {
   background: transparent;
-  border-color: var(--glass-border-subtle);
-  color: var(--color-text-secondary);
-  fill: var(--color-text-secondary);
+  border-color: var(--tech-border-subtle);
+  color: var(--tech-text-secondary);
+  fill: var(--tech-text-secondary);
 }
 
 .flow :global(.react-flow__controls-button:hover) {
-  background: var(--color-bg-muted);
-  color: var(--color-text-primary);
-  fill: var(--color-text-primary);
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+  fill: var(--tech-text-primary);
 }
 
 .flow :global(.react-flow__controls-button svg) {
   fill: currentColor;
 }
 
-/* MiniMap — Tier A frost (small nav-adjacent utility, not a hero overlay).
-   bgColor="transparent" on the component lets this glass show through the
-   real SVG canvas so node thumbnails render on frosted glass, not a solid box. */
+/* MiniMap — solid tech surface, not a hero overlay. */
 .miniMap.miniMap {
-  background: var(--glass-bg-clear);
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  border: 1px solid var(--glass-border-highlight);
-  border-radius: var(--radius-glass-md);
-  box-shadow: var(--glass-shadow-elevated);
+  background: var(--tech-bg-elevated);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  box-shadow: var(--tech-shadow-sm);
   overflow: hidden;
 }
 
@@ -477,7 +475,7 @@
   .miniMap.miniMap {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    background: var(--color-bg-elevated);
+    background: var(--tech-bg-elevated);
   }
 }
 
@@ -549,29 +547,29 @@
 .galaxyCameraHint {
   margin: 0;
   padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  background: rgba(11, 16, 32, 0.72);
-  border: 1px solid var(--glass-border-subtle);
-  color: var(--color-text-secondary);
+  border-radius: 4px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+  color: var(--tech-text-secondary);
   font-size: 10px;
   line-height: 1.4;
   pointer-events: none;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .galaxyCinemaBadge {
   padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  background: rgba(107, 159, 255, 0.16);
-  border: 1px solid rgba(107, 159, 255, 0.35);
-  color: var(--color-accent-primary, #6b9fff);
+  border-radius: 4px;
+  background: var(--tech-accent-subtle);
+  border: 1px solid var(--tech-accent);
+  color: var(--tech-accent);
   font-size: 10px;
   font-weight: 500;
   line-height: 1.4;
   pointer-events: none;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .galaxyCameraButtons {
@@ -579,13 +577,13 @@
   align-items: center;
   gap: 4px;
   padding: 4px;
-  border-radius: var(--radius-glass-md);
-  background: rgba(11, 16, 32, 0.82);
-  border: 1px solid var(--glass-border-subtle);
-  box-shadow: var(--glass-shadow-regular);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+  box-shadow: var(--tech-shadow-sm);
   pointer-events: auto;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .galaxyOrbitSpeed {
@@ -593,32 +591,32 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-radius: var(--radius-glass-md);
-  background: rgba(11, 16, 32, 0.82);
-  border: 1px solid var(--glass-border-subtle);
-  box-shadow: var(--glass-shadow-regular);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+  box-shadow: var(--tech-shadow-sm);
   pointer-events: auto;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .galaxyOrbitSpeedLabel {
   flex-shrink: 0;
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
   font-size: 11px;
   white-space: nowrap;
 }
 
 .galaxyOrbitSpeedSlider {
   width: 96px;
-  accent-color: var(--color-accent-primary, #6b9fff);
+  accent-color: var(--tech-accent);
   cursor: pointer;
 }
 
 .galaxyOrbitSpeedValue {
   flex-shrink: 0;
   min-width: 36px;
-  color: var(--color-text-primary);
+  color: var(--tech-text-primary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -629,18 +627,18 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-radius: var(--radius-glass-md);
-  background: rgba(11, 16, 32, 0.82);
-  border: 1px solid var(--glass-border-subtle);
-  box-shadow: var(--glass-shadow-regular);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+  box-shadow: var(--tech-shadow-sm);
   pointer-events: auto;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .galaxyEdgeLabelSettingLabel {
   flex-shrink: 0;
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -648,60 +646,60 @@
 .galaxyEdgeLabelSelect {
   min-width: 108px;
   padding: 4px 8px;
-  border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-sm);
-  background: rgba(11, 16, 32, 0.65);
-  color: var(--color-text-primary);
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
   font-size: 11px;
   cursor: pointer;
 }
 
 .galaxyEdgeLabel {
   padding: 3px 8px;
-  border-radius: var(--radius-pill);
+  border-radius: 4px;
   border: 1px solid;
-  background: rgba(11, 16, 32, 0.82);
-  color: var(--color-text-primary);
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-primary);
   font-size: 10px;
   font-weight: 600;
   line-height: 1.35;
   white-space: nowrap;
   pointer-events: none;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  text-shadow: none;
 }
 
 .galaxyNodeLabel {
   padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  background: rgba(11, 16, 32, 0.78);
-  border: 1px solid var(--glass-border-subtle);
-  color: var(--color-text-primary);
+  border-radius: 4px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+  color: var(--tech-text-primary);
   font-size: 11px;
   font-weight: 500;
   line-height: 1.35;
   white-space: nowrap;
   pointer-events: none;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  text-shadow: none;
 }
 
 .galaxyClusterTitle {
   padding: 2px 10px;
-  border-radius: var(--radius-pill);
-  background: rgba(11, 16, 32, 0.82);
-  border: 1px solid var(--glass-border-subtle);
-  color: var(--color-text-primary);
+  border-radius: 4px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+  color: var(--tech-text-primary);
   font-size: 11px;
   font-weight: 600;
   line-height: 1.35;
   white-space: nowrap;
   pointer-events: none;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  text-shadow: none;
 }
 
 .galaxyCameraButton {
@@ -711,16 +709,16 @@
   width: 32px;
   height: 32px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease;
 }
 
 .galaxyCameraButton:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background: var(--color-hover-overlay);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
 }
 
 .galaxyCameraButton:disabled {
@@ -729,8 +727,8 @@
 }
 
 .galaxyCameraButtonActive {
-  color: var(--color-accent-primary, #6b9fff);
-  background: rgba(107, 159, 255, 0.12);
+  color: var(--tech-accent);
+  background: var(--tech-accent-subtle);
 }
 
 .galaxyCanvas canvas {
@@ -760,10 +758,10 @@
   transform: translateX(-50%);
   max-width: min(92%, 520px);
   padding: 6px 12px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--glass-border);
-  background: color-mix(in srgb, var(--color-bg) 82%, transparent);
-  color: var(--color-text-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--tech-border);
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-secondary);
   font-size: var(--font-size-xs);
   text-align: center;
   pointer-events: none;
@@ -774,9 +772,9 @@
   align-items: center;
   gap: 2px;
   padding: 2px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-muted);
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
   flex-shrink: 0;
 }
 
@@ -786,29 +784,29 @@
   gap: 4px;
   padding: 3px 8px;
   border: none;
-  border-radius: var(--radius-pill);
+  border-radius: 4px;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
   font-size: var(--font-size-xs);
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease;
 }
 
 .viewModeButton:hover {
-  color: var(--color-text-primary);
-  background: var(--color-hover-overlay);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-elevated);
 }
 
 .viewModeButtonActive {
-  color: var(--color-text-primary);
-  background: var(--color-accent-subtle);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-elevated);
 }
 
 @media (prefers-reduced-transparency: reduce) {
   .toolbar {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    background: var(--color-bg-elevated);
+    background: var(--tech-bg-side-panel);
   }
 
   .nodePreview {

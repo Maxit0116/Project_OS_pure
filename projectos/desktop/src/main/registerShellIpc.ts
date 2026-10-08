@@ -1,10 +1,11 @@
 import { BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
-import { basename, extname } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 
 import { MAP_IMAGE_MAX_BYTES } from '../../../contracts/map-content.js'
 import { assertAllowedExternalUrl } from './externalUrlPolicy.js'
 import { assertTrustedHostRenderer } from './ipcSenderTrust.js'
+import { parseCloneUrl, repositoryDirectoryName, runGitClone } from './cloneRepository.js'
 import { parseWindowTitle } from './ipcArgumentValidation.js'
 
 export function registerShellIpc(): void {
@@ -26,6 +27,29 @@ export function registerShellIpc(): void {
       return null
     }
     return result.filePaths[0]
+  })
+
+  ipcMain.handle('shell:cloneRepository', async (event, input: unknown) => {
+    assertTrustedHostRenderer(event)
+    const url = parseCloneUrl(input)
+    const parent = BrowserWindow.fromWebContents(event.sender)
+    const result = parent
+      ? await dialog.showOpenDialog(parent, {
+          properties: ['openDirectory', 'createDirectory'],
+          title: 'Choose where to clone',
+          buttonLabel: 'Clone',
+        })
+      : await dialog.showOpenDialog({
+          properties: ['openDirectory', 'createDirectory'],
+          title: 'Choose where to clone',
+          buttonLabel: 'Clone',
+        })
+    if (result.canceled || !result.filePaths[0]) {
+      return null
+    }
+    const destination = join(result.filePaths[0], repositoryDirectoryName(url))
+    await runGitClone(url, destination)
+    return destination
   })
 
   ipcMain.handle('shell:pickImageFile', async (event) => {

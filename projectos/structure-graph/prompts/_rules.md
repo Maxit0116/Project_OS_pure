@@ -4,12 +4,23 @@ CodeSee 三原则在结构层的变体。
 
 ## MUST
 
-1. **语义归模型**：命名、职责、分层、依赖说明写入 `graph.json`；布局与交互仍归 Function Map UI
-2. **路径真实**：`fileIndex.path` / `linkedFiles.path` 必须是仓库内真实相对路径；不确定就省略
-3. **C4 最小完备**：至少 1 个 system + ≥1 container + ≥1 component
-4. **层级一致**：`parentId` 与 `children` 双向对齐；`layer` 必须落在 `architecture.layers`
-5. **边可解释**：每条边有人类可读 `label` 与可核对的 `evidence`
-6. 枚举值只能使用 `_schema.md` 中的合法值
+1. **语义归模型**：命名、职责、分层、`technology`、外部系统写入两轮 JSON；文件挂载与 import 边由程序补齐
+2. **路径真实**：`pathHints` 必须是仓库内真实前缀；不确定就省略
+3. **L2 完备**：1 system + ≥1 container + 按仓库规模足够的 component（产品能力名）
+4. **语言跟随 README**
+5. 枚举值只能使用 `_schema.md` 中的合法值（含 `data_store`、`external_system`）
+6. **C4 形状可用**：container / data_store 必须有短 `technology`（Next.js、PostgreSQL、Redis、Kafka、React Native 等），数据库用 `data_store`
+7. **边带协议**：关系尽量写短 `technology`（HTTP / HTTPS / gRPC / Kafka / SQL …）
+8. **嵌套 parentId**：container/data_store → software_system；component → container
+
+## MUST NOT
+
+1. 编造不存在的文件或包路径
+2. 输出完整 `fileIndex` / `fileRelations`（会截断）
+3. 用「frontend module / src module / android module」作为最终名称
+4. 恢复故事层 / features.json
+5. 发明新的 `elementType`（只能用 schema 枚举）
+6. 把布局坐标、画布状态写进 graph.json
 
 ## SHOULD
 
@@ -17,10 +28,6 @@ CodeSee 三原则在结构层的变体。
 2. 优先把入口文件、路由、API handler、核心服务挂到对应 component
 3. `imports`/`exports` 可为空；第一期不强制 AST 依赖图
 4. 中文仓库用中文命名；英文仓库用英文命名
-
-## MUST NOT
-
-1. 编造不存在的文件或包路径
-2. 把布局坐标、画布状态写进 graph.json
-3. 恢复故事层 / features.json / Story 画布内容
-4. 用「frontend module / src module」这类目录壳作为最终组件名
+5. 第三方支付、鉴权、云 AI、对象存储等用 `external_system`，不要画进本系统 container
+6. prisma / sqlite / postgres / redis / kafka 等证据优先落成 `data_store` 或带对应 `technology` 的 container
+7. 低置信节点写 `openQuestions`；有证据写 `notes`；可选 `owners`

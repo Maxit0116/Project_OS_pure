@@ -3,12 +3,16 @@
  * Used on first open when the heuristic C4 graph is incomplete / bootstrap-tagged.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { basename, join, relative, sep } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 
 import {
   ProjectGraphSchema,
+  type FunctionalEdge,
+  type FunctionalNode,
   type ProjectGraph,
+  type StructureScanMode,
 } from "../contracts/graph.js";
 import type { ModelProfile } from "../contracts/settings.js";
 import { ProjectOSError } from "../errors.js";
@@ -18,55 +22,23 @@ import {
 } from "./workspace-bootstrap.js";
 import { ModelGateway } from "./model-gateway/index.js";
 import type { SemanticTree } from "../contracts/semantic-tree.js";
+import {
+  assessL2GraphQuality,
+  assignFilesToComponents,
+  buildFileIndexAndRelations,
+  collectRepoFiles,
+  collectWorkspaceTechSignals,
+  defaultArchitecture,
+  detectReadmeLanguage,
+  enrichNodesForC4Shapes,
+  ensureEdgeFields,
+  mergeStructureGraphs,
+  rebuildHierarchy,
+  type ScanLanguage,
+} from "./structure-graph-l2.js";
 
 export const AI_SCAN_GRAPH_GENERATOR_TAG = "ai-scan";
 export const BOOTSTRAP_GRAPH_TAGS = new Set(["heuristic", "bootstrap"]);
-
-const SKIP_DIRS = new Set([
-  ".git",
-  ".hg",
-  ".svn",
-  ".projectos",
-  ".codesee",
-  "node_modules",
-  "dist",
-  "build",
-  "out",
-  "coverage",
-  ".venv",
-  "venv",
-  ".next",
-  ".turbo",
-  ".cache",
-  "target",
-  "vendor",
-]);
-
-const TEXT_EXTS = new Set([
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".py",
-  ".go",
-  ".rs",
-  ".java",
-  ".kt",
-  ".swift",
-  ".vue",
-  ".svelte",
-  ".md",
-  ".json",
-  ".yml",
-  ".yaml",
-  ".toml",
-  ".sql",
-  ".css",
-  ".scss",
-  ".html",
-]);
 
 export interface GraphCompletenessResult {
   complete: boolean;
@@ -169,37 +141,7 @@ function readTextCapped(path: string, maxChars: number): string | null {
 }
 
 function collectFileTree(workspaceRoot: string, limit = 120): string[] {
-  const files: string[] = [];
-  const walk = (absoluteDir: string): void => {
-    if (files.length >= limit) return;
-    let entries;
-    try {
-      entries = readdirSync(absoluteDir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (files.length >= limit) return;
-      if (entry.name.startsWith(".") && entry.name !== ".env.example") {
-        if (SKIP_DIRS.has(entry.name)) continue;
-        if (entry.name !== ".github" && entry.name !== ".agents") continue;
-      }
-      if (SKIP_DIRS.has(entry.name)) continue;
-      const absolute = join(absoluteDir, entry.name);
-      if (entry.isDirectory()) {
-        walk(absolute);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const ext = entry.name.includes(".")
-        ? `.${entry.name.split(".").pop()!.toLowerCase()}`
-        : "";
-      if (!TEXT_EXTS.has(ext) && entry.name !== "Dockerfile") continue;
-      files.push(relative(workspaceRoot, absolute).split(sep).join("/"));
-    }
-  };
-  walk(workspaceRoot);
-  return files;
+  return collectRepoFiles(workspaceRoot, limit);
 }
 
 function pickSnippetPaths(filePaths: string[]): string[] {
@@ -416,8 +358,13 @@ function softRepairStructureGraphJson(
   if (typeof root.projectName !== "string" || !root.projectName.trim()) {
     root.projectName = options.projectName;
   }
-  if (root.version !== "0.3.0" && root.version !== "0.2.0" && root.version !== "0.1.0") {
-    root.version = "0.3.0";
+  if (
+    root.version !== "0.4.0" &&
+    root.version !== "0.3.0" &&
+    root.version !== "0.2.0" &&
+    root.version !== "0.1.0"
+  ) {
+    root.version = "0.4.0";
   }
   if (typeof root.analyzedAt !== "string") {
     root.analyzedAt = new Date().toISOString();
@@ -595,7 +542,7 @@ export function parseProjectGraphFromModelOutput(
         analyzedAt: new Date().toISOString(),
         analysisStatus: "complete",
         analysisError: null,
-        version: "0.3.0",
+        version: "0.4.0",
         nodes: sanitized.nodes.map((node) => {
           const tags = (node.tags ?? []).filter(
             (tag) => !BOOTSTRAP_GRAPH_TAGS.has(tag),
@@ -645,108 +592,562 @@ export interface RunStructureGraphAiScanInput {
   graph: ProjectGraph;
   profile: ModelProfile;
   gateway: ModelGateway;
-  /** When true, skip the completeness gate (used by analyzeWorkspace rescan). */
+  /** When true, scan even if the graph is already complete / authored. */
   force?: boolean;
+  /**
+   * User-initiated analyzeWorkspace: allow regenerate on complete graphs,
+   * but still honor authored unless force is set.
+   */
+  userInitiated?: boolean;
+  scanMode?: StructureScanMode;
+  nodeIds?: string[];
+  /** Bias refine toward these changed paths (Arch4 changed-files). */
+  changedFiles?: string[];
 }
 
-const STRUCTURE_SCAN_MAX_OUTPUT_TOKENS = 32_768;
-
-function buildStructureScanSystemPrompt(input: {
-  workspaceRoot: string;
-  displayName: string;
-  projectId: string;
-  mode: "standard" | "compact";
-}): string {
-  const sizeRules =
-    input.mode === "compact"
-      ? [
-          "COMPACT MODE (token-safe): keep the JSON small enough to finish.",
-          "Hard caps: ≤1 system, ≤3 containers, ≤6 components, ≤20 fileIndex entries, ≤12 edges.",
-          "Each description/summary/responsibility ≤ 60 Chinese/English chars.",
-          "Only link 1–3 primary files per component. imports/exports MUST be [].",
-          "Omit nameEn, refs, preview, fileRelations, technology when unsure.",
-        ]
-      : [
-          "SIZE CAPS so the JSON always finishes: ≤1 system + optional persons, ≤4 containers, ≤10 components, ≤40 fileIndex entries, ≤20 edges.",
-          "Each description/summary/responsibility ≤ 100 chars. Prefer product language like sample maps (e.g.「访客」「登录服务」), never「android module」.",
-          "Only include files you actually attach via linkedFiles. imports/exports may be [].",
-          "Omit fileRelations, nameEn, refs, preview unless essential.",
-        ];
-
-  return [
-    loadPromptBundle(input.workspaceRoot),
-    "",
-    "You are generating `.projectos/graph.json` for Project OS Function Map (structure layer).",
-    "Goal: a readable C4 map like Project OS sample — actors/system/containers/components with clear product names and real file mounts.",
-    "Return ONLY one JSON object matching ProjectGraph v0.3.0. No markdown fences unless required.",
-    "The first character of your response should be `{` and the last should be `}`.",
-    "Do NOT invent file paths. Prefer real paths from the file list.",
-    "Include at least one system, one container, and one component with meaningful names.",
-    ...sizeRules,
-    `Repo name: ${input.displayName}`,
-    `projectId (must match exactly): ${input.projectId}`,
-  ].join("\n");
+function computeRepoScanContentHash(workspaceRoot: string, files: string[]): string {
+  const hash = createHash("sha256");
+  const manifests = [
+    "package.json",
+    "go.mod",
+    "pyproject.toml",
+    "requirements.txt",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "Dockerfile",
+    "prisma/schema.prisma",
+    "README.md",
+    "readme.md",
+  ];
+  for (const relativePath of manifests) {
+    const absolute = join(workspaceRoot, relativePath);
+    try {
+      if (!existsSync(absolute) || !statSync(absolute).isFile()) continue;
+      hash.update(relativePath);
+      hash.update("\0");
+      hash.update(readFileSync(absolute));
+      hash.update("\0");
+    } catch {
+      /* ignore */
+    }
+  }
+  hash.update(files.slice(0, 400).join("\n"));
+  return hash.digest("hex");
 }
 
-async function completeStructureScanOnce(
+function readScanCacheHash(workspaceRoot: string): string | null {
+  const path = join(workspaceRoot, ".projectos", "scan-cache.json");
+  try {
+    if (!existsSync(path)) return null;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as { contentHash?: string };
+    return typeof parsed.contentHash === "string" ? parsed.contentHash : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeScanCacheHash(workspaceRoot: string, contentHash: string): void {
+  const dir = join(workspaceRoot, ".projectos");
+  const path = join(dir, "scan-cache.json");
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path,
+      `${JSON.stringify({ contentHash, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+      "utf8",
+    );
+  } catch {
+    /* best-effort */
+  }
+}
+
+export function isAuthoredGraph(graph: ProjectGraph): boolean {
+  if (graph.authored === true) return true;
+  return graph.nodes.some((node) => node.tags.includes("product-authored"));
+}
+
+const STRUCTURE_SCAN_MAX_OUTPUT_TOKENS = 8_192;
+
+function parseModelJsonObject(output: string): Record<string, unknown> {
+  const issues: string[] = [];
+  for (const candidate of extractJsonObjectCandidates(output)) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+      issues.push("not_object");
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  throw new ProjectOSError(
+    "agent_orchestration_failed",
+    `Model did not return a valid JSON object${issues[0] ? ` (${issues[0]})` : ""}`,
+  );
+}
+
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is Record<string, unknown> =>
+      !!item && typeof item === "object" && !Array.isArray(item),
+  );
+}
+
+function normalizeNode(
+  raw: Record<string, unknown>,
+  language: ScanLanguage,
+): FunctionalNode {
+  const id = String(raw.id ?? "node_unknown");
+  const name = String(raw.name ?? id);
+  const description = String(raw.description ?? raw.summary ?? name);
+  const summary = String(raw.summary ?? description);
+  const tags = Array.isArray(raw.tags)
+    ? raw.tags.filter((tag): tag is string => typeof tag === "string")
+    : [];
+  if (!tags.includes(AI_SCAN_GRAPH_GENERATOR_TAG)) tags.push(AI_SCAN_GRAPH_GENERATOR_TAG);
+  const level =
+    raw.level === "context" ||
+    raw.level === "container" ||
+    raw.level === "component" ||
+    raw.level === "code"
+      ? raw.level
+      : raw.elementType === "person" ||
+          raw.elementType === "software_system" ||
+          raw.elementType === "external_system"
+        ? "context"
+        : raw.elementType === "container" || raw.elementType === "data_store"
+          ? "container"
+          : raw.elementType === "component"
+            ? "component"
+            : undefined;
+  let elementType =
+    raw.elementType === "person" ||
+    raw.elementType === "software_system" ||
+    raw.elementType === "external_system" ||
+    raw.elementType === "container" ||
+    raw.elementType === "component" ||
+    raw.elementType === "data_store"
+      ? raw.elementType
+      : undefined;
+  if (!elementType && level === "context") elementType = "software_system";
+  if (!elementType && level === "container") elementType = "container";
+  if (!elementType && level === "component") elementType = "component";
+  const technology =
+    typeof raw.technology === "string" && raw.technology.trim().length > 0
+      ? raw.technology.trim()
+      : undefined;
+  const owners = Array.isArray(raw.owners)
+    ? raw.owners.filter((owner): owner is string => typeof owner === "string" && owner.trim().length > 0)
+    : undefined;
+  const notes =
+    typeof raw.notes === "string" && raw.notes.trim().length > 0
+      ? raw.notes.trim()
+      : undefined;
+  const openQuestions = Array.isArray(raw.openQuestions)
+    ? raw.openQuestions.filter(
+        (question): question is string =>
+          typeof question === "string" && question.trim().length > 0,
+      )
+    : undefined;
+  const confidence = typeof raw.confidence === "number" ? raw.confidence : 0.75;
+  const inferredQuestions =
+    openQuestions && openQuestions.length > 0
+      ? openQuestions
+      : confidence < 0.6
+        ? [`Confirm role and boundaries for ${name}.`]
+        : undefined;
+  return {
+    id,
+    type: raw.type === "suggested" ? "suggested" : "capability",
+    name,
+    status: "active",
+    description,
+    summary,
+    responsibility: String(raw.responsibility ?? description),
+    elementType,
+    level,
+    layer: typeof raw.layer === "string" ? raw.layer : "application",
+    ...(technology ? { technology } : {}),
+    linkedFiles: [],
+    upstream: Array.isArray(raw.upstream)
+      ? raw.upstream.filter((id): id is string => typeof id === "string")
+      : [],
+    downstream: Array.isArray(raw.downstream)
+      ? raw.downstream.filter((id): id is string => typeof id === "string")
+      : [],
+    confidence,
+    tags: tags.filter((tag) => !BOOTSTRAP_GRAPH_TAGS.has(tag)),
+    parentId: typeof raw.parentId === "string" ? raw.parentId : undefined,
+    children: Array.isArray(raw.children)
+      ? raw.children.filter((id): id is string => typeof id === "string")
+      : [],
+    ...(owners && owners.length > 0 ? { owners } : {}),
+    ...(notes ? { notes } : {}),
+    ...(inferredQuestions && inferredQuestions.length > 0
+      ? { openQuestions: inferredQuestions }
+      : {}),
+  };
+}
+
+function normalizeEdge(raw: Record<string, unknown>, index: number): FunctionalEdge {
+  const technology =
+    typeof raw.technology === "string" && raw.technology.trim().length > 0
+      ? raw.technology.trim()
+      : undefined;
+  return ensureEdgeFields(
+    {
+      id: String(raw.id ?? `edge_${index}`),
+      source: String(raw.source ?? ""),
+      target: String(raw.target ?? ""),
+      relation:
+        raw.relation === "calls" ||
+        raw.relation === "data_flows_to" ||
+        raw.relation === "uses" ||
+        raw.relation === "imports" ||
+        raw.relation === "reads_from" ||
+        raw.relation === "writes_to" ||
+        raw.relation === "publishes_to" ||
+        raw.relation === "subscribes_to"
+          ? raw.relation
+          : "depends_on",
+      label: typeof raw.label === "string" ? raw.label : undefined,
+      purpose: typeof raw.purpose === "string" ? raw.purpose : undefined,
+      ...(technology ? { technology } : {}),
+      confidence: typeof raw.confidence === "number" ? raw.confidence : 0.7,
+      evidence: typeof raw.evidence === "string" ? raw.evidence : undefined,
+    },
+    index,
+  );
+}
+
+async function completeJsonRound(
   input: RunStructureGraphAiScanInput,
-  mode: "standard" | "compact",
-): Promise<ProjectGraph> {
-  const systemPrompt = buildStructureScanSystemPrompt({
-    workspaceRoot: input.workspaceRoot,
-    displayName: input.displayName,
-    projectId: input.projectId,
-    mode,
-  });
-
-  const repoContext = buildRepoScanContext({
-    workspaceRoot: input.workspaceRoot,
-    displayName: input.displayName,
-    graph: input.graph,
-  });
-
+  systemPrompt: string,
+  task: string,
+  extra: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
   const response = await input.gateway.complete(input.profile, {
     projectId: input.projectId,
     requestKind: "structure_graph_scan",
     modelPreference: input.profile.id,
     systemPrompt,
     input: {
-      task: "Generate ProjectGraph JSON for this repository",
-      mode,
+      task,
       repo: basename(input.workspaceRoot),
-      context: repoContext,
+      ...extra,
     },
     redactionPolicy: "secrets_and_paths",
     maxOutputTokens: STRUCTURE_SCAN_MAX_OUTPUT_TOKENS,
-    thinkingDepth: mode === "compact" ? "low" : "medium",
+    thinkingDepth: "medium",
+  });
+  return parseModelJsonObject(response.output);
+}
+
+function attachFilesToNodes(
+  nodes: FunctionalNode[],
+  assignments: Map<string, string[]>,
+): FunctionalNode[] {
+  return nodes.map((node) => {
+    const paths = assignments.get(node.id);
+    if (!paths || node.level !== "component") return node;
+    return {
+      ...node,
+      linkedFiles: paths.map((path, index) => ({
+        path,
+        role: index === 0 ? ("primary" as const) : ("supporting" as const),
+      })),
+    };
+  });
+}
+
+function assembleFromRounds(input: {
+  projectId: string;
+  projectName: string;
+  workspaceRoot: string;
+  language: ScanLanguage;
+  projectType: ProjectGraph["projectType"];
+  roundA: Record<string, unknown>;
+  roundB: Record<string, unknown>;
+}): ProjectGraph {
+  const architecture =
+    input.roundA.architecture && typeof input.roundA.architecture === "object"
+      ? (input.roundA.architecture as ProjectGraph["architecture"])
+      : defaultArchitecture(input.language);
+  const layers = architecture?.layers ?? defaultArchitecture(input.language).layers;
+  const layerIds = new Set(layers.map((layer) => layer.id));
+
+  const skeleton = asRecordArray(input.roundA.nodes).map((raw) =>
+    normalizeNode(raw, input.language),
+  );
+  const componentsRaw = asRecordArray(
+    input.roundB.components ?? input.roundB.nodes,
+  );
+  const components = componentsRaw.map((raw) => {
+    const node = normalizeNode(
+      { ...raw, level: raw.level ?? "component", elementType: raw.elementType ?? "component" },
+      input.language,
+    );
+    return node;
   });
 
-  return parseProjectGraphFromModelOutput(response.output, {
+  let nodes = [...skeleton, ...components].map((node) => ({
+    ...node,
+    layer: node.layer && layerIds.has(node.layer) ? node.layer : layers[1]?.id ?? layers[0]!.id,
+  }));
+  const systemId = nodes.find((node) => node.elementType === "software_system")?.id;
+  const firstContainerId = nodes.find((node) => node.level === "container")?.id;
+  nodes = nodes.map((node) => {
+    if (node.level === "container" && !node.parentId && systemId) {
+      return { ...node, parentId: systemId };
+    }
+    if (node.level === "component" && !node.parentId && firstContainerId) {
+      return { ...node, parentId: firstContainerId };
+    }
+    return node;
+  });
+  nodes = rebuildHierarchy(nodes);
+
+  const hints = componentsRaw.map((raw) => ({
+    id: String(raw.id ?? ""),
+    pathHints: Array.isArray(raw.pathHints)
+      ? raw.pathHints.filter((hint): hint is string => typeof hint === "string")
+      : typeof raw.pathHint === "string"
+        ? [raw.pathHint]
+        : [],
+  })).filter((hint) => hint.id.length > 0);
+
+  const files = collectRepoFiles(input.workspaceRoot, 400);
+  const assignments = assignFilesToComponents({ files, components: hints });
+  nodes = attachFilesToNodes(nodes, assignments);
+  const techSignals = collectWorkspaceTechSignals(input.workspaceRoot, files);
+  nodes = enrichNodesForC4Shapes({
+    nodes,
+    workspaceRoot: input.workspaceRoot,
+    files,
+    signals: techSignals,
+  });
+  const { fileIndex, fileRelations } = buildFileIndexAndRelations({
+    workspaceRoot: input.workspaceRoot,
+    assignments,
+  });
+
+  const edges = [
+    ...asRecordArray(input.roundA.edges),
+    ...asRecordArray(input.roundB.edges),
+  ].map((raw, index) => normalizeEdge(raw, index));
+
+  const graph: ProjectGraph = {
+    version: "0.4.0",
+    projectId: input.projectId,
+    projectName: input.projectName,
+    projectType: input.projectType,
+    analyzedAt: new Date().toISOString(),
+    analysisStatus: "complete",
+    authored: false,
+    architecture: architecture ?? defaultArchitecture(input.language),
+    nodes,
+    edges,
+    fileIndex,
+    fileRelations,
+    topology: {
+      rootIds: nodes.filter((node) => !node.parentId).map((node) => node.id),
+      maxDepth: 3,
+      totalNodes: nodes.length,
+    },
+    analysisError: null,
+  };
+
+  const sanitized = sanitizeLegacyProjectGraph(graph, {
     workspaceRoot: input.workspaceRoot,
     projectId: input.projectId,
-    projectName: input.displayName,
   });
+  const parsed = ProjectGraphSchema.safeParse(sanitized ?? graph);
+  if (!parsed.success) {
+    throw new ProjectOSError(
+      "agent_orchestration_failed",
+      `Assembled graph failed validation (${parsed.error.issues
+        .slice(0, 4)
+        .map((issue) => `${issue.path.join(".")}:${issue.message}`)
+        .join("; ")})`,
+    );
+  }
+  return parsed.data;
 }
 
 export async function runStructureGraphAiScan(
   input: RunStructureGraphAiScanInput,
 ): Promise<ProjectGraph> {
-  if (!input.force && !graphNeedsAiScan(input.graph)) {
+  const scanMode: StructureScanMode = input.scanMode ?? "regenerate";
+  if (
+    !input.force &&
+    scanMode === "regenerate" &&
+    isAuthoredGraph(input.graph)
+  ) {
+    return input.graph;
+  }
+  if (
+    !input.force &&
+    !input.userInitiated &&
+    scanMode === "regenerate" &&
+    !graphNeedsAiScan(input.graph)
+  ) {
+    return input.graph;
+  }
+  if (scanMode === "deepen" && (!input.nodeIds || input.nodeIds.length === 0)) {
+    throw new ProjectOSError(
+      "agent_orchestration_failed",
+      "deepen requires nodeIds",
+    );
+  }
+
+  const language = detectReadmeLanguage(input.workspaceRoot);
+  const files = collectRepoFiles(input.workspaceRoot, 400);
+  const contentHash = computeRepoScanContentHash(input.workspaceRoot, files);
+  const cachedHash = readScanCacheHash(input.workspaceRoot);
+  const hashUnchanged = cachedHash !== null && cachedHash === contentHash;
+
+  if (
+    !input.force &&
+    scanMode === "refine" &&
+    hashUnchanged &&
+    !graphNeedsAiScan(input.graph) &&
+    (!input.changedFiles || input.changedFiles.length === 0)
+  ) {
     return input.graph;
   }
 
-  let lastError: unknown;
-  for (const mode of ["standard", "compact"] as const) {
-    try {
-      return await completeStructureScanOnce(input, mode);
-    } catch (error) {
-      lastError = error;
-    }
+  const bundle = loadPromptBundle(input.workspaceRoot);
+  const repoContext = buildRepoScanContext({
+    workspaceRoot: input.workspaceRoot,
+    displayName: input.displayName,
+    graph: input.graph,
+  });
+  const fileList = files.slice(0, 180).map((path) => `- ${path}`).join("\n");
+  const changedNote =
+    input.changedFiles && input.changedFiles.length > 0
+      ? `Changed files to prioritize (keep unrelated node ids/names stable): ${input.changedFiles
+          .slice(0, 80)
+          .join(", ")}`
+      : "";
+
+  const skipRoundA =
+    ((scanMode === "refine" || scanMode === "deepen") &&
+      input.graph.nodes.some((node) => node.level === "container") &&
+      (hashUnchanged || (input.changedFiles?.length ?? 0) > 0)) ||
+    (scanMode === "refine" && hashUnchanged && !input.force);
+
+  let roundA: Record<string, unknown>;
+  if (skipRoundA) {
+    roundA = {
+      architecture: input.graph.architecture,
+      nodes: input.graph.nodes.filter(
+        (node) => node.level === "context" || node.level === "container",
+      ),
+      edges: input.graph.edges,
+    };
+  } else {
+    roundA = await completeJsonRound(
+      input,
+      [
+        bundle,
+        "",
+        "ROUND A: emit ONLY context + container nodes (no components, no fileIndex, no fileRelations).",
+        `Language for names: ${language === "zh-CN" ? "Chinese" : "English"} (follow README).`,
+        "Include 0–4 person actors, 1 software_system, 0–4 external_system (SaaS/cloud/third-party), 2–6 containers.",
+        "Use elementType data_store (level=container) for databases/caches; short technology strings for C4 shapes:",
+        "Next.js, React, Vue, React Native, Flutter, Node.js / Express, NestJS, PostgreSQL, MySQL, MongoDB, SQLite, Redis, Kafka, RabbitMQ, SQS.",
+        "Every relationship MUST include short technology/protocol (HTTP, HTTPS, gRPC, Kafka, SQL, WebSocket, …).",
+        "Optional enrichment: notes, openQuestions (for low confidence), owners.",
+        "Nesting: containers/data_stores parentId = software_system id. Never emit layout coordinates.",
+        "Product names only — never 'android module' / 'src module'.",
+        "Return one JSON object: { architecture, nodes, edges }.",
+        changedNote,
+        `projectId: ${input.projectId}`,
+        `Repo: ${input.displayName}`,
+      ].join("\n"),
+      "structure_graph_round_a",
+      { context: repoContext, language },
+    );
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new ProjectOSError(
-        "agent_orchestration_failed",
-        "Structure graph AI scan failed after retries",
-      );
+
+  const deepenNote =
+    scanMode === "deepen"
+      ? `Only deepen these node ids and their children: ${(input.nodeIds ?? []).join(", ")}`
+      : scanMode === "refine"
+        ? "Keep existing node ids when possible; add missing components."
+        : "Create a full component set.";
+
+  const roundB = await completeJsonRound(
+    input,
+    [
+      bundle,
+      "",
+      "ROUND B: emit ONLY components with pathHints. No fileIndex, no fileRelations.",
+      `Language for names: ${language === "zh-CN" ? "Chinese" : "English"}.`,
+      "Each container needs 2–6 components (about 8–20 total). Product capability names, not directory shells.",
+      "Each component: { id, name, parentId, description, summary, responsibility, layer, pathHints: string[], technology?, notes?, openQuestions?, owners? }.",
+      "pathHints must be real path prefixes from the file list (e.g. android/app/src, src/auth).",
+      "Edges between components MUST include technology/protocol when known.",
+      deepenNote,
+      changedNote,
+      "Return one JSON object: { components, edges }.",
+      `projectId: ${input.projectId}`,
+    ].join("\n"),
+    "structure_graph_round_b",
+    {
+      language,
+      files: fileList,
+      roundA,
+      changedFiles: input.changedFiles?.slice(0, 80) ?? [],
+      existingComponents: input.graph.nodes
+        .filter((node) => node.level === "component")
+        .map((node) => ({ id: node.id, name: node.name, parentId: node.parentId })),
+    },
+  );
+
+  const assembled = assembleFromRounds({
+    projectId: input.projectId,
+    projectName: input.displayName,
+    workspaceRoot: input.workspaceRoot,
+    language,
+    projectType: input.graph.projectType,
+    roundA,
+    roundB,
+  });
+
+  const merged =
+    scanMode === "regenerate"
+      ? assembled
+      : mergeStructureGraphs({
+          base: input.graph,
+          incoming: assembled,
+          mode: scanMode,
+          deepenIds: input.nodeIds,
+        });
+
+  const result: ProjectGraph = {
+    ...merged,
+    version: "0.4.0",
+    authored: input.force ? false : merged.authored === true ? true : false,
+    nodes: enrichNodesForC4Shapes({
+      nodes: merged.nodes,
+      workspaceRoot: input.workspaceRoot,
+      files,
+    }),
+  };
+
+  const quality = assessL2GraphQuality(result, {
+    sourceFileCount: files.length,
+    language,
+  });
+  if (!quality.complete) {
+    throw new ProjectOSError(
+      "agent_orchestration_failed",
+      `L2 quality gate failed: ${quality.reasons.join(",")}`,
+    );
+  }
+  writeScanCacheHash(input.workspaceRoot, contentHash);
+  return result;
 }

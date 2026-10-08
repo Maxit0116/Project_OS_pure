@@ -5,7 +5,7 @@
   min-height: 0;
   min-width: 1024px;
   position: relative;
-  background: var(--ambient-mesh);
+  background: var(--tech-bg-canvas);
   overflow: hidden;
 }
 
@@ -24,11 +24,9 @@
   min-height: var(--topbar-height);
   padding: 0 var(--space-md);
   -webkit-app-region: no-drag;
-  background: var(--glass-bg-clear);
-  backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
-  border-bottom: 1px solid var(--border-window-chrome);
-  box-shadow: var(--window-rim-chrome), var(--glass-shadow-elevated);
+  background: var(--tech-bg-side-panel);
+  border-bottom: 1px solid var(--tech-border);
+  box-shadow: var(--tech-shadow-sm);
   border-radius: 0;
   flex-shrink: 0;
 }
@@ -51,7 +49,7 @@
 .topBarDivider {
   width: 1px;
   height: 20px;
-  background: var(--glass-border);
+  background: var(--tech-border);
   flex-shrink: 0;
 }
 
@@ -131,15 +129,14 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid var(--glass-border-highlight);
-  border-radius: var(--radius-pill);
+  background: var(--tech-bg-muted);
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
   padding: 2px;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset;
 }
 
 [data-theme='light'] .panelToggles {
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--tech-bg-muted);
 }
 
 .panelToggle {
@@ -149,26 +146,24 @@
   width: 30px;
   height: 26px;
   padding: 0;
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
   background: transparent;
   border: none;
-  border-radius: var(--radius-pill);
+  border-radius: 4px;
   cursor: pointer;
   transition:
     background var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out);
+    color var(--duration-fast) var(--ease-out);
 }
 
 .panelToggle:hover {
-  color: var(--color-text-primary);
-  background: var(--color-hover-overlay);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-elevated);
 }
 
 .panelToggleActive {
-  color: var(--color-text-primary);
-  background: var(--color-accent-subtle);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 25%, transparent);
+  color: var(--tech-accent-foreground);
+  background: var(--tech-accent);
 }
 
 .settingsBtn {
@@ -178,12 +173,11 @@
   width: 32px;
   height: 32px;
   padding: 0;
-  color: var(--color-text-secondary);
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid var(--glass-border-highlight);
-  border-radius: var(--radius-pill);
+  color: var(--tech-text-secondary);
+  background: transparent;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
   cursor: pointer;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset;
   transition:
     color var(--duration-fast) var(--ease-out),
     background var(--duration-fast) var(--ease-out),
@@ -191,26 +185,29 @@
 }
 
 [data-theme='light'] .settingsBtn {
-  background: rgba(255, 255, 255, 0.55);
+  background: transparent;
 }
 
 .settingsBtn:hover {
-  color: var(--color-text-primary);
-  background: var(--color-hover-overlay);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
+  border-color: var(--tech-border-strong);
 }
 
 .demoMenu {
   position: relative;
 }
 
-/* Background/border/shadow now come from GlassLens (Tier B true refraction). */
 .demoDropdown {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
   z-index: 100;
   padding: var(--space-sm);
-  border-radius: var(--radius-glass-lg);
+  border-radius: 8px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+  box-shadow: var(--tech-shadow-md);
 }
 
 .errorBar {
@@ -271,8 +268,8 @@
 /* Code/Diff + Agent Flow — side panels squeeze center (mirror chat on the right). */
 .workbenchBodyCenterSideInset .main {
   transition:
-    margin-left var(--duration-panel-enter) var(--ease-spring),
-    margin-right var(--duration-panel-enter) var(--ease-spring);
+    margin-left var(--duration-panel-enter) var(--ease-out),
+    margin-right var(--duration-panel-enter) var(--ease-out);
 }
 
 .workbenchBodyCenterSideInset.workbenchBodyLeftOpen .main {
@@ -323,21 +320,21 @@
 }
 
 .shellChromeBleed .topBar {
-  background: var(--glass-bg-bleed);
-  backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
-  -webkit-backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
+  background: var(--tech-bg-side-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .shellChromeBleed :global([data-desktop-title-bar]) {
-  background: var(--glass-bg-bleed);
-  backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
-  -webkit-backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
+  background: var(--tech-bg-side-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .shellGraphBleed .terminalBar {
-  background: var(--glass-bg-bleed);
-  backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
-  -webkit-backdrop-filter: blur(var(--glass-blur-bleed)) saturate(var(--glass-saturate-bleed));
+  background: var(--tech-bg-side-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .terminalBar {
@@ -350,34 +347,34 @@
   justify-content: space-between;
   padding: 0 var(--space-md);
   font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  background: var(--glass-bg-clear);
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  border-top: 1px solid var(--border-window-chrome);
-  box-shadow: var(--window-rim-chrome), 0 -1px 0 rgba(255, 255, 255, 0.08) inset;
-  border-top-left-radius: var(--radius-glass-md);
-  border-top-right-radius: var(--radius-glass-md);
+  color: var(--tech-text-muted);
+  background: var(--tech-bg-side-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-top: 1px solid var(--tech-border);
+  box-shadow: var(--tech-shadow-sm);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 .terminalBtn {
   padding: 2px 8px;
   font-size: 10px;
-  color: var(--color-warning);
+  color: var(--tech-warning);
   background: transparent;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out);
 }
 
 .terminalBtn:hover {
-  background: var(--color-warning-subtle);
+  background: var(--tech-bg-muted);
 }
 
 .terminalHint {
   font-size: 10px;
-  color: var(--color-text-muted);
+  color: var(--tech-text-muted);
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -388,10 +385,10 @@
   }
 
   .topBar {
-    background: var(--color-bg-elevated);
+    background: var(--tech-bg-side-panel);
   }
 
   .terminalBar {
-    background: var(--color-bg-muted);
+    background: var(--tech-bg-side-panel);
   }
 }

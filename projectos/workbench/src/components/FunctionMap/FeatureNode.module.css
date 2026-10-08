@@ -4,126 +4,12 @@
   position: relative;
 }
 
-.branchCardFace {
-  width: 100%;
-  height: 100%;
-  transform-origin: center center;
-  cursor: pointer;
-}
-
-.branchCardFace .node {
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-}
-
-.branchCardBillboard {
-  width: 100%;
-  height: 100%;
-  box-sizing: border-box;
-  overflow: hidden;
-  cursor: pointer;
-}
-
-.branchCardBillboard .node {
-  min-width: 0;
-  min-height: 0;
-  width: 100%;
-  height: 100%;
-  font-size: 1.22em;
-  line-height: 1.35;
-}
-
-.branchCardBillboardSelected .node {
-  box-shadow:
-    0 0 0 2px var(--color-accent),
-    0 12px 32px rgba(0, 0, 0, 0.5);
-}
-
-/* Thick 3D extrusion — only the FeatureNode card, no extra backing plate. */
-.branchCard3d {
-  --branch-thickness: 10px;
-  width: 100%;
-  height: 100%;
-  position: relative;
-  transform-style: preserve-3d;
-  cursor: pointer;
-}
-
-.branchCard3dSelected .branchCardFaceFront .node {
-  box-shadow:
-    0 0 0 2px var(--color-accent),
-    0 12px 32px rgba(0, 0, 0, 0.5);
-}
-
-.branchCardFaceFront {
-  position: absolute;
-  inset: 0;
-  transform: translateZ(calc(var(--branch-thickness) / 2));
-  backface-visibility: hidden;
-}
-
-.branchCardFaceBack {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--radius-glass-sm);
-  background: var(--color-bg-muted);
-  border: 1px solid var(--glass-border);
-  transform: translateZ(calc(var(--branch-thickness) / -2)) rotateY(180deg);
-}
-
-.branchCardFaceLeft {
-  position: absolute;
-  top: 10px;
-  bottom: 10px;
-  left: 0;
-  width: var(--branch-thickness);
-  transform-origin: left center;
-  transform: rotateY(-90deg) translateX(calc(var(--branch-thickness) / -2));
-  background: color-mix(in srgb, var(--branch-card-accent, var(--color-accent)) 72%, #0f172a);
-  border-radius: 2px 0 0 2px;
-}
-
-.branchCardFaceRight {
-  position: absolute;
-  top: 10px;
-  bottom: 10px;
-  right: 0;
-  width: var(--branch-thickness);
-  transform-origin: right center;
-  transform: rotateY(90deg) translateX(calc(var(--branch-thickness) / 2));
-  background: color-mix(in srgb, var(--branch-card-accent, var(--color-accent)) 42%, #0f172a);
-  border-radius: 0 2px 2px 0;
-}
-
-.branchCardFaceTop {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  top: 0;
-  height: var(--branch-thickness);
-  transform-origin: center top;
-  transform: rotateX(90deg) translateY(calc(var(--branch-thickness) / -2));
-  background: color-mix(in srgb, var(--branch-card-accent, var(--color-accent)) 28%, var(--color-bg-elevated));
-}
-
-.branchCardFaceBottom {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 0;
-  height: var(--branch-thickness);
-  transform-origin: center bottom;
-  transform: rotateX(-90deg) translateY(calc(var(--branch-thickness) / 2));
-  background: color-mix(in srgb, var(--branch-card-accent, var(--color-accent)) 18%, #0b1220);
-}
-
 .node {
-  --node-accent: var(--color-accent);
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--node-accent) 8%, transparent), transparent 46%),
-    var(--color-bg-elevated);
-  border: 1px solid color-mix(in srgb, var(--node-accent) 32%, var(--glass-border));
-  border-radius: var(--radius-glass-sm);
-  padding: 11px 12px 10px 14px;
+  --node-accent: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--tech-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
   box-sizing: border-box;
   /* Fill the RF measured box so FloatingStraightEdge attachment points meet the card. */
   width: 100%;
@@ -131,46 +17,31 @@
   min-width: 220px;
   position: relative;
   color: var(--color-text-primary);
-  box-shadow: var(--glass-shadow-regular);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   cursor: grab;
-  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
   user-select: none;
   -webkit-user-select: none;
 }
-
-.node::before {
-  position: absolute;
-  inset: 10px auto 10px 0;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--node-accent);
-  content: '';
-  opacity: 0.78;
-}
-
-.node[data-element-type='person'] { --node-accent: #ff9f0a; }
-.node[data-element-type='software_system'] { --node-accent: #bf5af2; }
-.node[data-element-type='external_system'] { --node-accent: #64d2ff; }
-.node[data-element-type='container'] { --node-accent: #0a84ff; }
-.node[data-element-type='component'] { --node-accent: #30d158; }
-.node[data-element-type='code_element'] { --node-accent: #5e5ce6; }
-.node[data-element-type='data_store'] { --node-accent: #32ade6; }
 
 :global(.react-flow__node.dragging) .node {
   cursor: grabbing;
 }
 
 .node:hover {
-  border-color: color-mix(in srgb, var(--node-accent) 68%, var(--glass-border-highlight));
-  box-shadow: var(--glass-shadow-elevated);
+  background: var(--tech-bg-muted);
+  border-color: var(--tech-border);
+  box-shadow: none;
 }
 
 .selected {
   border-color: var(--color-accent);
-  box-shadow: var(--glass-focus-ring);
+  box-shadow: none;
 }
 
 .suggested {
@@ -217,13 +88,13 @@
 
 .typeIcon {
   display: grid;
-  width: 19px;
-  height: 19px;
-  border: 1px solid color-mix(in srgb, var(--node-accent) 34%, transparent);
-  border-radius: 6px;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 0;
   place-items: center;
-  background: color-mix(in srgb, var(--node-accent) 12%, transparent);
-  color: var(--node-accent);
+  background: transparent;
+  color: var(--color-text-muted);
 }
 
 .layerLabel {
@@ -405,11 +276,10 @@
 
 .fileCount {
   flex-shrink: 0;
-  font-size: 9.5px;
-  color: var(--node-accent);
-  background: color-mix(in srgb, var(--node-accent) 10%, var(--color-bg-muted));
-  padding: 2px 6px;
-  border-radius: var(--radius-pill);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  background: none;
+  padding: 0;
 }
 
 .openGraph {

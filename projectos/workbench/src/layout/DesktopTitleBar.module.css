@@ -1,4 +1,4 @@
-/* Tier A frost-chrome — dedicated macOS drag strip; native traffic lights sit on the left. */
+/* Solid tech title bar — macOS drag strip; native traffic lights sit on the left. */
 .titleBar {
   height: var(--titlebar-height);
   flex-shrink: 0;
@@ -9,11 +9,11 @@
   -webkit-app-region: drag;
   position: relative;
   z-index: calc(var(--z-workbench-chrome) + 1);
-  background: color-mix(in srgb, var(--color-bg-elevated) 72%, transparent);
-  backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur-xl)) saturate(var(--glass-saturate));
-  border-bottom: 1px solid var(--border-window-chrome);
-  box-shadow: var(--window-rim-chrome);
+  background: var(--tech-bg-side-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-bottom: 1px solid var(--tech-border);
+  box-shadow: none;
 }
 
 .titleBarWindowed {
@@ -46,7 +46,7 @@
   flex-shrink: 1;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -64,6 +64,6 @@
   .titleBar {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    background: var(--color-bg-elevated);
+    background: var(--tech-bg-side-panel);
   }
 }

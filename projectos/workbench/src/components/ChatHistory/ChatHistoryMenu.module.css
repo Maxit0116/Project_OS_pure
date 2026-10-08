@@ -9,7 +9,7 @@
   width: 100%;
   max-height: min(48vh, 420px);
   padding: 4px;
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   display: flex;
   flex-direction: column;
   overflow: hidden;

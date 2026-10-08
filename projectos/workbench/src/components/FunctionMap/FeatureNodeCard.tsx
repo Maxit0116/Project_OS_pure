@@ -62,18 +62,9 @@ export function isPurposeFirstArchitectureLevel(level: string | undefined): bool
   return level === 'context' || level === 'container' || level === 'component'
 }
 
-const ELEMENT_ACCENT: Record<string, string> = {
-  person: '#ff9f0a',
-  software_system: '#bf5af2',
-  external_system: '#64d2ff',
-  container: '#0a84ff',
-  component: '#30d158',
-  code_element: '#5e5ce6',
-  data_store: '#32ade6',
-}
-
-export function featureNodeAccent(elementType: string | undefined): string {
-  return ELEMENT_ACCENT[elementType ?? ''] ?? '#0a84ff'
+/** Selection blue. Type is shown by the label, not a per-type color. */
+export function featureNodeAccent(_elementType: string | undefined): string {
+  return '#4c7dff'
 }
 
 /**

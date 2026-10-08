@@ -11,7 +11,7 @@
   flex: 1;
   min-width: 0;
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-muted);
   overflow: visible;
 }
@@ -21,7 +21,7 @@
   flex: 1;
   min-height: 0;
   overflow: visible;
-  border-radius: var(--radius-glass-sm) var(--radius-glass-sm) 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 .input {

@@ -19,7 +19,7 @@ import type {
 import type { VerificationRunResult } from "../contracts/exec-command.js";
 import type { VerificationCommandApprovalStatus } from "../contracts/verification-command-approval.js";
 import type { AgentRunEvent, AgentTransientTrace } from "../contracts/events.js";
-import type { ProjectGraph } from "../contracts/graph.js";
+import type { ProjectGraph, StructureScanOptions } from "../contracts/graph.js";
 import type { HarnessRecord } from "../contracts/harness.js";
 import type {
   CreatePlanRequest,
@@ -67,8 +67,8 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.openWorkspace(path);
   }
 
-  analyzeWorkspace(projectId: string): Promise<ProjectGraph> {
-    return this.transport.analyzeWorkspace(projectId);
+  analyzeWorkspace(projectId: string, options?: StructureScanOptions): Promise<ProjectGraph> {
+    return this.transport.analyzeWorkspace(projectId, options);
   }
 
   getProjectGraph(projectId: string): Promise<ProjectGraph> {

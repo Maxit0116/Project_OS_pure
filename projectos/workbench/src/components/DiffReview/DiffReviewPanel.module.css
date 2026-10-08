@@ -46,13 +46,13 @@
   padding: 6px 10px;
   background: var(--color-success-subtle);
   border: 1px solid color-mix(in srgb, var(--color-success) 25%, transparent);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
 }
 
 .verificationBadge {
   max-width: 260px;
   padding: 6px 10px;
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
 }
@@ -84,7 +84,7 @@
   text-align: left;
   background: color-mix(in srgb, var(--color-warning) 10%, var(--color-bg-elevated));
   border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
 }
 
 .verificationApproval > span {
@@ -105,7 +105,7 @@
   overflow-wrap: anywhere;
   color: var(--color-text-primary);
   background: var(--color-bg-muted);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
 }
 
 .files {
@@ -117,7 +117,7 @@
 
 .fileBlock {
   border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-glass-md);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 

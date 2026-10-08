@@ -21,8 +21,21 @@ import FeatureNode, { isPurposeFirstArchitectureLevel } from './FeatureNode'
 import ArchitectureLayerNode from './ArchitectureLayerNode'
 import FloatingStraightEdge from './FloatingStraightEdge'
 import { mapArtifactNodeTypes } from './mapArtifactNodeTypes'
+import C4FlowNode from './c4/C4FlowNode'
+import C4BoundaryFlowNode from './c4/C4BoundaryFlowNode'
+import { buildDiagram } from './c4/buildDiagram'
+import { layoutFromC4Diagram } from './c4/layoutFromC4Diagram'
+import { applyElkLayoutToDiagram } from './c4/layoutWithElk'
+import {
+  applyOverlayToPositions,
+  loadC4LayoutOverlay,
+  pruneC4LayoutOverlayForView,
+  upsertC4LayoutPositions,
+} from './c4/c4LayoutOverlay'
+import type { C4Diagram } from './c4/types'
 import type {
   ArchitectureLayer,
+  FunctionalEdge,
   FunctionalNode,
   MapArtifact,
   MapArtifactType,
@@ -118,7 +131,8 @@ import {
   resolveRenderableLayerBands,
   sanitizeLayerBandsForNodes,
 } from './mergeFullLayerBands'
-import { EDGE_COLORS } from './edgePresentation'
+import { EDGE_COLORS, formatC4EdgeLabel } from './edgePresentation'
+import C4NodeDetailDrawer from './C4NodeDetailDrawer'
 import {
   focusCodeNodeForMap,
   openCodeNodeFile,
@@ -186,11 +200,21 @@ const STATUS_COLORS: Record<string, string> = {
   suggested: 'var(--color-text-muted)',
 }
 
+/** Feature cards (legacy) and classic C4 shapes share selection/drill handlers. */
+function isArchitectureFlowNodeType(type: string | undefined): boolean {
+  return type === 'feature' || type === 'c4Shape'
+}
+
 const nodeTypes = {
   architectureLayer: ArchitectureLayerNode,
   feature: FeatureNode,
+  c4Shape: C4FlowNode,
+  c4Boundary: C4BoundaryFlowNode,
   ...mapArtifactNodeTypes,
 }
+
+/** Dashed C4 system/container frame — below feature nodes. */
+const Z_C4_BOUNDARY = 1
 const edgeTypes = { floatingStraight: FloatingStraightEdge }
 
 // Allow nodes to grow past native size so the graph fills the panel instead of
@@ -542,13 +566,25 @@ function collectForeignNodeObstaclesForWorkGroup(
       }
       continue
     }
-    if (node.type === 'feature') {
+    if (isArchitectureFlowNodeType(node.type)) {
+      const width =
+        typeof node.style?.width === 'number'
+          ? node.style.width
+          : typeof node.width === 'number'
+            ? node.width
+            : NODE_WIDTH
+      const height =
+        typeof node.style?.height === 'number'
+          ? node.style.height
+          : typeof node.height === 'number'
+            ? node.height
+            : NODE_HEIGHT
       obstacles.push({
         id: node.id,
         x: node.position.x,
         y: node.position.y,
-        width: NODE_WIDTH,
-        height: NODE_HEIGHT,
+        width,
+        height,
       })
     }
   }
@@ -564,7 +600,7 @@ function clearDragElevation(setFlowNodes: (updater: (current: Node[]) => Node[])
       if (node.type === 'map_artifact_stack') {
         return node.zIndex === Z_ARTIFACT ? node : { ...node, zIndex: Z_ARTIFACT }
       }
-      if (node.type === 'feature') {
+      if (isArchitectureFlowNodeType(node.type)) {
         return node.zIndex === Z_FEATURE ? node : { ...node, zIndex: Z_FEATURE }
       }
       return node
@@ -677,6 +713,24 @@ function flowNodeDataVisualKey(node: Node): string {
       data.focusOpacity,
       data.flash,
     ])
+  }
+  if (node.type === 'c4Shape') {
+    const members = Array.isArray(data.members) ? data.members.join(',') : ''
+    return joinFlowNodeVisualKey([
+      data.shape,
+      data.label,
+      data.description,
+      data.technology,
+      data.stereotype,
+      members,
+      data.selected,
+      data.dimmed,
+      data.canOpenGraph,
+      data.openGraphLabel,
+    ])
+  }
+  if (node.type === 'c4Boundary') {
+    return joinFlowNodeVisualKey([data.label, data.description])
   }
   if (node.type === 'map_artifact_stack') {
     const active = data.activeArtifact as {
@@ -793,6 +847,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     selectedNodeId,
     onSelectNode,
     onSelectFile,
+    onClearSelection,
     search,
     backdropRef,
     chromeInsetsRef,
@@ -876,6 +931,49 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       architectureScopeId ? { parentId: architectureScopeId } : {},
     [architectureScopeId],
   )
+
+  const c4DiagramBase = useMemo(() => {
+    if (architecture?.notation !== 'c4') return null
+    return buildDiagram({
+      level: architectureLevel,
+      nodes: graphNodes,
+      edges: graphEdges,
+      architecture,
+      scope: architectureScope,
+      fileIndex,
+      fileRelations,
+    })
+  }, [
+    architecture,
+    architectureLevel,
+    architectureScope,
+    graphNodes,
+    graphEdges,
+    fileIndex,
+    fileRelations,
+  ])
+  const [c4Diagram, setC4Diagram] = useState<C4Diagram | null>(c4DiagramBase)
+  useEffect(() => {
+    if (!c4DiagramBase) {
+      setC4Diagram(null)
+      return
+    }
+    let cancelled = false
+    setC4Diagram(c4DiagramBase)
+    void applyElkLayoutToDiagram(c4DiagramBase).then((laidOut) => {
+      if (!cancelled) setC4Diagram(laidOut)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [c4DiagramBase])
+  const c4DiagramRef = useRef(c4Diagram)
+  c4DiagramRef.current = c4Diagram
+
+  const c4NodeById = useMemo(() => {
+    if (!c4Diagram) return null
+    return new Map(c4Diagram.nodes.map((node) => [node.id, node]))
+  }, [c4Diagram])
 
   const fullLayerGraph = useMemo(
     () =>
@@ -1014,8 +1112,49 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   const prevLayerFocusNodeIdRef = useRef<string | null>(layerFocusNodeId)
   const isLayerFocusAnimating = layerFocusTransitionSample !== null
 
-  const displayFeatureNodes = isLayerFocusAnimating ? fullLayerGraph.nodes : nodes
-  const displayEdges = isLayerFocusAnimating ? fullLayerGraph.edges : edges
+  const useC4Visuals = Boolean(
+    !isLayerFocusAnimating && c4Diagram && c4Diagram.nodes.length > 0,
+  )
+
+  const displayFeatureNodes = useMemo(() => {
+    if (isLayerFocusAnimating) return fullLayerGraph.nodes
+    if (!useC4Visuals || !c4Diagram) return nodes
+    const byId = new Map<string, FunctionalNode>()
+    for (const node of graphNodes) byId.set(node.id, node)
+    for (const node of nodes) byId.set(node.id, node)
+    return c4Diagram.nodes
+      .map((c4Node) => byId.get(c4Node.sourceNodeId) ?? byId.get(c4Node.id))
+      .filter((node): node is FunctionalNode => Boolean(node))
+  }, [
+    isLayerFocusAnimating,
+    fullLayerGraph.nodes,
+    useC4Visuals,
+    c4Diagram,
+    nodes,
+    graphNodes,
+  ])
+
+  const displayEdges = useMemo((): FunctionalEdge[] => {
+    if (isLayerFocusAnimating) return fullLayerGraph.edges
+    if (!useC4Visuals || !c4Diagram) return edges
+    return c4Diagram.edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      relation: edge.relation as FunctionalEdge['relation'],
+      label: edge.label,
+      purpose: edge.purpose,
+      technology: edge.technology,
+      confidence: edge.confidence ?? 1,
+      evidence: undefined,
+    }))
+  }, [
+    isLayerFocusAnimating,
+    fullLayerGraph.edges,
+    useC4Visuals,
+    c4Diagram,
+    edges,
+  ])
 
   const viewportPersistenceGuardRef = useRef<ReturnType<
     typeof createViewportPersistenceGuard
@@ -1420,15 +1559,82 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     [architecture],
   )
 
+  const c4BoundaryFlowNodes: Node[] = useMemo(() => {
+    if (!useC4Visuals || !c4Diagram) return []
+    return c4Diagram.boundaries.map((boundary) => ({
+      id: boundary.id,
+      type: 'c4Boundary',
+      position: boundary.position,
+      draggable: false,
+      selectable: false,
+      focusable: false,
+      zIndex: Z_C4_BOUNDARY,
+      initialWidth: boundary.width,
+      initialHeight: boundary.height,
+      style: {
+        width: boundary.width,
+        height: boundary.height,
+        pointerEvents: 'none' as const,
+      },
+      data: {
+        label: boundary.label,
+        description: boundary.description,
+      },
+    }))
+  }, [useC4Visuals, c4Diagram])
+
   const derivedNodes: Node[] = useMemo(
     () => [
-      ...layerBandFlowNodes,
+      ...(useC4Visuals ? [] : layerBandFlowNodes),
+      ...c4BoundaryFlowNodes,
       ...workGroupFlowNodes,
       ...displayFeatureNodes.map((n) => {
         const focusOpacity = layerFocusTransitionSample
           ? (layerFocusTransitionSample.nodeOpacityById[n.id] ?? 0)
           : 1
         const searchDimmed = matchingIds !== null && !matchingIds.has(n.id)
+        const c4Node = c4NodeById?.get(n.id)
+        const width = c4Node?.width ?? NODE_WIDTH
+        const height = c4Node?.height ?? NODE_HEIGHT
+        const openGraphLabel =
+          n.level === 'context'
+            ? messages.map.node.openSystemMap
+            : n.level === 'container'
+              ? messages.map.node.openModuleMap
+              : messages.map.node.openGraph
+
+        if (useC4Visuals && c4Node) {
+          return {
+            id: n.id,
+            type: 'c4Shape',
+            position: positionsById[n.id] ?? c4Node.position,
+            draggable: false,
+            zIndex: Z_FEATURE,
+            initialWidth: width,
+            initialHeight: height,
+            style: {
+              width,
+              height,
+              ...(focusOpacity < 0.01
+                ? { pointerEvents: 'none' as const, visibility: 'hidden' as const }
+                : {}),
+            },
+            data: {
+              shape: c4Node.shape,
+              label: c4Node.label || n.name,
+              description: c4Node.description ?? n.responsibility ?? n.summary,
+              technology: c4Node.technology ?? n.technology,
+              stereotype: c4Node.stereotype,
+              members: c4Node.members,
+              selected: n.id === selectedNodeId,
+              dimmed: searchDimmed,
+              canOpenGraph: canDrillIntoNode(n.id),
+              onOpenGraph: () => drillIntoNode(n.id),
+              openGraphLabel,
+            },
+          }
+        }
+
         return {
         id: n.id,
         type: 'feature',
@@ -1470,12 +1676,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
           suggestedLabel: messages.map.node.suggested,
           responsibilityMissing: messages.map.node.responsibilityMissing,
           technologyMissing: messages.map.node.technologyMissing,
-          openGraphLabel:
-            n.level === 'context'
-              ? messages.map.node.openSystemMap
-              : n.level === 'container'
-                ? messages.map.node.openModuleMap
-                : messages.map.node.openGraph,
+          openGraphLabel,
           canOpenGraph: canDrillIntoNode(n.id),
           onOpenGraph: () => drillIntoNode(n.id),
           fileCount: n.linkedFiles.length,
@@ -1502,6 +1703,9 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     [
       workGroupFlowNodes,
       layerBandFlowNodes,
+      c4BoundaryFlowNodes,
+      useC4Visuals,
+      c4NodeById,
       displayFeatureNodes,
       positionsById,
       selectedNodeId,
@@ -1963,6 +2167,15 @@ function FunctionMapCanvasInner({ bleed }: Props) {
                 },
               }
             }
+            const projectKey = useWorkbenchStore.getState().project?.projectId
+            if (projectKey && architecture?.notation === 'c4') {
+              upsertC4LayoutPositions(
+                projectKey,
+                architectureLevel,
+                architectureScopeId,
+                { [change.id]: resolved },
+              )
+            }
             pendingDragEndPositionsRef.current.set(change.id, resolved)
             draggedIdsRef.current.delete(change.id)
             elevatedDragIdsRef.current.clear()
@@ -1981,7 +2194,15 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
       onNodesChangeInternal(nextChanges)
     },
-    [handleArtifactDragEnd, handleWorkGroupDragEnd, onNodesChangeInternal, setFlowNodes],
+    [
+      architecture,
+      architectureLevel,
+      architectureScopeId,
+      handleArtifactDragEnd,
+      handleWorkGroupDragEnd,
+      onNodesChangeInternal,
+      setFlowNodes,
+    ],
   )
 
   const applyArtifactSnapDuringDrag = useCallback(
@@ -2304,7 +2525,9 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
   const flowEdges: Edge[] = useMemo(() => {
     const isLayeredArchitecture =
-      displayFeatureNodes.length > 0 && displayFeatureNodes.every((node) => node.layer)
+      !useC4Visuals &&
+      displayFeatureNodes.length > 0 &&
+      displayFeatureNodes.every((node) => node.layer)
     const resolveEdgeOpacity = (edgeId: string, sourceId: string, targetId: string) => {
       const focusOpacity = layerFocusTransitionSample
         ? (layerFocusTransitionSample.edgeOpacityById[edgeId] ?? 0)
@@ -2315,6 +2538,16 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     }
     const graphEdges = displayEdges.map((e) => {
       const color = EDGE_COLORS[e.relation]
+      const relationI18n =
+        messages.map.relations[e.relation as keyof typeof messages.map.relations]
+      const denseC4 = useC4Visuals && displayEdges.length > 8
+      const compactLabel = formatC4EdgeLabel(
+        e.label,
+        e.technology,
+        e.relation,
+        relationI18n,
+        denseC4 ? 'tech' : 'full',
+      )
       return {
         id: e.id,
         source: e.source,
@@ -2324,7 +2557,14 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         data: {
           evidence: e.evidence,
           purpose: e.purpose,
-          detailVisibility: isLayeredArchitecture || displayEdges.length > 6 ? 'hover' : 'always',
+          detailVisibility:
+            useC4Visuals
+              ? denseC4
+                ? 'hover'
+                : 'always'
+              : isLayeredArchitecture || displayEdges.length > 6
+                ? 'hover'
+                : 'always',
           technology: e.technology,
           relationship: e.label,
         },
@@ -2340,11 +2580,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
           strokeDasharray: e.relation === 'depends_on' || e.confidence < 0.8 ? '6 4' : undefined,
           opacity: resolveEdgeOpacity(e.id, e.source, e.target),
         },
-        label: isLayeredArchitecture
-          ? undefined
-          : e.label ??
-            messages.map.relations[e.relation as keyof typeof messages.map.relations] ??
-            e.relation.replace(/_/g, ' '),
+        label: isLayeredArchitecture ? undefined : compactLabel || undefined,
         labelStyle: { fill: 'var(--color-text-primary)', fontSize: 11, fontWeight: 650 },
         labelBgStyle: {
           fill: 'var(--color-bg-elevated)',
@@ -2460,6 +2696,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     messages,
     showArtifacts,
     layerFocusTransitionSample,
+    useC4Visuals,
   ])
 
   const pendingClickRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2490,15 +2727,39 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     }
   }, [bleed, flowRef, viewportChromeRef, chromeInsetsRef])
 
-  const nodesRef = useRef(nodes)
-  nodesRef.current = nodes
-  const edgesRef = useRef(edges)
-  edgesRef.current = edges
+  const nodesRef = useRef(displayFeatureNodes)
+  nodesRef.current = displayFeatureNodes
+  const edgesRef = useRef(displayEdges)
+  edgesRef.current = displayEdges
+
+  const c4LayoutSignature = useMemo(() => {
+    if (!c4Diagram) return ''
+    return c4Diagram.nodes
+      .map(
+        (node) =>
+          `${node.id}:${Math.round(node.position.x)},${Math.round(node.position.y)}`,
+      )
+      .join(';')
+  }, [c4Diagram])
 
   const graphLayoutKey = useMemo(
     () =>
-      `${nodes.map((n) => n.id).join('\0')}|${edges.map((e) => `${e.source}>${e.target}`).join('\0')}`,
-    [nodes, edges],
+      [
+        architectureLevel,
+        architectureScopeId ?? '',
+        useC4Visuals ? 'c4' : 'legacy',
+        displayFeatureNodes.map((n) => n.id).join('\0'),
+        displayEdges.map((e) => `${e.source}>${e.target}`).join('\0'),
+        c4LayoutSignature,
+      ].join('|'),
+    [
+      architectureLevel,
+      architectureScopeId,
+      useC4Visuals,
+      displayFeatureNodes,
+      displayEdges,
+      c4LayoutSignature,
+    ],
   )
   const graphLayoutKeyRef = useRef(graphLayoutKey)
   graphLayoutKeyRef.current = graphLayoutKey
@@ -2620,20 +2881,53 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         return
       }
 
-      const snapshot = buildLayout(
-        currentNodes,
-        edgesRef.current.map((e) => ({ source: e.source, target: e.target })),
-        architecture?.layers ?? [],
-        safe,
-      )
+      const activeC4 = c4DiagramRef.current
+      const snapshot =
+        activeC4 && activeC4.nodes.length > 0
+          ? (() => {
+              const c4Layout = layoutFromC4Diagram(activeC4, safe)
+              const projectKey = useWorkbenchStore.getState().project?.projectId
+              const overlay = projectKey
+                ? loadC4LayoutOverlay(projectKey)
+                : { version: 1 as const, positions: {} }
+              const positionsById = applyOverlayToPositions(
+                overlay,
+                architectureLevel,
+                architectureScopeId,
+                c4Layout.positionsById,
+              )
+              if (projectKey) {
+                pruneC4LayoutOverlayForView(
+                  projectKey,
+                  architectureLevel,
+                  architectureScopeId,
+                  Object.keys(positionsById),
+                )
+              }
+              return {
+                area: c4Layout.area,
+                positionsById,
+                layerBands: [] as ArchitectureLayerBandLayout[],
+                viewport: c4Layout.viewport,
+              }
+            })()
+          : buildLayout(
+              currentNodes,
+              edgesRef.current.map((e) => ({ source: e.source, target: e.target })),
+              architecture?.layers ?? [],
+              safe,
+            )
       const sanitizedSnapshot: LayoutSnapshot = {
         ...snapshot,
-        layerBands: sanitizeLayoutBands(
-          snapshot.layerBands,
-          currentNodes,
-          snapshot.positionsById,
-          architecture?.layers,
-        ),
+        layerBands:
+          activeC4 && activeC4.nodes.length > 0
+            ? []
+            : sanitizeLayoutBands(
+                snapshot.layerBands,
+                currentNodes,
+                snapshot.positionsById,
+                architecture?.layers,
+              ),
       }
       const snapshotsEqual = previous
         ? layoutSnapshotsEqual(previous, sanitizedSnapshot)
@@ -3120,7 +3414,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         selectArtifact(null)
         return
       }
-      if (node.type !== 'feature') {
+      if (!isArchitectureFlowNodeType(node.type)) {
         if (pendingClickRef.current) clearTimeout(pendingClickRef.current)
         const artifactId =
           typeof node.data?.artifactId === 'string' ? node.data.artifactId : node.id
@@ -3148,12 +3442,15 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
   const handleNodeMouseEnter = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      if (node.type !== 'feature') return
-      const sourceNode = fullLayerGraph.nodes.find((n) => n.id === node.id)
+      if (!isArchitectureFlowNodeType(node.type)) return
+      const sourceNode =
+        displayFeatureNodes.find((n) => n.id === node.id) ??
+        fullLayerGraph.nodes.find((n) => n.id === node.id) ??
+        graphNodes.find((n) => n.id === node.id)
       if (!sourceNode) return
       schedulePreview(sourceNode, event.clientX, event.clientY)
     },
-    [fullLayerGraph.nodes, schedulePreview],
+    [displayFeatureNodes, fullLayerGraph.nodes, graphNodes, schedulePreview],
   )
 
   const handleNodeMouseLeave = useCallback(() => {
@@ -3242,10 +3539,12 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
   const handleNodeContextMenu = useCallback(
     (event: ReactMouseEvent | MouseEvent, node: Node) => {
-      if (node.type !== 'feature') return
+      if (!isArchitectureFlowNodeType(node.type)) return
       event.preventDefault()
       setHeaderContextMenu(null)
-      const featureNode = nodes.find((candidate) => candidate.id === node.id)
+      const featureNode =
+        nodes.find((candidate) => candidate.id === node.id) ??
+        graphNodes.find((candidate) => candidate.id === node.id)
       const codeTarget = resolveCodeNodeTarget(featureNode)
       setContextMenu({
         x: event.clientX,
@@ -3260,7 +3559,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         anchorParentNodeId: codeTarget?.parentNodeId,
       })
     },
-    [nodes],
+    [nodes, graphNodes],
   )
 
   const handleContextMenuSelect = useCallback(
@@ -3295,12 +3594,14 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
   const handleNodeDoubleClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
-      if (node.type !== 'feature') return
+      if (!isArchitectureFlowNodeType(node.type)) return
       if (pendingClickRef.current) {
         clearTimeout(pendingClickRef.current)
         pendingClickRef.current = null
       }
-      const sourceNode = nodes.find((candidate) => candidate.id === node.id)
+      const sourceNode =
+        nodes.find((candidate) => candidate.id === node.id) ??
+        graphNodes.find((candidate) => candidate.id === node.id)
       const codeTarget = resolveCodeNodeTarget(sourceNode)
       if (codeTarget) {
         void focusCodeNodeForMap(codeTarget, {
@@ -3320,6 +3621,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     [
       drillIntoNode,
       focusCodeNode,
+      graphNodes,
       nodes,
       onSelectNode,
       openNodeAgentChat,
@@ -3423,6 +3725,17 @@ function FunctionMapCanvasInner({ bleed }: Props) {
           onCancel={cancelMapArtifactRename}
         />
       )}
+      {useC4Visuals && selectedNodeId ? (
+        <C4NodeDetailDrawer
+          node={
+            graphNodes.find((candidate) => candidate.id === selectedNodeId) ??
+            nodes.find((candidate) => candidate.id === selectedNodeId) ??
+            null
+          }
+          edges={graphEdges}
+          onClose={onClearSelection}
+        />
+      ) : null}
     </div>
   )
 }

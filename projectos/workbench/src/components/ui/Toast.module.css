@@ -5,38 +5,38 @@
   gap: var(--space-md);
   padding: var(--space-md) var(--space-lg);
   font-size: var(--font-size-md);
-  border-radius: var(--radius-glass-md);
-  border: 1px solid var(--glass-border-highlight);
-  background: var(--glass-bg-overlay);
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  box-shadow: var(--glass-shadow-overlay);
+  border-radius: 6px;
+  border: 1px solid var(--tech-border);
+  background: var(--tech-bg-elevated);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: var(--tech-shadow-md);
   max-width: 400px;
   border-left-width: 3px;
 }
 
 .success {
-  color: var(--color-success);
-  border-left-color: var(--color-success);
-  background: color-mix(in srgb, var(--glass-bg-overlay) 85%, var(--color-success-subtle));
+  color: var(--tech-success);
+  border-left-color: var(--tech-success);
+  background: var(--tech-bg-elevated);
 }
 
 .info {
-  color: var(--color-accent);
-  border-left-color: var(--color-accent);
-  background: color-mix(in srgb, var(--glass-bg-overlay) 85%, var(--color-accent-subtle));
+  color: var(--tech-accent);
+  border-left-color: var(--tech-accent);
+  background: var(--tech-bg-elevated);
 }
 
 .warning {
-  color: var(--color-warning);
-  border-left-color: var(--color-warning);
-  background: color-mix(in srgb, var(--glass-bg-overlay) 85%, var(--color-warning-subtle));
+  color: var(--tech-warning);
+  border-left-color: var(--tech-warning);
+  background: var(--tech-bg-elevated);
 }
 
 .error {
-  color: var(--color-error);
-  border-left-color: var(--color-error);
-  background: color-mix(in srgb, var(--glass-bg-overlay) 85%, var(--color-error-subtle));
+  color: var(--tech-error);
+  border-left-color: var(--tech-error);
+  background: var(--tech-bg-elevated);
 }
 
 .icon {
@@ -47,7 +47,7 @@
 .message {
   flex: 1;
   line-height: 1.4;
-  color: var(--color-text-primary);
+  color: var(--tech-text-primary);
 }
 
 .dismiss {
@@ -60,20 +60,20 @@
   color: inherit;
   background: transparent;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
   opacity: 0.8;
   cursor: pointer;
 }
 
 .dismiss:hover {
   opacity: 1;
-  background: var(--color-hover-overlay);
+  background: var(--tech-bg-muted);
 }
 
 @media (prefers-reduced-transparency: reduce) {
   .toast {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    background: var(--color-bg-elevated);
+    background: var(--tech-bg-elevated);
   }
 }

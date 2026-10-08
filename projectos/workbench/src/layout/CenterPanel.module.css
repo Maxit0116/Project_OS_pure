@@ -57,7 +57,7 @@
 }
 
 .tabPane[data-tour='function-map'] {
-  border-radius: var(--radius-glass-md) var(--radius-glass-md) 0 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
 
 .browserHidden {

@@ -5,13 +5,16 @@ import { useBottomDockStore } from '../../state/bottomDockStore'
 import { useTerminalStore } from '../../state/terminalStore'
 import { isDesktopApp } from '../../data/clientMode'
 import { useI18n } from '../../i18n'
-import { GlassLens } from '../Glass'
 import {
   handleTopmostOverlayEscape,
   registerOverlay,
 } from '../overlays/overlayStack'
 import { handleCommandPaletteNavigation } from './commandPaletteKeyboard'
 import type { SemanticTreeNode } from '@contracts/index'
+import {
+  exportC4MermaidBundle,
+  exportC4Views,
+} from '../FunctionMap/c4/exportC4Views'
 import styles from './CommandPalette.module.css'
 
 function collectFiles(nodes: SemanticTreeNode[]): { path: string; label: string }[] {
@@ -53,6 +56,8 @@ export default function CommandPalette() {
   const setCenterTab = useWorkbenchStore((s) => s.setCenterTab)
   const setLocale = useWorkbenchStore((s) => s.setLocale)
   const locale = useWorkbenchStore((s) => s.locale)
+  const pushToast = useWorkbenchStore((s) => s.pushToast)
+  const rescanStructureGraph = useWorkbenchStore((s) => s.rescanStructureGraph)
   const { ts } = useI18n()
 
   const closePalette = useCallback(() => {
@@ -110,6 +115,49 @@ export default function CommandPalette() {
         action: () => setLocale(locale === 'zh' ? 'en' : 'zh'),
       },
     ]
+
+    if (graph && graph.architecture?.notation === 'c4') {
+      cmds.push(
+        {
+          id: 'export-c4-mermaid',
+          label: ts('map.exportMermaid'),
+          group: 'Map',
+          action: () => {
+            void navigator.clipboard
+              .writeText(exportC4MermaidBundle(graph))
+              .then(() => {
+                pushToast({ type: 'success', message: ts('map.exportCopied') })
+              })
+              .catch(() => {
+                pushToast({ type: 'warning', message: ts('map.exportFailed') })
+              })
+          },
+        },
+        {
+          id: 'export-c4-structurizr',
+          label: ts('map.exportStructurizrDsl'),
+          group: 'Map',
+          action: () => {
+            void navigator.clipboard
+              .writeText(exportC4Views(graph).structurizrDsl)
+              .then(() => {
+                pushToast({ type: 'success', message: ts('map.exportCopied') })
+              })
+              .catch(() => {
+                pushToast({ type: 'warning', message: ts('map.exportFailed') })
+              })
+          },
+        },
+        {
+          id: 'force-regenerate-structure',
+          label: ts('map.forceRegenerateStructure'),
+          group: 'Map',
+          action: () => {
+            void rescanStructureGraph({ mode: 'regenerate', force: true })
+          },
+        },
+      )
+    }
 
     if (phase === 'ready') {
       cmds.push(
@@ -217,7 +265,7 @@ export default function CommandPalette() {
     }
 
     return cmds
-  }, [graph, tree, selectNode, selectFile, setCenterTab, setLocale, locale, ts, phase, runGoogleLoginScenario, triggerAuthError, resetDemo, togglePanel, openPanel, setActiveView, createTab, killActiveTab, splitTerminal])
+  }, [graph, tree, selectNode, selectFile, setCenterTab, setLocale, locale, ts, phase, runGoogleLoginScenario, triggerAuthError, resetDemo, togglePanel, openPanel, setActiveView, createTab, killActiveTab, splitTerminal, pushToast, rescanStructureGraph])
 
   const filtered = commands.filter((c) =>
     c.label.toLowerCase().includes(query.toLowerCase()),
@@ -248,9 +296,7 @@ export default function CommandPalette() {
 
   return (
     <div className={styles.overlay} onClick={closePalette}>
-      <GlassLens
-        radius={28}
-        tint="overlay"
+      <div
         className={`${styles.palette} glass-overlay-enter glass-slide-down`}
         style={{ width: '100%', maxWidth: 480 }}
       >
@@ -320,7 +366,7 @@ export default function CommandPalette() {
             </div>
           )}
         </div>
-      </GlassLens>
+      </div>
     </div>
   )
 }

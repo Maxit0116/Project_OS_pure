@@ -8,8 +8,8 @@
   pointer-events: none;
   overflow: hidden;
   transition:
-    left var(--duration-panel-enter) var(--ease-spring),
-    right var(--duration-terminal-enter) var(--ease-spring);
+    left var(--duration-panel-enter) var(--ease-out),
+    right var(--duration-terminal-enter) var(--ease-out);
 }
 
 .shellExiting {
@@ -22,12 +22,12 @@
 }
 
 .shellMotionEnter {
-  animation: terminalSlideIn var(--duration-terminal-enter) var(--ease-spring) both;
+  animation: terminalSlideIn var(--duration-terminal-enter) var(--ease-out) both;
   will-change: transform;
 }
 
 .shellMotionExit {
-  animation: terminalSlideOut var(--duration-terminal-enter) var(--ease-spring) both;
+  animation: terminalSlideOut var(--duration-terminal-enter) var(--ease-out) both;
   pointer-events: none;
   will-change: transform;
 }

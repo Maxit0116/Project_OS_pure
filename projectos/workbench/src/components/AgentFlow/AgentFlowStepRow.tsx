@@ -1,7 +1,6 @@
 import { Check, AlertCircle, Circle } from 'lucide-react'
 import type { AgentFlowStep } from '@contracts/index'
 import { useI18n } from '../../i18n'
-import ThinkingOrb from '../ui/ThinkingOrb'
 import styles from './AgentFlowStepRow.module.css'
 
 const STATUS_CLASS: Record<string, string> = {
@@ -24,9 +23,7 @@ interface Props {
 
 function StatusIcon({ status }: { status: string }) {
   if (status === 'complete') return <Check size={14} className={styles.iconComplete} />
-  if (status === 'running') {
-    return <ThinkingOrb state="working" size={20} className={styles.iconRunning} />
-  }
+  if (status === 'running') return <Circle size={14} className={styles.iconRunning} fill="currentColor" />
   if (status === 'error') return <AlertCircle size={14} className={styles.iconError} />
   return <Circle size={14} className={styles.iconPending} />
 }

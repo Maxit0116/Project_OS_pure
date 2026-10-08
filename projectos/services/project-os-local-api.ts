@@ -100,7 +100,9 @@ import type {
   LinkedFile,
   LinkedFileRole,
   ProjectGraph,
+  StructureScanOptions,
 } from "../contracts/graph.js";
+import { StructureScanOptionsSchema } from "../contracts/graph.js";
 import { HarnessRecordSchema, type HarnessRecord } from "../contracts/harness.js";
 import {
   CreatePlanRequestSchema,
@@ -746,41 +748,48 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return workspace.project;
   }
 
-  async analyzeWorkspace(projectId: string): Promise<ProjectGraph> {
+  async analyzeWorkspace(
+    projectId: string,
+    options?: StructureScanOptions,
+  ): Promise<ProjectGraph> {
     const workspace = this.requireLoadedWorkspace(projectId);
     if (workspace.workspaceRoot.startsWith("mock://")) {
       return cloneJson(workspace.graph);
     }
+    const parsedOptions = StructureScanOptionsSchema.parse(options ?? { mode: "regenerate" });
     const profile = this.settingsService.resolveModelProfile(workspace.settings);
     if (!profile) {
-      return cloneJson(workspace.graph);
-    }
-    try {
-      const scanned = await runStructureGraphAiScan({
-        workspaceRoot: workspace.workspaceRoot,
-        projectId: workspace.project.projectId,
-        displayName: workspace.project.displayName,
-        graph: workspace.graph,
-        profile,
-        gateway: this.modelGateway,
-        force: true,
-      });
-      await this.workspaceStore.writeGraph(workspace.workspaceRoot, scanned);
-      const semanticTree = projectSemanticTreeFromGraph({
-        projectId: workspace.project.projectId,
-        projectName: workspace.project.displayName,
-        graph: scanned,
-      });
-      await this.workspaceStore.writeSemanticTree(
-        workspace.workspaceRoot,
-        semanticTree,
+      throw new ProjectOSError(
+        "settings_not_found",
+        "Configure a default model profile before scanning the structure map",
       );
-      const reloaded = this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
-      this.workspacesByProjectId.set(projectId, reloaded);
-      return cloneJson(reloaded.graph);
-    } catch {
-      return cloneJson(workspace.graph);
     }
+    const scanned = await runStructureGraphAiScan({
+      workspaceRoot: workspace.workspaceRoot,
+      projectId: workspace.project.projectId,
+      displayName: workspace.project.displayName,
+      graph: workspace.graph,
+      profile,
+      gateway: this.modelGateway,
+      force: parsedOptions.force === true,
+      userInitiated: true,
+      scanMode: parsedOptions.mode,
+      nodeIds: parsedOptions.nodeIds,
+      changedFiles: parsedOptions.changedFiles,
+    });
+    await this.workspaceStore.writeGraph(workspace.workspaceRoot, scanned);
+    const semanticTree = projectSemanticTreeFromGraph({
+      projectId: workspace.project.projectId,
+      projectName: workspace.project.displayName,
+      graph: scanned,
+    });
+    await this.workspaceStore.writeSemanticTree(
+      workspace.workspaceRoot,
+      semanticTree,
+    );
+    const reloaded = this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
+    this.workspacesByProjectId.set(projectId, reloaded);
+    return cloneJson(reloaded.graph);
   }
 
   /** Desktop-main authority; intentionally not exposed through ProjectOSApi or IPC. */

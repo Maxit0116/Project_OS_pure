@@ -20,20 +20,20 @@
 
 .status {
   font-size: var(--font-size-xs);
-  text-transform: uppercase;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-muted);
-  border: 1px solid var(--glass-border-subtle);
+  text-transform: none;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  border: none;
   color: var(--color-text-secondary);
 }
 
 .card {
   margin-bottom: var(--space-md);
-  padding: var(--space-md);
-  border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-glass-sm);
-  background: var(--color-bg-elevated);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .card h3 {
@@ -70,7 +70,7 @@
   padding: 10px 12px;
   border: 1px solid var(--glass-border-subtle);
   border-left: 3px solid var(--color-warning);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-elevated);
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
@@ -93,7 +93,7 @@
   margin: var(--space-lg) 0;
   padding: var(--space-md);
   border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-muted);
 }
 
@@ -144,7 +144,7 @@
 .delegatedChild {
   padding: var(--space-sm);
   border-left: 3px solid var(--color-accent);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-elevated);
 }
 
@@ -186,7 +186,7 @@
   gap: 2px;
   margin-bottom: var(--space-sm);
   padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-muted);
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
@@ -220,7 +220,7 @@
   margin: var(--space-md) 0;
   padding: var(--space-sm) var(--space-md);
   border: 1px solid color-mix(in srgb, var(--color-success) 35%, transparent);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--color-success) 10%, transparent);
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
@@ -240,7 +240,7 @@
 }
 
 .reviewBtnPulse {
-  animation: pulseRunning 1.5s ease-in-out infinite;
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -11,7 +11,7 @@
   padding: var(--space-md);
   background: var(--color-success-subtle);
   border: 1px solid color-mix(in srgb, var(--color-success) 25%, transparent);
-  border-radius: var(--radius-glass-md);
+  border-radius: var(--radius-md);
 }
 
 .summaryCard h3 {
@@ -63,7 +63,7 @@
   color: var(--color-error);
   background: var(--color-error-subtle);
   border: 1px solid var(--color-error-border);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   white-space: pre-wrap;
 }
 
@@ -88,7 +88,7 @@
   padding: 3px 8px;
   background: var(--color-bg-muted);
   border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
 }
 
@@ -124,10 +124,10 @@
   color: #fff;
   background: var(--color-accent);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   margin-top: 8px;
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-spring);
+  transition: background var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
 }
 
 .fixBtn:hover {

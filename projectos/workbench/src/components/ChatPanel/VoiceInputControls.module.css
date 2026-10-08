@@ -73,7 +73,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 6px 10px;
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--color-danger, #ff453a) 12%, transparent);
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);

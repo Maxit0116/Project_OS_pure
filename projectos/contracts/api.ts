@@ -8,7 +8,7 @@ import type { ApplyResult, GeneratedDiff, RestoreApplyResult } from "./diff.js";
 import type { VerificationRunResult } from "./exec-command.js";
 import type { VerificationCommandApprovalStatus } from "./verification-command-approval.js";
 import type { AgentRunEvent, AgentTransientTrace } from "./events.js";
-import type { ProjectGraph } from "./graph.js";
+import type { ProjectGraph, StructureScanOptions } from "./graph.js";
 import type { HarnessRecord } from "./harness.js";
 import type {
   CreatePlanRequest,
@@ -69,7 +69,10 @@ export interface Disposable {
 export interface ProjectOSApi {
   openSampleWorkspace(): Promise<ProjectOSProject>;
   openWorkspace(path: string): Promise<ProjectOSProject>;
-  analyzeWorkspace(projectId: string): Promise<ProjectGraph>;
+  analyzeWorkspace(
+    projectId: string,
+    options?: StructureScanOptions,
+  ): Promise<ProjectGraph>;
   getProjectGraph(projectId: string): Promise<ProjectGraph>;
   getSemanticTree(projectId: string): Promise<SemanticTree>;
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload>;

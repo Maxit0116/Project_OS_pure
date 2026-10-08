@@ -10,7 +10,7 @@ export function loadThemePreference(): ThemePreference {
   } catch {
     /* ignore */
   }
-  return 'system'
+  return 'dark'
 }
 
 export function saveThemePreference(theme: ThemePreference) {

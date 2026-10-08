@@ -71,7 +71,12 @@ function setsIntersect(
   return false;
 }
 
-export const ProjectGraphVersionSchema = z.enum(["0.1.0", "0.2.0", "0.3.0"]);
+export const ProjectGraphVersionSchema = z.enum([
+  "0.1.0",
+  "0.2.0",
+  "0.3.0",
+  "0.4.0",
+]);
 
 export const GraphAnalysisStatusSchema = z.enum([
   "complete",
@@ -215,6 +220,12 @@ export const FunctionalNodeSchema = z
     ).optional(),
     refs: boundedArray(z.string(), PROJECT_GRAPH_LIMITS.refsPerNode).optional(),
     depth: z.number().int().nonnegative().optional(),
+    /** Team / CODEOWNERS-style owners (Arch4 entity enrichment). */
+    owners: boundedArray(z.string().min(1).max(128), 32).optional(),
+    /** Free-form implementation notes tied to the node. */
+    notes: z.string().max(4_096).optional(),
+    /** Unresolved architecture questions for this node. */
+    openQuestions: boundedArray(z.string().min(1).max(512), 32).optional(),
   })
   .strict();
 
@@ -282,6 +293,11 @@ export const ProjectGraphSchema = z
     analyzedAt: z.string(),
     analysisStatus: GraphAnalysisStatusSchema,
     architecture: ProjectArchitectureSchema.optional(),
+    /**
+     * When true, regenerate scans must not overwrite this graph unless the
+     * caller passes force (c4-gen authored guard).
+     */
+    authored: z.boolean().optional(),
     nodes: boundedArray(FunctionalNodeSchema, PROJECT_GRAPH_LIMITS.nodes),
     edges: boundedArray(FunctionalEdgeSchema, PROJECT_GRAPH_LIMITS.edges),
     fileRelations: boundedArray(
@@ -464,13 +480,13 @@ export const ProjectGraphSchema = z
       }
     });
 
-    if (graph.version !== "0.3.0") return;
+    if (graph.version !== "0.3.0" && graph.version !== "0.4.0") return;
 
     if (!graph.architecture) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["architecture"],
-        message: "Project graph v0.3.0 requires architecture metadata",
+        message: "Project graph v0.3+/v0.4 requires architecture metadata",
       });
     }
 
@@ -479,14 +495,14 @@ export const ProjectGraphSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["edges", index, "label"],
-          message: "Project graph v0.3.0 relationships require a human-readable label",
+          message: "Project graph relationships require a human-readable label",
         });
       }
       if (!edge.evidence?.trim()) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["edges", index, "evidence"],
-          message: "Project graph v0.3.0 relationships require evidence",
+          message: "Project graph relationships require evidence",
         });
       }
     });
@@ -518,3 +534,26 @@ export type FunctionalEdge = z.infer<typeof FunctionalEdgeSchema>;
 export type FileEntry = z.infer<typeof FileEntrySchema>;
 export type ProjectGraphTopology = z.infer<typeof ProjectGraphTopologySchema>;
 export type ProjectGraph = z.infer<typeof ProjectGraphSchema>;
+
+export const StructureScanModeSchema = z.enum([
+  "regenerate",
+  "refine",
+  "deepen",
+]);
+
+export const StructureScanOptionsSchema = z
+  .object({
+    mode: StructureScanModeSchema.default("regenerate"),
+    nodeIds: z.array(z.string().min(1).max(256)).max(64).optional(),
+    /**
+     * Bypass authored / completeness guards (explicit user force rescan).
+     * Default false so authored graphs are preserved.
+     */
+    force: z.boolean().optional(),
+    /** Changed paths to bias refine (Arch4 changed-files context). */
+    changedFiles: z.array(z.string().min(1).max(1_024)).max(256).optional(),
+  })
+  .strict();
+
+export type StructureScanMode = z.infer<typeof StructureScanModeSchema>;
+export type StructureScanOptions = z.infer<typeof StructureScanOptionsSchema>;

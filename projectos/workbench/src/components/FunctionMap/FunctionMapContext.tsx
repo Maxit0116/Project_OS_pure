@@ -20,6 +20,7 @@ import type {
 import {
   architectureScopeForSelection,
   availableArchitectureLevels,
+  defaultArchitectureScopeId,
   projectArchitectureView,
 } from './architectureView'
 import { useReducedMotion3d } from './hooks/useReducedMotion3d'
@@ -304,20 +305,7 @@ function defaultScopeIdForLevel(
   nodes: FunctionalNode[],
   level: ArchitectureLevel,
 ): string | null {
-  if (level === 'context') return null
-  if (level === 'code') {
-    return nodes.find(
-      (candidate) => candidate.level === 'component' && candidate.linkedFiles.length > 0,
-    )?.id ?? null
-  }
-
-  return (
-    nodes.find((candidate) =>
-      candidate.children?.some(
-        (childId) => nodes.find((node) => node.id === childId)?.level === level,
-      ),
-    )?.id ?? null
-  )
+  return defaultArchitectureScopeId(nodes, level)
 }
 
 function buildArchitectureBreadcrumbs(
@@ -377,8 +365,8 @@ export function FunctionMapProvider({
 }: ProviderProps) {
   const [search, setSearch] = useState('')
   const architectureLevels = useMemo(
-    () => availableArchitectureLevels(nodes),
-    [nodes],
+    () => availableArchitectureLevels(nodes, fileIndex),
+    [nodes, fileIndex],
   )
   const preferredLevel =
     architecture && architectureLevels.includes(architecture.defaultLevel)
@@ -755,11 +743,18 @@ export function FunctionMapProvider({
   const canDrillIntoNode = useCallback(
     (nodeId: string) => {
       const node = nodes.find((candidate) => candidate.id === nodeId)
-      return Boolean(
-        (node?.level === 'component' && node.linkedFiles.length > 0) ||
-        node?.children?.some((childId) =>
+      if (!node) return false
+      if (node.level === 'component' && node.linkedFiles.length > 0) return true
+      if (
+        node.children?.some((childId) =>
           nodes.some((candidate) => candidate.id === childId && candidate.level),
-        ),
+        )
+      ) {
+        return true
+      }
+      // parentId reverse link (C4 graphs may omit children[] until L2 assemble)
+      return nodes.some(
+        (candidate) => candidate.parentId === nodeId && Boolean(candidate.level),
       )
     },
     [nodes],
@@ -789,10 +784,16 @@ export function FunctionMapProvider({
         setHorizonPhase('off')
         return true
       }
-      const child = node?.children
+      if (!node) return false
+
+      const childFromList = node.children
         ?.map((childId) => nodes.find((candidate) => candidate.id === childId))
         .find((candidate): candidate is FunctionalNode => Boolean(candidate?.level))
-      if (!node || !child?.level) return false
+      const childFromParentId = nodes.find(
+        (candidate) => candidate.parentId === nodeId && Boolean(candidate.level),
+      )
+      const child = childFromList ?? childFromParentId
+      if (!child?.level) return false
 
       setArchitectureScopeId(node.id)
       setArchitectureLevelState(child.level)

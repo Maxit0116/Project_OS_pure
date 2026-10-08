@@ -27,6 +27,7 @@ import {
 import type { SemanticTree, SemanticTreeNode } from "../contracts/semantic-tree.js";
 import { ProjectOSError } from "../errors.js";
 import { installStructureGraphScaffolding } from "./structure-graph-install.js";
+import { collectWorkspaceTechSignals } from "./structure-graph-l2.js";
 import { validateWorkspaceFixtures } from "../validation/validate-fixtures.js";
 
 const SKIP_DIR_NAMES = new Set([
@@ -294,9 +295,15 @@ function layerForContainer(relativeRoot: string): "experience" | "application" |
   return "application";
 }
 
-function technologyForContainer(relativeRoot: string, workspaceRoot: string): string {
+function technologyForContainer(
+  relativeRoot: string,
+  workspaceRoot: string,
+  preferred?: string[],
+): string {
+  if (preferred?.[0]) return preferred[0];
   const absolute = join(workspaceRoot, relativeRoot);
   if (existsSync(join(absolute, "package.json"))) return "JavaScript/TypeScript";
+  if (existsSync(join(absolute, "go.mod"))) return "Go";
   if (
     existsSync(join(absolute, "requirements.txt")) ||
     existsSync(join(absolute, "pyproject.toml")) ||
@@ -306,7 +313,34 @@ function technologyForContainer(relativeRoot: string, workspaceRoot: string): st
   ) {
     return "Python";
   }
+  if (existsSync(join(absolute, "Dockerfile")) || existsSync(join(absolute, "dockerfile"))) {
+    return "Container";
+  }
   return "Mixed";
+}
+
+function listManifestContainerRoots(workspaceRoot: string): string[] {
+  const roots = new Set<string>();
+  const candidates = [
+    "",
+    ...PRIMARY_CONTAINER_DIRS,
+    "services",
+    "apps",
+  ];
+  for (const rel of candidates) {
+    const absolute = rel ? join(workspaceRoot, rel) : workspaceRoot;
+    if (!existsSync(absolute)) continue;
+    const hasManifest =
+      existsSync(join(absolute, "package.json")) ||
+      existsSync(join(absolute, "go.mod")) ||
+      existsSync(join(absolute, "pyproject.toml")) ||
+      existsSync(join(absolute, "requirements.txt")) ||
+      existsSync(join(absolute, "Dockerfile")) ||
+      existsSync(join(absolute, "dockerfile"));
+    if (!hasManifest) continue;
+    if (rel) roots.add(rel);
+  }
+  return [...roots];
 }
 
 export function buildHeuristicProjectGraph(input: {
@@ -316,7 +350,15 @@ export function buildHeuristicProjectGraph(input: {
   workspaceRoot: string;
 }): ProjectGraph {
   const analyzedAt = new Date().toISOString();
-  const containers = listTopLevelContainers(input.workspaceRoot);
+  const signals = collectWorkspaceTechSignals(input.workspaceRoot);
+  const dirContainers = listTopLevelContainers(input.workspaceRoot);
+  const manifestRoots = listManifestContainerRoots(input.workspaceRoot);
+  const containers = [
+    ...new Set([
+      ...dirContainers,
+      ...manifestRoots.filter((root) => !dirContainers.includes(root)),
+    ]),
+  ].slice(0, 12);
   const systemId = "system_root";
   const nodes: FunctionalNode[] = [];
   const edges: FunctionalEdge[] = [];
@@ -336,20 +378,100 @@ export function buildHeuristicProjectGraph(input: {
     elementType: "software_system",
     level: "context",
     layer: "application",
-    technology: input.projectType,
+    technology:
+      signals.webTechnologies[0] ??
+      signals.serverTechnologies[0] ??
+      input.projectType,
     linkedFiles: [],
     upstream: [],
     downstream: [],
     confidence: 0.55,
     tags: ["heuristic", "bootstrap"],
     children: [],
+    notes: "Bootstrap heuristic graph; run AI structure scan to refine.",
+    openQuestions: ["Confirm primary system boundary and actor set."],
   });
+
+  nodes.push({
+    id: "person_user",
+    type: "capability",
+    name: "User",
+    status: "active",
+    description: "Primary human actor using the system",
+    summary: "End user of the product.",
+    responsibility: "Uses the software system.",
+    elementType: "person",
+    level: "context",
+    layer: "experience",
+    linkedFiles: [],
+    upstream: [],
+    downstream: [systemId],
+    confidence: 0.5,
+    tags: ["heuristic", "bootstrap"],
+    children: [],
+  });
+  edges.push({
+    id: "edge_person_user_uses_system",
+    source: "person_user",
+    target: systemId,
+    relation: "uses",
+    label: "Uses",
+    purpose: "Primary user interaction",
+    technology: "UI",
+    confidence: 0.5,
+    evidence: "Default person actor for C4 context",
+  });
+
+  for (const externalName of signals.externalSystemNames.slice(0, 4)) {
+    const id = `external_${slugify(externalName)}`;
+    nodes.push({
+      id,
+      type: "capability",
+      name: externalName,
+      status: "active",
+      description: `External system ${externalName}`,
+      summary: `Third-party dependency detected from package manifests.`,
+      responsibility: `Provides ${externalName} capabilities to the system.`,
+      elementType: "external_system",
+      level: "context",
+      layer: "infrastructure",
+      technology: externalName,
+      linkedFiles: [],
+      upstream: [],
+      downstream: [],
+      confidence: 0.55,
+      tags: ["heuristic", "bootstrap", "External"],
+      children: [],
+      notes: `Detected via dependency on ${externalName}.`,
+    });
+    edges.push({
+      id: `edge_${systemId}_uses_${id}`,
+      source: systemId,
+      target: id,
+      relation: "uses",
+      label: "Uses",
+      purpose: "External SaaS / cloud dependency",
+      technology: "HTTPS",
+      confidence: 0.5,
+      evidence: `Dependency signal for ${externalName}`,
+    });
+  }
 
   for (const containerPath of containers) {
     const id = `container_${slugify(containerPath)}`;
     const componentId = `component_${slugify(containerPath)}`;
     const layer = layerForContainer(containerPath);
-    const technology = technologyForContainer(containerPath, input.workspaceRoot);
+    const preferredTech =
+      layer === "experience"
+        ? signals.webTechnologies
+        : layer === "infrastructure"
+          ? signals.serverTechnologies
+          : [...signals.serverTechnologies, ...signals.webTechnologies];
+    const technology = technologyForContainer(
+      containerPath,
+      input.workspaceRoot,
+      preferredTech,
+    );
     containerIds.push(id);
     componentIdsByContainer.set(containerPath, componentId);
 
@@ -372,6 +494,7 @@ export function buildHeuristicProjectGraph(input: {
       tags: ["heuristic", "bootstrap"],
       parentId: systemId,
       children: [componentId],
+      openQuestions: [`Is ${containerPath} a deployable container boundary?`],
     });
 
     nodes.push({
@@ -396,9 +519,69 @@ export function buildHeuristicProjectGraph(input: {
     });
   }
 
+  for (const tech of signals.dataStoreTechnologies.slice(0, 3)) {
+    const id = `datastore_${slugify(tech)}`;
+    if (nodes.some((node) => node.id === id)) continue;
+    containerIds.push(id);
+    nodes.push({
+      id,
+      type: "capability",
+      name: tech,
+      status: "active",
+      description: `${tech} data store`,
+      summary: `Data store inferred from repository manifests.`,
+      responsibility: `Persists application data via ${tech}.`,
+      elementType: "data_store",
+      level: "container",
+      layer: "infrastructure",
+      technology: tech,
+      linkedFiles: [],
+      upstream: [],
+      downstream: [],
+      confidence: 0.6,
+      tags: ["heuristic", "bootstrap", "data_store"],
+      parentId: systemId,
+      children: [],
+      notes: signals.dataStorePathHints[0]
+        ? `Path hint: ${signals.dataStorePathHints[0]}`
+        : undefined,
+    });
+  }
+
+  for (const tech of signals.queueTechnologies.slice(0, 2)) {
+    const id = `queue_${slugify(tech)}`;
+    if (nodes.some((node) => node.id === id)) continue;
+    containerIds.push(id);
+    nodes.push({
+      id,
+      type: "capability",
+      name: tech,
+      status: "active",
+      description: `${tech} messaging`,
+      summary: `Queue / broker inferred from repository manifests.`,
+      responsibility: `Transports async messages via ${tech}.`,
+      elementType: "container",
+      level: "container",
+      layer: "infrastructure",
+      technology: tech,
+      linkedFiles: [],
+      upstream: [],
+      downstream: [],
+      confidence: 0.55,
+      tags: ["heuristic", "bootstrap", "queue"],
+      parentId: systemId,
+      children: [],
+    });
+  }
+
   const system = nodes.find((node) => node.id === systemId)!;
   system.children = containerIds;
-  system.downstream = containerIds;
+  system.downstream = [
+    ...containerIds,
+    ...nodes
+      .filter((node) => node.elementType === "external_system")
+      .map((node) => node.id),
+  ];
 
   for (let index = 0; index < containerIds.length - 1; index += 1) {
     const source = containerIds[index]!;
@@ -407,13 +590,25 @@ export function buildHeuristicProjectGraph(input: {
     const targetNode = nodes.find((node) => node.id === target)!;
     sourceNode.downstream = [...sourceNode.downstream, target];
     targetNode.upstream = [...targetNode.upstream, source];
+    const relation =
+      targetNode.elementType === "data_store" ? "reads_from" : "depends_on";
+    const technology =
+      targetNode.elementType === "data_store"
+        ? "SQL"
+        : /kafka|rabbit|nats|sqs|pubsub/i.test(targetNode.technology ?? "")
+          ? targetNode.technology
+          : "HTTPS";
     edges.push({
       id: `edge_${source}_to_${target}`,
       source,
       target,
-      relation: "depends_on",
-      label: `${sourceNode.name} → ${targetNode.name}`,
+      relation,
+      label:
+        relation === "reads_from"
+          ? "Reads from and writes to"
+          : `${sourceNode.name} → ${targetNode.name}`,
       purpose: "Heuristic adjacency from repository layout",
+      technology,
       confidence: 0.4,
       evidence: `Inferred from top-level directories ${sourceNode.name} and ${targetNode.name}`,
     });
@@ -450,12 +645,13 @@ export function buildHeuristicProjectGraph(input: {
   }
 
   return {
-    version: "0.3.0",
+    version: "0.4.0",
     projectId: input.projectId,
     projectName: input.projectName,
     projectType: input.projectType,
     analyzedAt,
     analysisStatus: "partial",
+    authored: false,
     architecture: {
       notation: "c4",
       defaultLevel: "component",
@@ -484,7 +680,7 @@ export function buildHeuristicProjectGraph(input: {
     edges,
     fileIndex,
     topology: {
-      rootIds: [systemId],
+      rootIds: ["person_user", systemId],
       maxDepth: 2,
       totalNodes: nodes.length,
     },
@@ -537,7 +733,7 @@ export function buildHeuristicSemanticTree(input: {
 }
 
 
-function pickDefined<T extends Record<string, unknown>>(
+function pickDefined(
   source: Record<string, unknown>,
   keys: readonly string[],
 ): Record<string, unknown> {

@@ -7,7 +7,7 @@
   max-height: 280px;
   overflow: auto;
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-elevated);
   box-shadow: var(--shadow-overlay);
 }

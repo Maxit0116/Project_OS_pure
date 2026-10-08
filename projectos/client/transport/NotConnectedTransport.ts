@@ -19,7 +19,7 @@ import type {
 import type { VerificationRunResult } from "../../contracts/exec-command.js";
 import type { VerificationCommandApprovalStatus } from "../../contracts/verification-command-approval.js";
 import type { AgentRunEvent, AgentTransientTrace } from "../../contracts/events.js";
-import type { ProjectGraph } from "../../contracts/graph.js";
+import type { ProjectGraph, StructureScanOptions } from "../../contracts/graph.js";
 import type { HarnessRecord } from "../../contracts/harness.js";
 import type {
   PromptRefineRequest,
@@ -52,7 +52,10 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
-  async analyzeWorkspace(_projectId: string): Promise<ProjectGraph> {
+  async analyzeWorkspace(
+    _projectId: string,
+    _options?: StructureScanOptions,
+  ): Promise<ProjectGraph> {
     return transportNotConnected();
   }
 

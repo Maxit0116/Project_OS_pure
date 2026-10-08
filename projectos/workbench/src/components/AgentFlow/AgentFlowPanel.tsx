@@ -118,7 +118,7 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
   if (steps.length === 0 && status === 'idle') {
     return (
       <EmptyState
-        icon={<Workflow size={32} />}
+        icon={<Workflow size={16} />}
         title={ts('agentFlow.emptyTitle')}
         description={ts('agentFlow.emptyDesc')}
       />

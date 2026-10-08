@@ -1,8 +1,8 @@
 import type { Viewport } from '@xyflow/react'
 import type { ArchitectureLayerBandLayout } from './layeredArchitectureLayout'
 
-/** Matches `--duration-map-layer-focus` in tokens.css (1s total). */
-export const LAYER_FOCUS_TRANSITION_MS = 1000
+/** Matches `--duration-map-layer-focus` in tokens.css. */
+export const LAYER_FOCUS_TRANSITION_MS = 200
 
 /**
  * Zero velocity at t=0 and t=1 — slow launch, cruise, gentle settle (Perlin smootherstep).

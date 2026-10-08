@@ -3,8 +3,8 @@
   padding: var(--space-sm) var(--space-md);
   border-left: 2px solid var(--color-warning);
   background: color-mix(in srgb, var(--color-warning) 8%, transparent);
-  border-radius: 0 var(--radius-glass-sm) var(--radius-glass-sm) 0;
-  animation: glassEnter var(--duration-normal) var(--ease-spring) both;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  animation: glassEnter var(--duration-normal) var(--ease-out) both;
 }
 
 .marker {

@@ -177,7 +177,7 @@ export default function BrowserPanel() {
       <div className={styles.viewport}>
         {isHome ? (
           <EmptyState
-            icon={<Globe size={32} strokeWidth={1.5} aria-hidden />}
+            icon={<Globe size={16} strokeWidth={1.5} aria-hidden />}
             title={ts('browser.emptyTitle')}
             description={ts('browser.emptyDesc')}
           />

@@ -6,7 +6,7 @@
 .menu {
   min-width: 168px;
   padding: 4px;
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   display: flex;
   flex-direction: column;
   gap: 2px;

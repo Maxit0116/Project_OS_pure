@@ -1,12 +1,12 @@
 .drawerEnter {
-  animation: drawerSlideLeft var(--duration-panel-enter) var(--ease-spring) both;
+  animation: drawerSlideLeft var(--duration-panel-enter) var(--ease-out) both;
   height: 100%;
   min-height: 0;
   will-change: transform;
 }
 
 .drawerExit {
-  animation: drawerSlideLeftExit var(--duration-panel-enter) var(--ease-spring) both;
+  animation: drawerSlideLeftExit var(--duration-panel-enter) var(--ease-out) both;
   height: 100%;
   min-height: 0;
   pointer-events: none;
@@ -48,7 +48,7 @@
   transition:
     background var(--duration-normal) var(--ease-out),
     box-shadow var(--duration-normal) var(--ease-out),
-    transform var(--duration-normal) var(--ease-spring);
+    transform var(--duration-normal) var(--ease-out);
 }
 
 .inner {
@@ -74,7 +74,7 @@
   flex-shrink: 0;
   border-radius: 0;
   overflow: hidden;
-  box-shadow: inset 0 -1px 0 var(--glass-border-subtle);
+  box-shadow: inset 0 -1px 0 var(--tech-border);
 }
 
 .headerTop {
@@ -87,7 +87,7 @@
 .title {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -117,7 +117,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .panelBleed {
-    background: var(--color-bg-side-panel);
+    background: var(--tech-bg-side-panel);
   }
 }
 

@@ -6,7 +6,7 @@
   bottom: 0;
   pointer-events: none;
   z-index: var(--z-workbench-side-panel);
-  transition: bottom var(--duration-terminal-enter) var(--ease-spring);
+  transition: bottom var(--duration-terminal-enter) var(--ease-out);
 }
 
 /* Terminal docked — semantic tree yields bottom space (squeeze up, no overlay). */
@@ -17,7 +17,7 @@
 .sidePanelLayerLeft {
   left: 0;
   width: var(--workbench-left-panel-width);
-  transition: bottom var(--duration-panel-enter) var(--ease-spring);
+  transition: bottom var(--duration-panel-enter) var(--ease-out);
 }
 
 .sidePanelLayerRight {
@@ -51,23 +51,23 @@
 }
 
 .shellDrawerEnterLeft {
-  animation: shellDrawerSlideInLeft var(--duration-panel-enter) var(--ease-spring) both;
+  animation: shellDrawerSlideInLeft var(--duration-panel-enter) var(--ease-out) both;
   will-change: transform;
 }
 
 .shellDrawerExitLeft {
-  animation: shellDrawerSlideOutLeft var(--duration-panel-enter) var(--ease-spring) both;
+  animation: shellDrawerSlideOutLeft var(--duration-panel-enter) var(--ease-out) both;
   pointer-events: none;
   will-change: transform;
 }
 
 .shellDrawerEnterRight {
-  animation: shellDrawerSlideInRight var(--duration-panel-enter) var(--ease-spring) both;
+  animation: shellDrawerSlideInRight var(--duration-panel-enter) var(--ease-out) both;
   will-change: transform;
 }
 
 .shellDrawerExitRight {
-  animation: shellDrawerSlideOutRight var(--duration-panel-enter) var(--ease-spring) both;
+  animation: shellDrawerSlideOutRight var(--duration-panel-enter) var(--ease-out) both;
   pointer-events: none;
   will-change: transform;
 }

@@ -1,17 +1,22 @@
 .empty {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
   height: 100%;
-  padding: var(--space-xl);
-  text-align: center;
+  padding: var(--space-lg);
+  text-align: left;
   gap: var(--space-sm);
 }
 
 .icon {
   color: var(--color-text-muted);
-  margin-bottom: var(--space-sm);
+  margin-bottom: 0;
+}
+
+.icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .title {

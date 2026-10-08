@@ -17,7 +17,7 @@
   padding: var(--space-md);
   background: var(--color-bg-elevated);
   border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-glass-md);
+  border-radius: var(--radius-md);
 }
 
 @keyframes shimmer {

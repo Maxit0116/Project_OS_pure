@@ -7,7 +7,7 @@
   padding: 3px 10px;
   background: var(--color-bg-muted);
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
   cursor: default;
   transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);

@@ -1,98 +1,82 @@
 ---
-description: Apple Liquid Glass — two tiers (true lens + frost chrome), navigation only
+description: Tech theme UI — solid surfaces, hairline borders, no glass (Cursor/ChatGPT/Claude Code style)
 globs: projectos/workbench/**/*.{tsx,css}
 alwaysApply: false
 ---
 
-# Liquid Glass UI
+# Tech Theme UI
 
-Read `.cursor/skills/apple-inspired-ui/SKILL.md` and [true-glass-engine.md](../skills/apple-inspired-ui/references/true-glass-engine.md).
+The workbench uses the **tech theme**: solid surfaces, hairline borders, no blur, no refraction — the visual language of Cursor, ChatGPT, and Claude Code.
 
-> **Blur isn't glass.** ([Outpace Studios](https://glass.outpacestudios.com/))  
-> `backdrop-filter: blur()` = **frost chrome** (Tier A). Real liquid glass = **edge refraction** via SVG displacement (Tier B).
+> The previous Apple Liquid Glass system is **deprecated**. Do not add `backdrop-filter`, `--glass-*` tokens, or `GlassLens`/`GlassPanelShell` refraction to any new UI. The `GlassLens`/`GlassPanelShell` components that remain are inert pass-through wrappers.
 
-## Rule #1: Navigation Only
+## Rule #1: Tech tokens only
 
-Glass (frost or lens) is **only** for: top bar, side panel chrome, tab bars, toolbars, menus, command palette, toasts, drawer scrim, secondary controls.
+Use `--tech-*` tokens for every surface, border, text color, and shadow. Never hardcode hex values in CSS modules.
 
-**Never** on: chat bubbles, timeline cards, graph nodes, tree rows, diff/code, harness cards, list items.
+| Layer | Token | Value (dark) |
+|-------|-------|--------------|
+| App background | `--tech-bg-canvas` | `#0f172a` |
+| Side panels / nav | `--tech-bg-side-panel` | `#1e293b` |
+| Elevated cards | `--tech-bg-elevated` | `#1e293b` |
+| Hover / muted | `--tech-bg-muted` | `#272f42` |
+| Border | `--tech-border` | `rgba(255,255,255,0.08)` |
+| Border (strong) | `--tech-border-strong` | `#334155` |
+| Primary text | `--tech-text-primary` | `#f8fafc` |
+| Accent | `--tech-accent` | `#22c55e` |
 
-## Rule #2: Two Tiers
+Full list in `projectos/workbench/src/styles/tokens.css`.
 
-| Tier | CSS / component | Label in code |
-|------|-----------------|---------------|
-| **A — Frost chrome** | `backdrop-filter` + `--glass-bg-*` tokens | `frost-chrome` |
-| **B — True lens** | `GlassScene` + `GlassLens` + `feDisplacementMap` | `glass-lens` |
+## Rule #2: No glass
 
-```tsx
-// ✅ Tier B — hero overlay (command palette, dropdown)
-<GlassScene content={<AmbientBackdrop />}>
-  {open && <GlassLens bounds={bounds}>{items}</GlassLens>}
-</GlassScene>
-
-// ✅ Tier A — bulk side panel (performance)
+```css
+/* ✅ Correct — solid surface, hairline border */
 .panel {
-  background: var(--glass-bg-clear);
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  background: var(--tech-bg-side-panel);
+  border-right: 1px solid var(--tech-border);
 }
 
-// ❌ Tier B trap — SVG displacement via backdrop-filter (Safari/Firefox = flat frost only)
-.menu { backdrop-filter: blur(20px) url(#glass-filter); }
-
-// ✅ Content card — solid, no blur
-.stepCard {
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--glass-border-subtle);
+/* ❌ Never — no backdrop-filter, no glass tokens, no blur */
+.panel {
+  background: var(--glass-bg-clear);
+  backdrop-filter: blur(var(--glass-blur-lg));
 }
 ```
 
-## Tier B Requirements (True Glass)
+## Utility classes
 
-When implementing hero overlays:
+`projectos/workbench/src/styles/global.css` provides:
 
-1. **Refract a copy**, not live backdrop — `filter` on counter-positioned copy ([Outpace](https://glass.outpacestudios.com/))
-2. Displacement map from **Snell's law** squircle dome — not painted gradient
-3. `feImage` href = **`blob:` URL** — never `data:` (WebKit silent fail)
-4. Filter `colorInterpolationFilters="sRGB"`
-5. Clip copy to **lens box** (Safari size cap)
-6. **Fresh filter `id`** per animated rebuild (Safari cache)
-7. Chromium: optional chromatic fringe passes; Safari: single pass
+| Class | Use |
+|-------|-----|
+| `.tech-surface` | Elevated card with border + subtle shadow |
+| `.tech-surface-hover` | Adds hover transition to `.tech-surface` |
+| `.tech-nav` | Side-panel / nav chrome |
+| `.tech-card` | Content card, 6px radius |
+| `.tech-button-primary` / `.tech-button-secondary` | Button styles |
+| `.tech-focus` | Visible focus ring (`:focus-visible`) |
+| `.tech-no-glass` | Force-remove any residual glass effect |
 
-Recipe: `.cursor/skills/apple-inspired-ui/components/glass-lens.md`
+## Radius
 
-## Tier A Frost Tokens
+Small radius everywhere: `4px` controls, `6px` cards/buttons, `8px` overlays. Do not use `--radius-glass-*` values (14–34px) for new UI.
 
-| Style | Token | When |
-|-------|-------|------|
-| regular | `--glass-bg-regular` | Toolbars, side panels |
-| clear | `--glass-bg-clear` | Over `--ambient-mesh` backgrounds |
-| identity | solid `--color-bg-elevated` | `prefers-reduced-transparency` |
+## Shadows
 
-Place `--ambient-mesh` behind frost so blur has visible content to sample.
+Subtle and few. Use `--tech-shadow-sm` (panels), `--tech-shadow-md` (floating cards), `--tech-shadow-lg` (modals). Focus ring: `--tech-shadow-focus`.
 
-## GlassEffectContainer (Tier A)
+## Motion
 
-Nearby frost elements share one parent blur. Max 2 blurred layers per viewport column.
-
-## Interactive
-
-- Primary: solid accent (glassProminent) — no blur, no lens
-- Secondary: solid transparent inside glass container
-- `:active` → `scale(0.98)`; `:focus-visible` → `--glass-focus-ring`
-- Min hit target 44×32px on icon buttons
+- Micro-interactions: 150–300ms with `--ease-out`.
+- No infinite decorative animations.
+- Respect `prefers-reduced-motion`.
 
 ## Accessibility
 
-```css
-@media (prefers-reduced-transparency: reduce) {
-  .glass-nav, .glass-lens .refractCopy {
-    backdrop-filter: none;
-    filter: none;
-  }
-  .glass-nav, .glass-lens {
-    background: var(--color-bg-elevated);
-  }
-}
-```
+- `:focus-visible` → `box-shadow: var(--tech-shadow-focus)` on all interactive elements.
+- Text contrast ≥ 4.5:1 on `--tech-bg-*` surfaces.
+- Icon-only buttons: `aria-label` required.
 
-Tier B: drop refraction entirely under reduced-transparency; UI stays on opaque panel.
+## Legacy
+
+Old glass utility classes (`.glass-nav`, `.glass-elevated`, …) still exist in `global.css` for reference but are no longer applied by any component. Do not use them.

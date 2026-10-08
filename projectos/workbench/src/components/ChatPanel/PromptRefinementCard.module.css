@@ -2,7 +2,7 @@
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-accent);
   border-left-width: 3px;
-  border-radius: var(--radius-glass-md);
+  border-radius: var(--radius-md);
   padding: 14px;
   margin-top: 4px;
   user-select: text;
@@ -37,7 +37,7 @@
 .badge {
   font-size: 10px;
   padding: 2px 8px;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-muted);
   border: 1px solid var(--glass-border-subtle);
   color: var(--color-text-secondary);
@@ -91,7 +91,7 @@
   padding: 3px 10px;
   background: var(--color-bg-muted);
   border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
 }
 
@@ -115,9 +115,9 @@
   color: #fff;
   background: var(--color-accent);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-spring);
+  transition: background var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
 }
 
 .confirm:hover {
@@ -134,7 +134,7 @@
   color: var(--color-text-secondary);
   background: transparent;
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out);
 }
@@ -186,7 +186,7 @@
   padding: 10px 12px;
   text-align: left;
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-muted);
   color: var(--color-text-primary);
   cursor: pointer;
@@ -223,7 +223,7 @@
   min-height: 56px;
   padding: 8px 10px;
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-muted);
   color: var(--color-text-primary);
   font: inherit;

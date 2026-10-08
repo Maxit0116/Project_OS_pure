@@ -1,6 +1,6 @@
 .file {
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   overflow: hidden;
   background: var(--color-bg-elevated);
 }

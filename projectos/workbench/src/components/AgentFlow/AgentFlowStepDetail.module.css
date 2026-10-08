@@ -3,7 +3,7 @@
   padding: var(--space-md);
   background: var(--color-bg-muted);
   border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-glass-md);
+  border-radius: var(--radius-md);
   user-select: text;
   -webkit-user-select: text;
 }

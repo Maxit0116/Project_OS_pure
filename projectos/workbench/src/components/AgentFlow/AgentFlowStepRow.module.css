@@ -1,25 +1,25 @@
 .wrapper {
-  animation: glassEnter var(--duration-normal) var(--ease-spring) both;
+  animation: none;
 }
 
 .card {
   width: 100%;
   text-align: left;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-glass-md);
-  padding: var(--space-md);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
   cursor: pointer;
-  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
 .card:hover {
-  border-color: var(--color-accent);
+  background: var(--tech-bg-muted);
 }
 
 .selected {
-  border-color: var(--color-accent);
-  box-shadow: var(--glass-focus-ring);
+  background: var(--color-accent-subtle);
+  box-shadow: none;
 }
 
 .running {
@@ -75,11 +75,11 @@
 .correctionBadge {
   font-size: 10px;
   font-weight: var(--font-weight-medium);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 6px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-warning) 20%, transparent);
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 0;
+  border-radius: 0;
+  background: none;
   color: var(--color-warning);
 }
 
@@ -105,13 +105,19 @@
 }
 
 .fileChip {
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono);
-  padding: 2px 8px;
-  background: var(--color-bg-muted);
-  border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-pill);
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
   color: var(--color-text-secondary);
+}
+
+.fileChip + .fileChip::before {
+  content: '·';
+  margin-right: 4px;
+  color: var(--color-text-muted);
 }
 
 .connector {

@@ -1,15 +1,22 @@
 ---
 name: apple-inspired-ui
 description: >-
-  Implements Apple Liquid Glass for Project OS workbench web UI.
-  Two tiers: Tier B true lens (SVG feDisplacementMap, Outpace/Aave) for hero
-  overlays; Tier A frost-chrome (backdrop-filter tokens) for bulk nav only.
-  Glass is navigation-layer only — never on content cards/lists.
-  Use when restyling workbench UI, tokens.css, liquid glass, GlassLens,
-  GlassScene, or navigation chrome.
+  DEPRECATED — Apple Liquid Glass replaced by the tech theme. See
+  .cursor/rules/liquid-glass-ui.mdc and --tech-* tokens in
+  projectos/workbench/src/styles/tokens.css. Do not apply glass to new UI.
+  Kept for historical reference only.
 ---
 
-# Apple Liquid Glass UI (Web)
+> **DEPRECATION NOTICE**
+>
+> The workbench no longer uses Liquid Glass. All surfaces are now solid
+> tech-theme panels (Cursor/ChatGPT/Claude Code style) using `--tech-*`
+> tokens. `GlassLens` and `GlassPanelShell` are inert pass-through wrappers
+> kept only so existing call sites compile. Do **not** apply glass
+> (backdrop-filter, refraction, `--glass-*` tokens) to any new UI.
+> Current rules: [`.cursor/rules/liquid-glass-ui.mdc`](../rules/liquid-glass-ui.mdc).
+
+# Apple Liquid Glass UI (DEPRECATED)
 
 ## Read This First: Blur Isn't Glass
 

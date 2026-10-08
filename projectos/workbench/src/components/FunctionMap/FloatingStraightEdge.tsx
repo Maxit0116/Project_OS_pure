@@ -10,6 +10,7 @@ import {
 } from '@xyflow/react'
 import { NODE_HEIGHT, NODE_WIDTH } from './autoGridLayout'
 import { rectAttachment } from './crossMinLayout'
+import { formatC4EdgeLabel } from './edgePresentation'
 import { Z_EDGE_DETAIL } from './mapWorkGroupOverlap'
 import styles from './FloatingStraightEdge.module.css'
 
@@ -66,9 +67,16 @@ function FloatingStraightEdge({
       }
     | undefined
 
-  const relationshipLabel = label ?? metadata?.relationship
+  const relationshipLabel =
+    (typeof label === 'string' ? label : undefined) ?? metadata?.relationship
   const purposeText = metadata?.purpose
-  const hasHoverableDetails = Boolean(relationshipLabel || purposeText)
+  const intentForC4 =
+    (typeof relationshipLabel === 'string' ? relationshipLabel : undefined) ??
+    purposeText
+  const c4CompactLabel = formatC4EdgeLabel(intentForC4, metadata?.technology)
+  const hasHoverableDetails = Boolean(
+    relationshipLabel || purposeText || metadata?.technology,
+  )
 
   const [path, labelX, labelY] = getStraightPath({
     sourceX: start.x,
@@ -84,6 +92,16 @@ function FloatingStraightEdge({
       (metadata?.detailVisibility === 'always' && purposeText)
     ),
   )
+  // Compact C4 text on the edge; hide only when the always-visible purpose
+  // overlay would duplicate the same string.
+  const showCompactBaseLabel =
+    Boolean(c4CompactLabel) &&
+    !(metadata?.detailVisibility === 'always' && purposeText)
+  const overlayTitle =
+    formatC4EdgeLabel(
+      typeof relationshipLabel === 'string' ? relationshipLabel : undefined,
+      metadata?.technology,
+    ) || c4CompactLabel
   const baseOpacity = typeof style?.opacity === 'number' ? style.opacity : 1
   const baseStrokeWidth = typeof style?.strokeWidth === 'number' ? style.strokeWidth : 1.8
   const renderedStyle = metadata?.detailVisibility === 'hover'
@@ -124,7 +142,7 @@ function FloatingStraightEdge({
         path={path}
         labelX={labelX}
         labelY={labelY}
-        label={purposeText ? undefined : label}
+        label={showCompactBaseLabel ? c4CompactLabel : undefined}
         labelStyle={labelStyle}
         labelShowBg={labelShowBg}
         labelBgStyle={labelBgStyle}
@@ -167,10 +185,12 @@ function FloatingStraightEdge({
               zIndex: Z_EDGE_DETAIL,
               transform: detailLabelTransform,
             }}
-            aria-label={`${String(relationshipLabel ?? '')}。${purposeText ?? ''}`}
+            aria-label={`${overlayTitle || String(relationshipLabel ?? '')}。${purposeText ?? ''}`}
           >
-            {relationshipLabel && <strong>{relationshipLabel}</strong>}
-            {purposeText && purposeText !== relationshipLabel && <span>{purposeText}</span>}
+            {overlayTitle && <strong>{overlayTitle}</strong>}
+            {purposeText &&
+              purposeText !== overlayTitle &&
+              purposeText !== relationshipLabel && <span>{purposeText}</span>}
           </div>
         </EdgeLabelRenderer>
       )}

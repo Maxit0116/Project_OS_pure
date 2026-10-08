@@ -1,14 +1,18 @@
-.orb {
-  display: block;
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--color-accent);
   flex-shrink: 0;
 }
 
-.size20 {
-  width: 20px;
-  height: 20px;
+.dot[data-state='listening'] {
+  background: var(--color-warning);
 }
 
-.size64 {
-  width: 64px;
-  height: 64px;
+.dot[data-state='error'],
+.dot[data-state='failed'] {
+  background: var(--color-error);
 }

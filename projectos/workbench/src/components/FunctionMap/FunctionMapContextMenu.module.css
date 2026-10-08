@@ -5,7 +5,7 @@
   padding: 4px 0;
   background: var(--color-bg-elevated);
   border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   box-shadow: var(--glass-shadow-regular);
   color: var(--color-text-primary);
 }

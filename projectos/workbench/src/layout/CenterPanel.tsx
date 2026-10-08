@@ -161,7 +161,7 @@ export default function CenterPanel({ mapBleed }: Props) {
                 <CodeEditorWorkspace />
               ) : (
                 <EmptyState
-                  icon={<Code2 size={32} />}
+                  icon={<Code2 size={16} />}
                   title={ts('code.emptyTitle')}
                   description={ts('code.emptyDesc')}
                 />

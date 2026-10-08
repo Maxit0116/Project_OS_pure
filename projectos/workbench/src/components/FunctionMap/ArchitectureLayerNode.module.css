@@ -3,7 +3,7 @@
   height: 100%;
   box-sizing: border-box;
   border: 1px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
-  border-radius: var(--radius-glass-md);
+  border-radius: var(--radius-md);
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 5%, transparent), transparent 32%),
     color-mix(in srgb, var(--color-bg-elevated) 42%, transparent);

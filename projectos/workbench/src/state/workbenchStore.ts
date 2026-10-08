@@ -17,6 +17,7 @@ import type {
   GeneratedDiff,
   HarnessRecord,
   ProjectGraph,
+  StructureScanOptions,
   ProjectDescription,
   ProjectOSApi,
   ProjectOSProject,
@@ -100,6 +101,7 @@ import { useDiagnosticsStore } from './diagnosticsStore'
 import { useOutlineStore } from './outlineStore'
 import { useChatSessionStore } from './chatSessionStore'
 import { useFileTimelineStore } from './fileTimelineStore'
+import { rememberRecentWorkspace } from './recentWorkspaces'
 import { recordProposedTimelineFromDiff } from './fileTimelineFromRunEvent'
 import { lspClient } from '../lsp/lspClient'
 import { languageForPath } from '../data/sampleFileContents'
@@ -470,7 +472,7 @@ export interface WorkbenchState {
 
   openSampleWorkspace: () => Promise<void>
   openWorkspace: (path: string) => Promise<void>
-  rescanStructureGraph: () => Promise<void>
+  rescanStructureGraph: (options?: StructureScanOptions) => Promise<void>
   setCenterTab: (tab: CenterTab) => void
   setMapLayer: (layer: MapLayerMode) => void
   setStoryView: (next: {
@@ -849,6 +851,7 @@ async function loadWorkspaceIntoStore(
     shouldStartOnboarding,
     terminalLines: [],
   })
+  rememberRecentWorkspace(project)
   if (graph.analysisStatus === 'partial') {
     get().pushToast({
       type: 'info',
@@ -1330,16 +1333,29 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
   },
 
-  rescanStructureGraph: async () => {
+  rescanStructureGraph: async (options) => {
     const { client, project, locale, structureRescanLoading, pushToast } = get()
     if (!project || structureRescanLoading) return
+    const mode = options?.mode ?? 'regenerate'
     set({ structureRescanLoading: true })
+    const loadingKey =
+      mode === 'refine'
+        ? 'map.refiningStructure'
+        : mode === 'deepen'
+          ? 'map.deepeningStructure'
+          : 'map.regeneratingStructure'
     pushToast({
       type: 'info',
-      message: getStoreMessage(locale, 'map.rescanningStructure'),
+      message: getStoreMessage(locale, loadingKey),
     })
     try {
-      const graph = await client.analyzeWorkspace(project.projectId)
+      const graph = await client.analyzeWorkspace(project.projectId, {
+        mode,
+        ...(options?.nodeIds ? { nodeIds: options.nodeIds } : {}),
+        ...(options?.changedFiles ? { changedFiles: options.changedFiles } : {}),
+        // Authored graphs are only overwritten when the caller sets force.
+        ...(options?.force === true ? { force: true } : {}),
+      })
       const tree = await client.getSemanticTree(project.projectId)
       set({ graph, tree, structureRescanLoading: false })
       pushToast({

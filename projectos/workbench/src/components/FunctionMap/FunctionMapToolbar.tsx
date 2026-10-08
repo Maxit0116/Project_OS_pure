@@ -41,11 +41,20 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
   const beginMapWorkGroupCreate = useWorkbenchStore((s) => s.beginMapWorkGroupCreate)
   const rescanStructureGraph = useWorkbenchStore((s) => s.rescanStructureGraph)
   const structureRescanLoading = useWorkbenchStore((s) => s.structureRescanLoading)
+  const selectedNodeId = useWorkbenchStore((s) => s.selectedNodeId)
+  const graph = useWorkbenchStore((s) => s.graph)
   const { ts } = useI18n()
   const [addMenuOpen, setAddMenuOpen] = useState(false)
+  const [scanMenuOpen, setScanMenuOpen] = useState(false)
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null)
+  const [scanMenuPosition, setScanMenuPosition] = useState<{ x: number; y: number } | null>(null)
   const addButtonRef = useRef<HTMLDivElement>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
+  const scanButtonRef = useRef<HTMLDivElement>(null)
+  const scanMenuRef = useRef<HTMLDivElement>(null)
+  const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId)
+  const canDeepen =
+    selectedNode?.level === 'container' || selectedNode?.level === 'component'
   const relationKeys = Array.from(new Set(edges.map((edge) => edge.relation)))
   useLayoutEffect(() => {
     if (!addMenuOpen || !menuPosition) return
@@ -110,6 +119,34 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
     }
   }, [addMenuOpen])
 
+  useEffect(() => {
+    if (!scanMenuOpen) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setScanMenuOpen(false)
+        setScanMenuPosition(null)
+      }
+    }
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (scanButtonRef.current?.contains(target) || scanMenuRef.current?.contains(target)) {
+        return
+      }
+      setScanMenuOpen(false)
+      setScanMenuPosition(null)
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    const dismissTimer = window.setTimeout(() => {
+      document.addEventListener('click', handleClickOutside, true)
+    }, 0)
+    return () => {
+      window.clearTimeout(dismissTimer)
+      document.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('click', handleClickOutside, true)
+    }
+  }, [scanMenuOpen])
+
   const openAddMenu = () => {
     const rect = addButtonRef.current?.getBoundingClientRect()
     if (!rect) return
@@ -136,16 +173,84 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
       />
       {architectureLevels.length > 0 ? (
       <div className={styles.createActions}>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => void rescanStructureGraph()}
-          disabled={structureRescanLoading}
-          title={ts('map.rescanStructure')}
-        >
-          <RefreshCw size={13} strokeWidth={1.75} aria-hidden />
-          {structureRescanLoading ? ts('map.rescanningStructure') : ts('map.rescanStructure')}
-        </Button>
+        <div ref={scanButtonRef} className={styles.addMenuAnchor}>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={structureRescanLoading}
+            onClick={() => {
+              const rect = scanButtonRef.current?.getBoundingClientRect()
+              if (!rect) return
+              if (scanMenuOpen) {
+                setScanMenuOpen(false)
+                setScanMenuPosition(null)
+                return
+              }
+              setScanMenuPosition({ x: rect.left, y: rect.bottom + 4 })
+              setScanMenuOpen(true)
+            }}
+            aria-expanded={scanMenuOpen}
+            aria-haspopup="menu"
+            title={ts('map.rescanStructure')}
+          >
+            <RefreshCw size={13} strokeWidth={1.75} aria-hidden />
+            {structureRescanLoading ? ts('map.regeneratingStructure') : ts('map.rescanStructure')}
+          </Button>
+        </div>
+        {scanMenuOpen &&
+          scanMenuPosition &&
+          createPortal(
+            <div
+              ref={scanMenuRef}
+              className={contextMenuStyles.menu}
+              role="menu"
+              aria-label={ts('map.rescanStructure')}
+              data-zone-interactive
+              style={{ left: scanMenuPosition.x, top: scanMenuPosition.y }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className={contextMenuStyles.menuItem}
+                onClick={() => {
+                  setScanMenuOpen(false)
+                  setScanMenuPosition(null)
+                  if (!window.confirm(ts('map.regenerateStructureConfirm'))) return
+                  void rescanStructureGraph({ mode: 'regenerate' })
+                }}
+              >
+                {ts('map.regenerateStructure')}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={contextMenuStyles.menuItem}
+                onClick={() => {
+                  setScanMenuOpen(false)
+                  setScanMenuPosition(null)
+                  void rescanStructureGraph({ mode: 'refine' })
+                }}
+              >
+                {ts('map.refineStructure')}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={contextMenuStyles.menuItem}
+                disabled={!canDeepen}
+                title={canDeepen ? undefined : ts('map.deepenSelectionDisabled')}
+                onClick={() => {
+                  if (!canDeepen || !selectedNodeId) return
+                  setScanMenuOpen(false)
+                  setScanMenuPosition(null)
+                  void rescanStructureGraph({ mode: 'deepen', nodeIds: [selectedNodeId] })
+                }}
+              >
+                {ts('map.deepenSelection')}
+              </button>
+            </div>,
+            document.body,
+          )}
         <Button
           variant={showArtifacts ? 'secondary' : 'ghost'}
           size="sm"

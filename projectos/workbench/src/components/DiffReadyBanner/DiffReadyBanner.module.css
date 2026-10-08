@@ -7,12 +7,12 @@
   align-items: stretch;
   gap: var(--space-xs);
   width: min(360px, calc(100% - var(--space-lg) * 2));
-  border-radius: var(--radius-glass-md);
-  border: 1px solid var(--glass-border-highlight);
-  background: var(--glass-bg-overlay);
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  box-shadow: var(--glass-shadow-overlay);
+  border-radius: 6px;
+  border: 1px solid var(--tech-border);
+  background: var(--tech-bg-elevated);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: var(--tech-shadow-md);
   pointer-events: auto;
   transition:
     transform 220ms ease,
@@ -40,7 +40,7 @@
 .icon {
   flex-shrink: 0;
   margin-top: 2px;
-  color: var(--color-accent);
+  color: var(--tech-accent);
 }
 
 .text {
@@ -53,43 +53,43 @@
 .title {
   font-size: var(--font-size-sm);
   font-weight: 600;
-  color: var(--color-text-primary);
+  color: var(--tech-text-primary);
 }
 
 .body {
   font-size: var(--font-size-sm);
   line-height: 1.35;
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
 }
 
 .action {
   margin-top: var(--space-xs);
   font-size: var(--font-size-xs);
   font-weight: 500;
-  color: var(--color-accent);
+  color: var(--tech-accent);
 }
 
 .dismiss {
   flex-shrink: 0;
   width: 28px;
   border: none;
-  border-left: 1px solid var(--glass-border-subtle);
+  border-left: 1px solid var(--tech-border);
   background: transparent;
-  color: var(--color-text-muted);
+  color: var(--tech-text-muted);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
 }
 
 .dismiss:hover {
-  color: var(--color-text-primary);
-  background: var(--color-hover-overlay);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
 }
 
 @media (prefers-reduced-transparency: reduce) {
   .banner {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    background: var(--color-bg-elevated);
+    background: var(--tech-bg-elevated);
   }
 }

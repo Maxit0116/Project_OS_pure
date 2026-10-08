@@ -20,9 +20,8 @@ export default function FunctionMapLevelNavigator({ showScopeLabel = false }: Pr
 
   if (architectureLevels.length === 0) return null
 
-  const guidedLevels = architectureLevels.filter(
-    (level) => level !== 'code' || architectureLevel === 'code',
-  )
+  // Always expose Code when available — classic C4 is a four-step zoom.
+  const guidedLevels = architectureLevels
   const activeStepLevel = architectureLevel
   const currentScope = architectureBreadcrumbs.at(-1)
   const breadcrumbTitle = architectureBreadcrumbs.map((node) => node.name).join(' › ')

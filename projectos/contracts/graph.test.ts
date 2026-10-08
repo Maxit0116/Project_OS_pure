@@ -397,4 +397,21 @@ describe("ProjectGraphSchema architecture model", () => {
 
     expect(ProjectGraphSchema.safeParse(graph).success).toBe(true);
   });
+
+  it("accepts v0.4.0 authored graphs with enrichment fields", () => {
+    const graph = architectureGraph();
+    graph.version = "0.4.0";
+    graph.authored = true;
+    const web = graph.nodes.find((node) => node.id === "component_web");
+    if (!web) throw new Error("missing web");
+    web.owners = ["platform"];
+    web.notes = "Entry experience";
+    web.openQuestions = ["Confirm SSR boundary?"];
+    graph.edges = graph.edges.map((edge) => ({
+      ...edge,
+      technology: edge.technology ?? "HTTPS",
+    }));
+
+    expect(ProjectGraphSchema.safeParse(graph).success).toBe(true);
+  });
 });

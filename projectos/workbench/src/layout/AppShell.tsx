@@ -19,8 +19,8 @@ import { preloadLocalWhisper } from '../components/ChatPanel/voice/localWhisperT
 import { preloadMonacoEditor } from '../components/CodeEditor/preloadMonacoEditor'
 import styles from './AppShell.module.css'
 
-const PANEL_EXIT_MS = 480
-const TERMINAL_EXIT_MS = 300
+const PANEL_EXIT_MS = 200
+const TERMINAL_EXIT_MS = 200
 
 export default function AppShell() {
   const phase = useWorkbenchStore((s) => s.phase)
@@ -28,7 +28,6 @@ export default function AppShell() {
   const loadingMessage = useWorkbenchStore((s) => s.loadingMessage)
   const graph = useWorkbenchStore((s) => s.graph)
   const centerTab = useWorkbenchStore((s) => s.centerTab)
-  const openSampleWorkspace = useWorkbenchStore((s) => s.openSampleWorkspace)
   const openWorkspace = useWorkbenchStore((s) => s.openWorkspace)
   const dismissError = useWorkbenchStore((s) => s.dismissError)
   const settingsOpen = useWorkbenchStore((s) => s.settingsOpen)
@@ -104,7 +103,6 @@ export default function AppShell() {
             loading={phase === 'loading'}
             loadingMessage={loadingMessage}
             error={error}
-            onOpenSample={openSampleWorkspace}
             onOpenWorkspace={(path) => void openWorkspace(path)}
           />
         </div>

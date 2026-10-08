@@ -44,7 +44,7 @@
 .bubble {
   max-width: 100%;
   padding: 10px 12px;
-  border-radius: var(--radius-glass-sm);
+  border-radius: 6px;
   font-size: var(--font-size-md);
   line-height: 1.5;
 }
@@ -71,8 +71,8 @@
   height: 26px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius-glass-sm);
-  color: var(--color-text-secondary);
+  border-radius: 4px;
+  color: var(--tech-text-secondary);
   background: transparent;
   cursor: pointer;
   transition:
@@ -82,15 +82,15 @@
 }
 
 .copyButton:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-muted);
-  border-color: var(--glass-border-subtle);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
+  border-color: var(--tech-border);
 }
 
 .copyButton:focus-visible {
   outline: none;
   opacity: 1;
-  box-shadow: var(--glass-focus-ring);
+  box-shadow: var(--tech-shadow-focus);
 }
 
 @media (hover: none) {
@@ -107,16 +107,20 @@
 }
 
 .user .bubble {
-  background: var(--color-accent);
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(10, 132, 255, 0.25);
+  background: transparent;
+  color: var(--tech-text-primary);
+  border: 1px solid var(--tech-border);
+  box-shadow: none;
 }
 
 .assistant .bubble,
 .system .bubble {
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--glass-border-subtle);
-  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  border-left: 2px solid var(--tech-border);
+  border-radius: 0;
+  padding-left: 12px;
+  color: var(--tech-text-primary);
 }
 
 .refiningStatus {
@@ -125,14 +129,14 @@
 
 .messageNotice {
   margin: var(--space-xs) 0 0;
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
   font-size: var(--font-size-xs);
   line-height: 1.4;
 }
 
 .inputArea {
   padding: var(--space-md);
-  border-top: 1px solid var(--glass-border-subtle);
+  border-top: 1px solid var(--tech-border);
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
@@ -143,15 +147,15 @@
   display: inline-flex;
   align-self: flex-start;
   padding: 2px;
-  border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-muted);
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
 }
 
 .modeButton,
 .modeActive {
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: 4px;
   padding: 4px 12px;
   font: inherit;
   font-size: var(--font-size-sm);
@@ -159,14 +163,14 @@
 }
 
 .modeButton {
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
   background: transparent;
 }
 
 .modeActive {
-  color: var(--color-text-primary);
-  background: var(--color-bg-elevated);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-elevated);
+  box-shadow: none;
 }
 
 .inputStack {
@@ -179,14 +183,14 @@
   position: relative;
   flex: 1;
   min-width: 0;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-glass-sm);
-  background: var(--color-bg-muted);
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
 .inputComposer:focus-within {
-  border-color: var(--color-accent);
+  border-color: var(--tech-accent);
 }
 
 .input {
@@ -202,7 +206,7 @@
   font-size: var(--font-size-md);
   line-height: 1.5;
   font-family: inherit;
-  color: var(--color-text-primary);
+  color: var(--tech-text-primary);
   background: transparent;
   border: 0;
   border-radius: inherit;

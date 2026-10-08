@@ -24,16 +24,70 @@ export function isNodeAgentArchitectureLevel(
   return level === 'context' || level === 'container' || level === 'component'
 }
 
-export function availableArchitectureLevels(nodes: FunctionalNode[]): ArchitectureLevel[] {
+export function availableArchitectureLevels(
+  nodes: FunctionalNode[],
+  fileIndex: FileEntry[] = [],
+): ArchitectureLevel[] {
   const available = new Set(nodes.map((node) => node.level).filter(Boolean))
-  if (
-    nodes.some(
-      (node) => node.level === 'component' && node.linkedFiles.length > 0,
-    )
-  ) {
+  const componentIds = new Set(
+    nodes.filter((node) => node.level === 'component').map((node) => node.id),
+  )
+  const hasLinkedFiles = nodes.some(
+    (node) => node.level === 'component' && node.linkedFiles.length > 0,
+  )
+  const hasOwnedFiles = fileIndex.some((file) =>
+    file.nodeIds.some((nodeId) => componentIds.has(nodeId)),
+  )
+  if (hasLinkedFiles || hasOwnedFiles) {
     available.add('code')
   }
   return ARCHITECTURE_LEVELS.filter((level) => available.has(level))
+}
+
+/**
+ * Default zoom-into parent for a C4 level when the level switcher is used
+ * (not a specific double-click drill). Prefers parentId reverse links so
+ * missing `children[]` still scopes Container/Component diagrams.
+ */
+export function defaultArchitectureScopeId(
+  nodes: FunctionalNode[],
+  level: ArchitectureLevel,
+): string | null {
+  if (level === 'context') return null
+
+  if (level === 'code') {
+    return (
+      nodes.find(
+        (candidate) =>
+          candidate.level === 'component' && candidate.linkedFiles.length > 0,
+      )?.id ?? null
+    )
+  }
+
+  if (level === 'container') {
+    const systems = nodes.filter((n) => n.elementType === 'software_system')
+    const withContainers = systems.find((system) =>
+      nodes.some((n) => n.level === 'container' && n.parentId === system.id),
+    )
+    if (withContainers) return withContainers.id
+    if (systems[0]) return systems[0].id
+  }
+
+  if (level === 'component') {
+    const containers = nodes.filter((n) => n.level === 'container')
+    const withComponents = containers.find((container) =>
+      nodes.some((n) => n.level === 'component' && n.parentId === container.id),
+    )
+    if (withComponents) return withComponents.id
+  }
+
+  return (
+    nodes.find((candidate) =>
+      candidate.children?.some(
+        (childId) => nodes.find((node) => node.id === childId)?.level === level,
+      ),
+    )?.id ?? null
+  )
 }
 
 export function architectureFileNodeId(componentId: string, path: string): string {
@@ -62,6 +116,27 @@ function fileTechnology(path: string): string {
   if (path.endsWith('/route.ts')) return 'Next.js Route Handler'
   if (path.endsWith('.ts')) return 'TypeScript'
   return '项目文件'
+}
+
+function filePurposeFromPath(path: string): string {
+  const base = path.split('/').pop() ?? path
+  const stem = base.replace(/\.[^.]+$/, '')
+  return stem || base
+}
+
+export function codeElementStereotype(file: FileEntry | undefined, path: string): string {
+  if (file?.type === 'page') return '[Page]'
+  if (file?.type === 'api') return '[API Route]'
+  if (path.endsWith('.prisma')) return '[Schema]'
+  if (path.endsWith('.css') || path.endsWith('.scss') || path.endsWith('.module.css')) {
+    return '[Style]'
+  }
+  if (file?.type === 'test' || /\.(test|spec)\./.test(path)) return '[Test]'
+  if (file?.exports.some((name) => name !== 'default') || file?.type === 'lib') {
+    return '[Module]'
+  }
+  if (path.endsWith('.tsx') || path.endsWith('.jsx')) return '[Component]'
+  return '[Code]'
 }
 
 const INTERNAL_IMPORT_EXTENSIONS = [
@@ -151,6 +226,17 @@ function projectInternalFileView(
 ): { nodes: FunctionalNode[]; edges: FunctionalEdge[] } {
   const filesByPath = new Map(fileIndex.map((file) => [file.path, file]))
   const linkedByPath = new Map(component.linkedFiles.map((file) => [file.path, file]))
+  // Classic C4 Code scope = one component. If linkedFiles is thin, recover
+  // ownership from fileIndex.nodeIds so the code layer is still reachable.
+  for (const file of fileIndex) {
+    if (!file.nodeIds.includes(component.id)) continue
+    if (linkedByPath.has(file.path)) continue
+    linkedByPath.set(file.path, {
+      path: file.path,
+      role: 'supporting',
+      summary: filePurposeFromPath(file.path),
+    })
+  }
   const nodeIdByPath = new Map(
     [...linkedByPath.keys()].map((path) => [path, architectureFileNodeId(component.id, path)]),
   )
@@ -209,11 +295,18 @@ function projectInternalFileView(
   const projectedNodes = [...linkedByPath].map(([path, linkedFile]) => {
     const file = filesByPath.get(path)
     const id = nodeIdByPath.get(path)!
-    const purpose = linkedFile.summary ?? '该文件属于当前功能模块。'
+    const basename = path.split('/').pop() ?? path
+    const purpose =
+      linkedFile.summary?.trim() ||
+      (file?.exports.filter((name) => name !== 'default').length
+        ? `Exports ${file.exports.filter((name) => name !== 'default').join(', ')}`
+        : filePurposeFromPath(path))
+    const stereotype = codeElementStereotype(file, path)
     return {
       id,
       type: 'capability' as const,
-      name: path,
+      // Basename first — classic code diagrams name the type, not the full path.
+      name: basename,
       status: 'active' as const,
       description: purpose,
       summary: purpose,
@@ -222,14 +315,14 @@ function projectInternalFileView(
       level: 'code' as const,
       layer: fileLayer(file),
       technology: fileTechnology(path),
-      linkedFiles: [linkedFile],
+      linkedFiles: [{ ...linkedFile, path, summary: linkedFile.summary ?? purpose }],
       upstream: upstreamById.get(id) ?? [],
       downstream: downstreamById.get(id) ?? [],
       confidence: 1,
-      tags: ['内部文件', file?.type ?? 'other'],
+      tags: ['内部文件', 'code', stereotype, file?.type ?? 'other', path],
       parentId: component.id,
       children: [],
-      refs: [],
+      refs: file?.exports ?? [],
       depth: 3,
     } satisfies FunctionalNode
   })

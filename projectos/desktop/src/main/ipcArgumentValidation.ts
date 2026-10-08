@@ -3,7 +3,7 @@ type IpcArgumentKind = 'string' | 'record' | 'boolean' | 'array'
 const PROJECTOS_IPC_SIGNATURES = {
   openSampleWorkspace: [],
   openWorkspace: ['string'],
-  analyzeWorkspace: ['string'],
+  analyzeWorkspace: ['string', 'record'],
   getProjectGraph: ['string'],
   getSemanticTree: ['string'],
   getNodeContext: ['string', 'string'],

@@ -5,6 +5,7 @@ import {
   availableArchitectureLevels,
   architectureScopeForSelection,
   computeOneHopLinkedIds,
+  defaultArchitectureScopeId,
   projectArchitectureView,
 } from './architectureView'
 
@@ -256,13 +257,13 @@ describe('projectArchitectureView', () => {
       nodes: [
         {
           id: loginPageId,
-          name: 'app/login/page.tsx',
+          name: 'page.tsx',
           elementType: 'code_element',
           linkedFiles: [{ path: 'app/login/page.tsx' }],
         },
         {
           id: authFileId,
-          name: 'lib/auth.ts',
+          name: 'auth.ts',
           elementType: 'code_element',
           linkedFiles: [{ path: 'lib/auth.ts' }],
         },
@@ -403,8 +404,8 @@ describe('projectArchitectureView', () => {
     ])
     expect(projected.nodes).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: 'lib/auth.ts', layer: 'application' }),
-        expect.objectContaining({ name: 'app/middleware.ts', layer: 'interface' }),
+        expect.objectContaining({ name: 'auth.ts', layer: 'application' }),
+        expect.objectContaining({ name: 'middleware.ts', layer: 'interface' }),
       ]),
     )
   })
@@ -504,6 +505,33 @@ describe('computeOneHopLinkedIds', () => {
     })
     const linkedIds = computeOneHopLinkedIds(nodes, edges, 'identity')
     expect(projected.nodes.map((item) => item.id).sort()).toEqual([...linkedIds].sort())
+  })
+
+  it('defaultArchitectureScopeId prefers parentId reverse links for C4 levels', () => {
+    const nodes: FunctionalNode[] = [
+      {
+        ...node('person', 'context'),
+        elementType: 'person',
+      },
+      {
+        ...node('system', 'context'),
+        elementType: 'software_system',
+      },
+      {
+        ...node('web', 'container', 'system'),
+        elementType: 'container',
+      },
+      {
+        ...node('identity', 'component', 'web'),
+        elementType: 'component',
+        linkedFiles: [{ path: 'lib/auth.ts', role: 'primary' }],
+      },
+    ]
+
+    expect(defaultArchitectureScopeId(nodes, 'context')).toBeNull()
+    expect(defaultArchitectureScopeId(nodes, 'container')).toBe('system')
+    expect(defaultArchitectureScopeId(nodes, 'component')).toBe('web')
+    expect(defaultArchitectureScopeId(nodes, 'code')).toBe('identity')
   })
 })
 

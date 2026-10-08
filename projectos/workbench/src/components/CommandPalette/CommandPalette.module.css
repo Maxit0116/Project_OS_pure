@@ -2,8 +2,8 @@
   position: fixed;
   inset: 0;
   background: var(--scrim-heavy);
-  backdrop-filter: blur(var(--glass-blur-sm));
-  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   z-index: 2000;
   display: flex;
   align-items: flex-start;
@@ -11,10 +11,13 @@
   padding-top: 15vh;
 }
 
-/* Background/border/shadow now come from GlassLens (Tier B true refraction). */
+/* Solid tech surface — no GlassLens refraction. */
 .palette {
   overflow: hidden;
-  border-radius: var(--radius-glass-xl);
+  border-radius: 8px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+  box-shadow: var(--tech-shadow-lg);
 }
 
 .inputRow {
@@ -22,19 +25,19 @@
   align-items: center;
   gap: var(--space-sm);
   padding: 0 16px;
-  border-bottom: 1px solid var(--glass-border-subtle);
+  border-bottom: 1px solid var(--tech-border);
 }
 
 .searchIcon {
   flex-shrink: 0;
-  color: var(--color-text-muted);
+  color: var(--tech-text-muted);
 }
 
 .input {
   width: 100%;
   padding: 14px 0;
   font-size: var(--font-size-base);
-  color: var(--color-text-primary);
+  color: var(--tech-text-primary);
   background: transparent;
   border: none;
 }
@@ -44,7 +47,7 @@
 }
 
 .input::placeholder {
-  color: var(--color-text-muted);
+  color: var(--tech-text-muted);
 }
 
 .list {
@@ -53,18 +56,12 @@
 }
 
 .listOpen .item {
-  animation: paletteItemIn var(--duration-normal) var(--ease-spring) both;
+  animation: paletteItemIn var(--duration-fast) var(--ease-out) both;
 }
 
 @keyframes paletteItemIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.99);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .item {
@@ -77,16 +74,15 @@
   text-align: left;
   background: transparent;
   border: none;
-  color: var(--color-text-primary);
+  color: var(--tech-text-primary);
   cursor: pointer;
-  border-radius: var(--radius-glass-sm);
-  transition: background var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-spring);
+  border-radius: 4px;
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
 .item:hover,
 .itemHighlighted {
-  background: var(--color-accent-subtle);
-  transform: translateX(4px);
+  background: var(--tech-accent-subtle);
 }
 
 .itemLabel {
@@ -98,14 +94,14 @@
 
 .itemGroup {
   font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
+  color: var(--tech-text-muted);
   margin-left: var(--space-md);
 }
 
 .empty {
   padding: var(--space-lg);
   font-size: var(--font-size-md);
-  color: var(--color-text-secondary);
+  color: var(--tech-text-secondary);
   text-align: center;
 }
 
@@ -114,7 +110,7 @@
   align-items: center;
   justify-content: flex-end;
   padding: 8px 16px;
-  border-top: 1px solid var(--glass-border-subtle);
+  border-top: 1px solid var(--tech-border);
 }
 
 .footerHint {
@@ -122,7 +118,7 @@
   align-items: center;
   gap: 4px;
   font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
+  color: var(--tech-text-muted);
 }
 
 @media (prefers-reduced-transparency: reduce) {

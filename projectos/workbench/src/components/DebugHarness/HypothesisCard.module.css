@@ -2,7 +2,7 @@
   padding: 10px 12px;
   margin-bottom: 8px;
   border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-elevated);
 }
 

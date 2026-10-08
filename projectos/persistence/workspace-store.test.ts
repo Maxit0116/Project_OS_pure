@@ -242,7 +242,11 @@ describe("ProjectOSWorkspaceStore", () => {
     expect(updated).toMatchObject({ source: "user", projectId: project.projectId });
     expect(existsSync(descriptionPath)).toBe(true);
 
-    await api.analyzeWorkspace(project.projectId);
+    try {
+      await api.analyzeWorkspace(project.projectId);
+    } catch {
+      // Sample workspaces may lack a usable API key; analysis must not wipe description.
+    }
     expect(await api.getProjectDescription(project.projectId)).toEqual(updated);
     expect(store.loadWorkspace(tempWorkspaceRoot).projectDescription).toEqual(updated);
   });

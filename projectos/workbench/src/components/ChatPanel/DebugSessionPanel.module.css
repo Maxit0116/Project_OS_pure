@@ -4,7 +4,7 @@
   gap: var(--space-md);
   padding: var(--space-md);
   border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-elevated);
 }
 
@@ -33,7 +33,7 @@
 
 .progressStep {
   padding: 2px 8px;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   background: var(--color-bg-muted);

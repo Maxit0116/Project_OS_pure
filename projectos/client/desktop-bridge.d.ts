@@ -38,6 +38,7 @@ export interface ProjectOSBridge {
   consumeFallbackNotice(projectId: string): Promise<string | undefined>;
   shell: {
     pickWorkspaceFolder(): Promise<string | null>;
+    cloneRepository(url: string): Promise<string | null>;
     pickImageFile(): Promise<
       | {
           dataUrl: string;

@@ -11,18 +11,18 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
-  background: var(--glass-bg-clear);
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  border-bottom: 1px solid var(--glass-border);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset;
+  background: var(--tech-bg-side-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-bottom: 1px solid var(--tech-border);
+  box-shadow: none;
   flex-shrink: 0;
 }
 
 .path {
   font-size: var(--font-size-sm);
   font-family: var(--font-mono);
-  color: var(--color-accent);
+  color: var(--tech-accent);
 }
 
 .headerActions {
@@ -51,8 +51,8 @@
   justify-content: flex-end;
   flex-shrink: 0;
   padding: 6px 10px;
-  border-bottom: 1px solid var(--glass-border-subtle);
-  background: var(--color-bg-editor);
+  border-bottom: 1px solid var(--tech-border);
+  background: var(--tech-bg-side-panel);
 }
 
 .editorBody {
@@ -102,6 +102,6 @@
   .header {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    background: var(--color-bg-elevated);
+    background: var(--tech-bg-side-panel);
   }
 }

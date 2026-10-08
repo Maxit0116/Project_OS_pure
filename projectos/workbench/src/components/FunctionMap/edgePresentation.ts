@@ -36,12 +36,51 @@ export function isEdgeDashed(
   return relation === 'depends_on' || confidence < 0.8
 }
 
+function trimText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
+}
+
+export type C4EdgeLabelDensity = 'full' | 'tech' | 'hover'
+
+/**
+ * Classic C4 relationship text: intent plus optional technology in brackets.
+ * Example: `Gets account information from [JSON/HTTPS]`.
+ *
+ * Prefer `label` (intent / purpose). Fall back to `relationI18n`, then a
+ * humanized `relation` key. Technology alone renders as `[tech]`.
+ * Dense diagrams can pass `density: 'tech'` to show only the protocol.
+ */
+export function formatC4EdgeLabel(
+  label?: string,
+  technology?: string,
+  relation?: FunctionalEdgeRelation | 'trunk' | 'branch' | string,
+  relationI18n?: string,
+  density: C4EdgeLabelDensity = 'full',
+): string {
+  const intent =
+    trimText(label) ??
+    trimText(relationI18n) ??
+    (relation ? relation.replace(/_/g, ' ') : undefined)
+  const tech = trimText(technology)
+
+  if (density === 'tech') {
+    if (tech) return `[${tech}]`
+    return intent ?? ''
+  }
+
+  if (intent && tech) return `${intent} [${tech}]`
+  if (intent) return intent
+  if (tech) return `[${tech}]`
+  return ''
+}
+
 export function resolveEdgeDisplayLabel(
   label: string | undefined,
   relation: FunctionalEdgeRelation | 'trunk' | 'branch',
   relationI18n: string | undefined,
 ): string {
-  return label ?? relationI18n ?? relation.replace(/_/g, ' ')
+  return formatC4EdgeLabel(label, undefined, relation, relationI18n)
 }
 
 export function edgeColorHex(

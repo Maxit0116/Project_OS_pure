@@ -142,6 +142,9 @@ const api = {
     pickWorkspaceFolder(): Promise<string | null> {
       return ipcRenderer.invoke('shell:pickWorkspaceFolder')
     },
+    cloneRepository(url: string): Promise<string | null> {
+      return ipcRenderer.invoke('shell:cloneRepository', url)
+    },
     pickImageFile(): Promise<
       | {
           dataUrl: string

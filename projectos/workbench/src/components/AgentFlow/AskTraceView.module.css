@@ -11,7 +11,7 @@
   padding: var(--space-md);
   border: 1px solid var(--glass-border-subtle);
   border-left: 3px solid var(--color-accent);
-  border-radius: var(--radius-glass-sm);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-elevated);
 }
 
