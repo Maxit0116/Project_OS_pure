@@ -26,22 +26,14 @@ export function C4ShapeMeta({
   return (
     <div className={styles.meta}>
       {stereotype ? (
-        <span className={styles.technology} title={stereotype}>
-          {stereotype}
-        </span>
+        <span className={styles.technology}>{stereotype}</span>
       ) : null}
-      <span className={styles.label} title={label}>
-        {label}
-      </span>
+      <span className={styles.label}>{label}</span>
       {!stereotype && techLine ? (
-        <span className={styles.technology} title={technology}>
-          {techLine}
-        </span>
+        <span className={styles.technology}>{techLine}</span>
       ) : null}
       {description ? (
-        <span className={styles.description} title={description}>
-          {description}
-        </span>
+        <span className={styles.description}>{description}</span>
       ) : null}
     </div>
   )

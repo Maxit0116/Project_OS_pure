@@ -41,6 +41,16 @@ function trimText(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Keep a single `[tech]` when the intent already contains that bracket. */
+function collapseRepeatedBracket(text: string, tech: string): string {
+  const re = new RegExp(`(?:\\s*\\[${escapeRegExp(tech)}\\])+`, 'g')
+  return text.replace(re, ` [${tech}]`).replace(/\s{2,}/g, ' ').trim()
+}
+
 export type C4EdgeLabelDensity = 'full' | 'tech' | 'hover'
 
 /**
@@ -69,7 +79,10 @@ export function formatC4EdgeLabel(
     return intent ?? ''
   }
 
-  if (intent && tech) return `${intent} [${tech}]`
+  if (intent && tech) {
+    if (intent.includes(`[${tech}]`)) return collapseRepeatedBracket(intent, tech)
+    return `${intent} [${tech}]`
+  }
   if (intent) return intent
   if (tech) return `[${tech}]`
   return ''

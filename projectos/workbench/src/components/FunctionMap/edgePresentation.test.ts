@@ -45,6 +45,15 @@ describe('formatC4EdgeLabel', () => {
     expect(formatC4EdgeLabel(undefined, undefined)).toBe('')
   })
 
+  it('does not repeat a bracket that the intent already contains', () => {
+    expect(
+      formatC4EdgeLabel('事件入库与本地查询 [SQL]', 'SQL'),
+    ).toBe('事件入库与本地查询 [SQL]')
+    expect(
+      formatC4EdgeLabel('后台定时同步事件 [HTTPS] [HTTPS]', 'HTTPS'),
+    ).toBe('后台定时同步事件 [HTTPS]')
+  })
+
   it('supports dense tech-only labels', () => {
     expect(
       formatC4EdgeLabel('Gets account information from', 'JSON/HTTPS', undefined, undefined, 'tech'),

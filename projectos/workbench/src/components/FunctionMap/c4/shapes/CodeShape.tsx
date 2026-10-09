@@ -14,22 +14,16 @@ export default function CodeShape(props: C4ShapeProps) {
         <span className={styles.codeStereotype}>
           {props.stereotype ?? (props.technology ? `[${props.technology}]` : '[Code]')}
         </span>
-        <span className={styles.codeClassName} title={props.label}>
-          {props.label}
-        </span>
+        <span className={styles.codeClassName}>{props.label}</span>
       </div>
       {members.length > 0 ? (
         <ul className={styles.codeMembers}>
           {members.map((member) => (
-            <li key={member} title={member}>
-              + {member}
-            </li>
+            <li key={member}>+ {member}</li>
           ))}
         </ul>
       ) : props.description ? (
-        <p className={styles.codePurpose} title={props.description}>
-          {props.description}
-        </p>
+        <p className={styles.codePurpose}>{props.description}</p>
       ) : null}
     </div>
   )
