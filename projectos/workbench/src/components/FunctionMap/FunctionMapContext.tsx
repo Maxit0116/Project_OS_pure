@@ -24,6 +24,8 @@ import {
   projectArchitectureView,
 } from './architectureView'
 import { useReducedMotion3d } from './hooks/useReducedMotion3d'
+import type { MapSearchFocusRequest, MapSearchHit } from './mapSearch'
+import { useWorkbenchStore } from '../../state/workbenchStore'
 
 type MapViewMode = 'flat'
 type GalaxyEdgeLabelVisibility = 'hover'
@@ -74,6 +76,8 @@ function useFrozenPlanetOrbits() {
 
 import {
   GALAXY_PREVIEW_FOLLOW_MS,
+  PREVIEW_DWELL_MS,
+  previewDwellMoved,
   type GalaxyPreviewFollowAnchor,
   type MapClusterPreview,
   type MapHoverPreview,
@@ -116,6 +120,7 @@ function applyChromeInsetCssVars(
     if (!surface) continue
     surface.style.setProperty('--map-inset-left', `${insets.left}px`)
     surface.style.setProperty('--map-inset-right', `${insets.right}px`)
+    surface.style.setProperty('--map-inset-top', `${insets.top}px`)
     surface.style.setProperty('--map-inset-bottom', `${insets.bottom}px`)
   }
 }
@@ -165,6 +170,9 @@ export interface FunctionMapContextValue {
   onClearSelection: () => void
   search: string
   setSearch: (value: string) => void
+  mapSearchFocus: MapSearchFocusRequest | null
+  jumpToMapSearchHit: (hit: MapSearchHit) => void
+  clearMapSearchFocus: () => void
   backdropRef: React.MutableRefObject<HTMLDivElement | null>
   viewportChromeRef: React.MutableRefObject<HTMLDivElement | null>
   mapSurfaceRef: React.MutableRefObject<HTMLDivElement | null>
@@ -189,6 +197,12 @@ export interface FunctionMapContextValue {
   reportPreviewMetrics: (metrics: { width: number; height: number }) => void
   dismissGalaxyHoverPreview: (anchor?: Pick<GalaxyPreviewFollowAnchor, 'nodeId' | 'clusterId'>) => void
   cancelPendingGalaxyPreview: () => void
+  /** True while a node drag is in progress. Preview must not open. */
+  previewDragLockRef: React.MutableRefObject<boolean>
+  lockPreviewForNodeDrag: () => void
+  unlockPreviewAfterNodeDrag: () => void
+  /** Restarts the hover dwell when the pointer travels while still waiting. */
+  nudgePreviewDwell: (clientX: number, clientY: number) => void
   updateGalaxyPointer: (clientX: number, clientY: number) => void
   galaxyPointerRef: React.MutableRefObject<GalaxyPointerClient | null>
   hoverPreviewRef: React.MutableRefObject<MapHoverPreview | null>
@@ -252,7 +266,7 @@ export interface FunctionMapContextValue {
 
 const FunctionMapContext = createContext<FunctionMapContextValue | null>(null)
 
-const NODE_PREVIEW_DELAY_MS = 650
+const NODE_PREVIEW_DELAY_MS = PREVIEW_DWELL_MS
 export const PREVIEW_WIDTH = 240
 export const PREVIEW_MIN_HEIGHT = 72
 
@@ -364,6 +378,8 @@ export function FunctionMapProvider({
   children,
 }: ProviderProps) {
   const [search, setSearch] = useState('')
+  const mapSearchFocusTokenRef = useRef(0)
+  const [mapSearchFocus, setMapSearchFocus] = useState<MapSearchFocusRequest | null>(null)
   const architectureLevels = useMemo(
     () => availableArchitectureLevels(nodes, fileIndex),
     [nodes, fileIndex],
@@ -437,9 +453,47 @@ export function FunctionMapProvider({
   )
   const reducedMotion = useReducedMotion3d()
   const [hoverPreview, setHoverPreview] = useState<MapHoverPreview | null>(null)
+  const clearMapSearchFocus = useCallback(() => {
+    setMapSearchFocus(null)
+  }, [])
+  const jumpToMapSearchHit = useCallback(
+    (hit: MapSearchHit) => {
+      if (hit.kind === 'feature') {
+        if (hit.level) {
+          setArchitectureLevelState(hit.level)
+          setArchitectureScopeId(hit.parentId ?? null)
+        }
+        setFocusedCodeNodeId(null)
+        setLayerFocusSuppressed(true)
+        setHoverPreview(null)
+        if (nodes.some((node) => node.id === hit.id)) {
+          void onSelectNode(hit.id)
+        }
+      } else {
+        setShowArtifacts(true)
+        if (hit.kind === 'card' && hit.artifactId) {
+          useWorkbenchStore.getState().selectArtifact(hit.artifactId)
+        }
+      }
+      mapSearchFocusTokenRef.current += 1
+      setMapSearchFocus({
+        token: mapSearchFocusTokenRef.current,
+        canvasNodeId: hit.canvasNodeId,
+        ...(hit.workGroupId ? { workGroupId: hit.workGroupId } : {}),
+      })
+    },
+    [nodes, onSelectNode],
+  )
   const previewTimerRef = useRef<number | null>(null)
   const previewFollowRef = useRef<GalaxyPreviewFollowAnchor | null>(null)
   const previewMetricsRef = useRef({ width: PREVIEW_WIDTH, height: PREVIEW_MIN_HEIGHT })
+  const previewDragLockRef = useRef(false)
+  const previewDwellAnchorRef = useRef<{ x: number; y: number } | null>(null)
+  const previewDwellTargetRef = useRef<
+    | { kind: 'node'; node: FunctionalNode }
+    | { kind: 'cluster'; cluster: MapClusterPreview; clusterId: string }
+    | null
+  >(null)
   const hoverPreviewRef = useRef<MapHoverPreview | null>(null)
   const galaxyPointerRef = useRef<GalaxyPointerClient | null>(null)
   const pendingPreviewRef = useRef<PendingGalaxyPreview | null>(null)
@@ -895,6 +949,8 @@ export function FunctionMapProvider({
       window.clearTimeout(previewTimerRef.current)
       previewTimerRef.current = null
     }
+    previewDwellAnchorRef.current = null
+    previewDwellTargetRef.current = null
   }, [])
 
   useEffect(() => () => clearPreviewTimer(), [clearPreviewTimer])
@@ -908,6 +964,7 @@ export function FunctionMapProvider({
 
   const schedulePreview = useCallback(
     (node: FunctionalNode, clientX: number, clientY: number) => {
+      if (previewDragLockRef.current) return
       clearPreviewTimer()
       previewFollowRef.current = null
       previewMetricsRef.current = { width: PREVIEW_WIDTH, height: PREVIEW_MIN_HEIGHT }
@@ -915,9 +972,12 @@ export function FunctionMapProvider({
       const session = previewHoverSessionRef.current + 1
       previewHoverSessionRef.current = session
       pendingPreviewRef.current = { session, nodeId: node.id }
+      previewDwellAnchorRef.current = { x: clientX, y: clientY }
+      previewDwellTargetRef.current = { kind: 'node', node }
 
       previewTimerRef.current = window.setTimeout(() => {
         if (previewHoverSessionRef.current !== session) return
+        if (previewDragLockRef.current) return
 
         const pointer = galaxyPointerRef.current ?? { clientX, clientY }
         const { width, height } = previewMetricsRef.current
@@ -944,6 +1004,7 @@ export function FunctionMapProvider({
 
   const scheduleClusterPreview = useCallback(
     (cluster: MapClusterPreview, clusterId: string, clientX: number, clientY: number) => {
+      if (previewDragLockRef.current) return
       const bounds = resolvePreviewBounds()
 
       clearPreviewTimer()
@@ -953,9 +1014,12 @@ export function FunctionMapProvider({
       const session = previewHoverSessionRef.current + 1
       previewHoverSessionRef.current = session
       pendingPreviewRef.current = { session, clusterId }
+      previewDwellAnchorRef.current = { x: clientX, y: clientY }
+      previewDwellTargetRef.current = { kind: 'cluster', cluster, clusterId }
 
       previewTimerRef.current = window.setTimeout(() => {
         if (previewHoverSessionRef.current !== session) return
+        if (previewDragLockRef.current) return
 
         const pointer = galaxyPointerRef.current ?? { clientX, clientY }
         const { width, height } = previewMetricsRef.current
@@ -985,6 +1049,37 @@ export function FunctionMapProvider({
       positionHoverPreviewAtClient(clientX, clientY)
     },
     [positionHoverPreviewAtClient],
+  )
+
+  const lockPreviewForNodeDrag = useCallback(() => {
+    previewDragLockRef.current = true
+    previewDwellAnchorRef.current = null
+    previewDwellTargetRef.current = null
+    clearPreviewTimer()
+    pendingPreviewRef.current = null
+    invalidatePreviewHoverSession()
+    setHoverPreview(null)
+  }, [clearPreviewTimer, invalidatePreviewHoverSession])
+
+  const unlockPreviewAfterNodeDrag = useCallback(() => {
+    previewDragLockRef.current = false
+  }, [])
+
+  const nudgePreviewDwell = useCallback(
+    (clientX: number, clientY: number) => {
+      if (previewDragLockRef.current) return
+      if (previewTimerRef.current === null) return
+      const anchor = previewDwellAnchorRef.current
+      const target = previewDwellTargetRef.current
+      if (!anchor || !target) return
+      if (!previewDwellMoved(anchor, { x: clientX, y: clientY })) return
+      if (target.kind === 'node') {
+        schedulePreview(target.node, clientX, clientY)
+        return
+      }
+      scheduleClusterPreview(target.cluster, target.clusterId, clientX, clientY)
+    },
+    [scheduleClusterPreview, schedulePreview],
   )
 
   const dismissGalaxyHoverPreview = useCallback(
@@ -1058,6 +1153,9 @@ export function FunctionMapProvider({
       onClearSelection: clearSelection,
       search,
       setSearch,
+      mapSearchFocus,
+      jumpToMapSearchHit,
+      clearMapSearchFocus,
       backdropRef,
       viewportChromeRef,
       mapSurfaceRef,
@@ -1077,6 +1175,10 @@ export function FunctionMapProvider({
       reportPreviewMetrics,
       dismissGalaxyHoverPreview,
       cancelPendingGalaxyPreview,
+      previewDragLockRef,
+      lockPreviewForNodeDrag,
+      unlockPreviewAfterNodeDrag,
+      nudgePreviewDwell,
       updateGalaxyPointer,
       galaxyPointerRef,
       hoverPreviewRef,
@@ -1155,6 +1257,9 @@ export function FunctionMapProvider({
       clearLayerFocus,
       layerFocusSuppressed,
       search,
+      mapSearchFocus,
+      jumpToMapSearchHit,
+      clearMapSearchFocus,
       chromeInsets,
       hoverPreview,
       clearPreviewTimer,
@@ -1165,6 +1270,10 @@ export function FunctionMapProvider({
       reportPreviewMetrics,
       dismissGalaxyHoverPreview,
       cancelPendingGalaxyPreview,
+      previewDragLockRef,
+      lockPreviewForNodeDrag,
+      unlockPreviewAfterNodeDrag,
+      nudgePreviewDwell,
       updateGalaxyPointer,
       galaxyPointerRef,
       hoverPreviewRef,

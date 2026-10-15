@@ -8,6 +8,7 @@ import MarkdownViewToggle from '../Markdown/MarkdownViewToggle'
 import type { MarkdownDiffViewMode } from '../Markdown/markdownPath'
 import { isMarkdownPath } from '../Markdown/markdownPath'
 import Button from '../ui/Button'
+import { editorThemeName } from '../CodeEditor/editorTheme'
 import {
   buildSideBySideDiffForFile,
   collectDiffChangeSites,
@@ -42,7 +43,7 @@ export default function DiffFileView({
 }: Props) {
   const { ts } = useI18n()
   const resolvedTheme = useWorkbenchStore((s) => s.resolvedTheme)
-  const syntaxTheme = resolvedTheme === 'dark' ? 'vs-dark' : 'vs'
+  const syntaxTheme = editorThemeName(resolvedTheme)
   const beforeRef = useRef<HTMLDivElement>(null)
   const afterRef = useRef<HTMLDivElement>(null)
   const scrollSynchronizerRef = useRef<ReturnType<

@@ -4,6 +4,7 @@ import {
   projectArchitectureView,
 } from '../../architectureView'
 import { codeNodeFilePath } from '../../codeNodeInteraction'
+import { nodeCardBlurb } from '../../nodeCopy'
 import {
   computeBounds,
   emptyBounds,
@@ -163,14 +164,14 @@ function toCodeDiagramNode(
 ): C4DiagramNode {
   const basename = path.split('/').pop() ?? node.name
   const stereotype = codeElementStereotype(file, path)
-  const responsibility = node.responsibility?.trim() || node.summary?.trim()
+  const blurb = nodeCardBlurb(node)
 
   return {
     ...base,
     shape: 'code',
-    // Classic code diagrams title the type/file; path + purpose sit below.
+    // Classic code diagrams title the type/file; the short summary sits below.
     label: basename,
-    description: responsibility && responsibility !== basename ? responsibility : path,
+    description: blurb && blurb !== basename ? blurb : path,
     technology: node.technology,
     stereotype,
     members,

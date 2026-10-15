@@ -39,6 +39,21 @@ export const ChatSessionModeSchema = z.enum([
 
 export const ChatSessionTitleSourceSchema = z.enum(["auto", "manual"]);
 
+export const ChatSessionClassificationSchema = z.enum(["topic", "misc"]);
+
+export const ChatSessionClassificationSourceSchema = z.enum(["auto", "manual"]);
+
+export const SessionContextDigestSchema = z
+  .object({
+    responsibility: z.string().trim().min(1).max(240),
+    decisions: z.array(z.string().trim().min(1).max(240)).max(3),
+    openQuestions: z.array(z.string().trim().min(1).max(240)).max(3),
+    refs: z.array(z.string().trim().min(1).max(240)).max(5),
+    updatedAt: z.string().min(1),
+    throughMessageId: z.string().min(1),
+  })
+  .strict();
+
 export const ChatMessageSchema = z
   .object({
     id: z.string().min(1),
@@ -64,6 +79,11 @@ export const ChatSessionHeadSchema = z
     subtitle: z.string().optional(),
     titleSource: ChatSessionTitleSourceSchema.optional(),
     titleGeneratedAt: z.string().min(1).optional(),
+    parentSessionId: z.string().min(1).optional(),
+    forkMessageId: z.string().min(1).optional(),
+    classification: ChatSessionClassificationSchema.optional(),
+    classificationSource: ChatSessionClassificationSourceSchema.optional(),
+    responsibility: z.string().trim().min(1).max(240).optional(),
   })
   .strict();
 
@@ -115,6 +135,8 @@ export const ChatSessionRecordSchema = z
     draftInput: z.string().optional(),
     draftComposer: ComposerDraftSchema.optional(),
     snapshot: ChatSessionSnapshotSchema.optional(),
+    contextDigest: SessionContextDigestSchema.optional(),
+    inheritedDigest: SessionContextDigestSchema.optional(),
   })
   .strict();
 
@@ -130,6 +152,11 @@ export const ChatSessionIndexSchema = z
 export type ChatSessionStatus = z.infer<typeof ChatSessionStatusSchema>;
 export type ChatSessionMode = z.infer<typeof ChatSessionModeSchema>;
 export type ChatSessionTitleSource = z.infer<typeof ChatSessionTitleSourceSchema>;
+export type ChatSessionClassification = z.infer<typeof ChatSessionClassificationSchema>;
+export type ChatSessionClassificationSource = z.infer<
+  typeof ChatSessionClassificationSourceSchema
+>;
+export type SessionContextDigest = z.infer<typeof SessionContextDigestSchema>;
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export type ChatSessionHead = z.infer<typeof ChatSessionHeadSchema>;
 export type LatestAskTrace = z.infer<typeof LatestAskTraceSchema>;

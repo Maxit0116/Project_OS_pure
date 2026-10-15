@@ -92,6 +92,13 @@ export function buildChatSessionRecord(
     subtitle: deriveChatSessionSubtitle(state),
     ...(existingHead?.titleSource ? { titleSource: existingHead.titleSource } : {}),
     ...(existingHead?.titleGeneratedAt ? { titleGeneratedAt: existingHead.titleGeneratedAt } : {}),
+    ...(existingHead?.parentSessionId ? { parentSessionId: existingHead.parentSessionId } : {}),
+    ...(existingHead?.forkMessageId ? { forkMessageId: existingHead.forkMessageId } : {}),
+    ...(existingHead?.classification ? { classification: existingHead.classification } : {}),
+    ...(existingHead?.classificationSource
+      ? { classificationSource: existingHead.classificationSource }
+      : {}),
+    ...(existingHead?.responsibility ? { responsibility: existingHead.responsibility } : {}),
   }
   return {
     version: '0.2.0',

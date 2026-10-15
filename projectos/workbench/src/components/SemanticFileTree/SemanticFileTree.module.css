@@ -177,3 +177,9 @@
   font-size: var(--font-size-md);
   color: var(--color-text-secondary);
 }
+
+.folderHint {
+  padding: 4px 8px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}

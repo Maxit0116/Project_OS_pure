@@ -38,6 +38,7 @@ import type {
   PromptRefinement,
 } from "../contracts/prompt-refinement.js";
 import type { SemanticTree } from "../contracts/semantic-tree.js";
+import type { WorkspaceDirectoryEntry } from "../contracts/workspace-directory.js";
 import type {
   CreateMapArtifactInput,
   MapArtifact,
@@ -77,6 +78,13 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   getSemanticTree(projectId: string): Promise<SemanticTree> {
     return this.transport.getSemanticTree(projectId);
+  }
+
+  listWorkspaceDirectory(
+    projectId: string,
+    relativePath: string,
+  ): Promise<WorkspaceDirectoryEntry[]> {
+    return this.transport.listWorkspaceDirectory(projectId, relativePath);
   }
 
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload> {
@@ -171,6 +179,22 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     sessionId: string,
   ): Promise<ChatSessionHead | null> {
     return this.transport.summarizeChatSessionTitle(projectId, sessionId);
+  }
+
+  forkChatSession(
+    projectId: string,
+    parentSessionId: string,
+    forkMessageId: string,
+  ): Promise<ChatSessionRecord | null> {
+    return this.transport.forkChatSession(projectId, parentSessionId, forkMessageId);
+  }
+
+  setChatSessionClassification(
+    projectId: string,
+    sessionId: string,
+    classification: "topic" | "misc",
+  ): Promise<ChatSessionHead | null> {
+    return this.transport.setChatSessionClassification(projectId, sessionId, classification);
   }
 
   deleteChatSession(projectId: string, sessionId: string): Promise<boolean> {

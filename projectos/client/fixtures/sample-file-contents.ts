@@ -208,14 +208,77 @@ export function getSampleFileContent(path: string): string {
   return SAMPLE_FILE_CONTENTS[path] ?? `// File: ${path}\n// Content not available in sample fixtures.\n`
 }
 
+const EXTENSION_LANGUAGES: Record<string, string> = {
+  ts: 'typescript',
+  tsx: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
+  js: 'javascript',
+  jsx: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  json: 'json',
+  jsonc: 'json',
+  css: 'css',
+  scss: 'scss',
+  less: 'less',
+  html: 'html',
+  htm: 'html',
+  md: 'markdown',
+  markdown: 'markdown',
+  mdx: 'mdx',
+  py: 'python',
+  go: 'go',
+  rs: 'rust',
+  java: 'java',
+  kt: 'kotlin',
+  kts: 'kotlin',
+  swift: 'swift',
+  c: 'c',
+  h: 'c',
+  cpp: 'cpp',
+  cc: 'cpp',
+  cxx: 'cpp',
+  hpp: 'cpp',
+  hh: 'cpp',
+  cs: 'csharp',
+  php: 'php',
+  rb: 'ruby',
+  lua: 'lua',
+  sh: 'shell',
+  bash: 'shell',
+  zsh: 'shell',
+  ps1: 'powershell',
+  sql: 'sql',
+  xml: 'xml',
+  svg: 'xml',
+  graphql: 'graphql',
+  gql: 'graphql',
+  yaml: 'yaml',
+  yml: 'yaml',
+  proto: 'proto',
+  tf: 'hcl',
+  tfvars: 'hcl',
+  hcl: 'hcl',
+  dart: 'dart',
+  ex: 'elixir',
+  exs: 'elixir',
+  scala: 'scala',
+  r: 'r',
+  pl: 'perl',
+  m: 'objective-c',
+  mm: 'objective-c',
+}
+
+const FILENAME_LANGUAGES: Record<string, string> = {
+  dockerfile: 'dockerfile',
+}
+
 export function languageForPath(path: string): string {
-  if (path.endsWith('.tsx')) return 'typescript'
-  if (path.endsWith('.ts')) return 'typescript'
-  if (path.endsWith('.jsx')) return 'javascript'
-  if (path.endsWith('.js')) return 'javascript'
-  if (path.endsWith('.json')) return 'json'
-  if (path.endsWith('.css')) return 'css'
-  if (path.endsWith('.md') || path.endsWith('.markdown')) return 'markdown'
-  if (path.endsWith('.prisma')) return 'plaintext'
-  return 'plaintext'
+  const base = path.split(/[/\\]/u).pop() ?? path
+  const filenameLanguage = FILENAME_LANGUAGES[base.toLowerCase()]
+  if (filenameLanguage) return filenameLanguage
+  const dot = base.lastIndexOf('.')
+  if (dot <= 0) return 'plaintext'
+  return EXTENSION_LANGUAGES[base.slice(dot + 1).toLowerCase()] ?? 'plaintext'
 }

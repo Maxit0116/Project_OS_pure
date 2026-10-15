@@ -1,4 +1,5 @@
 import type { FunctionalEdge, FunctionalNode } from '@contracts/index'
+import { nodeCardBlurb } from '../nodeCopy'
 import { C4_DEFAULT_NODE_SIZE } from './shapes'
 import { resolveC4ShapeKindFromNode } from './shapeKind'
 import type { C4DiagramEdge, C4DiagramNode } from './types'
@@ -53,7 +54,7 @@ export function toC4Node(
     id: node.id,
     shape,
     label: node.name,
-    description: node.responsibility ?? node.summary ?? node.description,
+    description: nodeCardBlurb(node),
     technology: node.technology,
     elementType: node.elementType,
     level: node.level,

@@ -1450,9 +1450,14 @@ export function resolveOverlayConflicts(input: {
   edges: RoutedEdgeSpec[]
   routes: Map<string, OrthogonalRouteResult>
   maxPasses?: number
+  /** When set, only these edges may move. Other routes stay frozen obstacles. */
+  onlyEdgeIds?: ReadonlySet<string>
 }): { resolved: boolean; passes: number } {
   const maxPasses = input.maxPasses ?? 10
-  const allIds = [...input.routes.keys()]
+  const routeIds = [...input.routes.keys()]
+  const mutableIds = input.onlyEdgeIds
+    ? routeIds.filter((id) => input.onlyEdgeIds!.has(id))
+    : routeIds
   let passes = 0
 
   const isClear = (
@@ -1469,7 +1474,7 @@ export function resolveOverlayConflicts(input: {
     passes = pass + 1
     let dirty = false
 
-    for (const id of allIds) {
+    for (const id of mutableIds) {
       const route = input.routes.get(id)!
       const edge = input.edges.find((candidate) => candidate.id === id)
       const source = edge ? input.nodes.find((n) => n.id === edge.source) : undefined
@@ -1478,10 +1483,10 @@ export function resolveOverlayConflicts(input: {
         width: route.labelRect.width,
         height: route.labelRect.height,
       }
-      const others = allIds
+      const others = routeIds
         .filter((otherId) => otherId !== id)
         .map((otherId) => input.routes.get(otherId)!.points)
-      const otherLabels = allIds
+      const otherLabels = routeIds
         .filter((otherId) => otherId !== id)
         .map((otherId) => input.routes.get(otherId)!.labelRect)
 
@@ -1552,12 +1557,12 @@ export function resolveOverlayConflicts(input: {
 
   // Final check.
   let allClear = true
-  for (const id of allIds) {
+  for (const id of mutableIds) {
     const route = input.routes.get(id)!
-    const others = allIds
+    const others = routeIds
       .filter((otherId) => otherId !== id)
       .map((otherId) => input.routes.get(otherId)!.points)
-    const otherLabels = allIds
+    const otherLabels = routeIds
       .filter((otherId) => otherId !== id)
       .map((otherId) => input.routes.get(otherId)!.labelRect)
     if (!isClear(route.labelRect, input.nodes, otherLabels, others)) {

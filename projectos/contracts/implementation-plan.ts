@@ -84,6 +84,7 @@ export const CreatePlanRequestSchema = z
       .optional(),
     existingQuestions: z.array(ClarifyingQuestionSchema).optional(),
     existingPlanId: z.string().min(1).optional(),
+    chatSessionId: z.string().min(1).optional(),
   })
   .merge(PromptComposerFieldsSchema)
   .strict();

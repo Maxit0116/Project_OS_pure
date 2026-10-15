@@ -65,6 +65,7 @@ export const DebugSessionSchema = z
     linkedRunId: z.string().min(1).optional(),
     verification: HarnessVerificationSchema,
     debugLogPort: z.number().int().positive().optional(),
+    chatSessionId: z.string().min(1).optional(),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1),
   })
@@ -76,6 +77,7 @@ export const StartDebugSessionRequestSchema = z
     scope: AgentConversationScopeSchema,
     bugDescription: z.string().trim().min(1),
     rawError: z.string().optional(),
+    chatSessionId: z.string().min(1).optional(),
   })
   .merge(PromptComposerFieldsSchema)
   .strict();

@@ -33,7 +33,7 @@ import type {
   PromptRefinement,
 } from "../contracts/prompt-refinement.js";
 import { cloneJson } from "../utils/json.js";
-import { resolveChatSessionTitleSource } from "../contracts/chat-session-title.js";
+import { appendSessionContextMarkdown } from "../contracts/chat-session-context.js";
 import {
   resolveContainedDestinationPath,
   resolveContainedPath,
@@ -135,6 +135,7 @@ import type {
   SemanticTree,
   SemanticTreeNode,
 } from "../contracts/semantic-tree.js";
+import type { WorkspaceDirectoryEntry } from "../contracts/workspace-directory.js";
 import {
   CreateMapArtifactInputSchema,
   CreateMapImageArtifactInputSchema,
@@ -181,6 +182,8 @@ import {
   UpdateMapWorkGroupPatchSchema,
 } from "../contracts/map-work-group.js";
 import { ProjectOSError } from "../errors.js";
+import { attachIndexedFilesToSemanticTree } from "./semantic-tree-files.js";
+import { listWorkspaceDirectoryEntries } from "./workspace-directory.js";
 import {
   type LoadedProjectOSWorkspace,
   ProjectOSWorkspaceStore,
@@ -858,7 +861,19 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   }
 
   async getSemanticTree(projectId: string): Promise<SemanticTree> {
-    return this.requireLoadedWorkspace(projectId).semanticTree;
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return attachIndexedFilesToSemanticTree(
+      workspace.semanticTree,
+      workspace.graph.fileIndex,
+    );
+  }
+
+  async listWorkspaceDirectory(
+    projectId: string,
+    relativePath: string,
+  ): Promise<WorkspaceDirectoryEntry[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return listWorkspaceDirectoryEntries(workspace.workspaceRoot, relativePath);
   }
 
   async getNodeContext(
@@ -903,7 +918,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       node.linkedFiles.some((file) => file.path === path),
     );
 
-    if (!fileEntry && semanticMatches.length === 0 && directLinkedNodes.length === 0) {
+    if (
+      !fileEntry &&
+      semanticMatches.length === 0 &&
+      directLinkedNodes.length === 0 &&
+      !workspaceFileIsReadable(workspace.workspaceRoot, path)
+    ) {
       throw new ProjectOSError(
         "file_not_found",
         `File '${path}' was not found in project '${projectId}' context`,
@@ -1157,27 +1177,69 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     sessionId: string,
   ): Promise<import("../contracts/chat-session.js").ChatSessionHead | null> {
     const workspace = this.requireLoadedWorkspace(projectId);
-    const { getChatSession, applyAutoChatSessionTitle } = await import(
+    const { getChatSession, saveChatSessionContext } = await import(
       "./chat-session-service.js"
     );
-    const { summarizeChatSessionTitleForRecord } = await import(
+    const { summarizeChatSessionContextForRecord } = await import(
       "./chat-session-title-summarize.js"
     );
     const record = getChatSession(workspace.workspaceRoot, sessionId);
     if (!record) return null;
 
-    if (resolveChatSessionTitleSource(record.head.titleSource) === "manual") {
-      return record.head;
-    }
-
-    const title = await summarizeChatSessionTitleForRecord(projectId, record, {
+    const update = await summarizeChatSessionContextForRecord(projectId, record, {
       chatTitleService: this.chatTitleService,
       settingsService: this.settingsService,
       settings: workspace.settings,
     });
-    if (!title) return null;
+    if (!update) return record.head;
+    return saveChatSessionContext(workspace.workspaceRoot, sessionId, update);
+  }
 
-    return applyAutoChatSessionTitle(workspace.workspaceRoot, sessionId, title);
+  async forkChatSession(
+    projectId: string,
+    parentSessionId: string,
+    forkMessageId: string,
+  ): Promise<import("../contracts/chat-session.js").ChatSessionRecord | null> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getChatSession, upsertChatSession } = await import("./chat-session-service.js");
+    const { summarizeChatSessionContextForRecord } = await import(
+      "./chat-session-title-summarize.js"
+    );
+    const {
+      buildForkedChatSession,
+      messagesThroughFork,
+    } = await import("../contracts/chat-session-context.js");
+    const parent = getChatSession(workspace.workspaceRoot, parentSessionId);
+    if (!parent) return null;
+    const forkId = forkMessageId.trim() || undefined;
+    let inherited = parent.contextDigest ?? null;
+    if (forkId) {
+      const slice = messagesThroughFork(parent.messages, forkId);
+      if (!slice) return null;
+      const update = await summarizeChatSessionContextForRecord(
+        projectId,
+        { ...parent, messages: slice },
+        {
+          chatTitleService: this.chatTitleService,
+          settingsService: this.settingsService,
+          settings: workspace.settings,
+        },
+      );
+      inherited = update?.digest ?? null;
+    }
+    const child = buildForkedChatSession(parent, inherited, forkId);
+    return upsertChatSession(workspace.workspaceRoot, child);
+  }
+
+  async setChatSessionClassification(
+    projectId: string,
+    sessionId: string,
+    classification: string,
+  ): Promise<import("../contracts/chat-session.js").ChatSessionHead | null> {
+    if (classification !== "topic" && classification !== "misc") return null;
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { setChatSessionClassification } = await import("./chat-session-service.js");
+    return setChatSessionClassification(workspace.workspaceRoot, sessionId, classification);
   }
 
   async deleteChatSession(projectId: string, sessionId: string): Promise<boolean> {
@@ -1247,10 +1309,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       parsedRequest,
       localContext,
     );
-    const supplementalMarkdown = [
-      augmented.supplementalMarkdown,
-    ]
-      .filter((part) => part && part.trim().length > 0)
+    const sessionContext = await this.sessionContextMarkdown(
+      parsedRequest.projectId,
+      parsedRequest.chatSessionId,
+    );
+    const supplementalMarkdown = [augmented.supplementalMarkdown, sessionContext]
+      .filter((part) => part.trim().length > 0)
       .join("\n\n");
     const result = await this.groundedAnswerService.answer({
       projectId: parsedRequest.projectId,
@@ -1348,6 +1412,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return resolveAttachments(attachments, this.attachmentResolverDeps(workspace));
   }
 
+  private async sessionContextMarkdown(
+    projectId: string,
+    chatSessionId: string | undefined,
+  ): Promise<string> {
+    if (!chatSessionId) return "";
+    const record = await this.getChatSession(projectId, chatSessionId);
+    return appendSessionContextMarkdown("", record);
+  }
+
   private async buildComposerSupplementalMarkdown(
     workspace: LoadedProjectOSWorkspace,
     composer: PromptComposerFields,
@@ -1398,7 +1471,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       thinkingDepth: workspace.settings.execution.thinkingDepth,
       clarifyingAnswers: parsedRequest.clarifyingAnswers,
       existingQuestions: parsedRequest.existingQuestions,
-      supplementalMarkdown: augmented.supplementalMarkdown,
+      supplementalMarkdown: [
+        augmented.supplementalMarkdown,
+        await this.sessionContextMarkdown(parsedRequest.projectId, parsedRequest.chatSessionId),
+      ]
+        .filter((part) => part.trim().length > 0)
+        .join("\n\n"),
       ...(parsedRequest.existingPlanId
         ? {
             existingPlanId: parsedRequest.existingPlanId,
@@ -1596,6 +1674,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         nodeId: ownerScope.nodeId,
         filePath: ownerScope.selectedFilePath,
         rawPrompt,
+        ...(stored.session.chatSessionId
+          ? { chatSessionId: stored.session.chatSessionId }
+          : {}),
       });
       run = await this.confirmExecution(refinement.id);
     }
@@ -1653,10 +1734,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             : request.filePath
               ? await this.getFileContext(request.projectId, request.filePath)
               : undefined;
-          const supplementalMarkdown = await this.buildComposerSupplementalMarkdown(
-            workspace,
-            request,
-          );
+          const supplementalMarkdown = [
+            await this.buildComposerSupplementalMarkdown(workspace, request),
+            await this.sessionContextMarkdown(request.projectId, request.chatSessionId),
+          ]
+            .filter((part) => part.trim().length > 0)
+            .join("\n\n");
           const refined = await this.refinementService.refineWithModel({
             request,
             ...(context ? { context } : {}),
@@ -7175,6 +7258,19 @@ function assertApplyTargetUnchanged(
       `Generated diff is stale for '${plan.path}'`,
       { cause: error },
     );
+  }
+}
+
+function workspaceFileIsReadable(workspaceRoot: string, path: string): boolean {
+  try {
+    if (!path || targetsProtectedProjectPath(path)) return false;
+    const containedRoot = resolveContainedPath(workspaceRoot, ".");
+    const fullPath = resolveContainedPath(containedRoot, path);
+    if (targetsProtectedProjectPath(relative(containedRoot, fullPath))) return false;
+    const stats = lstatSync(fullPath);
+    return stats.isFile() && !stats.isSymbolicLink();
+  } catch {
+    return false;
   }
 }
 

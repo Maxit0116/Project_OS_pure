@@ -28,3 +28,21 @@ export function revealPosition(
 export function getRegisteredEditor(filePath: string): MonacoEditor | undefined {
   return editors.get(filePath)
 }
+
+export function runEditorCommand(filePath: string, commandId: string): boolean {
+  const editor = editors.get(filePath)
+  if (!editor) return false
+  const action = editor.getAction(commandId)
+  if (!action) return false
+  editor.focus()
+  void action.run()
+  return true
+}
+
+export function scheduleEditorCommand(filePath: string, commandId: string): void {
+  const attempt = (remaining: number) => {
+    if (runEditorCommand(filePath, commandId) || remaining <= 0) return
+    window.setTimeout(() => attempt(remaining - 1), 50)
+  }
+  attempt(20)
+}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Monaco } from '@monaco-editor/react'
 
 import { languageForPath } from '../../data/sampleFileContents'
+import { codeEditorOptions } from '../CodeEditor/editorPresentation'
 import { MonacoEditor } from '../CodeEditor/monacoEditorLazy'
 import type { DiffChangeSite, SideBySideRow } from './diffHighlight'
 import type { DiffSyntaxTheme } from './diffSyntaxHighlight'
@@ -98,13 +99,8 @@ function revealChangeSite(
 }
 
 const editorOptions = {
+  ...codeEditorOptions,
   readOnly: true,
-  minimap: { enabled: false },
-  fontSize: 13,
-  lineNumbers: 'on' as const,
-  scrollBeyondLastLine: false,
-  automaticLayout: true,
-  padding: { top: 12 },
   renderValidationDecorations: 'off' as const,
   overviewRulerLanes: 0,
 }

@@ -749,7 +749,11 @@ function applyPathSignals(filePath: string, signals: WorkspaceTechSignals): void
   if (/\.kt$|\.java$/i.test(lower) && /(^|\/)android(\/|$)/i.test(lower)) {
     pushUnique(signals.mobileTechnologies, "Android");
   }
-  if (/\.swift$/i.test(lower)) pushUnique(signals.mobileTechnologies, "SwiftUI");
+  if (/\.swift$/i.test(lower)) {
+    const onDesktop = /(^|\/)(macos|osx)(\/|$)/i.test(lower);
+    const onIos = /(^|\/)ios(\/|$)/i.test(lower);
+    if (onIos || !onDesktop) pushUnique(signals.mobileTechnologies, "SwiftUI");
+  }
 }
 
 /**
@@ -910,8 +914,22 @@ function looksLikeQueue(blob: string): boolean {
   return /kafka|rabbit|sqs|pubsub|queue|nats|event.?bridge|消息队列/.test(blob);
 }
 
+function looksLikeDesktop(blob: string): boolean {
+  return /macos|mac\s*os|\bos\s*x\b|macintosh|\bmac\b|appkit|electron|tauri|\bwpf\b|winui|桌面客户端|桌面应用/.test(
+    blob,
+  );
+}
+
 function looksLikeMobile(blob: string): boolean {
-  return /react.?native|flutter|ios|android|mobile|swiftui|移动端/.test(blob);
+  if (
+    looksLikeDesktop(blob) &&
+    !/android|安卓|iphone|jetpack|react.?native|\bflutter\b|\bios\b/.test(blob)
+  ) {
+    return false;
+  }
+  return /react.?native|flutter|\bios\b|android|mobile|swiftui|jetpack|移动端|安卓/.test(
+    blob,
+  );
 }
 
 function looksLikeWeb(blob: string): boolean {
@@ -947,6 +965,12 @@ function pickTechnologyForNode(
   }
   if (looksLikeQueue(blob)) {
     return signals.queueTechnologies[0] ?? "Kafka";
+  }
+  if (looksLikeDesktop(blob) && !looksLikeMobile(blob)) {
+    if (/electron/.test(blob)) return "Electron";
+    if (/tauri/.test(blob)) return "Tauri";
+    if (/windows|wpf|winui/.test(blob)) return "Windows";
+    return "macOS";
   }
   if (looksLikeMobile(blob)) {
     return signals.mobileTechnologies[0] ?? "React Native";

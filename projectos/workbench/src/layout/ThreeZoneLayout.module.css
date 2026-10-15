@@ -21,10 +21,6 @@
   z-index: 4;
 }
 
-.graphBleedPassThrough .edgeRail {
-  pointer-events: auto;
-}
-
 /* Center column panel shell — let events fall through to canvas (z-index 2). */
 .centerPassThrough {
   pointer-events: none;
@@ -42,10 +38,6 @@
   pointer-events: none;
 }
 
-.wrapperTerminalDocked .edgeRailLeft {
-  top: calc((100% - var(--terminal-dock-height)) / 2);
-}
-
 /* Center column yields bottom to terminal so docked glass samples the map backdrop. */
 .wrapperCenterYieldTerminal .group {
   padding-bottom: var(--terminal-dock-height);
@@ -59,65 +51,8 @@
   height: 100%;
 }
 
-/* Edge rails — reopen collapsed panels */
-.edgeRail {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 45;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 56px;
-  padding: 0;
-  color: var(--color-text-secondary);
-  background: var(--tech-bg-side-panel);
-  border: 1px solid var(--tech-border);
-  cursor: pointer;
-  transition:
-    color var(--duration-fast) var(--ease-out),
-    background var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out);
-}
-
-.edgeRail:hover {
-  color: var(--color-text-primary);
-  background: var(--tech-bg-muted);
-  box-shadow: none;
-}
-
-.edgeRailLeft {
-  left: 0;
-  border-left: none;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-}
-
-.edgeRailRight {
-  right: 0;
-  border-right: none;
-  border-radius: var(--radius-md) 0 0 var(--radius-md);
-}
-
-.edgeRail:active {
-  color: var(--color-text-primary);
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .edgeRail {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: var(--color-bg-side-panel);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .group {
-    transition: none;
-  }
-
-  .edgeRail {
     transition: none;
   }
 }

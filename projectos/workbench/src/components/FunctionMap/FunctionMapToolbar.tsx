@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Layers2, RefreshCw, StickyNote } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
 import { useFunctionMap } from './FunctionMapContext'
+import { buildMapSearchHits, type MapSearchHit } from './mapSearch'
 import { MAP_CREATE_ARTIFACT_ACTIONS } from './mapCreateActions'
 import { EDGE_COLORS } from './edgePresentation'
 import contextMenuStyles from './FunctionMapContextMenu.module.css'
@@ -14,6 +15,19 @@ const VIEWPORT_MARGIN = 8
 
 interface Props {
   variant?: 'panel' | 'inline'
+}
+
+function SearchHitTitle({ title, query }: { title: string; query: string }) {
+  const needle = query.trim()
+  const index = needle ? title.toLowerCase().indexOf(needle.toLowerCase()) : -1
+  if (index < 0) return title
+  return (
+    <>
+      {title.slice(0, index)}
+      <mark className={styles.searchHitMark}>{title.slice(index, index + needle.length)}</mark>
+      {title.slice(index + needle.length)}
+    </>
+  )
 }
 
 export function shouldCloseToolbarMenuForScroll(
@@ -32,6 +46,9 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
   const {
     search,
     setSearch,
+    graphNodes,
+    mapContent,
+    jumpToMapSearchHit,
     edges,
     architectureLevels,
     showArtifacts,
@@ -52,6 +69,29 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
   const addMenuRef = useRef<HTMLDivElement>(null)
   const scanButtonRef = useRef<HTMLDivElement>(null)
   const scanMenuRef = useRef<HTMLDivElement>(null)
+  const searchAnchorRef = useRef<HTMLDivElement>(null)
+  const searchMenuRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchActiveIndex, setSearchActiveIndex] = useState(0)
+  const [searchMenuBox, setSearchMenuBox] = useState<{
+    x: number
+    y: number
+    width: number
+  } | null>(null)
+  const searchHits = useMemo(
+    () =>
+      buildMapSearchHits({
+        nodes: graphNodes,
+        artifacts: mapContent?.artifacts,
+        workGroups: mapContent?.workGroups,
+        query: search,
+      }),
+    [graphNodes, mapContent?.artifacts, mapContent?.workGroups, search],
+  )
+  const searchQuery = search.trim()
+  const activeSearchIndex =
+    searchHits.length === 0 ? 0 : Math.min(searchActiveIndex, searchHits.length - 1)
   const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId)
   const canDeepen =
     selectedNode?.level === 'container' || selectedNode?.level === 'component'
@@ -147,6 +187,67 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
     }
   }, [scanMenuOpen])
 
+  useLayoutEffect(() => {
+    if (!searchOpen) return
+    const anchor = searchAnchorRef.current
+    if (!anchor) return
+    const rect = anchor.getBoundingClientRect()
+    const width = Math.max(rect.width, 280)
+    let x = rect.left
+    if (x + width > window.innerWidth - VIEWPORT_MARGIN) {
+      x = Math.max(VIEWPORT_MARGIN, window.innerWidth - width - VIEWPORT_MARGIN)
+    }
+    setSearchMenuBox({ x, y: rect.bottom + 4, width })
+  }, [searchOpen, searchHits.length, search])
+
+  useEffect(() => {
+    if (!searchOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSearchOpen(false)
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (
+        searchAnchorRef.current?.contains(target) ||
+        searchMenuRef.current?.contains(target)
+      ) {
+        return
+      }
+      setSearchOpen(false)
+    }
+    const placeMenu = () => {
+      const anchor = searchAnchorRef.current
+      if (!anchor) return
+      const rect = anchor.getBoundingClientRect()
+      const width = Math.max(rect.width, 280)
+      let x = rect.left
+      if (x + width > window.innerWidth - VIEWPORT_MARGIN) {
+        x = Math.max(VIEWPORT_MARGIN, window.innerWidth - width - VIEWPORT_MARGIN)
+      }
+      setSearchMenuBox({ x, y: rect.bottom + 4, width })
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    const dismissTimer = window.setTimeout(() => {
+      document.addEventListener('mousedown', handlePointerDown, true)
+    }, 0)
+    window.addEventListener('resize', placeMenu)
+    window.addEventListener('scroll', placeMenu, true)
+    return () => {
+      window.clearTimeout(dismissTimer)
+      document.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('mousedown', handlePointerDown, true)
+      window.removeEventListener('resize', placeMenu)
+      window.removeEventListener('scroll', placeMenu, true)
+    }
+  }, [searchOpen])
+
+  const chooseSearchHit = (hit: MapSearchHit) => {
+    jumpToMapSearchHit(hit)
+    setSearch('')
+    setSearchOpen(false)
+    setSearchActiveIndex(0)
+  }
+
   const openAddMenu = () => {
     const rect = addButtonRef.current?.getBoundingClientRect()
     if (!rect) return
@@ -164,13 +265,105 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
       className={variant === 'inline' ? styles.toolbarInline : styles.toolbar}
       data-zone-interactive
     >
-      <input
-        type="search"
-        className={styles.search}
-        placeholder={ts('map.searchPlaceholder')}
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
+      <div className={styles.searchAnchor} ref={searchAnchorRef}>
+        <input
+          ref={searchInputRef}
+          type="search"
+          role="combobox"
+          className={styles.search}
+          placeholder={ts('map.searchPlaceholder')}
+          value={search}
+          aria-label={ts('map.searchPlaceholder')}
+          aria-expanded={searchOpen}
+          aria-controls="map-search-results"
+          aria-autocomplete="list"
+          aria-activedescendant={
+            searchOpen && searchHits[activeSearchIndex]
+              ? `map-search-hit-${searchHits[activeSearchIndex].kind}-${searchHits[activeSearchIndex].id}`
+              : undefined
+          }
+          onChange={(event) => {
+            setSearch(event.target.value)
+            setSearchActiveIndex(0)
+            setSearchOpen(event.target.value.trim().length > 0)
+          }}
+          onFocus={() => {
+            if (searchQuery) setSearchOpen(true)
+          }}
+          onKeyDown={(event) => {
+            if (!searchOpen && (event.key === 'ArrowDown' || event.key === 'Enter') && searchQuery) {
+              setSearchOpen(true)
+              event.preventDefault()
+              return
+            }
+            if (!searchOpen) return
+            if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              setSearchActiveIndex((index) =>
+                searchHits.length === 0 ? 0 : (index + 1) % searchHits.length,
+              )
+            } else if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              setSearchActiveIndex((index) =>
+                searchHits.length === 0 ? 0 : (index - 1 + searchHits.length) % searchHits.length,
+              )
+            } else if (event.key === 'Enter') {
+              const hit = searchHits[activeSearchIndex]
+              if (!hit) return
+              event.preventDefault()
+              chooseSearchHit(hit)
+            } else if (event.key === 'Escape') {
+              event.preventDefault()
+              setSearchOpen(false)
+            }
+          }}
+        />
+        {searchOpen &&
+          searchMenuBox &&
+          createPortal(
+            <div
+              ref={searchMenuRef}
+              id="map-search-results"
+              className={styles.searchResults}
+              role="listbox"
+              aria-label={ts('map.searchResults')}
+              data-zone-interactive
+              style={{ left: searchMenuBox.x, top: searchMenuBox.y, width: searchMenuBox.width }}
+            >
+              {searchHits.length === 0 ? (
+                <div className={styles.searchEmpty}>{ts('map.searchEmpty')}</div>
+              ) : (
+                searchHits.map((hit, index) => {
+                  const kindLabel =
+                    hit.kind === 'feature' && hit.level
+                      ? ts(`map.levels.${hit.level}`)
+                      : ts(`map.searchKinds.${hit.kind}`)
+                  return (
+                    <button
+                      key={`${hit.kind}:${hit.id}`}
+                      id={`map-search-hit-${hit.kind}-${hit.id}`}
+                      type="button"
+                      role="option"
+                      aria-selected={index === activeSearchIndex}
+                      className={`${styles.searchHit} ${index === activeSearchIndex ? styles.searchHitActive : ''}`}
+                      onMouseEnter={() => setSearchActiveIndex(index)}
+                      onMouseDown={(event) => {
+                        event.preventDefault()
+                        chooseSearchHit(hit)
+                      }}
+                    >
+                      <span className={styles.searchHitTitle}>
+                        <SearchHitTitle title={hit.title} query={searchQuery} />
+                      </span>
+                      <span className={styles.searchHitKind}>{kindLabel}</span>
+                    </button>
+                  )
+                })
+              )}
+            </div>,
+            document.body,
+          )}
+      </div>
       {architectureLevels.length > 0 ? (
       <div className={styles.createActions}>
         <div ref={scanButtonRef} className={styles.addMenuAnchor}>

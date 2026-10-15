@@ -7,13 +7,14 @@ import type {
   ProjectArchitecture,
 } from '@contracts/index'
 
-/** Classic C4 visual role — mapped from elementType + technology, not a new contract enum. */
+/** Classic C4 visual role — mapped from elementType + name/path/technology, not a new contract enum. */
 export type C4ShapeKind =
   | 'person'
   | 'system'
   | 'external_system'
   | 'web_app'
   | 'mobile_app'
+  | 'desktop_app'
   | 'server'
   | 'database'
   | 'queue'

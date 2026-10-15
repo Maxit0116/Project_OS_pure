@@ -9,15 +9,22 @@ import {
 import { join } from "node:path";
 
 import {
-  CHAT_SESSION_MAX_COUNT,
   CHAT_SESSION_MAX_PINNED,
   ChatSessionHeadSchema,
   ChatSessionIndexSchema,
   ChatSessionRecordSchema,
+  type ChatSessionClassification,
   type ChatSessionHead,
   type ChatSessionIndex,
   type ChatSessionRecord,
 } from "../contracts/chat-session.js";
+import {
+  applyChatSessionContextUpdate,
+  chatSessionHasChildren,
+  chatSessionIdsToPrune,
+  preserveChatSessionContext,
+  type ChatSessionContextUpdate,
+} from "../contracts/chat-session-context.js";
 
 const CHAT_SESSIONS_DIR = join(".projectos", "chat-sessions");
 const INDEX_PATH = join(CHAT_SESSIONS_DIR, "index.json");
@@ -51,24 +58,7 @@ function writeIndex(workspaceRoot: string, index: ChatSessionIndex): void {
 }
 
 function pruneSessions(workspaceRoot: string, index: ChatSessionIndex): ChatSessionIndex {
-  if (index.heads.length <= CHAT_SESSION_MAX_COUNT) {
-    return index;
-  }
-
-  const pinned = new Set(index.pinnedIds);
-  const sorted = [...index.heads].sort((a, b) => {
-    if (a.isArchived !== b.isArchived) return a.isArchived ? -1 : 1;
-    return a.lastUpdatedAt.localeCompare(b.lastUpdatedAt);
-  });
-
-  const toRemove: string[] = [];
-  let count = index.heads.length;
-  for (const head of sorted) {
-    if (count <= CHAT_SESSION_MAX_COUNT) break;
-    if (pinned.has(head.id)) continue;
-    toRemove.push(head.id);
-    count -= 1;
-  }
+  const toRemove = chatSessionIdsToPrune(index.heads, index.pinnedIds);
 
   for (const id of toRemove) {
     const filePath = join(workspaceRoot, sessionFilePath(id));
@@ -129,7 +119,10 @@ export function upsertChatSession(
   workspaceRoot: string,
   record: ChatSessionRecord,
 ): ChatSessionRecord {
-  const parsed = ChatSessionRecordSchema.parse(record);
+  const parsed = preserveChatSessionContext(
+    getChatSession(workspaceRoot, record.head.id),
+    ChatSessionRecordSchema.parse(record),
+  );
   ensureSessionsDir(workspaceRoot);
   writeFileSync(
     join(workspaceRoot, sessionFilePath(parsed.head.id)),
@@ -236,6 +229,9 @@ export function applyAutoChatSessionTitle(
 }
 
 export function deleteChatSession(workspaceRoot: string, sessionId: string): boolean {
+  const indexBefore = readIndex(workspaceRoot);
+  if (chatSessionHasChildren(indexBefore.heads, sessionId)) return false;
+
   const filePath = join(workspaceRoot, sessionFilePath(sessionId));
   if (existsSync(filePath)) {
     unlinkSync(filePath);
@@ -251,6 +247,37 @@ export function deleteChatSession(workspaceRoot: string, sessionId: string): boo
   };
   writeIndex(workspaceRoot, index);
   return existed;
+}
+
+export function saveChatSessionContext(
+  workspaceRoot: string,
+  sessionId: string,
+  update: ChatSessionContextUpdate,
+): ChatSessionHead | null {
+  const record = getChatSession(workspaceRoot, sessionId);
+  if (!record) return null;
+  const next = ChatSessionRecordSchema.parse(applyChatSessionContextUpdate(record, update));
+  upsertChatSession(workspaceRoot, next);
+  return next.head;
+}
+
+export function setChatSessionClassification(
+  workspaceRoot: string,
+  sessionId: string,
+  classification: ChatSessionClassification,
+): ChatSessionHead | null {
+  const record = getChatSession(workspaceRoot, sessionId);
+  if (!record) return null;
+  const nextHead: ChatSessionHead = {
+    ...record.head,
+    classification,
+    classificationSource: "manual",
+    lastUpdatedAt: new Date().toISOString(),
+  };
+  if (classification === "misc") delete nextHead.responsibility;
+  const parsedHead = ChatSessionHeadSchema.parse(nextHead);
+  upsertChatSession(workspaceRoot, { ...record, head: parsedHead });
+  return parsedHead;
 }
 
 export function setLastActiveChatSession(

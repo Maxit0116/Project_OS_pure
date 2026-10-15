@@ -8,6 +8,7 @@ const KINDS: C4ShapeKind[] = [
   'external_system',
   'web_app',
   'mobile_app',
+  'desktop_app',
   'server',
   'database',
   'queue',

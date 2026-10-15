@@ -61,5 +61,11 @@ export function mergeTreeExpansion(
 }
 
 export function isSemanticFileKind(kind: string): boolean {
-  return kind === 'file' || kind === 'api' || kind === 'route' || kind === 'config'
+  return (
+    kind === 'file' ||
+    kind === 'api' ||
+    kind === 'route' ||
+    kind === 'config' ||
+    kind === 'test'
+  )
 }

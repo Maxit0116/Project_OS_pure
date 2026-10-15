@@ -26,6 +26,21 @@ export type MapHoverPreview =
 
 export const GALAXY_PREVIEW_FOLLOW_MS = 1000
 
+/** How long the pointer must rest on a node before the preview opens. */
+export const PREVIEW_DWELL_MS = 1000
+/** Movement inside this radius still counts as resting. */
+export const PREVIEW_DWELL_SLOP_PX = 12
+
+export function previewDwellMoved(
+  anchor: { x: number; y: number },
+  point: { x: number; y: number },
+  slop = PREVIEW_DWELL_SLOP_PX,
+): boolean {
+  const dx = point.x - anchor.x
+  const dy = point.y - anchor.y
+  return dx * dx + dy * dy > slop * slop
+}
+
 export const PREVIEW_CURSOR_OFFSET_X = 18
 export const PREVIEW_CURSOR_OFFSET_Y = 14
 export const PREVIEW_VIEWPORT_MARGIN = 12

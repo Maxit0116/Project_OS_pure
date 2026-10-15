@@ -29,6 +29,7 @@ import { ProjectOSError } from "../errors.js";
 import { installStructureGraphScaffolding } from "./structure-graph-install.js";
 import { collectWorkspaceTechSignals } from "./structure-graph-l2.js";
 import { validateWorkspaceFixtures } from "../validation/validate-fixtures.js";
+import { attachIndexedFilesToSemanticTree } from "./semantic-tree-files.js";
 
 const SKIP_DIR_NAMES = new Set([
   ".git",
@@ -724,12 +725,15 @@ export function buildHeuristicSemanticTree(input: {
     });
   }
 
-  return {
-    version: "0.1.0",
-    projectId: input.projectId,
-    generatedAt: new Date().toISOString(),
-    roots,
-  };
+  return attachIndexedFilesToSemanticTree(
+    {
+      version: "0.1.0",
+      projectId: input.projectId,
+      generatedAt: new Date().toISOString(),
+      roots,
+    },
+    input.graph.fileIndex,
+  );
 }
 
 

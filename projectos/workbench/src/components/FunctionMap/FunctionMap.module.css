@@ -84,10 +84,15 @@
   flex: 1;
 }
 
+.toolbarInline .searchAnchor {
+  flex: 0 1 280px;
+  min-width: 180px;
+  max-width: 320px;
+}
+
 .toolbarInline .search {
-  flex: 0 1 180px;
-  min-width: 120px;
-  max-width: 200px;
+  width: 100%;
+  max-width: none;
   padding: 4px 8px;
   font-size: var(--font-size-xs);
 }
@@ -236,10 +241,15 @@
   flex-shrink: 0;
 }
 
-.search {
+.searchAnchor {
+  position: relative;
   flex: 1;
-  min-width: 140px;
-  max-width: 220px;
+  min-width: 180px;
+  max-width: 280px;
+}
+
+.search {
+  width: 100%;
   padding: 6px 10px;
   font-size: var(--font-size-sm);
   color: var(--tech-text-primary);
@@ -252,6 +262,68 @@
 .search:focus {
   border-color: var(--tech-accent);
   outline: none;
+}
+
+.searchResults {
+  position: fixed;
+  z-index: 80;
+  max-height: 320px;
+  overflow: auto;
+  padding: 4px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 8px;
+  box-shadow: var(--tech-shadow-lg);
+}
+
+.searchEmpty {
+  padding: 8px 10px;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-muted);
+}
+
+.searchHit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tech-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.searchHitActive,
+.searchHit:hover,
+.searchHit:focus-visible {
+  outline: none;
+  background: var(--tech-bg-muted);
+}
+
+.searchHitTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchHitMark {
+  background: transparent;
+  color: var(--tech-accent);
+  font-weight: var(--font-weight-semibold);
+}
+
+.searchHitKind {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-muted);
 }
 
 .legend {
@@ -313,7 +385,6 @@
   min-height: 0;
   position: relative;
   background: transparent;
-  transition: opacity 120ms var(--ease-out);
   user-select: none;
   -webkit-user-select: none;
 }

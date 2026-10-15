@@ -1,12 +1,12 @@
 import { Columns2, FileCode, Rows2, X } from 'lucide-react'
-import { useCallback, useLayoutEffect, useRef, type CSSProperties } from 'react'
+import { useCallback, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useTabStripDrag } from '../ui/tabStrip/useTabStripDrag'
-import { useTabStripLayout } from '../ui/tabStrip/useTabStripLayout'
 import tabStyles from '../ui/tabStrip/TabStrip.module.css'
 import CodeEditorTabItem from './CodeEditorTabItem'
+import { editorTabScrollDelta, revealEditorTab } from './editorTabScroll'
 import styles from './CodeEditorTabBar.module.css'
 
 interface Props {
@@ -34,7 +34,7 @@ export default function CodeEditorTabBar({ paneId }: Props) {
   const tabCount = filePaths.length
   const activeFilePath = pane?.activeFilePath ?? null
 
-  const { tabListRef, tabWidth, isCompressed, isScrollable } = useTabStripLayout(tabCount, 0)
+  const tabListRef = useRef<HTMLDivElement>(null)
   const tabRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const prevTabCountRef = useRef(tabCount)
   const prevActiveFileRef = useRef(activeFilePath)
@@ -86,6 +86,29 @@ export default function CodeEditorTabBar({ paneId }: Props) {
     [closeEditorFile, paneId],
   )
 
+  const onTabListWheel = useCallback((event: WheelEvent) => {
+    const list = event.currentTarget as HTMLDivElement
+    if (list.scrollWidth <= list.clientWidth + 1) return
+    const delta = editorTabScrollDelta(event.deltaX, event.deltaY)
+    if (delta === 0) return
+    event.preventDefault()
+    list.scrollLeft += delta
+  }, [])
+
+  const setTabListNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      const previous = tabListRef.current
+      if (previous) {
+        previous.removeEventListener('wheel', onTabListWheel)
+      }
+      tabListRef.current = node
+      if (node) {
+        node.addEventListener('wheel', onTabListWheel, { passive: false })
+      }
+    },
+    [onTabListWheel],
+  )
+
   useLayoutEffect(() => {
     if (isDragging || !activeFilePath) return
     if (prevActiveFileRef.current === activeFilePath && prevTabCountRef.current === tabCount) {
@@ -98,13 +121,10 @@ export default function CodeEditorTabBar({ paneId }: Props) {
     const addedTab = tabCount > prevTabCountRef.current
     prevTabCountRef.current = tabCount
 
-    if (!activeEl) return
+    const list = tabListRef.current
+    if (!activeEl || !list) return
 
-    activeEl.scrollIntoView({
-      inline: addedTab ? 'end' : 'nearest',
-      block: 'nearest',
-      behavior: 'auto',
-    })
+    list.scrollLeft = revealEditorTab(list, activeEl, addedTab ? 'end' : 'nearest')
   }, [activeFilePath, isDragging, tabCount])
 
   if (!pane) return null
@@ -115,16 +135,20 @@ export default function CodeEditorTabBar({ paneId }: Props) {
   return (
     <div className={styles.tabBar}>
       <div
-        ref={tabListRef}
-        className={`${tabStyles.tabList} ${isScrollable ? tabStyles.tabListScrollable : ''} ${
-          isDragging ? tabStyles.tabListDragging : ''
-        }`}
-        style={{ '--tab-width': `${tabWidth}px` } as CSSProperties}
+        ref={setTabListNode}
+        className={`${tabStyles.tabList} ${isDragging ? tabStyles.tabListDragging : ''}`}
         role="tablist"
       >
         {stripItems.map((item) => {
           if (item.kind === 'spacer') {
-            return <div key="tab-drag-spacer" className={tabStyles.tabSpacer} aria-hidden />
+            return (
+              <div
+                key="tab-drag-spacer"
+                className={tabStyles.tabSpacer}
+                style={{ width: ghost?.width ?? 0 }}
+                aria-hidden
+              />
+            )
           }
 
           const filePath = item.id
@@ -134,7 +158,6 @@ export default function CodeEditorTabBar({ paneId }: Props) {
               filePath={filePath}
               isActive={filePath === activeFilePath}
               isDirty={isEditorDirty(filePath)}
-              isCompressed={isCompressed}
               showClose
               onTitlePointerDown={onTitlePointerDown}
               onTitleClick={onTitleClick}
@@ -183,16 +206,10 @@ export default function CodeEditorTabBar({ paneId }: Props) {
                 transform: `translate(${ghost.x}px, ${ghost.y}px)`,
               }}
             >
-              <FileCode size={12} strokeWidth={1.75} className={tabStyles.tabIcon} aria-hidden />
-              <span
-                className={`${tabStyles.tabTitle} ${
-                  isCompressed ? tabStyles.tabTitleCompressed : ''
-                }`}
-              >
-                {fileLabel(ghostFilePath)}
-              </span>
+              <FileCode size={16} strokeWidth={1.75} className={tabStyles.tabIcon} aria-hidden />
+              <span className={tabStyles.tabTitle}>{fileLabel(ghostFilePath)}</span>
               <span className={tabStyles.tabDragGhostClose} aria-hidden>
-                <X size={16} strokeWidth={2.25} />
+                <X size={14} strokeWidth={2} />
               </span>
             </div>,
             document.body,

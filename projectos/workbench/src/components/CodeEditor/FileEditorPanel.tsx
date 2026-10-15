@@ -11,8 +11,11 @@ import MarkdownViewToggle from '../Markdown/MarkdownViewToggle'
 import { isMarkdownPath } from '../Markdown/markdownPath'
 import { findHeadingLine as findHeadingLineInContent } from '../Markdown/markdownLinkUtils'
 import { useMarkdownEditorScrollSync } from '../Markdown/useMarkdownEditorScrollSync'
+import { codeEditorOptions } from './editorPresentation'
+import { editorThemeName } from './editorTheme'
 import { registerEditor, revealPosition, unregisterEditor } from './editorNavigation'
 import { MonacoEditor } from './monacoEditorLazy'
+import { trackSemanticTokenModel } from './semanticTokens'
 import styles from './FileEditorPanel.module.css'
 
 const MIN_SPLIT_PERCENT = 25
@@ -47,7 +50,7 @@ export default function FileEditorPanel({ filePath, content, onChange, showHeade
     () => diagnosticItems.filter((item) => item.filePath === filePath),
     [diagnosticItems, filePath],
   )
-  const monacoTheme = resolvedTheme === 'dark' ? 'vs-dark' : 'vs'
+  const monacoTheme = editorThemeName(resolvedTheme)
   const monacoRef = useRef<Monaco | null>(null)
   const editorRef = useRef<ReturnType<Monaco['editor']['create']> | null>(null)
   const splitBodyRef = useRef<HTMLDivElement>(null)
@@ -95,6 +98,15 @@ export default function FileEditorPanel({ filePath, content, onChange, showHeade
       unregisterEditor(filePath)
     }
   }, [filePath])
+
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor || !editorMounted) return
+    const model = editor.getModel()
+    if (!model) return
+    registerEditor(filePath, editor)
+    return trackSemanticTokenModel(model, filePath)
+  }, [editorMounted, filePath])
 
   const onSplitDelta = useCallback((delta: number) => {
     const body = splitBodyRef.current
@@ -155,14 +167,7 @@ export default function FileEditorPanel({ filePath, content, onChange, showHeade
           registerEditor(filePath, editor)
           setEditorMounted(true)
         }}
-        options={{
-          minimap: { enabled: false },
-          fontSize: 13,
-          lineNumbers: 'on',
-          scrollBeyondLastLine: false,
-          automaticLayout: true,
-          padding: { top: 12 },
-        }}
+        options={codeEditorOptions}
       />
     </Suspense>
   ) : null

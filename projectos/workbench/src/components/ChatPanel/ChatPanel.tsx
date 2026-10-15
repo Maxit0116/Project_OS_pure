@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react'
+import { GitBranch } from 'lucide-react'
 import { canSubmitAgentPrompt, useWorkbenchStore } from '../../state/workbenchStore'
+import { useChatSessionStore } from '../../state/chatSessionStore'
 import {
   selectPendingChangesDrawerUndoMode,
   selectPendingChangesDrawerVisible,
@@ -12,6 +14,7 @@ import DebugSessionPanel from './DebugSessionPanel'
 import { cycleChatMode } from './ChatModeSelector'
 import ChatMessageContent from './ChatMessageContent'
 import ChatMessageCopyButton from './ChatMessageCopyButton'
+import InheritedSessionCard from './InheritedSessionCard'
 import AgentActivityIndicator from '../ui/AgentActivityIndicator'
 import { VoiceInputErrorBanner } from './VoiceInputControls'
 import { mergeBaseWithSpoken } from './voice/mergeTranscript'
@@ -25,6 +28,9 @@ import styles from './ChatPanel.module.css'
 
 export default function ChatPanel() {
   const messages = useWorkbenchStore((s) => s.messages)
+  const inheritedDigest = useChatSessionStore((s) => s.inheritedDigest)
+  const activeSessionId = useChatSessionStore((s) => s.activeSessionId)
+  const forkSession = useChatSessionStore((s) => s.forkSession)
   const composerDraft = useWorkbenchStore((s) => s.composerDraft)
   const setComposerDraft = useWorkbenchStore((s) => s.setComposerDraft)
   const setChatInput = useWorkbenchStore((s) => s.setChatInput)
@@ -170,9 +176,14 @@ export default function ChatPanel() {
   return (
     <div className={styles.panel}>
       <div className={styles.messages} ref={messagesRef}>
+        {inheritedDigest ? <InheritedSessionCard digest={inheritedDigest} /> : null}
         {messages.map((msg) => {
           const showCopy =
             chatMode === 'ask' && msg.role === 'assistant' && msg.content.trim().length > 0
+          const showBranch =
+            !!activeSessionId &&
+            (msg.role === 'user' || msg.role === 'assistant') &&
+            msg.content.trim().length > 0
           return (
             <div key={msg.id} className={`${styles.message} ${styles[msg.role]}`}>
               <div className={styles.messageBody}>
@@ -185,9 +196,20 @@ export default function ChatPanel() {
                 <div className={styles.bubble} title={formatTime(msg.timestamp)}>
                   <ChatMessageContent message={msg} />
                 </div>
-                {showCopy && (
+                {(showCopy || showBranch) && (
                   <div className={styles.messageActions}>
-                    <ChatMessageCopyButton content={msg.content} />
+                    {showBranch ? (
+                      <button
+                        type="button"
+                        className={styles.copyButton}
+                        aria-label={ts('chat.sessionGraph.branchFromHere')}
+                        title={ts('chat.sessionGraph.branchFromHere')}
+                        onClick={() => void forkSession(activeSessionId!, msg.id)}
+                      >
+                        <GitBranch size={14} aria-hidden />
+                      </button>
+                    ) : null}
+                    {showCopy && <ChatMessageCopyButton content={msg.content} />}
                   </div>
                 )}
               </div>

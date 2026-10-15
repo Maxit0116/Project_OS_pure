@@ -58,6 +58,7 @@ export const AgentAskRequestSchema = z
     scope: AgentConversationScopeSchema,
     question: z.string().trim().min(1),
     language: AgentAskLanguageSchema,
+    chatSessionId: z.string().min(1).optional(),
   })
   .merge(PromptComposerFieldsSchema)
   .strict();

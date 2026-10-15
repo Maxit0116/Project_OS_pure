@@ -88,7 +88,9 @@ export function buildContainerDiagram(input: C4DiagramInput): C4Diagram {
             ? 'Web Application'
             : placed.shape === 'mobile_app'
               ? 'Mobile App'
-              : 'Container'
+              : placed.shape === 'desktop_app'
+                ? 'Desktop App'
+                : 'Container'
     return {
       ...placed,
       stereotype: node.technology ? `[${kind}: ${node.technology}]` : `[${kind}]`,

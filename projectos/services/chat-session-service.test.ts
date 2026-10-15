@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { buildForkedChatSession } from "../contracts/chat-session-context.js";
 import {
   applyAutoChatSessionTitle,
   createEmptyChatSessionRecord,
@@ -85,6 +86,44 @@ describe("chat-session-service", () => {
       expect(autoHead?.title).toBe("Generated title");
       expect(autoHead?.titleSource).toBe("auto");
       expect(autoHead?.titleGeneratedAt).toBeTruthy();
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a parent that still has a branch and stores the child without parent messages", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "chat-sessions-branch-"));
+    try {
+      const parent = createEmptyChatSessionRecord({
+        title: "Login",
+        messages: [
+          {
+            id: "m1",
+            role: "user",
+            content: "Fix the login redirect after callback",
+            timestamp: "2026-08-02T00:00:00.000Z",
+          },
+        ],
+      });
+      upsertChatSession(workspaceRoot, parent);
+      const child = buildForkedChatSession(
+        parent,
+        {
+          responsibility: "Fix the login redirect",
+          decisions: [],
+          openQuestions: [],
+          refs: [],
+          updatedAt: "2026-08-02T00:00:00.000Z",
+          throughMessageId: "m1",
+        },
+        "m1",
+      );
+      upsertChatSession(workspaceRoot, child);
+
+      expect(getChatSession(workspaceRoot, child.head.id)?.messages).toEqual([]);
+      expect(getChatSession(workspaceRoot, parent.head.id)?.messages).toHaveLength(1);
+      expect(deleteChatSession(workspaceRoot, parent.head.id)).toBe(false);
+      expect(listChatSessionHeads(workspaceRoot).map((head) => head.id)).toContain(parent.head.id);
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true });
     }

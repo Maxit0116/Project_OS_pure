@@ -10,6 +10,7 @@ export const PromptRefineRequestSchema = z
     nodeId: z.string().optional(),
     filePath: z.string().optional(),
     rawPrompt: z.string(),
+    chatSessionId: z.string().min(1).optional(),
   })
   .merge(PromptComposerFieldsSchema)
   .strict();

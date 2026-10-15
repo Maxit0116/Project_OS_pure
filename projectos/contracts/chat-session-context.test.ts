@@ -1,0 +1,240 @@
+import { describe, expect, it } from "vitest";
+
+import type { ChatMessage, ChatSessionHead, ChatSessionRecord } from "./chat-session.js";
+import {
+  appendSessionContextMarkdown,
+  applyChatSessionContextUpdate,
+  buildForkedChatSession,
+  buildSessionGraph,
+  chatSessionHasChildren,
+  chatSessionIdsToPrune,
+  isSubstantiveChat,
+  messagesThroughFork,
+  parseSessionContextModelOutput,
+  sessionGraphCardInsets,
+} from "./chat-session-context.js";
+
+const now = "2026-08-02T00:00:00.000Z";
+
+function message(id: string, role: ChatMessage["role"], content: string): ChatMessage {
+  return { id, role, content, timestamp: now };
+}
+
+function head(partial: Partial<ChatSessionHead> & Pick<ChatSessionHead, "id">): ChatSessionHead {
+  return {
+    title: partial.title ?? partial.id,
+    createdAt: now,
+    lastUpdatedAt: partial.lastUpdatedAt ?? now,
+    chatMode: "ask",
+    isArchived: partial.isArchived ?? false,
+    status: "idle",
+    ...partial,
+  };
+}
+
+function record(partial: Partial<ChatSessionRecord> & { head: ChatSessionHead }): ChatSessionRecord {
+  return {
+    version: "0.2.0",
+    messages: partial.messages ?? [],
+    ...partial,
+  };
+}
+
+describe("chat session context", () => {
+  it("treats greetings and test pings as misc", () => {
+    expect(isSubstantiveChat([message("m1", "user", "hi")])).toBe(false);
+    expect(isSubstantiveChat([message("m1", "user", "test")])).toBe(false);
+    expect(isSubstantiveChat([message("m1", "user", "你好")])).toBe(false);
+    expect(isSubstantiveChat([message("m1", "assistant", "Hello")])).toBe(false);
+  });
+
+  it("treats a real task as substantive", () => {
+    expect(
+      isSubstantiveChat([message("m1", "user", "Fix the login redirect after callback")]),
+    ).toBe(true);
+    expect(isSubstantiveChat([message("m1", "user", "look at app/login.tsx")])).toBe(true);
+  });
+
+  it("promotes a misc session to a root once the transcript is substantive", () => {
+    const misc = head({
+      id: "chat_hi",
+      title: "hi",
+      classification: "misc",
+      classificationSource: "auto",
+    });
+    expect(buildSessionGraph([misc]).nodes).toHaveLength(0);
+    expect(buildSessionGraph([misc]).misc.map((item) => item.id)).toEqual(["chat_hi"]);
+
+    const promoted = applyChatSessionContextUpdate(
+      record({
+        head: misc,
+        messages: [message("m1", "user", "Fix the login redirect after callback")],
+      }),
+      {
+        classification: "topic",
+        title: "Login redirect",
+        responsibility: "Fix the login redirect",
+        digest: {
+          responsibility: "Fix the login redirect",
+          decisions: [],
+          openQuestions: [],
+          refs: [],
+          updatedAt: now,
+          throughMessageId: "m1",
+        },
+        now,
+      },
+    );
+    const graph = buildSessionGraph([promoted.head]);
+    expect(graph.misc).toHaveLength(0);
+    expect(graph.nodes.map((node) => node.id)).toEqual(["chat_hi"]);
+    expect(graph.nodes[0]?.parentId).toBeNull();
+    expect(promoted.head.title).toBe("Login redirect");
+  });
+
+  it("keeps a manual title and a manual misc classification", () => {
+    const updated = applyChatSessionContextUpdate(
+      record({
+        head: head({
+          id: "chat_named",
+          title: "Pinned topic",
+          titleSource: "manual",
+          classification: "misc",
+          classificationSource: "manual",
+        }),
+      }),
+      {
+        classification: "topic",
+        title: "Generated title",
+        responsibility: "Should stay hidden",
+        digest: {
+          responsibility: "Should stay hidden",
+          decisions: [],
+          openQuestions: [],
+          refs: [],
+          updatedAt: now,
+          throughMessageId: "m1",
+        },
+        now,
+      },
+    );
+    expect(updated.head.title).toBe("Pinned topic");
+    expect(updated.head.titleSource).toBe("manual");
+    expect(updated.head.classification).toBe("misc");
+    expect(updated.contextDigest).toBeUndefined();
+  });
+
+  it("builds a tree from branches and leaves archived sessions out", () => {
+    const graph = buildSessionGraph([
+      head({ id: "root", classification: "topic", responsibility: "Own login" }),
+      head({
+        id: "child",
+        parentSessionId: "root",
+        classification: "topic",
+      }),
+      head({ id: "orphan", parentSessionId: "missing", classification: "topic" }),
+      head({ id: "aside", classification: "misc" }),
+      head({ id: "old", classification: "topic", isArchived: true }),
+    ]);
+    expect(graph.edges).toEqual([{ source: "root", target: "child" }]);
+    expect(graph.nodes.find((node) => node.id === "orphan")?.parentId).toBeNull();
+    expect(graph.misc.map((item) => item.id)).toEqual(["aside"]);
+    expect(graph.nodes.map((node) => node.id)).not.toContain("old");
+  });
+
+  it("forks without copying parent messages", () => {
+    const parent = record({
+      head: head({ id: "parent", classification: "topic" }),
+      messages: [
+        message("m1", "user", "Fix the login redirect after callback"),
+        message("m2", "assistant", "The callback sets the cookie."),
+        message("m3", "user", "Also rename the button"),
+      ],
+      contextDigest: {
+        responsibility: "Fix the login redirect",
+        decisions: ["Keep the callback"],
+        openQuestions: [],
+        refs: ["app/login.tsx"],
+        updatedAt: now,
+        throughMessageId: "m3",
+      },
+    });
+    const slice = messagesThroughFork(parent.messages, "m2");
+    expect(slice?.map((item) => item.id)).toEqual(["m1", "m2"]);
+    const child = buildForkedChatSession(parent, parent.contextDigest ?? null, "m2", now);
+    expect(child.messages).toEqual([]);
+    expect(child.head.parentSessionId).toBe("parent");
+    expect(child.head.forkMessageId).toBe("m2");
+    expect(child.inheritedDigest?.responsibility).toBe("Fix the login redirect");
+    expect(parent.messages).toHaveLength(3);
+  });
+
+  it("does not prune a session that still has children", () => {
+    const heads = [
+      head({ id: "parent", lastUpdatedAt: "2026-08-01T00:00:00.000Z" }),
+      head({ id: "child", parentSessionId: "parent", lastUpdatedAt: "2026-08-03T00:00:00.000Z" }),
+      head({ id: "old", lastUpdatedAt: "2026-08-02T00:00:00.000Z" }),
+    ];
+    expect(chatSessionHasChildren(heads, "parent")).toBe(true);
+    expect(chatSessionIdsToPrune(heads, [], 2)).toEqual(["old"]);
+  });
+
+  it("insets the floating card inside the squeezed center", () => {
+    expect(
+      sessionGraphCardInsets({
+        leftOpen: true,
+        rightOpen: true,
+        terminalOpen: true,
+        leftWidth: 253,
+        rightWidth: 380,
+        terminalHeight: 320,
+      }),
+    ).toEqual({ top: 12, right: 392, bottom: 332, left: 265 });
+    expect(
+      sessionGraphCardInsets({
+        leftOpen: false,
+        rightOpen: false,
+        terminalOpen: false,
+        leftWidth: 253,
+        rightWidth: 380,
+        terminalHeight: 320,
+      }),
+    ).toEqual({ top: 12, right: 12, bottom: 12, left: 12 });
+  });
+
+  it("appends inherited and current context with current winning on conflict", () => {
+    const markdown = appendSessionContextMarkdown("Project notes", {
+      inheritedDigest: {
+        responsibility: "Parent duty",
+        decisions: [],
+        openQuestions: [],
+        refs: [],
+        updatedAt: now,
+        throughMessageId: "m1",
+      },
+      contextDigest: {
+        responsibility: "Child duty",
+        decisions: [],
+        openQuestions: [],
+        refs: [],
+        updatedAt: now,
+        throughMessageId: "m2",
+      },
+    });
+    expect(markdown).toContain("Project notes");
+    expect(markdown).toContain("Parent duty");
+    expect(markdown).toContain("Child duty");
+    expect(markdown.indexOf("supersedes")).toBeGreaterThan(-1);
+  });
+
+  it("parses a model context payload", () => {
+    const parsed = parseSessionContextModelOutput(
+      '{"title":"Login redirect","substantive":true,"responsibility":"Fix the login redirect","decisions":["Keep callback"],"openQuestions":[],"refs":["app/login.tsx"]}',
+      "m2",
+      now,
+    );
+    expect(parsed?.title).toBe("Login redirect");
+    expect(parsed?.digest?.refs).toEqual(["app/login.tsx"]);
+    expect(parsed?.digest?.throughMessageId).toBe("m2");
+  });
+});

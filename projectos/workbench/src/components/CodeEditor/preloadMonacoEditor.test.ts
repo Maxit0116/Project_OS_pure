@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@monaco-editor/react', () => ({
   default: {},
   loader: {
+    config: vi.fn(),
     init: vi.fn(() => Promise.resolve()),
   },
 }))

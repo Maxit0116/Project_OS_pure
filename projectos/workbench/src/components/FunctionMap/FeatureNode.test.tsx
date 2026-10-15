@@ -94,6 +94,16 @@ describe('FeatureNode purpose-first hierarchy', () => {
     expect(html).not.toContain('data-purpose-first')
   })
 
+  it('uses a corner icon for drill-in and keeps the sentence in the accessible name', () => {
+    const html = renderFeatureNode({
+      canOpenGraph: true,
+      onOpenGraph: () => undefined,
+    })
+
+    expect(html).toContain('aria-label="Open internal file map"')
+    expect(html).not.toContain('→')
+  })
+
   it('keeps code/file cards on their existing purpose-first file layout', () => {
     const html = renderFeatureNode({
       label: 'app/login/page.tsx',

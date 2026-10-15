@@ -7,6 +7,7 @@ import {
 } from './layoutWithElk'
 import { horizontalGap } from './edgeLabelFit'
 import { minNodeGap } from './orthogonalRoute'
+import { BOUNDARY_PAD } from './boundaryFit'
 import type { C4Diagram } from './types'
 
 function sampleDiagram(): C4Diagram {
@@ -97,6 +98,15 @@ describe('layoutWithElk', () => {
     const boundary = laidOut.boundaries[0]!
     expect(boundary.width).toBeGreaterThan(100)
     expect(boundary.height).toBeGreaterThan(100)
+    const members = laidOut.nodes.filter((node) => node.id !== 'stripe')
+    const minX = Math.min(...members.map((node) => node.position.x))
+    const minY = Math.min(...members.map((node) => node.position.y))
+    const maxX = Math.max(...members.map((node) => node.position.x + node.width))
+    const maxY = Math.max(...members.map((node) => node.position.y + node.height))
+    expect(boundary.position.x).toBeCloseTo(minX - BOUNDARY_PAD.left)
+    expect(boundary.position.y).toBeCloseTo(minY - BOUNDARY_PAD.top)
+    expect(boundary.width).toBeCloseTo(maxX - minX + BOUNDARY_PAD.left + BOUNDARY_PAD.right)
+    expect(boundary.height).toBeCloseTo(maxY - minY + BOUNDARY_PAD.top + BOUNDARY_PAD.bottom)
     for (const node of laidOut.nodes) {
       expect(Number.isFinite(node.position.x)).toBe(true)
       expect(Number.isFinite(node.position.y)).toBe(true)

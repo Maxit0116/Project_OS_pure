@@ -106,7 +106,7 @@ function TreeNode({
         role="treeitem"
         aria-expanded={hasChildren ? isExpanded : undefined}
         aria-selected={isSelected}
-        className={`${styles.row} ${isSelected ? styles.rowSelected : ''} ${isHighlighted && !isSelected ? styles.rowHighlighted : ''} ${isError ? styles.rowError : ''} ${isHighlighted ? 'flash-highlight' : ''}`}
+        className={`${styles.row} ${isSelected ? styles.rowSelected : ''} ${isHighlighted && !isSelected ? styles.rowHighlighted : ''} ${isError ? styles.rowError : ''}`}
         style={{ paddingLeft: 8 + depth * 14 }}
         onClick={handleRowClick}
         data-tree-row-id={node.id}
@@ -165,7 +165,7 @@ function AttentionRow({ node }: { node: SemanticTreeNode }) {
     <button
       ref={attentionRef}
       type="button"
-      className={`${styles.attentionRow} flash-highlight`}
+      className={styles.attentionRow}
       onClick={() => node.path && void selectFile(node.path, node.sourceNodeId)}
     >
       <AlertTriangle size={12} />

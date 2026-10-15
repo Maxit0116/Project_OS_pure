@@ -39,4 +39,52 @@ describe('resolveC4ShapeKind', () => {
       }),
     ).toBe('server')
   })
+
+  it('draws client devices from the name, not the toolkit keyword', () => {
+    expect(
+      resolveC4ShapeKind({
+        elementType: 'container',
+        name: 'Android 打卡客户端',
+        technology: 'Jetpack Compose',
+      }),
+    ).toBe('mobile_app')
+    expect(
+      resolveC4ShapeKind({
+        elementType: 'container',
+        name: 'macOS 打卡客户端',
+        technology: 'SwiftUI',
+      }),
+    ).toBe('desktop_app')
+    expect(
+      resolveC4ShapeKind({
+        elementType: 'container',
+        name: 'Web 打卡',
+        technology: 'Next.js',
+      }),
+    ).toBe('web_app')
+  })
+
+  it('keeps SwiftUI on a phone unless the name or path is a desktop client', () => {
+    expect(
+      resolveC4ShapeKind({
+        elementType: 'container',
+        name: 'iOS 打卡客户端',
+        technology: 'SwiftUI',
+      }),
+    ).toBe('mobile_app')
+    expect(
+      resolveC4ShapeKind({
+        elementType: 'container',
+        name: '打卡客户端',
+        technology: 'SwiftUI',
+        linkedFiles: [{ path: 'macos/App/CheckIn.swift' }],
+      }),
+    ).toBe('desktop_app')
+    expect(
+      resolveC4ShapeKind({
+        elementType: 'container',
+        technology: 'Electron',
+      }),
+    ).toBe('desktop_app')
+  })
 })

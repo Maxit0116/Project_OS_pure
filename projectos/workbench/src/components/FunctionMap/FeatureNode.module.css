@@ -189,7 +189,7 @@
   font-size: 11px;
   line-height: 1.42;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   overflow-wrap: anywhere;
 }
 
@@ -215,7 +215,7 @@
   font-weight: var(--font-weight-semibold);
   line-height: 1.4;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   overflow-wrap: anywhere;
 }
 
@@ -243,7 +243,7 @@
   font-weight: var(--font-weight-semibold);
   line-height: 1.48;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   overflow-wrap: anywhere;
 }
 
@@ -282,32 +282,54 @@
   padding: 0;
 }
 
-.openGraph {
-  align-self: flex-start;
-  margin-top: 5px;
+.openGraphCorner {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  margin: 0;
   padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--node-accent);
-  cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-family: inherit;
-  font-size: 10.5px;
-  font-weight: var(--font-weight-semibold);
+  justify-content: center;
+  border-radius: 4px;
+  border: 1px solid var(--tech-border);
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
 }
 
-.openGraph:hover,
-.openGraph:focus-visible {
-  text-decoration: underline;
-  text-underline-offset: 2px;
+.flowHost[data-c4-flow-node='person'] .openGraphCorner {
+  top: 38px;
 }
 
-.openGraph:focus-visible {
-  border-radius: 3px;
-  outline: 2px solid color-mix(in srgb, var(--node-accent) 70%, transparent);
+.flowHost[data-c4-flow-node='database'] .openGraphCorner {
+  top: 20px;
+}
+
+.openGraphCorner:hover,
+.openGraphCorner:focus-visible,
+.openGraphCorner[data-active='true'] {
+  background: var(--tech-bg-muted);
+  border-color: var(--tech-border-strong);
+  color: var(--tech-text-primary);
+}
+
+.openGraphCorner:focus-visible {
+  outline: 2px solid var(--tech-accent);
   outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .openGraphCorner {
+    transition: none;
+  }
 }
 
 .dimmed {

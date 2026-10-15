@@ -25,6 +25,7 @@ import type {
   PromptRefinement,
   SemanticTree,
   ThinkingDepth,
+  WorkspaceDirectoryEntry,
   VerificationRunResult,
   VerificationCommandApprovalStatus,
   MapArtifactType,
@@ -179,6 +180,11 @@ export type RightPanelTab = 'chat' | 'harness'
 export type CodeSubTab = 'editor' | 'diff'
 export type AgentFlowViewMode = 'timeline' | 'graph'
 export type TreeViewMode = 'semantic' | 'directory'
+
+export interface DirectoryListing {
+  status: 'loading' | 'ready' | 'error'
+  entries: WorkspaceDirectoryEntry[]
+}
 export type ChatMode = 'ask' | 'change' | 'plan' | 'debug' | 'anchored'
 export type AgentFlowSubject = 'ask' | 'run' | 'plan' | 'debug'
 export type LatestAskTrace =
@@ -347,6 +353,7 @@ export interface WorkbenchState {
   treeViewMode: TreeViewMode
   semanticTreeExpansion: Record<string, boolean>
   directoryTreeExpansion: Record<string, boolean>
+  directoryListings: Record<string, DirectoryListing>
   selectedFlowStepId: string | null
   bouncingNodeIds: string[]
   flashKey: number
@@ -463,6 +470,7 @@ export interface WorkbenchState {
   setTreeViewMode: (mode: TreeViewMode) => void
   toggleSemanticTreeExpanded: (nodeId: string, depth: number) => void
   toggleDirectoryTreeExpanded: (folderPath: string, depth: number) => void
+  loadDirectoryListing: (relativePath: string) => Promise<void>
   setSelectedFlowStepId: (id: string | null) => void
   setLeftPanelOpen: (open: boolean) => void
   setRightPanelOpen: (open: boolean) => void
@@ -767,6 +775,11 @@ function scheduleChatSessionPersist(): void {
   chatSessionStore.scheduleTitleSummarize()
 }
 
+function chatSessionRequestFields(): { chatSessionId?: string } {
+  const chatSessionId = useChatSessionStore.getState().activeSessionId
+  return chatSessionId ? { chatSessionId } : {}
+}
+
 function disposeActiveRunSubscriptions(
   get: () => WorkbenchState,
   set: (partial: Partial<WorkbenchState>) => void,
@@ -790,12 +803,13 @@ async function loadWorkspaceIntoStore(
   useOutlineStore.getState().clear()
   useFileTimelineStore.getState().clear()
   useChatSessionStore.getState().clear()
-  const [graph, tree, mapContent, currentWork, projectDescription] = await Promise.all([
+  const [graph, tree, mapContent, currentWork, projectDescription, directoryEntries] = await Promise.all([
     client.getProjectGraph(project.projectId),
     client.getSemanticTree(project.projectId),
     client.getMapContent(project.projectId),
     client.getCurrentWork(project.projectId),
     client.getProjectDescription(project.projectId),
+    client.listWorkspaceDirectory(project.projectId, '').catch(() => null),
   ])
   const features = null
   const featuresLayout = null
@@ -843,6 +857,11 @@ async function loadWorkspaceIntoStore(
     selectedModelProfileId: defaultModelProfileId,
     context: null,
     ...initialTransientState,
+    directoryListings: {
+      '': directoryEntries
+        ? { status: 'ready', entries: directoryEntries }
+        : { status: 'error', entries: [] },
+    },
     currentWork,
     projectDescription,
     teamSnapshot,
@@ -922,6 +941,7 @@ const initialTransientState = {
   bouncingNodeIds: [] as string[],
   semanticTreeExpansion: {} as Record<string, boolean>,
   directoryTreeExpansion: {} as Record<string, boolean>,
+  directoryListings: {} as Record<string, DirectoryListing>,
   selectedArtifactId: null as string | null,
   mapArtifactCreateFlow: null as MapArtifactCreateFlow | null,
   mapWorkGroupCreateFlow: null as MapWorkGroupCreateFlow | null,
@@ -1258,6 +1278,37 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         directoryTreeExpansion: { ...s.directoryTreeExpansion, [folderPath]: !expanded },
       }
     }),
+
+  loadDirectoryListing: async (relativePath) => {
+    const { client, project, directoryListings } = get()
+    const existing = directoryListings[relativePath]
+    if (!project || existing?.status === 'loading' || existing?.status === 'ready') return
+    const projectId = project.projectId
+    set((s) => ({
+      directoryListings: {
+        ...s.directoryListings,
+        [relativePath]: { status: 'loading', entries: existing?.entries ?? [] },
+      },
+    }))
+    try {
+      const entries = await client.listWorkspaceDirectory(projectId, relativePath)
+      if (get().project?.projectId !== projectId) return
+      set((s) => ({
+        directoryListings: {
+          ...s.directoryListings,
+          [relativePath]: { status: 'ready', entries },
+        },
+      }))
+    } catch {
+      if (get().project?.projectId !== projectId) return
+      set((s) => ({
+        directoryListings: {
+          ...s.directoryListings,
+          [relativePath]: { status: 'error', entries: [] },
+        },
+      }))
+    }
+  },
   setSelectedFlowStepId: (id) => set({ selectedFlowStepId: id }),
   setLeftPanelOpen: (open) => {
     set({ leftPanelOpen: open })
@@ -1855,6 +1906,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           scope: askScope,
           question: rawPrompt.trim(),
           language: { mode: 'auto' },
+          ...chatSessionRequestFields(),
           ...composerFields,
         })
         set((current) => ({
@@ -1921,6 +1973,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           scope: askScope,
           question: rawPrompt.trim(),
           language: { mode: 'auto' },
+          ...chatSessionRequestFields(),
           ...composerFields,
         })
         set((current) => ({
@@ -2037,6 +2090,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           projectId: project.projectId,
           scope: planScope,
           objective: rawPrompt.trim(),
+          ...chatSessionRequestFields(),
           ...composerFields,
         }))
         if (plan.status === 'needs_clarification') {
@@ -2126,6 +2180,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           projectId: project.projectId,
           scope: debugScope,
           bugDescription: rawPrompt.trim(),
+          ...chatSessionRequestFields(),
           ...composerFields,
         })
         set({
@@ -2174,6 +2229,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         nodeId: selectedNodeId ?? undefined,
         filePath: selectedFilePath ?? undefined,
         rawPrompt: rawPrompt.trim(),
+        ...chatSessionRequestFields(),
         ...composerFields,
       })
       set((state) => ({
@@ -2533,6 +2589,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         existingPlanId: pendingPlan.id,
         clarifyingAnswers: [...mergedAnswers.values()],
         existingQuestions: pendingPlan.clarifyingQuestions,
+        ...chatSessionRequestFields(),
       }))
       set({
         refineLoading: false,
@@ -2936,6 +2993,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         scope: { kind: 'node', nodeId: 'feat_login' },
         bugDescription: AUTH_ERROR_RAW,
         rawError: AUTH_ERROR_RAW,
+        ...chatSessionRequestFields(),
       })
       set({
         harnessRecord,

@@ -10,6 +10,9 @@ import {
   registerOverlay,
 } from '../overlays/overlayStack'
 import { handleCommandPaletteNavigation } from './commandPaletteKeyboard'
+import { filterCommandPaletteEntries, COMMAND_PALETTE_FILE_GROUP } from './commandPaletteFilter'
+import { bindCommandPalette } from '../../appMenu/commandPaletteController'
+import { executeAppMenuCommand } from '../../appMenu/menuCommands'
 import type { SemanticTreeNode } from '@contracts/index'
 import {
   exportC4MermaidBundle,
@@ -36,17 +39,17 @@ interface Command {
 
 export default function CommandPalette() {
   const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<'all' | 'files'>('all')
   const [query, setQuery] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const overlayTokenRef = useRef(Symbol('command-palette'))
+  const inputRef = useRef<HTMLInputElement>(null)
   const phase = useWorkbenchStore((s) => s.phase)
   const runGoogleLoginScenario = useWorkbenchStore((s) => s.runGoogleLoginScenario)
   const triggerAuthError = useWorkbenchStore((s) => s.triggerAuthError)
   const resetDemo = useWorkbenchStore((s) => s.resetDemo)
   const togglePanel = useBottomDockStore((s) => s.togglePanel)
-  const openPanel = useBottomDockStore((s) => s.openPanel)
   const setActiveView = useBottomDockStore((s) => s.setActiveView)
-  const createTab = useTerminalStore((s) => s.createTab)
   const killActiveTab = useTerminalStore((s) => s.killActiveTab)
   const splitTerminal = useTerminalStore((s) => s.splitTerminal)
   const graph = useWorkbenchStore((s) => s.graph)
@@ -72,17 +75,31 @@ export default function CommandPalette() {
   }, [open])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault()
+    if (!open) return
+    const focusInput = () => inputRef.current?.focus()
+    focusInput()
+    const timer = window.setTimeout(focusInput, 0)
+    return () => window.clearTimeout(timer)
+  }, [open])
+
+  useEffect(() => {
+    return bindCommandPalette((action) => {
+      if (action === 'open-files') {
+        setMode('files')
+        setOpen(true)
+      } else {
+        setMode('all')
         setOpen((current) => !current)
-        setQuery('')
-        setHighlightedIndex(0)
-        return
       }
-      if (open) {
-        handleTopmostOverlayEscape(e, overlayTokenRef.current, closePalette)
-      }
+      setQuery('')
+      setHighlightedIndex(0)
+    })
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!open) return
+      handleTopmostOverlayEscape(e, overlayTokenRef.current, closePalette)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -172,8 +189,7 @@ export default function CommandPalette() {
           label: ts('terminal.newTab'),
           group: 'Terminal',
           action: () => {
-            openPanel('terminal')
-            void createTab()
+            executeAppMenuCommand({ id: 'terminal-new' })
           },
         },
         {
@@ -258,18 +274,16 @@ export default function CommandPalette() {
         cmds.push({
           id: `file-${f.path}`,
           label: f.path,
-          group: 'Files',
+          group: COMMAND_PALETTE_FILE_GROUP,
           action: () => void selectFile(f.path),
         })
       })
     }
 
     return cmds
-  }, [graph, tree, selectNode, selectFile, setCenterTab, setLocale, locale, ts, phase, runGoogleLoginScenario, triggerAuthError, resetDemo, togglePanel, openPanel, setActiveView, createTab, killActiveTab, splitTerminal, pushToast, rescanStructureGraph])
+  }, [graph, tree, selectNode, selectFile, setCenterTab, setLocale, locale, ts, phase, runGoogleLoginScenario, triggerAuthError, resetDemo, togglePanel, setActiveView, killActiveTab, splitTerminal, pushToast, rescanStructureGraph])
 
-  const filtered = commands.filter((c) =>
-    c.label.toLowerCase().includes(query.toLowerCase()),
-  )
+  const filtered = filterCommandPaletteEntries(commands, query, mode)
 
   useEffect(() => {
     if (filtered.length === 0) {
@@ -304,6 +318,7 @@ export default function CommandPalette() {
           <div className={styles.inputRow}>
             <Search className={styles.searchIcon} size={16} strokeWidth={1.75} aria-hidden />
             <input
+              ref={inputRef}
               className={styles.input}
               autoFocus
               role="combobox"
@@ -329,7 +344,9 @@ export default function CommandPalette() {
                   },
                 )
               }}
-              placeholder={ts('commandPalette.placeholder')}
+              placeholder={mode === 'files'
+                ? ts('commandPalette.goToFilePlaceholder')
+                : ts('commandPalette.placeholder')}
             />
           </div>
           <div

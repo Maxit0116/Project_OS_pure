@@ -2,6 +2,7 @@ import { useLayoutEffect, useMemo, useRef } from 'react'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { codeNodeDisplayTitle, codeNodeFilePath, isCodeElementNode } from './codeNodeInteraction'
+import { nodePreviewBody } from './nodeCopy'
 import { useFunctionMap } from './FunctionMapContext'
 import styles from './FunctionMap.module.css'
 
@@ -60,6 +61,8 @@ export default function FunctionMapNodePreview() {
   const isCodeElement = isCodeElementNode(node)
   const displayTitle = isCodeElement ? codeNodeDisplayTitle(node) : node.name
   const filePath = isCodeElement ? codeNodeFilePath(node) : undefined
+  const previewBody = nodePreviewBody(node)
+  const previewText = previewBody && previewBody !== displayTitle ? previewBody : undefined
 
   return (
     <aside
@@ -77,18 +80,10 @@ export default function FunctionMapNodePreview() {
       {!isCodeElement && locale === 'en' && node.nameEn && (
         <div className={styles.nodePreviewSubtitle}>{node.nameEn}</div>
       )}
-      {!isCodeElement && (
-        <p className={styles.nodePreviewSummary}>
-          <strong>{ts('map.node.responsibility')}：</strong>
-          {node.responsibility ?? node.summary}
-        </p>
-      )}
+      {previewText ? <p className={styles.nodePreviewSummary}>{previewText}</p> : null}
       <div className={styles.nodePreviewMeta}>
         <span>{ts(`map.elementTypes.${node.elementType ?? 'fallback'}`)}</span>
         {node.layer && <span>{layerLabelById.get(node.layer)}</span>}
-      </div>
-      <div className={styles.nodePreviewMeta}>
-        <span>{node.technology ?? ts('map.node.technologyMissing')}</span>
         <span>{ts('map.previewFiles', { count: node.linkedFiles.length })}</span>
       </div>
       {!node.elementType && node.tags.length > 0 && (

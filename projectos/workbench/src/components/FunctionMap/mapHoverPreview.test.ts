@@ -1,7 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { resolvePreviewPosition } from './mapHoverPreview'
+import { resolvePreviewPosition, previewDwellMoved, PREVIEW_DWELL_MS, PREVIEW_DWELL_SLOP_PX } from './mapHoverPreview'
 
 const bounds = { left: 100, top: 80, right: 900, bottom: 700 }
+
+describe('previewDwellMoved', () => {
+  it('treats a small pointer jitter as still resting', () => {
+    expect(previewDwellMoved({ x: 10, y: 10 }, { x: 16, y: 14 })).toBe(false)
+  })
+
+  it('restarts the dwell after the pointer travels past the slop', () => {
+    expect(previewDwellMoved({ x: 10, y: 10 }, { x: 30, y: 10 })).toBe(true)
+  })
+
+  it('waits a full second before the preview may open', () => {
+    expect(PREVIEW_DWELL_MS).toBeGreaterThanOrEqual(1000)
+    expect(PREVIEW_DWELL_SLOP_PX).toBeGreaterThan(0)
+  })
+})
 
 describe('resolvePreviewPosition', () => {
   it('keeps the default cursor offset when the preview fits inside bounds', () => {

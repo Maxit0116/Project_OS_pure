@@ -35,7 +35,9 @@ Do **not** emit layout coordinates, canvas positions, or view state.
 |-------|------|
 | `id` | Stable identifier; keep across refine when possible |
 | `name` | Product-facing label (not a directory shell) |
-| `description` / `summary` / `responsibility` | What it is / short blurb / what it owns |
+| `summary` | Card line. ≤24 CJK characters or ≤12 words. Do not repeat `name`. |
+| `description` | Hover preview. 1–2 sentences, about 40–120 CJK characters. Add who uses it, what it connects to, and the boundary. Do not repeat `summary`. |
+| `responsibility` | One ownership sentence for the detail drawer. Do not repeat `summary`. |
 | `level` + `elementType` | C4 placement (see below) |
 | `layer` | experience / application / infrastructure |
 | `technology` | Short stack for shape selection (Next.js, PostgreSQL, …) |

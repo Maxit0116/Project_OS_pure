@@ -3,6 +3,7 @@ export { default as SystemShape } from './SystemShape'
 export { default as ExternalSystemShape } from './ExternalSystemShape'
 export { default as WebAppShape } from './WebAppShape'
 export { default as MobileAppShape } from './MobileAppShape'
+export { default as DesktopAppShape } from './DesktopAppShape'
 export { default as ServerShape } from './ServerShape'
 export { default as DatabaseShape } from './DatabaseShape'
 export { default as QueueShape } from './QueueShape'
@@ -18,6 +19,7 @@ import SystemShape from './SystemShape'
 import ExternalSystemShape from './ExternalSystemShape'
 import WebAppShape from './WebAppShape'
 import MobileAppShape from './MobileAppShape'
+import DesktopAppShape from './DesktopAppShape'
 import ServerShape from './ServerShape'
 import DatabaseShape from './DatabaseShape'
 import QueueShape from './QueueShape'
@@ -33,6 +35,7 @@ export const C4_SHAPE_COMPONENTS: Record<
   external_system: ExternalSystemShape,
   web_app: WebAppShape,
   mobile_app: MobileAppShape,
+  desktop_app: DesktopAppShape,
   server: ServerShape,
   database: DatabaseShape,
   queue: QueueShape,
@@ -49,6 +52,7 @@ export const C4_DEFAULT_NODE_SIZE: Record<
   external_system: { width: 200, height: 110 },
   web_app: { width: 200, height: 118 },
   mobile_app: { width: 148, height: 148 },
+  desktop_app: { width: 200, height: 128 },
   server: { width: 200, height: 110 },
   database: { width: 150, height: 130 },
   queue: { width: 210, height: 84 },

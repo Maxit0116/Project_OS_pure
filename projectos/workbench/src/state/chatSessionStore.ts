@@ -1,5 +1,9 @@
-import type { ChatSessionHead, ChatSessionIndex, ChatSessionRecord } from '@contracts/index'
-import { emptyComposerDraft, resolveChatSessionTitleSource } from '@contracts/index'
+import type {
+  ChatSessionHead,
+  ChatSessionRecord,
+  SessionContextDigest,
+} from '@contracts/index'
+import { emptyComposerDraft } from '@contracts/index'
 import { create } from 'zustand'
 import { resolveClientMode } from '../data/clientMode'
 import {
@@ -7,6 +11,7 @@ import {
   sampleActiveSessionId,
   samplePinnedSessionId,
 } from '../fixtures/sampleChatSessions'
+import { getStoreMessage } from '../i18n/storeMessages'
 import { applyRunEventsToState } from './handleRunEvent'
 import {
   buildChatSessionRecord,
@@ -18,6 +23,25 @@ import { useWorkbenchStore, type ChatMode } from './workbenchStore'
 
 const PERSIST_DEBOUNCE_MS = 500
 const TITLE_SUMMARIZE_DEBOUNCE_MS = 1500
+const SESSION_GRAPH_OPEN_KEY = 'projectos_session_graph_open'
+
+function readSessionGraphOpen(): boolean {
+  if (typeof localStorage === 'undefined') return false
+  try {
+    return localStorage.getItem(SESSION_GRAPH_OPEN_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function writeSessionGraphOpen(open: boolean): void {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(SESSION_GRAPH_OPEN_KEY, open ? 'true' : 'false')
+  } catch {
+    /* ignore quota and private-mode failures */
+  }
+}
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 let titleSummarizeTimer: ReturnType<typeof setTimeout> | null = null
@@ -27,12 +51,16 @@ interface ChatSessionStore {
   pinnedIds: string[]
   activeSessionId: string | null
   historyOpen: boolean
+  sessionGraphOpen: boolean
+  inheritedDigest: SessionContextDigest | null
   loading: boolean
 
   loadForWorkspace: () => Promise<void>
   clear: () => void
   setHistoryOpen: (open: boolean) => void
   toggleHistory: () => void
+  setSessionGraphOpen: (open: boolean) => void
+  toggleSessionGraph: () => void
   switchSession: (sessionId: string) => Promise<void>
   createSession: (options?: {
     seedWelcome?: boolean
@@ -47,7 +75,12 @@ interface ChatSessionStore {
   setPinned: (sessionId: string, pinned: boolean) => Promise<void>
   setArchived: (sessionId: string, archived: boolean) => Promise<void>
   renameSession: (sessionId: string, title: string) => Promise<void>
-  deleteSession: (sessionId: string) => Promise<void>
+  deleteSession: (sessionId: string) => Promise<boolean>
+  forkSession: (parentSessionId: string, forkMessageId?: string) => Promise<string | null>
+  setSessionClassification: (
+    sessionId: string,
+    classification: 'topic' | 'misc',
+  ) => Promise<void>
   findWithAgent: (query: string) => Promise<void>
   resetForDemo: () => Promise<void>
 }
@@ -101,6 +134,9 @@ async function restoreRunFlow(activeRunId: string): Promise<void> {
 
 function applySessionToWorkbench(record: ChatSessionRecord): void {
   const hydrated = hydrateChatSessionState(record)
+  useChatSessionStore.setState({
+    inheritedDigest: record.inheritedDigest ?? null,
+  })
   useWorkbenchStore.setState({
     messages: hydrated.messages,
     composerDraft: hydrated.composerDraft,
@@ -137,6 +173,8 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   pinnedIds: [],
   activeSessionId: null,
   historyOpen: false,
+  sessionGraphOpen: readSessionGraphOpen(),
+  inheritedDigest: null,
   loading: false,
 
   clear: () => {
@@ -153,6 +191,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       pinnedIds: [],
       activeSessionId: null,
       historyOpen: false,
+      inheritedDigest: null,
       loading: false,
     })
   },
@@ -160,6 +199,17 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   setHistoryOpen: (open) => set({ historyOpen: open }),
 
   toggleHistory: () => set((state) => ({ historyOpen: !state.historyOpen })),
+
+  setSessionGraphOpen: (open) => {
+    writeSessionGraphOpen(open)
+    set({ sessionGraphOpen: open })
+  },
+
+  toggleSessionGraph: () => {
+    const open = !get().sessionGraphOpen
+    writeSessionGraphOpen(open)
+    set({ sessionGraphOpen: open })
+  },
 
   loadForWorkspace: async () => {
     const { client, project, locale } = useWorkbenchStore.getState()
@@ -194,6 +244,8 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
             chatMode: 'ask',
             isArchived: false,
             status: 'idle',
+            classification: 'misc',
+            classificationSource: 'auto',
           },
           messages: buildWelcomeMessages(locale),
         }
@@ -268,9 +320,6 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     const { client, project } = useWorkbenchStore.getState()
     if (!client || !project) return
 
-    const head = get().heads.find((item) => item.id === sessionId)
-    if (head && resolveChatSessionTitleSource(head.titleSource) === 'manual') return
-
     try {
       const updatedHead = await client.summarizeChatSessionTitle(project.projectId, sessionId)
       if (!updatedHead) return
@@ -330,6 +379,8 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         chatMode,
         isArchived: false,
         status: 'idle',
+        classification: 'misc',
+        classificationSource: 'auto',
       },
       messages: seedWelcome ? buildWelcomeMessages(locale) : [],
       draftComposer: emptyComposerDraft(draftInput),
@@ -388,11 +439,19 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   deleteSession: async (sessionId) => {
-    const { client, project } = useWorkbenchStore.getState()
-    if (!client || !project) return
+    const { client, project, locale, pushToast } = useWorkbenchStore.getState()
+    if (!client || !project) return false
+
+    const deleted = await client.deleteChatSession(project.projectId, sessionId)
+    if (!deleted) {
+      pushToast({
+        type: 'warning',
+        message: getStoreMessage(locale, 'chat.sessionGraph.deleteBlocked'),
+      })
+      return false
+    }
 
     const wasActive = get().activeSessionId === sessionId
-    await client.deleteChatSession(project.projectId, sessionId)
     const index = await client.getChatSessionIndex(project.projectId)
     set({ heads: index.heads, pinnedIds: index.pinnedIds })
 
@@ -406,6 +465,29 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         await get().createSession({ seedWelcome: true })
       }
     }
+    return true
+  },
+
+  forkSession: async (parentSessionId, forkMessageId) => {
+    const { client, project } = useWorkbenchStore.getState()
+    if (!client || !project) return null
+    await get().persistActiveSession()
+    const child = await client.forkChatSession(
+      project.projectId,
+      parentSessionId,
+      forkMessageId ?? '',
+    )
+    if (!child) return null
+    await get().switchSession(child.head.id)
+    return child.head.id
+  },
+
+  setSessionClassification: async (sessionId, classification) => {
+    const { client, project } = useWorkbenchStore.getState()
+    if (!client || !project) return
+    await client.setChatSessionClassification(project.projectId, sessionId, classification)
+    const index = await client.getChatSessionIndex(project.projectId)
+    set({ heads: index.heads, pinnedIds: index.pinnedIds })
   },
 
   findWithAgent: async (query) => {
@@ -442,6 +524,8 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         chatMode: 'ask',
         isArchived: false,
         status: 'idle',
+        classification: 'misc',
+        classificationSource: 'auto',
       },
       messages: buildResetMessages(locale),
       draftComposer: emptyComposerDraft(),

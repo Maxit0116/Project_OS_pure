@@ -1,5 +1,12 @@
 import type { DiagnosticItem, DocumentSymbolItem } from '@contracts/index'
 import { isDesktopApp } from '../data/clientMode'
+import {
+  buildLspInitializeParams,
+  readSemanticTokensLegend,
+  SEMANTIC_TOKEN_MODIFIERS,
+  SEMANTIC_TOKEN_TYPES,
+  type SemanticTokensLegend,
+} from './lspInitialize'
 import { createNotification, createRequest, pathToUri } from './lspProtocol'
 import { mapLspDocumentSymbols } from './lspSymbolMapping'
 
@@ -16,14 +23,42 @@ const pendingRequests = new Map<number, PendingRequest>()
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
 
+const FALLBACK_SEMANTIC_TOKENS_LEGEND: SemanticTokensLegend = {
+  tokenTypes: [...SEMANTIC_TOKEN_TYPES],
+  tokenModifiers: [...SEMANTIC_TOKEN_MODIFIERS],
+}
+
 let workspaceRoot: string | null = null
 let started = false
 let unavailableReason: string | null = null
+let semanticTokensLegend: SemanticTokensLegend | null = null
 let messageDisposable: { dispose(): void } | null = null
 const handlers = new Set<MessageHandler>()
+const readyListeners = new Set<() => void>()
 
 function sendRaw(message: string): void {
   window.projectOS?.lsp?.send(message)
+}
+
+function sendRequest<T>(
+  method: string,
+  params: unknown,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+): Promise<T> {
+  const { id, message } = createRequest(method, params)
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingRequests.delete(id)
+      reject(new Error(`LSP request timed out: ${method}`))
+    }, timeoutMs)
+
+    pendingRequests.set(id, {
+      resolve: (value) => resolve(value as T),
+      reject,
+      timer,
+    })
+    sendRaw(message)
+  })
 }
 
 function settlePendingRequest(id: number, result: unknown, error?: { message?: string }): void {
@@ -129,15 +164,21 @@ export const lspClient = {
     }
 
     unavailableReason = null
-    const init = createRequest('initialize', {
-      processId: null,
-      rootUri: pathToUri(root, '.'),
-      capabilities: {},
-      workspaceFolders: [{ uri: pathToUri(root, '.'), name: 'workspace' }],
-    })
-    sendRaw(init.message)
-    sendRaw(createNotification('initialized', {}))
-    started = true
+    try {
+      const result = await sendRequest(
+        'initialize',
+        buildLspInitializeParams(pathToUri(root, '.')),
+      )
+      semanticTokensLegend = readSemanticTokensLegend(result)
+      sendRaw(createNotification('initialized', {}))
+      started = true
+      for (const listener of readyListeners) listener()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Language server initialize failed'
+      console.warn('[lspClient]', message)
+      await this.stop()
+      unavailableReason = message
+    }
   },
 
   async stop(): Promise<void> {
@@ -156,6 +197,7 @@ export const lspClient = {
     started = false
     workspaceRoot = null
     unavailableReason = null
+    semanticTokensLegend = null
   },
 
   isAvailable(): boolean {
@@ -166,6 +208,25 @@ export const lspClient = {
     return unavailableReason
   },
 
+  onLanguageServerReady(listener: () => void): () => void {
+    readyListeners.add(listener)
+    if (started) listener()
+    return () => readyListeners.delete(listener)
+  },
+
+  getSemanticTokensLegend(): SemanticTokensLegend {
+    return semanticTokensLegend ?? FALLBACK_SEMANTIC_TOKENS_LEGEND
+  },
+
+  async requestSemanticTokens(filePath: string): Promise<{ data: number[] } | null> {
+    if (!workspaceRoot || !started) return null
+    const result = await this.request<{ data?: number[] } | null>('textDocument/semanticTokens/full', {
+      textDocument: { uri: pathToUri(workspaceRoot, filePath) },
+    })
+    if (!result || !Array.isArray(result.data)) return null
+    return { data: result.data }
+  },
+
   async request<T>(
     method: string,
     params: unknown,
@@ -174,21 +235,7 @@ export const lspClient = {
     if (!started) {
       throw new Error(unavailableReason ?? 'Language server unavailable')
     }
-
-    const { id, message } = createRequest(method, params)
-    return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pendingRequests.delete(id)
-        reject(new Error(`LSP request timed out: ${method}`))
-      }, timeoutMs)
-
-      pendingRequests.set(id, {
-        resolve: (value) => resolve(value as T),
-        reject,
-        timer,
-      })
-      sendRaw(message)
-    })
+    return sendRequest<T>(method, params, timeoutMs)
   },
 
   async documentSymbol(filePath: string): Promise<DocumentSymbolItem[]> {

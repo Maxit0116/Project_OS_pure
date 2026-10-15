@@ -7,7 +7,6 @@ interface Props {
   filePath: string
   isActive: boolean
   isDirty: boolean
-  isCompressed: boolean
   showClose: boolean
   onTitlePointerDown: (filePath: string, event: PointerEvent<HTMLSpanElement>) => void
   onTitleClick: (event: MouseEvent<HTMLSpanElement>) => void
@@ -25,7 +24,6 @@ function CodeEditorTabItem({
   filePath,
   isActive,
   isDirty,
-  isCompressed,
   showClose,
   onTitlePointerDown,
   onTitleClick,
@@ -58,13 +56,11 @@ function CodeEditorTabItem({
       aria-selected={isActive}
       title={filePath}
     >
-      <FileCode size={12} strokeWidth={1.75} className={tabStyles.tabIcon} aria-hidden />
+      <FileCode size={16} strokeWidth={1.75} className={tabStyles.tabIcon} aria-hidden />
       <span
         onPointerDown={handleTitlePointerDown}
         onClick={onTitleClick}
-        className={`${tabStyles.tabTitle} ${tabStyles.tabTitleDraggable} ${
-          isCompressed ? tabStyles.tabTitleCompressed : ''
-        }`}
+        className={`${tabStyles.tabTitle} ${tabStyles.tabTitleDraggable}`}
       >
         {fileLabel(filePath)}
         {isDirty ? <span className={tabStyles.tabDirtyDot} aria-label={ts('editor.unsaved')} /> : null}
@@ -80,7 +76,7 @@ function CodeEditorTabItem({
           if (showClose) onClose(filePath)
         }}
       >
-        <X size={16} strokeWidth={2.25} />
+        <X size={14} strokeWidth={2} />
       </button>
     </div>
   )

@@ -11,6 +11,7 @@ import type { VerificationRunResult } from '../../../contracts/exec-command.js'
 import type { ServicePort } from '../../../contracts/service-port.js'
 import type { VerificationCommandApprovalStatus } from '../../../contracts/verification-command-approval.js'
 import type { ProjectDescription } from '../../../contracts/project-description.js'
+import type { AppMenuState } from '../../../contracts/app-menu.js'
 type RunEventListener = (runId: string, event: AgentRunEvent) => void
 type RunTransientTraceListener = (runId: string, trace: AgentTransientTrace) => void
 type TerminalDataListener = (terminalId: string, data: string) => void
@@ -258,6 +259,22 @@ const api = {
       return {
         dispose() {
           servicesChangedListeners.delete(listener)
+        },
+      }
+    },
+  },
+  menu: {
+    setState(state: AppMenuState): void {
+      ipcRenderer.send('menu:setState', state)
+    },
+    onCommand(listener: (command: unknown) => void): Disposable {
+      const handler = (_event: unknown, command: unknown) => {
+        listener(command)
+      }
+      ipcRenderer.on('menu:command', handler)
+      return {
+        dispose() {
+          ipcRenderer.off('menu:command', handler)
         },
       }
     },

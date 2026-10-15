@@ -1,6 +1,7 @@
 import type { FunctionalEdge, FunctionalNode } from '@contracts/index'
 import { X } from 'lucide-react'
 import { useI18n } from '../../i18n'
+import { nodeDetailCopy } from './nodeCopy'
 import styles from './C4NodeDetailDrawer.module.css'
 
 interface Props {
@@ -20,6 +21,7 @@ export default function C4NodeDetailDrawer({ node, edges, onClose }: Props) {
   const upstream = edges.filter((edge) => edge.target === node.id)
   const downstream = edges.filter((edge) => edge.source === node.id)
   const linked = node.linkedFiles.slice(0, 12)
+  const detail = nodeDetailCopy(node)
 
   return (
     <aside
@@ -47,12 +49,19 @@ export default function C4NodeDetailDrawer({ node, edges, onClose }: Props) {
       </header>
 
       <div className={styles.body}>
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>{ts('map.c4Detail.description')}</h3>
-          <p className={styles.text}>
-            {node.responsibility ?? node.summary ?? node.description}
-          </p>
-        </section>
+        {detail.description ? (
+          <section className={styles.section}>
+            <h3 className={styles.sectionTitle}>{ts('map.c4Detail.description')}</h3>
+            <p className={styles.text}>{detail.description}</p>
+          </section>
+        ) : null}
+
+        {detail.responsibility ? (
+          <section className={styles.section}>
+            <h3 className={styles.sectionTitle}>{ts('map.c4Detail.responsibility')}</h3>
+            <p className={styles.text}>{detail.responsibility}</p>
+          </section>
+        ) : null}
 
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>{ts('map.c4Detail.confidence')}</h3>

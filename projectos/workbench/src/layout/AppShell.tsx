@@ -8,12 +8,15 @@ import DesktopTitleBar from './DesktopTitleBar'
 import WelcomeScreen from '../components/WelcomeScreen'
 import ToastContainer from '../components/ui/ToastContainer'
 import CommandPalette from '../components/CommandPalette/CommandPalette'
+import AppMenuBridge from '../appMenu/AppMenuBridge'
 import SettingsPanel from '../components/Settings/SettingsPanel'
 import BottomDockPanel from '../components/BottomDock/BottomDockPanel'
 import { useBottomDockStore } from '../state/bottomDockStore'
 import { useTerminalShortcuts } from '../components/Terminal/useTerminalShortcuts'
 import { useEditorShortcuts } from '../components/CodeEditor/useEditorShortcuts'
 import WorkbenchSidePanels from './WorkbenchSidePanels'
+import SessionGraphOverlay from '../components/SessionGraph/SessionGraphOverlay'
+import EdgeRails from './EdgeRails'
 import { FunctionMapBleedRoot } from '../components/FunctionMap/FunctionMapBleedLayer'
 import { preloadLocalWhisper } from '../components/ChatPanel/voice/localWhisperTranscribe'
 import { preloadMonacoEditor } from '../components/CodeEditor/preloadMonacoEditor'
@@ -107,6 +110,8 @@ export default function AppShell() {
           />
         </div>
         <ToastContainer />
+        <CommandPalette />
+        <AppMenuBridge />
       </div>
     )
   }
@@ -136,11 +141,15 @@ export default function AppShell() {
               graphBleed={mapBleedActive}
               mapBleed={mapBleedActive}
               bottomDockOpen={bottomDockOpen}
-              leftPanelMounted={leftPresence.mounted}
-              rightPanelMounted={rightPresence.mounted}
             />
           </main>
 
+          <SessionGraphOverlay />
+          <EdgeRails
+            leftMounted={leftPresence.mounted}
+            rightMounted={rightPresence.mounted}
+            terminalDocked={bottomDockOpen}
+          />
           <WorkbenchSidePanels
             left={leftPresence}
             right={rightPresence}
@@ -152,6 +161,7 @@ export default function AppShell() {
 
         <ToastContainer />
         <CommandPalette />
+        <AppMenuBridge />
         {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       </div>
     </FunctionMapBleedRoot>

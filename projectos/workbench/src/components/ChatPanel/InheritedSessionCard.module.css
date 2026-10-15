@@ -1,0 +1,30 @@
+.card {
+  padding: 10px 12px;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+}
+
+.label {
+  margin: 0 0 4px;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+}
+
+.responsibility {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.line {
+  margin: 6px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  line-height: 1.4;
+}
+
+.line span {
+  color: var(--tech-text-primary);
+}

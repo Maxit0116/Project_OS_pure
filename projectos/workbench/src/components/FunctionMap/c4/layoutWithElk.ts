@@ -1,19 +1,12 @@
 import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js'
 import type { C4Boundary, C4Diagram, C4DiagramNode } from './types'
+import { BOUNDARY_PAD, fitBoundaryToMemberNodes } from './boundaryFit'
 import { computeBounds, emptyBounds } from './diagramShared'
 import { fitEdgeLabel, horizontalGap, verticalGap } from './edgeLabelFit'
 import { formatC4EdgeLabel } from '../edgePresentation'
 import { minNodeGap, type RouteRect } from './orthogonalRoute'
 
 const elk = new ELK()
-
-/** Generous padding so orthogonal edges + labels have room inside boundaries. */
-const BOUNDARY_PAD = {
-  left: 56,
-  right: 56,
-  top: 72,
-  bottom: 48,
-} as const
 
 /** Target clear gap between node boxes after layout (room for labels + bends). */
 const TARGET_NODE_GAP = 96
@@ -141,33 +134,11 @@ export async function layoutWithElk(diagram: C4Diagram): Promise<C4Diagram> {
 
   let boundaries: C4Boundary[] = []
   if (boundary) {
-    const compound = (result.children ?? []).find((child) => child.id === boundary.id)
-    if (compound) {
-      boundaries = [
-        {
-          ...boundary,
-          position: { x: compound.x ?? 0, y: compound.y ?? 0 },
-          width: Math.max(compound.width ?? boundary.width, 280),
-          height: Math.max(compound.height ?? boundary.height, 200),
-        },
-      ]
-    } else if (insideNodes.length > 0) {
-      const insidePlaced = placedNodes.filter((node) => insideIds.has(node.id))
-      const bounds = computeBounds(insidePlaced, 0)
-      boundaries = [
-        {
-          ...boundary,
-          position: {
-            x: bounds.minX - BOUNDARY_PAD.left,
-            y: bounds.minY - BOUNDARY_PAD.top,
-          },
-          width: bounds.width + BOUNDARY_PAD.left + BOUNDARY_PAD.right,
-          height: bounds.height + BOUNDARY_PAD.top + BOUNDARY_PAD.bottom,
-        },
-      ]
-    } else {
-      boundaries = [boundary]
-    }
+    const insidePlaced = placedNodes.filter((node) => insideIds.has(node.id))
+    boundaries =
+      insidePlaced.length > 0
+        ? [fitBoundaryToMemberNodes(boundary, insidePlaced)]
+        : [boundary]
   }
 
   const frame = [...placedNodes, ...boundaries]
@@ -248,16 +219,7 @@ export function expandIfCramped(diagram: C4Diagram): C4Diagram {
       )
     })
     if (inside.length > 0) {
-      const bounds = computeBounds(inside, 0)
-      boundaries[0] = {
-        ...boundary,
-        position: {
-          x: bounds.minX - BOUNDARY_PAD.left,
-          y: bounds.minY - BOUNDARY_PAD.top,
-        },
-        width: bounds.width + BOUNDARY_PAD.left + BOUNDARY_PAD.right,
-        height: bounds.height + BOUNDARY_PAD.top + BOUNDARY_PAD.bottom,
-      }
+      boundaries[0] = fitBoundaryToMemberNodes(boundary, inside)
     }
   }
 
@@ -389,18 +351,7 @@ export function separateNodesForLabels(diagram: C4Diagram): C4Diagram {
             return wasInside
           })
           if (inside.length === 0) return diagram.boundaries
-          const bounds = computeBounds(inside, 0)
-          return [
-            {
-              ...boundary,
-              position: {
-                x: bounds.minX - BOUNDARY_PAD.left,
-                y: bounds.minY - BOUNDARY_PAD.top,
-              },
-              width: bounds.width + BOUNDARY_PAD.left + BOUNDARY_PAD.right,
-              height: bounds.height + BOUNDARY_PAD.top + BOUNDARY_PAD.bottom,
-            },
-          ]
+          return [fitBoundaryToMemberNodes(boundary, inside)]
         })()
       : diagram.boundaries
 

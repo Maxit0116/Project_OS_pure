@@ -9,8 +9,6 @@ export function useEditorShortcuts(): void {
   const editorPanes = useWorkbenchStore((s) => s.editorPanes)
   const focusedEditorPaneId = useWorkbenchStore((s) => s.focusedEditorPaneId)
   const editorSplitDirection = useWorkbenchStore((s) => s.editorSplitDirection)
-  const saveEditorFile = useWorkbenchStore((s) => s.saveEditorFile)
-  const isEditorDirty = useWorkbenchStore((s) => s.isEditorDirty)
   const markdownEditorViewModes = useWorkbenchStore((s) => s.markdownEditorViewModes)
   const setMarkdownEditorViewMode = useWorkbenchStore((s) => s.setMarkdownEditorViewMode)
   const chordPendingRef = useRef(false)
@@ -71,13 +69,6 @@ export function useEditorShortcuts(): void {
         return
       }
 
-      const isSave = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's'
-      if (!isSave) return
-
-      if (!activeFile || !isEditorDirty(activeFile)) return
-
-      event.preventDefault()
-      void saveEditorFile(activeFile)
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -89,8 +80,6 @@ export function useEditorShortcuts(): void {
     editorPanes,
     focusedEditorPaneId,
     editorSplitDirection,
-    saveEditorFile,
-    isEditorDirty,
     markdownEditorViewModes,
     setMarkdownEditorViewMode,
   ])

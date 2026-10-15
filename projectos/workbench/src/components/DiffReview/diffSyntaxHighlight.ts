@@ -1,20 +1,26 @@
 import { loader } from '@monaco-editor/react'
+import type { Monaco } from '@monaco-editor/react'
+import type { editor as MonacoEditorApi } from 'monaco-editor'
 import * as monaco from 'monaco-editor'
 
 // Use the locally bundled monaco-editor to avoid CDN fetches blocked by CSP.
 loader.config({ monaco })
 
 import { languageForPath } from '../../data/sampleFileContents'
+import { registerProjectOsThemes, type ProjectOsEditorTheme } from '../CodeEditor/editorTheme'
 
-export type DiffSyntaxTheme = 'vs' | 'vs-dark'
+export type DiffSyntaxTheme = ProjectOsEditorTheme
 
 const colorizeCache = new Map<string, Promise<string>>()
 
-let monacoReady: ReturnType<typeof loader.init> | null = null
+let monacoReady: Promise<Monaco> | null = null
 
-function ensureMonaco() {
+function ensureMonaco(): Promise<Monaco> {
   if (!monacoReady) {
-    monacoReady = loader.init()
+    monacoReady = loader.init().then((api) => {
+      registerProjectOsThemes(monaco)
+      return api
+    })
   }
   return monacoReady
 }
@@ -40,8 +46,8 @@ export async function colorizeDiffLine(
   const cached = colorizeCache.get(key)
   if (cached) return cached
 
-  const promise = ensureMonaco().then((monaco) =>
-    monaco.editor.colorize(text, language, { tabSize: 2, theme }),
+  const promise = ensureMonaco().then((instance) =>
+    instance.editor.colorize(text, language, { tabSize: 2, theme } as MonacoEditorApi.IColorizerOptions),
   )
   colorizeCache.set(key, promise)
   return promise

@@ -10,6 +10,7 @@ import type { VerificationRunResult } from "../contracts/exec-command.js";
 import type { ServicePort } from "../contracts/service-port.js";
 import type { VerificationCommandApprovalStatus } from "../contracts/verification-command-approval.js";
 import type { ProjectDescription } from "../contracts/project-description.js";
+import type { AppMenuState } from "../contracts/app-menu.js";
 
 export interface ProjectOSBridge {
   platform: string;
@@ -82,6 +83,10 @@ export interface ProjectOSBridge {
     register(input: { port: number; host?: string; label?: string }): Promise<ServicePort>;
     unregister(id: string): Promise<void>;
     onChanged(listener: (ports: ServicePort[]) => void): Disposable;
+  };
+  menu: {
+    setState(state: AppMenuState): void;
+    onCommand(listener: (command: unknown) => void): Disposable;
   };
   lsp: {
     start(workspaceRoot: string): Promise<{ ok: boolean; error?: string }>;

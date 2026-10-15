@@ -34,6 +34,7 @@ import type {
   SettingsPatch,
 } from "../../contracts/settings.js";
 import type { SemanticTree } from "../../contracts/semantic-tree.js";
+import type { WorkspaceDirectoryEntry } from "../../contracts/workspace-directory.js";
 import type {
   FileTimelineEntry,
   FileTimelineSnapshotContent,
@@ -175,6 +176,13 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("getSemanticTree", projectId);
   }
 
+  listWorkspaceDirectory(
+    projectId: string,
+    relativePath: string,
+  ): Promise<WorkspaceDirectoryEntry[]> {
+    return this.invoke("listWorkspaceDirectory", projectId, relativePath);
+  }
+
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload> {
     return this.invoke("getNodeContext", projectId, nodeId);
   }
@@ -267,6 +275,22 @@ export class IpcTransport implements ApiTransport {
     sessionId: string,
   ): Promise<ChatSessionHead | null> {
     return this.invoke("summarizeChatSessionTitle", projectId, sessionId);
+  }
+
+  forkChatSession(
+    projectId: string,
+    parentSessionId: string,
+    forkMessageId: string,
+  ): Promise<ChatSessionRecord | null> {
+    return this.invoke("forkChatSession", projectId, parentSessionId, forkMessageId);
+  }
+
+  setChatSessionClassification(
+    projectId: string,
+    sessionId: string,
+    classification: "topic" | "misc",
+  ): Promise<ChatSessionHead | null> {
+    return this.invoke("setChatSessionClassification", projectId, sessionId, classification);
   }
 
   deleteChatSession(projectId: string, sessionId: string): Promise<boolean> {

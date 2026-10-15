@@ -119,6 +119,7 @@ export function createInitialDebugSession(
     phase: harnessRecord ? "instrument" : "hypothesize",
     verification: harnessRecord?.verification ?? { status: "not_run" },
     ...(debugLogPort ? { debugLogPort } : {}),
+    ...(request.chatSessionId ? { chatSessionId: request.chatSessionId } : {}),
     createdAt: now,
     updatedAt: now,
   };

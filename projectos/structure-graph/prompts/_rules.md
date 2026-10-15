@@ -12,6 +12,7 @@ CodeSee 三原则在结构层的变体。
 6. **C4 形状可用**：container / data_store 必须有短 `technology`（Next.js、PostgreSQL、Redis、Kafka、React Native 等），数据库用 `data_store`
 7. **边带协议**：关系尽量写短 `technology`（HTTP / HTTPS / gRPC / Kafka / SQL …）
 8. **嵌套 parentId**：container/data_store → software_system；component → container
+9. **三层文案**：每个节点同时写 `summary`、`description`、`responsibility`，三句不互相复述。`summary` 是卡片一行短述（中文 ≤24 字，英文 ≤12 词）；`description` 是悬停预览的 1–2 句（中文约 40–120 字，补上谁在用、连到哪里、边界）；`responsibility` 是详情里的一句职责
 
 ## MUST NOT
 

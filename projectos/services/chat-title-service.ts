@@ -1,4 +1,5 @@
-import type { ChatMessage } from "../contracts/chat-session.js";
+import type { ChatMessage, SessionContextDigest } from "../contracts/chat-session.js";
+import { parseSessionContextModelOutput } from "../contracts/chat-session-context.js";
 import {
   CHAT_SESSION_TITLE_MAX,
   deriveChatSessionTitle,
@@ -15,6 +16,17 @@ const TITLE_SYSTEM_PROMPT = `You generate short chat session titles for a develo
 Given a conversation transcript, produce a concise title (max 60 characters) that captures the current topic.
 Use the same language as the user's messages.
 Return plain text only: no quotes, no markdown, no trailing punctuation unless required.`;
+
+const CONTEXT_SYSTEM_PROMPT = `You compress a developer IDE chat into a session context and a short title.
+Return JSON only with this shape:
+{"title":"","substantive":true,"responsibility":"","decisions":[],"openQuestions":[],"refs":[]}
+title: max 60 characters, same language as the user, no surrounding quotes.
+substantive: false for greetings, tests, and small talk; true when the conversation has a real task.
+responsibility: one sentence describing what this session is responsible for.
+decisions: up to 3 short strings already decided.
+openQuestions: up to 3 short strings still open.
+refs: up to 5 file paths or node names mentioned.
+Do not include markdown fences.`;
 
 const MAX_TRANSCRIPT_MESSAGES = 20;
 const MAX_TRANSCRIPT_CHARS = 2000;
@@ -49,6 +61,38 @@ export class ChatTitleService {
       );
     }
     return title;
+  }
+
+  async summarizeContext(input: ChatTitleModelInput): Promise<{
+    title: string;
+    substantive: boolean;
+    digest: SessionContextDigest | null;
+  }> {
+    const throughMessageId = [...input.messages].reverse().find((message) => message.id)?.id;
+    if (!throughMessageId) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        "No messages available for chat context",
+      );
+    }
+    const response = await this.gateway.complete(input.profile, {
+      projectId: input.projectId,
+      requestKind: "chat_title",
+      modelPreference: input.profile.id,
+      systemPrompt: `${CONTEXT_SYSTEM_PROMPT}\n${responseLanguageInstruction(input.responseLanguage)}`,
+      input: { transcript: formatChatTranscript(input.messages) },
+      redactionPolicy: "secrets_and_paths",
+      maxOutputTokens: 400,
+      thinkingDepth: "off",
+    });
+    const parsed = parseSessionContextModelOutput(response.output, throughMessageId);
+    if (!parsed || !parsed.title) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        "The model returned an unusable chat context",
+      );
+    }
+    return parsed;
   }
 
   summarizeDeterministic(messages: ChatMessage[]): string {

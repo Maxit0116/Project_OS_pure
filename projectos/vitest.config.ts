@@ -6,6 +6,7 @@ export default defineConfig({
     alias: {
       '@contracts': path.resolve(__dirname, 'contracts'),
       '@client': path.resolve(__dirname, 'client'),
+      'monaco-editor': path.resolve(__dirname, 'workbench/src/test/monacoEditorStub.ts'),
     },
   },
 })

@@ -18,11 +18,14 @@ import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useI18n } from '../../i18n'
 import { useFunctionMap } from './FunctionMapContext'
 import FeatureNode, { isPurposeFirstArchitectureLevel } from './FeatureNode'
+import { nodeCardBlurb } from './nodeCopy'
 import ArchitectureLayerNode from './ArchitectureLayerNode'
 import FloatingStraightEdge from './FloatingStraightEdge'
 import C4OrthogonalEdge from './c4/C4OrthogonalEdge'
 import { fitEdgeLabel } from './c4/edgeLabelFit'
-import { routeAllOrthogonalEdges } from './c4/orthogonalRoute'
+import { routeAllOrthogonalEdges, type OrthogonalRouteResult, type RouteRect, type RoutedEdgeSpec } from './c4/orthogonalRoute'
+import { liveRouteFrame } from './c4/liveEdgeRoutes'
+import { fitBoundaryToMembers, snapshotBoundaryMembers } from './c4/boundaryFit'
 import { mapArtifactNodeTypes } from './mapArtifactNodeTypes'
 import C4FlowNode from './c4/C4FlowNode'
 import C4BoundaryFlowNode from './c4/C4BoundaryFlowNode'
@@ -264,6 +267,12 @@ interface SafeRect {
    * these corners.
    */
   chromeRects: { x: number; y: number; w: number; h: number }[]
+  /**
+   * True when bleed mode had to use the full canvas because the chrome
+   * sentinel was not measurable yet. That rect is replaced a frame later
+   * and must not move the camera.
+   */
+  provisional?: boolean
 }
 
 interface LayoutEdgeInput {
@@ -340,6 +349,7 @@ function measureSafeRect(
   let safeTop: number
   let safeRight: number
   let safeBottom: number
+  let provisional = false
 
   if (bleed && viewportChromeEl) {
     const chromeRect = viewportChromeEl.getBoundingClientRect()
@@ -356,6 +366,7 @@ function measureSafeRect(
       safeBottom = window.innerHeight - chromeInsets.bottom
     } else {
       // Fall back to the full bleed canvas until chrome metrics are ready.
+      provisional = true
       safeLeft = flowRect.left
       safeTop = flowRect.top
       safeRight = flowRect.right
@@ -369,6 +380,7 @@ function measureSafeRect(
     safeRight = window.innerWidth - chromeInsets.right
     safeBottom = window.innerHeight - chromeInsets.bottom
   } else {
+    provisional = bleed
     safeLeft = flowRect.left
     safeTop = flowRect.top
     safeRight = flowRect.right
@@ -403,6 +415,7 @@ function measureSafeRect(
     sw,
     sh,
     chromeRects,
+    provisional,
   }
 }
 
@@ -853,7 +866,7 @@ function buildStackFlowNode(
 }
 
 function FunctionMapCanvasInner({ bleed }: Props) {
-  const { fitView, setViewport, screenToFlowPosition, getViewport } = useReactFlow()
+  const { fitView, setViewport, screenToFlowPosition, getViewport, getNodes } = useReactFlow()
   const {
     nodes,
     edges,
@@ -871,6 +884,8 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     onSelectFile,
     onClearSelection,
     search,
+    mapSearchFocus,
+    clearMapSearchFocus,
     backdropRef,
     chromeInsetsRef,
     viewportChromeRef,
@@ -879,6 +894,10 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     flowRef,
     clearPreviewTimer,
     schedulePreview,
+    lockPreviewForNodeDrag,
+    unlockPreviewAfterNodeDrag,
+    nudgePreviewDwell,
+    previewDragLockRef,
     moveHoverPreview,
     galaxyPointerRef,
     hoverPreviewRef,
@@ -975,15 +994,24 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     fileRelations,
   ])
   const [c4Diagram, setC4Diagram] = useState<C4Diagram | null>(c4DiagramBase)
+  // Layout must not fit the pre-ELK grid. The first camera is the laid-out
+  // diagram only; fitting both is the double zoom jump seen on mount.
+  const c4LayoutGenerationRef = useRef(0)
+  const c4LaidOutGenerationRef = useRef(-1)
+  const c4DiagramBaseRef = useRef(c4DiagramBase)
+  c4DiagramBaseRef.current = c4DiagramBase
   useEffect(() => {
     if (!c4DiagramBase) {
+      c4LaidOutGenerationRef.current = c4LayoutGenerationRef.current
       setC4Diagram(null)
       return
     }
+    const generation = ++c4LayoutGenerationRef.current
     let cancelled = false
-    setC4Diagram(c4DiagramBase)
     void applyElkLayoutToDiagram(c4DiagramBase).then((laidOut) => {
-      if (!cancelled) setC4Diagram(laidOut)
+      if (cancelled) return
+      c4LaidOutGenerationRef.current = generation
+      setC4Diagram(laidOut)
     })
     return () => {
       cancelled = true
@@ -996,6 +1024,15 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     if (!c4Diagram) return null
     return new Map(c4Diagram.nodes.map((node) => [node.id, node]))
   }, [c4Diagram])
+  const c4NodeByIdRef = useRef(c4NodeById)
+  c4NodeByIdRef.current = c4NodeById
+
+  const boundaryMembership = useMemo(() => {
+    if (!c4Diagram) return {} as Record<string, string[]>
+    return snapshotBoundaryMembers(c4Diagram.boundaries, c4Diagram.nodes)
+  }, [c4Diagram])
+  const boundaryMembershipRef = useRef(boundaryMembership)
+  boundaryMembershipRef.current = boundaryMembership
 
   const fullLayerGraph = useMemo(
     () =>
@@ -1116,8 +1153,22 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   /** Node ids visually elevated for the active drag (WG frame + members, or one free node). */
   const elevatedDragIdsRef = useRef<Set<string>>(new Set())
   const [layoutVersion, setLayoutVersion] = useState(0)
+  const layoutVersionRef = useRef(layoutVersion)
+  layoutVersionRef.current = layoutVersion
   const [layoutReady, setLayoutReady] = useState(false)
   const [flowHostReady, setFlowHostReady] = useState(false)
+  const c4LivePositionsRef = useRef<Record<string, { x: number; y: number }>>({})
+  const c4DirtyNodeIdsRef = useRef<Set<string>>(new Set())
+  const c4RouteRafRef = useRef<number | null>(null)
+  const c4DragActiveRef = useRef(false)
+  const c4PreviousRoutesRef = useRef<Map<string, OrthogonalRouteResult> | null>(null)
+  const c4RoutingModelRef = useRef<{ nodes: RouteRect[]; edges: RoutedEdgeSpec[] } | null>(null)
+  const pendingClickRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingPaneClickRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [c4LiveFrame, setC4LiveFrame] = useState<{
+    positions: Record<string, { x: number; y: number }>
+    routes: Map<string, OrthogonalRouteResult>
+  } | null>(null)
   const hasLaidOutRef = useRef(false)
   const layoutRafRef = useRef<number | null>(null)
   const layoutGraphKeyOnSnapshotRef = useRef<string | null>(null)
@@ -1137,6 +1188,27 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   const useC4Visuals = Boolean(
     !isLayerFocusAnimating && c4Diagram && c4Diagram.nodes.length > 0,
   )
+
+  useEffect(() => {
+    const sample = (phase: string) => {
+      const flow = flowRef.current
+      const style = flow ? getComputedStyle(flow) : null
+      const animated: string[] = []
+      flow?.querySelectorAll('.react-flow__node, .react-flow__viewport, .react-flow__edge').forEach((el) => {
+        if (!(el instanceof HTMLElement) || animated.length >= 6) return
+        const computed = getComputedStyle(el)
+        if (computed.animationName && computed.animationName !== 'none') {
+          animated.push(computed.animationName)
+        }
+      })
+      // #region agent log
+      fetch('http://127.0.0.1:7605/ingest/de6de0cd-a771-456b-b3d5-e46cdcebc2c1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'960ec8'},body:JSON.stringify({sessionId:'960ec8',hypothesisId:'B',location:'FunctionMapCanvas.tsx:animationSample',message:'canvas animation sample',data:{phase,architectureLevel,architectureScopeId,layoutReady,useC4Visuals,opacity:style?.opacity??null,animationName:style?.animationName??null,transitionDuration:style?.transitionDuration??null,pending:flow?.classList.contains('flowLayoutPending')??null,animated},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    }
+    sample('sync')
+    const raf = requestAnimationFrame(() => sample('raf'))
+    return () => cancelAnimationFrame(raf)
+  }, [architectureLevel, architectureScopeId, flowRef, layoutReady, useC4Visuals])
 
   const displayFeatureNodes = useMemo(() => {
     if (isLayerFocusAnimating) return fullLayerGraph.nodes
@@ -1583,27 +1655,47 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
   const c4BoundaryFlowNodes: Node[] = useMemo(() => {
     if (!useC4Visuals || !c4Diagram) return []
-    return c4Diagram.boundaries.map((boundary) => ({
-      id: boundary.id,
-      type: 'c4Boundary',
-      position: boundary.position,
-      draggable: false,
-      selectable: false,
-      focusable: false,
-      zIndex: Z_C4_BOUNDARY,
-      initialWidth: boundary.width,
-      initialHeight: boundary.height,
-      style: {
-        width: boundary.width,
-        height: boundary.height,
-        pointerEvents: 'none' as const,
-      },
-      data: {
-        label: boundary.label,
-        description: boundary.description,
-      },
-    }))
-  }, [useC4Visuals, c4Diagram])
+    return c4Diagram.boundaries.map((boundary) => {
+      const memberIds = boundaryMembership[boundary.id] ?? []
+      const livePositions = c4LiveFrame?.positions
+      const members = memberIds.flatMap((id) => {
+        const node = c4NodeById?.get(id)
+        if (!node) return []
+        const position = livePositions?.[id] ?? positionsById[id] ?? node.position
+        return [
+          {
+            x: position.x,
+            y: position.y,
+            width: node.width,
+            height: node.height,
+          },
+        ]
+      })
+      const fitted = fitBoundaryToMembers(boundary, members)
+      return {
+        id: boundary.id,
+        type: 'c4Boundary',
+        position: fitted.position,
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        zIndex: Z_C4_BOUNDARY,
+        width: fitted.width,
+        height: fitted.height,
+        initialWidth: fitted.width,
+        initialHeight: fitted.height,
+        style: {
+          width: fitted.width,
+          height: fitted.height,
+          pointerEvents: 'none' as const,
+        },
+        data: {
+          label: boundary.label,
+          description: boundary.description,
+        },
+      }
+    })
+  }, [useC4Visuals, c4Diagram, boundaryMembership, c4NodeById, positionsById, c4LiveFrame])
 
   const derivedNodes: Node[] = useMemo(
     () => [
@@ -1630,7 +1722,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
             id: n.id,
             type: 'c4Shape',
             position: positionsById[n.id] ?? c4Node.position,
-            draggable: false,
+            draggable: focusOpacity >= 0.01 && !searchDimmed,
             zIndex: Z_FEATURE,
             initialWidth: width,
             initialHeight: height,
@@ -1644,7 +1736,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
             data: {
               shape: c4Node.shape,
               label: c4Node.label || n.name,
-              description: c4Node.description ?? n.responsibility ?? n.summary,
+              description: c4Node.description ?? nodeCardBlurb(n),
               technology: c4Node.technology ?? n.technology,
               stereotype: c4Node.stereotype,
               members: c4Node.members,
@@ -1686,7 +1778,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
               (n.elementType ?? 'fallback') as keyof typeof messages.map.elementTypes
             ],
           layerLabel: n.layer ? layerLabelById.get(n.layer) : undefined,
-          responsibility: n.responsibility ?? n.summary,
+          responsibility: nodeCardBlurb(n),
           purposeFirst: isPurposeFirstArchitectureLevel(n.level),
           responsibilityLabel:
             n.elementType === 'code_element'
@@ -2084,6 +2176,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
         if (change.dragging === true) {
           activeDragIdsRef.current.add(change.id)
+          if (!previewDragLockRef.current) lockPreviewForNodeDrag()
           if (!dragStartPositionsRef.current.has(change.id)) {
             dragStartPositionsRef.current.set(change.id, { ...change.position })
           }
@@ -2117,6 +2210,20 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         if (change.dragging === false) {
           activeDragIdsRef.current.delete(change.id)
           draggedIdsRef.current.add(change.id)
+          if (previewDragLockRef.current) {
+            unlockPreviewAfterNodeDrag()
+            const flowNode = flowNodesRef.current.find((node) => node.id === change.id)
+            const pointer = lastPointerClientRef.current
+            const sourceNode = graphNodes.find((node) => node.id === change.id)
+            if (
+              flowNode &&
+              isArchitectureFlowNodeType(flowNode.type) &&
+              sourceNode &&
+              pointer
+            ) {
+              schedulePreview(sourceNode, pointer.x, pointer.y)
+            }
+          }
 
           if (isMapWorkGroupNodeId(change.id)) {
             const memberNodeIds =
@@ -2168,12 +2275,13 @@ function FunctionMapCanvasInner({ bleed }: Props) {
               mapState?.artifacts ?? [],
               mapState?.workGroups ?? [],
             )
+            const c4Size = c4NodeByIdRef.current?.get(change.id)
             const moving: BoundsRect = {
               id: change.id,
               x: change.position.x,
               y: change.position.y,
-              width: NODE_WIDTH,
-              height: NODE_HEIGHT,
+              width: c4Size?.width ?? NODE_WIDTH,
+              height: c4Size?.height ?? NODE_HEIGHT,
             }
             const sep = separateFromObstacles(moving, frames)
             const resolved = {
@@ -2203,6 +2311,17 @@ function FunctionMapCanvasInner({ bleed }: Props) {
             elevatedDragIdsRef.current.clear()
             clearDragElevation(setFlowNodes)
             dragStartPositionsRef.current.delete(change.id)
+            if (c4DragActiveRef.current || c4Size) {
+              c4DragActiveRef.current = false
+              if (c4RouteRafRef.current != null) {
+                cancelAnimationFrame(c4RouteRafRef.current)
+                c4RouteRafRef.current = null
+              }
+              c4LivePositionsRef.current = {}
+              c4DirtyNodeIdsRef.current.clear()
+              setC4LiveFrame(null)
+              setLayoutVersion((version) => version + 1)
+            }
             nextChanges.push({
               ...change,
               position: resolved,
@@ -2224,6 +2343,10 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       handleWorkGroupDragEnd,
       onNodesChangeInternal,
       setFlowNodes,
+      lockPreviewForNodeDrag,
+      unlockPreviewAfterNodeDrag,
+      schedulePreview,
+      graphNodes,
     ],
   )
 
@@ -2276,8 +2399,133 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     [contactGapBetweenArtifacts, getSnapTargetBounds, getViewport, setFlowNodes],
   )
 
+  const fitLiveBoundaries = useCallback(
+    (positionOverrides: Record<string, { x: number; y: number }>) => {
+      const membership = boundaryMembershipRef.current
+      const sizes = c4NodeByIdRef.current
+      setFlowNodes((current) => {
+        let changed = false
+        const next = current.map((node) => {
+          if (node.type !== 'c4Boundary') return node
+          const memberIds = membership[node.id] ?? []
+          const members: Array<{ x: number; y: number; width: number; height: number }> = []
+          for (const id of memberIds) {
+            const sized = sizes?.get(id)
+            const flow = current.find((candidate) => candidate.id === id)
+            const override = positionOverrides[id]
+            const x = override?.x ?? flow?.position.x
+            const y = override?.y ?? flow?.position.y
+            if (x == null || y == null) continue
+            members.push({
+              x,
+              y,
+              width:
+                sized?.width ??
+                (typeof flow?.width === 'number' ? flow.width : NODE_WIDTH),
+              height:
+                sized?.height ??
+                (typeof flow?.height === 'number' ? flow.height : NODE_HEIGHT),
+            })
+          }
+          const width =
+            typeof node.style?.width === 'number'
+              ? node.style.width
+              : typeof node.width === 'number'
+                ? node.width
+                : 0
+          const height =
+            typeof node.style?.height === 'number'
+              ? node.style.height
+              : typeof node.height === 'number'
+                ? node.height
+                : 0
+          const fitted = fitBoundaryToMembers(
+            { position: node.position, width, height },
+            members,
+          )
+          if (
+            fitted.position.x === node.position.x &&
+            fitted.position.y === node.position.y &&
+            fitted.width === width &&
+            fitted.height === height
+          ) {
+            return node
+          }
+          changed = true
+          return {
+            ...node,
+            position: fitted.position,
+            width: fitted.width,
+            height: fitted.height,
+            initialWidth: fitted.width,
+            initialHeight: fitted.height,
+            style: {
+              ...node.style,
+              width: fitted.width,
+              height: fitted.height,
+              pointerEvents: 'none' as const,
+            },
+          }
+        })
+        return changed ? next : current
+      })
+    },
+    [setFlowNodes],
+  )
+
+  const scheduleC4LiveRoute = useCallback(() => {
+    if (c4RouteRafRef.current != null) return
+    const run = () => {
+      c4RouteRafRef.current = null
+      if (!c4DragActiveRef.current) return
+      const model = c4RoutingModelRef.current
+      if (!model) return
+      const dirtyNodeIds = c4DirtyNodeIdsRef.current
+      c4DirtyNodeIdsRef.current = new Set()
+      const positions = c4LivePositionsRef.current
+      const nodes = model.nodes.map((node) => {
+        const live = positions[node.id]
+        return live ? { ...node, x: live.x, y: live.y } : node
+      })
+      const started = performance.now()
+      const routes = liveRouteFrame({
+        nodes,
+        edges: model.edges,
+        previous: c4PreviousRoutesRef.current,
+        dirtyNodeIds,
+        mode: 'incremental',
+        clearance: 36,
+      })
+      const slow = performance.now() - started > 16
+      const followUp = () => {
+        if (c4RouteRafRef.current != null) return
+        c4RouteRafRef.current = requestAnimationFrame(run)
+      }
+      if (!c4DragActiveRef.current) return
+      if (slow && c4DirtyNodeIdsRef.current.size > 0) {
+        followUp()
+        return
+      }
+      c4PreviousRoutesRef.current = routes
+      setC4LiveFrame({
+        positions: { ...positions },
+        routes,
+      })
+      if (c4DirtyNodeIdsRef.current.size > 0) followUp()
+    }
+    c4RouteRafRef.current = requestAnimationFrame(run)
+  }, [])
+
   const onNodeDragStart: OnNodeDrag = useCallback(
     (_event, node) => {
+      lockPreviewForNodeDrag()
+      if (node.type === 'c4Shape') {
+        c4DragActiveRef.current = true
+        if (pendingPaneClickRef.current) {
+          clearTimeout(pendingPaneClickRef.current)
+          pendingPaneClickRef.current = null
+        }
+      }
       const elevateIds = new Set<string>([node.id])
       if (isMapWorkGroupNodeId(node.id)) {
         const workGroups = useWorkbenchStore.getState().mapContent?.workGroups ?? []
@@ -2303,7 +2551,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         }),
       )
     },
-    [setFlowNodes],
+    [lockPreviewForNodeDrag, setFlowNodes],
   )
 
   const onNodeDrag: OnNodeDrag = useCallback(
@@ -2314,6 +2562,17 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
       if (isMapArtifactCanvasNodeId(node.id)) {
         applyArtifactSnapDuringDrag(node)
+        return
+      }
+
+      if (node.type === 'c4Shape') {
+        c4LivePositionsRef.current = {
+          ...c4LivePositionsRef.current,
+          [node.id]: { x: node.position.x, y: node.position.y },
+        }
+        c4DirtyNodeIdsRef.current.add(node.id)
+        fitLiveBoundaries(c4LivePositionsRef.current)
+        scheduleC4LiveRoute()
         return
       }
 
@@ -2353,16 +2612,17 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         }),
       )
     },
-    [applyArtifactSnapDuringDrag, setFlowNodes],
+    [applyArtifactSnapDuringDrag, fitLiveBoundaries, scheduleC4LiveRoute, setFlowNodes],
   )
 
   const trackPointerMove = useCallback((event: ReactMouseEvent) => {
     lastPointerClientRef.current = { x: event.clientX, y: event.clientY }
     galaxyPointerRef.current = { clientX: event.clientX, clientY: event.clientY }
-    if (hoverPreviewRef.current) {
+    nudgePreviewDwell(event.clientX, event.clientY)
+    if (hoverPreviewRef.current && !previewDragLockRef.current) {
       moveHoverPreview(event.clientX, event.clientY)
     }
-  }, [galaxyPointerRef, hoverPreviewRef, moveHoverPreview])
+  }, [galaxyPointerRef, hoverPreviewRef, moveHoverPreview, nudgePreviewDwell, previewDragLockRef])
 
   useEffect(() => {
     if (
@@ -2473,7 +2733,8 @@ function FunctionMapCanvasInner({ bleed }: Props) {
           existing.style?.height !== n.style?.height ||
           existing.style?.opacity !== n.style?.opacity ||
           existing.style?.pointerEvents !== n.style?.pointerEvents ||
-          existing.style?.visibility !== n.style?.visibility
+          existing.style?.visibility !== n.style?.visibility ||
+          existing.draggable !== n.draggable
         ) {
           changed = true
           return mergeDerivedFlowNode(n, existing)
@@ -2533,8 +2794,9 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       flowRef.current = el
       backdropRef.current = el
       if (el) {
-        layoutRef.current = null
-        setLayoutReady(false)
+        // #region agent log
+        fetch('http://127.0.0.1:7605/ingest/de6de0cd-a771-456b-b3d5-e46cdcebc2c1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'960ec8'},body:JSON.stringify({sessionId:'960ec8',hypothesisId:'A',location:'FunctionMapCanvas.tsx:flowHostRef',message:'canvas marked not ready',data:{},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         syncChromeInsetCssVars()
       }
       setFlowHostReady((prev) => {
@@ -2558,10 +2820,12 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         matchingIds && (!matchingIds.has(sourceId) || !matchingIds.has(targetId)) ? 0.2 : 1
       return focusOpacity * searchOpacity
     }
+    const livePositions = c4LiveFrame?.positions
     const c4Obstacles = useC4Visuals
       ? displayFeatureNodes.map((node) => {
           const c4 = c4NodeById?.get(node.id)
-          const pos = positionsById[node.id] ?? c4?.position ?? { x: 0, y: 0 }
+          const pos =
+            livePositions?.[node.id] ?? positionsById[node.id] ?? c4?.position ?? { x: 0, y: 0 }
           return {
             id: node.id,
             x: pos.x,
@@ -2574,42 +2838,53 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     const c4ObstacleById = c4Obstacles
       ? new Map(c4Obstacles.map((rect) => [rect.id, rect]))
       : null
-    const c4Routes =
-      useC4Visuals && c4Obstacles && c4ObstacleById
-        ? routeAllOrthogonalEdges({
-            nodes: c4Obstacles,
-            clearance: 36,
-            edges: displayEdges.map((e) => {
-              const source = c4ObstacleById.get(e.source)
-              const target = c4ObstacleById.get(e.target)
-              const relationI18n =
-                messages.map.relations[
-                  e.relation as keyof typeof messages.map.relations
-                ]
-              const denseC4 = displayEdges.length > 8
-              const compactLabel = formatC4EdgeLabel(
-                e.label,
-                e.technology,
-                e.relation,
-                relationI18n,
-                denseC4 ? 'tech' : 'full',
-              )
-              const fit =
-                compactLabel && source && target
-                  ? fitEdgeLabel(compactLabel, source, target)
-                  : null
-              return {
-                id: e.id,
-                source: e.source,
-                target: e.target,
-                labelText: compactLabel || undefined,
-                labelBox: fit
-                  ? { width: fit.boxWidth, height: fit.boxHeight }
-                  : { width: 96, height: 22 },
-              }
-            }),
+    const c4EdgeSpecs: RoutedEdgeSpec[] | null =
+      useC4Visuals && c4ObstacleById
+        ? displayEdges.map((e) => {
+            const source = c4ObstacleById.get(e.source)
+            const target = c4ObstacleById.get(e.target)
+            const relationI18n =
+              messages.map.relations[e.relation as keyof typeof messages.map.relations]
+            const denseC4 = displayEdges.length > 8
+            const compactLabel = formatC4EdgeLabel(
+              e.label,
+              e.technology,
+              e.relation,
+              relationI18n,
+              denseC4 ? 'tech' : 'full',
+            )
+            const fit =
+              compactLabel && source && target
+                ? fitEdgeLabel(compactLabel, source, target)
+                : null
+            return {
+              id: e.id,
+              source: e.source,
+              target: e.target,
+              labelText: compactLabel || undefined,
+              labelBox: fit
+                ? { width: fit.boxWidth, height: fit.boxHeight }
+                : { width: 96, height: 22 },
+            }
           })
         : null
+    if (c4Obstacles && c4EdgeSpecs) {
+      c4RoutingModelRef.current = { nodes: c4Obstacles, edges: c4EdgeSpecs }
+    } else {
+      c4RoutingModelRef.current = null
+    }
+    const c4Routes = c4LiveFrame?.routes
+      ? c4LiveFrame.routes
+      : c4Obstacles && c4EdgeSpecs
+        ? routeAllOrthogonalEdges({
+            nodes: c4Obstacles,
+            edges: c4EdgeSpecs,
+            clearance: 36,
+          })
+        : null
+    if (!c4LiveFrame && c4Routes) {
+      c4PreviousRoutesRef.current = c4Routes
+    }
     const graphEdges = displayEdges.map((e, edgeIndex) => {
       const color = EDGE_COLORS[e.relation]
       const relationI18n =
@@ -2805,15 +3080,14 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     useC4Visuals,
     c4NodeById,
     positionsById,
+    c4LiveFrame,
   ])
-
-  const pendingClickRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingPaneClickRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     return () => {
       if (pendingClickRef.current) clearTimeout(pendingClickRef.current)
       if (pendingPaneClickRef.current) clearTimeout(pendingPaneClickRef.current)
+      if (c4RouteRafRef.current != null) cancelAnimationFrame(c4RouteRafRef.current)
     }
   }, [])
 
@@ -2878,13 +3152,16 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
   const applyCamera = useCallback(
     (viewport: Viewport, duration: number) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7605/ingest/de6de0cd-a771-456b-b3d5-e46cdcebc2c1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'960ec8'},body:JSON.stringify({sessionId:'960ec8',hypothesisId:'C',location:'FunctionMapCanvas.tsx:applyCamera',message:'camera update',data:{duration,zoom:Math.round(viewport.zoom*100)/100,x:Math.round(viewport.x),y:Math.round(viewport.y),architectureLevel},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       // Programmatic camera updates can emit onMoveEnd; only the latest move
       // token may lift suppression when rapid camera applications overlap.
       viewportPersistenceGuardRef.current?.suppressFor(Math.max(duration, 0) + 80)
       setDefaultViewport(viewport)
       setViewport(viewport, { duration })
     },
-    [setViewport],
+    [architectureLevel, setViewport],
   )
 
   const isBleedChromeReady = useCallback(() => {
@@ -2913,6 +3190,14 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       }
       if (currentNodes.length === 0) return
       if (bleed && !isBleedChromeReady()) return
+      if (
+        c4DiagramBaseRef.current &&
+        c4LaidOutGenerationRef.current !== c4LayoutGenerationRef.current
+      ) {
+        // Pre-ELK grid is still the displayed diagram. Fitting it, then fitting
+        // the laid-out result, is the double camera jump.
+        return
+      }
 
       const isUserManipulatingCanvas =
         resizingIdsRef.current.size > 0 ||
@@ -2926,6 +3211,11 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
       const chromeInsets = chromeInsetsRef.current
       let safe = measureSafeRect(flow, !!bleed, viewportChromeRef.current, chromeInsets)
+      if (safe?.provisional) {
+        // Full-canvas fallback is replaced as soon as the chrome sentinel measures.
+        // Committing it moves the camera (same zoom, large pan) a frame later.
+        return
+      }
       if (!safe && bleed) {
         // Chrome sentinel may not be ready on the first paint — use non-bleed bounds.
         safe = measureSafeRect(flow, false, null, chromeInsets)
@@ -3166,6 +3456,9 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
   const startLayerFocusTransition = useCallback(
     (direction: 'enter' | 'exit', focusNodeId: string | null) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7605/ingest/de6de0cd-a771-456b-b3d5-e46cdcebc2c1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'960ec8'},body:JSON.stringify({sessionId:'960ec8',hypothesisId:'D',location:'FunctionMapCanvas.tsx:startLayerFocusTransition',message:'legacy layer focus',data:{direction,focusNodeId,architectureLevel},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (!isLayeredArchitectureMap) return
       cancelLayerFocusTransitionRaf()
 
@@ -3267,6 +3560,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       layerFocusTransitionRafRef.current = requestAnimationFrame(runLayerFocusTransitionFrame)
     },
     [
+      architectureLevel,
       isLayeredArchitectureMap,
       cancelLayerFocusTransitionRaf,
       fullLayerGraph,
@@ -3280,7 +3574,8 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   )
 
   useLayoutEffect(() => {
-    if (!flowHostReady || !isLayeredArchitectureMap) {
+    const c4OwnsCanvas = Boolean(c4Diagram && c4Diagram.nodes.length > 0)
+    if (!flowHostReady || !isLayeredArchitectureMap || c4OwnsCanvas) {
       prevLayerFocusActiveRef.current = isLayerFocusActive
       prevLayerFocusNodeIdRef.current = layerFocusNodeId
       return
@@ -3307,6 +3602,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   }, [
     flowHostReady,
     isLayeredArchitectureMap,
+    c4Diagram,
     isLayerFocusActive,
     layerFocusNodeId,
     startLayerFocusTransition,
@@ -3352,18 +3648,71 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   }, [applyLayout, scheduleApplyLayout, flowRef, viewportChromeRef, graphLayoutKey, nodes.length, bleed, flowHostReady])
 
   // Fallback: reveal the canvas even if the first layout pass is skipped mid-drag.
+  // Wait until ELK has published; revealing the pre-ELK grid is the zoom flash.
   useEffect(() => {
     if (layoutReady) return
+    if (
+      c4DiagramBaseRef.current &&
+      c4LaidOutGenerationRef.current !== c4LayoutGenerationRef.current
+    ) {
+      return
+    }
     const timer = window.setTimeout(() => {
       setLayoutReady(true)
     }, 120)
     return () => window.clearTimeout(timer)
-  }, [layoutReady])
+  }, [layoutReady, c4Diagram])
 
   useEffect(() => {
     const guard = viewportPersistenceGuardRef.current
     if (guard) fitSingleMatchingNode(matchingIds, fitView, guard, FIT_MAX_ZOOM)
   }, [matchingIds, fitView])
+
+  useEffect(() => {
+    if (!mapSearchFocus) return
+    if (mapSearchFocus.workGroupId) {
+      setSelectedWorkGroupId(mapSearchFocus.workGroupId)
+    }
+    const focus = mapSearchFocus
+    let cancelled = false
+    let raf = 0
+    let frames = 0
+    let quietFrames = 0
+    let lastLayout = layoutVersionRef.current
+    const tick = () => {
+      if (cancelled) return
+      frames += 1
+      const layoutNow = layoutVersionRef.current
+      if (layoutNow !== lastLayout) {
+        lastLayout = layoutNow
+        quietFrames = 0
+      } else {
+        quietFrames += 1
+      }
+      const present = getNodes().some((node) => node.id === focus.canvasNodeId)
+      if (present && quietFrames >= 8) {
+        viewportPersistenceGuardRef.current?.suppressFor(400)
+        void fitView({
+          nodes: [{ id: focus.canvasNodeId }],
+          padding: 0.5,
+          duration: 280,
+          maxZoom: FIT_MAX_ZOOM,
+        })
+        clearMapSearchFocus()
+        return
+      }
+      if (frames >= 180) {
+        clearMapSearchFocus()
+        return
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(raf)
+    }
+  }, [mapSearchFocus, clearMapSearchFocus, fitView, getNodes])
 
   const handleMoveEnd = useCallback((_event: unknown, viewport: Viewport) => {
     if (viewportPersistenceGuardRef.current?.isSuppressed()) return
@@ -3550,6 +3899,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
   const handleNodeMouseEnter = useCallback(
     (event: React.MouseEvent, node: Node) => {
+      if (previewDragLockRef.current) return
       if (!isArchitectureFlowNodeType(node.type)) return
       const sourceNode =
         displayFeatureNodes.find((n) => n.id === node.id) ??
@@ -3558,7 +3908,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       if (!sourceNode) return
       schedulePreview(sourceNode, event.clientX, event.clientY)
     },
-    [displayFeatureNodes, fullLayerGraph.nodes, graphNodes, schedulePreview],
+    [displayFeatureNodes, fullLayerGraph.nodes, graphNodes, previewDragLockRef, schedulePreview],
   )
 
   const handleNodeMouseLeave = useCallback(() => {

@@ -1,13 +1,20 @@
 import {
-  CHAT_SESSION_MAX_COUNT,
   CHAT_SESSION_MAX_PINNED,
   ChatSessionHeadSchema,
   ChatSessionIndexSchema,
   ChatSessionRecordSchema,
+  type ChatSessionClassification,
   type ChatSessionHead,
   type ChatSessionIndex,
   type ChatSessionRecord,
 } from "../contracts/chat-session.js";
+import {
+  applyChatSessionContextUpdate,
+  chatSessionHasChildren,
+  chatSessionIdsToPrune,
+  preserveChatSessionContext,
+  type ChatSessionContextUpdate,
+} from "../contracts/chat-session-context.js";
 import { cloneJson } from "../utils/json.js";
 
 interface ProjectChatSessions {
@@ -30,20 +37,8 @@ function getProjectStore(projectId: string): ProjectChatSessions {
 }
 
 function pruneIndex(index: ChatSessionIndex): ChatSessionIndex {
-  if (index.heads.length <= CHAT_SESSION_MAX_COUNT) return index;
-  const pinned = new Set(index.pinnedIds);
-  const sorted = [...index.heads].sort((a, b) => {
-    if (a.isArchived !== b.isArchived) return a.isArchived ? -1 : 1;
-    return a.lastUpdatedAt.localeCompare(b.lastUpdatedAt);
-  });
-  const remove = new Set<string>();
-  let count = index.heads.length;
-  for (const head of sorted) {
-    if (count <= CHAT_SESSION_MAX_COUNT) break;
-    if (pinned.has(head.id)) continue;
-    remove.add(head.id);
-    count -= 1;
-  }
+  const remove = new Set(chatSessionIdsToPrune(index.heads, index.pinnedIds));
+  if (remove.size === 0) return index;
   return {
     ...index,
     heads: index.heads.filter((head) => !remove.has(head.id)),
@@ -76,8 +71,11 @@ export function mockUpsertChatSession(
   projectId: string,
   record: ChatSessionRecord,
 ): ChatSessionRecord {
-  const parsed = ChatSessionRecordSchema.parse(record);
   const store = getProjectStore(projectId);
+  const parsed = preserveChatSessionContext(
+    store.records.get(record.head.id) ?? null,
+    ChatSessionRecordSchema.parse(record),
+  );
   store.records.set(parsed.head.id, cloneJson(parsed));
   const heads = store.index.heads.filter((head) => head.id !== parsed.head.id);
   store.index = pruneIndex({
@@ -189,8 +187,50 @@ export function mockApplyAutoChatSessionTitle(
   return cloneJson(nextHead);
 }
 
+export function mockSaveChatSessionContext(
+  projectId: string,
+  sessionId: string,
+  update: ChatSessionContextUpdate,
+): ChatSessionHead | null {
+  const store = getProjectStore(projectId);
+  const record = store.records.get(sessionId);
+  if (!record) return null;
+  const next = ChatSessionRecordSchema.parse(applyChatSessionContextUpdate(record, update));
+  store.records.set(sessionId, cloneJson(next));
+  store.index = {
+    ...store.index,
+    heads: store.index.heads.map((head) => (head.id === sessionId ? next.head : head)),
+  };
+  return cloneJson(next.head);
+}
+
+export function mockSetChatSessionClassification(
+  projectId: string,
+  sessionId: string,
+  classification: ChatSessionClassification,
+): ChatSessionHead | null {
+  const store = getProjectStore(projectId);
+  const record = store.records.get(sessionId);
+  if (!record) return null;
+  const nextHead: ChatSessionHead = {
+    ...record.head,
+    classification,
+    classificationSource: "manual",
+    lastUpdatedAt: new Date().toISOString(),
+  };
+  if (classification === "misc") delete nextHead.responsibility;
+  const parsedHead = ChatSessionHeadSchema.parse(nextHead);
+  store.records.set(sessionId, { ...record, head: parsedHead });
+  store.index = {
+    ...store.index,
+    heads: store.index.heads.map((head) => (head.id === sessionId ? parsedHead : head)),
+  };
+  return cloneJson(parsedHead);
+}
+
 export function mockDeleteChatSession(projectId: string, sessionId: string): boolean {
   const store = getProjectStore(projectId);
+  if (chatSessionHasChildren(store.index.heads, sessionId)) return false;
   const existed = store.records.delete(sessionId) || store.index.heads.some((h) => h.id === sessionId);
   store.index = {
     ...store.index,

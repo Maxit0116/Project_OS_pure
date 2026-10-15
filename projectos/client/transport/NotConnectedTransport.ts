@@ -34,6 +34,7 @@ import type {
   SettingsPatch,
 } from "../../contracts/settings.js";
 import type { SemanticTree } from "../../contracts/semantic-tree.js";
+import type { WorkspaceDirectoryEntry } from "../../contracts/workspace-directory.js";
 import { ProjectOSError } from "../../errors.js";
 
 const TRANSPORT_MESSAGE =
@@ -64,6 +65,13 @@ export class NotConnectedTransport implements ProjectOSApi {
   }
 
   async getSemanticTree(_projectId: string): Promise<SemanticTree> {
+    return transportNotConnected();
+  }
+
+  async listWorkspaceDirectory(
+    _projectId: string,
+    _relativePath: string,
+  ): Promise<WorkspaceDirectoryEntry[]> {
     return transportNotConnected();
   }
 
@@ -169,6 +177,22 @@ export class NotConnectedTransport implements ProjectOSApi {
   async summarizeChatSessionTitle(
     _projectId: string,
     _sessionId: string,
+  ): Promise<ChatSessionHead | null> {
+    return transportNotConnected();
+  }
+
+  async forkChatSession(
+    _projectId: string,
+    _parentSessionId: string,
+    _forkMessageId: string,
+  ): Promise<ChatSessionRecord | null> {
+    return transportNotConnected();
+  }
+
+  async setChatSessionClassification(
+    _projectId: string,
+    _sessionId: string,
+    _classification: "topic" | "misc",
   ): Promise<ChatSessionHead | null> {
     return transportNotConnected();
   }

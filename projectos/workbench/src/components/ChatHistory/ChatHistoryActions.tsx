@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { History, Plus } from 'lucide-react'
+import { GitBranch, History, Plus } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useChatSessionStore } from '../../state/chatSessionStore'
 import Button from '../ui/Button'
@@ -13,7 +13,9 @@ interface Props {
 export default function ChatHistoryActions({ visible = true }: Props) {
   const { ts } = useI18n()
   const historyOpen = useChatSessionStore((s) => s.historyOpen)
+  const sessionGraphOpen = useChatSessionStore((s) => s.sessionGraphOpen)
   const toggleHistory = useChatSessionStore((s) => s.toggleHistory)
+  const toggleSessionGraph = useChatSessionStore((s) => s.toggleSessionGraph)
   const setHistoryOpen = useChatSessionStore((s) => s.setHistoryOpen)
   const createSession = useChatSessionStore((s) => s.createSession)
   const historyAnchorRef = useRef<HTMLDivElement>(null)
@@ -31,6 +33,17 @@ export default function ChatHistoryActions({ visible = true }: Props) {
         onClick={() => void createSession()}
       >
         <Plus size={16} aria-hidden />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={ts('chat.sessionGraph.title')}
+        aria-pressed={sessionGraphOpen}
+        title={ts('chat.sessionGraph.title')}
+        onClick={toggleSessionGraph}
+      >
+        <GitBranch size={16} aria-hidden />
       </Button>
       <div className={styles.historyWrap} ref={historyAnchorRef}>
         <Button

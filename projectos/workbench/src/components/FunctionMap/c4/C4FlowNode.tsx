@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { OpenGraphButton } from '../OpenGraphButton'
 import type { C4ShapeKind } from './types'
 import { C4_SHAPE_COMPONENTS } from './shapes'
 import styles from '../FeatureNode.module.css'
@@ -45,20 +46,14 @@ function C4FlowNode({ data }: NodeProps & { data: C4FlowNodeData }) {
         members={data.members}
         selected={data.selected}
         dimmed={data.dimmed}
+        className={data.canOpenGraph ? 'has-drill' : undefined}
       />
       {data.canOpenGraph && data.onOpenGraph ? (
-        <button
-          type="button"
-          className={styles.openGraph}
-          style={{ position: 'absolute', left: 8, bottom: 6, zIndex: 1 }}
-          onClick={(event) => {
-            event.stopPropagation()
-            data.onOpenGraph?.()
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
-        >
-          {data.openGraphLabel ?? 'Open'}
-        </button>
+        <OpenGraphButton
+          label={data.openGraphLabel ?? 'Open'}
+          active={data.selected}
+          onOpen={data.onOpenGraph}
+        />
       ) : null}
     </div>
   )

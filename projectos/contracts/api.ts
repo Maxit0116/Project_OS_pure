@@ -33,6 +33,7 @@ import type {
   SettingsPatch,
 } from "./settings.js";
 import type { SemanticTree } from "./semantic-tree.js";
+import type { WorkspaceDirectoryEntry } from "./workspace-directory.js";
 import type {
   CreateMapArtifactInput,
   CreateMapImageArtifactInput,
@@ -75,6 +76,10 @@ export interface ProjectOSApi {
   ): Promise<ProjectGraph>;
   getProjectGraph(projectId: string): Promise<ProjectGraph>;
   getSemanticTree(projectId: string): Promise<SemanticTree>;
+  listWorkspaceDirectory(
+    projectId: string,
+    relativePath: string,
+  ): Promise<WorkspaceDirectoryEntry[]>;
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload>;
   getFileContext(projectId: string, path: string): Promise<ContextPayload>;
   getFileContent(projectId: string, path: string): Promise<string>;
@@ -113,6 +118,16 @@ export interface ProjectOSApi {
   summarizeChatSessionTitle(
     projectId: string,
     sessionId: string,
+  ): Promise<ChatSessionHead | null>;
+  forkChatSession(
+    projectId: string,
+    parentSessionId: string,
+    forkMessageId: string,
+  ): Promise<ChatSessionRecord | null>;
+  setChatSessionClassification(
+    projectId: string,
+    sessionId: string,
+    classification: "topic" | "misc",
   ): Promise<ChatSessionHead | null>;
   deleteChatSession(projectId: string, sessionId: string): Promise<boolean>;
   setLastActiveChatSession(projectId: string, sessionId: string): Promise<void>;

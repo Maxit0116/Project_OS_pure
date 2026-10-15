@@ -8,6 +8,7 @@ import {
   UserRound,
   type LucideIcon,
 } from 'lucide-react'
+import { OpenGraphButton } from './OpenGraphButton'
 import styles from './FeatureNode.module.css'
 
 export interface FeatureNodeData {
@@ -165,20 +166,12 @@ export function FeatureNodeCard({ data }: { data: FeatureNodeData }) {
           </div>
         </>
       )}
-      {data.canOpenGraph && (
-        <button
-          type="button"
-          className={`${styles.openGraph} nodrag nopan`}
-          data-zone-interactive
-          onClick={(event) => {
-            event.stopPropagation()
-            data.onOpenGraph?.()
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          {data.openGraphLabel}
-          <span aria-hidden>→</span>
-        </button>
+      {data.canOpenGraph && data.onOpenGraph && (
+        <OpenGraphButton
+          label={data.openGraphLabel}
+          active={data.isSelected}
+          onOpen={data.onOpenGraph}
+        />
       )}
     </div>
   )

@@ -49,14 +49,15 @@ import settingsFixture from "./sample-projectos-fixtures/settings.json" with { t
 import semanticTreeFixture from "./sample-projectos-fixtures/semantic-tree.json" with { type: "json" };
 import mapContentFixture from "./sample-projectos-fixtures/map-content.json" with { type: "json" };
 import {
-  mockApplyAutoChatSessionTitle,
   mockClearChatSessions,
   mockDeleteChatSession,
   mockGetChatSession,
   mockGetChatSessionIndex,
   mockListChatSessionHeads,
   mockRenameChatSession,
+  mockSaveChatSessionContext,
   mockSetChatSessionArchived,
+  mockSetChatSessionClassification,
   mockSetChatSessionPinned,
   mockSetLastActiveChatSession,
   mockUpsertChatSession,
@@ -66,8 +67,11 @@ import type {
   ChatSessionIndex,
   ChatSessionRecord,
 } from "../contracts/chat-session.js";
-import { resolveChatSessionTitleSource } from "../contracts/chat-session-title.js";
-import { summarizeChatSessionTitleForRecord } from "../services/chat-session-title-summarize.js";
+import {
+  buildForkedChatSession,
+  messagesThroughFork,
+} from "../contracts/chat-session-context.js";
+import { summarizeChatSessionContextForRecord } from "../services/chat-session-title-summarize.js";
 
 export const MOCK_SAMPLE_WORKSPACE_ROOT = "mock://sample-graph-saas";
 
@@ -190,21 +194,53 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     const record = mockGetChatSession(projectId, sessionId);
     if (!record) return null;
 
-    if (resolveChatSessionTitleSource(record.head.titleSource) === "manual") {
-      return record.head;
-    }
-
     const workspace = this.requireLoadedWorkspace(projectId);
     if (!workspace) return null;
 
-    const title = await summarizeChatSessionTitleForRecord(projectId, record, {
+    const update = await summarizeChatSessionContextForRecord(projectId, record, {
       chatTitleService: this.chatTitleService,
       settingsService: this.settingsService,
       settings: workspace.settings,
     });
-    if (!title) return null;
+    if (!update) return record.head;
+    return mockSaveChatSessionContext(projectId, sessionId, update);
+  }
 
-    return mockApplyAutoChatSessionTitle(projectId, sessionId, title);
+  override async forkChatSession(
+    projectId: string,
+    parentSessionId: string,
+    forkMessageId: string,
+  ): Promise<ChatSessionRecord | null> {
+    const parent = mockGetChatSession(projectId, parentSessionId);
+    if (!parent) return null;
+    const workspace = this.requireLoadedWorkspace(projectId);
+    if (!workspace) return null;
+    const forkId = forkMessageId.trim() || undefined;
+    let inherited = parent.contextDigest ?? null;
+    if (forkId) {
+      const slice = messagesThroughFork(parent.messages, forkId);
+      if (!slice) return null;
+      const update = await summarizeChatSessionContextForRecord(
+        projectId,
+        { ...parent, messages: slice },
+        {
+          chatTitleService: this.chatTitleService,
+          settingsService: this.settingsService,
+          settings: workspace.settings,
+        },
+      );
+      inherited = update?.digest ?? null;
+    }
+    const child = buildForkedChatSession(parent, inherited, forkId);
+    return mockUpsertChatSession(projectId, child);
+  }
+
+  override setChatSessionClassification(
+    projectId: string,
+    sessionId: string,
+    classification: "topic" | "misc",
+  ): Promise<ChatSessionHead | null> {
+    return Promise.resolve(mockSetChatSessionClassification(projectId, sessionId, classification));
   }
 
   override deleteChatSession(projectId: string, sessionId: string): Promise<boolean> {
