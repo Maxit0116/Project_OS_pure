@@ -57,6 +57,8 @@ export interface ProjectOSBridge {
     isFullScreen(): Promise<boolean>;
     isFocused(): Promise<boolean>;
     setTitle(title: string): Promise<void>;
+    initialWorkspace(): Promise<string | null>;
+    openWorkspaceInNewWindow(path: string): Promise<void>;
     onFullScreenChange(listener: (isFullScreen: boolean) => void): Disposable;
     onFocusChange(listener: (focused: boolean) => void): Disposable;
   };
@@ -93,6 +95,76 @@ export interface ProjectOSBridge {
     stop(): Promise<void>;
     send(message: string): void;
     onMessage(listener: (message: string) => void): Disposable;
+  };
+  spatialPin: {
+    beginCapture(): Promise<{ ok: boolean }>;
+    hideOverlay(): Promise<{ ok: boolean }>;
+    closeOverlay(): Promise<{ ok: boolean }>;
+    getContext(): Promise<{
+      projectId: string | null;
+      workspacePath: string | null;
+      candidates: Array<{
+        projectId: string;
+        workspacePath: string;
+        displayName: string;
+        source: string;
+      }>;
+      location: unknown;
+      webEnhanceAvailable: boolean;
+      bridge: {
+        connected: boolean;
+        port: number | null;
+        token: string | null;
+        bridgeFilePath: string | null;
+        lastUrl: string | null;
+        lastProjectId: string | null;
+      };
+    }>;
+    setPreferredProject(projectId: string | null): Promise<{
+      projectId: string | null;
+      workspacePath: string | null;
+      candidates: Array<{
+        projectId: string;
+        workspacePath: string;
+        displayName: string;
+        source: string;
+      }>;
+      location: unknown;
+      webEnhanceAvailable: boolean;
+    }>;
+    getBridgeState(): Promise<{
+      connected: boolean;
+      port: number | null;
+      token: string | null;
+      bridgeFilePath: string | null;
+      lastUrl: string | null;
+      lastProjectId: string | null;
+    }>;
+    reportBrowserLocation(payload: unknown): Promise<{ ok: boolean }>;
+    captureSelection(rect: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }): Promise<{
+      pngBase64: string | null;
+      host: {
+        appName?: string;
+        bundleId?: string;
+        windowTitle?: string;
+        deviceKind?: string;
+        inferredPath?: string;
+        textHint?: string;
+      };
+      error?: string;
+    }>;
+    onBeginCapture(
+      listener: (payload: {
+        displayBounds: { x: number; y: number; width: number; height: number };
+      }) => void,
+    ): Disposable;
+    onLocation(listener: (payload: unknown) => void): Disposable;
+    onBridgeState(listener: (payload: unknown) => void): Disposable;
   };
 }
 

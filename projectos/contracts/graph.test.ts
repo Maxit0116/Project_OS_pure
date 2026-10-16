@@ -414,4 +414,36 @@ describe("ProjectGraphSchema architecture model", () => {
 
     expect(ProjectGraphSchema.safeParse(graph).success).toBe(true);
   });
+
+  it("accepts v0.5.0 graphs with views and sourceKind", () => {
+    const graph = architectureGraph();
+    graph.version = "0.5.0";
+    graph.views = [
+      {
+        key: "view_component",
+        title: "Components",
+        level: "component",
+        sourceKind: "ai",
+      },
+      {
+        key: "view_code_web",
+        title: "Web Code",
+        level: "code",
+        parentId: "component_web",
+        locked: true,
+        sourceKind: "authored",
+      },
+    ];
+    graph.nodes = graph.nodes.map((node) => ({
+      ...node,
+      sourceKind: node.sourceKind ?? "ai",
+    }));
+    graph.edges = graph.edges.map((edge) => ({
+      ...edge,
+      sourceKind: "ai",
+      technology: edge.technology ?? "HTTPS",
+    }));
+
+    expect(ProjectGraphSchema.safeParse(graph).success).toBe(true);
+  });
 });

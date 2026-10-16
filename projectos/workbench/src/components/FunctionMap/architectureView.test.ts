@@ -533,6 +533,55 @@ describe('computeOneHopLinkedIds', () => {
     expect(defaultArchitectureScopeId(nodes, 'component')).toBe('web')
     expect(defaultArchitectureScopeId(nodes, 'code')).toBe('identity')
   })
+
+  it('lifts cross-level relationships to visible context ancestors', () => {
+    const nodes = [
+      { ...node('person', 'context'), elementType: 'person' as const },
+      { ...node('system', 'context'), elementType: 'software_system' as const },
+      { ...node('ext', 'context'), elementType: 'external_system' as const },
+      { ...node('web', 'container', 'system'), elementType: 'container' as const },
+    ]
+    const edges = [
+      edge('person_uses', 'person', 'system', 'Uses'),
+      edge('web_calls_ext', 'web', 'ext', 'Calls payment API'),
+    ]
+
+    const projected = projectArchitectureView(nodes, edges, 'context')
+    expect(projected.nodes.map((item) => item.id).sort()).toEqual([
+      'ext',
+      'person',
+      'system',
+    ])
+    expect(projected.edges.some((item) => item.source === 'system' && item.target === 'ext')).toBe(
+      true,
+    )
+  })
+
+  it('applies named view include filters', () => {
+    const nodes = [
+      node('web', 'container', 'system'),
+      node('worker', 'container', 'system'),
+    ]
+    const views = [
+      {
+        key: 'view_container_system',
+        title: 'Web only',
+        level: 'container' as const,
+        parentId: 'system',
+        includeNodeIds: ['web'],
+      },
+    ]
+    const projected = projectArchitectureView(
+      nodes,
+      [],
+      'container',
+      { parentId: 'system' },
+      [],
+      [],
+      { views, viewKey: 'view_container_system' },
+    )
+    expect(projected.nodes.map((item) => item.id)).toEqual(['web'])
+  })
 })
 
 function relation(

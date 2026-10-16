@@ -1,6 +1,7 @@
 import type { AppMenuCommand } from '@contracts/app-menu'
 import { getActiveEditorFilePath } from '../components/CodeEditor/editorPaneHelpers'
 import { scheduleEditorCommand } from '../components/CodeEditor/editorNavigation'
+import { normalizeRecentWorkspacePath } from '../state/recentWorkspaces'
 import { isDesktopApp } from '../data/clientMode'
 import { useBottomDockStore } from '../state/bottomDockStore'
 import { useTerminalStore } from '../state/terminalStore'
@@ -54,12 +55,25 @@ export function commandFromKeyEvent(event: MenuKeyEvent): AppMenuCommand | null 
   if (isKey(event, 'KeyS', 's')) return { id: 'save' }
   if (isKey(event, 'KeyW', 'w')) return { id: 'close-editor' }
   if (isKey(event, 'KeyK', 'k')) return { id: 'command-palette' }
+  if (event.shiftKey && isKey(event, 'KeyP', 'p')) return { id: 'spatial-pin' }
   if (isKey(event, 'KeyP', 'p')) return { id: 'go-to-file' }
   if (isKey(event, 'KeyB', 'b')) return { id: 'toggle-left-panel' }
   if (isKey(event, 'KeyF', 'f')) return { id: 'find' }
   if (isKey(event, 'KeyG', 'g')) return { id: 'go-to-line' }
   if (isKey(event, 'Backslash', '\\')) return { id: 'split-editor-right' }
   return null
+}
+
+export function workspaceWindowTarget(
+  currentPath: string | null | undefined,
+  nextPath: string,
+): 'current' | 'same' | 'new' {
+  const next = normalizeRecentWorkspacePath(nextPath)
+  if (!next) return 'current'
+  const current = currentPath ? normalizeRecentWorkspacePath(currentPath) : ''
+  if (!current) return 'current'
+  if (current === next) return 'same'
+  return 'new'
 }
 
 export function executeAppMenuCommand(command: AppMenuCommand): void {
@@ -77,7 +91,7 @@ export function executeAppMenuCommand(command: AppMenuCommand): void {
       void openFolder()
       return
     case 'open-recent':
-      void useWorkbenchStore.getState().openWorkspace(command.path)
+      void openWorkspaceFromMenu(command.path)
       return
     case 'save':
       saveActiveEditor()
@@ -171,6 +185,10 @@ export function executeAppMenuCommand(command: AppMenuCommand): void {
     case 'show-keyboard-shortcuts':
       setKeyboardShortcutsOpen(true)
       return
+    case 'spatial-pin':
+      if (!isDesktopApp()) return
+      void window.projectOS?.spatialPin.beginCapture()
+      return
     default: {
       const unreachable: never = command
       return unreachable
@@ -225,7 +243,18 @@ async function openFolder(): Promise<void> {
   if (!bridge?.shell.pickWorkspaceFolder) return
   const picked = await bridge.shell.pickWorkspaceFolder()
   if (!picked) return
-  await useWorkbenchStore.getState().openWorkspace(picked)
+  await openWorkspaceFromMenu(picked)
+}
+
+async function openWorkspaceFromMenu(path: string): Promise<void> {
+  const current = useWorkbenchStore.getState().project?.workspaceRoot
+  const target = workspaceWindowTarget(current, path)
+  if (target === 'same') return
+  if (target === 'new' && window.projectOS?.window.openWorkspaceInNewWindow) {
+    await window.projectOS.window.openWorkspaceInNewWindow(path)
+    return
+  }
+  await useWorkbenchStore.getState().openWorkspace(path)
 }
 
 function isBackquote(event: MenuKeyEvent): boolean {

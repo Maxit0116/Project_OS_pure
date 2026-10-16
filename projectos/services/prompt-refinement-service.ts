@@ -77,6 +77,9 @@ export class PromptRefinementService {
       },
       redactionPolicy: "secrets_and_paths",
       ...(input.thinkingDepth ? { thinkingDepth: input.thinkingDepth } : {}),
+      ...(input.request.images?.length
+        ? { images: input.request.images }
+        : {}),
     });
 
     const parsed = parseRefinementJson(

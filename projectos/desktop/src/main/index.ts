@@ -7,22 +7,31 @@ import { registerTerminalIpc } from './terminal/registerTerminalIpc.js'
 import { registerServicesIpc } from './services/registerServicesIpc.js'
 import { registerLspIpc } from './lsp/registerLspIpc.js'
 import { installAppMenu } from './registerAppMenu.js'
+import { registerWorkspaceWindowIpc } from './registerWorkspaceWindowIpc.js'
 import { AppQuitCoordinator } from './appQuitCoordinator.js'
 import { handleAppStartupFailure } from './appStartupFailure.js'
 import { loadDesktopEnvFiles } from './loadDesktopEnv.js'
 import { installParentExitGuard } from './parentExitGuard.js'
+import {
+  registerSpatialPinOverlay,
+  unregisterSpatialPinOverlayShortcuts,
+} from './registerSpatialPinOverlay.js'
+import { startSpatialPinBridge, stopSpatialPinBridge } from './spatialPinBridge.js'
 
 loadDesktopEnvFiles()
 installParentExitGuard()
 
 void app.whenReady().then(() => {
   installAppMenu()
+  registerWorkspaceWindowIpc()
   registerProjectOsIpc()
   registerNotificationIpc()
   registerShellIpc()
   registerTerminalIpc()
   registerServicesIpc()
   registerLspIpc()
+  registerSpatialPinOverlay()
+  startSpatialPinBridge()
   createMainWindow()
 
   app.on('activate', () => {
@@ -57,5 +66,7 @@ const quitCoordinator = new AppQuitCoordinator(
 )
 
 app.on('before-quit', (event) => {
+  unregisterSpatialPinOverlayShortcuts()
+  stopSpatialPinBridge()
   quitCoordinator.handleBeforeQuit(event)
 })

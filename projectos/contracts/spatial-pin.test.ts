@@ -1,0 +1,113 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  buildSpatialPinUserContent,
+  classifyMacHostApp,
+  createDraftSpatialPin,
+  headFromSpatialPin,
+  normalizeSpatialPinUrl,
+  SpatialPinSchema,
+} from "./spatial-pin.js";
+
+describe("spatial-pin contracts", () => {
+  it("normalizes urls for stable location identity", () => {
+    expect(normalizeSpatialPinUrl("http://localhost:3000/app/?q=1#hash")).toBe(
+      "http://localhost:3000/app?q=1",
+    );
+    expect(normalizeSpatialPinUrl("https://example.com/path/")).toBe(
+      "https://example.com/path",
+    );
+  });
+
+  it("creates a draft pin defaulting to Agent (change) mode", () => {
+    const pin = createDraftSpatialPin({
+      id: "pin_1",
+      projectId: "proj_1",
+      location: {
+        surface: "chrome",
+        url: "http://localhost:5173/login",
+        selector: "#submit",
+      },
+      captureRect: { x: 10, y: 20, width: 100, height: 40 },
+    });
+    expect(pin.composer.mode).toBe("change");
+    expect(pin.status).toBe("draft");
+    expect(pin.resolve?.confidence).toBe("exact");
+    expect(SpatialPinSchema.parse(pin).id).toBe("pin_1");
+    expect(headFromSpatialPin(pin).mode).toBe("change");
+  });
+
+  it("creates screen/workspace pins as snapshot_only without DOM selector", () => {
+    const pin = createDraftSpatialPin({
+      id: "pin_screen",
+      projectId: "proj_1",
+      location: {
+        surface: "workspace",
+        url: "spatial://workspace/%2Ftmp%2Fdemo",
+        workspacePath: "/tmp/demo",
+      },
+      captureRect: { x: 0, y: 0, width: 200, height: 100 },
+    });
+    expect(pin.resolve?.confidence).toBe("snapshot_only");
+    expect(pin.location.surface).toBe("workspace");
+  });
+
+  it("classifies macOS host apps for external IDE / virtual devices", () => {
+    expect(classifyMacHostApp("Xcode", "CoupleRecording — ContentView.swift").deviceKind).toBe(
+      "ide",
+    );
+    expect(classifyMacHostApp("Simulator", "iPhone 16 — CoupleRecording").deviceKind).toBe(
+      "ios-simulator",
+    );
+    expect(classifyMacHostApp("Android Studio", "couple_recording").deviceKind).toBe("ide");
+    expect(classifyMacHostApp("qemu-system-x86_64", "Android Emulator").deviceKind).toBe(
+      "android-emulator",
+    );
+    expect(classifyMacHostApp("Emulator", "Pixel_8_API_35").deviceKind).toBe(
+      "android-emulator",
+    );
+  });
+
+  it("uses host_window resolve when host fields are present without selector", () => {
+    const pin = createDraftSpatialPin({
+      id: "pin_host",
+      projectId: "proj_1",
+      location: {
+        surface: "workspace",
+        url: "spatial://workspace/%2Ftmp%2Fdemo",
+        workspacePath: "/tmp/demo",
+        appName: "Xcode",
+        deviceKind: "ide",
+        inferredPath: "ios/",
+      },
+    });
+    expect(pin.resolve?.confidence).toBe("approx");
+    expect(pin.resolve?.method).toBe("host_window");
+  });
+
+  it("builds user content with host and snapshot metadata", () => {
+    const pin = createDraftSpatialPin({
+      id: "pin_meta",
+      projectId: "proj_1",
+      location: {
+        surface: "workspace",
+        url: "spatial://workspace/%2Ftmp%2Fdemo",
+        workspacePath: "/tmp/demo",
+        appName: "Simulator",
+        deviceKind: "ios-simulator",
+        inferredPath: "ios/",
+        windowTitle: "iPhone 16",
+      },
+      captureRect: { x: 10, y: 20, width: 100, height: 40 },
+    });
+    pin.composer.prompt = "Fix the login button";
+    pin.composer.snapshotAssetPath = ".projectos/spatial-pins/assets/pin_meta.png";
+    const content = buildSpatialPinUserContent(pin);
+    expect(content).toContain("Fix the login button");
+    expect(content).toContain("app=Simulator");
+    expect(content).toContain("device=ios-simulator");
+    expect(content).toContain("inferredPath=ios/");
+    expect(content).toContain("snapshot=.projectos/spatial-pins/assets/pin_meta.png");
+    expect(content).toContain("rect=10,20 100x40");
+  });
+});

@@ -46,11 +46,25 @@ describe('resolveContextDropdownLabel', () => {
     ).toBe('Visitor')
   })
 
-  it('returns empty label when no scope is selected', () => {
+  it('defaults to global scope when no node is selected', () => {
     expect(
       resolveContextDropdownLabel({
         globalAgentActive: false,
         selectedNodeId: null,
+        nodeName: null,
+        contextSummary: null,
+        globalScopeLabel: 'Global scope',
+        emptyLabel: 'No context',
+      }),
+    ).toBe('Global scope')
+  })
+
+  it('returns empty label while a file is selected without a resolved node', () => {
+    expect(
+      resolveContextDropdownLabel({
+        globalAgentActive: false,
+        selectedNodeId: null,
+        selectedFilePath: 'app/login/page.tsx',
         nodeName: null,
         contextSummary: null,
         globalScopeLabel: 'Global scope',

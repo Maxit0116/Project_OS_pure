@@ -27,6 +27,10 @@ describe("prompt-composer contracts", () => {
     expect(normalizeComposerDraft("hello")).toEqual(emptyComposerDraft("hello"));
   });
 
+  it("fills missing attachments for partial draft objects", () => {
+    expect(normalizeComposerDraft({ text: "" })).toEqual(emptyComposerDraft());
+  });
+
   it("accepts git and terminal refs", () => {
     const attachment = PromptAttachmentSchema.parse({
       id: "att_git",

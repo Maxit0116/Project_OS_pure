@@ -160,6 +160,8 @@ describe("structure-graph-export", () => {
     expect(views.mermaid.container).toContain("C4Container");
     expect(views.mermaid.container).toContain("ContainerDb(datastore_pg");
     expect(views.mermaid.component).toContain("C4Component");
+    expect(views.mermaid.code).toContain("flowchart");
+    expect(views.mermaid.flowchart).toContain("flowchart");
     expect(views.structurizrDsl).toContain("workspace {");
     expect(views.structurizrDsl).toContain('person_user = person "User"');
     expect(views.structurizrDsl).toContain("systemContext");
@@ -169,6 +171,6 @@ describe("structure-graph-export", () => {
   it("bundles mermaid fenced blocks", () => {
     const bundle = exportC4MermaidBundle(sampleGraph());
     expect(bundle).toContain("```mermaid");
-    expect(bundle.match(/```mermaid/g)?.length).toBe(3);
+    expect(bundle.match(/```mermaid/g)?.length).toBe(4);
   });
 });

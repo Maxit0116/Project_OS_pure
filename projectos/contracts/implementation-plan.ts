@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { AgentConversationScopeSchema } from "./agent-conversation.js";
+import { ModelImagePartSchema } from "./model-gateway.js";
 import { PromptComposerFieldsSchema } from "./prompt-composer.js";
 
 export const ImplementationPlanVersionSchema = z.literal("0.1.0");
@@ -85,6 +86,7 @@ export const CreatePlanRequestSchema = z
     existingQuestions: z.array(ClarifyingQuestionSchema).optional(),
     existingPlanId: z.string().min(1).optional(),
     chatSessionId: z.string().min(1).optional(),
+    images: z.array(ModelImagePartSchema).max(4).optional(),
   })
   .merge(PromptComposerFieldsSchema)
   .strict();

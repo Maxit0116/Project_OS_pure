@@ -33,7 +33,15 @@ export function resolvePersistedChatSessionTitle(
 }
 
 export function deriveChatSessionSubtitle(state: WorkbenchState): string | undefined {
-  if (state.globalAgentActive) return 'Global'
+  if (
+    state.globalAgentActive ||
+    (!state.selectedNodeId &&
+      !state.selectedFilePath &&
+      !state.pendingFileOwnerChoice &&
+      !state.fileScopeError)
+  ) {
+    return 'Global'
+  }
   if (state.selectedFilePath) {
     const fileName = state.selectedFilePath.split('/').pop()
     return fileName ? `File: ${fileName}` : undefined

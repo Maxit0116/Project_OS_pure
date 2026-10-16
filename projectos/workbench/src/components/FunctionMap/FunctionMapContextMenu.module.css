@@ -62,3 +62,10 @@
   flex-shrink: 0;
   color: var(--color-text-secondary);
 }
+
+.menuItemCheck {
+  display: inline-flex;
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--color-accent);
+}

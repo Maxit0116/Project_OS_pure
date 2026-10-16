@@ -35,6 +35,7 @@ export interface GroundedAnswerInput {
   thinkingDepth: ThinkingDepth;
   responseLanguage: ResolvedResponseLanguage;
   supplementalMarkdown?: string;
+  images?: Array<{ mimeType: "image/png" | "image/jpeg"; base64: string }>;
 }
 
 export interface GroundedAnswerOutput {
@@ -111,6 +112,7 @@ export class GroundedAnswerService {
       redactionPolicy: "secrets_and_paths",
       maxOutputTokens: 2048,
       thinkingDepth: input.thinkingDepth,
+      ...(input.images?.length ? { images: input.images } : {}),
     });
     const answer = redactText(response.output, "secrets_and_paths").trim();
     const reasoning = response.reasoning

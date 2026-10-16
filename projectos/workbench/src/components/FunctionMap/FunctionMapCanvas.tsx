@@ -34,6 +34,7 @@ import { layoutFromC4Diagram } from './c4/layoutFromC4Diagram'
 import { applyElkLayoutToDiagram } from './c4/layoutWithElk'
 import {
   applyOverlayToPositions,
+  clearC4LayoutOverlayForView,
   loadC4LayoutOverlay,
   pruneC4LayoutOverlayForView,
   upsertC4LayoutPositions,
@@ -140,10 +141,14 @@ import {
 import { EDGE_COLORS, formatC4EdgeLabel } from './edgePresentation'
 import C4NodeDetailDrawer from './C4NodeDetailDrawer'
 import {
-  focusCodeNodeForMap,
   openCodeNodeFile,
+  openCodeNodeInEditor,
   resolveCodeNodeTarget,
 } from './codeNodeInteraction'
+import {
+  resolveMapBlankDoubleClickAction,
+  resolveMapNodeDoubleClickAction,
+} from './mapLayerNavigation'
 import {
   architectureScopeForSelection,
   computeOneHopLinkedIds,
@@ -685,11 +690,9 @@ function mergeDerivedFlowNode(derived: Node, existing: Node): Node {
   const height = derivedHeight ?? existing.height ?? existing.measured?.height
 
   let measured = existing.measured
-  if (measured && (derivedWidth !== undefined || derivedHeight !== undefined)) {
-    const nextW = derivedWidth ?? measured.width
-    const nextH = derivedHeight ?? measured.height
-    if (nextW !== measured.width || nextH !== measured.height) {
-      measured = { width: nextW, height: nextH }
+  if (typeof width === 'number' && typeof height === 'number') {
+    if (!measured || measured.width !== width || measured.height !== height) {
+      measured = { width, height }
     }
   }
 
@@ -765,7 +768,11 @@ function flowNodeDataVisualKey(node: Node): string {
     ])
   }
   if (node.type === 'c4Boundary') {
-    return joinFlowNodeVisualKey([data.label, data.description])
+    return joinFlowNodeVisualKey([
+      data.label,
+      data.description,
+      data.collapsed ? 'collapsed' : 'expanded',
+    ])
   }
   if (node.type === 'map_artifact_stack') {
     const active = data.activeArtifact as {
@@ -875,9 +882,14 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     fileIndex,
     fileRelations,
     architecture,
+    architectureViews,
     architectureLevel,
     architectureScopeId,
-    focusedCodeNodeId,
+    activeViewKey,
+    collapsedBoundaryIds,
+    toggleBoundaryCollapsed,
+    layoutResetToken,
+    confidencePerspective,
     showArtifacts,
     selectedNodeId,
     onSelectNode,
@@ -903,7 +915,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     hoverPreviewRef,
     canDrillIntoNode,
     drillIntoNode,
-    focusCodeNode,
+    drillOut,
     isLayerFocusActive,
     clearLayerFocus,
   } = useFunctionMap()
@@ -912,6 +924,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   isLayerFocusActiveRef.current = isLayerFocusActive
   const bouncingNodeIds = useWorkbenchStore((s) => s.bouncingNodeIds)
   const flashKey = useWorkbenchStore((s) => s.flashKey)
+  const durableGraph = useWorkbenchStore((s) => s.graph)
   const mapContent = useWorkbenchStore((s) => s.mapContent)
   const selectedArtifactId = useWorkbenchStore((s) => s.selectedArtifactId)
   const mapArtifactCreateFlow = useWorkbenchStore((s) => s.mapArtifactCreateFlow)
@@ -981,13 +994,17 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       edges: graphEdges,
       architecture,
       scope: architectureScope,
+      views: architectureViews,
+      ...(activeViewKey ? { viewKey: activeViewKey } : {}),
       fileIndex,
       fileRelations,
     })
   }, [
     architecture,
+    architectureViews,
     architectureLevel,
     architectureScope,
+    activeViewKey,
     graphNodes,
     graphEdges,
     fileIndex,
@@ -1043,12 +1060,18 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         architectureScope,
         fileIndex,
         fileRelations,
+        {
+          views: architectureViews,
+          ...(activeViewKey ? { viewKey: activeViewKey } : {}),
+        },
       ),
     [
       graphNodes,
       graphEdges,
       architectureLevel,
       architectureScope,
+      architectureViews,
+      activeViewKey,
       fileIndex,
       fileRelations,
     ],
@@ -1056,9 +1079,6 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
   const layerFocusNodeId = useMemo(() => {
     if (!isLayerFocusActive) return null
-    if (architectureLevel === 'code' && focusedCodeNodeId) {
-      return focusedCodeNodeId
-    }
     const scope = architectureScopeForSelection(
       graphNodes,
       architectureLevel,
@@ -1074,7 +1094,6 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   }, [
     isLayerFocusActive,
     architectureLevel,
-    focusedCodeNodeId,
     graphNodes,
     selectedNodeId,
     architectureScopeId,
@@ -1189,26 +1208,17 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     !isLayerFocusAnimating && c4Diagram && c4Diagram.nodes.length > 0,
   )
 
-  useEffect(() => {
-    const sample = (phase: string) => {
-      const flow = flowRef.current
-      const style = flow ? getComputedStyle(flow) : null
-      const animated: string[] = []
-      flow?.querySelectorAll('.react-flow__node, .react-flow__viewport, .react-flow__edge').forEach((el) => {
-        if (!(el instanceof HTMLElement) || animated.length >= 6) return
-        const computed = getComputedStyle(el)
-        if (computed.animationName && computed.animationName !== 'none') {
-          animated.push(computed.animationName)
-        }
-      })
-      // #region agent log
-      fetch('http://127.0.0.1:7605/ingest/de6de0cd-a771-456b-b3d5-e46cdcebc2c1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'960ec8'},body:JSON.stringify({sessionId:'960ec8',hypothesisId:'B',location:'FunctionMapCanvas.tsx:animationSample',message:'canvas animation sample',data:{phase,architectureLevel,architectureScopeId,layoutReady,useC4Visuals,opacity:style?.opacity??null,animationName:style?.animationName??null,transitionDuration:style?.transitionDuration??null,pending:flow?.classList.contains('flowLayoutPending')??null,animated},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
+  const collapsedMemberIds = useMemo(() => {
+    const hidden = new Set<string>()
+    if (!c4Diagram) return hidden
+    for (const boundary of c4Diagram.boundaries) {
+      if (!collapsedBoundaryIds.has(boundary.id)) continue
+      for (const memberId of boundaryMembership[boundary.id] ?? []) {
+        hidden.add(memberId)
+      }
     }
-    sample('sync')
-    const raf = requestAnimationFrame(() => sample('raf'))
-    return () => cancelAnimationFrame(raf)
-  }, [architectureLevel, architectureScopeId, flowRef, layoutReady, useC4Visuals])
+    return hidden
+  }, [c4Diagram, collapsedBoundaryIds, boundaryMembership])
 
   const displayFeatureNodes = useMemo(() => {
     if (isLayerFocusAnimating) return fullLayerGraph.nodes
@@ -1219,6 +1229,12 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     return c4Diagram.nodes
       .map((c4Node) => byId.get(c4Node.sourceNodeId) ?? byId.get(c4Node.id))
       .filter((node): node is FunctionalNode => Boolean(node))
+      .filter((node) => !collapsedMemberIds.has(node.id))
+      .map((node) =>
+        confidencePerspective && node.confidence < 0.6
+          ? { ...node, tags: Array.from(new Set([...node.tags, 'perspective-dim'])) }
+          : node,
+      )
   }, [
     isLayerFocusAnimating,
     fullLayerGraph.nodes,
@@ -1226,28 +1242,41 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     c4Diagram,
     nodes,
     graphNodes,
+    collapsedMemberIds,
+    confidencePerspective,
   ])
 
   const displayEdges = useMemo((): FunctionalEdge[] => {
     if (isLayerFocusAnimating) return fullLayerGraph.edges
     if (!useC4Visuals || !c4Diagram) return edges
-    return c4Diagram.edges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      relation: edge.relation as FunctionalEdge['relation'],
-      label: edge.label,
-      purpose: edge.purpose,
-      technology: edge.technology,
-      confidence: edge.confidence ?? 1,
-      evidence: undefined,
-    }))
+    const memberToBoundary = new Map<string, string>()
+    for (const [boundaryId, memberIds] of Object.entries(boundaryMembership)) {
+      if (!collapsedBoundaryIds.has(boundaryId)) continue
+      for (const memberId of memberIds) memberToBoundary.set(memberId, boundaryId)
+    }
+    return c4Diagram.edges.map((edge) => {
+      const source = memberToBoundary.get(edge.source) ?? edge.source
+      const target = memberToBoundary.get(edge.target) ?? edge.target
+      return {
+        id: edge.id,
+        source,
+        target,
+        relation: edge.relation as FunctionalEdge['relation'],
+        label: edge.label,
+        purpose: edge.purpose,
+        technology: edge.technology,
+        confidence: edge.confidence ?? 1,
+        evidence: undefined,
+      }
+    }).filter((edge) => edge.source !== edge.target)
   }, [
     isLayerFocusAnimating,
     fullLayerGraph.edges,
     useC4Visuals,
     c4Diagram,
     edges,
+    boundaryMembership,
+    collapsedBoundaryIds,
   ])
 
   const viewportPersistenceGuardRef = useRef<ReturnType<
@@ -1657,21 +1686,30 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     if (!useC4Visuals || !c4Diagram) return []
     return c4Diagram.boundaries.map((boundary) => {
       const memberIds = boundaryMembership[boundary.id] ?? []
+      const collapsed = collapsedBoundaryIds.has(boundary.id)
       const livePositions = c4LiveFrame?.positions
-      const members = memberIds.flatMap((id) => {
-        const node = c4NodeById?.get(id)
-        if (!node) return []
-        const position = livePositions?.[id] ?? positionsById[id] ?? node.position
-        return [
-          {
-            x: position.x,
-            y: position.y,
-            width: node.width,
-            height: node.height,
-          },
-        ]
-      })
-      const fitted = fitBoundaryToMembers(boundary, members)
+      const members = collapsed
+        ? []
+        : memberIds.flatMap((id) => {
+            const node = c4NodeById?.get(id)
+            if (!node) return []
+            const position = livePositions?.[id] ?? positionsById[id] ?? node.position
+            return [
+              {
+                x: position.x,
+                y: position.y,
+                width: node.width,
+                height: node.height,
+              },
+            ]
+          })
+      const fitted = collapsed
+        ? {
+            position: boundary.position,
+            width: Math.max(180, boundary.width * 0.45),
+            height: Math.max(72, boundary.height * 0.35),
+          }
+        : fitBoundaryToMembers(boundary, members)
       return {
         id: boundary.id,
         type: 'c4Boundary',
@@ -1684,6 +1722,9 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         height: fitted.height,
         initialWidth: fitted.width,
         initialHeight: fitted.height,
+        // Keep measured in sync — RF otherwise caches a collapsed header height
+        // and the dashed rectangle never grows to the fitted box.
+        measured: { width: fitted.width, height: fitted.height },
         style: {
           width: fitted.width,
           height: fitted.height,
@@ -1692,10 +1733,39 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         data: {
           label: boundary.label,
           description: boundary.description,
+          collapsed,
+          onToggleCollapsed: () => toggleBoundaryCollapsed(boundary.id),
         },
       }
     })
-  }, [useC4Visuals, c4Diagram, boundaryMembership, c4NodeById, positionsById, c4LiveFrame])
+  }, [
+    useC4Visuals,
+    c4Diagram,
+    boundaryMembership,
+    c4NodeById,
+    positionsById,
+    c4LiveFrame,
+    collapsedBoundaryIds,
+    toggleBoundaryCollapsed,
+  ])
+
+  useEffect(() => {
+    if (layoutResetToken === 0) return
+    const projectKey = useWorkbenchStore.getState().project?.projectId
+    if (!projectKey || architecture?.notation !== 'c4') return
+    clearC4LayoutOverlayForView(
+      projectKey,
+      architectureLevel,
+      architectureScopeId,
+      activeViewKey,
+    )
+  }, [
+    layoutResetToken,
+    architecture?.notation,
+    architectureLevel,
+    architectureScopeId,
+    activeViewKey,
+  ])
 
   const derivedNodes: Node[] = useMemo(
     () => [
@@ -2304,6 +2374,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
                 architectureLevel,
                 architectureScopeId,
                 { [change.id]: resolved },
+                activeViewKey,
               )
             }
             pendingDragEndPositionsRef.current.set(change.id, resolved)
@@ -2459,6 +2530,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
             height: fitted.height,
             initialWidth: fitted.width,
             initialHeight: fitted.height,
+            measured: { width: fitted.width, height: fitted.height },
             style: {
               ...node.style,
               width: fitted.width,
@@ -2706,6 +2778,22 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         ) {
           return existing
         }
+        // Live boundary geometry is owned by fitLiveBoundaries while a C4 node
+        // is dragged — don't let a stale derived frame overwrite it.
+        if (existing && n.type === 'c4Boundary' && c4DragActiveRef.current) {
+          const merged = mergeDerivedFlowNode(n, existing)
+          return {
+            ...merged,
+            position: existing.position,
+            width: existing.width,
+            height: existing.height,
+            initialWidth: existing.initialWidth,
+            initialHeight: existing.initialHeight,
+            measured: existing.measured,
+            style: existing.style,
+            zIndex: existing.zIndex ?? n.zIndex,
+          }
+        }
         // Keep drag-time elevation (and live WG-member follow positions) stable.
         if (existing && elevatedDragIdsRef.current.has(n.id)) {
           const merged = mergeDerivedFlowNode(n, existing)
@@ -2794,9 +2882,6 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       flowRef.current = el
       backdropRef.current = el
       if (el) {
-        // #region agent log
-        fetch('http://127.0.0.1:7605/ingest/de6de0cd-a771-456b-b3d5-e46cdcebc2c1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'960ec8'},body:JSON.stringify({sessionId:'960ec8',hypothesisId:'A',location:'FunctionMapCanvas.tsx:flowHostRef',message:'canvas marked not ready',data:{},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         syncChromeInsetCssVars()
       }
       setFlowHostReady((prev) => {
@@ -3152,16 +3237,13 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
   const applyCamera = useCallback(
     (viewport: Viewport, duration: number) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7605/ingest/de6de0cd-a771-456b-b3d5-e46cdcebc2c1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'960ec8'},body:JSON.stringify({sessionId:'960ec8',hypothesisId:'C',location:'FunctionMapCanvas.tsx:applyCamera',message:'camera update',data:{duration,zoom:Math.round(viewport.zoom*100)/100,x:Math.round(viewport.x),y:Math.round(viewport.y),architectureLevel},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       // Programmatic camera updates can emit onMoveEnd; only the latest move
       // token may lift suppression when rapid camera applications overlap.
       viewportPersistenceGuardRef.current?.suppressFor(Math.max(duration, 0) + 80)
       setDefaultViewport(viewport)
       setViewport(viewport, { duration })
     },
-    [architectureLevel, setViewport],
+    [setViewport],
   )
 
   const isBleedChromeReady = useCallback(() => {
@@ -3287,12 +3369,13 @@ function FunctionMapCanvasInner({ bleed }: Props) {
               const projectKey = useWorkbenchStore.getState().project?.projectId
               const overlay = projectKey
                 ? loadC4LayoutOverlay(projectKey)
-                : { version: 1 as const, positions: {} }
+                : { version: 2 as const, positions: {}, collapsedBoundaries: {} }
               const positionsById = applyOverlayToPositions(
                 overlay,
                 architectureLevel,
                 architectureScopeId,
                 c4Layout.positionsById,
+                activeViewKey,
               )
               if (projectKey) {
                 pruneC4LayoutOverlayForView(
@@ -3300,6 +3383,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
                   architectureLevel,
                   architectureScopeId,
                   Object.keys(positionsById),
+                  activeViewKey,
                 )
               }
               return {
@@ -3456,9 +3540,6 @@ function FunctionMapCanvasInner({ bleed }: Props) {
 
   const startLayerFocusTransition = useCallback(
     (direction: 'enter' | 'exit', focusNodeId: string | null) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7605/ingest/de6de0cd-a771-456b-b3d5-e46cdcebc2c1',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'960ec8'},body:JSON.stringify({sessionId:'960ec8',hypothesisId:'D',location:'FunctionMapCanvas.tsx:startLayerFocusTransition',message:'legacy layer focus',data:{direction,focusNodeId,architectureLevel},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (!isLayeredArchitectureMap) return
       cancelLayerFocusTransitionRaf()
 
@@ -3560,7 +3641,6 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       layerFocusTransitionRafRef.current = requestAnimationFrame(runLayerFocusTransitionFrame)
     },
     [
-      architectureLevel,
       isLayeredArchitectureMap,
       cancelLayerFocusTransitionRaf,
       fullLayerGraph,
@@ -3879,22 +3959,15 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         selectArtifact(artifactId)
         return
       }
+      // Single-click selects (opens detail drawer). Double-click opens Code / Diff
+      // for code-file nodes — do not jump to the editor on first click.
       if (pendingClickRef.current) clearTimeout(pendingClickRef.current)
-      const sourceNode = nodes.find((candidate) => candidate.id === node.id)
-      const codeTarget = resolveCodeNodeTarget(sourceNode)
       pendingClickRef.current = setTimeout(() => {
         pendingClickRef.current = null
-        if (codeTarget) {
-          void focusCodeNodeForMap(codeTarget, {
-            focusCodeNode,
-            selectNode: onSelectNode,
-          })
-          return
-        }
         void onSelectNode(node.id)
       }, 280)
     },
-    [nodes, focusCodeNode, onSelectNode, selectArtifact],
+    [onSelectNode, selectArtifact],
   )
 
   const handleNodeMouseEnter = useCallback(
@@ -3923,20 +3996,32 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     }
   }, [])
 
-  const exitLayerFocusFromBlank = useCallback(() => {
+  const navigateUpFromBlank = useCallback(() => {
     cancelPendingPaneClick()
-    if (!isLayerFocusActiveRef.current) return false
+    const action = resolveMapBlankDoubleClickAction({
+      isLayerFocusActive: isLayerFocusActiveRef.current,
+      hasArchitectureScope: Boolean(architectureScopeId),
+    })
+    if (action === 'none') return false
+
     blurActiveNoteEditor()
     handleNodeMouseLeave()
     selectArtifact(null)
     setSelectedWorkGroupId(null)
-    clearLayerFocus()
     setContextMenu(null)
     setHeaderContextMenu(null)
+
+    if (action === 'clear-layer-focus') {
+      clearLayerFocus()
+      return true
+    }
+    drillOut()
     return true
   }, [
+    architectureScopeId,
     cancelPendingPaneClick,
     clearLayerFocus,
+    drillOut,
     handleNodeMouseLeave,
     selectArtifact,
   ])
@@ -3949,17 +4034,17 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       const onPane = Boolean(target?.closest('.react-flow__pane'))
       const onNode = Boolean(target?.closest('.react-flow__node'))
       if (!onPane || onNode) return
-      exitLayerFocusFromBlank()
+      navigateUpFromBlank()
     }
     host.addEventListener('dblclick', onNativeDblClick)
     return () => host.removeEventListener('dblclick', onNativeDblClick)
-  }, [flowRef, flowHostReady, exitLayerFocusFromBlank])
+  }, [flowRef, flowHostReady, navigateUpFromBlank])
 
   const handlePaneClick = useCallback(
     (event: React.MouseEvent) => {
       if (event.button !== 0) return
       if (event.detail >= 2) {
-        exitLayerFocusFromBlank()
+        navigateUpFromBlank()
         return
       }
       cancelPendingPaneClick()
@@ -3976,7 +4061,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     },
     [
       cancelPendingPaneClick,
-      exitLayerFocusFromBlank,
+      navigateUpFromBlank,
       handleNodeMouseLeave,
       selectArtifact,
       openGlobalAgentChat,
@@ -4061,15 +4146,23 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         nodes.find((candidate) => candidate.id === node.id) ??
         graphNodes.find((candidate) => candidate.id === node.id)
       const codeTarget = resolveCodeNodeTarget(sourceNode)
-      if (codeTarget) {
-        void focusCodeNodeForMap(codeTarget, {
-          focusCodeNode,
-          selectNode: onSelectNode,
-        })
+      const action = resolveMapNodeDoubleClickAction({
+        isCodeFileNode: Boolean(codeTarget),
+        canDrill: canDrillIntoNode(node.id),
+      })
+      if (action === 'open-code-file' && codeTarget) {
+        if (onSelectFile) {
+          void openCodeNodeInEditor(codeTarget, {
+            selectFile: onSelectFile,
+          })
+        } else {
+          void onSelectNode(codeTarget.parentNodeId)
+        }
         setHoverPreview(null)
         return
       }
-      if (drillIntoNode(node.id)) {
+      if (action === 'drill-in') {
+        drillIntoNode(node.id)
         setHoverPreview(null)
         return
       }
@@ -4077,10 +4170,11 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       setHoverPreview(null)
     },
     [
+      canDrillIntoNode,
       drillIntoNode,
-      focusCodeNode,
       graphNodes,
       nodes,
+      onSelectFile,
       onSelectNode,
       openNodeAgentChat,
       setHoverPreview,
@@ -4186,11 +4280,15 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       {useC4Visuals && selectedNodeId ? (
         <C4NodeDetailDrawer
           node={
-            graphNodes.find((candidate) => candidate.id === selectedNodeId) ??
             nodes.find((candidate) => candidate.id === selectedNodeId) ??
+            graphNodes.find((candidate) => candidate.id === selectedNodeId) ??
             null
           }
-          edges={graphEdges}
+          layerNodes={nodes}
+          layerEdges={edges}
+          fileIndex={fileIndex}
+          fileRelations={fileRelations}
+          durableGraph={durableGraph}
           onClose={onClearSelection}
         />
       ) : null}

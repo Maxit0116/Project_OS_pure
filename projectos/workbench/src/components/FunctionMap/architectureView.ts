@@ -1,14 +1,29 @@
 import type {
   ArchitectureLevel,
+  ArchitectureView,
   FileEntry,
   FileRelation,
   FunctionalEdge,
   FunctionalNode,
 } from '../../../../contracts/index.js'
+import {
+  applyViewNodeFilters,
+  findArchitectureView,
+  liftRelationshipsToVisibleAncestors,
+  resolveArchitectureView,
+  synthesizeDefaultArchitectureViews,
+  viewsForLevel,
+  type ArchitectureViewScope,
+} from '../../../../shared/c4-architecture-views/index.js'
 
-export interface ArchitectureViewScope {
-  parentId?: string
-  focusNodeId?: string
+export type { ArchitectureViewScope }
+export {
+  applyViewNodeFilters,
+  findArchitectureView,
+  liftRelationshipsToVisibleAncestors,
+  resolveArchitectureView,
+  synthesizeDefaultArchitectureViews,
+  viewsForLevel,
 }
 
 export const ARCHITECTURE_LEVELS: ArchitectureLevel[] = [
@@ -330,6 +345,13 @@ function projectInternalFileView(
   return { nodes: projectedNodes, edges: projectedEdges }
 }
 
+export interface ProjectArchitectureViewOptions {
+  views?: ArchitectureView[]
+  viewKey?: string
+  /** When true (default), lift cross-level edges to visible ancestors. */
+  liftRelationships?: boolean
+}
+
 export function projectArchitectureView(
   nodes: FunctionalNode[],
   edges: FunctionalEdge[],
@@ -337,41 +359,62 @@ export function projectArchitectureView(
   scope: ArchitectureViewScope = {},
   fileIndex: FileEntry[] = [],
   fileRelations: FileRelation[] = [],
+  options: ProjectArchitectureViewOptions = {},
 ): { nodes: FunctionalNode[]; edges: FunctionalEdge[] } {
   if (!nodes.some((node) => node.level)) {
     return { nodes, edges }
   }
 
-  if (level === 'code') {
-    const component = scope.parentId
-      ? nodes.find((node) => node.id === scope.parentId && node.level === 'component')
+  const resolved = resolveArchitectureView({
+    views: options.views,
+    viewKey: options.viewKey,
+    level,
+    scope,
+  })
+  const effectiveLevel = resolved.view.level
+  const effectiveScope: ArchitectureViewScope = {
+    ...resolved.scope,
+    ...scope,
+  }
+  const lift = options.liftRelationships !== false
+
+  if (effectiveLevel === 'code') {
+    const component = effectiveScope.parentId
+      ? nodes.find(
+          (node) =>
+            node.id === effectiveScope.parentId && node.level === 'component',
+        )
       : undefined
     const fileGraph = component
       ? projectInternalFileView(component, fileRelations, fileIndex)
       : { nodes: [], edges: [] }
-    return scope.focusNodeId
-      ? focusOneHop(fileGraph.nodes, fileGraph.edges, scope.focusNodeId)
+    return effectiveScope.focusNodeId
+      ? focusOneHop(fileGraph.nodes, fileGraph.edges, effectiveScope.focusNodeId)
       : fileGraph
   }
 
-  const levelNodes = nodes.filter(
+  let levelNodes = nodes.filter(
     (node) =>
-      node.level === level &&
-      (!scope.parentId || node.parentId === scope.parentId),
+      node.level === effectiveLevel &&
+      (!effectiveScope.parentId || node.parentId === effectiveScope.parentId),
   )
+  levelNodes = applyViewNodeFilters(levelNodes, resolved.view)
   const levelIds = new Set(levelNodes.map((node) => node.id))
-  const levelEdges = edges.filter(
-    (edge) =>
-      Boolean(edge.label?.trim()) &&
-      levelIds.has(edge.source) &&
-      levelIds.has(edge.target),
-  )
 
-  if (!scope.focusNodeId || !levelIds.has(scope.focusNodeId)) {
+  const labeledEdges = edges.filter((edge) => Boolean(edge.label?.trim()))
+  const levelEdges = lift
+    ? liftRelationshipsToVisibleAncestors(nodes, labeledEdges, levelIds).filter(
+        (edge) => levelIds.has(edge.source) && levelIds.has(edge.target),
+      )
+    : labeledEdges.filter(
+        (edge) => levelIds.has(edge.source) && levelIds.has(edge.target),
+      )
+
+  if (!effectiveScope.focusNodeId || !levelIds.has(effectiveScope.focusNodeId)) {
     return { nodes: levelNodes, edges: levelEdges }
   }
 
-  return focusOneHop(levelNodes, levelEdges, scope.focusNodeId)
+  return focusOneHop(levelNodes, levelEdges, effectiveScope.focusNodeId)
 }
 
 export function computeOneHopLinkedIds(

@@ -262,6 +262,7 @@ export class ModelGateway {
       ...(request.thinkingDepth !== undefined
         ? { thinkingDepth: request.thinkingDepth }
         : {}),
+      ...(request.images?.length ? { images: request.images } : {}),
     };
   }
 }

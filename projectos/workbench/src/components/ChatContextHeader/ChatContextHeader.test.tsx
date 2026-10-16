@@ -3,9 +3,13 @@ import { describe, expect, it, vi } from 'vitest'
 
 import ChatContextHeader from './ChatContextHeader'
 
-vi.mock('../../state/workbenchStore', () => ({
-  useWorkbenchStore: vi.fn(),
-}))
+vi.mock('../../state/workbenchStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../state/workbenchStore')>()
+  return {
+    ...actual,
+    useWorkbenchStore: vi.fn(),
+  }
+})
 
 vi.mock('../../i18n', () => ({
   useI18n: () => ({
@@ -52,5 +56,25 @@ describe('ChatContextHeader', () => {
     expect(html).not.toContain('system_saas_starter')
     expect(html).toContain('访客 feature Visitor')
     expect(html).toContain('Browse public pages and enter login flow.')
+  })
+
+  it('defaults the trigger to global / whole project when nothing is selected', () => {
+    mockStoreState({
+      context: null,
+      contextLoading: false,
+      graph: { nodes: [] },
+      selectedNodeId: null,
+      globalAgentActive: true,
+      selectedFilePath: null,
+      pendingFileOwnerChoice: null,
+      fileScopeError: null,
+      selectFile: vi.fn(),
+      chooseFileOwner: vi.fn(),
+    })
+
+    const html = renderToStaticMarkup(<ChatContextHeader />)
+
+    expect(html).toContain('context.scopeGlobal')
+    expect(html).not.toContain('context.empty')
   })
 })

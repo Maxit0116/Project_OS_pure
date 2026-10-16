@@ -50,6 +50,7 @@ describe('buildAppMenuTemplate', () => {
         locale: 'zh',
         workspaceOpen: true,
         hasActiveEditor: true,
+        workspacePath: '/tmp/demo',
         recentWorkspaces: [{ name: 'Demo & Co', path: '/tmp/demo' }],
       },
       'Project OS',

@@ -67,6 +67,53 @@ function setReadyScope(client: ProjectOSApi, mode: 'ask' | 'change' | 'plan' | '
 }
 
 describe('agent conversation routing', () => {
+  it('treats clearSelection as whole-project scope for Ask', async () => {
+    const workspace = createMockSampleWorkspace()
+    const askAgent = vi.fn(async (): Promise<AgentAnswerResult> => ({
+      id: 'answer-global-clear',
+      projectId: workspace.project.projectId,
+      scope: { kind: 'global' },
+      answer: 'Whole project answer.',
+      backend: 'model',
+      modelProfileId: 'model-1',
+      contextBundleHash: `sha256:${'e'.repeat(64)}`,
+      contextSummary: {
+        files: [],
+        synopsisPresent: true,
+        bundleHash: `sha256:${'e'.repeat(64)}`,
+      },
+      responseLanguage: { tag: 'und', source: 'undetermined', validation: 'not_checkable' },
+      createdAt: '2026-07-19T00:00:00.000Z',
+    }))
+    useWorkbenchStore.setState({
+      client: { askAgent } as unknown as ProjectOSApi,
+      project: workspace.project,
+      graph: workspace.graph,
+      tree: workspace.semanticTree,
+      selectedNodeId: 'feat_login',
+      selectedFilePath: 'app/login/page.tsx',
+      globalAgentActive: false,
+      chatMode: 'ask',
+    })
+
+    useWorkbenchStore.getState().clearSelection()
+    expect(useWorkbenchStore.getState()).toMatchObject({
+      globalAgentActive: true,
+      selectedNodeId: null,
+      selectedFilePath: null,
+    })
+    expect(canSubmitAgentPrompt(useWorkbenchStore.getState())).toBe(true)
+
+    await useWorkbenchStore.getState().sendPrompt('Summarize the project')
+
+    expect(askAgent).toHaveBeenCalledWith({
+      projectId: workspace.project.projectId,
+      scope: { kind: 'global' },
+      question: 'Summarize the project',
+      language: { mode: 'auto' },
+    })
+  })
+
   it('routes blank-canvas global Ask without node or file scope', async () => {
     const workspace = createMockSampleWorkspace()
     const askAgent = vi.fn(async (): Promise<AgentAnswerResult> => ({

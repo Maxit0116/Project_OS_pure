@@ -5,7 +5,14 @@ import type { WebContents } from 'electron'
 
 export interface PtySession {
   id: string
+  cwd: string
   pty: { write(data: string): void; resize(cols: number, rows: number): void; kill(): void }
+  webContentsId: number
+}
+
+export interface PtySessionSummary {
+  id: string
+  cwd: string
   webContentsId: number
 }
 
@@ -115,6 +122,7 @@ export class PtyManager {
 
     this.sessions.set(id, {
       id,
+      cwd: resolvedCwd,
       pty: ptyProcess,
       webContentsId: webContents.id,
     })
@@ -126,6 +134,14 @@ export class PtyManager {
     }
 
     return id
+  }
+
+  listSessions(): PtySessionSummary[] {
+    return [...this.sessions.values()].map((session) => ({
+      id: session.id,
+      cwd: session.cwd,
+      webContentsId: session.webContentsId,
+    }))
   }
 
   private getOwnedSession(id: string, webContentsId: number): PtySession | undefined {

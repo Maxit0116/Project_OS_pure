@@ -169,6 +169,43 @@ describe("chat session context", () => {
     expect(parent.messages).toHaveLength(3);
   });
 
+  it("keeps a topic→topic graph edge when branching without a digest", () => {
+    const parent = record({
+      head: head({
+        id: "parent",
+        classification: "topic",
+        classificationSource: "manual",
+        responsibility: "Own login",
+      }),
+      messages: [],
+    });
+    const child = buildForkedChatSession(parent, null, undefined, now);
+    expect(child.head.classification).toBe("topic");
+    expect(child.head.parentSessionId).toBe("parent");
+    expect(child.head.responsibility).toBe("Own login");
+    const graph = buildSessionGraph([parent.head, child.head]);
+    expect(graph.nodes.map((node) => node.id).sort()).toEqual(
+      [parent.head.id, child.head.id].sort(),
+    );
+    expect(graph.edges).toEqual([{ source: "parent", target: child.head.id }]);
+    expect(graph.misc).toEqual([]);
+  });
+
+  it("keeps misc forks out of the graph until they become substantive", () => {
+    const parent = record({
+      head: head({ id: "aside", classification: "misc", classificationSource: "auto" }),
+      messages: [message("m1", "user", "hi")],
+    });
+    const child = buildForkedChatSession(parent, null, undefined, now);
+    expect(child.head.classification).toBe("misc");
+    const graph = buildSessionGraph([parent.head, child.head]);
+    expect(graph.nodes).toEqual([]);
+    expect(graph.edges).toEqual([]);
+    expect(graph.misc.map((item) => item.id).sort()).toEqual(
+      [parent.head.id, child.head.id].sort(),
+    );
+  });
+
   it("does not prune a session that still has children", () => {
     const heads = [
       head({ id: "parent", lastUpdatedAt: "2026-08-01T00:00:00.000Z" }),

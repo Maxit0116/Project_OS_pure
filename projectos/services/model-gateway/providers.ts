@@ -11,6 +11,11 @@ import { normalizeModelProfile } from "../../contracts/settings.js";
 import { ProjectOSError } from "../../errors.js";
 import type { SecretStore } from "../../persistence/secret-store.js";
 
+export interface ProviderImagePart {
+  mimeType: "image/png" | "image/jpeg";
+  base64: string;
+}
+
 export interface ProviderCompleteInput {
   systemPrompt?: string;
   userPrompt?: string;
@@ -19,6 +24,41 @@ export interface ProviderCompleteInput {
   signal?: AbortSignal;
   maxOutputTokens?: number;
   thinkingDepth?: ThinkingDepth;
+  images?: ProviderImagePart[];
+}
+
+export function buildOpenAiUserContent(
+  text: string,
+  images?: ProviderImagePart[],
+): string | Array<Record<string, unknown>> {
+  if (!images?.length) return text;
+  return [
+    { type: "text", text },
+    ...images.map((image) => ({
+      type: "image_url",
+      image_url: {
+        url: `data:${image.mimeType};base64,${image.base64}`,
+      },
+    })),
+  ];
+}
+
+export function buildAnthropicUserContent(
+  text: string,
+  images?: ProviderImagePart[],
+): string | Array<Record<string, unknown>> {
+  if (!images?.length) return text;
+  return [
+    ...images.map((image) => ({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: image.mimeType,
+        data: image.base64,
+      },
+    })),
+    { type: "text", text },
+  ];
 }
 
 export type ProviderMessage = {
@@ -319,9 +359,12 @@ export function buildOpenAiChatBody(
         ...(input.systemPrompt
           ? [{ role: "system", content: input.systemPrompt }]
           : []),
-        ...input.messages.map((message) => ({
+        ...input.messages.map((message, index) => ({
         role: message.role,
-        content: message.content,
+        content:
+          message.role === "user" && index === input.messages!.length - 1
+            ? buildOpenAiUserContent(message.content, input.images)
+            : message.content,
         ...(message.toolCalls
           ? {
               tool_calls: message.toolCalls.map((toolCall) => ({
@@ -335,13 +378,16 @@ export function buildOpenAiChatBody(
             }
           : {}),
         ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
-        })),
+      })),
       ]
     : [
         ...(input.systemPrompt
           ? [{ role: "system", content: input.systemPrompt }]
           : []),
-        { role: "user", content: input.userPrompt ?? "" },
+        {
+          role: "user",
+          content: buildOpenAiUserContent(input.userPrompt ?? "", input.images),
+        },
       ];
   const body: Record<string, unknown> = {
     model: profile.model,
@@ -377,7 +423,13 @@ export function buildAnthropicMessagesBody(
   const sourceMessages = input.messages ?? [
     { role: "user" as const, content: input.userPrompt ?? "" },
   ];
-  const messages = sourceMessages.map((message) => {
+  const lastUserIndex = (() => {
+    for (let i = sourceMessages.length - 1; i >= 0; i -= 1) {
+      if (sourceMessages[i]?.role === "user") return i;
+    }
+    return -1;
+  })();
+  const messages = sourceMessages.map((message, index) => {
     if (message.role === "assistant") {
       const content: Array<Record<string, unknown>> = [];
       if (message.content) content.push({ type: "text", text: message.content });
@@ -407,7 +459,13 @@ export function buildAnthropicMessagesBody(
         }],
       };
     }
-    return { role: "user", content: message.content };
+    return {
+      role: "user",
+      content:
+        index === lastUserIndex
+          ? buildAnthropicUserContent(message.content, input.images)
+          : message.content,
+    };
   });
   const body: Record<string, unknown> = {
     model: profile.model,

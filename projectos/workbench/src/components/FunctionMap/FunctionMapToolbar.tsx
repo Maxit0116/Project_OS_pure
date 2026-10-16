@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Layers2, RefreshCw, StickyNote } from 'lucide-react'
+import { Check, Layers2, RotateCcw, SlidersHorizontal, StickyNote } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
@@ -53,6 +53,12 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
     architectureLevels,
     showArtifacts,
     setShowArtifacts,
+    resetC4Layout,
+    confidencePerspective,
+    setConfidencePerspective,
+    hideHeuristicNodes,
+    setHideHeuristicNodes,
+    architecture,
   } = useFunctionMap()
   const beginMapArtifactCreate = useWorkbenchStore((s) => s.beginMapArtifactCreate)
   const beginMapWorkGroupCreate = useWorkbenchStore((s) => s.beginMapWorkGroupCreate)
@@ -62,13 +68,17 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
   const graph = useWorkbenchStore((s) => s.graph)
   const { ts } = useI18n()
   const [addMenuOpen, setAddMenuOpen] = useState(false)
-  const [scanMenuOpen, setScanMenuOpen] = useState(false)
+  const [displayMenuOpen, setDisplayMenuOpen] = useState(false)
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null)
-  const [scanMenuPosition, setScanMenuPosition] = useState<{ x: number; y: number } | null>(null)
+  const [displayMenuPosition, setDisplayMenuPosition] = useState<{
+    x: number
+    y: number
+  } | null>(null)
   const addButtonRef = useRef<HTMLDivElement>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
-  const scanButtonRef = useRef<HTMLDivElement>(null)
-  const scanMenuRef = useRef<HTMLDivElement>(null)
+  const displayButtonRef = useRef<HTMLDivElement>(null)
+  const displayMenuRef = useRef<HTMLDivElement>(null)
+  const isC4 = architecture?.notation === 'c4'
   const searchAnchorRef = useRef<HTMLDivElement>(null)
   const searchMenuRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -159,22 +169,49 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
     }
   }, [addMenuOpen])
 
+  useLayoutEffect(() => {
+    if (!displayMenuOpen || !displayMenuPosition) return
+
+    const button = displayButtonRef.current
+    const menuEl = displayMenuRef.current
+    if (!button || !menuEl) return
+
+    const buttonRect = button.getBoundingClientRect()
+    const menuRect = menuEl.getBoundingClientRect()
+    let x = displayMenuPosition.x
+    let y = displayMenuPosition.y
+
+    if (x + menuRect.width > window.innerWidth - VIEWPORT_MARGIN) {
+      x = Math.max(VIEWPORT_MARGIN, window.innerWidth - menuRect.width - VIEWPORT_MARGIN)
+    }
+    if (y + menuRect.height > window.innerHeight - VIEWPORT_MARGIN) {
+      y = Math.max(VIEWPORT_MARGIN, buttonRect.top - menuRect.height - 4)
+    }
+
+    if (x !== displayMenuPosition.x || y !== displayMenuPosition.y) {
+      setDisplayMenuPosition({ x, y })
+    }
+  }, [displayMenuOpen, displayMenuPosition])
+
   useEffect(() => {
-    if (!scanMenuOpen) return
+    if (!displayMenuOpen) return
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setScanMenuOpen(false)
-        setScanMenuPosition(null)
+        setDisplayMenuOpen(false)
+        setDisplayMenuPosition(null)
       }
     }
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node
-      if (scanButtonRef.current?.contains(target) || scanMenuRef.current?.contains(target)) {
+      if (
+        displayButtonRef.current?.contains(target) ||
+        displayMenuRef.current?.contains(target)
+      ) {
         return
       }
-      setScanMenuOpen(false)
-      setScanMenuPosition(null)
+      setDisplayMenuOpen(false)
+      setDisplayMenuPosition(null)
     }
     document.addEventListener('keydown', handleKeyDown)
     const dismissTimer = window.setTimeout(() => {
@@ -185,7 +222,12 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
       document.removeEventListener('keydown', handleKeyDown)
       document.removeEventListener('click', handleClickOutside, true)
     }
-  }, [scanMenuOpen])
+  }, [displayMenuOpen])
+
+  const closeDisplayMenu = () => {
+    setDisplayMenuOpen(false)
+    setDisplayMenuPosition(null)
+  }
 
   useLayoutEffect(() => {
     if (!searchOpen) return
@@ -366,48 +408,55 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
       </div>
       {architectureLevels.length > 0 ? (
       <div className={styles.createActions}>
-        <div ref={scanButtonRef} className={styles.addMenuAnchor}>
+        <div ref={displayButtonRef} className={styles.addMenuAnchor}>
           <Button
-            variant="ghost"
+            variant={
+              confidencePerspective || hideHeuristicNodes || structureRescanLoading
+                ? 'secondary'
+                : 'ghost'
+            }
             size="sm"
             disabled={structureRescanLoading}
             onClick={() => {
-              const rect = scanButtonRef.current?.getBoundingClientRect()
+              const rect = displayButtonRef.current?.getBoundingClientRect()
               if (!rect) return
-              if (scanMenuOpen) {
-                setScanMenuOpen(false)
-                setScanMenuPosition(null)
+              if (displayMenuOpen) {
+                closeDisplayMenu()
                 return
               }
-              setScanMenuPosition({ x: rect.left, y: rect.bottom + 4 })
-              setScanMenuOpen(true)
+              setDisplayMenuPosition({ x: rect.left, y: rect.bottom + 4 })
+              setDisplayMenuOpen(true)
             }}
-            aria-expanded={scanMenuOpen}
+            aria-expanded={displayMenuOpen}
             aria-haspopup="menu"
-            title={ts('map.rescanStructure')}
+            title={ts('map.displayMenuHint')}
           >
-            <RefreshCw size={13} strokeWidth={1.75} aria-hidden />
-            {structureRescanLoading ? ts('map.regeneratingStructure') : ts('map.rescanStructure')}
+            <SlidersHorizontal size={13} strokeWidth={1.75} aria-hidden />
+            {structureRescanLoading
+              ? ts('map.regeneratingStructure')
+              : ts('map.displayMenu')}
           </Button>
         </div>
-        {scanMenuOpen &&
-          scanMenuPosition &&
+        {displayMenuOpen &&
+          displayMenuPosition &&
           createPortal(
             <div
-              ref={scanMenuRef}
+              ref={displayMenuRef}
               className={contextMenuStyles.menu}
               role="menu"
-              aria-label={ts('map.rescanStructure')}
+              aria-label={ts('map.displayMenu')}
               data-zone-interactive
-              style={{ left: scanMenuPosition.x, top: scanMenuPosition.y }}
+              style={{ left: displayMenuPosition.x, top: displayMenuPosition.y }}
             >
+              <div className={contextMenuStyles.groupLabel} aria-hidden>
+                {ts('map.displayMenuStructure')}
+              </div>
               <button
                 type="button"
                 role="menuitem"
                 className={contextMenuStyles.menuItem}
                 onClick={() => {
-                  setScanMenuOpen(false)
-                  setScanMenuPosition(null)
+                  closeDisplayMenu()
                   if (!window.confirm(ts('map.regenerateStructureConfirm'))) return
                   void rescanStructureGraph({ mode: 'regenerate' })
                 }}
@@ -419,8 +468,7 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
                 role="menuitem"
                 className={contextMenuStyles.menuItem}
                 onClick={() => {
-                  setScanMenuOpen(false)
-                  setScanMenuPosition(null)
+                  closeDisplayMenu()
                   void rescanStructureGraph({ mode: 'refine' })
                 }}
               >
@@ -434,13 +482,68 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
                 title={canDeepen ? undefined : ts('map.deepenSelectionDisabled')}
                 onClick={() => {
                   if (!canDeepen || !selectedNodeId) return
-                  setScanMenuOpen(false)
-                  setScanMenuPosition(null)
+                  closeDisplayMenu()
                   void rescanStructureGraph({ mode: 'deepen', nodeIds: [selectedNodeId] })
                 }}
               >
                 {ts('map.deepenSelection')}
               </button>
+              {isC4 ? (
+                <>
+                  <div className={contextMenuStyles.separator} aria-hidden />
+                  <div className={contextMenuStyles.groupLabel} aria-hidden>
+                    {ts('map.displayMenuView')}
+                  </div>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={contextMenuStyles.menuItem}
+                    title={ts('map.resetLayoutHint')}
+                    onClick={() => {
+                      closeDisplayMenu()
+                      resetC4Layout()
+                    }}
+                  >
+                    <RotateCcw
+                      className={contextMenuStyles.menuItemIcon}
+                      size={14}
+                      strokeWidth={1.75}
+                      aria-hidden
+                    />
+                    {ts('map.resetLayout')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={confidencePerspective}
+                    className={contextMenuStyles.menuItem}
+                    title={ts('map.confidencePerspectiveHint')}
+                    onClick={() => setConfidencePerspective(!confidencePerspective)}
+                  >
+                    <span className={contextMenuStyles.menuItemCheck} aria-hidden>
+                      {confidencePerspective ? (
+                        <Check size={14} strokeWidth={2} />
+                      ) : null}
+                    </span>
+                    {ts('map.confidencePerspective')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={hideHeuristicNodes}
+                    className={contextMenuStyles.menuItem}
+                    title={ts('map.hideHeuristicHint')}
+                    onClick={() => setHideHeuristicNodes(!hideHeuristicNodes)}
+                  >
+                    <span className={contextMenuStyles.menuItemCheck} aria-hidden>
+                      {hideHeuristicNodes ? (
+                        <Check size={14} strokeWidth={2} />
+                      ) : null}
+                    </span>
+                    {ts('map.hideHeuristic')}
+                  </button>
+                </>
+              ) : null}
             </div>,
             document.body,
           )}

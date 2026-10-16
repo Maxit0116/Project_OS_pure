@@ -7,11 +7,13 @@ describe('parseAppMenuState', () => {
       locale: 'zh',
       workspaceOpen: true,
       hasActiveEditor: false,
+      workspacePath: '/tmp/demo',
       recentWorkspaces: [{ name: 'Demo', path: '/tmp/demo' }],
     })).toEqual({
       locale: 'zh',
       workspaceOpen: true,
       hasActiveEditor: false,
+      workspacePath: '/tmp/demo',
       recentWorkspaces: [{ name: 'Demo', path: '/tmp/demo' }],
     })
   })

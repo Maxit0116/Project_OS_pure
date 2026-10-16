@@ -19,6 +19,9 @@ export async function applyElkLayoutToDiagram(
   diagram: C4Diagram,
 ): Promise<C4Diagram> {
   if (diagram.nodes.length === 0) return diagram
+  // A code listing with no file-to-file edges is already a near-square matrix.
+  // ELK's layered pass would stack those files into one column.
+  if (isUnrelatedCodeListing(diagram)) return diagram
 
   try {
     const laidOut = await layoutWithElk(diagram)
@@ -362,6 +365,14 @@ export function separateNodesForLabels(diagram: C4Diagram): C4Diagram {
     boundaries,
     bounds: frame.length > 0 ? computeBounds(frame) : emptyBounds(),
   }
+}
+
+function isUnrelatedCodeListing(diagram: C4Diagram): boolean {
+  if (diagram.level !== 'code' || diagram.nodes.length === 0) return false
+  const ids = new Set(diagram.nodes.map((node) => node.id))
+  return !diagram.edges.some(
+    (edge) => ids.has(edge.source) && ids.has(edge.target) && edge.source !== edge.target,
+  )
 }
 
 function elkLeaf(node: C4DiagramNode): ElkNode {

@@ -34,9 +34,7 @@ const DEVELOPMENT_CSP = PACKAGED_CSP
   )
   .replace(
     `connect-src ${PACKAGED_CONNECT_SRC}`,
-    // #region agent log
-    `connect-src ${PACKAGED_CONNECT_SRC} ws: wss: http://127.0.0.1:7605`,
-    // #endregion
+    `connect-src ${PACKAGED_CONNECT_SRC} ws: wss:`,
   )
 
 export const MAIN_WINDOW_MEDIA_PERMISSION = 'media'

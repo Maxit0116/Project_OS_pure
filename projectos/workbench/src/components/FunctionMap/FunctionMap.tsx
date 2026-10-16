@@ -1,5 +1,6 @@
 import { ReactFlowProvider } from '@xyflow/react'
 import type {
+  ArchitectureView,
   FileEntry,
   FileRelation,
   FunctionalEdge,
@@ -18,6 +19,7 @@ interface Props {
   fileIndex?: FileEntry[]
   fileRelations?: FileRelation[]
   architecture?: ProjectArchitecture
+  architectureViews?: ArchitectureView[]
   projectName?: string
   mapContent?: MapContentDocument | null
   selectedNodeId: string | null

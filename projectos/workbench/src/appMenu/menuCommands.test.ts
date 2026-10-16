@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getMessages } from '../i18n'
 import { KEYBOARD_SHORTCUT_GROUPS } from './keyboardShortcutCatalog'
 import {
   commandFromKeyEvent,
   executeAppMenuCommand,
   resetAppMenuCommandGuardForTests,
+  workspaceWindowTarget,
 } from './menuCommands'
 import { keyboardShortcutsOpen, setKeyboardShortcutsOpen } from './keyboardShortcutsController'
 import { useWorkbenchStore } from '../state/workbenchStore'
@@ -39,6 +40,14 @@ describe('commandFromKeyEvent', () => {
   })
 })
 
+describe('workspaceWindowTarget', () => {
+  it('keeps the first project in the current window and opens later ones in a new window', () => {
+    expect(workspaceWindowTarget(null, '/tmp/first')).toBe('current')
+    expect(workspaceWindowTarget('/tmp/first', '/tmp/first/')).toBe('same')
+    expect(workspaceWindowTarget('/tmp/first', '/tmp/second')).toBe('new')
+  })
+})
+
 describe('executeAppMenuCommand', () => {
   beforeEach(() => {
     resetAppMenuCommandGuardForTests()
@@ -47,6 +56,7 @@ describe('executeAppMenuCommand', () => {
       phase: 'ready',
       centerTab: 'function-map',
       leftPanelOpen: true,
+      project: null,
     })
     useBottomDockStore.setState({ open: false, activeView: 'terminal' })
   })
@@ -70,6 +80,26 @@ describe('executeAppMenuCommand', () => {
   it('opens the shortcut reference', () => {
     executeAppMenuCommand({ id: 'show-keyboard-shortcuts' })
     expect(keyboardShortcutsOpen()).toBe(true)
+  })
+
+  it('asks the desktop shell to open another folder in a new window', async () => {
+    const openWorkspaceInNewWindow = vi.fn(() => Promise.resolve())
+    vi.stubGlobal('window', {
+      projectOS: { window: { openWorkspaceInNewWindow } },
+    })
+    useWorkbenchStore.setState({
+      project: { workspaceRoot: '/tmp/current' } as NonNullable<
+        ReturnType<typeof useWorkbenchStore.getState>['project']
+      >,
+    })
+    resetAppMenuCommandGuardForTests()
+
+    executeAppMenuCommand({ id: 'open-recent', path: '/tmp/next' })
+    await Promise.resolve()
+
+    expect(openWorkspaceInNewWindow).toHaveBeenCalledWith('/tmp/next')
+    vi.unstubAllGlobals()
+    useWorkbenchStore.setState({ project: null })
   })
 })
 

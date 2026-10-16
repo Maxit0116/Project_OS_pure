@@ -68,7 +68,10 @@ export type ProjectOSErrorCode =
   | "git_conflict"
   | "pr_not_found"
   | "daily_brief_not_found"
-  | "annotation_not_found";
+  | "annotation_not_found"
+  | "spatial_pin_invalid"
+  | "loop_graph_not_found"
+  | "loop_graph_invalid";
 
 export interface ProjectOSErrorOptions {
   cause?: unknown;

@@ -14,6 +14,10 @@ export default function FunctionMapLevelNavigator({ showScopeLabel = false }: Pr
     architectureLevels,
     setArchitectureLevel,
     architectureBreadcrumbs,
+    architectureViewsForLevel,
+    activeViewKey,
+    setActiveViewKey,
+    activeViewTitle,
     drillOut,
   } = useFunctionMap()
   const { ts } = useI18n()
@@ -24,7 +28,10 @@ export default function FunctionMapLevelNavigator({ showScopeLabel = false }: Pr
   const guidedLevels = architectureLevels
   const activeStepLevel = architectureLevel
   const currentScope = architectureBreadcrumbs.at(-1)
-  const breadcrumbTitle = architectureBreadcrumbs.map((node) => node.name).join(' › ')
+  const breadcrumbTitle = [
+    ...architectureBreadcrumbs.map((node) => node.name),
+    ...(activeViewTitle ? [activeViewTitle] : []),
+  ].join(' › ')
 
   return (
     <div className={styles.levelNavigator} data-tour="architecture-levels" data-zone-interactive>
@@ -67,6 +74,26 @@ export default function FunctionMapLevelNavigator({ showScopeLabel = false }: Pr
           </Fragment>
         ))}
       </div>
+      {architectureViewsForLevel.length > 1 && (
+        <label className={styles.viewSelectLabel}>
+          <span className={styles.viewSelectCaption}>{ts('map.viewSwitcher')}</span>
+          <select
+            className={styles.viewSelect}
+            value={activeViewKey ?? architectureViewsForLevel[0]?.key ?? ''}
+            onChange={(event) => {
+              const key = event.target.value
+              setActiveViewKey(key || null)
+            }}
+            aria-label={ts('map.viewSwitcher')}
+          >
+            {architectureViewsForLevel.map((view) => (
+              <option key={view.key} value={view.key}>
+                {view.title}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
     </div>
   )
 }

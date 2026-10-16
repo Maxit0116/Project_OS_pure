@@ -107,3 +107,40 @@
   font-family: var(--font-mono, ui-monospace, monospace);
   word-break: break-all;
 }
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  background: var(--tech-bg-muted);
+  font-size: var(--font-size-xs, 11px);
+  color: var(--tech-text-secondary, var(--color-text-muted));
+}
+
+.empty {
+  margin: 0;
+  font-size: var(--font-size-sm, 12px);
+  line-height: 1.45;
+  color: var(--tech-text-secondary, var(--color-text-muted));
+}
+
+.riskLow {
+  color: var(--tech-accent, #22c55e);
+}
+
+.riskMedium {
+  color: var(--tech-warning, #eab308);
+}
+
+.riskHigh {
+  color: var(--tech-danger, #ef4444);
+}

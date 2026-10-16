@@ -1,5 +1,6 @@
 import type {
   ArchitectureLevel,
+  ArchitectureView,
   FileEntry,
   FileRelation,
   FunctionalEdge,
@@ -32,6 +33,8 @@ export interface C4DiagramInput {
   edges: FunctionalEdge[]
   architecture?: ProjectArchitecture
   scope?: C4DiagramScope
+  views?: ArchitectureView[]
+  viewKey?: string
   fileIndex?: FileEntry[]
   fileRelations?: FileRelation[]
 }

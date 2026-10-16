@@ -10,6 +10,7 @@ import {
 } from 'react'
 import type {
   ArchitectureLevel,
+  ArchitectureView,
   FileEntry,
   FileRelation,
   FunctionalEdge,
@@ -21,7 +22,10 @@ import {
   architectureScopeForSelection,
   availableArchitectureLevels,
   defaultArchitectureScopeId,
+  findArchitectureView,
   projectArchitectureView,
+  synthesizeDefaultArchitectureViews,
+  viewsForLevel,
 } from './architectureView'
 import { useReducedMotion3d } from './hooks/useReducedMotion3d'
 import type { MapSearchFocusRequest, MapSearchHit } from './mapSearch'
@@ -147,9 +151,13 @@ export interface FunctionMapContextValue {
   fileIndex: FileEntry[]
   fileRelations: FileRelation[]
   architecture?: ProjectArchitecture
+  architectureViews: ArchitectureView[]
   architectureLevel: ArchitectureLevel
   architectureLevels: ArchitectureLevel[]
   setArchitectureLevel: (level: ArchitectureLevel) => void
+  activeViewKey: string | null
+  setActiveViewKey: (key: string | null) => void
+  architectureViewsForLevel: ArchitectureView[]
   architectureScopeId: string | null
   focusedCodeNodeId: string | null
   focusCodeNode: (nodeId: string) => void
@@ -157,10 +165,21 @@ export interface FunctionMapContextValue {
   isLayerFocusActive: boolean
   clearLayerFocus: () => void
   architectureBreadcrumbs: FunctionalNode[]
+  activeViewTitle: string | null
   canDrillIntoNode: (nodeId: string) => boolean
   isComponentFileDrillTarget: (nodeId: string) => boolean
   drillIntoNode: (nodeId: string) => boolean
   drillOut: () => void
+  collapsedBoundaryIds: ReadonlySet<string>
+  toggleBoundaryCollapsed: (boundaryId: string) => void
+  resetC4Layout: () => void
+  layoutResetToken: number
+  /** Soft perspective overlay: dim low-confidence nodes when enabled. */
+  confidencePerspective: boolean
+  setConfidencePerspective: (enabled: boolean) => void
+  /** Hide heuristic-sourced nodes when true. */
+  hideHeuristicNodes: boolean
+  setHideHeuristicNodes: (hide: boolean) => void
   showArtifacts: boolean
   setShowArtifacts: (show: boolean) => void
   selectedNodeId: string | null
@@ -348,6 +367,7 @@ interface ProviderProps {
   fileIndex?: FileEntry[]
   fileRelations?: FileRelation[]
   architecture?: ProjectArchitecture
+  architectureViews?: ArchitectureView[]
   projectName?: string
   galaxySettings?: MapGalaxySettings | null
   mapContent?: MapContentDocument | null
@@ -366,6 +386,7 @@ export function FunctionMapProvider({
   fileIndex = [],
   fileRelations = [],
   architecture,
+  architectureViews: architectureViewsProp,
   projectName = 'Project',
   galaxySettings = null,
   mapContent = null,
@@ -403,6 +424,20 @@ export function FunctionMapProvider({
   const [architectureScopeId, setArchitectureScopeId] = useState<string | null>(() =>
     selectedFileOwnerId ?? defaultScopeIdForLevel(nodes, initialLevel),
   )
+  const architectureViews = useMemo(
+    () =>
+      architectureViewsProp?.length
+        ? architectureViewsProp
+        : synthesizeDefaultArchitectureViews(nodes, { sourceKind: 'heuristic' }),
+    [architectureViewsProp, nodes],
+  )
+  const [activeViewKey, setActiveViewKeyState] = useState<string | null>(null)
+  const [collapsedBoundaryIds, setCollapsedBoundaryIds] = useState<Set<string>>(
+    () => new Set(),
+  )
+  const [layoutResetToken, setLayoutResetToken] = useState(0)
+  const [confidencePerspective, setConfidencePerspective] = useState(false)
+  const [hideHeuristicNodes, setHideHeuristicNodes] = useState(false)
   const [focusedCodeNodeId, setFocusedCodeNodeId] = useState<string | null>(null)
   const [layerFocusSuppressed, setLayerFocusSuppressed] = useState(false)
   const nodeMembershipKey = useMemo(() => functionMapNodeMembershipKey(nodes), [nodes])
@@ -562,10 +597,36 @@ export function FunctionMapProvider({
     [onSelectNode],
   )
 
+  const architectureViewsForLevel = useMemo(
+    () => viewsForLevel(architectureViews, architectureLevel),
+    [architectureViews, architectureLevel],
+  )
+
+  const setActiveViewKey = useCallback(
+    (key: string | null) => {
+      setActiveViewKeyState(key)
+      const view = findArchitectureView(architectureViews, key ?? undefined)
+      if (!view) return
+      setArchitectureLevelState(view.level)
+      setArchitectureScopeId(view.parentId ?? null)
+      setLayerFocusSuppressed(false)
+      setFocusedCodeNodeId(null)
+      setHoverPreview(null)
+      collapseAllClusters()
+      clearAllFrozenPlanetOrbits()
+    },
+    [architectureViews, collapseAllClusters, clearAllFrozenPlanetOrbits],
+  )
+
   const setArchitectureLevel = useCallback(
     (level: ArchitectureLevel) => {
       setArchitectureLevelState(level)
-      setArchitectureScopeId(defaultScopeIdForLevel(nodes, level))
+      const scopeId = defaultScopeIdForLevel(nodes, level)
+      setArchitectureScopeId(scopeId)
+      const matching = viewsForLevel(architectureViews, level)
+      const preferred =
+        matching.find((view) => (view.parentId ?? null) === scopeId) ?? matching[0]
+      setActiveViewKeyState(preferred?.key ?? null)
       setLayerFocusSuppressed(false)
       setFocusedCodeNodeId(null)
       setHoverPreview(null)
@@ -575,8 +636,22 @@ export function FunctionMapProvider({
       setExpandedPipeIds(new Set())
       clearAllFrozenPlanetOrbits()
     },
-    [nodes, collapseAllClusters, clearAllFrozenPlanetOrbits],
+    [nodes, architectureViews, collapseAllClusters, clearAllFrozenPlanetOrbits],
   )
+
+  const toggleBoundaryCollapsed = useCallback((boundaryId: string) => {
+    setCollapsedBoundaryIds((current) => {
+      const next = new Set(current)
+      if (next.has(boundaryId)) next.delete(boundaryId)
+      else next.add(boundaryId)
+      return next
+    })
+  }, [])
+
+  const resetC4Layout = useCallback(() => {
+    setCollapsedBoundaryIds(new Set())
+    setLayoutResetToken((token) => token + 1)
+  }, [])
 
   const togglePipeExpanded = useCallback((hostNodeId: string) => {
     setExpandedPipeIds((current) => {
@@ -826,9 +901,14 @@ export function FunctionMapProvider({
   const drillIntoNode = useCallback(
     (nodeId: string) => {
       const node = nodes.find((candidate) => candidate.id === nodeId)
-      if (node?.level === 'component' && node.linkedFiles.length > 0) {
-        setArchitectureScopeId(node.id)
-        setArchitectureLevelState('code')
+      if (!node) return false
+
+      // Prefer a named child view whose parentId is this node (LikeC4-style).
+      const childView = architectureViews.find((view) => view.parentId === nodeId)
+      if (childView) {
+        setActiveViewKeyState(childView.key)
+        setArchitectureLevelState(childView.level)
+        setArchitectureScopeId(childView.parentId ?? nodeId)
         setLayerFocusSuppressed(false)
         setFocusedCodeNodeId(null)
         setHoverPreview(null)
@@ -838,7 +918,24 @@ export function FunctionMapProvider({
         setHorizonPhase('off')
         return true
       }
-      if (!node) return false
+
+      if (node.level === 'component' && node.linkedFiles.length > 0) {
+        setArchitectureScopeId(node.id)
+        setArchitectureLevelState('code')
+        setActiveViewKeyState(
+          architectureViews.find(
+            (view) => view.level === 'code' && view.parentId === node.id,
+          )?.key ?? null,
+        )
+        setLayerFocusSuppressed(false)
+        setFocusedCodeNodeId(null)
+        setHoverPreview(null)
+        collapseAllClusters()
+        clearAllFrozenPlanetOrbits()
+        setGalaxyHorizonMode(false)
+        setHorizonPhase('off')
+        return true
+      }
 
       const childFromList = node.children
         ?.map((childId) => nodes.find((candidate) => candidate.id === childId))
@@ -851,6 +948,11 @@ export function FunctionMapProvider({
 
       setArchitectureScopeId(node.id)
       setArchitectureLevelState(child.level)
+      setActiveViewKeyState(
+        architectureViews.find(
+          (view) => view.level === child.level && view.parentId === node.id,
+        )?.key ?? null,
+      )
       setLayerFocusSuppressed(false)
       setFocusedCodeNodeId(null)
       setHoverPreview(null)
@@ -860,7 +962,7 @@ export function FunctionMapProvider({
       setHorizonPhase('off')
       return true
     },
-    [nodes, collapseAllClusters, clearAllFrozenPlanetOrbits],
+    [nodes, architectureViews, collapseAllClusters, clearAllFrozenPlanetOrbits],
   )
 
   const drillOut = useCallback(() => {
@@ -870,65 +972,107 @@ export function FunctionMapProvider({
 
     setArchitectureLevelState(owner.level)
     setArchitectureScopeId(owner.parentId ?? null)
+    setActiveViewKeyState(
+      architectureViews.find(
+        (view) =>
+          view.level === owner.level &&
+          (view.parentId ?? null) === (owner.parentId ?? null),
+      )?.key ?? null,
+    )
     setLayerFocusSuppressed(false)
     setFocusedCodeNodeId(null)
     setHoverPreview(null)
     collapseAllClusters()
     clearAllFrozenPlanetOrbits()
-  }, [architectureScopeId, nodes, collapseAllClusters, clearAllFrozenPlanetOrbits])
+  }, [
+    architectureScopeId,
+    architectureViews,
+    nodes,
+    collapseAllClusters,
+    clearAllFrozenPlanetOrbits,
+  ])
 
   const architectureBreadcrumbs = useMemo(
     () => buildArchitectureBreadcrumbs(nodes, architectureScopeId),
     [architectureScopeId, nodes],
   )
 
+  const activeViewTitle = useMemo(() => {
+    const view = findArchitectureView(architectureViews, activeViewKey ?? undefined)
+    return view?.title ?? null
+  }, [architectureViews, activeViewKey])
+
   const selectedArchitectureScope = useMemo(
     () => architectureScopeForSelection(nodes, architectureLevel, selectedNodeId),
     [nodes, architectureLevel, selectedNodeId],
   )
+  // Code layer keeps the full component file graph on selection / open-file.
+  // One-hop focus is architecture-level only (not driven by code-file clicks).
   const selectedFocusCandidate =
+    architectureLevel !== 'code' &&
     selectedArchitectureScope.focusNodeId &&
     selectedArchitectureScope.parentId === (architectureScopeId ?? undefined)
       ? selectedArchitectureScope.focusNodeId
       : undefined
   const isLayerFocusActive =
-    !layerFocusSuppressed &&
-    Boolean(
-      selectedFocusCandidate ||
-        (architectureLevel === 'code' && focusedCodeNodeId),
-    )
+    !layerFocusSuppressed && Boolean(selectedFocusCandidate)
   const selectedFocusInScope = isLayerFocusActive ? selectedFocusCandidate : undefined
 
-  const projectedGraph = useMemo(
-    () =>
-      projectArchitectureView(
-        nodes,
-        edges,
-        architectureLevel,
-        {
-          ...(architectureScopeId ? { parentId: architectureScopeId } : {}),
-          ...(selectedFocusInScope ? { focusNodeId: selectedFocusInScope } : {}),
-          ...(architectureLevel === 'code' &&
-          focusedCodeNodeId &&
-          !layerFocusSuppressed
-            ? { focusNodeId: focusedCodeNodeId }
-            : {}),
-        },
-        fileIndex,
-        fileRelations,
-      ),
-    [
+  const projectedGraph = useMemo(() => {
+    const projected = projectArchitectureView(
       nodes,
       edges,
+      architectureLevel,
+      {
+        ...(architectureScopeId ? { parentId: architectureScopeId } : {}),
+        ...(architectureLevel !== 'code' && selectedFocusInScope
+          ? { focusNodeId: selectedFocusInScope }
+          : {}),
+      },
       fileIndex,
       fileRelations,
-      architectureLevel,
-      architectureScopeId,
-      focusedCodeNodeId,
-      layerFocusSuppressed,
-      selectedFocusInScope,
-    ],
-  )
+      {
+        views: architectureViews,
+        ...(activeViewKey ? { viewKey: activeViewKey } : {}),
+      },
+    )
+    let nextNodes = projected.nodes
+    if (hideHeuristicNodes) {
+      nextNodes = nextNodes.filter((node) => node.sourceKind !== 'heuristic')
+    }
+    if (confidencePerspective) {
+      nextNodes = nextNodes.map((node) =>
+        node.confidence < 0.6
+          ? { ...node, tags: Array.from(new Set([...node.tags, 'perspective-dim'])) }
+          : node,
+      )
+    }
+    const visibleIds = new Set(nextNodes.map((node) => node.id))
+    return {
+      nodes: nextNodes,
+      edges: projected.edges.filter(
+        (edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target),
+      ),
+    }
+  }, [
+    nodes,
+    edges,
+    fileIndex,
+    fileRelations,
+    architectureLevel,
+    architectureScopeId,
+    architectureViews,
+    activeViewKey,
+    selectedFocusInScope,
+    hideHeuristicNodes,
+    confidencePerspective,
+  ])
+
+  const centerTab = useWorkbenchStore((s) => s.centerTab)
+  useEffect(() => {
+    // Provider stays mounted across bleed tab switches; drop stale code focus.
+    setFocusedCodeNodeId(null)
+  }, [centerTab])
 
   const setChromeInsets = useCallback((next: ChromeInsets, options?: SetChromeInsetsOptions) => {
     chromeInsetsRef.current = next
@@ -1131,9 +1275,13 @@ export function FunctionMapProvider({
       fileIndex,
       fileRelations,
       architecture,
+      architectureViews,
       architectureLevel,
       architectureLevels,
       setArchitectureLevel,
+      activeViewKey,
+      setActiveViewKey,
+      architectureViewsForLevel,
       architectureScopeId,
       focusedCodeNodeId,
       focusCodeNode,
@@ -1141,10 +1289,19 @@ export function FunctionMapProvider({
       isLayerFocusActive,
       clearLayerFocus,
       architectureBreadcrumbs,
+      activeViewTitle,
       canDrillIntoNode,
       isComponentFileDrillTarget,
       drillIntoNode,
       drillOut,
+      collapsedBoundaryIds,
+      toggleBoundaryCollapsed,
+      resetC4Layout,
+      layoutResetToken,
+      confidencePerspective,
+      setConfidencePerspective,
+      hideHeuristicNodes,
+      setHideHeuristicNodes,
       showArtifacts,
       setShowArtifacts,
       selectedNodeId,
@@ -1243,12 +1400,23 @@ export function FunctionMapProvider({
       fileIndex,
       fileRelations,
       architecture,
+      architectureViews,
       architectureLevel,
       architectureLevels,
+      activeViewKey,
+      setActiveViewKey,
+      architectureViewsForLevel,
       architectureScopeId,
       focusedCodeNodeId,
       isLayerFocusActive,
       architectureBreadcrumbs,
+      activeViewTitle,
+      collapsedBoundaryIds,
+      toggleBoundaryCollapsed,
+      resetC4Layout,
+      layoutResetToken,
+      confidencePerspective,
+      hideHeuristicNodes,
       showArtifacts,
       selectedNodeId,
       selectNode,

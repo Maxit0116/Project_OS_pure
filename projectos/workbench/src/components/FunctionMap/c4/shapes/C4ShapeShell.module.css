@@ -617,30 +617,44 @@
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  border: 1.5px dashed var(--tech-border-strong, var(--color-border));
-  border-radius: 8px;
-  background: transparent;
+  min-width: 100%;
+  min-height: 100%;
+  /* Stronger than --tech-border-strong so the C4 frame reads on dark canvases. */
+  border: 2px dashed
+    color-mix(in srgb, var(--tech-text-secondary, #a1a1aa) 65%, transparent);
+  border-radius: 10px;
+  background: color-mix(
+    in srgb,
+    var(--tech-text-secondary, #a1a1aa) 4%,
+    transparent
+  );
   pointer-events: none;
   position: relative;
 }
 
 .boundaryHeader {
   position: absolute;
-  top: 8px;
-  left: 12px;
+  top: 10px;
+  left: 36px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-width: calc(100% - 24px);
+  max-width: calc(100% - 48px);
+  pointer-events: none;
 }
 
 .boundaryLabel {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--tech-text-secondary, var(--color-text-secondary));
+  letter-spacing: 0.01em;
+  color: var(--tech-text-primary, var(--color-text));
 }
 
 .boundaryDescription {
   font-size: 10px;
   color: var(--tech-text-muted, var(--color-text-muted));
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }

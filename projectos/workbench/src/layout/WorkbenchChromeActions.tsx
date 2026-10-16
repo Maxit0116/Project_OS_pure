@@ -1,4 +1,5 @@
-import { MessageSquare, PanelLeft, Settings, Terminal } from 'lucide-react'
+import { Crosshair, MessageSquare, PanelLeft, Settings, Terminal } from 'lucide-react'
+import { isDesktopApp } from '../data/clientMode'
 import { useWorkbenchStore } from '../state/workbenchStore'
 import { useBottomDockStore } from '../state/bottomDockStore'
 import { useI18n } from '../i18n'
@@ -20,9 +21,21 @@ export default function WorkbenchChromeActions({ onOpenSettings, compact = false
   const { ts } = useI18n()
 
   const iconSize = compact ? 14 : 16
+  const showSpatialPin = isDesktopApp()
 
   return (
     <div className={`${styles.actions} ${compact ? styles.compact : ''}`}>
+      {showSpatialPin && (
+        <button
+          type="button"
+          className={styles.spatialPinBtn}
+          onClick={() => void window.projectOS?.spatialPin.beginCapture()}
+          title={ts('topBar.spatialPin')}
+          aria-label={ts('topBar.spatialPin')}
+        >
+          <Crosshair size={iconSize} strokeWidth={1.75} aria-hidden />
+        </button>
+      )}
       <div className={styles.panelToggles}>
         <button
           type="button"

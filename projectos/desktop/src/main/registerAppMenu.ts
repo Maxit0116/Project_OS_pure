@@ -1,27 +1,42 @@
 import { app, BrowserWindow, Menu, ipcMain } from 'electron'
-import { parseAppMenuState, type AppMenuCommand } from '../../../contracts/app-menu.js'
+import { parseAppMenuState, type AppMenuCommand, type AppMenuState } from '../../../contracts/app-menu.js'
 import { buildAppMenuTemplate, initialAppMenuState } from './appMenu.js'
 import {
   assertTrustedHostRenderer,
   isActiveTrustedHostWebContents,
 } from './ipcSenderTrust.js'
+import { forgetWorkspaceWindow, rememberWorkspacePath } from './workspaceWindowRegistry.js'
 
-let menuState = initialAppMenuState('en')
+const menuStateByWindow = new Map<number, AppMenuState>()
+let fallbackMenuState = initialAppMenuState('en')
 
 export function installAppMenu(): void {
-  menuState = initialAppMenuState(app.getLocale())
+  fallbackMenuState = initialAppMenuState(app.getLocale())
   ipcMain.on('menu:setState', (event, input: unknown) => {
     assertTrustedHostRenderer(event)
     const next = parseAppMenuState(input)
     if (!next) return
-    menuState = next
+    menuStateByWindow.set(event.sender.id, next)
+    rememberWorkspacePath(event.sender.id, next.workspacePath)
+    fallbackMenuState = next
     publishAppMenu()
+  })
+  app.on('browser-window-focus', () => {
+    publishAppMenu()
+  })
+  app.on('browser-window-created', (_event, win) => {
+    const webContentsId = win.webContents.id
+    win.on('closed', () => {
+      menuStateByWindow.delete(webContentsId)
+      forgetWorkspaceWindow(webContentsId)
+      publishAppMenu()
+    })
   })
   publishAppMenu()
 }
 
 function publishAppMenu(): void {
-  const template = buildAppMenuTemplate(menuState, app.name, process.platform, {
+  const template = buildAppMenuTemplate(menuStateForFocusedWindow(), app.name, process.platform, {
     dispatch(command, window) {
       deliverMenuCommand(asBrowserWindow(window), command)
     },
@@ -31,6 +46,15 @@ function publishAppMenu(): void {
     },
   })
   Menu.setApplicationMenu(Menu.buildFromTemplate(template as Electron.MenuItemConstructorOptions[]))
+}
+
+function menuStateForFocusedWindow(): AppMenuState {
+  const focused = BrowserWindow.getFocusedWindow()
+  if (focused && !focused.isDestroyed()) {
+    const state = menuStateByWindow.get(focused.webContents.id)
+    if (state) return state
+  }
+  return fallbackMenuState
 }
 
 function deliverMenuCommand(preferred: BrowserWindow | undefined, command: AppMenuCommand): void {

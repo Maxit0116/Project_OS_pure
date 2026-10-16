@@ -22,6 +22,7 @@ import type {
 } from "./debug-session.js";
 import type { ProjectOSProject } from "./project.js";
 import type { ProjectDescription } from "./project-description.js";
+import type { CodeFileUnderstandingEntry } from "./code-file-understanding.js";
 import type {
   PromptRefineRequest,
   PromptRefinement,
@@ -62,6 +63,22 @@ import type {
   ChatSessionRecord,
 } from "./chat-session.js";
 import type { ListSkillsResult, SkillContent } from "./skills.js";
+import type {
+  LocationHint,
+  ResolvedSpatialPin,
+  SpatialPin,
+  SpatialPinHead,
+  SubmitSpatialPinResult,
+} from "./spatial-pin.js";
+import type {
+  LoopCompileResult,
+  LoopGraphDocument,
+  LoopGraphHead,
+  LoopGraphIndex,
+  LoopHitlAnswer,
+  LoopInstanceEvent,
+  LoopSpec,
+} from "./loop-graph.js";
 
 export interface Disposable {
   dispose(): void;
@@ -137,6 +154,14 @@ export interface ProjectOSApi {
     projectId: string,
     conciseDescription: string,
   ): Promise<ProjectDescription>;
+  /**
+   * Return cached LLM file understanding, or generate+persist on first click
+   * (or when file content hash changed).
+   */
+  ensureCodeFileUnderstanding(
+    projectId: string,
+    path: string,
+  ): Promise<CodeFileUnderstandingEntry>;
   askAgent(request: AgentAskRequest): Promise<AgentAnswerResult>;
   listSkills(projectId: string): Promise<ListSkillsResult>;
   getSkill(projectId: string, skillId: string): Promise<SkillContent | null>;
@@ -232,5 +257,92 @@ export interface ProjectOSApi {
     patch: UpdateMapWorkGroupPatch,
   ): Promise<MapContentDocument>;
   deleteMapArtifact(projectId: string, artifactId: string): Promise<void>;
+  listSpatialPins(projectId: string): Promise<SpatialPinHead[]>;
+  getSpatialPin(projectId: string, pinId: string): Promise<SpatialPin | null>;
+  upsertSpatialPin(projectId: string, pin: SpatialPin): Promise<SpatialPin>;
+  deleteSpatialPin(projectId: string, pinId: string): Promise<boolean>;
+  resolveSpatialPins(
+    projectId: string,
+    locationHint: LocationHint,
+  ): Promise<ResolvedSpatialPin[]>;
+  submitSpatialPin(projectId: string, pinId: string): Promise<SubmitSpatialPinResult>;
+  saveSpatialPinSnapshot(
+    projectId: string,
+    pinId: string,
+    pngBase64: string,
+  ): Promise<{ snapshotAssetPath: string }>;
+  listLoopGraphs(projectId: string): Promise<LoopGraphHead[]>;
+  getLoopGraphIndex(projectId: string): Promise<LoopGraphIndex>;
+  getLoopGraph(projectId: string, loopId: string): Promise<LoopGraphDocument | null>;
+  upsertLoopGraph(projectId: string, document: LoopGraphDocument): Promise<LoopGraphDocument>;
+  createLoopGraph(projectId: string, title?: string): Promise<LoopGraphDocument>;
+  deleteLoopGraph(projectId: string, loopId: string): Promise<boolean>;
+  setLastActiveLoopGraph(projectId: string, loopId: string): Promise<void>;
+  linkLoopGraphToSession(
+    projectId: string,
+    loopId: string,
+    sessionId: string,
+  ): Promise<LoopGraphDocument | null>;
+  unlinkLoopGraphFromSession(
+    projectId: string,
+    loopId: string,
+    sessionId: string,
+  ): Promise<LoopGraphDocument | null>;
+  compileLoopGraph(projectId: string, loopId: string): Promise<LoopCompileResult>;
+  approveLoopSpec(
+    projectId: string,
+    loopId: string,
+    spec: LoopSpec,
+  ): Promise<LoopGraphDocument>;
+  startLoopInstance(
+    projectId: string,
+    loopId: string,
+    specVersion?: string,
+  ): Promise<LoopGraphDocument>;
+  pauseLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument>;
+  resumeLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument>;
+  resolveLoopHitl(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    answers: LoopHitlAnswer[],
+  ): Promise<LoopGraphDocument>;
+  getLoopInstanceEvents(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopInstanceEvent[]>;
+  advanceLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument>;
+  sendLoopAuthoringTurn(
+    projectId: string,
+    loopId: string,
+    request: import("./loop-graph.js").LoopAuthoringTurnRequest,
+  ): Promise<LoopGraphDocument>;
+  answerLoopGoalClarification(
+    projectId: string,
+    loopId: string,
+    answers: import("./loop-graph.js").LoopGoalClarificationAnswer[],
+  ): Promise<LoopGraphDocument>;
+  confirmLoopGoalContext(projectId: string, loopId: string): Promise<LoopGraphDocument>;
+  acceptLoopGraphEditOffer(projectId: string, loopId: string): Promise<LoopGraphDocument>;
+  dismissLoopGraphEditOffer(projectId: string, loopId: string): Promise<LoopGraphDocument>;
+  undoLoopDraft(projectId: string, loopId: string): Promise<LoopGraphDocument>;
+  setLoopComposerMode(
+    projectId: string,
+    loopId: string,
+    mode: import("./loop-graph.js").LoopComposerMode,
+  ): Promise<LoopGraphDocument>;
   transcribeAudio(request: TranscribeAudioRequest): Promise<TranscribeAudioResult>;
 }

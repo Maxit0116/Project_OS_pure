@@ -209,6 +209,38 @@
   font-weight: var(--font-weight-semibold);
 }
 
+.viewSelectLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-left: 4px;
+}
+
+.viewSelectCaption {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.viewSelect {
+  max-width: 160px;
+  min-width: 96px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--tech-border);
+  border-radius: var(--radius-sm);
+  background: var(--tech-bg-elevated);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 10px;
+}
+
+.viewSelect:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
 .addMenuAnchor {
   flex-shrink: 0;
 }
@@ -475,6 +507,16 @@
 .flow :global(.react-flow__edge) {
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* React Flow sizes the wrapper; children must fill it for the dashed frame. */
+.flow :global(.react-flow__node-c4Boundary) {
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  overflow: visible;
 }
 
 .flow :global(.react-flow__edge.selected .react-flow__edge-path),

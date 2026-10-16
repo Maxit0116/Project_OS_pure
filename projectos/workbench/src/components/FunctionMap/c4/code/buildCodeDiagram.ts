@@ -42,6 +42,10 @@ export function buildCodeDiagram(input: C4DiagramInput): C4Diagram {
     input.scope ?? {},
     input.fileIndex ?? [],
     input.fileRelations ?? [],
+    {
+      views: input.views,
+      viewKey: input.viewKey,
+    },
   )
 
   if (projected.nodes.length === 0) {

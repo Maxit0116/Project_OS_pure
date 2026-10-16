@@ -1,23 +1,47 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type WheelEvent } from 'react'
 import type { ChatSessionHead, SessionGraphModel } from '@contracts/index'
 import {
-  SESSION_GRAPH_GAP_PX,
   buildSessionGraph,
   sessionGraphShieldInsets,
   type SessionGraphInsets,
 } from '@contracts/index'
-import { Archive, GitBranch, X } from 'lucide-react'
+import {
+  Archive,
+  Box,
+  Bug,
+  GitBranch,
+  GitPullRequest,
+  LayoutTemplate,
+  Map,
+  Search,
+  Terminal,
+  X,
+} from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useBottomDockStore } from '../../state/bottomDockStore'
 import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
+import { GraphOverlayFrame } from '../GraphOverlay/GraphOverlayFrame'
 import {
   SESSION_NODE_HEIGHT,
   SESSION_NODE_WIDTH,
   layoutSessionGraph,
   type SessionGraphLayout,
 } from './layoutSessionGraph'
+import { classifySessionTask } from './sessionTaskKind'
+import WorkingSessionRail from './WorkingSessionRail'
+import { listWorkingSessions } from './workingSessions'
 import styles from './SessionGraphOverlay.module.css'
+
+const TASK_ICON = {
+  explore: Search,
+  plan: Map,
+  build: Box,
+  fix: Bug,
+  design: LayoutTemplate,
+  git: GitPullRequest,
+  setup: Terminal,
+} as const
 
 const STATUS_CLASS = {
   idle: '',
@@ -26,6 +50,7 @@ const STATUS_CLASS = {
   error: styles.statusDotError,
 } as const
 
+/** @deprecated Prefer GraphOverlayFrame — kept for existing imports/tests. */
 export function SessionGraphFrame({
   shield,
   resizing,
@@ -38,26 +63,9 @@ export function SessionGraphFrame({
   children: ReactNode
 }) {
   return (
-    <div
-      className={`${styles.shield} ${resizing ? styles.shieldResizing : ''}`}
-      style={{ top: shield.top, right: shield.right, bottom: shield.bottom, left: shield.left }}
-      data-session-graph-shield
-    >
-      <section
-        className={styles.card}
-        style={{
-          top: SESSION_GRAPH_GAP_PX,
-          right: SESSION_GRAPH_GAP_PX,
-          bottom: SESSION_GRAPH_GAP_PX,
-          left: SESSION_GRAPH_GAP_PX,
-        }}
-        role="region"
-        aria-label={label}
-        data-session-graph-card
-      >
-        {children}
-      </section>
-    </div>
+    <GraphOverlayFrame shield={shield} resizing={resizing} label={label}>
+      {children}
+    </GraphOverlayFrame>
   )
 }
 
@@ -67,10 +75,12 @@ export default function SessionGraphOverlay() {
   const activeSessionId = useChatSessionStore((s) => s.activeSessionId)
   const setSessionGraphOpen = useChatSessionStore((s) => s.setSessionGraphOpen)
   const switchSession = useChatSessionStore((s) => s.switchSession)
+  const createSession = useChatSessionStore((s) => s.createSession)
   const forkSession = useChatSessionStore((s) => s.forkSession)
   const setSessionClassification = useChatSessionStore((s) => s.setSessionClassification)
   const leftPanelOpen = useWorkbenchStore((s) => s.leftPanelOpen)
   const rightPanelOpen = useWorkbenchStore((s) => s.rightPanelOpen)
+  const setRightPanelOpen = useWorkbenchStore((s) => s.setRightPanelOpen)
   const leftPanelWidth = useWorkbenchStore((s) => s.leftPanelWidth)
   const rightPanelWidth = useWorkbenchStore((s) => s.rightPanelWidth)
   const terminalHeight = useWorkbenchStore((s) => s.terminalHeight)
@@ -79,6 +89,10 @@ export default function SessionGraphOverlay() {
   const { ts } = useI18n()
 
   const model = useMemo(() => buildSessionGraph(heads), [heads])
+  const workingSessions = useMemo(
+    () => listWorkingSessions(heads, activeSessionId),
+    [heads, activeSessionId],
+  )
   const [layout, setLayout] = useState<SessionGraphLayout | null>(null)
   const [viewport, setViewport] = useState({ x: 32, y: 32, scale: 1 })
   const [dragging, setDragging] = useState(false)
@@ -121,12 +135,30 @@ export default function SessionGraphOverlay() {
     setViewport((current) => ({ ...current, scale: nextScale }))
   }
 
+  const openWorkingSession = (sessionId: string) => {
+    void switchSession(sessionId)
+    setRightPanelOpen(true)
+  }
+
+  const createWorkingSession = () => {
+    void createSession().then(() => {
+      setRightPanelOpen(true)
+    })
+  }
+
   return (
     <SessionGraphFrame
       shield={shield}
       resizing={panelResizing}
       label={ts('chat.sessionGraph.title')}
     >
+      <WorkingSessionRail
+        items={workingSessions}
+        activeSessionId={activeSessionId}
+        onOpen={openWorkingSession}
+        onCreate={createWorkingSession}
+      />
+      <div className={styles.main}>
         <header className={styles.header}>
           <h2 className={styles.title}>{ts('chat.sessionGraph.title')}</h2>
           <button
@@ -177,7 +209,7 @@ export default function SessionGraphOverlay() {
                 transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
               }}
             >
-              <svg className={styles.edges} width={layout.width} height={layout.height}>
+              <svg className={styles.edges} width={layout.width} height={layout.height} aria-hidden>
                 {model.edges.map((edge) => {
                   const source = layout.positions[edge.source]
                   const target = layout.positions[edge.target]
@@ -225,6 +257,7 @@ export default function SessionGraphOverlay() {
           onOpen={(sessionId) => void switchSession(sessionId)}
           onPromote={(sessionId) => void setSessionClassification(sessionId, 'topic')}
         />
+      </div>
     </SessionGraphFrame>
   )
 }
@@ -253,15 +286,25 @@ function SessionNode({
   onMisc: () => void
 }) {
   const { ts } = useI18n()
+  const task = classifySessionTask(title, responsibility)
+  const TaskIcon = TASK_ICON[task]
+  const taskLabel = ts(`chat.sessionGraph.task.${task}`)
   return (
     <div
       className={`${styles.node} ${active ? styles.nodeActive : ''}`}
       style={{ left: x, top: y, width: SESSION_NODE_WIDTH, height: SESSION_NODE_HEIGHT }}
       data-session-node={head?.id}
+      data-task={task}
     >
-      <button type="button" className={styles.nodeTitle} onClick={onOpen}>
-        {title}
-      </button>
+      <div className={styles.nodeTop}>
+        <span className={styles.taskMark} title={taskLabel}>
+          <TaskIcon size={14} strokeWidth={1.75} aria-hidden />
+          <span className={styles.taskName}>{taskLabel}</span>
+        </span>
+        <button type="button" className={styles.nodeTitle} onClick={onOpen} aria-current={active ? 'true' : undefined}>
+          {title}
+        </button>
+      </div>
       {responsibility ? <span className={styles.nodeResponsibility}>{responsibility}</span> : null}
       <div className={styles.nodeMeta}>
         <span className={styles.status}>

@@ -1,0 +1,33 @@
+.shield {
+  position: absolute;
+  z-index: 12;
+  pointer-events: auto;
+  transition:
+    top var(--duration-panel-enter) var(--ease-out),
+    right var(--duration-panel-enter) var(--ease-out),
+    bottom var(--duration-terminal-enter) var(--ease-out),
+    left var(--duration-panel-enter) var(--ease-out);
+}
+
+.shieldResizing {
+  transition: none;
+}
+
+.card {
+  position: absolute;
+  display: flex;
+  flex-direction: row;
+  min-width: 0;
+  min-height: 0;
+  background: var(--tech-bg-side-panel);
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 8px;
+  box-shadow: var(--tech-shadow-lg);
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shield {
+    transition: none;
+  }
+}

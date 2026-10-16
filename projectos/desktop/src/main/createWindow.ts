@@ -16,10 +16,14 @@ import { installRendererResourceCleanup } from './rendererResourceLifecycle.js'
 import {
   installTrustedHostRendererAuthority,
 } from './ipcSenderTrust.js'
+import {
+  forgetWorkspaceWindow,
+  setInitialWorkspacePath,
+} from './workspaceWindowRegistry.js'
 
 const MAIN_WINDOW_REVEAL_FALLBACK_MS = 2_000
 
-export function createMainWindow(): BrowserWindow {
+export function createMainWindow(initialWorkspacePath?: string): BrowserWindow {
   const isMac = process.platform === 'darwin'
   const trafficLightPosition = macTrafficLightPosition()
   const rendererPath = join(__dirname, '../renderer/index.html')
@@ -52,6 +56,11 @@ export function createMainWindow(): BrowserWindow {
       webviewTag: true,
     },
   })
+
+  const webContentsId = win.webContents.id
+  if (initialWorkspacePath) {
+    setInitialWorkspacePath(webContentsId, initialWorkspacePath)
+  }
 
   installBrowserWebviewPolicy(win)
   installMainWindowNavigationGuard(win.webContents, allowedDocumentUrl)
@@ -130,6 +139,7 @@ export function createMainWindow(): BrowserWindow {
     disposeRendererResources()
   })
   win.on('closed', () => {
+    forgetWorkspaceWindow(webContentsId)
     if (revealFallback) {
       clearTimeout(revealFallback)
       revealFallback = undefined

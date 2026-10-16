@@ -23,21 +23,28 @@ import { useWorkbenchStore, type ChatMode } from './workbenchStore'
 
 const PERSIST_DEBOUNCE_MS = 500
 const TITLE_SUMMARIZE_DEBOUNCE_MS = 1500
+const CANVAS_OVERLAY_KEY = 'projectos_canvas_overlay'
 const SESSION_GRAPH_OPEN_KEY = 'projectos_session_graph_open'
 
-function readSessionGraphOpen(): boolean {
-  if (typeof localStorage === 'undefined') return false
+export type CanvasOverlay = 'none' | 'session' | 'loop'
+
+function readCanvasOverlay(): CanvasOverlay {
+  if (typeof localStorage === 'undefined') return 'none'
   try {
-    return localStorage.getItem(SESSION_GRAPH_OPEN_KEY) === 'true'
+    const raw = localStorage.getItem(CANVAS_OVERLAY_KEY)
+    if (raw === 'session' || raw === 'loop' || raw === 'none') return raw
+    // Migrate legacy session-graph-only preference.
+    return localStorage.getItem(SESSION_GRAPH_OPEN_KEY) === 'true' ? 'session' : 'none'
   } catch {
-    return false
+    return 'none'
   }
 }
 
-function writeSessionGraphOpen(open: boolean): void {
+function writeCanvasOverlay(overlay: CanvasOverlay): void {
   if (typeof localStorage === 'undefined') return
   try {
-    localStorage.setItem(SESSION_GRAPH_OPEN_KEY, open ? 'true' : 'false')
+    localStorage.setItem(CANVAS_OVERLAY_KEY, overlay)
+    localStorage.setItem(SESSION_GRAPH_OPEN_KEY, overlay === 'session' ? 'true' : 'false')
   } catch {
     /* ignore quota and private-mode failures */
   }
@@ -51,7 +58,10 @@ interface ChatSessionStore {
   pinnedIds: string[]
   activeSessionId: string | null
   historyOpen: boolean
+  canvasOverlay: CanvasOverlay
+  /** Derived: canvasOverlay === 'session' (kept for existing callers). */
   sessionGraphOpen: boolean
+  loopGraphOpen: boolean
   inheritedDigest: SessionContextDigest | null
   loading: boolean
 
@@ -59,8 +69,11 @@ interface ChatSessionStore {
   clear: () => void
   setHistoryOpen: (open: boolean) => void
   toggleHistory: () => void
+  setCanvasOverlay: (overlay: CanvasOverlay) => void
   setSessionGraphOpen: (open: boolean) => void
   toggleSessionGraph: () => void
+  setLoopGraphOpen: (open: boolean) => void
+  toggleLoopGraph: () => void
   switchSession: (sessionId: string) => Promise<void>
   createSession: (options?: {
     seedWelcome?: boolean
@@ -168,12 +181,20 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
   }
 }
 
+function overlayState(overlay: CanvasOverlay) {
+  return {
+    canvasOverlay: overlay,
+    sessionGraphOpen: overlay === 'session',
+    loopGraphOpen: overlay === 'loop',
+  }
+}
+
 export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   heads: [],
   pinnedIds: [],
   activeSessionId: null,
   historyOpen: false,
-  sessionGraphOpen: readSessionGraphOpen(),
+  ...overlayState(readCanvasOverlay()),
   inheritedDigest: null,
   loading: false,
 
@@ -200,15 +221,33 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
 
   toggleHistory: () => set((state) => ({ historyOpen: !state.historyOpen })),
 
+  setCanvasOverlay: (overlay) => {
+    writeCanvasOverlay(overlay)
+    set(overlayState(overlay))
+  },
+
   setSessionGraphOpen: (open) => {
-    writeSessionGraphOpen(open)
-    set({ sessionGraphOpen: open })
+    const overlay: CanvasOverlay = open ? 'session' : 'none'
+    writeCanvasOverlay(overlay)
+    set(overlayState(overlay))
   },
 
   toggleSessionGraph: () => {
-    const open = !get().sessionGraphOpen
-    writeSessionGraphOpen(open)
-    set({ sessionGraphOpen: open })
+    const overlay: CanvasOverlay = get().canvasOverlay === 'session' ? 'none' : 'session'
+    writeCanvasOverlay(overlay)
+    set(overlayState(overlay))
+  },
+
+  setLoopGraphOpen: (open) => {
+    const overlay: CanvasOverlay = open ? 'loop' : 'none'
+    writeCanvasOverlay(overlay)
+    set(overlayState(overlay))
+  },
+
+  toggleLoopGraph: () => {
+    const overlay: CanvasOverlay = get().canvasOverlay === 'loop' ? 'none' : 'loop'
+    writeCanvasOverlay(overlay)
+    set(overlayState(overlay))
   },
 
   loadForWorkspace: async () => {
@@ -478,6 +517,10 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       forkMessageId ?? '',
     )
     if (!child) return null
+    // Refresh heads immediately so Session Graph can draw the parent→child edge
+    // before switchSession finishes its persist/load round-trip.
+    const index = await client.getChatSessionIndex(project.projectId)
+    set({ heads: index.heads, pinnedIds: index.pinnedIds })
     await get().switchSession(child.head.id)
     return child.head.id
   },

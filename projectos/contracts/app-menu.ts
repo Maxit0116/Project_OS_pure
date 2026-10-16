@@ -25,6 +25,7 @@ export const APP_MENU_SIMPLE_COMMAND_IDS = [
   "terminal-next",
   "terminal-previous",
   "show-keyboard-shortcuts",
+  "spatial-pin",
 ] as const;
 
 export type AppMenuSimpleCommandId = (typeof APP_MENU_SIMPLE_COMMAND_IDS)[number];
@@ -43,6 +44,8 @@ export interface AppMenuState {
   recentWorkspaces: AppMenuRecentWorkspace[];
   workspaceOpen: boolean;
   hasActiveEditor: boolean;
+  /** Absolute workspace open in the window that published this state. */
+  workspacePath: string | null;
 }
 
 const MAX_RECENT_WORKSPACES = 5;
@@ -66,13 +69,25 @@ export function parseAppMenuState(input: unknown): AppMenuState | null {
     if (!recent) return null;
     recentWorkspaces.push(recent);
   }
+  const workspacePath = parseWorkspacePath(record.workspacePath);
+  if (workspacePath === undefined) return null;
 
   return {
     locale: record.locale,
     recentWorkspaces,
     workspaceOpen: record.workspaceOpen,
     hasActiveEditor: record.hasActiveEditor,
+    workspacePath,
   };
+}
+
+function parseWorkspacePath(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const path = value.trim();
+  if (!path) return null;
+  if (!isSafePath(path)) return undefined;
+  return path;
 }
 
 export function parseAppMenuCommand(input: unknown): AppMenuCommand | null {

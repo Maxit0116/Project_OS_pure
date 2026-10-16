@@ -62,11 +62,62 @@ import {
   mockSetLastActiveChatSession,
   mockUpsertChatSession,
 } from "./mock-chat-session-store.js";
+import {
+  mockDeleteSpatialPin,
+  mockGetSpatialPin,
+  mockListSpatialPins,
+  mockResolveSpatialPins,
+  mockUpsertSpatialPin,
+} from "./mock-spatial-pin-store.js";
+import {
+  mockAcceptLoopGraphEditOffer,
+  mockAdvanceLoopInstance,
+  mockAnswerLoopGoalClarification,
+  mockApproveLoopSpec,
+  mockCompileLoopGraph,
+  mockConfirmLoopGoalContext,
+  mockCreateLoopGraph,
+  mockDeleteLoopGraph,
+  mockDismissLoopGraphEditOffer,
+  mockGetLoopGraph,
+  mockGetLoopGraphIndex,
+  mockGetLoopInstanceEvents,
+  mockLinkLoopGraphToSession,
+  mockListLoopGraphs,
+  mockPauseLoopInstance,
+  mockResolveLoopHitl,
+  mockResumeLoopInstance,
+  mockSendLoopAuthoringTurn,
+  mockSetLastActiveLoopGraph,
+  mockSetLoopComposerMode,
+  mockStartLoopInstance,
+  mockUndoLoopDraft,
+  mockUnlinkLoopGraphFromSession,
+  mockUpsertLoopGraph,
+} from "./mock-loop-graph-store.js";
+import type {
+  LoopAuthoringTurnRequest,
+  LoopCompileResult,
+  LoopComposerMode,
+  LoopGoalClarificationAnswer,
+  LoopGraphDocument,
+  LoopGraphHead,
+  LoopGraphIndex,
+  LoopHitlAnswer,
+  LoopInstanceEvent,
+  LoopSpec,
+} from "../contracts/loop-graph.js";
 import type {
   ChatSessionHead,
   ChatSessionIndex,
   ChatSessionRecord,
 } from "../contracts/chat-session.js";
+import type {
+  LocationHint,
+  ResolvedSpatialPin,
+  SpatialPin,
+  SpatialPinHead,
+} from "../contracts/spatial-pin.js";
 import {
   buildForkedChatSession,
   messagesThroughFork,
@@ -125,6 +176,46 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     return super.updateProjectDescription(projectId, conciseDescription);
   }
 
+  override async ensureCodeFileUnderstanding(
+    projectId: string,
+    path: string,
+  ): Promise<import("../contracts/code-file-understanding.js").CodeFileUnderstandingEntry> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const content = await this.getFileContent(projectId, path);
+    const { hashFileContent } = await import(
+      "../services/code-file-understanding-service.js"
+    );
+    const {
+      findCodeFileUnderstandingEntry,
+      readCodeFileUnderstandingDocument,
+      upsertCodeFileUnderstandingEntry,
+      writeCodeFileUnderstandingDocument,
+    } = await import("../services/code-file-understanding-store.js");
+    const contentHash = hashFileContent(content);
+    const document = readCodeFileUnderstandingDocument(
+      workspace.workspaceRoot,
+      projectId,
+    );
+    const cached = findCodeFileUnderstandingEntry(document, path);
+    if (cached && cached.contentHash === contentHash) {
+      return cached;
+    }
+    const basename = path.split(/[/\\]/).pop() ?? path;
+    const entry = {
+      path,
+      description: `${basename} participates in the sample architecture as a linked source file. Callers and imports from the local graph define its boundary; it does not own unrelated product surfaces.`,
+      role: `Owns the ${basename} module surface for this component.`,
+      contentHash,
+      updatedAt: new Date().toISOString(),
+      source: "llm" as const,
+    };
+    writeCodeFileUnderstandingDocument(
+      workspace.workspaceRoot,
+      upsertCodeFileUnderstandingEntry(document, entry),
+    );
+    return entry;
+  }
+
   override runVerification(runId: string): Promise<VerificationRunResult> {
     return super.runVerification(runId);
   }
@@ -139,6 +230,224 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
 
   override consumeFallbackNotice(projectId: string): Promise<string | undefined> {
     return super.consumeFallbackNotice(projectId);
+  }
+
+  override listSpatialPins(projectId: string): Promise<SpatialPinHead[]> {
+    return Promise.resolve(mockListSpatialPins(projectId));
+  }
+
+  override getSpatialPin(
+    projectId: string,
+    pinId: string,
+  ): Promise<SpatialPin | null> {
+    return Promise.resolve(mockGetSpatialPin(projectId, pinId));
+  }
+
+  override upsertSpatialPin(
+    projectId: string,
+    pin: SpatialPin,
+  ): Promise<SpatialPin> {
+    return Promise.resolve(mockUpsertSpatialPin(projectId, pin));
+  }
+
+  override deleteSpatialPin(projectId: string, pinId: string): Promise<boolean> {
+    return Promise.resolve(mockDeleteSpatialPin(projectId, pinId));
+  }
+
+  override resolveSpatialPins(
+    projectId: string,
+    locationHint: LocationHint,
+  ): Promise<ResolvedSpatialPin[]> {
+    return Promise.resolve(mockResolveSpatialPins(projectId, locationHint));
+  }
+
+  override saveSpatialPinSnapshot(
+    projectId: string,
+    pinId: string,
+    _pngBase64: string,
+  ): Promise<{ snapshotAssetPath: string }> {
+    const snapshotAssetPath = `.projectos/spatial-pins/assets/${pinId}.png`;
+    const existing = mockGetSpatialPin(projectId, pinId);
+    if (existing) {
+      mockUpsertSpatialPin(projectId, {
+        ...existing,
+        composer: { ...existing.composer, snapshotAssetPath },
+      });
+    }
+    return Promise.resolve({ snapshotAssetPath });
+  }
+
+  override listLoopGraphs(projectId: string): Promise<LoopGraphHead[]> {
+    return Promise.resolve(mockListLoopGraphs(projectId));
+  }
+
+  override getLoopGraphIndex(projectId: string): Promise<LoopGraphIndex> {
+    return Promise.resolve(mockGetLoopGraphIndex(projectId));
+  }
+
+  override getLoopGraph(
+    projectId: string,
+    loopId: string,
+  ): Promise<LoopGraphDocument | null> {
+    return Promise.resolve(mockGetLoopGraph(projectId, loopId));
+  }
+
+  override upsertLoopGraph(
+    projectId: string,
+    document: LoopGraphDocument,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockUpsertLoopGraph(projectId, document));
+  }
+
+  override createLoopGraph(
+    projectId: string,
+    title?: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockCreateLoopGraph(projectId, title));
+  }
+
+  override deleteLoopGraph(projectId: string, loopId: string): Promise<boolean> {
+    return Promise.resolve(mockDeleteLoopGraph(projectId, loopId));
+  }
+
+  override setLastActiveLoopGraph(projectId: string, loopId: string): Promise<void> {
+    mockSetLastActiveLoopGraph(projectId, loopId);
+    return Promise.resolve();
+  }
+
+  override linkLoopGraphToSession(
+    projectId: string,
+    loopId: string,
+    sessionId: string,
+  ): Promise<LoopGraphDocument | null> {
+    return Promise.resolve(mockLinkLoopGraphToSession(projectId, loopId, sessionId));
+  }
+
+  override unlinkLoopGraphFromSession(
+    projectId: string,
+    loopId: string,
+    sessionId: string,
+  ): Promise<LoopGraphDocument | null> {
+    return Promise.resolve(
+      mockUnlinkLoopGraphFromSession(projectId, loopId, sessionId),
+    );
+  }
+
+  override compileLoopGraph(
+    projectId: string,
+    loopId: string,
+  ): Promise<LoopCompileResult> {
+    return Promise.resolve(mockCompileLoopGraph(projectId, loopId));
+  }
+
+  override approveLoopSpec(
+    projectId: string,
+    loopId: string,
+    spec: LoopSpec,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockApproveLoopSpec(projectId, loopId, spec));
+  }
+
+  override startLoopInstance(
+    projectId: string,
+    loopId: string,
+    specVersion?: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockStartLoopInstance(projectId, loopId, specVersion));
+  }
+
+  override pauseLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockPauseLoopInstance(projectId, loopId, instanceId));
+  }
+
+  override resumeLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockResumeLoopInstance(projectId, loopId, instanceId));
+  }
+
+  override resolveLoopHitl(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    answers: LoopHitlAnswer[],
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(
+      mockResolveLoopHitl(projectId, loopId, instanceId, answers),
+    );
+  }
+
+  override getLoopInstanceEvents(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopInstanceEvent[]> {
+    return Promise.resolve(
+      mockGetLoopInstanceEvents(projectId, loopId, instanceId),
+    );
+  }
+
+  override advanceLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockAdvanceLoopInstance(projectId, loopId, instanceId));
+  }
+
+  override sendLoopAuthoringTurn(
+    projectId: string,
+    loopId: string,
+    request: LoopAuthoringTurnRequest,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockSendLoopAuthoringTurn(projectId, loopId, request));
+  }
+
+  override answerLoopGoalClarification(
+    projectId: string,
+    loopId: string,
+    answers: LoopGoalClarificationAnswer[],
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockAnswerLoopGoalClarification(projectId, loopId, answers));
+  }
+
+  override confirmLoopGoalContext(
+    projectId: string,
+    loopId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockConfirmLoopGoalContext(projectId, loopId));
+  }
+
+  override acceptLoopGraphEditOffer(
+    projectId: string,
+    loopId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockAcceptLoopGraphEditOffer(projectId, loopId));
+  }
+
+  override dismissLoopGraphEditOffer(
+    projectId: string,
+    loopId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockDismissLoopGraphEditOffer(projectId, loopId));
+  }
+
+  override undoLoopDraft(projectId: string, loopId: string): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockUndoLoopDraft(projectId, loopId));
+  }
+
+  override setLoopComposerMode(
+    projectId: string,
+    loopId: string,
+    mode: LoopComposerMode,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockSetLoopComposerMode(projectId, loopId, mode));
   }
 
   override listChatSessionHeads(projectId: string): Promise<ChatSessionHead[]> {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { ConfidenceSchema } from "./confidence.js";
+import { ModelImagePartSchema } from "./model-gateway.js";
 import { ChangeExecutionPolicySchema } from "./settings.js";
 import { PromptComposerFieldsSchema } from "./prompt-composer.js";
 
@@ -11,6 +12,7 @@ export const PromptRefineRequestSchema = z
     filePath: z.string().optional(),
     rawPrompt: z.string(),
     chatSessionId: z.string().min(1).optional(),
+    images: z.array(ModelImagePartSchema).max(4).optional(),
   })
   .merge(PromptComposerFieldsSchema)
   .strict();

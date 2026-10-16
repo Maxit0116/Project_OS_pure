@@ -1,7 +1,7 @@
 import type { SessionGraphModel } from '@contracts/index'
 import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js'
 
-export const SESSION_NODE_WIDTH = 220
+export const SESSION_NODE_WIDTH = 228
 export const SESSION_NODE_HEIGHT = 84
 
 export interface SessionGraphLayout {

@@ -76,11 +76,22 @@ export function emptyComposerDraft(text = ""): z.infer<typeof ComposerDraftSchem
 }
 
 export function normalizeComposerDraft(
-  value: string | z.infer<typeof ComposerDraftSchema> | undefined,
+  value:
+    | string
+    | Partial<z.infer<typeof ComposerDraftSchema>>
+    | undefined,
 ): z.infer<typeof ComposerDraftSchema> {
   if (!value) return emptyComposerDraft();
   if (typeof value === "string") return emptyComposerDraft(value);
-  return ComposerDraftSchema.parse(value);
+  // Accept partial drafts (e.g. `{ text }` without attachments) from older
+  // callers / session restores instead of throwing ZodError.
+  return ComposerDraftSchema.parse({
+    text: typeof value.text === "string" ? value.text : "",
+    attachments: Array.isArray(value.attachments) ? value.attachments : [],
+    ...(typeof value.invokedSkillId === "string" && value.invokedSkillId
+      ? { invokedSkillId: value.invokedSkillId }
+      : {}),
+  });
 }
 
 export function buildPromptComposerFields(draft: ComposerDraft): PromptComposerFields {

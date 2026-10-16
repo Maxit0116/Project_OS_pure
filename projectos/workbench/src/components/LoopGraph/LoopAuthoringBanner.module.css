@@ -1,0 +1,66 @@
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
+}
+
+.copy {
+  flex: 1;
+  min-width: 140px;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  line-height: 1.4;
+}
+
+.copy strong {
+  color: var(--tech-text-primary);
+  font-weight: 600;
+}
+
+.kindGroup {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.kindButton,
+.applyButton {
+  border: 1px solid var(--tech-border);
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-primary);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.kindButtonActive {
+  border-color: var(--tech-accent);
+  color: var(--tech-accent);
+}
+
+.applyButton {
+  border-color: var(--tech-accent);
+  color: var(--tech-accent);
+}
+
+.kindButton:hover,
+.applyButton:hover {
+  background: var(--tech-bg-canvas);
+}
+
+.kindButton:focus-visible,
+.applyButton:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.applyButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

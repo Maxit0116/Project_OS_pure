@@ -45,6 +45,7 @@ export function FunctionMapBleedRoot({ children }: { children: ReactNode }) {
       fileIndex={graph.fileIndex}
       fileRelations={graph.fileRelations}
       architecture={graph.architecture}
+      architectureViews={graph.views}
       projectName={graph.projectName}
       mapContent={mapContent}
       selectedNodeId={selectedNodeId}

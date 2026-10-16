@@ -10,6 +10,7 @@ export interface ElectronWebviewElement extends HTMLElement {
   loadURL(url: string, options?: { httpReferrer?: string; userAgent?: string }): void
   getURL(): string
   isLoading(): boolean
+  executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>
   addEventListener(
     type:
       | 'did-start-loading'
@@ -18,7 +19,8 @@ export interface ElectronWebviewElement extends HTMLElement {
       | 'did-navigate'
       | 'did-navigate-in-page'
       | 'dom-ready'
-      | 'ipc-message',
+      | 'ipc-message'
+      | 'console-message',
     listener: (event: Event) => void,
   ): void
   removeEventListener(
@@ -29,7 +31,8 @@ export interface ElectronWebviewElement extends HTMLElement {
       | 'did-navigate'
       | 'did-navigate-in-page'
       | 'dom-ready'
-      | 'ipc-message',
+      | 'ipc-message'
+      | 'console-message',
     listener: (event: Event) => void,
   ): void
 }

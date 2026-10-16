@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { useWorkbenchStore } from '../../state/workbenchStore'
+import { isGlobalAgentScope, useWorkbenchStore } from '../../state/workbenchStore'
 import { useI18n } from '../../i18n'
 import Chip from '../ui/Chip'
 import { SkeletonCard } from '../ui/Skeleton'
@@ -14,7 +14,6 @@ export default function ChatContextHeader() {
   const contextLoading = useWorkbenchStore((s) => s.contextLoading)
   const graph = useWorkbenchStore((s) => s.graph)
   const selectedNodeId = useWorkbenchStore((s) => s.selectedNodeId)
-  const globalAgentActive = useWorkbenchStore((s) => s.globalAgentActive)
   const selectedFilePath = useWorkbenchStore((s) => s.selectedFilePath)
   const pendingFileOwnerChoice = useWorkbenchStore((s) => s.pendingFileOwnerChoice)
   const fileScopeError = useWorkbenchStore((s) => s.fileScopeError)
@@ -32,24 +31,39 @@ export default function ChatContextHeader() {
   const teamSnapshot = useWorkbenchStore((s) => s.teamSnapshot)
   const activeHandoff = teamSnapshot?.handoffs.find((handoff) => handoff.id === activeHandoffId)
 
+  const wholeProjectScope = isGlobalAgentScope({
+    selectedNodeId,
+    selectedFilePath,
+    pendingFileOwnerChoice,
+    fileScopeError,
+  })
+
   const dropdownLabel = useMemo(
     () =>
       resolveContextDropdownLabel({
-        globalAgentActive,
+        globalAgentActive: wholeProjectScope,
         selectedNodeId,
+        selectedFilePath,
         nodeName: selectedNode?.name,
         contextSummary: context?.summary,
         globalScopeLabel: ts('context.scopeGlobal'),
         emptyLabel: ts('context.empty'),
       }),
-    [context?.summary, globalAgentActive, selectedNode, selectedNodeId, ts],
+    [
+      context?.summary,
+      selectedFilePath,
+      selectedNode,
+      selectedNodeId,
+      ts,
+      wholeProjectScope,
+    ],
   )
 
   const scopeLabel = context ? ts(`scope.${context.scope}` as 'scope.feature') : null
 
   const scopeStatus = (
     <div className={styles.boundScope}>
-      {globalAgentActive && (
+      {wholeProjectScope && (
         <div>
           <strong>{ts('context.globalAgentScope')}</strong>
           <div>{ts('context.scopeGlobal')}</div>
@@ -148,7 +162,7 @@ export default function ChatContextHeader() {
       )}
     </div>
   ) : (
-    !globalAgentActive && <div className={styles.empty}>{ts('context.empty')}</div>
+    !wholeProjectScope && <div className={styles.empty}>{ts('context.empty')}</div>
   )
 
   return (

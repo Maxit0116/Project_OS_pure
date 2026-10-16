@@ -371,7 +371,13 @@ export function buildForkedChatSession(
   now = new Date().toISOString(),
 ): ChatSessionRecord {
   const id = `chat_${globalThis.crypto.randomUUID()}`;
-  const classification: ChatSessionClassification = inheritedDigest ? "topic" : "misc";
+  // Branching from a topic session must stay on the session graph so the
+  // parent→child edge is visible, even when no context digest is available yet
+  // (e.g. a manually promoted topic with no summary).
+  const parentIsTopic = resolveChatSessionClassification(parent.head) === "topic";
+  const classification: ChatSessionClassification =
+    inheritedDigest || parentIsTopic ? "topic" : "misc";
+  const responsibility = inheritedDigest?.responsibility ?? parent.head.responsibility;
   return {
     version: "0.2.0",
     head: {
@@ -386,7 +392,7 @@ export function buildForkedChatSession(
       ...(forkMessageId ? { forkMessageId } : {}),
       classification,
       classificationSource: "auto",
-      ...(inheritedDigest ? { responsibility: inheritedDigest.responsibility } : {}),
+      ...(responsibility ? { responsibility } : {}),
     },
     messages: [],
     ...(inheritedDigest ? { inheritedDigest } : {}),

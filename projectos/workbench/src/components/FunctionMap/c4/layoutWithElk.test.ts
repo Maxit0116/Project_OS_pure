@@ -113,6 +113,39 @@ describe('layoutWithElk', () => {
     }
   })
 
+  it('keeps an unrelated code file listing on its matrix instead of restacking it', async () => {
+    const nodes = Array.from({ length: 6 }, (_, index) => ({
+      id: `file_${index}`,
+      shape: 'code' as const,
+      label: `file_${index}.ts`,
+      sourceNodeId: `file_${index}`,
+      position: {
+        x: 80 + (index % 3) * 248,
+        y: 100 + Math.floor(index / 3) * 124,
+      },
+      width: 220,
+      height: 88,
+      elementType: 'code_element' as const,
+      level: 'code' as const,
+    }))
+    const diagram: C4Diagram = {
+      level: 'code',
+      nodes,
+      edges: [],
+      boundaries: [
+        {
+          id: 'boundary_files',
+          label: 'Files',
+          position: { x: 24, y: 24 },
+          width: 900,
+          height: 420,
+        },
+      ],
+      bounds: { minX: 0, minY: 0, width: 1000, height: 500 },
+    }
+    await expect(applyElkLayoutToDiagram(diagram)).resolves.toEqual(diagram)
+  })
+
   it('falls back to the input diagram when layout fails', async () => {
     const empty: C4Diagram = {
       level: 'context',

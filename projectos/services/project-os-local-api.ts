@@ -131,6 +131,7 @@ import {
   ProjectDescriptionSchema,
   type ProjectDescription,
 } from "../contracts/project-description.js";
+import type { CodeFileUnderstandingEntry } from "../contracts/code-file-understanding.js";
 import type {
   SemanticTree,
   SemanticTreeNode,
@@ -202,6 +203,16 @@ import {
 import { ModelGateway } from "./model-gateway/index.js";
 import { PromptRefinementService } from "./prompt-refinement-service.js";
 import { ChatTitleService } from "./chat-title-service.js";
+import {
+  CodeFileUnderstandingService,
+  hashFileContent,
+} from "./code-file-understanding-service.js";
+import {
+  findCodeFileUnderstandingEntry,
+  readCodeFileUnderstandingDocument,
+  upsertCodeFileUnderstandingEntry,
+  writeCodeFileUnderstandingDocument,
+} from "./code-file-understanding-store.js";
 import { GroundedAnswerService } from "./grounded-answer-service.js";
 import { PlanService, buildPromptFromPlan } from "./plan-service.js";
 import { LocalContextAssembler } from "./local-context-assembler.js";
@@ -509,6 +520,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   protected readonly modelGateway: ModelGateway;
   protected readonly refinementService: PromptRefinementService;
   protected readonly chatTitleService: ChatTitleService;
+  protected readonly codeFileUnderstandingService: CodeFileUnderstandingService;
   private readonly groundedAnswerService: GroundedAnswerService;
   private readonly planService: PlanService;
   private readonly localContextAssembler: LocalContextAssemblerDependency;
@@ -533,6 +545,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     { workspace: LoadedProjectOSWorkspace; runId: string }
   >();
   private readonly fallbackNotices = new Map<string, string>();
+  private readonly codeFileUnderstandingInflight = new Map<
+    string,
+    Promise<CodeFileUnderstandingEntry>
+  >();
   private readonly boundRunAuthorizations = new Map<
     string,
     BoundRunAuthorization
@@ -567,6 +583,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     this.modelGateway = options.modelGateway ?? new ModelGateway({ secretStore: this.secretStore });
     this.refinementService = new PromptRefinementService(this.modelGateway);
     this.chatTitleService = new ChatTitleService(this.modelGateway);
+    this.codeFileUnderstandingService = new CodeFileUnderstandingService(
+      this.modelGateway,
+    );
     this.groundedAnswerService = new GroundedAnswerService(this.modelGateway);
     this.planService = new PlanService(this.modelGateway);
     this.localContextAssembler = options.localContextAssembler ?? new LocalContextAssembler();
@@ -784,6 +803,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       scanMode: parsedOptions.mode,
       nodeIds: parsedOptions.nodeIds,
       changedFiles: parsedOptions.changedFiles,
+      refinedGraph: parsedOptions.refinedGraph,
     });
     await this.workspaceStore.writeGraph(workspace.workspaceRoot, scanned);
     const semanticTree = projectSemanticTreeFromGraph({
@@ -858,6 +878,102 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
     workspace.projectDescription = persisted;
     return cloneJson(persisted);
+  }
+
+  async ensureCodeFileUnderstanding(
+    projectId: string,
+    path: string,
+  ): Promise<CodeFileUnderstandingEntry> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const normalizedPath = path.trim();
+    if (!normalizedPath) {
+      throw new ProjectOSError("file_not_found", "File path must not be empty");
+    }
+
+    const inflightKey = `${projectId}\u0000${normalizedPath}`;
+    const existingInflight = this.codeFileUnderstandingInflight.get(inflightKey);
+    if (existingInflight) return existingInflight;
+
+    const task = this.runEnsureCodeFileUnderstanding(workspace, normalizedPath);
+    this.codeFileUnderstandingInflight.set(inflightKey, task);
+    try {
+      return await task;
+    } finally {
+      this.codeFileUnderstandingInflight.delete(inflightKey);
+    }
+  }
+
+  private async runEnsureCodeFileUnderstanding(
+    workspace: LoadedProjectOSWorkspace,
+    path: string,
+  ): Promise<CodeFileUnderstandingEntry> {
+    const content = await this.getFileContent(workspace.project.projectId, path);
+    const contentHash = hashFileContent(content);
+    const document = readCodeFileUnderstandingDocument(
+      workspace.workspaceRoot,
+      workspace.project.projectId,
+    );
+    const cached = findCodeFileUnderstandingEntry(document, path);
+    if (cached && cached.contentHash === contentHash) {
+      return cloneJson(cached);
+    }
+
+    const fileEntry = workspace.graph.fileIndex.find((entry) => entry.path === path);
+    const parentComponent =
+      workspace.graph.nodes.find(
+        (node) =>
+          node.level === "component" &&
+          node.linkedFiles.some((file) => file.path === path),
+      ) ??
+      workspace.graph.nodes.find(
+        (node) =>
+          node.level === "component" && (fileEntry?.nodeIds.includes(node.id) ?? false),
+      );
+
+    const fileRelations = workspace.graph.fileRelations ?? [];
+    const usedBy = fileRelations
+      .filter((relation) => relation.targetPath === path)
+      .map((relation) => relation.sourcePath)
+      .slice(0, 8);
+    const dependsOn = [
+      ...fileRelations
+        .filter((relation) => relation.sourcePath === path)
+        .map((relation) => relation.targetPath),
+      ...(fileEntry?.imports ?? []),
+    ].slice(0, 8);
+
+    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    if (!profile) {
+      throw new ProjectOSError(
+        "settings_not_found",
+        "No default model profile is configured for code-file understanding",
+      );
+    }
+    const responseLanguage = resolveResponseLanguage(
+      workspace.projectDescription.conciseDescription ||
+        parentComponent?.summary ||
+        path,
+    );
+
+    const entry = await this.codeFileUnderstandingService.generateWithModel({
+      projectId: workspace.project.projectId,
+      path,
+      sourceExcerpt: content,
+      contentHash,
+      fileType: fileEntry?.type ?? null,
+      stereotype: codeFileStereotypeHint(fileEntry?.type, path),
+      exports: fileEntry?.exports ?? [],
+      usedBy,
+      dependsOn,
+      parentComponentName: parentComponent?.name ?? null,
+      parentComponentSummary: parentComponent?.summary ?? null,
+      profile,
+      responseLanguage,
+    });
+
+    const next = upsertCodeFileUnderstandingEntry(document, entry);
+    writeCodeFileUnderstandingDocument(workspace.workspaceRoot, next);
+    return cloneJson(entry);
   }
 
   async getSemanticTree(projectId: string): Promise<SemanticTree> {
@@ -1324,6 +1440,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       thinkingDepth: workspace.settings.execution.thinkingDepth,
       responseLanguage,
       supplementalMarkdown,
+      ...(parsedRequest.images?.length
+        ? { images: parsedRequest.images }
+        : {}),
     });
     const contextSummary = summarizeLocalContext(augmented.bundle);
     return AgentAnswerResultSchema.parse({
@@ -1477,6 +1596,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ]
         .filter((part) => part.trim().length > 0)
         .join("\n\n"),
+      ...(parsedRequest.images?.length
+        ? { images: parsedRequest.images }
+        : {}),
       ...(parsedRequest.existingPlanId
         ? {
             existingPlanId: parsedRequest.existingPlanId,
@@ -3366,6 +3488,694 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       cleanedDocument,
     );
     workspace.mapContent = persisted;
+  }
+
+  async listSpatialPins(
+    projectId: string,
+  ): Promise<import("../contracts/spatial-pin.js").SpatialPinHead[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listSpatialPinHeads } = await import("./spatial-pin-service.js");
+    return listSpatialPinHeads(workspace.workspaceRoot);
+  }
+
+  async getSpatialPin(
+    projectId: string,
+    pinId: string,
+  ): Promise<import("../contracts/spatial-pin.js").SpatialPin | null> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getSpatialPin } = await import("./spatial-pin-service.js");
+    return getSpatialPin(workspace.workspaceRoot, pinId);
+  }
+
+  async upsertSpatialPin(
+    projectId: string,
+    pin: import("../contracts/spatial-pin.js").SpatialPin,
+  ): Promise<import("../contracts/spatial-pin.js").SpatialPin> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    if (pin.projectId !== projectId) {
+      throw new ProjectOSError(
+        "spatial_pin_invalid",
+        `Spatial pin projectId '${pin.projectId}' does not match '${projectId}'`,
+      );
+    }
+    const { upsertSpatialPin } = await import("./spatial-pin-service.js");
+    return upsertSpatialPin(workspace.workspaceRoot, pin);
+  }
+
+  async deleteSpatialPin(projectId: string, pinId: string): Promise<boolean> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { deleteSpatialPin } = await import("./spatial-pin-service.js");
+    return deleteSpatialPin(workspace.workspaceRoot, pinId);
+  }
+
+  async resolveSpatialPins(
+    projectId: string,
+    locationHint: import("../contracts/spatial-pin.js").LocationHint,
+  ): Promise<import("../contracts/spatial-pin.js").ResolvedSpatialPin[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { resolveSpatialPins } = await import("./spatial-pin-service.js");
+    return resolveSpatialPins(workspace.workspaceRoot, locationHint);
+  }
+
+  private loadSpatialPinImages(
+    workspaceRoot: string,
+    snapshotAssetPath: string | undefined,
+  ): Array<{ mimeType: "image/png" | "image/jpeg"; base64: string }> {
+    if (!snapshotAssetPath?.trim()) return [];
+    const absolute = join(workspaceRoot, snapshotAssetPath);
+    if (!existsSync(absolute)) return [];
+    try {
+      const bytes = readFileSync(absolute);
+      if (bytes.length < 8 || bytes.length > 6_000_000) return [];
+      const ext = extname(absolute).toLowerCase();
+      const mimeType =
+        ext === ".jpg" || ext === ".jpeg"
+          ? ("image/jpeg" as const)
+          : ("image/png" as const);
+      return [{ mimeType, base64: bytes.toString("base64") }];
+    } catch {
+      return [];
+    }
+  }
+
+  async saveSpatialPinSnapshot(
+    projectId: string,
+    pinId: string,
+    pngBase64: string,
+  ): Promise<{ snapshotAssetPath: string }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    if (!pinId.trim()) {
+      throw new ProjectOSError("spatial_pin_invalid", "Spatial pin id is required");
+    }
+    if (!pngBase64.trim()) {
+      throw new ProjectOSError(
+        "spatial_pin_invalid",
+        "Spatial pin snapshot payload is empty",
+      );
+    }
+    const { saveSpatialPinSnapshot } = await import("./spatial-pin-service.js");
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(pngBase64, "base64");
+    } catch {
+      throw new ProjectOSError(
+        "spatial_pin_invalid",
+        "Spatial pin snapshot is not valid base64",
+      );
+    }
+    if (bytes.length < 8 || bytes.length > 8 * 1024 * 1024) {
+      throw new ProjectOSError(
+        "spatial_pin_invalid",
+        "Spatial pin snapshot size is out of range",
+      );
+    }
+    const snapshotAssetPath = saveSpatialPinSnapshot(
+      workspace.workspaceRoot,
+      pinId,
+      bytes,
+    );
+    const existing = await this.getSpatialPin(projectId, pinId);
+    if (existing) {
+      await this.upsertSpatialPin(projectId, {
+        ...existing,
+        updatedAt: new Date().toISOString(),
+        composer: {
+          ...existing.composer,
+          snapshotAssetPath,
+        },
+      });
+    }
+    return { snapshotAssetPath };
+  }
+
+  async submitSpatialPin(
+    projectId: string,
+    pinId: string,
+  ): Promise<import("../contracts/spatial-pin.js").SubmitSpatialPinResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const pin = await this.getSpatialPin(projectId, pinId);
+    if (!pin) {
+      throw new ProjectOSError(
+        "annotation_not_found",
+        `Spatial pin '${pinId}' was not found in project '${projectId}'`,
+      );
+    }
+    const prompt = pin.composer.prompt.trim();
+    if (!prompt) {
+      throw new ProjectOSError(
+        "spatial_pin_invalid",
+        "Spatial pin prompt must not be empty",
+      );
+    }
+
+    const { buildSpatialPinUserContent } = await import(
+      "../contracts/spatial-pin.js"
+    );
+    const now = new Date().toISOString();
+    const userContent = buildSpatialPinUserContent(pin);
+    const images = this.loadSpatialPinImages(
+      workspace.workspaceRoot,
+      pin.composer.snapshotAssetPath,
+    );
+    const snapshotAttachment =
+      pin.composer.snapshotAssetPath
+        ? [
+            {
+              id: `att_${pin.id}_snapshot`,
+              label: "Spatial Pin snapshot",
+              ref: {
+                kind: "file" as const,
+                path: pin.composer.snapshotAssetPath,
+              },
+            },
+          ]
+        : undefined;
+
+    const sessionId =
+      pin.links?.chatSessionId ?? `chat_${crypto.randomUUID()}`;
+    const scope =
+      pin.location.nodeId != null
+        ? ({ kind: "node" as const, nodeId: pin.location.nodeId })
+        : ({ kind: "global" as const });
+
+    const { emptyComposerDraft } = await import(
+      "../contracts/prompt-composer.js"
+    );
+
+    const userMessage = {
+      id: `msg_${crypto.randomUUID()}`,
+      role: "user" as const,
+      content: userContent,
+      timestamp: now,
+      ...(snapshotAttachment ? { attachments: snapshotAttachment } : {}),
+    };
+
+    const existingSession = await this.getChatSession(projectId, sessionId);
+    const sessionRecord: import("../contracts/chat-session.js").ChatSessionRecord =
+      existingSession
+        ? {
+            ...existingSession,
+            head: {
+              ...existingSession.head,
+              chatMode: pin.composer.mode,
+              lastUpdatedAt: now,
+              status: "running",
+              title:
+                existingSession.head.title ||
+                prompt.slice(0, 60) ||
+                "Spatial pin",
+            },
+            messages: [...existingSession.messages, userMessage],
+          }
+        : {
+            version: "0.2.0",
+            head: {
+              id: sessionId,
+              title: prompt.slice(0, 60) || "Spatial pin",
+              createdAt: now,
+              lastUpdatedAt: now,
+              chatMode: pin.composer.mode,
+              isArchived: false,
+              status: "running",
+              classification: "topic",
+              classificationSource: "auto",
+              subtitle: pin.location.url,
+            },
+            messages: [userMessage],
+            draftComposer: emptyComposerDraft(),
+          };
+
+    await this.upsertChatSession(projectId, sessionRecord);
+    await this.setLastActiveChatSession(projectId, sessionId);
+
+    let runId: string | undefined;
+    let refinementId: string | undefined;
+    let planId: string | undefined;
+    let debugSessionId: string | undefined;
+    let nextStatus: import("../contracts/spatial-pin.js").SpatialPinStatus =
+      "submitted";
+
+    const imageFields = images.length > 0 ? { images } : {};
+
+    if (pin.composer.mode === "ask") {
+      let answer: import("../contracts/agent-conversation.js").AgentAnswerResult;
+      try {
+        answer = await this.askAgent({
+          projectId,
+          scope,
+          question: userContent,
+          language: { mode: "auto" },
+          chatSessionId: sessionId,
+          ...imageFields,
+        });
+      } catch (error) {
+        if (!images.length) throw error;
+        // Vision-capable models may reject images; fall back to text-only.
+        answer = await this.askAgent({
+          projectId,
+          scope,
+          question: userContent,
+          language: { mode: "auto" },
+          chatSessionId: sessionId,
+        });
+      }
+      nextStatus = "done";
+      const answeredAt = new Date().toISOString();
+      await this.upsertChatSession(projectId, {
+        ...sessionRecord,
+        head: {
+          ...sessionRecord.head,
+          status: "idle",
+          lastUpdatedAt: answeredAt,
+        },
+        messages: [
+          ...sessionRecord.messages,
+          {
+            id: `msg_${crypto.randomUUID()}`,
+            role: "assistant",
+            content: answer.answer,
+            format: "markdown",
+            timestamp: answeredAt,
+          },
+        ],
+        snapshot: {
+          ...(sessionRecord.snapshot ?? {}),
+          latestAskTrace: {
+            status: "complete",
+            scope,
+            result: answer,
+          },
+          agentFlowSubject: "ask",
+          flowStatus: "idle",
+        },
+      });
+    } else if (pin.composer.mode === "change") {
+      let refinement: import("../contracts/prompt-refinement.js").PromptRefinement;
+      try {
+        refinement = await this.refinePrompt({
+          projectId,
+          ...(pin.location.nodeId ? { nodeId: pin.location.nodeId } : {}),
+          rawPrompt: userContent,
+          chatSessionId: sessionId,
+          ...imageFields,
+        });
+      } catch (error) {
+        if (!images.length) throw error;
+        refinement = await this.refinePrompt({
+          projectId,
+          ...(pin.location.nodeId ? { nodeId: pin.location.nodeId } : {}),
+          rawPrompt: userContent,
+          chatSessionId: sessionId,
+        });
+      }
+      refinementId = refinement.id;
+      const run = await this.confirmExecution(refinement.id);
+      runId = run.runId;
+      nextStatus = "running";
+    } else if (pin.composer.mode === "plan") {
+      let plan: import("../contracts/implementation-plan.js").ImplementationPlan;
+      try {
+        plan = await this.createPlan({
+          projectId,
+          scope,
+          objective: userContent,
+          chatSessionId: sessionId,
+          ...imageFields,
+        });
+      } catch (error) {
+        if (!images.length) throw error;
+        plan = await this.createPlan({
+          projectId,
+          scope,
+          objective: userContent,
+          chatSessionId: sessionId,
+        });
+      }
+      planId = plan.id;
+      nextStatus = plan.status === "needs_clarification" ? "awaiting_review" : "submitted";
+      await this.upsertChatSession(projectId, {
+        ...sessionRecord,
+        head: {
+          ...sessionRecord.head,
+          status: "awaiting_review",
+          lastUpdatedAt: new Date().toISOString(),
+        },
+        snapshot: {
+          ...(sessionRecord.snapshot ?? {}),
+          pendingPlan: plan,
+          hasPendingPlan: true,
+          agentFlowSubject: "plan",
+          flowStatus: "awaiting_review",
+        },
+      });
+    } else {
+      const debugSession = await this.startDebugSession({
+        projectId,
+        scope,
+        bugDescription: userContent,
+        chatSessionId: sessionId,
+        ...imageFields,
+      });
+      debugSessionId = debugSession.sessionId;
+      nextStatus = "submitted";
+      await this.upsertChatSession(projectId, {
+        ...sessionRecord,
+        head: {
+          ...sessionRecord.head,
+          status: "awaiting_review",
+          lastUpdatedAt: new Date().toISOString(),
+        },
+        snapshot: {
+          ...(sessionRecord.snapshot ?? {}),
+          debugSession,
+          agentFlowSubject: "debug",
+          flowStatus: "awaiting_review",
+        },
+      });
+    }
+
+    const updatedPin = await this.upsertSpatialPin(projectId, {
+      ...pin,
+      updatedAt: new Date().toISOString(),
+      status: nextStatus,
+      title: pin.title ?? prompt.slice(0, 60),
+      links: {
+        ...(pin.links ?? {}),
+        chatSessionId: sessionId,
+        ...(runId ? { runId } : {}),
+        ...(refinementId ? { refinementId } : {}),
+        ...(planId ? { planId } : {}),
+        ...(debugSessionId ? { debugSessionId } : {}),
+      },
+    });
+
+    return {
+      pin: updatedPin,
+      chatSessionId: sessionId,
+      ...(runId ? { runId } : {}),
+      ...(refinementId ? { refinementId } : {}),
+      ...(planId ? { planId } : {}),
+      ...(debugSessionId ? { debugSessionId } : {}),
+    };
+  }
+
+  async listLoopGraphs(
+    projectId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphHead[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listLoopGraphHeads } = await import("./loop-graph-service.js");
+    return listLoopGraphHeads(workspace.workspaceRoot);
+  }
+
+  async getLoopGraphIndex(
+    projectId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphIndex> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getLoopGraphIndex } = await import("./loop-graph-service.js");
+    return getLoopGraphIndex(workspace.workspaceRoot);
+  }
+
+  async getLoopGraph(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument | null> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getLoopGraph } = await import("./loop-graph-service.js");
+    return getLoopGraph(workspace.workspaceRoot, loopId);
+  }
+
+  async upsertLoopGraph(
+    projectId: string,
+    document: import("../contracts/loop-graph.js").LoopGraphDocument,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    if (document.projectId !== projectId) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        `Loop graph projectId '${document.projectId}' does not match '${projectId}'`,
+      );
+    }
+    const { upsertLoopGraph } = await import("./loop-graph-service.js");
+    return upsertLoopGraph(workspace.workspaceRoot, document);
+  }
+
+  async createLoopGraph(
+    projectId: string,
+    title?: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { createLoopGraph } = await import("./loop-graph-service.js");
+    return createLoopGraph(workspace.workspaceRoot, projectId, title);
+  }
+
+  async deleteLoopGraph(projectId: string, loopId: string): Promise<boolean> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { deleteLoopGraph } = await import("./loop-graph-service.js");
+    return deleteLoopGraph(workspace.workspaceRoot, loopId);
+  }
+
+  async setLastActiveLoopGraph(projectId: string, loopId: string): Promise<void> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { setLastActiveLoopGraph } = await import("./loop-graph-service.js");
+    setLastActiveLoopGraph(workspace.workspaceRoot, loopId);
+  }
+
+  async linkLoopGraphToSession(
+    projectId: string,
+    loopId: string,
+    sessionId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument | null> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { linkLoopGraphToSession } = await import("./loop-graph-service.js");
+    return linkLoopGraphToSession(workspace.workspaceRoot, loopId, sessionId);
+  }
+
+  async unlinkLoopGraphFromSession(
+    projectId: string,
+    loopId: string,
+    sessionId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument | null> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { unlinkLoopGraphFromSession } = await import("./loop-graph-service.js");
+    return unlinkLoopGraphFromSession(workspace.workspaceRoot, loopId, sessionId);
+  }
+
+  async compileLoopGraph(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopCompileResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getLoopGraph, savePendingCompile } = await import("./loop-graph-service.js");
+    const { compileLoopGraphDraft } = await import("./loop-graph-compiler.js");
+    const { getIntentGraphCompileIssues, isIntentGraphReadyForCompile } = await import(
+      "../contracts/loop-graph.js"
+    );
+    const doc = getLoopGraph(workspace.workspaceRoot, loopId);
+    if (!doc) {
+      throw new ProjectOSError(
+        "loop_graph_not_found",
+        `Loop graph '${loopId}' was not found`,
+      );
+    }
+    if (!isIntentGraphReadyForCompile(doc.draft)) {
+      const issues = getIntentGraphCompileIssues(doc.draft);
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        issues[0]?.message ?? "Loop graph is not ready to interpret",
+      );
+    }
+    const result = await compileLoopGraphDraft(doc.draft);
+    savePendingCompile(workspace.workspaceRoot, loopId, {
+      ...result,
+      compiledAt: new Date().toISOString(),
+    });
+    return result;
+  }
+
+  async approveLoopSpec(
+    projectId: string,
+    loopId: string,
+    spec: import("../contracts/loop-graph.js").LoopSpec,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { approveLoopSpec } = await import("./loop-graph-service.js");
+    try {
+      return approveLoopSpec(workspace.workspaceRoot, loopId, spec);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to approve loop spec",
+      );
+    }
+  }
+
+  async startLoopInstance(
+    projectId: string,
+    loopId: string,
+    specVersion?: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { startLoopInstance } = await import("./loop-runtime-service.js");
+    try {
+      return startLoopInstance(workspace.workspaceRoot, loopId, specVersion);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to start loop instance",
+      );
+    }
+  }
+
+  async pauseLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { pauseLoopInstance } = await import("./loop-runtime-service.js");
+    return pauseLoopInstance(workspace.workspaceRoot, loopId, instanceId);
+  }
+
+  async resumeLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { resumeLoopInstance } = await import("./loop-runtime-service.js");
+    return resumeLoopInstance(workspace.workspaceRoot, loopId, instanceId);
+  }
+
+  async resolveLoopHitl(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    answers: import("../contracts/loop-graph.js").LoopHitlAnswer[],
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { resolveLoopHitl } = await import("./loop-runtime-service.js");
+    return resolveLoopHitl(workspace.workspaceRoot, loopId, instanceId, answers);
+  }
+
+  async getLoopInstanceEvents(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopInstanceEvent[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getLoopInstanceEvents } = await import("./loop-runtime-service.js");
+    return getLoopInstanceEvents(workspace.workspaceRoot, loopId, instanceId);
+  }
+
+  async advanceLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { advanceLoopInstance } = await import("./loop-runtime-service.js");
+    return advanceLoopInstance(workspace.workspaceRoot, loopId, instanceId);
+  }
+
+  async sendLoopAuthoringTurn(
+    projectId: string,
+    loopId: string,
+    request: import("../contracts/loop-graph.js").LoopAuthoringTurnRequest,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { sendLoopAuthoringTurn } = await import("./loop-graph-service.js");
+    try {
+      return sendLoopAuthoringTurn(workspace.workspaceRoot, loopId, request);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to send authoring turn",
+      );
+    }
+  }
+
+  async answerLoopGoalClarification(
+    projectId: string,
+    loopId: string,
+    answers: import("../contracts/loop-graph.js").LoopGoalClarificationAnswer[],
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { answerLoopGoalClarification } = await import("./loop-graph-service.js");
+    try {
+      return answerLoopGoalClarification(workspace.workspaceRoot, loopId, answers);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to answer clarification",
+      );
+    }
+  }
+
+  async confirmLoopGoalContext(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { confirmLoopGoalContext } = await import("./loop-graph-service.js");
+    try {
+      return confirmLoopGoalContext(workspace.workspaceRoot, loopId);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to confirm goal context",
+      );
+    }
+  }
+
+  async acceptLoopGraphEditOffer(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { acceptLoopGraphEditOffer } = await import("./loop-graph-service.js");
+    try {
+      return acceptLoopGraphEditOffer(workspace.workspaceRoot, loopId);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to accept graph edit offer",
+      );
+    }
+  }
+
+  async dismissLoopGraphEditOffer(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { dismissLoopGraphEditOffer } = await import("./loop-graph-service.js");
+    return dismissLoopGraphEditOffer(workspace.workspaceRoot, loopId);
+  }
+
+  async undoLoopDraft(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { undoLoopDraft } = await import("./loop-graph-service.js");
+    try {
+      return undoLoopDraft(workspace.workspaceRoot, loopId);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to undo draft",
+      );
+    }
+  }
+
+  async setLoopComposerMode(
+    projectId: string,
+    loopId: string,
+    mode: import("../contracts/loop-graph.js").LoopComposerMode,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { setLoopComposerMode } = await import("./loop-graph-service.js");
+    return setLoopComposerMode(workspace.workspaceRoot, loopId, mode);
   }
 
   async applyMapWorkGroupMutation(
@@ -6970,6 +7780,30 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return this.writeTransactionRuntime;
   }
 
+  findLoadedProjectByWorkspaceRoot(
+    workspaceRoot: string,
+  ): ProjectOSProject | null {
+    const target = workspaceRoot.trim().replace(/[/\\]+$/, "");
+    if (!target) return null;
+    for (const workspace of this.workspacesByProjectId.values()) {
+      const root = workspace.workspaceRoot.trim().replace(/[/\\]+$/, "");
+      if (root === target) {
+        return {
+          ...workspace.project,
+          workspaceRoot: workspace.workspaceRoot,
+        };
+      }
+    }
+    return null;
+  }
+
+  listLoadedProjects(): ProjectOSProject[] {
+    return [...this.workspacesByProjectId.values()].map((workspace) => ({
+      ...workspace.project,
+      workspaceRoot: workspace.workspaceRoot,
+    }));
+  }
+
   protected requireLoadedWorkspace(projectId: string): LoadedProjectOSWorkspace {
     const workspace = this.workspacesByProjectId.get(projectId);
     if (!workspace) {
@@ -7587,6 +8421,22 @@ function linkedFileRoleForSemanticNode(node: SemanticTreeNode): LinkedFileRole {
     return "test";
   }
   return node.kind === "route" ? "primary" : "supporting";
+}
+
+function codeFileStereotypeHint(
+  fileType: string | undefined,
+  path: string,
+): string {
+  if (fileType === "page") return "[Page]";
+  if (fileType === "api") return "[API Route]";
+  if (path.endsWith(".prisma")) return "[Schema]";
+  if (path.endsWith(".css") || path.endsWith(".scss") || path.endsWith(".module.css")) {
+    return "[Style]";
+  }
+  if (fileType === "test" || /\.(test|spec)\./.test(path)) return "[Test]";
+  if (fileType === "lib") return "[Module]";
+  if (path.endsWith(".tsx") || path.endsWith(".jsx")) return "[Component]";
+  return "[Code]";
 }
 
 function renderNodeContextMarkdown(

@@ -5,6 +5,8 @@ import { readRecentWorkspaces } from '../state/recentWorkspaces'
 import { useWorkbenchStore } from '../state/workbenchStore'
 import { commandFromKeyEvent, executeAppMenuCommand } from './menuCommands'
 
+let claimedInitialWorkspace = false
+
 export function useAppMenu(): void {
   const locale = useWorkbenchStore((s) => s.locale)
   const phase = useWorkbenchStore((s) => s.phase)
@@ -23,12 +25,33 @@ export function useAppMenu(): void {
         })),
         workspaceOpen: phase === 'ready',
         hasActiveEditor: hasOpenEditorFiles(editorPanes),
+        workspacePath: phase === 'ready' && workspaceRoot ? workspaceRoot : null,
       })
     }
     publish()
     const retry = window.setTimeout(publish, 300)
     return () => window.clearTimeout(retry)
   }, [locale, phase, workspaceRoot, editorPanes])
+
+  useEffect(() => {
+    const readInitialWorkspace = window.projectOS?.window.initialWorkspace
+    if (!readInitialWorkspace || claimedInitialWorkspace) return undefined
+    let cancelled = false
+    const openInitialWorkspace = (path: string | null) => {
+      if (cancelled || !path || claimedInitialWorkspace) return
+      claimedInitialWorkspace = true
+      void useWorkbenchStore.getState().openWorkspace(path)
+    }
+    void readInitialWorkspace().then(openInitialWorkspace).catch(() => {
+      window.setTimeout(() => {
+        if (cancelled || claimedInitialWorkspace) return
+        void readInitialWorkspace().then(openInitialWorkspace)
+      }, 250)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const bridge = window.projectOS?.menu

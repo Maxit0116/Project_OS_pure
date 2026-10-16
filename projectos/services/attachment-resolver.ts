@@ -64,6 +64,32 @@ async function resolveRef(
 ): Promise<ResolvedAttachmentPayload> {
   switch (ref.kind) {
     case "file": {
+      const lower = ref.path.toLowerCase();
+      if (
+        lower.endsWith(".png") ||
+        lower.endsWith(".jpg") ||
+        lower.endsWith(".jpeg")
+      ) {
+        const abs = join(deps.workspaceRoot, ref.path);
+        let byteLength = 0;
+        try {
+          if (existsSync(abs)) {
+            byteLength = statSync(abs).size;
+          }
+        } catch {
+          byteLength = 0;
+        }
+        return {
+          ref,
+          label,
+          source: "mention",
+          disposition: "exact",
+          byteLength,
+          includedByteLength: 0,
+          markdown: `![${label}](${ref.path})`,
+          omissionReason: "binary_image_attachment",
+        };
+      }
       const content = await deps.readFile(ref.path);
       const truncated = truncateContent(content, EXPLICIT_MAX_CHARS);
       return {

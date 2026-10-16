@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Project OS Spatial Pin",
+  "version": "0.1.0",
+  "description": "Anchors Spatial Pins to page URL and DOM for Project OS.",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://*/*", "http://*/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Project OS Spatial Pin",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

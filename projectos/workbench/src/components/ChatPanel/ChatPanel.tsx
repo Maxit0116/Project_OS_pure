@@ -24,6 +24,7 @@ import { useVoiceInput } from './voice/useVoiceInput'
 import PromptComposer from './composer/PromptComposer'
 import { setComposerText } from './composer/composerTokens'
 import AttachmentChips from './composer/AttachmentChips'
+import LoopAuthoringBanner from '../LoopGraph/LoopAuthoringBanner'
 import styles from './ChatPanel.module.css'
 
 export default function ChatPanel() {
@@ -269,6 +270,7 @@ export default function ChatPanel() {
         ) : null}
 
         <div className={styles.inputStack}>
+          <LoopAuthoringBanner />
           <VoiceInputErrorBanner
             errorKey={voiceState.error}
             onDismiss={dismissError}

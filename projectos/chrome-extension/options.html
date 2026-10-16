@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Spatial Pin Bridge Settings</title>
+    <style>
+      body {
+        font: 14px/1.45 system-ui, sans-serif;
+        max-width: 560px;
+        margin: 32px auto;
+        color: #0f172a;
+        padding: 0 16px;
+      }
+      label {
+        display: block;
+        margin-top: 16px;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        margin-top: 6px;
+        padding: 8px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+      }
+      button {
+        margin-top: 20px;
+        padding: 8px 14px;
+        border-radius: 6px;
+        border: 0;
+        background: #16a34a;
+        color: white;
+        cursor: pointer;
+      }
+      .hint {
+        color: #64748b;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Project OS Spatial Pin</h1>
+    <p class="hint">
+      In Project OS Settings → Spatial Pin, copy the bridge port and token, then
+      paste them here. Load this folder as an unpacked extension in
+      chrome://extensions.
+    </p>
+    <label>
+      Bridge port
+      <input id="port" type="number" min="1" placeholder="e.g. 53123" />
+    </label>
+    <label>
+      Bridge token
+      <input id="token" type="text" placeholder="hex token from Project OS" />
+    </label>
+    <button id="save" type="button">Save</button>
+    <p id="saved" class="hint"></p>
+    <script src="options.js"></script>
+  </body>
+</html>

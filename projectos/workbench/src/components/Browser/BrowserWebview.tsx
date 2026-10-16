@@ -5,6 +5,10 @@ import {
   syncBrowserNavigationFromWebview,
   useBrowserStore,
 } from '../../state/browserStore'
+import {
+  buildSpatialLocatorInjectionSource,
+  SPATIAL_LOCATOR_CONSOLE_PREFIX,
+} from './injectSpatialLocator'
 import styles from './BrowserPanel.module.css'
 
 interface FailLoadEvent extends Event {
@@ -62,6 +66,23 @@ export default function BrowserWebview() {
       } catch {
         // getTitle may not be available
       }
+      try {
+        void el.executeJavaScript(buildSpatialLocatorInjectionSource(), false)
+      } catch {
+        // Guest injection is best-effort for spatial pins.
+      }
+    }
+    const handleConsole = (event: Event) => {
+      const message = (event as Event & { message?: string }).message
+      if (!message || !message.startsWith(SPATIAL_LOCATOR_CONSOLE_PREFIX)) return
+      try {
+        const payload = JSON.parse(
+          message.slice(SPATIAL_LOCATOR_CONSOLE_PREFIX.length),
+        )
+        void window.projectOS?.spatialPin.reportBrowserLocation(payload)
+      } catch {
+        // ignore malformed locator payloads
+      }
     }
     const handleTitleUpdated = (event: Event) => {
       const title = (event as Event & { title?: string }).title
@@ -76,6 +97,7 @@ export default function BrowserWebview() {
     el.addEventListener('did-fail-load', handleFail)
     el.addEventListener('did-navigate', handleNavigate)
     el.addEventListener('did-navigate-in-page', handleNavigate)
+    el.addEventListener('console-message', handleConsole)
     // Browser guest popups are denied by the main-owned setWindowOpenHandler.
     ;(el as unknown as HTMLElement).addEventListener('page-title-updated', handleTitleUpdated)
 
@@ -86,6 +108,7 @@ export default function BrowserWebview() {
       el.removeEventListener('did-fail-load', handleFail)
       el.removeEventListener('did-navigate', handleNavigate)
       el.removeEventListener('did-navigate-in-page', handleNavigate)
+      el.removeEventListener('console-message', handleConsole)
       ;(el as unknown as HTMLElement).removeEventListener('page-title-updated', handleTitleUpdated)
       registerController(null)
     }

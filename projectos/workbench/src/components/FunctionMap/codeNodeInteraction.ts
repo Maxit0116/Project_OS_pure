@@ -47,3 +47,19 @@ export async function openCodeNodeFile(
 ): Promise<void> {
   await selectFile(target.filePath, target.parentNodeId)
 }
+
+/**
+ * Open a code-file node in the Code / Diff editor.
+ * Does not enter one-hop map focus — returning to Function Map keeps the full graph.
+ */
+export async function openCodeNodeInEditor(
+  target: CodeNodeTarget,
+  actions: {
+    selectFile: (
+      filePath: string,
+      preferredNodeId?: string,
+    ) => void | Promise<void>
+  },
+): Promise<void> {
+  await openCodeNodeFile(target, actions.selectFile)
+}

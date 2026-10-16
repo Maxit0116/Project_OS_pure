@@ -106,6 +106,7 @@ export interface PlanServiceInput {
   existingPlanId?: string;
   existingCreatedAt?: string;
   supplementalMarkdown?: string;
+  images?: Array<{ mimeType: "image/png" | "image/jpeg"; base64: string }>;
 }
 
 export class PlanService {
@@ -136,6 +137,7 @@ export class PlanService {
       redactionPolicy: "secrets_and_paths",
       maxOutputTokens: 4096,
       thinkingDepth: input.thinkingDepth,
+      ...(input.images?.length ? { images: input.images } : {}),
     });
 
     const parsed = parsePlanJson(response.output, response.reasoning);

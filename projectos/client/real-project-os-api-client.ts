@@ -46,6 +46,13 @@ import type {
   UpdateMapArtifactPatch,
 } from "../contracts/map-content.js";
 import type { ListSkillsResult, SkillContent } from "../contracts/skills.js";
+import type {
+  LocationHint,
+  ResolvedSpatialPin,
+  SpatialPin,
+  SpatialPinHead,
+  SubmitSpatialPinResult,
+} from "../contracts/spatial-pin.js";
 import type { ApiTransport } from "./transport/ApiTransport.js";
 import { NotConnectedTransport } from "./transport/NotConnectedTransport.js";
 
@@ -218,6 +225,13 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     conciseDescription: string,
   ): Promise<ProjectDescription> {
     return this.transport.updateProjectDescription(projectId, conciseDescription);
+  }
+
+  ensureCodeFileUnderstanding(
+    projectId: string,
+    path: string,
+  ): Promise<import("../contracts/code-file-understanding.js").CodeFileUnderstandingEntry> {
+    return this.transport.ensureCodeFileUnderstanding(projectId, path);
   }
 
   askAgent(request: AgentAskRequest): Promise<AgentAnswerResult> {
@@ -407,6 +421,164 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   deleteMapArtifact(projectId: string, artifactId: string): Promise<void> {
     return this.transport.deleteMapArtifact(projectId, artifactId);
+  }
+
+  listSpatialPins(projectId: string): Promise<SpatialPinHead[]> {
+    return this.transport.listSpatialPins(projectId);
+  }
+
+  getSpatialPin(projectId: string, pinId: string): Promise<SpatialPin | null> {
+    return this.transport.getSpatialPin(projectId, pinId);
+  }
+
+  upsertSpatialPin(projectId: string, pin: SpatialPin): Promise<SpatialPin> {
+    return this.transport.upsertSpatialPin(projectId, pin);
+  }
+
+  deleteSpatialPin(projectId: string, pinId: string): Promise<boolean> {
+    return this.transport.deleteSpatialPin(projectId, pinId);
+  }
+
+  resolveSpatialPins(
+    projectId: string,
+    locationHint: LocationHint,
+  ): Promise<ResolvedSpatialPin[]> {
+    return this.transport.resolveSpatialPins(projectId, locationHint);
+  }
+
+  submitSpatialPin(
+    projectId: string,
+    pinId: string,
+  ): Promise<SubmitSpatialPinResult> {
+    return this.transport.submitSpatialPin(projectId, pinId);
+  }
+
+  saveSpatialPinSnapshot(
+    projectId: string,
+    pinId: string,
+    pngBase64: string,
+  ): Promise<{ snapshotAssetPath: string }> {
+    return this.transport.saveSpatialPinSnapshot(projectId, pinId, pngBase64);
+  }
+
+  listLoopGraphs(projectId: string) {
+    return this.transport.listLoopGraphs(projectId);
+  }
+
+  getLoopGraphIndex(projectId: string) {
+    return this.transport.getLoopGraphIndex(projectId);
+  }
+
+  getLoopGraph(projectId: string, loopId: string) {
+    return this.transport.getLoopGraph(projectId, loopId);
+  }
+
+  upsertLoopGraph(
+    projectId: string,
+    document: import("../contracts/loop-graph.js").LoopGraphDocument,
+  ) {
+    return this.transport.upsertLoopGraph(projectId, document);
+  }
+
+  createLoopGraph(projectId: string, title?: string) {
+    return this.transport.createLoopGraph(projectId, title);
+  }
+
+  deleteLoopGraph(projectId: string, loopId: string) {
+    return this.transport.deleteLoopGraph(projectId, loopId);
+  }
+
+  setLastActiveLoopGraph(projectId: string, loopId: string) {
+    return this.transport.setLastActiveLoopGraph(projectId, loopId);
+  }
+
+  linkLoopGraphToSession(projectId: string, loopId: string, sessionId: string) {
+    return this.transport.linkLoopGraphToSession(projectId, loopId, sessionId);
+  }
+
+  unlinkLoopGraphFromSession(projectId: string, loopId: string, sessionId: string) {
+    return this.transport.unlinkLoopGraphFromSession(projectId, loopId, sessionId);
+  }
+
+  compileLoopGraph(projectId: string, loopId: string) {
+    return this.transport.compileLoopGraph(projectId, loopId);
+  }
+
+  approveLoopSpec(
+    projectId: string,
+    loopId: string,
+    spec: import("../contracts/loop-graph.js").LoopSpec,
+  ) {
+    return this.transport.approveLoopSpec(projectId, loopId, spec);
+  }
+
+  startLoopInstance(projectId: string, loopId: string, specVersion?: string) {
+    return this.transport.startLoopInstance(projectId, loopId, specVersion);
+  }
+
+  pauseLoopInstance(projectId: string, loopId: string, instanceId: string) {
+    return this.transport.pauseLoopInstance(projectId, loopId, instanceId);
+  }
+
+  resumeLoopInstance(projectId: string, loopId: string, instanceId: string) {
+    return this.transport.resumeLoopInstance(projectId, loopId, instanceId);
+  }
+
+  resolveLoopHitl(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    answers: import("../contracts/loop-graph.js").LoopHitlAnswer[],
+  ) {
+    return this.transport.resolveLoopHitl(projectId, loopId, instanceId, answers);
+  }
+
+  getLoopInstanceEvents(projectId: string, loopId: string, instanceId: string) {
+    return this.transport.getLoopInstanceEvents(projectId, loopId, instanceId);
+  }
+
+  advanceLoopInstance(projectId: string, loopId: string, instanceId: string) {
+    return this.transport.advanceLoopInstance(projectId, loopId, instanceId);
+  }
+
+  sendLoopAuthoringTurn(
+    projectId: string,
+    loopId: string,
+    request: import("../contracts/loop-graph.js").LoopAuthoringTurnRequest,
+  ) {
+    return this.transport.sendLoopAuthoringTurn(projectId, loopId, request);
+  }
+
+  answerLoopGoalClarification(
+    projectId: string,
+    loopId: string,
+    answers: import("../contracts/loop-graph.js").LoopGoalClarificationAnswer[],
+  ) {
+    return this.transport.answerLoopGoalClarification(projectId, loopId, answers);
+  }
+
+  confirmLoopGoalContext(projectId: string, loopId: string) {
+    return this.transport.confirmLoopGoalContext(projectId, loopId);
+  }
+
+  acceptLoopGraphEditOffer(projectId: string, loopId: string) {
+    return this.transport.acceptLoopGraphEditOffer(projectId, loopId);
+  }
+
+  dismissLoopGraphEditOffer(projectId: string, loopId: string) {
+    return this.transport.dismissLoopGraphEditOffer(projectId, loopId);
+  }
+
+  undoLoopDraft(projectId: string, loopId: string) {
+    return this.transport.undoLoopDraft(projectId, loopId);
+  }
+
+  setLoopComposerMode(
+    projectId: string,
+    loopId: string,
+    mode: import("../contracts/loop-graph.js").LoopComposerMode,
+  ) {
+    return this.transport.setLoopComposerMode(projectId, loopId, mode);
   }
 
   initMapArtifactStack(

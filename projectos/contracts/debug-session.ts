@@ -6,6 +6,7 @@ import {
   HarnessProposedFixSchema,
   HarnessVerificationSchema,
 } from "./harness.js";
+import { ModelImagePartSchema } from "./model-gateway.js";
 import { PromptComposerFieldsSchema } from "./prompt-composer.js";
 
 export const DebugSessionVersionSchema = z.literal("0.1.0");
@@ -78,6 +79,7 @@ export const StartDebugSessionRequestSchema = z
     bugDescription: z.string().trim().min(1),
     rawError: z.string().optional(),
     chatSessionId: z.string().min(1).optional(),
+    images: z.array(ModelImagePartSchema).max(4).optional(),
   })
   .merge(PromptComposerFieldsSchema)
   .strict();

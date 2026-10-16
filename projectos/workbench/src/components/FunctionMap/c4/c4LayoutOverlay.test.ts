@@ -42,4 +42,16 @@ describe('c4LayoutOverlay', () => {
     expect(overlay.positions['container::root::stale']).toBeUndefined()
     expect(overlay.positions['container::root::keep']).toEqual({ x: 3, y: 4 })
   })
+
+  it('keys positions by named viewKey when provided', () => {
+    upsertC4LayoutPositions(
+      PROJECT,
+      'container',
+      'system_root',
+      { web: { x: 9, y: 8 } },
+      'view_container_system',
+    )
+    const overlay = loadC4LayoutOverlay(PROJECT)
+    expect(overlay.positions['view_container_system::web']).toEqual({ x: 9, y: 8 })
+  })
 })

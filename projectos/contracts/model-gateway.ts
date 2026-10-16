@@ -22,6 +22,13 @@ export const RedactionPolicySchema = z.enum([
   "secrets_and_paths",
 ]);
 
+export const ModelImagePartSchema = z
+  .object({
+    mimeType: z.enum(["image/png", "image/jpeg"]),
+    base64: z.string().min(1).max(6_000_000),
+  })
+  .strict();
+
 export const ModelGatewayRequestSchema = z
   .object({
     projectId: z.string().optional(),
@@ -32,6 +39,8 @@ export const ModelGatewayRequestSchema = z
     maxOutputTokens: z.number().finite().int().min(0).optional(),
     systemPrompt: z.string().optional(),
     thinkingDepth: ThinkingDepthSchema.optional(),
+    /** Optional vision parts (OpenAI / Anthropic). Ignored by text-only providers. */
+    images: z.array(ModelImagePartSchema).max(4).optional(),
   })
   .strict();
 
@@ -57,6 +66,7 @@ export const ModelGatewayResponseSchema = z
 
 export type ModelRequestKind = z.infer<typeof ModelRequestKindSchema>;
 export type RedactionPolicy = z.infer<typeof RedactionPolicySchema>;
+export type ModelImagePart = z.infer<typeof ModelImagePartSchema>;
 export type ModelGatewayRequest = z.infer<typeof ModelGatewayRequestSchema>;
 export type ModelGatewayUsage = z.infer<typeof ModelGatewayUsageSchema>;
 export type ModelGatewayResponse = z.infer<typeof ModelGatewayResponseSchema>;

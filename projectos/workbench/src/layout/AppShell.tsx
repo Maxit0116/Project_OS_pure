@@ -16,6 +16,7 @@ import { useTerminalShortcuts } from '../components/Terminal/useTerminalShortcut
 import { useEditorShortcuts } from '../components/CodeEditor/useEditorShortcuts'
 import WorkbenchSidePanels from './WorkbenchSidePanels'
 import SessionGraphOverlay from '../components/SessionGraph/SessionGraphOverlay'
+import LoopGraphOverlay from '../components/LoopGraph/LoopGraphOverlay'
 import EdgeRails from './EdgeRails'
 import { FunctionMapBleedRoot } from '../components/FunctionMap/FunctionMapBleedLayer'
 import { preloadLocalWhisper } from '../components/ChatPanel/voice/localWhisperTranscribe'
@@ -145,6 +146,7 @@ export default function AppShell() {
           </main>
 
           <SessionGraphOverlay />
+          <LoopGraphOverlay />
           <EdgeRails
             leftMounted={leftPresence.mounted}
             rightMounted={rightPresence.mounted}

@@ -58,12 +58,18 @@ export function layoutCodeNodesByImports(
     outgoing.set(id, [])
     incoming.set(id, [])
   }
+  const connectedEdges: CodeLayoutEdge[] = []
   for (const edge of edges) {
     if (!idSet.has(edge.source) || !idSet.has(edge.target) || edge.source === edge.target) {
       continue
     }
     outgoing.get(edge.source)!.push(edge.target)
     incoming.get(edge.target)!.push(edge.source)
+    connectedEdges.push(edge)
+  }
+
+  if (connectedEdges.length === 0) {
+    return layoutUnrelatedCodeMatrix(nodes, { startX, startY, gapX, gapY })
   }
 
   const layerOf = assignLayers(ids, outgoing, incoming)
@@ -121,6 +127,72 @@ export function layoutCodeNodesByImports(
       cursorY += gapY * 0.25
     }
   }
+
+  return positions
+}
+
+/**
+ * Column count for a row-major matrix whose bounding box is as close to a
+ * square as the cell size allows. Wide file cards therefore use fewer
+ * columns than a raw sqrt(n) grid.
+ */
+export function squareMatrixColumns(
+  count: number,
+  cellWidth: number,
+  cellHeight: number,
+  gapX = 0,
+  gapY = 0,
+): number {
+  if (count <= 1) return 1
+  const width = Math.max(1, cellWidth)
+  const height = Math.max(1, cellHeight)
+  let bestCols = 1
+  let bestDelta = Number.POSITIVE_INFINITY
+  let bestEmpty = Number.POSITIVE_INFINITY
+
+  for (let cols = 1; cols <= count; cols += 1) {
+    const rows = Math.ceil(count / cols)
+    const frameWidth = cols * width + (cols - 1) * gapX
+    const frameHeight = rows * height + (rows - 1) * gapY
+    const delta = Math.abs(frameWidth - frameHeight)
+    const empty = cols * rows - count
+    if (
+      delta < bestDelta - 0.5 ||
+      (Math.abs(delta - bestDelta) <= 0.5 && empty < bestEmpty)
+    ) {
+      bestDelta = delta
+      bestEmpty = empty
+      bestCols = cols
+    }
+  }
+
+  return bestCols
+}
+
+function layoutUnrelatedCodeMatrix(
+  nodes: CodeLayoutNode[],
+  options: { startX: number; startY: number; gapX: number; gapY: number },
+): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>()
+  const ordered = [...nodes].sort((a, b) => compareNodes(a, b, a.id, b.id))
+  const cellWidth = Math.max(...ordered.map((node) => node.width))
+  const cellHeight = Math.max(...ordered.map((node) => node.height))
+  const columns = squareMatrixColumns(
+    ordered.length,
+    cellWidth,
+    cellHeight,
+    options.gapX,
+    options.gapY,
+  )
+
+  ordered.forEach((node, index) => {
+    const column = index % columns
+    const row = Math.floor(index / columns)
+    positions.set(node.id, {
+      x: options.startX + column * (cellWidth + options.gapX),
+      y: options.startY + row * (cellHeight + options.gapY),
+    })
+  })
 
   return positions
 }

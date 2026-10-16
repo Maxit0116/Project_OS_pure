@@ -227,6 +227,18 @@ export interface ChatMessage {
   invokedSkillId?: string
 }
 
+/** No node/file selection ⇒ whole-project (global) agent scope. */
+export function isGlobalAgentScope(state: {
+  selectedNodeId: string | null
+  selectedFilePath: string | null
+  pendingFileOwnerChoice: PendingFileOwnerChoice | null
+  fileScopeError: 'not_mapped' | null
+}): boolean {
+  if (state.pendingFileOwnerChoice || state.fileScopeError) return false
+  if (state.selectedNodeId || state.selectedFilePath) return false
+  return true
+}
+
 export function canSubmitAgentPrompt(state: {
   chatMode: ChatMode
   globalAgentActive: boolean
@@ -236,7 +248,7 @@ export function canSubmitAgentPrompt(state: {
   fileScopeError: 'not_mapped' | null
   pendingPlan: import('@contracts/index').ImplementationPlan | null
 }): boolean {
-  if (state.globalAgentActive) {
+  if (isGlobalAgentScope(state)) {
     return state.chatMode === 'ask' || state.chatMode === 'debug' || state.chatMode === 'anchored'
   }
   if (
@@ -481,6 +493,8 @@ export interface WorkbenchState {
   openSampleWorkspace: () => Promise<void>
   openWorkspace: (path: string) => Promise<void>
   rescanStructureGraph: (options?: StructureScanOptions) => Promise<void>
+  /** Debounced refine when workspace files change (C4 Pulse incremental). */
+  queueStructureRefineForChangedFiles: (changedFiles: string[]) => void
   setCenterTab: (tab: CenterTab) => void
   setMapLayer: (layer: MapLayerMode) => void
   setStoryView: (next: {
@@ -803,6 +817,8 @@ async function loadWorkspaceIntoStore(
   useOutlineStore.getState().clear()
   useFileTimelineStore.getState().clear()
   useChatSessionStore.getState().clear()
+  const { useLoopGraphStore } = await import('./loopGraphStore')
+  useLoopGraphStore.getState().clear()
   const [graph, tree, mapContent, currentWork, projectDescription, directoryEntries] = await Promise.all([
     client.getProjectGraph(project.projectId),
     client.getSemanticTree(project.projectId),
@@ -884,7 +900,7 @@ async function loadWorkspaceIntoStore(
 }
 
 const initialTransientState = {
-  globalAgentActive: false,
+  globalAgentActive: true,
   selectedNodeId: null as string | null,
   selectedFilePath: null as string | null,
   pendingFileOwnerChoice: null as PendingFileOwnerChoice | null,
@@ -968,6 +984,30 @@ const initialTransientState = {
   publishBriefConfirm: false,
 }
 
+const pendingStructureRefineFiles: string[] = []
+let structureRefineTimer: ReturnType<typeof setTimeout> | null = null
+
+function queueStructureRefineForChangedFilesImpl(
+  changedFiles: string[],
+  flush: () => void,
+): void {
+  const cleaned = changedFiles.map((path) => path.trim()).filter(Boolean)
+  if (cleaned.length === 0) return
+  for (const path of cleaned) {
+    if (!pendingStructureRefineFiles.includes(path)) {
+      pendingStructureRefineFiles.push(path)
+    }
+  }
+  if (pendingStructureRefineFiles.length > 256) {
+    pendingStructureRefineFiles.splice(0, pendingStructureRefineFiles.length - 256)
+  }
+  if (structureRefineTimer) clearTimeout(structureRefineTimer)
+  structureRefineTimer = setTimeout(() => {
+    structureRefineTimer = null
+    flush()
+  }, 1_500)
+}
+
 export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   let nodeContextRequestSequence = 0
   let fileContextRequestSequence = 0
@@ -983,6 +1023,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         current.project?.projectId === projectId &&
         current.selectedNodeId === nodeId &&
         current.selectedFilePath === null
+    }
+
+    // Projected C4 code-layer ids are view-only; durable getNodeContext cannot resolve them.
+    if (nodeId.startsWith('code_file_')) {
+      if (!isCurrentRequest()) return
+      set({ context: null, contextLoading: false, error: null })
+      return
     }
 
     try {
@@ -1390,11 +1437,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const mode = options?.mode ?? 'regenerate'
     set({ structureRescanLoading: true })
     const loadingKey =
-      mode === 'refine'
+      mode === 'refine' || mode === 'acceptRefine'
         ? 'map.refiningStructure'
         : mode === 'deepen'
           ? 'map.deepeningStructure'
-          : 'map.regeneratingStructure'
+          : mode === 'prepareRefine'
+            ? 'map.refiningStructure'
+            : 'map.regeneratingStructure'
     pushToast({
       type: 'info',
       message: getStoreMessage(locale, loadingKey),
@@ -1404,6 +1453,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         mode,
         ...(options?.nodeIds ? { nodeIds: options.nodeIds } : {}),
         ...(options?.changedFiles ? { changedFiles: options.changedFiles } : {}),
+        ...(options?.refinedGraph !== undefined
+          ? { refinedGraph: options.refinedGraph }
+          : {}),
         // Authored graphs are only overwritten when the caller sets force.
         ...(options?.force === true ? { force: true } : {}),
       })
@@ -1421,6 +1473,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       })
       void err
     }
+  },
+
+  queueStructureRefineForChangedFiles: (changedFiles) => {
+    queueStructureRefineForChangedFilesImpl(changedFiles, () => {
+      const pending = pendingStructureRefineFiles.splice(
+        0,
+        pendingStructureRefineFiles.length,
+      )
+      if (pending.length === 0) return
+      void get().rescanStructureGraph({
+        mode: 'refine',
+        changedFiles: pending,
+      })
+    })
   },
 
   setCenterTab: (tab) => {
@@ -1620,6 +1686,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         editorSavedBuffers: { ...s.editorSavedBuffers, [path]: content },
       }))
       await useFileTimelineStore.getState().refresh(path)
+      get().queueStructureRefineForChangedFiles([path])
       pushToast({ type: 'success', message: getStoreMessage(locale, 'editor.saveSuccess') })
     } catch (err) {
       set({ error: errorMessage(err, 'Failed to save file') })
@@ -1841,7 +1908,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
   clearSelection: () =>
     set({
-      globalAgentActive: false,
+      globalAgentActive: true,
       selectedNodeId: null,
       selectedFilePath: null,
       pendingFileOwnerChoice: null,
@@ -1943,7 +2010,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
 
     if (chatMode === 'ask') {
-      const askScope: AgentConversationScope = state.globalAgentActive
+      const askScope: AgentConversationScope = isGlobalAgentScope(state)
         ? { kind: 'global' }
         : selectedFilePath
         ? {
@@ -2058,7 +2125,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
 
     if (chatMode === 'plan') {
-      const planScope: AgentConversationScope = state.globalAgentActive
+      const planScope: AgentConversationScope = isGlobalAgentScope(state)
         ? { kind: 'global' }
         : selectedFilePath
         ? {
@@ -2154,7 +2221,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
 
     if (chatMode === 'debug') {
-      const debugScope: AgentConversationScope = state.globalAgentActive
+      const debugScope: AgentConversationScope = isGlobalAgentScope(state)
         ? { kind: 'global' }
         : selectedFilePath
         ? {

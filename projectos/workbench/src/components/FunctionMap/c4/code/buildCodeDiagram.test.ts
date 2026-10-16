@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { FileEntry, FileRelation, FunctionalNode } from '@contracts/index'
 import { architectureFileNodeId } from '../../architectureView'
 import { buildCodeDiagram } from './buildCodeDiagram'
-import { assignImportLayers } from './layoutCodeNodes'
+import { assignImportLayers, layoutCodeNodesByImports, squareMatrixColumns } from './layoutCodeNodes'
 
 function componentNode(id: string, linkedPaths: string[]): FunctionalNode {
   return {
@@ -191,5 +191,52 @@ describe('assignImportLayers', () => {
     expect(layers.get('page')).toBe(0)
     expect(layers.get('auth')).toBe(1)
     expect(layers.get('session')).toBe(2)
+  })
+})
+
+describe('unrelated code file matrix', () => {
+  const card = { width: 220, height: 88 }
+
+  it('picks a column count whose frame is closer to a square than one column', () => {
+    const columns = squareMatrixColumns(8, card.width, card.height, 28, 36)
+    expect(columns).toBeGreaterThan(1)
+    const rows = Math.ceil(8 / columns)
+    const frameWidth = columns * card.width + (columns - 1) * 28
+    const frameHeight = rows * card.height + (rows - 1) * 36
+    const columnFrameHeight = 8 * card.height + 7 * 36
+    expect(Math.abs(frameWidth - frameHeight)).toBeLessThan(
+      Math.abs(card.width - columnFrameHeight),
+    )
+  })
+
+  it('places files with no edges into a matrix instead of a single column', () => {
+    const nodes = Array.from({ length: 8 }, (_, index) => ({
+      id: `file_${index}`,
+      width: card.width,
+      height: card.height,
+      sortKey: `file-${index}.ts`,
+    }))
+    const positions = layoutCodeNodesByImports(nodes, [])
+    const xs = new Set([...positions.values()].map((position) => position.x))
+    const ys = new Set([...positions.values()].map((position) => position.y))
+    expect(xs.size).toBeGreaterThan(1)
+    expect(ys.size).toBeGreaterThan(1)
+
+    const columns = squareMatrixColumns(nodes.length, card.width, card.height, 28, 36)
+    expect(xs.size).toBe(columns)
+  })
+
+  it('keeps an import chain in vertical layers when files reference each other', () => {
+    const nodes = [
+      { id: 'page', width: 220, height: 88, sortKey: 'page.tsx' },
+      { id: 'auth', width: 220, height: 88, sortKey: 'auth.ts' },
+      { id: 'session', width: 220, height: 88, sortKey: 'session.ts' },
+    ]
+    const positions = layoutCodeNodesByImports(nodes, [
+      { source: 'page', target: 'auth' },
+      { source: 'auth', target: 'session' },
+    ])
+    expect(positions.get('page')!.y).toBeLessThan(positions.get('auth')!.y)
+    expect(positions.get('auth')!.y).toBeLessThan(positions.get('session')!.y)
   })
 })

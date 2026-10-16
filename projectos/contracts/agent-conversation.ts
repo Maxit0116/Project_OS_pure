@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { ContextAssembledPayloadSchema } from "./events.js";
+import { ModelImagePartSchema } from "./model-gateway.js";
 import { PromptComposerFieldsSchema } from "./prompt-composer.js";
 
 export const AgentConversationScopeSchema = z.discriminatedUnion("kind", [
@@ -59,6 +60,7 @@ export const AgentAskRequestSchema = z
     question: z.string().trim().min(1),
     language: AgentAskLanguageSchema,
     chatSessionId: z.string().min(1).optional(),
+    images: z.array(ModelImagePartSchema).max(4).optional(),
   })
   .merge(PromptComposerFieldsSchema)
   .strict();

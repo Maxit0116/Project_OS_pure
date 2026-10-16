@@ -7,6 +7,9 @@ export const PROJECT_GRAPH_MAX_FILE_SIZE_BYTES = 1_099_511_627_776;
 
 export const PROJECT_GRAPH_LIMITS = {
   architectureLayers: 128,
+  architectureViews: 512,
+  includeNodeIdsPerView: 4_096,
+  excludeNodeIdsPerView: 4_096,
   nodes: 4_096,
   edges: 65_536,
   fileRelations: 131_072,
@@ -76,6 +79,16 @@ export const ProjectGraphVersionSchema = z.enum([
   "0.2.0",
   "0.3.0",
   "0.4.0",
+  "0.5.0",
+]);
+
+/** Provenance for nodes/edges — used by merge priority and UI filters. */
+export const GraphSourceKindSchema = z.enum([
+  "heuristic",
+  "ai",
+  "authored",
+  "runtime",
+  "import",
 ]);
 
 export const GraphAnalysisStatusSchema = z.enum([
@@ -114,6 +127,34 @@ export const ArchitectureLevelSchema = z.enum([
   "component",
   "code",
 ]);
+
+/**
+ * Named C4 view over the model (Structurizr-style: one model, many views).
+ * When absent, the workbench synthesizes default level-scoped views.
+ */
+export const ArchitectureViewSchema = z
+  .object({
+    key: z.string().min(1).max(256),
+    title: z.string().min(1).max(512),
+    level: ArchitectureLevelSchema,
+    parentId: z.string().min(1).max(256).optional(),
+    focusNodeId: z.string().min(1).max(256).optional(),
+    includeNodeIds: boundedArray(
+      z.string().min(1).max(256),
+      PROJECT_GRAPH_LIMITS.includeNodeIdsPerView,
+    ).optional(),
+    excludeNodeIds: boundedArray(
+      z.string().min(1).max(256),
+      PROJECT_GRAPH_LIMITS.excludeNodeIdsPerView,
+    ).optional(),
+    /**
+     * When true (or sourceKind is authored), regenerate keeps this view.
+     * Auto-generated views omit locked / use sourceKind ai|heuristic.
+     */
+    locked: z.boolean().optional(),
+    sourceKind: GraphSourceKindSchema.optional(),
+  })
+  .strict();
 
 export const ArchitectureElementTypeSchema = z.enum([
   "person",
@@ -226,6 +267,8 @@ export const FunctionalNodeSchema = z
     notes: z.string().max(4_096).optional(),
     /** Unresolved architecture questions for this node. */
     openQuestions: boundedArray(z.string().min(1).max(512), 32).optional(),
+    /** Provenance for multi-source merge (Phase 3). */
+    sourceKind: GraphSourceKindSchema.optional(),
   })
   .strict();
 
@@ -240,6 +283,8 @@ export const FunctionalEdgeSchema = z
     technology: z.string().optional(),
     confidence: ConfidenceSchema,
     evidence: z.string().optional(),
+    /** Provenance for multi-source merge (Phase 3). */
+    sourceKind: GraphSourceKindSchema.optional(),
   })
   .strict();
 
@@ -300,6 +345,10 @@ export const ProjectGraphSchema = z
     authored: z.boolean().optional(),
     nodes: boundedArray(FunctionalNodeSchema, PROJECT_GRAPH_LIMITS.nodes),
     edges: boundedArray(FunctionalEdgeSchema, PROJECT_GRAPH_LIMITS.edges),
+    views: boundedArray(
+      ArchitectureViewSchema,
+      PROJECT_GRAPH_LIMITS.architectureViews,
+    ).optional(),
     fileRelations: boundedArray(
       FileRelationSchema,
       PROJECT_GRAPH_LIMITS.fileRelations,
@@ -480,13 +529,45 @@ export const ProjectGraphSchema = z
       }
     });
 
-    if (graph.version !== "0.3.0" && graph.version !== "0.4.0") return;
+    const requiresArchitectureMeta =
+      graph.version === "0.3.0" ||
+      graph.version === "0.4.0" ||
+      graph.version === "0.5.0";
+    if (!requiresArchitectureMeta) return;
 
     if (!graph.architecture) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["architecture"],
-        message: "Project graph v0.3+/v0.4 requires architecture metadata",
+        message: "Project graph v0.3+ requires architecture metadata",
+      });
+    }
+
+    if (graph.views) {
+      const viewKeys = new Set<string>();
+      graph.views.forEach((view, index) => {
+        if (viewKeys.has(view.key)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["views", index, "key"],
+            message: `Duplicate architecture view key '${view.key}'`,
+          });
+        }
+        viewKeys.add(view.key);
+        if (view.parentId && !nodesById.has(view.parentId)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["views", index, "parentId"],
+            message: `Unknown parent node '${view.parentId}'`,
+          });
+        }
+        if (view.focusNodeId && !nodesById.has(view.focusNodeId)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["views", index, "focusNodeId"],
+            message: `Unknown focus node '${view.focusNodeId}'`,
+          });
+        }
       });
     }
 
@@ -517,6 +598,8 @@ export type FunctionalEdgeRelation = z.infer<
 >;
 export type FileRelation = z.infer<typeof FileRelationSchema>;
 export type ArchitectureLevel = z.infer<typeof ArchitectureLevelSchema>;
+export type GraphSourceKind = z.infer<typeof GraphSourceKindSchema>;
+export type ArchitectureView = z.infer<typeof ArchitectureViewSchema>;
 export type ArchitectureElementType = z.infer<
   typeof ArchitectureElementTypeSchema
 >;
@@ -539,6 +622,10 @@ export const StructureScanModeSchema = z.enum([
   "regenerate",
   "refine",
   "deepen",
+  /** Emit refine prompts as JSON without calling an LLM (c4-gen agent-mode). */
+  "prepareRefine",
+  /** Accept a refined model payload and merge into the graph. */
+  "acceptRefine",
 ]);
 
 export const StructureScanOptionsSchema = z
@@ -552,6 +639,11 @@ export const StructureScanOptionsSchema = z
     force: z.boolean().optional(),
     /** Changed paths to bias refine (Arch4 changed-files context). */
     changedFiles: z.array(z.string().min(1).max(1_024)).max(256).optional(),
+    /**
+     * Refined graph (or partial nodes/edges) for acceptRefine agent-mode.
+     * Validated loosely by the scan service before merge.
+     */
+    refinedGraph: z.unknown().optional(),
   })
   .strict();
 

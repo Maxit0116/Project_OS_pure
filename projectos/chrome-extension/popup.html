@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Spatial Pin</title>
+    <style>
+      body {
+        font: 13px/1.4 system-ui, sans-serif;
+        margin: 12px;
+        min-width: 220px;
+        color: #0f172a;
+      }
+      button {
+        width: 100%;
+        margin-top: 8px;
+        padding: 8px;
+        border-radius: 6px;
+        border: 1px solid #cbd5e1;
+        background: #16a34a;
+        color: white;
+        cursor: pointer;
+      }
+      .meta {
+        color: #64748b;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div><strong>Project OS Spatial Pin</strong></div>
+    <div class="meta" id="status">Checking bridge…</div>
+    <button id="capture" type="button">Start region pin</button>
+    <button id="options" type="button" style="background:#1e293b">Open settings</button>
+    <script src="popup.js"></script>
+  </body>
+</html>

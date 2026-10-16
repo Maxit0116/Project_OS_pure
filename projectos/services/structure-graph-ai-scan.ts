@@ -17,6 +17,10 @@ import {
 import type { ModelProfile } from "../contracts/settings.js";
 import { ProjectOSError } from "../errors.js";
 import {
+  mergeArchitectureViews,
+  synthesizeDefaultArchitectureViews,
+} from "../shared/c4-architecture-views/index.js";
+import {
   buildHeuristicSemanticTree,
   sanitizeLegacyProjectGraph,
 } from "./workspace-bootstrap.js";
@@ -359,12 +363,13 @@ function softRepairStructureGraphJson(
     root.projectName = options.projectName;
   }
   if (
+    root.version !== "0.5.0" &&
     root.version !== "0.4.0" &&
     root.version !== "0.3.0" &&
     root.version !== "0.2.0" &&
     root.version !== "0.1.0"
   ) {
-    root.version = "0.4.0";
+    root.version = "0.5.0";
   }
   if (typeof root.analyzedAt !== "string") {
     root.analyzedAt = new Date().toISOString();
@@ -603,6 +608,142 @@ export interface RunStructureGraphAiScanInput {
   nodeIds?: string[];
   /** Bias refine toward these changed paths (Arch4 changed-files). */
   changedFiles?: string[];
+  /** Refined graph payload for acceptRefine agent-mode. */
+  refinedGraph?: unknown;
+}
+
+export interface StructureRefinePreparePayload {
+  mode: "prepareRefine";
+  projectId: string;
+  projectName: string;
+  prompts: {
+    system: string;
+    user: string;
+  };
+  graphSnapshot: {
+    nodeCount: number;
+    edgeCount: number;
+    views: ProjectGraph["views"];
+  };
+}
+
+function buildRefinePreparePayload(
+  input: RunStructureGraphAiScanInput,
+  bundle: string,
+): StructureRefinePreparePayload {
+  return {
+    mode: "prepareRefine",
+    projectId: input.projectId,
+    projectName: input.displayName,
+    prompts: {
+      system: [
+        bundle,
+        "",
+        "REFINE ONLY: improve names, descriptions, people actors, and responsibility text.",
+        "Do NOT change topology (ids, parentId, children, edge endpoints) unless force is set.",
+        "Return a ProjectGraph JSON object (version 0.5.0) with the same node/edge ids.",
+      ].join("\n"),
+      user: [
+        `Project: ${input.displayName} (${input.projectId})`,
+        `Changed files: ${(input.changedFiles ?? []).slice(0, 80).join(", ") || "(none)"}`,
+        "",
+        "Current graph JSON:",
+        JSON.stringify(
+          {
+            version: input.graph.version,
+            nodes: input.graph.nodes,
+            edges: input.graph.edges,
+            views: input.graph.views,
+            architecture: input.graph.architecture,
+          },
+          null,
+          2,
+        ),
+      ].join("\n"),
+    },
+    graphSnapshot: {
+      nodeCount: input.graph.nodes.length,
+      edgeCount: input.graph.edges.length,
+      views: input.graph.views,
+    },
+  };
+}
+
+function acceptRefinedGraph(
+  base: ProjectGraph,
+  refinedUnknown: unknown,
+  force: boolean,
+): ProjectGraph {
+  const repaired = softRepairStructureGraphJson(refinedUnknown, {
+    projectId: base.projectId,
+    projectName: base.projectName,
+  });
+  const parsed = ProjectGraphSchema.safeParse(repaired);
+  if (!parsed.success) {
+    throw new ProjectOSError(
+      "agent_orchestration_failed",
+      `acceptRefine payload failed validation (${parsed.error.issues
+        .slice(0, 4)
+        .map((issue) => `${issue.path.join(".")}:${issue.message}`)
+        .join("; ")})`,
+    );
+  }
+  const incoming = parsed.data;
+  if (force) {
+    return {
+      ...incoming,
+      version: "0.5.0",
+      projectId: base.projectId,
+      views: mergeArchitectureViews({
+        existing: base.views,
+        generated:
+          incoming.views ??
+          synthesizeDefaultArchitectureViews(incoming.nodes, { sourceKind: "ai" }),
+        mode: "regenerate",
+      }),
+    };
+  }
+  // Refine semantics: preserve topology ids; take semantic fields from incoming.
+  const baseById = new Map(base.nodes.map((node) => [node.id, node]));
+  const nodes = incoming.nodes.map((node) => {
+    const prior = baseById.get(node.id);
+    if (!prior) return { ...node, sourceKind: node.sourceKind ?? "ai" as const };
+    return {
+      ...prior,
+      name: node.name || prior.name,
+      description: node.description || prior.description,
+      summary: node.summary || prior.summary,
+      responsibility: node.responsibility || prior.responsibility,
+      technology: node.technology ?? prior.technology,
+      owners: node.owners ?? prior.owners,
+      notes: node.notes ?? prior.notes,
+      openQuestions: node.openQuestions ?? prior.openQuestions,
+      sourceKind: prior.sourceKind === "authored" ? "authored" : (node.sourceKind ?? "ai"),
+    };
+  });
+  return {
+    ...base,
+    version: "0.5.0",
+    analyzedAt: new Date().toISOString(),
+    nodes,
+    edges: base.edges.map((edge) => {
+      const match = incoming.edges.find((item) => item.id === edge.id);
+      if (!match) return edge;
+      return {
+        ...edge,
+        label: match.label ?? edge.label,
+        purpose: match.purpose ?? edge.purpose,
+        technology: match.technology ?? edge.technology,
+      };
+    }),
+    views: mergeArchitectureViews({
+      existing: base.views,
+      generated:
+        incoming.views ??
+        synthesizeDefaultArchitectureViews(nodes, { sourceKind: "ai" }),
+      mode: "refine",
+    }),
+  };
 }
 
 function computeRepoScanContentHash(workspaceRoot: string, files: string[]): string {
@@ -788,6 +929,7 @@ function normalizeNode(
     ...(inferredQuestions && inferredQuestions.length > 0
       ? { openQuestions: inferredQuestions }
       : {}),
+    sourceKind: "ai",
   };
 }
 
@@ -814,6 +956,7 @@ function normalizeEdge(raw: Record<string, unknown>, index: number): FunctionalE
           : "depends_on",
       label: typeof raw.label === "string" ? raw.label : undefined,
       purpose: typeof raw.purpose === "string" ? raw.purpose : undefined,
+      sourceKind: "ai",
       ...(technology ? { technology } : {}),
       confidence: typeof raw.confidence === "number" ? raw.confidence : 0.7,
       evidence: typeof raw.evidence === "string" ? raw.evidence : undefined,
@@ -939,7 +1082,7 @@ function assembleFromRounds(input: {
   ].map((raw, index) => normalizeEdge(raw, index));
 
   const graph: ProjectGraph = {
-    version: "0.4.0",
+    version: "0.5.0",
     projectId: input.projectId,
     projectName: input.projectName,
     projectType: input.projectType,
@@ -949,6 +1092,7 @@ function assembleFromRounds(input: {
     architecture: architecture ?? defaultArchitecture(input.language),
     nodes,
     edges,
+    views: synthesizeDefaultArchitectureViews(nodes, { sourceKind: "ai" }),
     fileIndex,
     fileRelations,
     topology: {
@@ -999,6 +1143,34 @@ export async function runStructureGraphAiScan(
     throw new ProjectOSError(
       "agent_orchestration_failed",
       "deepen requires nodeIds",
+    );
+  }
+
+  if (scanMode === "prepareRefine") {
+    const bundle = loadPromptBundle(input.workspaceRoot);
+    const payload = buildRefinePreparePayload(input, bundle);
+    // Persist prompts beside the workspace for agent consumption.
+    const outDir = join(input.workspaceRoot, ".projectos", "structure-graph");
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(
+      join(outDir, "refine-prepare.json"),
+      `${JSON.stringify(payload, null, 2)}\n`,
+      "utf8",
+    );
+    return input.graph;
+  }
+
+  if (scanMode === "acceptRefine") {
+    if (input.refinedGraph === undefined || input.refinedGraph === null) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        "acceptRefine requires refinedGraph",
+      );
+    }
+    return acceptRefinedGraph(
+      input.graph,
+      input.refinedGraph,
+      input.force === true,
     );
   }
 
@@ -1127,15 +1299,26 @@ export async function runStructureGraphAiScan(
           deepenIds: input.nodeIds,
         });
 
+  const enrichedNodes = enrichNodesForC4Shapes({
+    nodes: merged.nodes,
+    workspaceRoot: input.workspaceRoot,
+    files,
+  });
+  const generatedViews = synthesizeDefaultArchitectureViews(enrichedNodes, {
+    sourceKind: "ai",
+  });
+  const views = mergeArchitectureViews({
+    existing: scanMode === "regenerate" ? merged.views : (input.graph.views ?? merged.views),
+    generated: generatedViews,
+    mode: scanMode === "regenerate" ? "regenerate" : "refine",
+  });
+
   const result: ProjectGraph = {
     ...merged,
-    version: "0.4.0",
+    version: "0.5.0",
     authored: input.force ? false : merged.authored === true ? true : false,
-    nodes: enrichNodesForC4Shapes({
-      nodes: merged.nodes,
-      workspaceRoot: input.workspaceRoot,
-      files,
-    }),
+    nodes: enrichedNodes,
+    views,
   };
 
   const quality = assessL2GraphQuality(result, {

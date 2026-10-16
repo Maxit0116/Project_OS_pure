@@ -14,6 +14,7 @@ import type {
   ProjectGraph,
   StructureScanMode,
 } from "../contracts/graph.js";
+import { sourceKindPriority } from "../shared/c4-architecture-views/index.js";
 
 export type ScanLanguage = "zh-CN" | "en";
 
@@ -262,6 +263,37 @@ export function parseImportSpecs(source: string): string[] {
   );
 }
 
+/** Extract exported symbols from TS/JS source (named + default). */
+export function parseExports(source: string): string[] {
+  const names: string[] = [];
+  for (const match of source.matchAll(
+    /export\s+(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/g,
+  )) {
+    if (match[1]) names.push(match[1]);
+  }
+  for (const match of source.matchAll(/export\s+class\s+([A-Za-z_$][\w$]*)/g)) {
+    if (match[1]) names.push(match[1]);
+  }
+  for (const match of source.matchAll(
+    /export\s+(?:const|let|var|type|interface|enum)\s+([A-Za-z_$][\w$]*)/g,
+  )) {
+    if (match[1]) names.push(match[1]);
+  }
+  for (const match of source.matchAll(/export\s+\{\s*([^}]+)\s*\}/g)) {
+    const inner = match[1] ?? "";
+    for (const part of inner.split(",")) {
+      const cleaned = part
+        .trim()
+        .replace(/^type\s+/, "")
+        .replace(/\s+as\s+[A-Za-z_$][\w$]*$/, "")
+        .trim();
+      if (cleaned && /^[A-Za-z_$]/.test(cleaned)) names.push(cleaned);
+    }
+  }
+  if (/export\s+default\b/.test(source)) names.push("default");
+  return Array.from(new Set(names)).slice(0, 256);
+}
+
 function resolvePackageImportPath(spec: string, files: Set<string>): string | null {
   const classPath = spec.replace(/\./g, "/");
   for (const file of files) {
@@ -341,6 +373,7 @@ export function buildFileIndexAndRelations(input: {
   }
   const allPaths = new Set(ownerByPath.keys());
   const importsByPath = new Map<string, string[]>();
+  const exportsByPath = new Map<string, string[]>();
 
   for (const path of allPaths) {
     const absolute = join(input.workspaceRoot, path);
@@ -358,6 +391,10 @@ export function buildFileIndexAndRelations(input: {
       if (target && target !== path) resolved.push(target);
     }
     importsByPath.set(path, Array.from(new Set(resolved)));
+    exportsByPath.set(
+      path,
+      /\.(?:[cm]?[jt]sx?)$/i.test(path) ? parseExports(body) : [],
+    );
   }
 
   const fileIndex: FileEntry[] = [...allPaths].map((path) => ({
@@ -365,7 +402,7 @@ export function buildFileIndexAndRelations(input: {
     type: classifyRepoFileType(path),
     nodeIds: ownerByPath.get(path) ? [ownerByPath.get(path)!] : [],
     imports: importsByPath.get(path) ?? [],
-    exports: [],
+    exports: exportsByPath.get(path) ?? [],
     status: "normal" as const,
   }));
 
@@ -530,6 +567,11 @@ export function mergeStructureGraphs(input: {
     return false;
   };
 
+  const preferIncoming = (
+    existingKind: FunctionalNode["sourceKind"] | FunctionalEdge["sourceKind"],
+    incomingKind: FunctionalNode["sourceKind"] | FunctionalEdge["sourceKind"],
+  ): boolean => sourceKindPriority(incomingKind) > sourceKindPriority(existingKind);
+
   const incomingById = new Map(input.incoming.nodes.filter(keepNode).map((node) => [node.id, node]));
   const nodesById = new Map(input.base.nodes.map((node) => [node.id, node]));
   for (const [id, node] of incomingById) {
@@ -538,14 +580,29 @@ export function mergeStructureGraphs(input: {
       nodesById.set(id, node);
       continue;
     }
+    // authored always wins for semantic fields / identity
+    if (existing.sourceKind === "authored" && node.sourceKind !== "authored") {
+      const linked = new Map(existing.linkedFiles.map((file) => [file.path, file]));
+      for (const file of node.linkedFiles) linked.set(file.path, file);
+      nodesById.set(id, {
+        ...existing,
+        linkedFiles: [...linked.values()],
+        tags: Array.from(new Set([...(existing.tags ?? []), ...(node.tags ?? [])])),
+      });
+      continue;
+    }
     const linked = new Map(existing.linkedFiles.map((file) => [file.path, file]));
     for (const file of node.linkedFiles) linked.set(file.path, file);
+    const takeIncoming = preferIncoming(existing.sourceKind, node.sourceKind);
     nodesById.set(id, {
       ...existing,
-      ...node,
-      name: existing.name,
+      ...(takeIncoming ? node : {}),
+      name: existing.sourceKind === "authored" ? existing.name : (takeIncoming ? node.name : existing.name),
       linkedFiles: [...linked.values()],
       tags: Array.from(new Set([...(existing.tags ?? []), ...(node.tags ?? [])])),
+      sourceKind: takeIncoming
+        ? (node.sourceKind ?? existing.sourceKind)
+        : (existing.sourceKind ?? node.sourceKind),
     });
   }
 
@@ -553,7 +610,9 @@ export function mergeStructureGraphs(input: {
   const nodeIds = new Set(nodes.map((node) => node.id));
   const edgesById = new Map(input.base.edges.map((edge) => [edge.id, edge]));
   for (const edge of input.incoming.edges) {
-    if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
+    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
+    const existing = edgesById.get(edge.id);
+    if (!existing || preferIncoming(existing.sourceKind, edge.sourceKind)) {
       edgesById.set(edge.id, edge);
     }
   }

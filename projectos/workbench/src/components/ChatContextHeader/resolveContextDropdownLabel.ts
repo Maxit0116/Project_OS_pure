@@ -12,6 +12,7 @@ export function truncateContextSummary(
 export interface ResolveContextDropdownLabelInput {
   globalAgentActive: boolean
   selectedNodeId: string | null
+  selectedFilePath?: string | null
   nodeName: string | null | undefined
   contextSummary: string | null | undefined
   globalScopeLabel: string
@@ -28,5 +29,9 @@ export function resolveContextDropdownLabel(input: ResolveContextDropdownLabelIn
     return name
   }
 
-  return input.emptyLabel
+  // Pending file ownership / unmapped file — not whole-project scope yet.
+  if (input.selectedFilePath) return input.emptyLabel
+
+  // No node selected ⇒ default to global / whole project.
+  return input.globalScopeLabel
 }

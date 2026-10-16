@@ -5,17 +5,27 @@
 
 import type {
   ArchitectureLevel,
+  ArchitectureView,
   FunctionalEdge,
   FunctionalNode,
   ProjectGraph,
 } from "../contracts/graph.js";
+import {
+  liftRelationshipsToVisibleAncestors,
+  synthesizeDefaultArchitectureViews,
+} from "../shared/c4-architecture-views/index.js";
 
 export interface C4ExportViews {
   mermaid: {
     context: string;
     container: string;
     component: string;
+    code: string;
+    /** Dense-diagram fallback (c4studio flowchart target). */
+    flowchart: string;
   };
+  /** One Mermaid string per named view key. */
+  viewMermaid: Record<string, string>;
   structurizrDsl: string;
 }
 
@@ -35,9 +45,44 @@ function edgeTech(edge: FunctionalEdge): string {
   return edge.technology?.trim() || "";
 }
 
+function resolvedViews(graph: ProjectGraph): ArchitectureView[] {
+  if (graph.views?.length) return graph.views;
+  return synthesizeDefaultArchitectureViews(graph.nodes, { sourceKind: "heuristic" });
+}
+
+function nodesForView(
+  graph: ProjectGraph,
+  view: ArchitectureView,
+): FunctionalNode[] {
+  let nodes = graph.nodes.filter((node) => node.level === view.level);
+  if (view.parentId) {
+    nodes = nodes.filter((node) => node.parentId === view.parentId);
+  }
+  if (view.includeNodeIds?.length) {
+    const include = new Set(view.includeNodeIds);
+    nodes = nodes.filter((node) => include.has(node.id));
+  }
+  if (view.excludeNodeIds?.length) {
+    const exclude = new Set(view.excludeNodeIds);
+    nodes = nodes.filter((node) => !exclude.has(node.id));
+  }
+  return nodes;
+}
+
+function edgesForVisible(
+  graph: ProjectGraph,
+  visible: FunctionalNode[],
+): FunctionalEdge[] {
+  const ids = new Set(visible.map((node) => node.id));
+  const labeled = graph.edges.filter((edge) => Boolean(edge.label?.trim()));
+  return liftRelationshipsToVisibleAncestors(graph.nodes, labeled, ids).filter(
+    (edge) => ids.has(edge.source) && ids.has(edge.target),
+  );
+}
+
 function buildMermaidContext(graph: ProjectGraph): string {
   const nodes = graph.nodes.filter((node) => node.level === "context");
-  const ids = new Set(nodes.map((node) => node.id));
+  const edges = edgesForVisible(graph, nodes);
   const lines = ["C4Context", `title ${escapeMermaid(graph.projectName)} System Context`];
   for (const node of nodes) {
     const label = escapeMermaid(nodeTitle(node));
@@ -54,8 +99,7 @@ function buildMermaidContext(graph: ProjectGraph): string {
       );
     }
   }
-  for (const edge of graph.edges) {
-    if (!ids.has(edge.source) || !ids.has(edge.target)) continue;
+  for (const edge of edges) {
     const label = escapeMermaid(edge.label ?? edge.relation);
     const tech = escapeMermaid(edgeTech(edge));
     lines.push(
@@ -65,8 +109,12 @@ function buildMermaidContext(graph: ProjectGraph): string {
   return lines.join("\n");
 }
 
-function buildMermaidContainer(graph: ProjectGraph): string {
-  const system = graph.nodes.find((node) => node.elementType === "software_system");
+function buildMermaidContainer(graph: ProjectGraph, parentId?: string): string {
+  const system =
+    (parentId
+      ? graph.nodes.find((node) => node.id === parentId)
+      : undefined) ??
+    graph.nodes.find((node) => node.elementType === "software_system");
   const containers = graph.nodes.filter(
     (node) =>
       node.level === "container" &&
@@ -75,11 +123,8 @@ function buildMermaidContainer(graph: ProjectGraph): string {
   const externals = graph.nodes.filter(
     (node) => node.elementType === "external_system",
   );
-  const ids = new Set([
-    ...containers.map((node) => node.id),
-    ...externals.map((node) => node.id),
-    ...(system ? [system.id] : []),
-  ]);
+  const visible = [...containers, ...externals, ...(system ? [system] : [])];
+  const edges = edgesForVisible(graph, visible);
   const lines = [
     "C4Container",
     `title ${escapeMermaid(graph.projectName)} Containers`,
@@ -116,8 +161,7 @@ function buildMermaidContainer(graph: ProjectGraph): string {
       `System_Ext(${node.id}, "${escapeMermaid(node.name)}", "${escapeMermaid(node.technology ?? node.summary)}")`,
     );
   }
-  for (const edge of graph.edges) {
-    if (!ids.has(edge.source) || !ids.has(edge.target)) continue;
+  for (const edge of edges) {
     if (system && (edge.source === system.id || edge.target === system.id)) continue;
     const label = escapeMermaid(edge.label ?? edge.relation);
     const tech = escapeMermaid(edgeTech(edge));
@@ -128,20 +172,24 @@ function buildMermaidContainer(graph: ProjectGraph): string {
   return lines.join("\n");
 }
 
-function buildMermaidComponent(graph: ProjectGraph): string {
+function buildMermaidComponent(graph: ProjectGraph, parentId?: string): string {
   const containers = graph.nodes.filter((node) => node.level === "container");
   const primary =
+    (parentId
+      ? containers.find((node) => node.id === parentId)
+      : undefined) ??
     containers.find((node) =>
       graph.nodes.some(
         (child) => child.level === "component" && child.parentId === node.id,
       ),
-    ) ?? containers[0];
+    ) ??
+    containers[0];
   const components = primary
     ? graph.nodes.filter(
         (node) => node.level === "component" && node.parentId === primary.id,
       )
     : graph.nodes.filter((node) => node.level === "component");
-  const ids = new Set(components.map((node) => node.id));
+  const edges = edgesForVisible(graph, components);
   const lines = [
     "C4Component",
     `title ${escapeMermaid(primary?.name ?? graph.projectName)} Components`,
@@ -163,8 +211,7 @@ function buildMermaidComponent(graph: ProjectGraph): string {
       );
     }
   }
-  for (const edge of graph.edges) {
-    if (!ids.has(edge.source) || !ids.has(edge.target)) continue;
+  for (const edge of edges) {
     const label = escapeMermaid(edge.label ?? edge.relation);
     const tech = escapeMermaid(edgeTech(edge));
     lines.push(
@@ -172,6 +219,95 @@ function buildMermaidComponent(graph: ProjectGraph): string {
     );
   }
   return lines.join("\n");
+}
+
+function buildMermaidCode(graph: ProjectGraph, parentId?: string): string {
+  const component =
+    (parentId
+      ? graph.nodes.find(
+          (node) => node.id === parentId && node.level === "component",
+        )
+      : undefined) ??
+    graph.nodes.find(
+      (node) => node.level === "component" && node.linkedFiles.length > 0,
+    );
+  if (!component) {
+    return [
+      "flowchart LR",
+      `  empty["${escapeMermaid(graph.projectName)} — no code view"]`,
+    ].join("\n");
+  }
+  const files = component.linkedFiles;
+  const pathSet = new Set(files.map((file) => file.path));
+  const lines = [
+    "flowchart LR",
+    `  subgraph ${component.id}["${escapeMermaid(component.name)}"]`,
+  ];
+  const idByPath = new Map<string, string>();
+  files.forEach((file, index) => {
+    const id = `f${index}`;
+    idByPath.set(file.path, id);
+    const base = file.path.split("/").pop() ?? file.path;
+    lines.push(`    ${id}["${escapeMermaid(base)}"]`);
+  });
+  lines.push("  end");
+  for (const entry of graph.fileIndex) {
+    if (!pathSet.has(entry.path)) continue;
+    const sourceId = idByPath.get(entry.path);
+    if (!sourceId) continue;
+    for (const targetPath of entry.imports) {
+      const targetId = idByPath.get(targetPath);
+      if (!targetId) continue;
+      lines.push(`  ${sourceId} --> ${targetId}`);
+    }
+  }
+  for (const relation of graph.fileRelations ?? []) {
+    if (!pathSet.has(relation.sourcePath) || !pathSet.has(relation.targetPath)) {
+      continue;
+    }
+    const sourceId = idByPath.get(relation.sourcePath);
+    const targetId = idByPath.get(relation.targetPath);
+    if (!sourceId || !targetId) continue;
+    lines.push(
+      `  ${sourceId} -->|${escapeMermaid(relation.label)}| ${targetId}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function buildFlowchartForLevel(
+  graph: ProjectGraph,
+  level: ArchitectureLevel,
+  parentId?: string,
+): string {
+  const nodes = graph.nodes.filter(
+    (node) =>
+      node.level === level && (!parentId || node.parentId === parentId),
+  );
+  const edges = edgesForVisible(graph, nodes);
+  const lines = [`flowchart LR`, `  %% ${level}`];
+  for (const node of nodes) {
+    lines.push(
+      `  ${node.id}["${escapeMermaid(node.name)}<br/>${escapeMermaid(node.technology ?? node.elementType ?? "")}"]`,
+    );
+  }
+  for (const edge of edges) {
+    lines.push(
+      `  ${edge.source} -->|${escapeMermaid(edge.label ?? edge.relation)}| ${edge.target}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function mermaidForView(graph: ProjectGraph, view: ArchitectureView): string {
+  if (view.level === "context") return buildMermaidContext(graph);
+  if (view.level === "container") {
+    return buildMermaidContainer(graph, view.parentId);
+  }
+  if (view.level === "component") {
+    return buildMermaidComponent(graph, view.parentId);
+  }
+  return buildMermaidCode(graph, view.parentId);
 }
 
 function dslId(id: string): string {
@@ -194,6 +330,7 @@ function buildStructurizrDsl(graph: ProjectGraph): string {
       (!system || node.parentId === system.id || !node.parentId),
   );
   const components = graph.nodes.filter((node) => node.level === "component");
+  const views = resolvedViews(graph);
 
   const lines: string[] = [];
   lines.push("workspace {");
@@ -247,18 +384,21 @@ function buildStructurizrDsl(graph: ProjectGraph): string {
   lines.push("    }");
   lines.push("");
   lines.push("    views {");
-  if (system) {
-    lines.push(`        systemContext ${dslId(system.id)} {`);
-    lines.push("            include *");
-    lines.push("            autolayout lr");
-    lines.push("        }");
-    lines.push(`        container ${dslId(system.id)} {`);
-    lines.push("            include *");
-    lines.push("            autolayout lr");
-    lines.push("        }");
-    for (const container of containers.slice(0, 6)) {
-      if (!components.some((node) => node.parentId === container.id)) continue;
-      lines.push(`        component ${dslId(container.id)} {`);
+  for (const view of views) {
+    if (view.level === "context" && system) {
+      lines.push(`        systemContext ${dslId(system.id)} "${escapeDsl(view.title)}" {`);
+      lines.push("            include *");
+      lines.push("            autolayout lr");
+      lines.push("        }");
+    } else if (view.level === "container" && system) {
+      lines.push(`        container ${dslId(system.id)} "${escapeDsl(view.title)}" {`);
+      lines.push("            include *");
+      lines.push("            autolayout lr");
+      lines.push("        }");
+    } else if (view.level === "component" && view.parentId) {
+      lines.push(
+        `        component ${dslId(view.parentId)} "${escapeDsl(view.title)}" {`,
+      );
       lines.push("            include *");
       lines.push("            autolayout lr");
       lines.push("        }");
@@ -277,12 +417,20 @@ function buildStructurizrDsl(graph: ProjectGraph): string {
 }
 
 export function exportC4Views(graph: ProjectGraph): C4ExportViews {
+  const views = resolvedViews(graph);
+  const viewMermaid: Record<string, string> = {};
+  for (const view of views) {
+    viewMermaid[view.key] = mermaidForView(graph, view);
+  }
   return {
     mermaid: {
       context: buildMermaidContext(graph),
       container: buildMermaidContainer(graph),
       component: buildMermaidComponent(graph),
+      code: buildMermaidCode(graph),
+      flowchart: buildFlowchartForLevel(graph, "component"),
     },
+    viewMermaid,
     structurizrDsl: buildStructurizrDsl(graph),
   };
 }
@@ -302,6 +450,10 @@ export function exportC4MermaidBundle(graph: ProjectGraph): string {
     views.mermaid.component,
     "```",
     "",
+    "```mermaid",
+    views.mermaid.code,
+    "```",
+    "",
   ].join("\n");
 }
 
@@ -311,6 +463,32 @@ export function exportC4LevelMermaid(
 ): string {
   const views = exportC4Views(graph);
   if (level === "container") return views.mermaid.container;
-  if (level === "component" || level === "code") return views.mermaid.component;
+  if (level === "component") return views.mermaid.component;
+  if (level === "code") return views.mermaid.code;
   return views.mermaid.context;
+}
+
+/** Headless SVG stub: wraps Mermaid source for CI/docs pipelines. */
+export function exportC4ViewSvgDocument(
+  graph: ProjectGraph,
+  viewKey?: string,
+): string {
+  const exported = exportC4Views(graph);
+  const mermaid =
+    (viewKey ? exported.viewMermaid[viewKey] : undefined) ??
+    exported.mermaid.context;
+  const title = escapeMermaid(graph.projectName);
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">`,
+    `  <title>${title}</title>`,
+    `  <rect width="100%" height="100%" fill="#0f1419"/>`,
+    `  <foreignObject x="24" y="24" width="912" height="492">`,
+    `    <div xmlns="http://www.w3.org/1999/xhtml" style="color:#e6edf3;font:14px/1.4 ui-monospace,monospace;white-space:pre-wrap;">`,
+    escapeMermaid(mermaid).slice(0, 8_000),
+    `    </div>`,
+    `  </foreignObject>`,
+    `</svg>`,
+    "",
+  ].join("\n");
 }

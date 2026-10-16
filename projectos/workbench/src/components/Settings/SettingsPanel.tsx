@@ -18,6 +18,7 @@ import ModelProfilesSection from './ModelProfilesSection'
 import AgentProfilesSection from './AgentProfilesSection'
 import NotificationSettingsSection from './NotificationSettingsSection'
 import ProjectDescriptionSection from './ProjectDescriptionSection'
+import SpatialPinSettingsSection from './SpatialPinSettingsSection'
 import { trapDialogTab } from './settingsDialogFocus'
 import styles from './SettingsPanel.module.css'
 
@@ -30,6 +31,7 @@ type SettingsView =
   | 'project'
   | 'models'
   | 'agents'
+  | 'spatialPin'
 
 interface Props {
   onClose: () => void
@@ -100,6 +102,11 @@ export default function SettingsPanel({ onClose }: Props) {
     { id: 'general', label: ts('settings.tabs.general'), summary: settings.presentationMode ? ts('settings.realDemoSummaryDemo') : ts('settings.realDemoSummaryReal') },
     { id: 'models', label: ts('settings.tabs.models'), summary: ts('settings.modelsSummary', { count: settings.modelProfiles.length }) },
     { id: 'agents', label: ts('settings.tabs.agents'), summary: ts('settings.agentsSummary', { count: settings.agentProfiles.length }) },
+    {
+      id: 'spatialPin',
+      label: ts('settings.tabs.spatialPin'),
+      summary: ts('settings.spatialPinSummary'),
+    },
   ]
 
   const viewTitle =
@@ -154,6 +161,7 @@ export default function SettingsPanel({ onClose }: Props) {
             {view === 'project' && <ProjectDescriptionSection />}
             {view === 'models' && <ModelProfilesSection />}
             {view === 'agents' && <AgentProfilesSection />}
+            {view === 'spatialPin' && <SpatialPinSettingsSection />}
           </div>
         </div>
       </GlassLens>

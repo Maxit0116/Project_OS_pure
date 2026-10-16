@@ -9,6 +9,7 @@ import {
   focusCodeNodeForMap,
   isCodeElementNode,
   openCodeNodeFile,
+  openCodeNodeInEditor,
   type CodeNodeTarget,
 } from './codeNodeInteraction'
 
@@ -62,7 +63,7 @@ describe('code-node selection paths', () => {
     expect(codeNodeFilePath(node)).toBe('app/login/page.tsx')
   })
 
-  it('keeps plain focus node-planner scoped and grants direct file scope only through open file', async () => {
+  it('keeps plain focus node-planner scoped and grants direct file scope through open file', async () => {
     const workspace = createMockSampleWorkspace()
     const owner = workspace.graph.nodes.find((node) => node.id === 'feat_login')!
     const target: CodeNodeTarget = {
@@ -120,6 +121,43 @@ describe('code-node selection paths', () => {
       codeSubTab: 'editor',
     })
     expect(canSubmitAgentPrompt(useWorkbenchStore.getState())).toBe(true)
+  })
+
+  it('opens Code / Diff from a map code-node double-click path without map focus', async () => {
+    const workspace = createMockSampleWorkspace()
+    const owner = workspace.graph.nodes.find((node) => node.id === 'feat_login')!
+    const target: CodeNodeTarget = {
+      nodeId: 'code-file-login',
+      filePath: 'app/login/page.tsx',
+      parentNodeId: owner.id,
+    }
+    const getFileContext = vi.fn(async () => ({
+      ...nodeContext(workspace.project.projectId, owner.id, target.filePath),
+      scope: 'file' as const,
+      filePath: target.filePath,
+    }))
+    useWorkbenchStore.setState({
+      client: { getFileContext } as unknown as ProjectOSApi,
+      project: workspace.project,
+      graph: workspace.graph,
+      tree: workspace.semanticTree,
+      selectedNodeId: 'feat_home',
+      selectedFilePath: null,
+      chatMode: 'change',
+      centerTab: 'function-map',
+      codeSubTab: 'diff',
+    })
+    const selectFile = vi.fn(useWorkbenchStore.getState().selectFile)
+
+    await openCodeNodeInEditor(target, { selectFile })
+
+    expect(selectFile).toHaveBeenCalledWith(target.filePath, owner.id)
+    expect(useWorkbenchStore.getState()).toMatchObject({
+      selectedNodeId: owner.id,
+      selectedFilePath: target.filePath,
+      centerTab: 'code',
+      codeSubTab: 'editor',
+    })
   })
 
   it('opens the file-agent chat with the exact file write scope', async () => {

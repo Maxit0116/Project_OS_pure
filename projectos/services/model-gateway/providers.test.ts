@@ -334,6 +334,41 @@ describe("thinking depth body mapping", () => {
     expect(body.reasoning_effort).toBeUndefined();
   });
 
+  it("embeds images in OpenAI user content when provided", () => {
+    const body = buildOpenAiChatBody(openAiProfile, {
+      userPrompt: "describe this",
+      images: [{ mimeType: "image/png", base64: "abc123" }],
+    });
+    const messages = body.messages as Array<{ role: string; content: unknown }>;
+    const user = messages.find((message) => message.role === "user");
+    expect(Array.isArray(user?.content)).toBe(true);
+    const parts = user?.content as Array<Record<string, unknown>>;
+    expect(parts.some((part) => part.type === "text")).toBe(true);
+    expect(parts.some((part) => part.type === "image_url")).toBe(true);
+  });
+
+  it("embeds images in Anthropic user content when provided", () => {
+    const body = buildAnthropicMessagesBody(anthropicProfile, {
+      userPrompt: "describe this",
+      images: [{ mimeType: "image/png", base64: "abc123" }],
+    });
+    const messages = body.messages as Array<{ role: string; content: unknown }>;
+    const user = messages.find((message) => message.role === "user");
+    expect(Array.isArray(user?.content)).toBe(true);
+    const parts = user?.content as Array<Record<string, unknown>>;
+    expect(parts.some((part) => part.type === "image")).toBe(true);
+    expect(parts.some((part) => part.type === "text")).toBe(true);
+  });
+
+  it("keeps OpenAI user content as a string without images", () => {
+    const body = buildOpenAiChatBody(openAiProfile, {
+      userPrompt: "hello only",
+    });
+    const messages = body.messages as Array<{ role: string; content: unknown }>;
+    const user = messages.find((message) => message.role === "user");
+    expect(user?.content).toBe("hello only");
+  });
+
   it("extracts answer and provider reasoning as distinct fields", () => {
     expect(
       extractOpenAiMessageParts({

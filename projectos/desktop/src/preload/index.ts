@@ -173,6 +173,12 @@ const api = {
     setTitle(title: string): Promise<void> {
       return ipcRenderer.invoke('window:setTitle', title).then(() => undefined)
     },
+    initialWorkspace(): Promise<string | null> {
+      return ipcRenderer.invoke('window:initialWorkspace')
+    },
+    openWorkspaceInNewWindow(path: string): Promise<void> {
+      return ipcRenderer.invoke('window:openWorkspaceInNewWindow', path).then(() => undefined)
+    },
     onFullScreenChange(listener: (isFullScreen: boolean) => void): Disposable {
       const handler = (_event: unknown, isFullScreen: boolean) => {
         listener(isFullScreen)
@@ -294,6 +300,131 @@ const api = {
       return {
         dispose() {
           lspMessageListeners.delete(listener)
+        },
+      }
+    },
+  },
+  spatialPin: {
+    beginCapture(): Promise<{ ok: boolean }> {
+      return ipcRenderer.invoke('spatial-pin:beginCapture')
+    },
+    hideOverlay(): Promise<{ ok: boolean }> {
+      return ipcRenderer.invoke('spatial-pin:hideOverlay')
+    },
+    closeOverlay(): Promise<{ ok: boolean }> {
+      return ipcRenderer.invoke('spatial-pin:closeOverlay')
+    },
+    getContext(): Promise<{
+      projectId: string | null
+      workspacePath: string | null
+      candidates: Array<{
+        projectId: string
+        workspacePath: string
+        displayName: string
+        source: string
+      }>
+      location: unknown
+      webEnhanceAvailable: boolean
+      bridge: {
+        connected: boolean
+        port: number | null
+        token: string | null
+        bridgeFilePath: string | null
+        lastUrl: string | null
+        lastProjectId: string | null
+      }
+    }> {
+      return ipcRenderer.invoke('spatial-pin:getContext')
+    },
+    setPreferredProject(projectId: string | null): Promise<{
+      projectId: string | null
+      workspacePath: string | null
+      candidates: Array<{
+        projectId: string
+        workspacePath: string
+        displayName: string
+        source: string
+      }>
+      location: unknown
+      webEnhanceAvailable: boolean
+    }> {
+      return ipcRenderer.invoke('spatial-pin:setPreferredProject', projectId)
+    },
+    getBridgeState(): Promise<{
+      connected: boolean
+      port: number | null
+      token: string | null
+      bridgeFilePath: string | null
+      lastUrl: string | null
+      lastProjectId: string | null
+    }> {
+      return ipcRenderer.invoke('spatial-pin:getBridgeState')
+    },
+    reportBrowserLocation(payload: unknown): Promise<{ ok: boolean }> {
+      return ipcRenderer.invoke('spatial-pin:reportBrowserLocation', payload)
+    },
+    captureSelection(rect: {
+      x: number
+      y: number
+      width: number
+      height: number
+    }): Promise<{
+      pngBase64: string | null
+      host: {
+        appName?: string
+        bundleId?: string
+        windowTitle?: string
+        deviceKind?: string
+        inferredPath?: string
+        textHint?: string
+      }
+      error?: string
+    }> {
+      return ipcRenderer.invoke('spatial-pin:captureSelection', rect)
+    },
+    onBeginCapture(
+      listener: (payload: {
+        displayBounds: { x: number; y: number; width: number; height: number }
+      }) => void,
+    ): Disposable {
+      const handler = (
+        _event: unknown,
+        payload: {
+          displayBounds: { x: number; y: number; width: number; height: number }
+        },
+      ) => {
+        listener(payload)
+        window.dispatchEvent(
+          new CustomEvent('spatial-pin:beginCapture', { detail: payload }),
+        )
+      }
+      ipcRenderer.on('spatial-pin:beginCapture', handler)
+      return {
+        dispose() {
+          ipcRenderer.off('spatial-pin:beginCapture', handler)
+        },
+      }
+    },
+    onLocation(listener: (payload: unknown) => void): Disposable {
+      const handler = (_event: unknown, payload: unknown) => {
+        listener(payload)
+        window.dispatchEvent(
+          new CustomEvent('spatial-pin:location', { detail: payload }),
+        )
+      }
+      ipcRenderer.on('spatial-pin:location', handler)
+      return {
+        dispose() {
+          ipcRenderer.off('spatial-pin:location', handler)
+        },
+      }
+    },
+    onBridgeState(listener: (payload: unknown) => void): Disposable {
+      const handler = (_event: unknown, payload: unknown) => listener(payload)
+      ipcRenderer.on('spatial-pin:bridgeState', handler)
+      return {
+        dispose() {
+          ipcRenderer.off('spatial-pin:bridgeState', handler)
         },
       }
     },

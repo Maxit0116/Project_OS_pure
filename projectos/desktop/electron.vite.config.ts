@@ -50,7 +50,10 @@ export default defineConfig({
     root: workbenchRoot,
     build: {
       rollupOptions: {
-        input: resolve(workbenchRoot, 'index.html'),
+        input: {
+          index: resolve(workbenchRoot, 'index.html'),
+          overlay: resolve(workbenchRoot, 'overlay.html'),
+        },
       },
     },
     resolve: {

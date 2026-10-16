@@ -47,6 +47,13 @@ import type {
 } from "../../contracts/chat-session.js";
 import type { ListSkillsResult, SkillContent } from "../../contracts/skills.js";
 import type {
+  LocationHint,
+  ResolvedSpatialPin,
+  SpatialPin,
+  SpatialPinHead,
+  SubmitSpatialPinResult,
+} from "../../contracts/spatial-pin.js";
+import type {
   CreateMapArtifactInput,
   MapArtifact,
   MapContentDocument,
@@ -316,6 +323,13 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("updateProjectDescription", projectId, conciseDescription);
   }
 
+  ensureCodeFileUnderstanding(
+    projectId: string,
+    path: string,
+  ): Promise<import("../../contracts/code-file-understanding.js").CodeFileUnderstandingEntry> {
+    return this.invoke("ensureCodeFileUnderstanding", projectId, path);
+  }
+
   askAgent(request: AgentAskRequest): Promise<AgentAnswerResult> {
     return this.invoke("askAgent", request);
   }
@@ -533,6 +547,216 @@ export class IpcTransport implements ApiTransport {
 
   deleteMapArtifact(projectId: string, artifactId: string): Promise<void> {
     return this.invoke("deleteMapArtifact", projectId, artifactId);
+  }
+
+  listSpatialPins(projectId: string): Promise<SpatialPinHead[]> {
+    return this.invoke("listSpatialPins", projectId);
+  }
+
+  getSpatialPin(projectId: string, pinId: string): Promise<SpatialPin | null> {
+    return this.invoke("getSpatialPin", projectId, pinId);
+  }
+
+  upsertSpatialPin(projectId: string, pin: SpatialPin): Promise<SpatialPin> {
+    return this.invoke("upsertSpatialPin", projectId, pin);
+  }
+
+  deleteSpatialPin(projectId: string, pinId: string): Promise<boolean> {
+    return this.invoke("deleteSpatialPin", projectId, pinId);
+  }
+
+  resolveSpatialPins(
+    projectId: string,
+    locationHint: LocationHint,
+  ): Promise<ResolvedSpatialPin[]> {
+    return this.invoke("resolveSpatialPins", projectId, locationHint);
+  }
+
+  submitSpatialPin(
+    projectId: string,
+    pinId: string,
+  ): Promise<SubmitSpatialPinResult> {
+    return this.invoke("submitSpatialPin", projectId, pinId);
+  }
+
+  saveSpatialPinSnapshot(
+    projectId: string,
+    pinId: string,
+    pngBase64: string,
+  ): Promise<{ snapshotAssetPath: string }> {
+    return this.invoke("saveSpatialPinSnapshot", projectId, pinId, pngBase64);
+  }
+
+  listLoopGraphs(projectId: string): Promise<import("../../contracts/loop-graph.js").LoopGraphHead[]> {
+    return this.invoke("listLoopGraphs", projectId);
+  }
+
+  getLoopGraphIndex(projectId: string): Promise<import("../../contracts/loop-graph.js").LoopGraphIndex> {
+    return this.invoke("getLoopGraphIndex", projectId);
+  }
+
+  getLoopGraph(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument | null> {
+    return this.invoke("getLoopGraph", projectId, loopId);
+  }
+
+  upsertLoopGraph(
+    projectId: string,
+    document: import("../../contracts/loop-graph.js").LoopGraphDocument,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("upsertLoopGraph", projectId, document);
+  }
+
+  createLoopGraph(
+    projectId: string,
+    title?: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("createLoopGraph", projectId).then(async (doc) => {
+      if (!title?.trim()) return doc;
+      return this.upsertLoopGraph(projectId, { ...doc, title: title.trim() });
+    });
+  }
+
+  deleteLoopGraph(projectId: string, loopId: string): Promise<boolean> {
+    return this.invoke("deleteLoopGraph", projectId, loopId);
+  }
+
+  setLastActiveLoopGraph(projectId: string, loopId: string): Promise<void> {
+    return this.invoke("setLastActiveLoopGraph", projectId, loopId);
+  }
+
+  linkLoopGraphToSession(
+    projectId: string,
+    loopId: string,
+    sessionId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument | null> {
+    return this.invoke("linkLoopGraphToSession", projectId, loopId, sessionId);
+  }
+
+  unlinkLoopGraphFromSession(
+    projectId: string,
+    loopId: string,
+    sessionId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument | null> {
+    return this.invoke("unlinkLoopGraphFromSession", projectId, loopId, sessionId);
+  }
+
+  compileLoopGraph(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopCompileResult> {
+    return this.invoke("compileLoopGraph", projectId, loopId);
+  }
+
+  approveLoopSpec(
+    projectId: string,
+    loopId: string,
+    spec: import("../../contracts/loop-graph.js").LoopSpec,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("approveLoopSpec", projectId, loopId, spec);
+  }
+
+  startLoopInstance(
+    projectId: string,
+    loopId: string,
+    _specVersion?: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("startLoopInstance", projectId, loopId);
+  }
+
+  pauseLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("pauseLoopInstance", projectId, loopId, instanceId);
+  }
+
+  resumeLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("resumeLoopInstance", projectId, loopId, instanceId);
+  }
+
+  resolveLoopHitl(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    answers: import("../../contracts/loop-graph.js").LoopHitlAnswer[],
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("resolveLoopHitl", projectId, loopId, instanceId, answers);
+  }
+
+  getLoopInstanceEvents(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopInstanceEvent[]> {
+    return this.invoke("getLoopInstanceEvents", projectId, loopId, instanceId);
+  }
+
+  advanceLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("advanceLoopInstance", projectId, loopId, instanceId);
+  }
+
+  sendLoopAuthoringTurn(
+    projectId: string,
+    loopId: string,
+    request: import("../../contracts/loop-graph.js").LoopAuthoringTurnRequest,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("sendLoopAuthoringTurn", projectId, loopId, request);
+  }
+
+  answerLoopGoalClarification(
+    projectId: string,
+    loopId: string,
+    answers: import("../../contracts/loop-graph.js").LoopGoalClarificationAnswer[],
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("answerLoopGoalClarification", projectId, loopId, answers);
+  }
+
+  confirmLoopGoalContext(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("confirmLoopGoalContext", projectId, loopId);
+  }
+
+  acceptLoopGraphEditOffer(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("acceptLoopGraphEditOffer", projectId, loopId);
+  }
+
+  dismissLoopGraphEditOffer(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("dismissLoopGraphEditOffer", projectId, loopId);
+  }
+
+  undoLoopDraft(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("undoLoopDraft", projectId, loopId);
+  }
+
+  setLoopComposerMode(
+    projectId: string,
+    loopId: string,
+    mode: import("../../contracts/loop-graph.js").LoopComposerMode,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("setLoopComposerMode", projectId, loopId, mode);
   }
 
   initMapArtifactStack(

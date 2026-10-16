@@ -16,8 +16,11 @@ import { executeAppMenuCommand } from '../../appMenu/menuCommands'
 import type { SemanticTreeNode } from '@contracts/index'
 import {
   exportC4MermaidBundle,
+  exportC4ViewSvgDocument,
   exportC4Views,
 } from '../FunctionMap/c4/exportC4Views'
+import { lintStructureGraph } from '../../../../services/structure-graph-lint.js'
+import { impactStructureGraph } from '../../../../services/structure-graph-impact.js'
 import styles from './CommandPalette.module.css'
 
 function collectFiles(nodes: SemanticTreeNode[]): { path: string; label: string }[] {
@@ -171,6 +174,76 @@ export default function CommandPalette() {
           group: 'Map',
           action: () => {
             void rescanStructureGraph({ mode: 'regenerate', force: true })
+          },
+        },
+        {
+          id: 'lint-structure-graph',
+          label: ts('map.lintStructure'),
+          group: 'Map',
+          action: () => {
+            const result = lintStructureGraph(graph)
+            if (result.ok) {
+              pushToast({ type: 'success', message: ts('map.lintStructureOk') })
+              return
+            }
+            pushToast({
+              type: 'warning',
+              message: ts('map.lintStructureFindings', {
+                count: String(result.findings.length),
+              }),
+            })
+            void navigator.clipboard.writeText(
+              JSON.stringify(result.findings, null, 2),
+            )
+          },
+        },
+        {
+          id: 'export-c4-svg',
+          label: ts('map.exportSvg'),
+          group: 'Map',
+          action: () => {
+            void navigator.clipboard
+              .writeText(exportC4ViewSvgDocument(graph))
+              .then(() => {
+                pushToast({ type: 'success', message: ts('map.exportCopied') })
+              })
+              .catch(() => {
+                pushToast({ type: 'warning', message: ts('map.exportFailed') })
+              })
+          },
+        },
+        {
+          id: 'prepare-refine-structure',
+          label: ts('map.prepareRefine'),
+          group: 'Map',
+          action: () => {
+            void rescanStructureGraph({ mode: 'prepareRefine' })
+          },
+        },
+        {
+          id: 'impact-selected-node',
+          label: ts('map.impactSelected'),
+          group: 'Map',
+          action: () => {
+            const selectedId = useWorkbenchStore.getState().selectedNodeId
+            if (!selectedId) {
+              pushToast({
+                type: 'warning',
+                message: ts('map.impactNeedsSelection'),
+              })
+              return
+            }
+            const impact = impactStructureGraph(graph, selectedId)
+            void navigator.clipboard
+              .writeText(JSON.stringify(impact, null, 2))
+              .then(() => {
+                pushToast({
+                  type: 'success',
+                  message: ts('map.impactCopied', {
+                    views: String(impact.views.length),
+                  }),
+                })
+              })
           },
         },
       )

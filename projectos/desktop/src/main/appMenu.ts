@@ -63,6 +63,7 @@ interface MenuLabels {
   window: string
   help: string
   keyboardShortcuts: string
+  spatialPin: string
 }
 
 const EN_LABELS: MenuLabels = {
@@ -104,6 +105,7 @@ const EN_LABELS: MenuLabels = {
   window: 'Window',
   help: 'Help',
   keyboardShortcuts: 'Keyboard Shortcuts',
+  spatialPin: 'Spatial Pin…',
 }
 
 const ZH_LABELS: MenuLabels = {
@@ -145,6 +147,7 @@ const ZH_LABELS: MenuLabels = {
   window: '窗口',
   help: '帮助',
   keyboardShortcuts: '键盘快捷键',
+  spatialPin: 'Spatial Pin…',
 }
 
 export function initialAppMenuState(systemLocale: string): AppMenuState {
@@ -153,6 +156,7 @@ export function initialAppMenuState(systemLocale: string): AppMenuState {
     recentWorkspaces: [],
     workspaceOpen: false,
     hasActiveEditor: false,
+    workspacePath: null,
   }
 }
 
@@ -283,6 +287,14 @@ export function buildAppMenuTemplate(
           id: 'show-agent-flow',
         }),
         commandItem('view.code', labels.code, undefined, workspaceOpen, actions, { id: 'show-code' }),
+        commandItem(
+          'view.spatialPin',
+          labels.spatialPin,
+          'Shift+CmdOrCtrl+P',
+          workspaceOpen,
+          actions,
+          { id: 'spatial-pin' },
+        ),
         { type: 'separator' },
         commandItem(
           'view.toggleBottomPanel',

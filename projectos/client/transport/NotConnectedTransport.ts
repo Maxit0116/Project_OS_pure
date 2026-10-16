@@ -220,6 +220,13 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async ensureCodeFileUnderstanding(
+    _projectId: string,
+    _path: string,
+  ): Promise<import("../../contracts/code-file-understanding.js").CodeFileUnderstandingEntry> {
+    return transportNotConnected();
+  }
+
   async askAgent(_request: AgentAskRequest): Promise<AgentAnswerResult> {
     return transportNotConnected();
   }
@@ -409,6 +416,223 @@ export class NotConnectedTransport implements ProjectOSApi {
   }
 
   async deleteMapArtifact(_projectId: string, _artifactId: string): Promise<void> {
+    return transportNotConnected();
+  }
+
+  async listSpatialPins(_projectId: string): Promise<import("../../contracts/spatial-pin.js").SpatialPinHead[]> {
+    return transportNotConnected();
+  }
+
+  async getSpatialPin(
+    _projectId: string,
+    _pinId: string,
+  ): Promise<import("../../contracts/spatial-pin.js").SpatialPin | null> {
+    return transportNotConnected();
+  }
+
+  async upsertSpatialPin(
+    _projectId: string,
+    _pin: import("../../contracts/spatial-pin.js").SpatialPin,
+  ): Promise<import("../../contracts/spatial-pin.js").SpatialPin> {
+    return transportNotConnected();
+  }
+
+  async deleteSpatialPin(_projectId: string, _pinId: string): Promise<boolean> {
+    return transportNotConnected();
+  }
+
+  async resolveSpatialPins(
+    _projectId: string,
+    _locationHint: import("../../contracts/spatial-pin.js").LocationHint,
+  ): Promise<import("../../contracts/spatial-pin.js").ResolvedSpatialPin[]> {
+    return transportNotConnected();
+  }
+
+  async submitSpatialPin(
+    _projectId: string,
+    _pinId: string,
+  ): Promise<import("../../contracts/spatial-pin.js").SubmitSpatialPinResult> {
+    return transportNotConnected();
+  }
+
+  async saveSpatialPinSnapshot(
+    _projectId: string,
+    _pinId: string,
+    _pngBase64: string,
+  ): Promise<{ snapshotAssetPath: string }> {
+    return transportNotConnected();
+  }
+
+  async listLoopGraphs(
+    _projectId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphHead[]> {
+    return transportNotConnected();
+  }
+
+  async getLoopGraphIndex(
+    _projectId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphIndex> {
+    return transportNotConnected();
+  }
+
+  async getLoopGraph(
+    _projectId: string,
+    _loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument | null> {
+    return transportNotConnected();
+  }
+
+  async upsertLoopGraph(
+    _projectId: string,
+    _document: import("../../contracts/loop-graph.js").LoopGraphDocument,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async createLoopGraph(
+    _projectId: string,
+    _title?: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async deleteLoopGraph(_projectId: string, _loopId: string): Promise<boolean> {
+    return transportNotConnected();
+  }
+
+  async setLastActiveLoopGraph(_projectId: string, _loopId: string): Promise<void> {
+    return transportNotConnected();
+  }
+
+  async linkLoopGraphToSession(
+    _projectId: string,
+    _loopId: string,
+    _sessionId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument | null> {
+    return transportNotConnected();
+  }
+
+  async unlinkLoopGraphFromSession(
+    _projectId: string,
+    _loopId: string,
+    _sessionId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument | null> {
+    return transportNotConnected();
+  }
+
+  async compileLoopGraph(
+    _projectId: string,
+    _loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopCompileResult> {
+    return transportNotConnected();
+  }
+
+  async approveLoopSpec(
+    _projectId: string,
+    _loopId: string,
+    _spec: import("../../contracts/loop-graph.js").LoopSpec,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async startLoopInstance(
+    _projectId: string,
+    _loopId: string,
+    _specVersion?: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async pauseLoopInstance(
+    _projectId: string,
+    _loopId: string,
+    _instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async resumeLoopInstance(
+    _projectId: string,
+    _loopId: string,
+    _instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async resolveLoopHitl(
+    _projectId: string,
+    _loopId: string,
+    _instanceId: string,
+    _answers: import("../../contracts/loop-graph.js").LoopHitlAnswer[],
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async getLoopInstanceEvents(
+    _projectId: string,
+    _loopId: string,
+    _instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopInstanceEvent[]> {
+    return transportNotConnected();
+  }
+
+  async advanceLoopInstance(
+    _projectId: string,
+    _loopId: string,
+    _instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async sendLoopAuthoringTurn(
+    _projectId: string,
+    _loopId: string,
+    _request: import("../../contracts/loop-graph.js").LoopAuthoringTurnRequest,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async answerLoopGoalClarification(
+    _projectId: string,
+    _loopId: string,
+    _answers: import("../../contracts/loop-graph.js").LoopGoalClarificationAnswer[],
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async confirmLoopGoalContext(
+    _projectId: string,
+    _loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async acceptLoopGraphEditOffer(
+    _projectId: string,
+    _loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async dismissLoopGraphEditOffer(
+    _projectId: string,
+    _loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async undoLoopDraft(
+    _projectId: string,
+    _loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async setLoopComposerMode(
+    _projectId: string,
+    _loopId: string,
+    _mode: import("../../contracts/loop-graph.js").LoopComposerMode,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return transportNotConnected();
   }
 
