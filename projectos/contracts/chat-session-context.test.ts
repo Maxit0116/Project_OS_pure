@@ -11,6 +11,12 @@ import {
   isSubstantiveChat,
   messagesThroughFork,
   parseSessionContextModelOutput,
+  placeChatSessionOnGraph,
+  demoteChatSessionToMisc,
+  extractSubtreeToNewGraph,
+  mergeSessionGraphs,
+  collectSessionSubtreeIds,
+  summarizeSessionGraphTitle,
   sessionGraphCardInsets,
 } from "./chat-session-context.js";
 
@@ -140,6 +146,85 @@ describe("chat session context", () => {
     expect(graph.nodes.find((node) => node.id === "orphan")?.parentId).toBeNull();
     expect(graph.misc.map((item) => item.id)).toEqual(["aside"]);
     expect(graph.nodes.map((node) => node.id)).not.toContain("old");
+  });
+
+  it("filters the canvas to one graph while keeping misc global", () => {
+    const heads = [
+      head({ id: "a", classification: "topic", graphId: "g1" }),
+      head({ id: "b", classification: "topic", graphId: "g2" }),
+      head({ id: "c", classification: "misc" }),
+    ];
+    const graph = buildSessionGraph(heads, { graphId: "g1" });
+    expect(graph.nodes.map((node) => node.id)).toEqual(["a"]);
+    expect(graph.misc.map((item) => item.id)).toEqual(["c"]);
+  });
+
+  it("places a misc session as an independent root on a new or joined graph", () => {
+    const misc = head({
+      id: "chat_misc",
+      classification: "misc",
+      parentSessionId: "someone",
+    });
+    const asNew = placeChatSessionOnGraph(misc, { mode: "new-graph" });
+    expect(asNew.classification).toBe("topic");
+    expect(asNew.parentSessionId).toBeUndefined();
+    expect(asNew.graphId).toMatch(/^graph_/);
+
+    const joined = placeChatSessionOnGraph(misc, {
+      mode: "join-graph",
+      graphId: "g_existing",
+    });
+    expect(joined.graphId).toBe("g_existing");
+    expect(joined.parentSessionId).toBeUndefined();
+
+    const demoted = demoteChatSessionToMisc(asNew);
+    expect(demoted.classification).toBe("misc");
+    expect(demoted.graphId).toBeUndefined();
+  });
+
+  it("extracts a node and its whole subtree onto a new graph", () => {
+    const heads = [
+      head({ id: "root", classification: "topic", graphId: "g1" }),
+      head({
+        id: "mid",
+        parentSessionId: "root",
+        classification: "topic",
+        graphId: "g1",
+      }),
+      head({
+        id: "leaf",
+        parentSessionId: "mid",
+        classification: "topic",
+        graphId: "g1",
+      }),
+      head({ id: "other", classification: "topic", graphId: "g1" }),
+    ];
+    expect(collectSessionSubtreeIds(heads, "mid").sort()).toEqual(["leaf", "mid"]);
+    const { heads: next, newGraphId, movedIds } = extractSubtreeToNewGraph(heads, "mid");
+    expect(movedIds.sort()).toEqual(["leaf", "mid"]);
+    expect(next.find((h) => h.id === "mid")?.graphId).toBe(newGraphId);
+    expect(next.find((h) => h.id === "leaf")?.graphId).toBe(newGraphId);
+    expect(next.find((h) => h.id === "mid")?.parentSessionId).toBeUndefined();
+    expect(next.find((h) => h.id === "leaf")?.parentSessionId).toBe("mid");
+    expect(next.find((h) => h.id === "root")?.graphId).toBe("g1");
+    expect(next.find((h) => h.id === "other")?.graphId).toBe("g1");
+  });
+
+  it("merges every session from one graph into another", () => {
+    const heads = [
+      head({ id: "a", classification: "topic", graphId: "g1" }),
+      head({
+        id: "a2",
+        parentSessionId: "a",
+        classification: "topic",
+        graphId: "g1",
+      }),
+      head({ id: "b", classification: "topic", graphId: "g2" }),
+    ];
+    const merged = mergeSessionGraphs(heads, "g1", "g2");
+    expect(merged.every((h) => h.graphId === "g2" || h.id === "b")).toBe(true);
+    expect(merged.find((h) => h.id === "a2")?.parentSessionId).toBe("a");
+    expect(summarizeSessionGraphTitle(merged, "g2")).toContain("a");
   });
 
   it("forks without copying parent messages", () => {

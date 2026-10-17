@@ -81,6 +81,8 @@ export const ChatSessionHeadSchema = z
     titleGeneratedAt: z.string().min(1).optional(),
     parentSessionId: z.string().min(1).optional(),
     forkMessageId: z.string().min(1).optional(),
+    /** Shared canvas group for topic sessions. Multi-root forests share one graphId. */
+    graphId: z.string().min(1).optional(),
     classification: ChatSessionClassificationSchema.optional(),
     classificationSource: ChatSessionClassificationSourceSchema.optional(),
     responsibility: z.string().trim().min(1).max(240).optional(),

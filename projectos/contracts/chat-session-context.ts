@@ -22,18 +22,210 @@ const CODE_OR_PATH =
 
 const REF_PATTERN = /\b[\w./-]+\.(?:ts|tsx|js|jsx|py|go|rs|css|json|md)\b/gu;
 
+/** Legacy topic sessions without graphId share one canvas until placed explicitly. */
+export const DEFAULT_SESSION_GRAPH_ID = "graph_default";
+
 export interface SessionGraphNode {
   id: string;
   parentId: string | null;
   title: string;
   responsibility?: string;
   status: ChatSessionHead["status"];
+  graphId: string;
 }
 
 export interface SessionGraphModel {
   nodes: SessionGraphNode[];
   edges: Array<{ source: string; target: string }>;
   misc: ChatSessionHead[];
+}
+
+export type SessionGraphPlacement =
+  | { mode: "new-graph" }
+  | { mode: "join-graph"; graphId: string }
+  | { mode: "current-graph"; graphId: string };
+
+export function createSessionGraphId(): string {
+  return `graph_${globalThis.crypto.randomUUID()}`;
+}
+
+export function resolveSessionGraphId(
+  head: Pick<ChatSessionHead, "graphId" | "classification">,
+): string | null {
+  if (resolveChatSessionClassification(head) === "misc") return null;
+  return head.graphId?.trim() || DEFAULT_SESSION_GRAPH_ID;
+}
+
+/** Promote a session onto a graph as an independent root (no parent edge). */
+export function placeChatSessionOnGraph(
+  head: ChatSessionHead,
+  placement: SessionGraphPlacement,
+): ChatSessionHead {
+  const graphId =
+    placement.mode === "new-graph" ? createSessionGraphId() : placement.graphId;
+  const next: ChatSessionHead = {
+    ...head,
+    classification: "topic",
+    classificationSource: "manual",
+    graphId,
+    lastUpdatedAt: new Date().toISOString(),
+  };
+  delete next.parentSessionId;
+  delete next.forkMessageId;
+  return next;
+}
+
+export function demoteChatSessionToMisc(head: ChatSessionHead): ChatSessionHead {
+  const next: ChatSessionHead = {
+    ...head,
+    classification: "misc",
+    classificationSource: "manual",
+    lastUpdatedAt: new Date().toISOString(),
+  };
+  delete next.graphId;
+  delete next.responsibility;
+  return next;
+}
+
+/** Root + descendants via parentSessionId (within the same head set). */
+export function collectSessionSubtreeIds(
+  heads: ReadonlyArray<Pick<ChatSessionHead, "id" | "parentSessionId">>,
+  rootId: string,
+): string[] {
+  const childrenByParent = new Map<string, string[]>();
+  for (const head of heads) {
+    if (!head.parentSessionId) continue;
+    const list = childrenByParent.get(head.parentSessionId) ?? [];
+    list.push(head.id);
+    childrenByParent.set(head.parentSessionId, list);
+  }
+  const out: string[] = [];
+  const stack = [rootId];
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    const children = childrenByParent.get(id);
+    if (children) {
+      for (const childId of children) stack.push(childId);
+    }
+  }
+  return out;
+}
+
+export function listTopicGraphIds(heads: ChatSessionHead[]): string[] {
+  const ids = new Set<string>();
+  for (const head of heads) {
+    if (head.isArchived) continue;
+    if (resolveChatSessionClassification(head) !== "topic") continue;
+    const graphId = resolveSessionGraphId(head);
+    if (graphId) ids.add(graphId);
+  }
+  return [...ids];
+}
+
+export function sessionsInGraph(
+  heads: ChatSessionHead[],
+  graphId: string,
+): ChatSessionHead[] {
+  return heads.filter(
+    (head) =>
+      !head.isArchived &&
+      resolveChatSessionClassification(head) === "topic" &&
+      resolveSessionGraphId(head) === graphId,
+  );
+}
+
+/** Prefer a root with the newest activity; fall back to any member. */
+export function pickGraphRepresentative(
+  heads: ChatSessionHead[],
+  graphId: string,
+): ChatSessionHead | null {
+  const members = sessionsInGraph(heads, graphId);
+  if (members.length === 0) return null;
+  const memberIds = new Set(members.map((head) => head.id));
+  const roots = members.filter(
+    (head) => !head.parentSessionId || !memberIds.has(head.parentSessionId),
+  );
+  const pool = roots.length > 0 ? roots : members;
+  return [...pool].sort((a, b) => b.lastUpdatedAt.localeCompare(a.lastUpdatedAt))[0] ?? null;
+}
+
+/** Lightweight rail title: join up to 3 root responsibilities/titles. */
+export function summarizeSessionGraphTitle(
+  heads: ChatSessionHead[],
+  graphId: string,
+  untitled = "Untitled",
+): string {
+  const members = sessionsInGraph(heads, graphId);
+  if (members.length === 0) return untitled;
+  const memberIds = new Set(members.map((head) => head.id));
+  const roots = members.filter(
+    (head) => !head.parentSessionId || !memberIds.has(head.parentSessionId),
+  );
+  const pool = (roots.length > 0 ? roots : members)
+    .slice()
+    .sort((a, b) => b.lastUpdatedAt.localeCompare(a.lastUpdatedAt));
+  const labels = pool
+    .map((head) => head.responsibility?.trim() || head.title.trim())
+    .filter((label) => label.length > 0)
+    .slice(0, 3);
+  if (labels.length === 0) return untitled;
+  return labels.join(" · ");
+}
+
+/**
+ * Move root + its entire subtree onto a brand-new graph.
+ * The root detaches from any parent outside the subtree; edges inside stay.
+ */
+export function extractSubtreeToNewGraph(
+  heads: ChatSessionHead[],
+  rootId: string,
+  now = new Date().toISOString(),
+): { heads: ChatSessionHead[]; newGraphId: string; movedIds: string[] } {
+  const movedIds = collectSessionSubtreeIds(heads, rootId);
+  const movedSet = new Set(movedIds);
+  const newGraphId = createSessionGraphId();
+  const nextHeads = heads.map((head) => {
+    if (!movedSet.has(head.id)) return head;
+    const next: ChatSessionHead = {
+      ...head,
+      classification: "topic",
+      classificationSource: head.classificationSource ?? "manual",
+      graphId: newGraphId,
+      lastUpdatedAt: now,
+    };
+    if (head.id === rootId) {
+      delete next.parentSessionId;
+      delete next.forkMessageId;
+    } else if (head.parentSessionId && !movedSet.has(head.parentSessionId)) {
+      delete next.parentSessionId;
+      delete next.forkMessageId;
+    }
+    return next;
+  });
+  return { heads: nextHeads, newGraphId, movedIds };
+}
+
+/** Move every topic session from one graph into another; keep internal edges. */
+export function mergeSessionGraphs(
+  heads: ChatSessionHead[],
+  fromGraphId: string,
+  toGraphId: string,
+  now = new Date().toISOString(),
+): ChatSessionHead[] {
+  if (fromGraphId === toGraphId) return heads;
+  return heads.map((head) => {
+    if (resolveSessionGraphId(head) !== fromGraphId) return head;
+    if (resolveChatSessionClassification(head) !== "topic") return head;
+    return {
+      ...head,
+      graphId: toGraphId,
+      lastUpdatedAt: now,
+    };
+  });
 }
 
 export interface SessionGraphInsetsInput {
@@ -215,13 +407,21 @@ export function appendSessionContextMarkdown(
   return [base.trim(), session.trim()].filter((part) => part.length > 0).join("\n\n");
 }
 
-export function buildSessionGraph(heads: ChatSessionHead[]): SessionGraphModel {
+export function buildSessionGraph(
+  heads: ChatSessionHead[],
+  options?: { graphId?: string | null },
+): SessionGraphModel {
   const misc = heads.filter(
     (head) => !head.isArchived && resolveChatSessionClassification(head) === "misc",
   );
-  const visible = heads.filter(
+  const topics = heads.filter(
     (head) => !head.isArchived && resolveChatSessionClassification(head) === "topic",
   );
+  const filterGraphId = options?.graphId;
+  const visible =
+    filterGraphId == null || filterGraphId === ""
+      ? topics
+      : topics.filter((head) => resolveSessionGraphId(head) === filterGraphId);
   const visibleIds = new Set(visible.map((head) => head.id));
   const nodes = visible.map((head) => ({
     id: head.id,
@@ -232,6 +432,7 @@ export function buildSessionGraph(heads: ChatSessionHead[]): SessionGraphModel {
     title: head.title,
     ...(head.responsibility ? { responsibility: head.responsibility } : {}),
     status: head.status,
+    graphId: resolveSessionGraphId(head) ?? DEFAULT_SESSION_GRAPH_ID,
   }));
   return {
     nodes,
@@ -291,6 +492,9 @@ export function preserveChatSessionContext(
   }
   if (!head.classificationSource && existing.head.classificationSource) {
     head.classificationSource = existing.head.classificationSource;
+  }
+  if (!head.graphId && existing.head.graphId) {
+    head.graphId = existing.head.graphId;
   }
   if (
     !head.responsibility &&
@@ -352,8 +556,12 @@ export function applyChatSessionContextUpdate(
   if (classification === "topic" && update.responsibility?.trim()) {
     head.responsibility = clampLine(update.responsibility, 240);
   }
+  if (classification === "topic" && !head.graphId) {
+    head.graphId = createSessionGraphId();
+  }
   if (classification === "misc") {
     delete head.responsibility;
+    delete head.graphId;
   }
   const next: ChatSessionRecord = { ...record, head };
   if (classification === "topic" && update.digest) {
@@ -378,6 +586,7 @@ export function buildForkedChatSession(
   const classification: ChatSessionClassification =
     inheritedDigest || parentIsTopic ? "topic" : "misc";
   const responsibility = inheritedDigest?.responsibility ?? parent.head.responsibility;
+  const parentGraphId = resolveSessionGraphId(parent.head);
   return {
     version: "0.2.0",
     head: {
@@ -393,6 +602,7 @@ export function buildForkedChatSession(
       classification,
       classificationSource: "auto",
       ...(responsibility ? { responsibility } : {}),
+      ...(classification === "topic" && parentGraphId ? { graphId: parentGraphId } : {}),
     },
     messages: [],
     ...(inheritedDigest ? { inheritedDigest } : {}),

@@ -69,6 +69,7 @@ export const LocationKeySchema = z
   })
   .strict();
 
+/** In-rect normalized point (pen / legacy rect strokes). */
 export const AnnotationPointSchema = z
   .object({
     x: z.number().min(0).max(1),
@@ -76,15 +77,74 @@ export const AnnotationPointSchema = z
   })
   .strict();
 
-export const AnnotationStrokeSchema = z
+/**
+ * Region-relative point that may lie outside [0,1] (arrow tails beyond the crop).
+ * (0,0) = region top-left; (1,1) = region bottom-right.
+ */
+export const AnnotationPointUnboundedSchema = z
+  .object({
+    x: z.number(),
+    y: z.number(),
+  })
+  .strict();
+
+/** Eight arrowhead anchors on a capture rect (corners + edge midpoints). */
+export const AnnotationAnchorSchema = z.enum([
+  "top",
+  "right",
+  "bottom",
+  "left",
+  "topLeft",
+  "topRight",
+  "bottomLeft",
+  "bottomRight",
+]);
+
+const AnnotationStrokePenSchema = z
   .object({
     id: z.string().min(1),
-    kind: z.enum(["pen", "rect", "arrow"]),
+    kind: z.literal("pen"),
     color: z.string().min(1).max(32),
     width: z.number().positive().max(32),
     points: z.array(AnnotationPointSchema).min(1).max(2000),
   })
   .strict();
+
+/** Legacy rect annotation (kept for back-compat; overlay no longer creates these). */
+const AnnotationStrokeRectSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("rect"),
+    color: z.string().min(1).max(32),
+    width: z.number().positive().max(32),
+    points: z.array(AnnotationPointSchema).min(1).max(2000),
+  })
+  .strict();
+
+const AnnotationStrokeArrowSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("arrow"),
+    color: z.string().min(1).max(32),
+    width: z.number().positive().max(32),
+    /** 1-based display number for the colored badge. */
+    index: z.number().int().positive().max(200),
+    anchor: AnnotationAnchorSchema,
+    head: AnnotationPointUnboundedSchema,
+    tail: AnnotationPointUnboundedSchema,
+    /**
+     * Legacy two-point arrow (head, tail) in clamped [0,1] space.
+     * New arrows prefer head/tail; parsers may synthesize from points.
+     */
+    points: z.array(AnnotationPointUnboundedSchema).min(1).max(2000).optional(),
+  })
+  .strict();
+
+export const AnnotationStrokeSchema = z.discriminatedUnion("kind", [
+  AnnotationStrokePenSchema,
+  AnnotationStrokeRectSchema,
+  AnnotationStrokeArrowSchema,
+]);
 
 export const AnnotationDocSchema = z
   .object({
@@ -241,7 +301,12 @@ export type SpatialPinDeviceKind = z.infer<typeof SpatialPinDeviceKindSchema>;
 export type ScreenRect = z.infer<typeof ScreenRectSchema>;
 export type LocationKey = z.infer<typeof LocationKeySchema>;
 export type AnnotationPoint = z.infer<typeof AnnotationPointSchema>;
+export type AnnotationPointUnbounded = z.infer<
+  typeof AnnotationPointUnboundedSchema
+>;
+export type AnnotationAnchor = z.infer<typeof AnnotationAnchorSchema>;
 export type AnnotationStroke = z.infer<typeof AnnotationStrokeSchema>;
+export type AnnotationStrokeArrow = z.infer<typeof AnnotationStrokeArrowSchema>;
 export type AnnotationDoc = z.infer<typeof AnnotationDocSchema>;
 export type PinComposer = z.infer<typeof PinComposerSchema>;
 export type PinLinks = z.infer<typeof PinLinksSchema>;
@@ -438,8 +503,37 @@ export function buildSpatialPinUserContent(pin: SpatialPin): string {
       `rect=${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`,
     );
   }
+  for (const stroke of pin.annotations.strokes) {
+    if (stroke.kind !== "arrow") continue;
+    lines.push(
+      `arrow=#${stroke.index} color=${stroke.color} anchor=${stroke.anchor} head=${stroke.head.x.toFixed(2)},${stroke.head.y.toFixed(2)} tail=${stroke.tail.x.toFixed(2)},${stroke.tail.y.toFixed(2)}`,
+    );
+  }
   const locationLine = lines.join(" · ");
   return `${prompt}\n\n[${locationLine}]`;
+}
+
+/** Build a persisted arrow stroke from region-relative head/tail. */
+export function createArrowStroke(input: {
+  id: string;
+  index: number;
+  color: string;
+  anchor: AnnotationAnchor;
+  head: AnnotationPointUnbounded;
+  tail: AnnotationPointUnbounded;
+  width?: number;
+}): AnnotationStrokeArrow {
+  return {
+    id: input.id,
+    kind: "arrow",
+    color: input.color,
+    width: input.width ?? 2,
+    index: input.index,
+    anchor: input.anchor,
+    head: input.head,
+    tail: input.tail,
+    points: [input.head, input.tail],
+  };
 }
 
 export function normalizeSpatialPinUrl(url: string): string {

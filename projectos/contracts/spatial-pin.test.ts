@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AnnotationStrokeSchema,
   buildSpatialPinUserContent,
   classifyMacHostApp,
+  createArrowStroke,
   createDraftSpatialPin,
   headFromSpatialPin,
   normalizeSpatialPinUrl,
@@ -109,5 +111,46 @@ describe("spatial-pin contracts", () => {
     expect(content).toContain("inferredPath=ios/");
     expect(content).toContain("snapshot=.projectos/spatial-pins/assets/pin_meta.png");
     expect(content).toContain("rect=10,20 100x40");
+  });
+
+  it("round-trips arrow strokes with unbounded tails and anchors", () => {
+    const stroke = createArrowStroke({
+      id: "arrow_1",
+      index: 1,
+      color: "#ff5c5c",
+      anchor: "topRight",
+      head: { x: 1, y: 0 },
+      tail: { x: 1.4, y: -0.2 },
+    });
+    expect(AnnotationStrokeSchema.parse(stroke)).toEqual(stroke);
+    expect(stroke.tail.x).toBeGreaterThan(1);
+  });
+
+  it("includes arrow metadata in user content", () => {
+    const pin = createDraftSpatialPin({
+      id: "pin_arrow",
+      projectId: "proj_1",
+      location: {
+        surface: "workspace",
+        url: "spatial://workspace/%2Ftmp%2Fdemo",
+        workspacePath: "/tmp/demo",
+      },
+      captureRect: { x: 0, y: 0, width: 100, height: 80 },
+    });
+    pin.composer.prompt = "Fix this control";
+    pin.annotations.strokes = [
+      createArrowStroke({
+        id: "arrow_1",
+        index: 2,
+        color: "#4c7dff",
+        anchor: "left",
+        head: { x: 0, y: 0.5 },
+        tail: { x: -0.3, y: 0.5 },
+      }),
+    ];
+    const content = buildSpatialPinUserContent(pin);
+    expect(content).toContain("arrow=#2");
+    expect(content).toContain("anchor=left");
+    expect(content).toContain("color=#4c7dff");
   });
 });

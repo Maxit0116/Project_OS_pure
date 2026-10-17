@@ -304,6 +304,8 @@
   background: var(--tech-bg-elevated);
   color: var(--tech-text-primary);
   cursor: pointer;
+  touch-action: none;
+  user-select: none;
 }
 
 .miscChipActive {
@@ -326,6 +328,65 @@
   height: 22px;
   padding: 0;
   font-size: 12px;
+}
+
+.canvasDropTarget {
+  outline: 1px dashed var(--tech-accent);
+  outline-offset: -4px;
+}
+
+.sessionDragGhost {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--tech-border-strong);
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  box-shadow: var(--tech-shadow-md);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sessionDragGhost[data-task='explore'] { color: #0f766e; }
+.sessionDragGhost[data-task='plan'] { color: #4338ca; }
+.sessionDragGhost[data-task='build'] { color: #15803d; }
+.sessionDragGhost[data-task='fix'] { color: #c2410c; }
+.sessionDragGhost[data-task='design'] { color: #be185d; }
+.sessionDragGhost[data-task='git'] { color: #3d5270; }
+.sessionDragGhost[data-task='setup'] { color: #44403c; }
+
+:global([data-theme='dark']) .sessionDragGhost[data-task='explore'] { color: #5eead4; }
+:global([data-theme='dark']) .sessionDragGhost[data-task='plan'] { color: #a5b4fc; }
+:global([data-theme='dark']) .sessionDragGhost[data-task='build'] { color: #6ee7b7; }
+:global([data-theme='dark']) .sessionDragGhost[data-task='fix'] { color: #fdba74; }
+:global([data-theme='dark']) .sessionDragGhost[data-task='design'] { color: #f9a8d4; }
+:global([data-theme='dark']) .sessionDragGhost[data-task='git'] { color: #9bb0c7; }
+:global([data-theme='dark']) .sessionDragGhost[data-task='setup'] { color: #d6d3d1; }
+
+.nodeLifted {
+  opacity: 0.35;
+  transform: scale(0.98);
+}
+
+.miscDropTarget {
+  outline: 1px dashed var(--tech-accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--tech-accent) 8%, var(--tech-bg-side-panel));
+}
+
+.miscHint {
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-muted);
+  padding: 4px 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

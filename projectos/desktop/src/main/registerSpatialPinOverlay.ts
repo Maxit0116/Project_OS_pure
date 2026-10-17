@@ -4,6 +4,7 @@ import {
   createOrShowOverlayWindow,
   getOverlayWindow,
   hideOverlayWindow,
+  releaseOverlayEscapeShortcut,
 } from './createOverlayWindow.js'
 import { assertTrustedHostRenderer } from './ipcSenderTrust.js'
 import { buildSpatialPinSessionContext } from './spatialPinContext.js'
@@ -292,4 +293,7 @@ export function registerSpatialPinOverlay(): void {
 
 export function unregisterSpatialPinOverlayShortcuts(): void {
   globalShortcut.unregister('CommandOrControl+Shift+P')
+  // Escape is registered only while the overlay is visible; clear it on shutdown
+  // in case hide/close did not run.
+  releaseOverlayEscapeShortcut()
 }

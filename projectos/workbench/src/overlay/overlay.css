@@ -59,8 +59,16 @@
 }
 
 .overlay-selection-compose {
-  pointer-events: auto;
+  /* Root overlay handles hit-testing; frames are visual only. */
+  pointer-events: none;
   cursor: crosshair;
+  /* Multi-region: avoid stacking full-screen punch-out shadows. */
+  box-shadow: inset 0 0 0 1px rgba(76, 125, 255, 0.25);
+}
+
+.overlay-selection-dimmed {
+  opacity: 0.35;
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
 }
 
 .overlay-canvas {
@@ -86,6 +94,54 @@
   color: var(--color-text-secondary);
   pointer-events: none;
   white-space: nowrap;
+}
+
+.overlay-hint-status {
+  top: auto;
+  bottom: 24px;
+  max-width: min(520px, calc(100vw - 32px));
+  white-space: normal;
+  text-align: center;
+}
+
+/* Always-visible dismiss: overlay is shown inactive so Esc may not reach the
+   renderer (fullscreen IDE keeps focus). Global Esc is also registered in main. */
+.overlay-dismiss {
+  appearance: none;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px 0 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--tech-shadow-md);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.overlay-dismiss:hover {
+  background: var(--color-hover-overlay);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.overlay-dismiss:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
 }
 
 /* ── Compose panel ─────────────────────────────────────────── */
@@ -220,6 +276,10 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+.overlay-panel-header .overlay-arrow-badge {
+  margin-top: 0;
 }
 
 .overlay-panel-title {
@@ -636,4 +696,158 @@
 }
 .confidence-snapshot_only {
   color: var(--color-error);
+}
+
+/* ── Multi-region arrows ───────────────────────────────────── */
+
+.overlay-panel-chrome {
+  z-index: 40;
+}
+
+.overlay-composer-footer-only {
+  border-top: none;
+}
+
+.overlay-arrows-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 20;
+  overflow: visible;
+}
+
+.overlay-arrow-dimmed {
+  opacity: 0.32;
+}
+
+.overlay-arrow-hit {
+  appearance: none;
+  position: absolute;
+  z-index: 26;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.overlay-arrow-hit-dimmed {
+  opacity: 0.35;
+}
+
+.overlay-anchor-dot {
+  position: absolute;
+  z-index: 25;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.overlay-region-tools {
+  position: absolute;
+  z-index: 30;
+  display: inline-flex;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.overlay-region-tool-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  box-shadow: var(--tech-shadow-md);
+}
+
+.overlay-region-tool-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-hover-overlay);
+}
+
+.overlay-region-tool-btn-active {
+  color: var(--color-accent-strong);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-bg-elevated));
+}
+
+.overlay-arrow-prompt {
+  position: absolute;
+  z-index: 35;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: min(220px, calc(100vw - 24px));
+  padding: 6px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--tech-shadow-md);
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.overlay-arrow-prompt-dimmed {
+  opacity: 0.35;
+}
+
+.overlay-arrow-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.overlay-arrow-prompt-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  max-height: 96px;
+  resize: none;
+  margin: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.4;
+  outline: none;
+}
+
+.overlay-arrow-prompt-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.overlay-arrow-prompt-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
 }

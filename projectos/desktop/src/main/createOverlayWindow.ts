@@ -1,9 +1,33 @@
-import { app, BrowserWindow, screen, type Rectangle } from 'electron'
+import { app, BrowserWindow, globalShortcut, screen, type Rectangle } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { installTrustedHostRendererAuthority } from './ipcSenderTrust.js'
 
 let overlayWindow: BrowserWindow | null = null
+let overlayEscapeRegistered = false
+
+/**
+ * Overlay is presented with showInactive so fullscreen IDEs keep their Space
+ * and keyboard focus. Renderer keydown never sees Esc in that case — register
+ * Escape as a global shortcut for the lifetime of the visible overlay.
+ */
+function registerOverlayEscapeShortcut(): void {
+  if (overlayEscapeRegistered) return
+  const ok = globalShortcut.register('Escape', () => {
+    hideOverlayWindow()
+  })
+  if (ok) {
+    overlayEscapeRegistered = true
+  } else {
+    console.warn('[spatial-pin] Failed to register global Escape shortcut')
+  }
+}
+
+export function releaseOverlayEscapeShortcut(): void {
+  if (!overlayEscapeRegistered) return
+  globalShortcut.unregister('Escape')
+  overlayEscapeRegistered = false
+}
 
 function overlayDocumentUrl(): string {
   const developmentRendererUrl = !app.isPackaged
@@ -66,6 +90,7 @@ export function presentOverlayWindow(win: BrowserWindow): void {
   } else {
     win.show()
   }
+  registerOverlayEscapeShortcut()
 }
 
 function emitBeginCapture(win: BrowserWindow): void {
@@ -166,12 +191,14 @@ export function createOrShowOverlayWindow(_opts?: {
 }
 
 export function hideOverlayWindow(): void {
+  releaseOverlayEscapeShortcut()
   const win = getOverlayWindow()
   if (!win) return
   win.hide()
 }
 
 export function closeOverlayWindow(): void {
+  releaseOverlayEscapeShortcut()
   const win = getOverlayWindow()
   if (!win) return
   win.close()

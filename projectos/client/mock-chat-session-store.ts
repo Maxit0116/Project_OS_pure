@@ -12,6 +12,8 @@ import {
   applyChatSessionContextUpdate,
   chatSessionHasChildren,
   chatSessionIdsToPrune,
+  demoteChatSessionToMisc,
+  placeChatSessionOnGraph,
   preserveChatSessionContext,
   type ChatSessionContextUpdate,
 } from "../contracts/chat-session-context.js";
@@ -212,13 +214,10 @@ export function mockSetChatSessionClassification(
   const store = getProjectStore(projectId);
   const record = store.records.get(sessionId);
   if (!record) return null;
-  const nextHead: ChatSessionHead = {
-    ...record.head,
-    classification,
-    classificationSource: "manual",
-    lastUpdatedAt: new Date().toISOString(),
-  };
-  if (classification === "misc") delete nextHead.responsibility;
+  const nextHead =
+    classification === "misc"
+      ? demoteChatSessionToMisc(record.head)
+      : placeChatSessionOnGraph(record.head, { mode: "new-graph" });
   const parsedHead = ChatSessionHeadSchema.parse(nextHead);
   store.records.set(sessionId, { ...record, head: parsedHead });
   store.index = {

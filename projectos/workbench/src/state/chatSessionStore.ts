@@ -2,8 +2,15 @@ import type {
   ChatSessionHead,
   ChatSessionRecord,
   SessionContextDigest,
+  SessionGraphPlacement,
 } from '@contracts/index'
-import { emptyComposerDraft } from '@contracts/index'
+import {
+  demoteChatSessionToMisc,
+  emptyComposerDraft,
+  extractSubtreeToNewGraph,
+  mergeSessionGraphs,
+  placeChatSessionOnGraph,
+} from '@contracts/index'
 import { create } from 'zustand'
 import { resolveClientMode } from '../data/clientMode'
 import {
@@ -94,6 +101,18 @@ interface ChatSessionStore {
     sessionId: string,
     classification: 'topic' | 'misc',
   ) => Promise<void>
+  /** Promote/demote with explicit graph placement (independent root, no parent). */
+  placeSessionOnGraph: (
+    sessionId: string,
+    placement: SessionGraphPlacement | { mode: 'misc' },
+  ) => Promise<ChatSessionHead | null>
+  /** Extract a canvas node and its full subtree onto a brand-new graph. */
+  extractSubtreeToGraph: (rootSessionId: string) => Promise<{
+    newGraphId: string
+    movedIds: string[]
+  } | null>
+  /** Merge every session from one graph into another. */
+  mergeGraphs: (fromGraphId: string, toGraphId: string) => Promise<boolean>
   findWithAgent: (query: string) => Promise<void>
   resetForDemo: () => Promise<void>
 }
@@ -531,6 +550,59 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     await client.setChatSessionClassification(project.projectId, sessionId, classification)
     const index = await client.getChatSessionIndex(project.projectId)
     set({ heads: index.heads, pinnedIds: index.pinnedIds })
+  },
+
+  placeSessionOnGraph: async (sessionId, placement) => {
+    const { client, project } = useWorkbenchStore.getState()
+    if (!client || !project) return null
+    const record = await client.getChatSession(project.projectId, sessionId)
+    if (!record) return null
+    const nextHead =
+      placement.mode === 'misc'
+        ? demoteChatSessionToMisc(record.head)
+        : placeChatSessionOnGraph(record.head, placement)
+    await client.upsertChatSession(project.projectId, { ...record, head: nextHead })
+    const index = await client.getChatSessionIndex(project.projectId)
+    set({ heads: index.heads, pinnedIds: index.pinnedIds })
+    return nextHead
+  },
+
+  extractSubtreeToGraph: async (rootSessionId) => {
+    const { client, project } = useWorkbenchStore.getState()
+    if (!client || !project) return null
+    const { heads: nextHeads, newGraphId, movedIds } = extractSubtreeToNewGraph(
+      get().heads,
+      rootSessionId,
+    )
+    const byId = new Map(nextHeads.map((head) => [head.id, head]))
+    for (const id of movedIds) {
+      const nextHead = byId.get(id)
+      if (!nextHead) continue
+      const record = await client.getChatSession(project.projectId, id)
+      if (!record) continue
+      await client.upsertChatSession(project.projectId, { ...record, head: nextHead })
+    }
+    const index = await client.getChatSessionIndex(project.projectId)
+    set({ heads: index.heads, pinnedIds: index.pinnedIds })
+    return { newGraphId, movedIds }
+  },
+
+  mergeGraphs: async (fromGraphId, toGraphId) => {
+    const { client, project } = useWorkbenchStore.getState()
+    if (!client || !project || fromGraphId === toGraphId) return false
+    const prevHeads = get().heads
+    const nextHeads = mergeSessionGraphs(prevHeads, fromGraphId, toGraphId)
+    for (let i = 0; i < nextHeads.length; i += 1) {
+      const nextHead = nextHeads[i]
+      const prevHead = prevHeads[i]
+      if (!nextHead || nextHead === prevHead) continue
+      const record = await client.getChatSession(project.projectId, nextHead.id)
+      if (!record) continue
+      await client.upsertChatSession(project.projectId, { ...record, head: nextHead })
+    }
+    const index = await client.getChatSessionIndex(project.projectId)
+    set({ heads: index.heads, pinnedIds: index.pinnedIds })
+    return true
   },
 
   findWithAgent: async (query) => {

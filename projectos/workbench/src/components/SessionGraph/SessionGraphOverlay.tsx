@@ -1,7 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, type WheelEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  type WheelEvent,
+} from 'react'
 import type { ChatSessionHead, SessionGraphModel } from '@contracts/index'
 import {
   buildSessionGraph,
+  pickGraphRepresentative,
+  resolveSessionGraphId,
+  sessionsInGraph,
   sessionGraphShieldInsets,
   type SessionGraphInsets,
 } from '@contracts/index'
@@ -12,7 +24,7 @@ import {
   GitBranch,
   GitPullRequest,
   LayoutTemplate,
-  Map,
+  Map as MapIcon,
   Search,
   Terminal,
   X,
@@ -29,13 +41,31 @@ import {
   type SessionGraphLayout,
 } from './layoutSessionGraph'
 import { classifySessionTask } from './sessionTaskKind'
+import {
+  createRailFolder,
+  emptySessionGraphRailLayout,
+  graphRailTitle,
+  insertGraphOnRail,
+  loadSessionGraphRailLayout,
+  moveGraphIntoFolder,
+  removeFolderFromLayout,
+  removeGraphFromLayout,
+  resolveActiveGraphId,
+  saveSessionGraphRailLayout,
+  syncRailLayoutWithGraphs,
+  type SessionGraphRailLayout,
+} from './sessionGraphRailLayout'
+import {
+  useSessionGraphDrag,
+  type SessionDragState,
+  type SessionDropTarget,
+} from './useSessionGraphDrag'
 import WorkingSessionRail from './WorkingSessionRail'
-import { listWorkingSessions } from './workingSessions'
 import styles from './SessionGraphOverlay.module.css'
 
 const TASK_ICON = {
   explore: Search,
-  plan: Map,
+  plan: MapIcon,
   build: Box,
   fix: Bug,
   design: LayoutTemplate,
@@ -77,7 +107,10 @@ export default function SessionGraphOverlay() {
   const switchSession = useChatSessionStore((s) => s.switchSession)
   const createSession = useChatSessionStore((s) => s.createSession)
   const forkSession = useChatSessionStore((s) => s.forkSession)
-  const setSessionClassification = useChatSessionStore((s) => s.setSessionClassification)
+  const placeSessionOnGraph = useChatSessionStore((s) => s.placeSessionOnGraph)
+  const extractSubtreeToGraph = useChatSessionStore((s) => s.extractSubtreeToGraph)
+  const mergeGraphs = useChatSessionStore((s) => s.mergeGraphs)
+  const projectId = useWorkbenchStore((s) => s.project?.projectId ?? null)
   const leftPanelOpen = useWorkbenchStore((s) => s.leftPanelOpen)
   const rightPanelOpen = useWorkbenchStore((s) => s.rightPanelOpen)
   const setRightPanelOpen = useWorkbenchStore((s) => s.setRightPanelOpen)
@@ -88,24 +121,234 @@ export default function SessionGraphOverlay() {
   const terminalOpen = useBottomDockStore((s) => s.open)
   const { ts } = useI18n()
 
-  const model = useMemo(() => buildSessionGraph(heads), [heads])
-  const workingSessions = useMemo(
-    () => listWorkingSessions(heads, activeSessionId),
-    [heads, activeSessionId],
+  const [railLayout, setRailLayout] = useState<SessionGraphRailLayout>(() =>
+    emptySessionGraphRailLayout(),
   )
+  const [preferredGraphId, setPreferredGraphId] = useState<string | null>(null)
+  const [forceRailExpanded, setForceRailExpanded] = useState(false)
   const [layout, setLayout] = useState<SessionGraphLayout | null>(null)
   const [viewport, setViewport] = useState({ x: 32, y: 32, scale: 1 })
   const [dragging, setDragging] = useState(false)
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
+  const railLayoutRef = useRef(railLayout)
+  railLayoutRef.current = railLayout
+
+  const activeGraphId = useMemo(
+    () => resolveActiveGraphId(heads, activeSessionId, preferredGraphId),
+    [heads, activeSessionId, preferredGraphId],
+  )
+  const model = useMemo(
+    () => buildSessionGraph(heads, { graphId: activeGraphId }),
+    [heads, activeGraphId],
+  )
+  const mergedRail = useMemo(
+    () => syncRailLayoutWithGraphs(railLayout, heads),
+    [railLayout, heads],
+  )
+
+  useEffect(() => {
+    if (!projectId) {
+      setRailLayout(emptySessionGraphRailLayout())
+      return
+    }
+    setRailLayout(loadSessionGraphRailLayout(projectId, heads))
+    // Only re-load when project changes; heads migration uses current heads once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
+
+  const persistRail = useCallback(
+    (next: SessionGraphRailLayout) => {
+      setRailLayout(next)
+      if (projectId) saveSessionGraphRailLayout(projectId, next)
+    },
+    [projectId],
+  )
+
+  const openGraph = useCallback(
+    async (graphId: string) => {
+      setPreferredGraphId(graphId)
+      const rep = pickGraphRepresentative(heads, graphId)
+      if (rep) {
+        await switchSession(rep.id)
+        setRightPanelOpen(true)
+      }
+    },
+    [heads, setRightPanelOpen, switchSession],
+  )
+
+  const demoteToMisc = useCallback(
+    async (sessionId: string) => {
+      const head = heads.find((item) => item.id === sessionId)
+      const graphId = head ? resolveSessionGraphId(head) : null
+      await placeSessionOnGraph(sessionId, { mode: 'misc' })
+      if (graphId) {
+        const remaining = sessionsInGraph(
+          useChatSessionStore.getState().heads,
+          graphId,
+        )
+        if (remaining.length === 0) {
+          persistRail(removeGraphFromLayout(railLayoutRef.current, graphId))
+          if (preferredGraphId === graphId) setPreferredGraphId(null)
+        }
+      }
+    },
+    [heads, placeSessionOnGraph, persistRail, preferredGraphId],
+  )
+
+  const handleDrop = useCallback(
+    async (drag: SessionDragState, target: SessionDropTarget) => {
+      const base = syncRailLayoutWithGraphs(
+        railLayoutRef.current,
+        useChatSessionStore.getState().heads,
+      )
+
+      // ——— Rail graph drag ———
+      if (drag.source === 'rail' && drag.graphId) {
+        if (target.kind === 'misc') {
+          const members = sessionsInGraph(useChatSessionStore.getState().heads, drag.graphId)
+          for (const member of members) {
+            await placeSessionOnGraph(member.id, { mode: 'misc' })
+          }
+          persistRail(removeGraphFromLayout(base, drag.graphId))
+          if (preferredGraphId === drag.graphId) setPreferredGraphId(null)
+          return
+        }
+        if (target.kind === 'graph' && target.graphId) {
+          await mergeGraphs(drag.graphId, target.graphId)
+          persistRail(removeGraphFromLayout(base, drag.graphId))
+          setPreferredGraphId(target.graphId)
+          return
+        }
+        if (target.kind === 'folder' && target.folderId) {
+          persistRail(moveGraphIntoFolder(base, drag.graphId, target.folderId))
+          return
+        }
+        if (target.kind === 'rail') {
+          persistRail(insertGraphOnRail(base, drag.graphId, target.railDropIndex))
+          return
+        }
+        if (target.kind === 'canvas') {
+          // Dropping a whole graph onto canvas just focuses it.
+          setPreferredGraphId(drag.graphId)
+          return
+        }
+        return
+      }
+
+      // ——— Session drag (misc / canvas) ———
+      const sessionId = drag.sessionId
+      if (!sessionId) return
+
+      if (target.kind === 'misc') {
+        await demoteToMisc(sessionId)
+        return
+      }
+
+      if (target.kind === 'canvas') {
+        const graphId = activeGraphId
+        const placed = await placeSessionOnGraph(
+          sessionId,
+          graphId ? { mode: 'current-graph', graphId } : { mode: 'new-graph' },
+        )
+        const nextGraphId = graphId ?? placed?.graphId ?? null
+        if (nextGraphId) {
+          persistRail(insertGraphOnRail(base, nextGraphId))
+          setPreferredGraphId(nextGraphId)
+        }
+        return
+      }
+
+      if (target.kind === 'rail') {
+        // Canvas → rail blank: extract whole subtree into a new graph.
+        if (drag.source === 'canvas') {
+          const result = await extractSubtreeToGraph(sessionId)
+          if (!result) return
+          persistRail(insertGraphOnRail(base, result.newGraphId, target.railDropIndex))
+          setPreferredGraphId(result.newGraphId)
+          const rep = pickGraphRepresentative(
+            useChatSessionStore.getState().heads,
+            result.newGraphId,
+          )
+          if (rep) void switchSession(rep.id)
+          return
+        }
+        // Misc → rail: new graph with this session as sole root.
+        const head = await placeSessionOnGraph(sessionId, { mode: 'new-graph' })
+        if (!head?.graphId) return
+        persistRail(insertGraphOnRail(base, head.graphId, target.railDropIndex))
+        setPreferredGraphId(head.graphId)
+        return
+      }
+
+      if (target.kind === 'graph' && target.graphId) {
+        // Join target graph as independent root (session only; not whole source graph).
+        await placeSessionOnGraph(sessionId, {
+          mode: 'join-graph',
+          graphId: target.graphId,
+        })
+        setPreferredGraphId(target.graphId)
+        return
+      }
+
+      if (target.kind === 'folder' && target.folderId) {
+        if (drag.source === 'canvas') {
+          const result = await extractSubtreeToGraph(sessionId)
+          if (!result) return
+          persistRail(
+            moveGraphIntoFolder(
+              insertGraphOnRail(base, result.newGraphId),
+              result.newGraphId,
+              target.folderId,
+            ),
+          )
+          setPreferredGraphId(result.newGraphId)
+          return
+        }
+        const head = await placeSessionOnGraph(sessionId, { mode: 'new-graph' })
+        if (!head?.graphId) return
+        persistRail(
+          moveGraphIntoFolder(
+            insertGraphOnRail(base, head.graphId),
+            head.graphId,
+            target.folderId,
+          ),
+        )
+        setPreferredGraphId(head.graphId)
+      }
+    },
+    [
+      activeGraphId,
+      demoteToMisc,
+      extractSubtreeToGraph,
+      mergeGraphs,
+      placeSessionOnGraph,
+      persistRail,
+      preferredGraphId,
+      switchSession,
+    ],
+  )
+
+  const {
+    drag: sessionDrag,
+    onPointerDown: onSessionPointerDown,
+    onPointerMove: onSessionPointerMove,
+    onPointerUp: onSessionPointerUp,
+  } = useSessionGraphDrag({
+    onDragStart: () => setForceRailExpanded(true),
+    onDragEnd: () => setForceRailExpanded(false),
+    onDrop: (state, target) => {
+      void handleDrop(state, target)
+    },
+  })
 
   useEffect(() => {
     if (!open) return undefined
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSessionGraphOpen(false)
+      if (event.key === 'Escape' && !sessionDrag) setSessionGraphOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, setSessionGraphOpen])
+  }, [open, sessionDrag, setSessionGraphOpen])
 
   useEffect(() => {
     if (!open) return undefined
@@ -135,16 +378,29 @@ export default function SessionGraphOverlay() {
     setViewport((current) => ({ ...current, scale: nextScale }))
   }
 
-  const openWorkingSession = (sessionId: string) => {
-    void switchSession(sessionId)
-    setRightPanelOpen(true)
-  }
-
   const createWorkingSession = () => {
     void createSession().then(() => {
       setRightPanelOpen(true)
     })
   }
+
+  const dropHighlight =
+    sessionDrag?.target?.kind === 'rail' ||
+    sessionDrag?.target?.kind === 'graph' ||
+    sessionDrag?.target?.kind === 'folder'
+      ? sessionDrag.target.kind
+      : null
+
+  const ghostTitle = sessionDrag?.title ?? ''
+  const ghostTask = sessionDrag
+    ? classifySessionTask(
+        ghostTitle,
+        sessionDrag.sessionId
+          ? heads.find((h) => h.id === sessionDrag.sessionId)?.responsibility
+          : pickGraphRepresentative(heads, sessionDrag.graphId ?? '')?.responsibility,
+      )
+    : null
+  const GhostIcon = ghostTask ? TASK_ICON[ghostTask] : null
 
   return (
     <SessionGraphFrame
@@ -153,14 +409,54 @@ export default function SessionGraphOverlay() {
       label={ts('chat.sessionGraph.title')}
     >
       <WorkingSessionRail
-        items={workingSessions}
-        activeSessionId={activeSessionId}
-        onOpen={openWorkingSession}
+        layout={mergedRail}
+        heads={heads}
+        activeGraphId={activeGraphId}
+        forceExpanded={forceRailExpanded}
+        dropHighlight={dropHighlight}
+        dropGraphId={sessionDrag?.target?.graphId ?? null}
+        dropFolderId={sessionDrag?.target?.folderId ?? null}
+        draggingGraphId={
+          sessionDrag?.source === 'rail' ? sessionDrag.graphId : null
+        }
+        railDropIndex={sessionDrag?.railDropIndex ?? null}
+        onOpenGraph={(graphId) => {
+          void openGraph(graphId)
+        }}
         onCreate={createWorkingSession}
+        onCreateFolder={() => {
+          persistRail(createRailFolder(railLayout, ts('chat.sessionGraph.folderUntitled')))
+        }}
+        onRemoveGraph={(graphId) => {
+          void (async () => {
+            const members = sessionsInGraph(heads, graphId)
+            for (const member of members) {
+              await placeSessionOnGraph(member.id, { mode: 'misc' })
+            }
+            persistRail(removeGraphFromLayout(railLayoutRef.current, graphId))
+            if (preferredGraphId === graphId) setPreferredGraphId(null)
+          })()
+        }}
+        onRemoveFolder={(folderId) => {
+          persistRail(removeFolderFromLayout(mergedRail, folderId))
+        }}
+        onGraphPointerDown={(event, graphId, title) => {
+          onSessionPointerDown(event, {
+            graphId,
+            title,
+            source: 'rail',
+          })
+        }}
+        onPointerMove={onSessionPointerMove}
+        onPointerUp={onSessionPointerUp}
       />
       <div className={styles.main}>
         <header className={styles.header}>
-          <h2 className={styles.title}>{ts('chat.sessionGraph.title')}</h2>
+          <h2 className={styles.title}>
+            {activeGraphId
+              ? graphRailTitle(heads, activeGraphId, ts('chat.sessionGraph.title'))
+              : ts('chat.sessionGraph.title')}
+          </h2>
           <button
             type="button"
             className={styles.closeButton}
@@ -171,9 +467,13 @@ export default function SessionGraphOverlay() {
           </button>
         </header>
         <div
-          className={`${styles.canvas} ${dragging ? styles.canvasDragging : ''}`}
+          className={`${styles.canvas} ${dragging ? styles.canvasDragging : ''} ${
+            sessionDrag?.target?.kind === 'canvas' ? styles.canvasDropTarget : ''
+          }`}
+          data-session-graph-drop="canvas"
           onWheel={onWheel}
           onPointerDown={(event) => {
+            if (sessionDrag) return
             if ((event.target as HTMLElement).closest('[data-session-node]')) return
             dragRef.current = {
               x: viewport.x,
@@ -232,19 +532,32 @@ export default function SessionGraphOverlay() {
                 const position = layout.positions[node.id]
                 if (!position) return null
                 const head = heads.find((item) => item.id === node.id)
+                const title = node.title || ts('chat.history.untitled')
+                const lifted = sessionDrag?.sessionId === node.id
                 return (
                   <SessionNode
                     key={node.id}
                     head={head}
-                    title={node.title || ts('chat.history.untitled')}
+                    title={title}
                     responsibility={node.responsibility}
                     status={node.status}
                     active={node.id === activeSessionId}
+                    lifted={lifted}
                     x={position.x}
                     y={position.y}
                     onOpen={() => void switchSession(node.id)}
                     onBranch={() => void forkSession(node.id)}
-                    onMisc={() => void setSessionClassification(node.id, 'misc')}
+                    onMisc={() => void demoteToMisc(node.id)}
+                    onPointerDown={(event) =>
+                      onSessionPointerDown(event, {
+                        sessionId: node.id,
+                        graphId: node.graphId,
+                        title,
+                        source: 'canvas',
+                      })
+                    }
+                    onPointerMove={onSessionPointerMove}
+                    onPointerUp={onSessionPointerUp}
                   />
                 )
               })}
@@ -254,10 +567,42 @@ export default function SessionGraphOverlay() {
         <MiscTray
           items={model.misc}
           activeSessionId={activeSessionId}
+          dropActive={sessionDrag?.target?.kind === 'misc'}
           onOpen={(sessionId) => void switchSession(sessionId)}
-          onPromote={(sessionId) => void setSessionClassification(sessionId, 'topic')}
+          onPromote={(sessionId) => {
+            void placeSessionOnGraph(
+              sessionId,
+              activeGraphId
+                ? { mode: 'current-graph', graphId: activeGraphId }
+                : { mode: 'new-graph' },
+            ).then((head) => {
+              if (!head?.graphId) return
+              persistRail(insertGraphOnRail(railLayoutRef.current, head.graphId))
+              setPreferredGraphId(head.graphId)
+            })
+          }}
+          onPointerDown={(event, sessionId, title) => {
+            onSessionPointerDown(event, {
+              sessionId,
+              title,
+              source: 'misc',
+            })
+          }}
+          onPointerMove={onSessionPointerMove}
+          onPointerUp={onSessionPointerUp}
         />
       </div>
+      {sessionDrag ? (
+        <div
+          className={styles.sessionDragGhost}
+          style={{ left: sessionDrag.x + 10, top: sessionDrag.y + 10 }}
+          data-task={ghostTask ?? undefined}
+          aria-hidden
+        >
+          {GhostIcon ? <GhostIcon size={16} strokeWidth={2} /> : null}
+          <span>{ghostTitle}</span>
+        </div>
+      ) : null}
     </SessionGraphFrame>
   )
 }
@@ -268,22 +613,30 @@ function SessionNode({
   responsibility,
   status,
   active,
+  lifted,
   x,
   y,
   onOpen,
   onBranch,
   onMisc,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
 }: {
   head: ChatSessionHead | undefined
   title: string
   responsibility?: string
   status: SessionGraphModel['nodes'][number]['status']
   active: boolean
+  lifted: boolean
   x: number
   y: number
   onOpen: () => void
   onBranch: () => void
   onMisc: () => void
+  onPointerDown: (event: ReactPointerEvent) => void
+  onPointerMove: (event: ReactPointerEvent) => void
+  onPointerUp: (event: ReactPointerEvent) => void
 }) {
   const { ts } = useI18n()
   const task = classifySessionTask(title, responsibility)
@@ -291,10 +644,16 @@ function SessionNode({
   const taskLabel = ts(`chat.sessionGraph.task.${task}`)
   return (
     <div
-      className={`${styles.node} ${active ? styles.nodeActive : ''}`}
+      className={`${styles.node} ${active ? styles.nodeActive : ''} ${
+        lifted ? styles.nodeLifted : ''
+      }`}
       style={{ left: x, top: y, width: SESSION_NODE_WIDTH, height: SESSION_NODE_HEIGHT }}
       data-session-node={head?.id}
       data-task={task}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
     >
       <div className={styles.nodeTop}>
         <span className={styles.taskMark} title={taskLabel}>
@@ -315,6 +674,7 @@ function SessionNode({
           <button
             type="button"
             className={styles.iconButton}
+            data-session-drag-ignore=""
             aria-label={ts('chat.sessionGraph.branch')}
             title={ts('chat.sessionGraph.branch')}
             onClick={onBranch}
@@ -324,6 +684,7 @@ function SessionNode({
           <button
             type="button"
             className={styles.iconButton}
+            data-session-drag-ignore=""
             aria-label={ts('chat.sessionGraph.moveToMisc')}
             title={ts('chat.sessionGraph.moveToMisc')}
             onClick={onMisc}
@@ -339,39 +700,65 @@ function SessionNode({
 function MiscTray({
   items,
   activeSessionId,
+  dropActive,
   onOpen,
   onPromote,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
 }: {
   items: ChatSessionHead[]
   activeSessionId: string | null
+  dropActive: boolean
   onOpen: (sessionId: string) => void
   onPromote: (sessionId: string) => void
+  onPointerDown: (
+    event: ReactPointerEvent,
+    sessionId: string,
+    title: string,
+  ) => void
+  onPointerMove: (event: ReactPointerEvent) => void
+  onPointerUp: (event: ReactPointerEvent) => void
 }) {
   const { ts } = useI18n()
-  if (items.length === 0) return null
   return (
-    <div className={styles.misc}>
+    <div
+      className={`${styles.misc} ${dropActive ? styles.miscDropTarget : ''}`}
+      data-session-graph-drop="misc"
+    >
       <span className={styles.miscLabel}>{ts('chat.sessionGraph.misc')}</span>
       <div className={styles.miscList}>
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className={`${styles.miscChip} ${item.id === activeSessionId ? styles.miscChipActive : ''}`}
-          >
-            <button type="button" className={styles.miscTitle} onClick={() => onOpen(item.id)}>
-              {item.title.trim() || ts('chat.history.untitled')}
-            </button>
-            <button
-              type="button"
-              className={styles.miscButton}
-              aria-label={ts('chat.sessionGraph.moveToGraph')}
-              title={ts('chat.sessionGraph.moveToGraph')}
-              onClick={() => onPromote(item.id)}
-            >
-              +
-            </button>
-          </div>
-        ))}
+        {items.length === 0 ? (
+          <span className={styles.miscHint}>{ts('chat.sessionGraph.miscDropHint')}</span>
+        ) : (
+          items.map((item) => {
+            const title = item.title.trim() || ts('chat.history.untitled')
+            return (
+              <div
+                key={item.id}
+                className={`${styles.miscChip} ${item.id === activeSessionId ? styles.miscChipActive : ''}`}
+                onPointerDown={(event) => onPointerDown(event, item.id, title)}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+              >
+                <button type="button" className={styles.miscTitle} onClick={() => onOpen(item.id)}>
+                  {title}
+                </button>
+                <button
+                  type="button"
+                  className={styles.miscButton}
+                  data-session-drag-ignore=""
+                  aria-label={ts('chat.sessionGraph.moveToGraph')}
+                  title={ts('chat.sessionGraph.moveToGraph')}
+                  onClick={() => onPromote(item.id)}
+                >
+                  +
+                </button>
+              </div>
+            )
+          })
+        )}
       </div>
     </div>
   )
