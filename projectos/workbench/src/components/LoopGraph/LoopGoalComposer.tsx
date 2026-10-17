@@ -1,10 +1,20 @@
-import { useMemo, useState, type KeyboardEvent } from 'react'
-import { ChevronUp } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { ChevronUp, MessageSquare, Pencil, Undo2 } from 'lucide-react'
 import type { LoopComposerMode, LoopOpenQuestion } from '@contracts/index'
+import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea'
 import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
 import AgentActivityIndicator from '../ui/AgentActivityIndicator'
+import Button from '../ui/Button'
+import Chip from '../ui/Chip'
 import styles from './LoopGoalComposer.module.css'
+
+const COMPOSER_MODES: LoopComposerMode[] = ['ask', 'edit']
+
+const MODE_ICON = {
+  ask: MessageSquare,
+  edit: Pencil,
+} as const
 
 export default function LoopGoalComposer() {
   const { ts } = useI18n()
@@ -13,7 +23,7 @@ export default function LoopGoalComposer() {
   const composerSheet = useLoopGraphStore((s) => s.composerSheet)
   const authoringBusy = useLoopGraphStore((s) => s.authoringBusy)
   const setComposerDraft = useLoopGraphStore((s) => s.setComposerDraft)
-  const setComposerSheet = useLoopGraphStore((s) => s.setComposerSheet)
+  const toggleComposerSheet = useLoopGraphStore((s) => s.toggleComposerSheet)
   const setComposerMode = useLoopGraphStore((s) => s.setComposerMode)
   const sendAuthoringTurn = useLoopGraphStore((s) => s.sendAuthoringTurn)
   const answerGoalClarification = useLoopGraphStore((s) => s.answerGoalClarification)
@@ -23,6 +33,9 @@ export default function LoopGoalComposer() {
   const undoDraft = useLoopGraphStore((s) => s.undoDraft)
 
   const [clarifyAnswers, setClarifyAnswers] = useState<Record<string, string>>({})
+  const [modeMenuOpen, setModeMenuOpen] = useState(false)
+  const modeMenuRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useAutoResizeTextarea(composerDraft, 200)
 
   const mode: LoopComposerMode = document?.composerMode ?? 'ask'
   const draftContext = document?.draftGoalContext
@@ -50,11 +63,24 @@ export default function LoopGoalComposer() {
     return recentSteps.find((step) => step.id === trace.currentStepId) ?? recentSteps.at(-1)
   }, [recentSteps, trace?.currentStepId])
 
+  useEffect(() => {
+    if (!modeMenuOpen) return
+    const onPointerDown = (event: MouseEvent) => {
+      if (!modeMenuRef.current?.contains(event.target as Node)) {
+        setModeMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [modeMenuOpen])
+
   if (!document) return null
 
-  const toggleSheet = (sheet: 'flow' | 'context') => {
-    setComposerSheet(composerSheet === sheet ? 'none' : sheet)
-  }
+  const ModeIcon = MODE_ICON[mode]
+  const modeLabel =
+    mode === 'ask' ? ts('chat.loopGraph.modeDiscuss') : ts('chat.loopGraph.modeEdit')
+  const submitDisabled =
+    authoringBusy || !composerDraft.trim() || (mode === 'ask' && needsClarification)
 
   const onSend = () => {
     void sendAuthoringTurn()
@@ -63,9 +89,7 @@ export default function LoopGoalComposer() {
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      if (!authoringBusy && composerDraft.trim() && !(mode === 'ask' && needsClarification)) {
-        onSend()
-      }
+      if (!submitDisabled) onSend()
     }
   }
 
@@ -104,8 +128,7 @@ export default function LoopGoalComposer() {
         ) : null}
         <input
           id={`loop-clarify-${question.id}`}
-          className={styles.textarea}
-          style={{ minHeight: 28, maxHeight: 48 }}
+          className={styles.clarifyInput}
           value={value}
           placeholder={ts('chat.loopGraph.clarifyCustom')}
           onChange={(event) =>
@@ -119,112 +142,130 @@ export default function LoopGoalComposer() {
     )
   }
 
+  const flowOpen = composerSheet === 'flow'
+  const contextOpen = composerSheet === 'context'
+
   return (
     <div className={styles.composer} data-loop-goal-composer="">
-      <div className={styles.sheetTabs} role="tablist" aria-label={ts('chat.loopGraph.composerSheets')}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={composerSheet === 'flow'}
-          className={`${styles.sheetTab} ${composerSheet === 'flow' ? styles.sheetTabActive : ''} ${
-            authoringBusy || trace?.status === 'running' ? styles.sheetTabBusy : ''
-          }`}
-          onClick={() => toggleSheet('flow')}
+      <div className={styles.bookmarkStack}>
+        <div
+          className={styles.bookmarkTabs}
+          role="tablist"
+          aria-label={ts('chat.loopGraph.composerSheets')}
         >
-          <ChevronUp size={12} aria-hidden />
-          {ts('chat.loopGraph.agentFlowSheet')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={composerSheet === 'context'}
-          className={`${styles.sheetTab} ${composerSheet === 'context' ? styles.sheetTabActive : ''}`}
-          onClick={() => toggleSheet('context')}
-        >
-          <ChevronUp size={12} aria-hidden />
-          {ts('chat.loopGraph.goalContextSheet')}
-        </button>
-      </div>
-
-      {composerSheet === 'flow' ? (
-        <div className={styles.sheetPanel} role="tabpanel">
-          {authoringBusy || currentStep ? (
-            <div className={styles.flowCurrent}>
-              <AgentActivityIndicator
-                state={authoringBusy || trace?.status === 'running' ? 'working' : 'composing'}
-                label={
-                  authoringBusy
-                    ? ts('chat.loopGraph.authoringWorking')
-                    : (currentStep?.label ?? ts('chat.loopGraph.authoringIdle'))
-                }
-              />
-            </div>
-          ) : (
-            <p className={styles.contextEmpty}>{ts('chat.loopGraph.authoringIdle')}</p>
-          )}
-          {recentSteps.length > 0 ? (
-            <ul className={styles.flowSteps}>
-              {recentSteps.map((step) => (
-                <li
-                  key={step.id}
-                  className={`${styles.flowStep} ${
-                    step.id === currentStep?.id ? styles.flowStepCurrent : ''
-                  }`}
-                >
-                  {step.label}
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={flowOpen}
+            className={`${styles.bookmarkTab} ${flowOpen ? styles.bookmarkTabActive : ''} ${
+              authoringBusy || trace?.status === 'running' ? styles.bookmarkTabBusy : ''
+            }`}
+            onClick={() => toggleComposerSheet('flow')}
+          >
+            <ChevronUp
+              size={11}
+              aria-hidden
+              className={flowOpen ? styles.bookmarkChevronOpen : undefined}
+            />
+            {ts('chat.loopGraph.agentFlowSheet')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={contextOpen}
+            className={`${styles.bookmarkTab} ${contextOpen ? styles.bookmarkTabActive : ''}`}
+            onClick={() => toggleComposerSheet('context')}
+          >
+            <ChevronUp
+              size={11}
+              aria-hidden
+              className={contextOpen ? styles.bookmarkChevronOpen : undefined}
+            />
+            {ts('chat.loopGraph.goalContextSheet')}
+          </button>
         </div>
-      ) : null}
 
-      {composerSheet === 'context' ? (
-        <div className={styles.sheetPanel} role="tabpanel">
-          {!context ? (
-            <p className={styles.contextEmpty}>{ts('chat.loopGraph.goalContextEmpty')}</p>
-          ) : (
-            <div className={styles.contextBlock}>
-              <h3 className={styles.contextTitle}>{context.goal}</h3>
-              <div className={styles.contextMeta}>
-                {ts('chat.loopGraph.goalContextStatus', {
-                  status: ts(`chat.loopGraph.goalContextStatusValue.${context.status}`),
-                  revision: String(context.revision),
-                })}
+        {flowOpen ? (
+          <div className={styles.sheetPanel} role="tabpanel" data-loop-sheet="flow">
+            {authoringBusy || currentStep ? (
+              <div className={styles.flowCurrent}>
+                <AgentActivityIndicator
+                  state={authoringBusy || trace?.status === 'running' ? 'working' : 'composing'}
+                  label={
+                    authoringBusy
+                      ? ts('chat.loopGraph.authoringWorking')
+                      : (currentStep?.label ?? ts('chat.loopGraph.authoringIdle'))
+                  }
+                />
               </div>
-              {context.constraints.length > 0 ? (
-                <p className={styles.contextSection}>
-                  <strong>{ts('chat.loopGraph.goalConstraints')}</strong>:{' '}
-                  {context.constraints.join('; ')}
-                </p>
-              ) : null}
-              {context.doneWhen.length > 0 ? (
-                <p className={styles.contextSection}>
-                  <strong>{ts('chat.loopGraph.goalDoneWhen')}</strong>: {context.doneWhen.join('; ')}
-                </p>
-              ) : null}
-              {context.outOfScope.length > 0 ? (
-                <p className={styles.contextSection}>
-                  <strong>{ts('chat.loopGraph.goalOutOfScope')}</strong>:{' '}
-                  {context.outOfScope.join('; ')}
-                </p>
-              ) : null}
-              {canConfirm ? (
-                <div className={styles.offerActions}>
-                  <button
-                    type="button"
-                    className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
-                    disabled={authoringBusy}
-                    onClick={() => void confirmGoalContext()}
+            ) : (
+              <p className={styles.contextEmpty}>{ts('chat.loopGraph.authoringIdle')}</p>
+            )}
+            {recentSteps.length > 0 ? (
+              <ul className={styles.flowSteps}>
+                {recentSteps.map((step) => (
+                  <li
+                    key={step.id}
+                    className={`${styles.flowStep} ${
+                      step.id === currentStep?.id ? styles.flowStepCurrent : ''
+                    }`}
                   >
-                    {ts('chat.loopGraph.confirmGoalContext')}
-                  </button>
+                    {step.label}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+
+        {contextOpen ? (
+          <div className={styles.sheetPanel} role="tabpanel" data-loop-sheet="context">
+            {!context ? (
+              <p className={styles.contextEmpty}>{ts('chat.loopGraph.goalContextEmpty')}</p>
+            ) : (
+              <div className={styles.contextBlock}>
+                <h3 className={styles.contextTitle}>{context.goal}</h3>
+                <div className={styles.contextMeta}>
+                  {ts('chat.loopGraph.goalContextStatus', {
+                    status: ts(`chat.loopGraph.goalContextStatusValue.${context.status}`),
+                    revision: String(context.revision),
+                  })}
                 </div>
-              ) : null}
-            </div>
-          )}
-        </div>
-      ) : null}
+                {context.constraints.length > 0 ? (
+                  <p className={styles.contextSection}>
+                    <strong>{ts('chat.loopGraph.goalConstraints')}</strong>:{' '}
+                    {context.constraints.join('; ')}
+                  </p>
+                ) : null}
+                {context.doneWhen.length > 0 ? (
+                  <p className={styles.contextSection}>
+                    <strong>{ts('chat.loopGraph.goalDoneWhen')}</strong>:{' '}
+                    {context.doneWhen.join('; ')}
+                  </p>
+                ) : null}
+                {context.outOfScope.length > 0 ? (
+                  <p className={styles.contextSection}>
+                    <strong>{ts('chat.loopGraph.goalOutOfScope')}</strong>:{' '}
+                    {context.outOfScope.join('; ')}
+                  </p>
+                ) : null}
+                {canConfirm ? (
+                  <div className={styles.offerActions}>
+                    <button
+                      type="button"
+                      className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                      disabled={authoringBusy}
+                      onClick={() => void confirmGoalContext()}
+                    >
+                      {ts('chat.loopGraph.confirmGoalContext')}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
 
       {needsClarification ? (
         <div className={styles.clarifyCard} data-loop-goal-clarify="">
@@ -267,74 +308,98 @@ export default function LoopGoalComposer() {
         </div>
       ) : null}
 
-      <div className={styles.row}>
-        <div className={styles.modes} role="group" aria-label={ts('chat.loopGraph.composerModes')}>
-          <button
-            type="button"
-            className={`${styles.modeButton} ${mode === 'ask' ? styles.modeButtonActive : ''}`}
-            aria-pressed={mode === 'ask'}
-            disabled={authoringBusy}
-            onClick={() => void setComposerMode('ask')}
-          >
-            {ts('chat.loopGraph.modeAsk')}
-          </button>
-          <button
-            type="button"
-            className={`${styles.modeButton} ${mode === 'edit' ? styles.modeButtonActive : ''}`}
-            aria-pressed={mode === 'edit'}
-            disabled={authoringBusy}
-            onClick={() => void setComposerMode('edit')}
-          >
-            {ts('chat.loopGraph.modeEdit')}
-          </button>
+      <div className={styles.promptDock}>
+        <div className={styles.inputComposer}>
+          <div className={styles.composerBody}>
+            <textarea
+              ref={textareaRef}
+              className={styles.input}
+              value={composerDraft}
+              placeholder={
+                mode === 'ask'
+                  ? ts('chat.loopGraph.askPlaceholder')
+                  : ts('chat.loopGraph.editPlaceholder')
+              }
+              disabled={authoringBusy || (mode === 'ask' && needsClarification)}
+              onChange={(event) => setComposerDraft(event.target.value)}
+              onKeyDown={onKeyDown}
+              rows={3}
+              aria-label={ts('chat.loopGraph.composerInput')}
+            />
+          </div>
+          <div className={styles.footer}>
+            <div className={styles.leftCluster}>
+              <div className={styles.menuWrap} ref={modeMenuRef}>
+                <Chip
+                  active={modeMenuOpen}
+                  className={styles.modeChip}
+                  aria-expanded={modeMenuOpen}
+                  aria-haspopup="listbox"
+                  aria-label={ts('chat.loopGraph.composerModes')}
+                  disabled={authoringBusy}
+                  onClick={() => setModeMenuOpen((open) => !open)}
+                >
+                  <ModeIcon size={14} strokeWidth={2} aria-hidden />
+                  <span>{modeLabel}</span>
+                  <span aria-hidden>▾</span>
+                </Chip>
+                {modeMenuOpen ? (
+                  <div className={styles.dropdownAnchor} role="listbox">
+                    {COMPOSER_MODES.map((option) => {
+                      const OptionIcon = MODE_ICON[option]
+                      const active = option === mode
+                      const label =
+                        option === 'ask'
+                          ? ts('chat.loopGraph.modeDiscuss')
+                          : ts('chat.loopGraph.modeEdit')
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          role="option"
+                          aria-selected={active}
+                          className={`${styles.menuItem} ${active ? styles.menuItemActive : ''}`}
+                          onClick={() => {
+                            void setComposerMode(option)
+                            setModeMenuOpen(false)
+                          }}
+                        >
+                          <OptionIcon size={15} strokeWidth={2} aria-hidden />
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <div className={styles.rightCluster}>
+              <button
+                type="button"
+                className={styles.undoButton}
+                disabled={authoringBusy || !canUndo}
+                title={ts('chat.loopGraph.undoDraft')}
+                aria-label={ts('chat.loopGraph.undoDraft')}
+                onClick={() => void undoDraft()}
+              >
+                <Undo2 size={14} aria-hidden />
+                <span>{ts('chat.loopGraph.undoDraft')}</span>
+              </button>
+              <Button type="button" size="sm" disabled={submitDisabled} onClick={onSend}>
+                {ts('chat.loopGraph.send')}
+              </Button>
+            </div>
+          </div>
         </div>
-        <textarea
-          className={styles.textarea}
-          value={composerDraft}
-          placeholder={
-            mode === 'ask'
-              ? ts('chat.loopGraph.askPlaceholder')
-              : ts('chat.loopGraph.editPlaceholder')
-          }
-          disabled={authoringBusy || (mode === 'ask' && needsClarification)}
-          onChange={(event) => setComposerDraft(event.target.value)}
-          onKeyDown={onKeyDown}
-          rows={2}
-          aria-label={ts('chat.loopGraph.composerInput')}
-        />
-        <div className={styles.actions}>
-          <button
-            type="button"
-            className={styles.undoButton}
-            disabled={authoringBusy || !canUndo}
-            title={ts('chat.loopGraph.undoDraft')}
-            aria-label={ts('chat.loopGraph.undoDraft')}
-            onClick={() => void undoDraft()}
-          >
-            {ts('chat.loopGraph.undoDraft')}
-          </button>
-          <button
-            type="button"
-            className={styles.sendButton}
-            disabled={
-              authoringBusy ||
-              !composerDraft.trim() ||
-              (mode === 'ask' && needsClarification)
-            }
-            onClick={onSend}
-          >
-            {ts('chat.loopGraph.send')}
-          </button>
-        </div>
-      </div>
 
-      {document.linkedSessionIds.length > 0 ? (
-        <span className={styles.metaHint}>
-          {ts('chat.loopGraph.linkedSessions', {
-            count: String(document.linkedSessionIds.length),
-          })}
-        </span>
-      ) : null}
+        {document.linkedSessionIds.length > 0 ? (
+          <span className={styles.metaHint}>
+            {ts('chat.loopGraph.linkedSessions', {
+              count: String(document.linkedSessionIds.length),
+            })}
+          </span>
+        ) : null}
+      </div>
     </div>
   )
 }

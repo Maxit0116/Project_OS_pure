@@ -311,6 +311,18 @@ const api = {
     hideOverlay(): Promise<{ ok: boolean }> {
       return ipcRenderer.invoke('spatial-pin:hideOverlay')
     },
+    /** Main Escape (showInactive): solidify then hideOverlay. */
+    onRequestHide(listener: () => void): Disposable {
+      const handler = () => {
+        listener()
+      }
+      ipcRenderer.on('spatial-pin:requestHide', handler)
+      return {
+        dispose() {
+          ipcRenderer.off('spatial-pin:requestHide', handler)
+        },
+      }
+    },
     closeOverlay(): Promise<{ ok: boolean }> {
       return ipcRenderer.invoke('spatial-pin:closeOverlay')
     },
@@ -381,6 +393,34 @@ const api = {
       error?: string
     }> {
       return ipcRenderer.invoke('spatial-pin:captureSelection', rect)
+    },
+    /** First paint / React mount — main re-emits beginCapture if it was missed. */
+    notifyOverlayMounted(): void {
+      ipcRenderer.send('spatial-pin:overlayMounted')
+    },
+    /** Signal main that beginCapture UI has been painted (opacity handshake). */
+    notifyOverlayReady(): void {
+      ipcRenderer.send('spatial-pin:overlayReady')
+    },
+    /** Overlay Esc flush finished — main broadcasts to Workbench to refresh gallery. */
+    notifySessionSolidified(sessionId: string): void {
+      ipcRenderer.send('spatial-pin:sessionSolidified', { sessionId })
+    },
+    onSessionSolidified(
+      listener: (payload: { sessionId: string | null }) => void,
+    ): Disposable {
+      const handler = (
+        _event: unknown,
+        payload: { sessionId?: string | null },
+      ) => {
+        listener({ sessionId: payload?.sessionId ?? null })
+      }
+      ipcRenderer.on('spatial-pin:sessionSolidified', handler)
+      return {
+        dispose() {
+          ipcRenderer.off('spatial-pin:sessionSolidified', handler)
+        },
+      }
     },
     onBeginCapture(
       listener: (payload: {

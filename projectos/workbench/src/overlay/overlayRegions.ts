@@ -12,9 +12,15 @@ export interface OverlayArrow {
   id: string
   index: number
   color: string
+  /** Arrow head dock on the capture region. */
   anchor: AnnotationAnchor
   head: { x: number; y: number }
   tail: { x: number; y: number }
+  /**
+   * Locked compose-card connection point (set once on commit).
+   * Dragging the card moves the tip but never changes this attach.
+   */
+  composeAttach: AnnotationAnchor
   prompt: string
   pinId: string
   /** Submitted run id if any. */

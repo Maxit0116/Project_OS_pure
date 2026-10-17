@@ -5,12 +5,11 @@ import ChatSessionTitle from '../components/ChatSessionTitle/ChatSessionTitle'
 import ChatContextHeader from '../components/ChatContextHeader/ChatContextHeader'
 import ChatPanel from '../components/ChatPanel/ChatPanel'
 import DebugHarnessPanel from '../components/DebugHarness/DebugHarnessPanel'
-import TabBar from '../components/ui/TabBar'
-import Button from '../components/ui/Button'
 import { GlassPanelShell } from '../components/Glass'
 import { useWorkbenchStore } from '../state/workbenchStore'
 import { useI18n } from '../i18n'
 import type { PanelMotionPhase } from '../hooks/usePanelPresence'
+import RightPanelTabSelect from './RightPanelTabSelect'
 import styles from './RightPanel.module.css'
 
 const isDemoMode = resolveClientMode() === 'mock'
@@ -47,11 +46,6 @@ export default function RightPanel({
     }
   }, [motionPhase])
 
-  const tabs = [
-    { id: 'chat', label: ts('rightTabs.chat') },
-    { id: 'harness', label: ts('rightTabs.harness'), dot: !!harnessRecord },
-  ]
-
   const frostClass = graphBleed ? '' : drawer ? 'glass-panel-edge-left-drawer' : 'glass-panel-edge-left'
   const motionClass =
     drawer && !shellMotion
@@ -74,21 +68,17 @@ export default function RightPanel({
       onAnimationEnd={shellMotion ? undefined : onMotionEnd}
     >
       <div className={styles.header}>
-        <TabBar
-          tabs={tabs}
-          activeId={rightPanelTab}
-          onChange={(id) => setRightPanelTab(id as 'chat' | 'harness')}
-          size="sm"
-          chrome="nested"
+        <RightPanelTabSelect
+          value={rightPanelTab}
+          onChange={setRightPanelTab}
+          harnessDot={!!harnessRecord}
         />
         <div className={styles.headerRight}>
-          {rightPanelTab === 'chat' && <ChatHistoryActions />}
+          <ChatHistoryActions
+            showSessionTools={rightPanelTab === 'chat'}
+            onClose={onClose}
+          />
           {isDemoMode && <span className={styles.badge}>{ts('demo.mock')}</span>}
-          {drawer && onClose && (
-            <Button variant="ghost" size="sm" onClick={onClose} aria-label={ts('common.close')}>
-              ×
-            </Button>
-          )}
         </div>
       </div>
       <div className={`${styles.body} tab-content-fade`} key={rightPanelTab}>

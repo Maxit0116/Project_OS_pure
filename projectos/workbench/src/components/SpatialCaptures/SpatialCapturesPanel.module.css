@@ -1,0 +1,132 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 16px 18px 20px;
+  gap: 14px;
+  overflow: auto;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.card:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-border));
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background:
+    linear-gradient(135deg, rgba(76, 125, 255, 0.08), transparent 60%),
+    var(--color-bg-subtle, rgba(0, 0, 0, 0.04));
+  background-size: cover;
+  background-position: center;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 10px 10px;
+}
+
+.cardTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardSub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.badge {
+  color: var(--color-accent-strong, var(--color-accent));
+  font-weight: 600;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.actionBtn {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+
+.actionBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-secondary);
+}
+
+.actionDanger:hover {
+  color: var(--color-danger, #c44);
+  border-color: color-mix(in srgb, var(--color-danger, #c44) 40%, var(--color-border));
+}
+
+.error {
+  font-size: 12px;
+  color: var(--color-danger, #c44);
+}

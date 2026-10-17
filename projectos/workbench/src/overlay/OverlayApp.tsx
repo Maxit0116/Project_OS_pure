@@ -9,6 +9,7 @@ import {
   Pencil,
   Send,
   SquarePen,
+  Trash2,
   X,
 } from 'lucide-react'
 import type {
@@ -39,6 +40,17 @@ import {
   renumberArrows,
 } from './arrowGeometry'
 import {
+  cardPinnedToTip,
+  composeAttachScreenPoint,
+  estimateComposePanelHeight,
+  layoutComposeForArrow,
+  type ComposeLayoutResult,
+} from './composeLayout'
+import {
+  resolveComposePanelSize,
+  useComposePanelMetrics,
+} from './useComposePanelMetrics'
+import {
   focusIdsForClick,
   isOutsideAllRegions,
   isRegionFocused,
@@ -54,6 +66,7 @@ import {
   relativePointForAnchor,
   relativeToClient,
 } from './regionAnchors'
+import { buildCaptureSessionFromOverlay } from './captureSessionSerialize'
 
 type OpenMenu = 'mode' | null
 
@@ -71,6 +84,15 @@ type PointerMode =
       kind: 'draw'
       regionId: string
       strokeId: string
+    }
+  | {
+      kind: 'compose-drag'
+      regionId: string
+      arrowId: string
+      /** Pointer offset from card top-left at drag start. */
+      grabOffset: { x: number; y: number }
+      panelWidth: number
+      panelHeight: number
     }
 
 const MODES: Array<{
@@ -125,12 +147,23 @@ export function OverlayApp() {
     Array<{ pin: SpatialPin; rect?: ScreenRect; confidence: string }>
   >([])
 
-  const panelRef = useRef<HTMLDivElement | null>(null)
+  const rootRef = useRef<HTMLDivElement | null>(null)
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
+  const { metrics: panelMetrics, bindPanel } = useComposePanelMetrics()
   const projectIdRef = useRef<string | null>(null)
   const locationRef = useRef<LocationKey | null>(null)
   const regionsRef = useRef(regions)
   const snapshotByRegionRef = useRef<Map<string, string>>(new Map())
+  /** In-memory session id for this overlay open; written to disk only on Esc solidify. */
+  const captureSessionIdRef = useRef<string | null>(null)
+  const captureSessionCreatedAtRef = useRef<string | null>(null)
+  const backdropAssetPathRef = useRef<string | undefined>(undefined)
+  const displayBoundsRef = useRef<DisplayBounds | null>(null)
+  const solidifyingRef = useRef(false)
+  const solidifyThenHideRef = useRef<() => Promise<void>>(async () => {})
+  /** Bumped on each beginCapture so we can signal main after the reset commit paints. */
+  const [captureEpoch, setCaptureEpoch] = useState(0)
+  const captureEpochRef = useRef(0)
 
   useEffect(() => {
     projectIdRef.current = projectId
@@ -141,6 +174,9 @@ export function OverlayApp() {
   useEffect(() => {
     regionsRef.current = regions
   }, [regions])
+  useEffect(() => {
+    displayBoundsRef.current = displayBounds
+  }, [displayBounds])
 
   useEffect(() => {
     const bridge = window.projectOS
@@ -148,6 +184,7 @@ export function OverlayApp() {
 
     const beginDisp = bridge.spatialPin.onBeginCapture((payload) => {
       setDisplayBounds(payload.displayBounds)
+      displayBoundsRef.current = payload.displayBounds
       setRegions([])
       setFocusedRegionIds([])
       setActiveArrowId(null)
@@ -158,8 +195,14 @@ export function OverlayApp() {
       setActiveRunId(null)
       setOpenMenu(null)
       snapshotByRegionRef.current.clear()
+      captureSessionIdRef.current = randomId('capture')
+      captureSessionCreatedAtRef.current = new Date().toISOString()
+      backdropAssetPathRef.current = undefined
+      solidifyingRef.current = false
       setStatus('Drag any on-screen region · Esc to cancel')
       void refreshContext()
+      // Defer ready until useLayoutEffect sees this epoch (post-commit).
+      setCaptureEpoch((n) => n + 1)
     })
     const locDisp = bridge.spatialPin.onLocation((payload) => {
       const loc = payload as BridgeLocation
@@ -172,12 +215,31 @@ export function OverlayApp() {
         void resolvePins(loc)
       }
     })
+    const hideDisp = bridge.spatialPin.onRequestHide?.(() => {
+      void solidifyThenHideRef.current()
+    })
     void refreshContext()
+    // Re-request beginCapture in case main emitted before this listener attached.
+    bridge.spatialPin.notifyOverlayMounted?.()
     return () => {
       beginDisp.dispose()
       locDisp.dispose()
+      hideDisp?.dispose()
     }
   }, [])
+
+  // After beginCapture state is committed and painted (useEffect runs post-paint),
+  // tell main it is safe to raise opacity (avoids stale-session flash).
+  useEffect(() => {
+    if (captureEpoch === 0) return
+    if (captureEpoch === captureEpochRef.current) return
+    captureEpochRef.current = captureEpoch
+    // One extra frame so the browser has composited the cleared DOM.
+    const id = requestAnimationFrame(() => {
+      window.projectOS?.spatialPin.notifyOverlayReady?.()
+    })
+    return () => cancelAnimationFrame(id)
+  }, [captureEpoch])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -186,7 +248,7 @@ export function OverlayApp() {
           setOpenMenu(null)
           return
         }
-        void window.projectOS?.spatialPin.hideOverlay()
+        void solidifyThenHideRef.current()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -196,12 +258,17 @@ export function OverlayApp() {
   useEffect(() => {
     if (!openMenu) return
     const onPointerDown = (event: PointerEvent) => {
-      if (panelRef.current?.contains(event.target as Node)) return
+      const panel = activeArrowId
+        ? rootRef.current?.querySelector(
+            `[data-compose-arrow="${CSS.escape(activeArrowId)}"]`,
+          )
+        : null
+      if (panel?.contains(event.target as Node)) return
       setOpenMenu(null)
     }
     document.addEventListener('pointerdown', onPointerDown, true)
     return () => document.removeEventListener('pointerdown', onPointerDown, true)
-  }, [openMenu])
+  }, [openMenu, activeArrowId])
 
   useEffect(() => {
     if (!activeRunId || !window.projectOS) return
@@ -320,12 +387,41 @@ export function OverlayApp() {
     )
   }
 
+  async function ensureBackdrop(pid: string): Promise<string | undefined> {
+    if (backdropAssetPathRef.current) return backdropAssetPathRef.current
+    if (!window.projectOS || !captureSessionIdRef.current) return undefined
+    const bounds = displayBoundsRef.current
+    if (!bounds || bounds.width < 1 || bounds.height < 1) return undefined
+    try {
+      const full = await window.projectOS.spatialPin.captureSelection({
+        x: 0,
+        y: 0,
+        width: bounds.width,
+        height: bounds.height,
+      })
+      if (!full.pngBase64) return undefined
+      const saved = (await window.projectOS.invoke(
+        'saveSpatialCaptureBackdrop',
+        pid,
+        captureSessionIdRef.current,
+        full.pngBase64,
+      )) as { backdropAssetPath: string }
+      backdropAssetPathRef.current = saved.backdropAssetPath
+      return saved.backdropAssetPath
+    } catch {
+      return undefined
+    }
+  }
+
   async function captureRegion(regionId: string, rect: ScreenRect) {
     const pid = (await refreshContext()) ?? projectIdRef.current
     if (!pid || !window.projectOS) {
       setStatus('Open a Project OS workspace first')
       return
     }
+
+    // Full-desktop backdrop once per overlay session (for IDE frozen replay).
+    void ensureBackdrop(pid)
 
     let loc = locationRef.current
     let captureError: string | undefined
@@ -459,6 +555,65 @@ export function OverlayApp() {
     await window.projectOS.invoke('upsertSpatialPin', pid, updated)
   }
 
+  async function solidifyCaptureSession(): Promise<void> {
+    const regions = regionsRef.current
+    if (regions.length === 0) return
+    const pid = projectIdRef.current ?? (await refreshContext())
+    const loc = locationRef.current
+    const sessionId = captureSessionIdRef.current
+    const bounds = displayBoundsRef.current
+    if (!pid || !loc || !sessionId || !bounds || !window.projectOS) return
+
+    const backdrop =
+      backdropAssetPathRef.current ?? (await ensureBackdrop(pid))
+
+    for (const region of regions) {
+      const snapshotAssetPath =
+        region.snapshotAssetPath ??
+        snapshotByRegionRef.current.get(region.id)
+      for (const arrow of region.arrows) {
+        try {
+          await upsertArrowPin(
+            { ...region, ...(snapshotAssetPath ? { snapshotAssetPath } : {}) },
+            arrow,
+          )
+        } catch {
+          /* best-effort flush */
+        }
+      }
+    }
+
+    const session = buildCaptureSessionFromOverlay({
+      id: sessionId,
+      projectId: pid,
+      location: loc,
+      viewport: { width: bounds.width, height: bounds.height },
+      regions,
+      ...(backdrop ? { backdropAssetPath: backdrop } : {}),
+      ...(captureSessionCreatedAtRef.current
+        ? { createdAt: captureSessionCreatedAtRef.current }
+        : {}),
+    })
+    await window.projectOS.invoke('upsertSpatialCaptureSession', pid, session)
+    window.projectOS.spatialPin.notifySessionSolidified?.(sessionId)
+  }
+
+  async function solidifyThenHide(): Promise<void> {
+    if (solidifyingRef.current) return
+    solidifyingRef.current = true
+    try {
+      await solidifyCaptureSession()
+    } catch {
+      /* still dismiss — never block Esc on flush failure */
+    }
+    try {
+      await window.projectOS?.spatialPin.hideOverlay()
+    } finally {
+      solidifyingRef.current = false
+    }
+  }
+  solidifyThenHideRef.current = solidifyThenHide
+
   function commitArrow(
     regionId: string,
     anchor: OverlayArrow['anchor'],
@@ -468,6 +623,17 @@ export function OverlayApp() {
     const region = regionsRef.current.find((r) => r.id === regionId)
     if (!region) return
     const index = region.arrows.length + 1
+    const tip = relativeToClient(region.captureRect, tail)
+    const headScreen = relativeToClient(region.captureRect, head)
+    // Pick compose attach once; tip stays at the user-drawn position.
+    const layout = layoutComposeForArrow({
+      region: region.captureRect,
+      headScreen,
+      preferredTailScreen: tip,
+      panelWidth: 360,
+      panelHeight: estimateComposePanelHeight(false),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    })
     const arrow: OverlayArrow = {
       id: randomId('arrow'),
       index,
@@ -475,6 +641,7 @@ export function OverlayApp() {
       anchor,
       head,
       tail,
+      composeAttach: layout.attach,
       prompt: '',
       pinId: randomId('pin'),
       status: 'draft',
@@ -555,8 +722,18 @@ export function OverlayApp() {
     const containing = focusIdsForClick(regions, clientX, clientY)
     if (containing.length > 0) {
       setFocusedRegionIds(containing)
-      // Click region → show 8 anchors to start/add an arrow (compose hides until arrow lands).
-      setActiveArrowId(null)
+      // Keep compose cards visible — only dim non-focused regions (never unmount).
+      setActiveArrowId((current) => {
+        if (current) {
+          const stillVisible = regions.some(
+            (r) =>
+              containing.includes(r.id) && r.arrows.some((a) => a.id === current),
+          )
+          if (stillVisible) return current
+        }
+        const first = regions.find((r) => containing.includes(r.id))
+        return first?.arrows[first.arrows.length - 1]?.id ?? null
+      })
       setRegions((prev) =>
         prev.map((region) => {
           if (!containing.includes(region.id)) {
@@ -567,6 +744,20 @@ export function OverlayApp() {
       )
       setStatus('Drag from a corner or edge midpoint to place an arrow')
       return
+    }
+
+    // Blank area: cancel Draw if active, otherwise maybe start a new region.
+    if (isOutsideAllRegions(regions, clientX, clientY)) {
+      const drawingIds = regions.filter((r) => r.tool === 'draw').map((r) => r.id)
+      if (drawingIds.length > 0) {
+        setRegions((prev) =>
+          prev.map((region) =>
+            region.tool === 'draw' ? { ...region, tool: 'arrow' } : region,
+          ),
+        )
+        setStatus('Draw cancelled')
+        return
+      }
     }
 
     // Start a new region only when outside all existing regions.
@@ -602,6 +793,29 @@ export function OverlayApp() {
         event.clientY,
       )
       setPointer({ ...pointer, liveTail })
+      return
+    }
+    if (pointer.kind === 'compose-drag') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      const arrow = region?.arrows.find((a) => a.id === pointer.arrowId)
+      if (!region || !arrow?.composeAttach) return
+      const cardX = event.clientX - pointer.grabOffset.x
+      const cardY = event.clientY - pointer.grabOffset.y
+      const card = {
+        x: cardX,
+        y: cardY,
+        width: pointer.panelWidth,
+        height: pointer.panelHeight,
+      }
+      // Tip follows the locked card connection point — direction/length change.
+      const tip = composeAttachScreenPoint(card, arrow.composeAttach)
+      const nextTail = clientToRelative(region.captureRect, tip.x, tip.y)
+      updateRegion(pointer.regionId, (r) => ({
+        ...r,
+        arrows: r.arrows.map((a) =>
+          a.id === pointer.arrowId ? { ...a, tail: nextTail } : a,
+        ),
+      }))
       return
     }
     if (pointer.kind === 'draw') {
@@ -669,6 +883,24 @@ export function OverlayApp() {
       // Ignore tiny accidental arrows.
       if (Math.hypot(dx, dy) < 12) return
       commitArrow(region.id, finalAnchor, finalHead, tail)
+      return
+    }
+
+    if (pointer.kind === 'compose-drag') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      const arrow = region?.arrows.find((a) => a.id === pointer.arrowId)
+      setPointer({ kind: 'idle' })
+      if (region && arrow) {
+        void upsertArrowPin(
+          {
+            ...region,
+            snapshotAssetPath:
+              region.snapshotAssetPath ??
+              snapshotByRegionRef.current.get(region.id),
+          },
+          arrow,
+        )
+      }
       return
     }
 
@@ -814,6 +1046,20 @@ export function OverlayApp() {
     setStatus('Cleared drawings')
   }
 
+  function deleteRegion(regionId: string) {
+    const removed = regionsRef.current.find((r) => r.id === regionId)
+    setRegions((prev) => prev.filter((r) => r.id !== regionId))
+    setFocusedRegionIds((prev) => prev.filter((id) => id !== regionId))
+    if (removed?.arrows.some((a) => a.id === activeArrowId)) {
+      setActiveArrowId(null)
+    }
+    if (pointer.kind !== 'idle' && 'regionId' in pointer && pointer.regionId === regionId) {
+      setPointer({ kind: 'idle' })
+    }
+    setDraftRect(null)
+    setStatus('Region deleted · drag to select another')
+  }
+
   const liveArrow = useMemo(() => {
     if (pointer.kind !== 'arrow') return null
     const region = regions.find((r) => r.id === pointer.regionId)
@@ -831,55 +1077,86 @@ export function OverlayApp() {
     }
   }, [pointer, regions])
 
-  const primaryFocused = useMemo(() => {
-    const id = focusedRegionIds[0]
-    return id ? regions.find((r) => r.id === id) ?? null : null
-  }, [focusedRegionIds, regions])
-
-  const activeArrow = useMemo(() => {
-    if (!activeArrowId) return null
-    for (const region of regions) {
-      const arrow = region.arrows.find((a) => a.id === activeArrowId)
-      if (arrow) return { region, arrow }
-    }
-    return null
-  }, [activeArrowId, regions])
-
-  const modeVisual =
-    MODES.find((item) => item.id === (primaryFocused?.mode ?? 'change')) ??
-    MODES[1]!
-  const ModeIcon = modeVisual.icon
   const hostChip = location ? formatHostChip(location) : null
   const showFlowRail = flow != null || flowSteps.length > 0
-  /** Big compose only after an arrow has been placed. */
-  const showCompose = activeArrow != null
+  const arrowComposes = useMemo(
+    () =>
+      regions.flatMap((region) =>
+        region.arrows.map((arrow) => ({ region, arrow })),
+      ),
+    [regions],
+  )
+  const hasAnyCompose = arrowComposes.length > 0
 
-  const chromeStyle = useMemo(() => {
-    const panelWidth = showFlowRail ? 520 : 360
-    if (activeArrow) {
-      const tail = relativeToClient(
-        activeArrow.region.captureRect,
-        activeArrow.arrow.tail,
-      )
-      const left = Math.min(
-        Math.max(12, tail.x + 16),
-        window.innerWidth - panelWidth - 12,
-      )
-      const top = Math.min(
-        Math.max(12, tail.y - 24),
-        window.innerHeight - 300,
-      )
-      return { left, top, width: panelWidth }
+  function layoutArrowCompose(
+    region: OverlayRegion,
+    arrow: OverlayArrow,
+    withFlow: boolean,
+  ): ComposeLayoutResult {
+    const fallbackWidth = withFlow ? 520 : 360
+    const { width: panelWidth, height: panelHeight } = resolveComposePanelSize(
+      panelMetrics,
+      arrow.id,
+      fallbackWidth,
+      estimateComposePanelHeight(withFlow),
+    )
+    const tip = relativeToClient(region.captureRect, arrow.tail)
+    // After commit, attach is locked — only tip/card move together when dragging.
+    if (arrow.composeAttach) {
+      return {
+        card: cardPinnedToTip(
+          tip,
+          arrow.composeAttach,
+          panelWidth,
+          panelHeight,
+        ),
+        attach: arrow.composeAttach,
+        attachScreen: tip,
+      }
     }
-    return { left: 16, top: 56, width: panelWidth }
-  }, [activeArrow, showFlowRail])
+    return layoutComposeForArrow({
+      region: region.captureRect,
+      headScreen: relativeToClient(region.captureRect, arrow.head),
+      preferredTailScreen: tip,
+      panelWidth,
+      panelHeight,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    })
+  }
+
+  function beginComposeDrag(
+    event: React.PointerEvent,
+    region: OverlayRegion,
+    arrow: OverlayArrow,
+    withFlow: boolean,
+  ) {
+    const layout = layoutArrowCompose(region, arrow, withFlow)
+    event.preventDefault()
+    event.stopPropagation()
+    setFocusedRegionIds([region.id])
+    setActiveArrowId(arrow.id)
+    setPointer({
+      kind: 'compose-drag',
+      regionId: region.id,
+      arrowId: arrow.id,
+      grabOffset: {
+        x: event.clientX - layout.card.x,
+        y: event.clientY - layout.card.y,
+      },
+      panelWidth: layout.card.width,
+      panelHeight: layout.card.height,
+    })
+    rootRef.current?.setPointerCapture?.(event.pointerId)
+  }
 
   return (
     <div
-      className="overlay-root"
+      ref={rootRef}
+      className={`overlay-root${pointer.kind === 'compose-drag' ? ' overlay-root-dragging' : ''}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
     >
       <div className="overlay-dim" />
 
@@ -889,7 +1166,7 @@ export function OverlayApp() {
         aria-label="Exit Spatial Pin"
         title="Exit (Esc)"
         onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => void window.projectOS?.spatialPin.hideOverlay()}
+        onClick={() => void solidifyThenHideRef.current()}
       >
         <X size={14} strokeWidth={2.25} aria-hidden />
         <span>Exit</span>
@@ -923,17 +1200,19 @@ export function OverlayApp() {
             region={region}
             focused={focused}
             onClearDraw={() => clearDraw(region.id)}
+            onDelete={() => deleteRegion(region.id)}
             onSetTool={(tool) => setRegionTool(region.id, tool)}
           />
         )
       })}
 
-      {/* Committed arrows (SVG overlay) */}
+      {/* Committed arrows — tip docks to compose card's best of 8 anchors */}
       <svg className="overlay-arrows-layer" aria-hidden>
         {regions.map((region) =>
           region.arrows.map((arrow) => {
             const head = relativeToClient(region.captureRect, arrow.head)
-            const tail = relativeToClient(region.captureRect, arrow.tail)
+            const withFlow = showFlowRail && arrow.id === activeArrowId
+            const layout = layoutArrowCompose(region, arrow, withFlow)
             const focused = isRegionFocused(focusedRegionIds, region.id)
             return (
               <g
@@ -942,7 +1221,7 @@ export function OverlayApp() {
               >
                 <ArrowPath
                   head={head}
-                  tail={tail}
+                  tail={layout.attachScreen}
                   color={arrow.color}
                   index={arrow.index}
                 />
@@ -961,13 +1240,14 @@ export function OverlayApp() {
         ) : null}
       </svg>
 
-      {/* Click arrow index badge to reopen that arrow's big compose */}
+      {/* Click arrow index badge to focus that arrow's big compose */}
       {regions.map((region) =>
         region.arrows.map((arrow) => {
           const head = relativeToClient(region.captureRect, arrow.head)
-          const tail = relativeToClient(region.captureRect, arrow.tail)
-          const midX = (head.x + tail.x) / 2
-          const midY = (head.y + tail.y) / 2
+          const withFlow = showFlowRail && arrow.id === activeArrowId
+          const layout = layoutArrowCompose(region, arrow, withFlow)
+          const midX = (head.x + layout.attachScreen.x) / 2
+          const midY = (head.y + layout.attachScreen.y) / 2
           const focused = isRegionFocused(focusedRegionIds, region.id)
           return (
             <button
@@ -988,238 +1268,268 @@ export function OverlayApp() {
         }),
       )}
 
-      {/* Big compose — only after an arrow is committed; sits near the arrow tail */}
-      {showCompose && activeArrow && primaryFocused ? (
-        <div
-          ref={panelRef}
-          className="overlay-panel overlay-panel-chrome"
-          style={chromeStyle}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <div className="overlay-panel-header">
-            <span
-              className="overlay-arrow-badge"
-              style={{ background: activeArrow.arrow.color }}
-              aria-hidden
-            >
-              {activeArrow.arrow.index}
-            </span>
-            <span className="overlay-panel-title">Arrow prompt</span>
-            {candidates.length > 0 ? (
-              <select
-                className="overlay-project-select"
-                value={projectId ?? ''}
-                aria-label="Project"
-                onChange={(event) => {
-                  void onSelectProject(event.target.value)
-                }}
-              >
-                {candidates.map((item) => (
-                  <option key={item.projectId} value={item.projectId}>
-                    {item.displayName}
-                    {item.source === 'terminal-cwd' ? ' · terminal' : ''}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-            <button
-              type="button"
-              className="overlay-icon-btn"
-              aria-label="Remove arrow"
-              title="Remove arrow"
-              onClick={() =>
-                deleteArrow(activeArrow.region.id, activeArrow.arrow.id)
-              }
-            >
-              <X size={14} strokeWidth={2} aria-hidden />
-            </button>
-          </div>
-
+      {/* One big compose per arrow — dim when region unfocused, never unmount */}
+      {arrowComposes.map(({ region, arrow }) => {
+        const focused = isRegionFocused(focusedRegionIds, region.id)
+        const isActive = arrow.id === activeArrowId
+        const withFlow = showFlowRail && isActive
+        const layout = layoutArrowCompose(region, arrow, withFlow)
+        const modeVisual =
+          MODES.find((item) => item.id === region.mode) ?? MODES[1]!
+        const ModeIcon = modeVisual.icon
+        return (
           <div
-            className={`overlay-compose-row${showFlowRail ? ' overlay-compose-row-split' : ''}`}
+            key={`compose-${arrow.id}`}
+            ref={bindPanel(arrow.id)}
+            className={`overlay-panel overlay-panel-chrome${focused ? '' : ' overlay-panel-dimmed'}`}
+            style={{
+              left: layout.card.x,
+              top: layout.card.y,
+              width: layout.card.width,
+            }}
+            data-attach={layout.attach}
+            data-compose-arrow={arrow.id}
+            onPointerDown={(event) => {
+              event.stopPropagation()
+              setFocusedRegionIds([region.id])
+              setActiveArrowId(arrow.id)
+            }}
           >
-            <div className="overlay-composer">
-              <div className="overlay-composer-body">
-                <textarea
-                  ref={promptRef}
-                  className="overlay-prompt"
-                  rows={2}
-                  value={activeArrow.arrow.prompt}
-                  placeholder={
-                    primaryFocused.mode === 'ask'
-                      ? 'Ask about this callout…'
-                      : primaryFocused.mode === 'plan'
-                        ? 'Describe the plan for this callout…'
-                        : primaryFocused.mode === 'debug'
-                          ? 'Describe the bug for this callout…'
-                          : 'Describe what to change…'
-                  }
+            <div
+              className="overlay-panel-header overlay-panel-drag-handle"
+              title="Drag to move card and arrow tip"
+              onPointerDown={(event) => {
+                // Don't start drag from interactive controls in the header.
+                const target = event.target as HTMLElement
+                if (
+                  target.closest('button') ||
+                  target.closest('select') ||
+                  target.closest('textarea')
+                ) {
+                  return
+                }
+                beginComposeDrag(event, region, arrow, withFlow)
+              }}
+            >
+              <span
+                className="overlay-arrow-badge"
+                style={{ background: arrow.color }}
+                aria-hidden
+              >
+                {arrow.index}
+              </span>
+              <span className="overlay-panel-title">Arrow prompt</span>
+              {candidates.length > 0 && isActive ? (
+                <select
+                  className="overlay-project-select"
+                  value={projectId ?? ''}
+                  aria-label="Project"
                   onChange={(event) => {
-                    const value = event.target.value
-                    updateRegion(activeArrow.region.id, (r) => ({
-                      ...r,
-                      arrows: r.arrows.map((a) =>
-                        a.id === activeArrow.arrow.id
-                          ? { ...a, prompt: value }
-                          : a,
-                      ),
-                    }))
+                    void onSelectProject(event.target.value)
                   }}
-                  onKeyDown={(event) => {
-                    if (
-                      (event.metaKey || event.ctrlKey) &&
-                      event.key === 'Enter'
-                    ) {
-                      event.preventDefault()
-                      void onSubmitArrow(
-                        activeArrow.region.id,
-                        activeArrow.arrow.id,
-                      )
-                    }
-                  }}
-                />
-              </div>
-              <div className="overlay-composer-footer">
-                <div className="overlay-toolbar-left">
-                  <div className="overlay-menu-wrap">
-                    <button
-                      type="button"
-                      className={`overlay-chip overlay-chip-mode ${modeVisual.toneClass}`}
-                      aria-expanded={openMenu === 'mode'}
-                      aria-haspopup="listbox"
-                      onClick={() =>
-                        setOpenMenu((current) =>
-                          current === 'mode' ? null : 'mode',
-                        )
-                      }
-                    >
-                      <ModeIcon size={13} strokeWidth={2} aria-hidden />
-                      <span className="overlay-chip-label">
-                        {modeVisual.label}
-                      </span>
-                      <ChevronDown
-                        size={12}
-                        strokeWidth={2}
-                        className="overlay-chip-caret"
-                        aria-hidden
-                      />
-                    </button>
-                    {openMenu === 'mode' ? (
-                      <div
-                        className="overlay-dropdown overlay-dropdown-up"
-                        role="listbox"
-                      >
-                        {MODES.map((item) => {
-                          const Icon = item.icon
-                          const active = item.id === primaryFocused.mode
-                          return (
-                            <button
-                              key={item.id}
-                              type="button"
-                              role="option"
-                              aria-selected={active}
-                              className={`overlay-menu-item ${item.toneClass}${active ? ' overlay-menu-item-active' : ''}`}
-                              onClick={() => {
-                                updateRegion(primaryFocused.id, {
-                                  mode: item.id,
-                                })
-                                setOpenMenu(null)
-                              }}
-                            >
-                              <Icon
-                                size={14}
-                                strokeWidth={2}
-                                className="overlay-menu-item-icon"
-                                aria-hidden
-                              />
-                              {item.label}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="overlay-send"
-                  disabled={
-                    activeArrow.arrow.status === 'submitting' ||
-                    !activeArrow.arrow.prompt.trim()
-                  }
-                  aria-label={
-                    activeArrow.arrow.status === 'submitting'
-                      ? 'Sending'
-                      : 'Submit'
-                  }
-                  title="Submit (⌘↵)"
-                  onClick={() =>
-                    void onSubmitArrow(
-                      activeArrow.region.id,
-                      activeArrow.arrow.id,
-                    )
-                  }
                 >
-                  <Send size={14} strokeWidth={2.25} aria-hidden />
-                </button>
-              </div>
+                  {candidates.map((item) => (
+                    <option key={item.projectId} value={item.projectId}>
+                      {item.displayName}
+                      {item.source === 'terminal-cwd' ? ' · terminal' : ''}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+              <button
+                type="button"
+                className="overlay-icon-btn"
+                aria-label="Remove arrow"
+                title="Remove arrow"
+                onClick={() => deleteArrow(region.id, arrow.id)}
+              >
+                <X size={14} strokeWidth={2} aria-hidden />
+              </button>
             </div>
 
-            {showFlowRail ? (
-              <aside className="overlay-flow-rail" aria-live="polite">
-                <div className="overlay-flow-rail-header">Flow</div>
-                <AgentActivityIndicator
-                  state={
-                    flow === 'reading'
-                      ? 'searching'
-                      : flow === 'writing'
-                        ? 'shaping'
-                        : flow === 'verifying' || flow === 'error'
-                          ? 'solving'
-                          : flow === 'done'
-                            ? 'composing'
-                            : flow === 'thinking'
-                              ? 'working'
-                              : 'composing'
-                  }
-                  label={currentCompactFlowLabel(flowSteps, flow)}
-                />
-                {flowSteps.length > 0 ? (
-                  <ol className="overlay-flow-steps">
-                    {flowSteps.slice(-6).map((step) => (
-                      <li
-                        key={step.id}
-                        className={`overlay-flow-step overlay-flow-step-${step.status}`}
+            <div
+              className={`overlay-compose-row${withFlow ? ' overlay-compose-row-split' : ''}`}
+            >
+              <div className="overlay-composer">
+                <div className="overlay-composer-body">
+                  <textarea
+                    ref={isActive ? promptRef : undefined}
+                    className="overlay-prompt"
+                    rows={2}
+                    value={arrow.prompt}
+                    placeholder={
+                      region.mode === 'ask'
+                        ? 'Ask about this callout…'
+                        : region.mode === 'plan'
+                          ? 'Describe the plan for this callout…'
+                          : region.mode === 'debug'
+                            ? 'Describe the bug for this callout…'
+                            : 'Describe what to change…'
+                    }
+                    onChange={(event) => {
+                      const value = event.target.value
+                      updateRegion(region.id, (r) => ({
+                        ...r,
+                        arrows: r.arrows.map((a) =>
+                          a.id === arrow.id ? { ...a, prompt: value } : a,
+                        ),
+                      }))
+                    }}
+                    onFocus={() => {
+                      setFocusedRegionIds([region.id])
+                      setActiveArrowId(arrow.id)
+                    }}
+                    onKeyDown={(event) => {
+                      if (
+                        (event.metaKey || event.ctrlKey) &&
+                        event.key === 'Enter'
+                      ) {
+                        event.preventDefault()
+                        void onSubmitArrow(region.id, arrow.id)
+                      }
+                    }}
+                  />
+                </div>
+                <div className="overlay-composer-footer">
+                  <div className="overlay-toolbar-left">
+                    <div className="overlay-menu-wrap">
+                      <button
+                        type="button"
+                        className={`overlay-chip overlay-chip-mode ${modeVisual.toneClass}`}
+                        aria-expanded={openMenu === 'mode' && isActive}
+                        aria-haspopup="listbox"
+                        onClick={() => {
+                          setActiveArrowId(arrow.id)
+                          setFocusedRegionIds([region.id])
+                          setOpenMenu((current) =>
+                            current === 'mode' && isActive ? null : 'mode',
+                          )
+                        }}
                       >
-                        <span className="overlay-flow-step-dot" aria-hidden />
-                        <span className="overlay-flow-step-label">
-                          {step.label}
+                        <ModeIcon size={13} strokeWidth={2} aria-hidden />
+                        <span className="overlay-chip-label">
+                          {modeVisual.label}
                         </span>
-                      </li>
-                    ))}
-                  </ol>
-                ) : null}
-              </aside>
-            ) : null}
-          </div>
+                        <ChevronDown
+                          size={12}
+                          strokeWidth={2}
+                          className="overlay-chip-caret"
+                          aria-hidden
+                        />
+                      </button>
+                      {openMenu === 'mode' && isActive ? (
+                        <div
+                          className="overlay-dropdown overlay-dropdown-up"
+                          role="listbox"
+                        >
+                          {MODES.map((item) => {
+                            const Icon = item.icon
+                            const active = item.id === region.mode
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                role="option"
+                                aria-selected={active}
+                                className={`overlay-menu-item ${item.toneClass}${active ? ' overlay-menu-item-active' : ''}`}
+                                onClick={() => {
+                                  updateRegion(region.id, { mode: item.id })
+                                  setOpenMenu(null)
+                                }}
+                              >
+                                <Icon
+                                  size={14}
+                                  strokeWidth={2}
+                                  className="overlay-menu-item-icon"
+                                  aria-hidden
+                                />
+                                {item.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="overlay-send"
+                    disabled={
+                      arrow.status === 'submitting' || !arrow.prompt.trim()
+                    }
+                    aria-label={
+                      arrow.status === 'submitting' ? 'Sending' : 'Submit'
+                    }
+                    title="Submit (⌘↵)"
+                    onClick={() => void onSubmitArrow(region.id, arrow.id)}
+                  >
+                    <Send size={14} strokeWidth={2.25} aria-hidden />
+                  </button>
+                </div>
+              </div>
 
-          <div className="overlay-meta">
-            {hostChip ? (
-              <span className="overlay-meta-chip">{hostChip}</span>
+              {withFlow ? (
+                <aside className="overlay-flow-rail" aria-live="polite">
+                  <div className="overlay-flow-rail-header">Flow</div>
+                  <AgentActivityIndicator
+                    state={
+                      flow === 'reading'
+                        ? 'searching'
+                        : flow === 'writing'
+                          ? 'shaping'
+                          : flow === 'verifying' || flow === 'error'
+                            ? 'solving'
+                            : flow === 'done'
+                              ? 'composing'
+                              : flow === 'thinking'
+                                ? 'working'
+                                : 'composing'
+                    }
+                    label={currentCompactFlowLabel(flowSteps, flow)}
+                  />
+                  {flowSteps.length > 0 ? (
+                    <ol className="overlay-flow-steps">
+                      {flowSteps.slice(-6).map((step) => (
+                        <li
+                          key={step.id}
+                          className={`overlay-flow-step overlay-flow-step-${step.status}`}
+                        >
+                          <span className="overlay-flow-step-dot" aria-hidden />
+                          <span className="overlay-flow-step-label">
+                            {step.label}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : null}
+                </aside>
+              ) : null}
+            </div>
+
+            {isActive ? (
+              <>
+                <div className="overlay-meta">
+                  {hostChip ? (
+                    <span className="overlay-meta-chip">{hostChip}</span>
+                  ) : null}
+                  {webEnhanceAvailable ? (
+                    <span className="overlay-meta-chip">Chrome enhance</span>
+                  ) : null}
+                  <span className="overlay-meta-chip">
+                    {regions.length} region{regions.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                {status ? (
+                  <div className="overlay-meta-status">{status}</div>
+                ) : null}
+              </>
             ) : null}
-            {webEnhanceAvailable ? (
-              <span className="overlay-meta-chip">Chrome enhance</span>
-            ) : null}
-            <span className="overlay-meta-chip">
-              {regions.length} region{regions.length === 1 ? '' : 's'}
-            </span>
           </div>
-          {status ? <div className="overlay-meta-status">{status}</div> : null}
-        </div>
-      ) : null}
+        )
+      })}
 
       {/* Status hint when waiting for first arrow (no compose yet) */}
-      {!showCompose && regions.length > 0 && status ? (
+      {!hasAnyCompose && regions.length > 0 && status ? (
         <div className="overlay-hint overlay-hint-status">{status}</div>
       ) : null}
 
@@ -1253,11 +1563,13 @@ function RegionView({
   region,
   focused,
   onClearDraw,
+  onDelete,
   onSetTool,
 }: {
   region: OverlayRegion
   focused: boolean
   onClearDraw: () => void
+  onDelete: () => void
   onSetTool: (tool: RegionTool) => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -1287,8 +1599,10 @@ function RegionView({
     }
   }, [region.drawStrokes, region.captureRect])
 
-  const btnLeft = region.captureRect.x + region.captureRect.width + 8
-  const btnTop = region.captureRect.y + region.captureRect.height - 28
+  const toolStackHeight = 26 * 3 + 4 * 2
+  const btnLeft = region.captureRect.x + region.captureRect.width + 6
+  const btnTop =
+    region.captureRect.y + region.captureRect.height - toolStackHeight
 
   return (
     <>
@@ -1342,6 +1656,15 @@ function RegionView({
             onClick={onClearDraw}
           >
             <Eraser size={12} strokeWidth={2} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="overlay-region-tool-btn overlay-region-tool-btn-danger"
+            title="Delete region"
+            aria-label="Delete region"
+            onClick={onDelete}
+          >
+            <Trash2 size={12} strokeWidth={2} aria-hidden />
           </button>
         </div>
       ) : null}

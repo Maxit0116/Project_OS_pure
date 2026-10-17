@@ -46,6 +46,7 @@ export * from "./semantic-tree.js";
 export * from "./workspace-directory.js";
 export * from "./service-port.js";
 export * from "./spatial-pin.js";
+export * from "./spatial-capture-session.js";
 export * from "./loop-graph.js";
 export * from "./write-authorization.js";
 export * from "./write-transaction.js";

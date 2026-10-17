@@ -244,6 +244,14 @@ export interface SessionGraphInsets {
   left: number;
 }
 
+/** Shield insets driven by workbench CSS vars — avoids React re-renders on panel resize. */
+export interface SessionGraphCssInsets {
+  top: number;
+  right: number | string;
+  bottom: number | string;
+  left: number | string;
+}
+
 export function resolveChatSessionClassification(
   head: Pick<ChatSessionHead, "classification">,
 ): ChatSessionClassification {
@@ -615,6 +623,20 @@ export function sessionGraphShieldInsets(input: SessionGraphInsetsInput): Sessio
     left: input.leftOpen ? input.leftWidth : 0,
     right: input.rightOpen ? input.rightWidth : 0,
     bottom: input.terminalOpen ? input.terminalHeight : 0,
+  };
+}
+
+/** Prefer for live overlays — couples to --workbench-*-panel-width / --terminal-dock-height. */
+export function sessionGraphShieldCssInsets(input: {
+  leftOpen: boolean;
+  rightOpen: boolean;
+  terminalOpen: boolean;
+}): SessionGraphCssInsets {
+  return {
+    top: 0,
+    left: input.leftOpen ? "var(--workbench-left-panel-width)" : 0,
+    right: input.rightOpen ? "var(--workbench-right-panel-width)" : 0,
+    bottom: input.terminalOpen ? "var(--terminal-dock-height)" : 0,
   };
 }
 

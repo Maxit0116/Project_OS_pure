@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import {
   SESSION_GRAPH_GAP_PX,
+  type SessionGraphCssInsets,
   type SessionGraphInsets,
 } from '@contracts/index'
 import styles from './GraphOverlayFrame.module.css'
@@ -11,7 +12,7 @@ export function GraphOverlayFrame({
   label,
   children,
 }: {
-  shield: SessionGraphInsets
+  shield: SessionGraphInsets | SessionGraphCssInsets
   resizing: boolean
   label: string
   children: ReactNode

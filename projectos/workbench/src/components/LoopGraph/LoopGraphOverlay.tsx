@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type WheelEvent } from 'react'
 import {
   isIntentGraphReadyForCompile,
-  sessionGraphShieldInsets,
+  sessionGraphShieldCssInsets,
   type IntentEdgePort,
   type IntentGraph,
   type IntentGraphEdge,
@@ -39,9 +39,6 @@ export default function LoopGraphOverlay() {
   const activeSessionId = useChatSessionStore((s) => s.activeSessionId)
   const leftPanelOpen = useWorkbenchStore((s) => s.leftPanelOpen)
   const rightPanelOpen = useWorkbenchStore((s) => s.rightPanelOpen)
-  const leftPanelWidth = useWorkbenchStore((s) => s.leftPanelWidth)
-  const rightPanelWidth = useWorkbenchStore((s) => s.rightPanelWidth)
-  const terminalHeight = useWorkbenchStore((s) => s.terminalHeight)
   const panelResizing = useWorkbenchStore((s) => s.panelResizing)
   const project = useWorkbenchStore((s) => s.project)
   const terminalOpen = useBottomDockStore((s) => s.open)
@@ -150,13 +147,10 @@ export default function LoopGraphOverlay() {
 
   if (!open) return null
 
-  const shield = sessionGraphShieldInsets({
+  const shield = sessionGraphShieldCssInsets({
     leftOpen: leftPanelOpen,
     rightOpen: rightPanelOpen,
     terminalOpen,
-    leftWidth: leftPanelWidth,
-    rightWidth: rightPanelWidth,
-    terminalHeight,
   })
 
   const draft = document?.draft ?? {

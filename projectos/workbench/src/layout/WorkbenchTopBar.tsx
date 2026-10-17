@@ -33,6 +33,7 @@ export default function WorkbenchTopBar({
 
   const centerTabs = [
     { id: 'function-map', label: ts('centerTabs.functionMap') },
+    { id: 'spatial-captures', label: ts('centerTabs.spatialCaptures') },
     { id: 'code', label: ts('centerTabs.codeDiff'), dot: diffReady },
     { id: 'agent-flow', label: ts('centerTabs.agentFlow') },
     ...(isDesktopApp()

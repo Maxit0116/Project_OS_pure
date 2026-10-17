@@ -55,9 +55,13 @@ describe('loopGraphStore authoring actions', () => {
     expect(useLoopGraphStore.getState().error).toMatch(/clarifying/i)
   })
 
-  it('switches composer sheet helpers', () => {
-    useLoopGraphStore.getState().setComposerSheet('flow')
+  it('toggles bookmark sheets mutually exclusively', () => {
+    useLoopGraphStore.getState().toggleComposerSheet('flow')
     expect(useLoopGraphStore.getState().composerSheet).toBe('flow')
+    useLoopGraphStore.getState().toggleComposerSheet('context')
+    expect(useLoopGraphStore.getState().composerSheet).toBe('context')
+    useLoopGraphStore.getState().toggleComposerSheet('context')
+    expect(useLoopGraphStore.getState().composerSheet).toBe('none')
     useLoopGraphStore.getState().setComposerDraft('hello')
     expect(useLoopGraphStore.getState().composerDraft).toBe('hello')
   })

@@ -41,7 +41,7 @@ function mockStore(partial: Record<string, unknown>) {
     composerSheet: 'none',
     authoringBusy: false,
     setComposerDraft: vi.fn(),
-    setComposerSheet: vi.fn(),
+    toggleComposerSheet: vi.fn(),
     setComposerMode: vi.fn(),
     sendAuthoringTurn: vi.fn(),
     answerGoalClarification: vi.fn(),
@@ -55,19 +55,21 @@ function mockStore(partial: Record<string, unknown>) {
 }
 
 describe('LoopGoalComposer', () => {
-  it('renders Ask/Edit modes and sheet tabs', () => {
+  it('renders bookmark tabs and Discuss mode chip', () => {
     mockStore({})
     const html = renderToStaticMarkup(<LoopGoalComposer />)
     expect(html).toContain('data-loop-goal-composer')
-    expect(html).toContain('chat.loopGraph.modeAsk')
-    expect(html).toContain('chat.loopGraph.modeEdit')
+    expect(html).toContain('chat.loopGraph.modeDiscuss')
     expect(html).toContain('chat.loopGraph.agentFlowSheet')
     expect(html).toContain('chat.loopGraph.goalContextSheet')
+    expect(html).toContain('role="tablist"')
   })
 
-  it('shows goal context empty copy when sheet is open', () => {
+  it('shows only one sheet panel at a time', () => {
     mockStore({ composerSheet: 'context' })
     const html = renderToStaticMarkup(<LoopGoalComposer />)
+    expect(html).toContain('data-loop-sheet="context"')
+    expect(html).not.toContain('data-loop-sheet="flow"')
     expect(html).toContain('chat.loopGraph.goalContextEmpty')
   })
 

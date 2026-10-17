@@ -31,6 +31,7 @@ const UNTITLED_NODE = 'Untitled'
 
 export type LoopPhase = 'draw' | 'review' | 'run'
 
+/** Mutual-exclusive bookmark sheet above the goal composer. */
 export type LoopComposerSheet = 'none' | 'flow' | 'context'
 
 export type LoopDeleteTarget =
@@ -64,6 +65,8 @@ interface LoopGraphStore {
   setConnectingFrom: (nodeId: string | null) => void
   setPendingDelete: (target: LoopDeleteTarget | null) => void
   setComposerDraft: (value: string) => void
+  /** Open a sheet, or collapse it if already open (bookmark toggle). */
+  toggleComposerSheet: (sheet: 'flow' | 'context') => void
   setComposerSheet: (sheet: LoopComposerSheet) => void
   setComposerMode: (mode: LoopComposerMode) => Promise<void>
   sendAuthoringTurn: () => Promise<void>
@@ -170,6 +173,11 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   setComposerDraft: (value) => set({ composerDraft: value }),
 
   setComposerSheet: (sheet) => set({ composerSheet: sheet }),
+
+  toggleComposerSheet: (sheet) =>
+    set((state) => ({
+      composerSheet: state.composerSheet === sheet ? 'none' : sheet,
+    })),
 
   setComposerMode: async (mode) => {
     const { client, project } = useWorkbenchStore.getState()
@@ -300,7 +308,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     try {
       const next = await client.undoLoopDraft(project.projectId, loopId)
       const heads = await client.listLoopGraphs(project.projectId)
-      set({ document: next, heads, authoringBusy: false, composerSheet: 'flow' })
+      set({ document: next, heads, authoringBusy: false })
     } catch (error) {
       set({
         authoringBusy: false,

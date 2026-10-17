@@ -157,6 +157,28 @@ export function registerSpatialPinOverlay(): void {
     return { ok: true }
   })
 
+  // Overlay renderer finished solidifying a capture session — refresh Workbench gallery.
+  ipcMain.on('spatial-pin:sessionSolidified', (event, payload: unknown) => {
+    try {
+      assertTrustedHostRenderer(event)
+    } catch {
+      return
+    }
+    const sessionId =
+      payload &&
+      typeof payload === 'object' &&
+      typeof (payload as { sessionId?: unknown }).sessionId === 'string'
+        ? (payload as { sessionId: string }).sessionId
+        : null
+    const overlay = getOverlayWindow()
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed() || win === overlay) continue
+      win.webContents.send('spatial-pin:sessionSolidified', {
+        sessionId,
+      })
+    }
+  })
+
   ipcMain.handle('spatial-pin:closeOverlay', (event) => {
     assertTrustedHostRenderer(event)
     closeOverlayWindow()

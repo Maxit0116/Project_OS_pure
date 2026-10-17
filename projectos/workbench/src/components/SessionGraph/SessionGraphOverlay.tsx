@@ -14,8 +14,8 @@ import {
   pickGraphRepresentative,
   resolveSessionGraphId,
   sessionsInGraph,
-  sessionGraphShieldInsets,
-  type SessionGraphInsets,
+  sessionGraphShieldCssInsets,
+  type SessionGraphCssInsets,
 } from '@contracts/index'
 import {
   Archive,
@@ -87,7 +87,7 @@ export function SessionGraphFrame({
   label,
   children,
 }: {
-  shield: SessionGraphInsets
+  shield: SessionGraphCssInsets
   resizing: boolean
   label: string
   children: ReactNode
@@ -114,9 +114,6 @@ export default function SessionGraphOverlay() {
   const leftPanelOpen = useWorkbenchStore((s) => s.leftPanelOpen)
   const rightPanelOpen = useWorkbenchStore((s) => s.rightPanelOpen)
   const setRightPanelOpen = useWorkbenchStore((s) => s.setRightPanelOpen)
-  const leftPanelWidth = useWorkbenchStore((s) => s.leftPanelWidth)
-  const rightPanelWidth = useWorkbenchStore((s) => s.rightPanelWidth)
-  const terminalHeight = useWorkbenchStore((s) => s.terminalHeight)
   const panelResizing = useWorkbenchStore((s) => s.panelResizing)
   const terminalOpen = useBottomDockStore((s) => s.open)
   const { ts } = useI18n()
@@ -363,13 +360,10 @@ export default function SessionGraphOverlay() {
 
   if (!open) return null
 
-  const shield = sessionGraphShieldInsets({
+  const shield = sessionGraphShieldCssInsets({
     leftOpen: leftPanelOpen,
     rightOpen: rightPanelOpen,
     terminalOpen,
-    leftWidth: leftPanelWidth,
-    rightWidth: rightPanelWidth,
-    terminalHeight,
   })
 
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {

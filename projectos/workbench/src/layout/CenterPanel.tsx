@@ -9,6 +9,7 @@ import DiffReviewPanel from '../components/DiffReview/DiffReviewPanel'
 import CodeEditorWorkspace from '../components/CodeEditor/CodeEditorWorkspace'
 import { hasOpenEditorFiles } from '../components/CodeEditor/editorPaneHelpers'
 import BrowserPanel from '../components/Browser/BrowserPanel'
+import SpatialCapturesPanel from '../components/SpatialCaptures/SpatialCapturesPanel'
 import DiffReadyBanner from '../components/DiffReadyBanner/DiffReadyBanner'
 import TabBar from '../components/ui/TabBar'
 import EmptyState from '../components/ui/EmptyState'
@@ -167,6 +168,12 @@ export default function CenterPanel({ mapBleed }: Props) {
                   description={ts('code.emptyDesc')}
                 />
               )}
+            </div>
+          )}
+          {centerTab === 'spatial-captures' && (
+            <div className={styles.tabPane} data-tour="spatial-captures">
+              {showCenterBanner ? diffReadyBannerEl : null}
+              <SpatialCapturesPanel />
             </div>
           )}
           {centerTab === 'agent-flow' && (

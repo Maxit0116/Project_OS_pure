@@ -1,10 +1,101 @@
-import { app, BrowserWindow, globalShortcut, screen, type Rectangle } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  ipcMain,
+  screen,
+  type Rectangle,
+} from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { installTrustedHostRendererAuthority } from './ipcSenderTrust.js'
 
 let overlayWindow: BrowserWindow | null = null
 let overlayEscapeRegistered = false
+let overlayLifecycleIpcInstalled = false
+/**
+ * Bumped on every hide/show so an in-flight "clear then hide" can be cancelled
+ * when the user reopens before hide() runs.
+ */
+let overlaySessionGeneration = 0
+
+function installOverlayLifecycleIpc(): void {
+  if (overlayLifecycleIpcInstalled) return
+  overlayLifecycleIpcInstalled = true
+  // First load: did-finish-load often fires before React mounts, so beginCapture
+  // would be missed. Renderer announces mount; we re-emit beginCapture.
+  ipcMain.on('spatial-pin:overlayMounted', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isDestroyed() || win !== getOverlayWindow()) return
+    emitBeginCapture(win)
+  })
+}
+
+/**
+ * Wait until the overlay renderer has applied beginCapture and painted, so we
+ * can raise opacity 0→1 without flashing the previous session UI.
+ */
+function waitForOverlayPainted(
+  win: BrowserWindow,
+  timeoutMs = 1500,
+): Promise<void> {
+  return new Promise((resolve) => {
+    if (win.isDestroyed()) {
+      resolve()
+      return
+    }
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      ipcMain.removeListener('spatial-pin:overlayReady', onReady)
+      resolve()
+    }
+    const onReady = (event: Electron.IpcMainEvent) => {
+      if (event.sender !== win.webContents) return
+      finish()
+    }
+    const timer = setTimeout(finish, timeoutMs)
+    ipcMain.on('spatial-pin:overlayReady', onReady)
+  })
+}
+
+/**
+ * show()/showInactive() on macOS often restores opacity to 1 for a frame and
+ * can flash the window-server's last composited surface. Set opacity before and
+ * immediately after show.
+ */
+function presentOverlayWindowAtOpacity(
+  win: BrowserWindow,
+  opacity: number,
+): void {
+  if (win.isDestroyed()) return
+  const bounds = virtualScreenBounds()
+  const current = win.getBounds()
+  if (
+    current.x !== bounds.x ||
+    current.y !== bounds.y ||
+    current.width !== bounds.width ||
+    current.height !== bounds.height
+  ) {
+    win.setBounds(bounds)
+  }
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  win.setAlwaysOnTop(true, 'screen-saver', 1)
+  if (typeof win.moveTop === 'function') {
+    win.moveTop()
+  }
+  win.setOpacity(opacity)
+  if (typeof win.showInactive === 'function') {
+    win.showInactive()
+  } else {
+    win.show()
+  }
+  // Re-assert: showInactive may bump opacity back to 1 on macOS.
+  win.setOpacity(opacity)
+  registerOverlayEscapeShortcut()
+}
 
 /**
  * Overlay is presented with showInactive so fullscreen IDEs keep their Space
@@ -14,6 +105,13 @@ let overlayEscapeRegistered = false
 function registerOverlayEscapeShortcut(): void {
   if (overlayEscapeRegistered) return
   const ok = globalShortcut.register('Escape', () => {
+    const win = getOverlayWindow()
+    // Ask the renderer to solidify the capture session, then hide — do not wipe
+    // UI or cancel agent runs from main.
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('spatial-pin:requestHide')
+      return
+    }
     hideOverlayWindow()
   })
   if (ok) {
@@ -75,22 +173,7 @@ export function getOverlayWindow(): BrowserWindow | null {
  * Project OS (activating would switch Spaces away from Xcode/Studio).
  */
 export function presentOverlayWindow(win: BrowserWindow): void {
-  if (win.isDestroyed()) return
-  const bounds = virtualScreenBounds()
-  win.setBounds(bounds)
-  // Re-assert after every show — macOS drops these when Spaces change.
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  win.setAlwaysOnTop(true, 'screen-saver', 1)
-  if (typeof win.moveTop === 'function') {
-    win.moveTop()
-  }
-  // Prefer inactive show so we do not steal the fullscreen app's Space.
-  if (typeof win.showInactive === 'function') {
-    win.showInactive()
-  } else {
-    win.show()
-  }
-  registerOverlayEscapeShortcut()
+  presentOverlayWindowAtOpacity(win, win.isDestroyed() ? 1 : win.getOpacity())
 }
 
 function emitBeginCapture(win: BrowserWindow): void {
@@ -105,13 +188,39 @@ function emitBeginCapture(win: BrowserWindow): void {
 export function createOrShowOverlayWindow(_opts?: {
   displayId?: number
 }): BrowserWindow {
+  installOverlayLifecycleIpc()
   const bounds = virtualScreenBounds()
   const existing = getOverlayWindow()
 
   if (existing) {
+    // Cancel any in-flight Esc dismiss so we do not race a late hide().
+    const session = ++overlaySessionGeneration
     existing.setContentProtection(true)
-    presentOverlayWindow(existing)
+    if (typeof existing.setIgnoreMouseEvents === 'function') {
+      existing.setIgnoreMouseEvents(false)
+    }
+    existing.setOpacity(0)
+    // Arm ready waiter before beginCapture to avoid missing a fast reply.
+    const painted = waitForOverlayPainted(existing)
     emitBeginCapture(existing)
+    void painted.then(() => {
+      if (existing.isDestroyed() || session !== overlaySessionGeneration) return
+      // Prefer opacity raise over hide→show: showInactive flashes the last
+      // window-server surface (previous arrows) even when the DOM was cleared
+      // while the window was hidden.
+      if (!existing.isVisible()) {
+        presentOverlayWindowAtOpacity(existing, 0)
+      } else {
+        existing.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+        existing.setAlwaysOnTop(true, 'screen-saver', 1)
+        if (typeof existing.moveTop === 'function') {
+          existing.moveTop()
+        }
+        existing.setOpacity(0)
+        registerOverlayEscapeShortcut()
+      }
+      existing.setOpacity(1)
+    })
     return existing
   }
 
@@ -141,6 +250,7 @@ export function createOrShowOverlayWindow(_opts?: {
   })
 
   overlayWindow = win
+  win.setOpacity(0)
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   win.setAlwaysOnTop(true, 'screen-saver', 1)
   // Keep overlay visible to the user while excluding it from screen captures,
@@ -175,8 +285,17 @@ export function createOrShowOverlayWindow(_opts?: {
 
   const reveal = () => {
     if (win.isDestroyed()) return
-    presentOverlayWindow(win)
+    const session = ++overlaySessionGeneration
+    win.setOpacity(0)
+    // Stay hidden until React mounts, applies beginCapture, and paints — then
+    // present at opacity 1 so the first visible frame is a clean capture UI.
+    const painted = waitForOverlayPainted(win)
     emitBeginCapture(win)
+    void painted.then(() => {
+      if (win.isDestroyed() || session !== overlaySessionGeneration) return
+      presentOverlayWindowAtOpacity(win, 0)
+      win.setOpacity(1)
+    })
   }
 
   win.webContents.once('did-finish-load', reveal)
@@ -193,8 +312,17 @@ export function createOrShowOverlayWindow(_opts?: {
 export function hideOverlayWindow(): void {
   releaseOverlayEscapeShortcut()
   const win = getOverlayWindow()
-  if (!win) return
-  win.hide()
+  if (!win || win.isDestroyed()) return
+  ++overlaySessionGeneration
+  // Do not hide(): on macOS the window-server caches the last opaque frame
+  // (regions/arrows). The next showInactive() flashes that cache for a frame
+  // even if React cleared the DOM while the window was hidden.
+  // Stay mapped at opacity 0, pass clicks through, and reset the session UI.
+  win.setOpacity(0)
+  if (typeof win.setIgnoreMouseEvents === 'function') {
+    win.setIgnoreMouseEvents(true, { forward: true })
+  }
+  emitBeginCapture(win)
 }
 
 export function closeOverlayWindow(): void {

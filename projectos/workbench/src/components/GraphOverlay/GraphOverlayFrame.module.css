@@ -2,15 +2,20 @@
   position: absolute;
   z-index: 12;
   pointer-events: auto;
+  /* Composite on own layer so sticky squeeze doesn't thrash main-thread paint. */
+  transform: translateZ(0);
+  backface-visibility: hidden;
   transition:
     top var(--duration-panel-enter) var(--ease-out),
     right var(--duration-panel-enter) var(--ease-out),
     bottom var(--duration-terminal-enter) var(--ease-out),
     left var(--duration-panel-enter) var(--ease-out);
+  will-change: top, right, bottom, left;
 }
 
 .shieldResizing {
   transition: none;
+  will-change: auto;
 }
 
 .card {
@@ -24,6 +29,7 @@
   border-radius: 8px;
   box-shadow: var(--tech-shadow-lg);
   overflow: hidden;
+  contain: layout paint;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -3558,6 +3558,156 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
   }
 
+  async listSpatialCaptureSessions(
+    projectId: string,
+  ): Promise<
+    import("../contracts/spatial-capture-session.js").SpatialCaptureSessionHead[]
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listSpatialCaptureSessions } = await import(
+      "./spatial-capture-session-service.js"
+    );
+    return listSpatialCaptureSessions(workspace.workspaceRoot);
+  }
+
+  async getSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+  ): Promise<
+    import("../contracts/spatial-capture-session.js").SpatialCaptureSession | null
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getSpatialCaptureSession } = await import(
+      "./spatial-capture-session-service.js"
+    );
+    return getSpatialCaptureSession(workspace.workspaceRoot, sessionId);
+  }
+
+  async upsertSpatialCaptureSession(
+    projectId: string,
+    session: import("../contracts/spatial-capture-session.js").SpatialCaptureSession,
+  ): Promise<
+    import("../contracts/spatial-capture-session.js").SpatialCaptureSession
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    if (session.projectId !== projectId) {
+      throw new ProjectOSError(
+        "spatial_pin_invalid",
+        `Capture session projectId '${session.projectId}' does not match '${projectId}'`,
+      );
+    }
+    const { upsertSpatialCaptureSession } = await import(
+      "./spatial-capture-session-service.js"
+    );
+    return upsertSpatialCaptureSession(workspace.workspaceRoot, session);
+  }
+
+  async deleteSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+  ): Promise<boolean> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      deleteSpatialCaptureSession,
+      SpatialCaptureSessionError,
+    } = await import("./spatial-capture-session-service.js");
+    try {
+      return deleteSpatialCaptureSession(workspace.workspaceRoot, sessionId);
+    } catch (error) {
+      if (error instanceof SpatialCaptureSessionError && error.code === "running") {
+        throw new ProjectOSError("spatial_pin_invalid", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async saveSpatialCaptureBackdrop(
+    projectId: string,
+    sessionId: string,
+    pngBase64: string,
+  ): Promise<{ backdropAssetPath: string }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    if (!sessionId.trim()) {
+      throw new ProjectOSError(
+        "spatial_pin_invalid",
+        "Capture session id is required",
+      );
+    }
+    if (!pngBase64.trim()) {
+      throw new ProjectOSError(
+        "spatial_pin_invalid",
+        "Capture backdrop payload is empty",
+      );
+    }
+    const { saveSpatialCaptureBackdrop, getSpatialCaptureSession, upsertSpatialCaptureSession } =
+      await import("./spatial-capture-session-service.js");
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(pngBase64, "base64");
+    } catch {
+      throw new ProjectOSError(
+        "spatial_pin_invalid",
+        "Capture backdrop payload is not valid base64",
+      );
+    }
+    if (bytes.length < 8 || bytes.length > 20_000_000) {
+      throw new ProjectOSError(
+        "spatial_pin_invalid",
+        "Capture backdrop size is out of range",
+      );
+    }
+    const backdropAssetPath = saveSpatialCaptureBackdrop(
+      workspace.workspaceRoot,
+      sessionId,
+      bytes,
+    );
+    const existing = getSpatialCaptureSession(
+      workspace.workspaceRoot,
+      sessionId,
+    );
+    if (existing) {
+      upsertSpatialCaptureSession(workspace.workspaceRoot, {
+        ...existing,
+        backdropAssetPath,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    return { backdropAssetPath };
+  }
+
+  async readProjectAssetBase64(
+    projectId: string,
+    relativePath: string,
+  ): Promise<{ base64: string; mimeType: string } | null> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const normalized = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+    if (
+      !normalized.startsWith(".projectos/spatial-") ||
+      normalized.includes("..")
+    ) {
+      throw new ProjectOSError(
+        "spatial_pin_invalid",
+        "Asset path is not allowed",
+      );
+    }
+    const absolute = join(workspace.workspaceRoot, normalized);
+    if (!existsSync(absolute)) return null;
+    try {
+      const bytes = readFileSync(absolute);
+      if (bytes.length < 8 || bytes.length > 20_000_000) return null;
+      const ext = extname(absolute).toLowerCase();
+      const mimeType =
+        ext === ".jpg" || ext === ".jpeg"
+          ? "image/jpeg"
+          : ext === ".webp"
+            ? "image/webp"
+            : "image/png";
+      return { base64: bytes.toString("base64"), mimeType };
+    } catch {
+      return null;
+    }
+  }
+
   async saveSpatialPinSnapshot(
     projectId: string,
     pinId: string,

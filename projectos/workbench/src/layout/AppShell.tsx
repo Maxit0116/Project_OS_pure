@@ -17,6 +17,7 @@ import { useEditorShortcuts } from '../components/CodeEditor/useEditorShortcuts'
 import WorkbenchSidePanels from './WorkbenchSidePanels'
 import SessionGraphOverlay from '../components/SessionGraph/SessionGraphOverlay'
 import LoopGraphOverlay from '../components/LoopGraph/LoopGraphOverlay'
+import SpatialCaptureOverlay from '../components/SpatialCaptures/SpatialCaptureOverlay'
 import EdgeRails from './EdgeRails'
 import { FunctionMapBleedRoot } from '../components/FunctionMap/FunctionMapBleedLayer'
 import { preloadLocalWhisper } from '../components/ChatPanel/voice/localWhisperTranscribe'
@@ -84,6 +85,7 @@ export default function AppShell() {
   const mapBleedActive = centerTab === 'function-map' && !!graph && graph.nodes.length > 0
   const centerSideInset =
     centerTab === 'function-map' ||
+    centerTab === 'spatial-captures' ||
     centerTab === 'code' ||
     centerTab === 'agent-flow' ||
     centerTab === 'browser'
@@ -147,6 +149,7 @@ export default function AppShell() {
 
           <SessionGraphOverlay />
           <LoopGraphOverlay />
+          <SpatialCaptureOverlay />
           <EdgeRails
             leftMounted={leftPresence.mounted}
             rightMounted={rightPresence.mounted}

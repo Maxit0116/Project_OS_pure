@@ -587,6 +587,59 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("saveSpatialPinSnapshot", projectId, pinId, pngBase64);
   }
 
+  listSpatialCaptureSessions(
+    projectId: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureSessionHead[]
+  > {
+    return this.invoke("listSpatialCaptureSessions", projectId);
+  }
+
+  getSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureSession | null
+  > {
+    return this.invoke("getSpatialCaptureSession", projectId, sessionId);
+  }
+
+  upsertSpatialCaptureSession(
+    projectId: string,
+    session: import("../../contracts/spatial-capture-session.js").SpatialCaptureSession,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureSession
+  > {
+    return this.invoke("upsertSpatialCaptureSession", projectId, session);
+  }
+
+  deleteSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+  ): Promise<boolean> {
+    return this.invoke("deleteSpatialCaptureSession", projectId, sessionId);
+  }
+
+  saveSpatialCaptureBackdrop(
+    projectId: string,
+    sessionId: string,
+    pngBase64: string,
+  ): Promise<{ backdropAssetPath: string }> {
+    return this.invoke(
+      "saveSpatialCaptureBackdrop",
+      projectId,
+      sessionId,
+      pngBase64,
+    );
+  }
+
+  readProjectAssetBase64(
+    projectId: string,
+    relativePath: string,
+  ): Promise<{ base64: string; mimeType: string } | null> {
+    return this.invoke("readProjectAssetBase64", projectId, relativePath);
+  }
+
   listLoopGraphs(projectId: string): Promise<import("../../contracts/loop-graph.js").LoopGraphHead[]> {
     return this.invoke("listLoopGraphs", projectId);
   }

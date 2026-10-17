@@ -99,6 +99,8 @@ export interface ProjectOSBridge {
   spatialPin: {
     beginCapture(): Promise<{ ok: boolean }>;
     hideOverlay(): Promise<{ ok: boolean }>;
+    /** Main-process Escape while showInactive — solidify then hide. */
+    onRequestHide(listener: () => void): Disposable;
     closeOverlay(): Promise<{ ok: boolean }>;
     getContext(): Promise<{
       projectId: string | null;
@@ -158,6 +160,15 @@ export interface ProjectOSBridge {
       };
       error?: string;
     }>;
+    /** React mount — main re-emits beginCapture if it was missed on first load. */
+    notifyOverlayMounted(): void;
+    /** beginCapture UI painted — main may show / raise opacity. */
+    notifyOverlayReady(): void;
+    /** Overlay solidified a session — tell Workbench to refresh Spatial Captures. */
+    notifySessionSolidified(sessionId: string): void;
+    onSessionSolidified(
+      listener: (payload: { sessionId: string | null }) => void,
+    ): Disposable;
     onBeginCapture(
       listener: (payload: {
         displayBounds: { x: number; y: number; width: number; height: number };

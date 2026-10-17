@@ -70,6 +70,12 @@ import {
   mockUpsertSpatialPin,
 } from "./mock-spatial-pin-store.js";
 import {
+  mockDeleteSpatialCaptureSession,
+  mockGetSpatialCaptureSession,
+  mockListSpatialCaptureSessions,
+  mockUpsertSpatialCaptureSession,
+} from "./mock-spatial-capture-session-store.js";
+import {
   mockAcceptLoopGraphEditOffer,
   mockAdvanceLoopInstance,
   mockAnswerLoopGoalClarification,
@@ -275,6 +281,54 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
       });
     }
     return Promise.resolve({ snapshotAssetPath });
+  }
+
+  override listSpatialCaptureSessions(projectId: string) {
+    return Promise.resolve(mockListSpatialCaptureSessions(projectId));
+  }
+
+  override getSpatialCaptureSession(projectId: string, sessionId: string) {
+    return Promise.resolve(mockGetSpatialCaptureSession(projectId, sessionId));
+  }
+
+  override upsertSpatialCaptureSession(
+    projectId: string,
+    session: import("../contracts/spatial-capture-session.js").SpatialCaptureSession,
+  ) {
+    return Promise.resolve(mockUpsertSpatialCaptureSession(projectId, session));
+  }
+
+  override deleteSpatialCaptureSession(projectId: string, sessionId: string) {
+    return Promise.resolve(mockDeleteSpatialCaptureSession(projectId, sessionId));
+  }
+
+  override saveSpatialCaptureBackdrop(
+    projectId: string,
+    sessionId: string,
+    _pngBase64: string,
+  ): Promise<{ backdropAssetPath: string }> {
+    const backdropAssetPath = `.projectos/spatial-captures/assets/${sessionId}-backdrop.png`;
+    const existing = mockGetSpatialCaptureSession(projectId, sessionId);
+    if (existing) {
+      mockUpsertSpatialCaptureSession(projectId, {
+        ...existing,
+        backdropAssetPath,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    return Promise.resolve({ backdropAssetPath });
+  }
+
+  override readProjectAssetBase64(
+    _projectId: string,
+    _relativePath: string,
+  ): Promise<{ base64: string; mimeType: string } | null> {
+    // 1x1 transparent PNG
+    return Promise.resolve({
+      base64:
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      mimeType: "image/png",
+    });
   }
 
   override listLoopGraphs(projectId: string): Promise<LoopGraphHead[]> {

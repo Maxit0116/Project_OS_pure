@@ -33,13 +33,20 @@ const TITLE_SUMMARIZE_DEBOUNCE_MS = 1500
 const CANVAS_OVERLAY_KEY = 'projectos_canvas_overlay'
 const SESSION_GRAPH_OPEN_KEY = 'projectos_session_graph_open'
 
-export type CanvasOverlay = 'none' | 'session' | 'loop'
+export type CanvasOverlay = 'none' | 'session' | 'loop' | 'spatial'
 
 function readCanvasOverlay(): CanvasOverlay {
   if (typeof localStorage === 'undefined') return 'none'
   try {
     const raw = localStorage.getItem(CANVAS_OVERLAY_KEY)
-    if (raw === 'session' || raw === 'loop' || raw === 'none') return raw
+    if (
+      raw === 'session' ||
+      raw === 'loop' ||
+      raw === 'spatial' ||
+      raw === 'none'
+    ) {
+      return raw
+    }
     // Migrate legacy session-graph-only preference.
     return localStorage.getItem(SESSION_GRAPH_OPEN_KEY) === 'true' ? 'session' : 'none'
   } catch {
@@ -69,6 +76,7 @@ interface ChatSessionStore {
   /** Derived: canvasOverlay === 'session' (kept for existing callers). */
   sessionGraphOpen: boolean
   loopGraphOpen: boolean
+  spatialCaptureOpen: boolean
   inheritedDigest: SessionContextDigest | null
   loading: boolean
 
@@ -81,6 +89,8 @@ interface ChatSessionStore {
   toggleSessionGraph: () => void
   setLoopGraphOpen: (open: boolean) => void
   toggleLoopGraph: () => void
+  setSpatialCaptureOpen: (open: boolean) => void
+  toggleSpatialCapture: () => void
   switchSession: (sessionId: string) => Promise<void>
   createSession: (options?: {
     seedWelcome?: boolean
@@ -205,6 +215,7 @@ function overlayState(overlay: CanvasOverlay) {
     canvasOverlay: overlay,
     sessionGraphOpen: overlay === 'session',
     loopGraphOpen: overlay === 'loop',
+    spatialCaptureOpen: overlay === 'spatial',
   }
 }
 
@@ -265,6 +276,19 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
 
   toggleLoopGraph: () => {
     const overlay: CanvasOverlay = get().canvasOverlay === 'loop' ? 'none' : 'loop'
+    writeCanvasOverlay(overlay)
+    set(overlayState(overlay))
+  },
+
+  setSpatialCaptureOpen: (open) => {
+    const overlay: CanvasOverlay = open ? 'spatial' : 'none'
+    writeCanvasOverlay(overlay)
+    set(overlayState(overlay))
+  },
+
+  toggleSpatialCapture: () => {
+    const overlay: CanvasOverlay =
+      get().canvasOverlay === 'spatial' ? 'none' : 'spatial'
     writeCanvasOverlay(overlay)
     set(overlayState(overlay))
   },

@@ -461,6 +461,41 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.saveSpatialPinSnapshot(projectId, pinId, pngBase64);
   }
 
+  listSpatialCaptureSessions(projectId: string) {
+    return this.transport.listSpatialCaptureSessions(projectId);
+  }
+
+  getSpatialCaptureSession(projectId: string, sessionId: string) {
+    return this.transport.getSpatialCaptureSession(projectId, sessionId);
+  }
+
+  upsertSpatialCaptureSession(
+    projectId: string,
+    session: import("../contracts/spatial-capture-session.js").SpatialCaptureSession,
+  ) {
+    return this.transport.upsertSpatialCaptureSession(projectId, session);
+  }
+
+  deleteSpatialCaptureSession(projectId: string, sessionId: string) {
+    return this.transport.deleteSpatialCaptureSession(projectId, sessionId);
+  }
+
+  saveSpatialCaptureBackdrop(
+    projectId: string,
+    sessionId: string,
+    pngBase64: string,
+  ) {
+    return this.transport.saveSpatialCaptureBackdrop(
+      projectId,
+      sessionId,
+      pngBase64,
+    );
+  }
+
+  readProjectAssetBase64(projectId: string, relativePath: string) {
+    return this.transport.readProjectAssetBase64(projectId, relativePath);
+  }
+
   listLoopGraphs(projectId: string) {
     return this.transport.listLoopGraphs(projectId);
   }

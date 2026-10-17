@@ -168,7 +168,12 @@ import type {
 } from '../components/CodeEditor/editorTypes'
 
 export type AppPhase = 'idle' | 'loading' | 'ready' | 'error'
-export type CenterTab = 'function-map' | 'code' | 'agent-flow' | 'browser'
+export type CenterTab =
+  | 'function-map'
+  | 'spatial-captures'
+  | 'code'
+  | 'agent-flow'
+  | 'browser'
 
 export type DesignSurfaceFocus =
   | { kind: 'epic'; epicId: string }

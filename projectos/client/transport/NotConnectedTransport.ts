@@ -463,6 +463,54 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async listSpatialCaptureSessions(
+    _projectId: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureSessionHead[]
+  > {
+    return transportNotConnected();
+  }
+
+  async getSpatialCaptureSession(
+    _projectId: string,
+    _sessionId: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureSession | null
+  > {
+    return transportNotConnected();
+  }
+
+  async upsertSpatialCaptureSession(
+    _projectId: string,
+    _session: import("../../contracts/spatial-capture-session.js").SpatialCaptureSession,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureSession
+  > {
+    return transportNotConnected();
+  }
+
+  async deleteSpatialCaptureSession(
+    _projectId: string,
+    _sessionId: string,
+  ): Promise<boolean> {
+    return transportNotConnected();
+  }
+
+  async saveSpatialCaptureBackdrop(
+    _projectId: string,
+    _sessionId: string,
+    _pngBase64: string,
+  ): Promise<{ backdropAssetPath: string }> {
+    return transportNotConnected();
+  }
+
+  async readProjectAssetBase64(
+    _projectId: string,
+    _relativePath: string,
+  ): Promise<{ base64: string; mimeType: string } | null> {
+    return transportNotConnected();
+  }
+
   async listLoopGraphs(
     _projectId: string,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphHead[]> {

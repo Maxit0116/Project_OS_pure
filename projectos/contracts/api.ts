@@ -71,6 +71,10 @@ import type {
   SubmitSpatialPinResult,
 } from "./spatial-pin.js";
 import type {
+  SpatialCaptureSession,
+  SpatialCaptureSessionHead,
+} from "./spatial-capture-session.js";
+import type {
   LoopCompileResult,
   LoopGraphDocument,
   LoopGraphHead,
@@ -271,6 +275,30 @@ export interface ProjectOSApi {
     pinId: string,
     pngBase64: string,
   ): Promise<{ snapshotAssetPath: string }>;
+  listSpatialCaptureSessions(
+    projectId: string,
+  ): Promise<SpatialCaptureSessionHead[]>;
+  getSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+  ): Promise<SpatialCaptureSession | null>;
+  upsertSpatialCaptureSession(
+    projectId: string,
+    session: SpatialCaptureSession,
+  ): Promise<SpatialCaptureSession>;
+  deleteSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+  ): Promise<boolean>;
+  saveSpatialCaptureBackdrop(
+    projectId: string,
+    sessionId: string,
+    pngBase64: string,
+  ): Promise<{ backdropAssetPath: string }>;
+  readProjectAssetBase64(
+    projectId: string,
+    relativePath: string,
+  ): Promise<{ base64: string; mimeType: string } | null>;
   listLoopGraphs(projectId: string): Promise<LoopGraphHead[]>;
   getLoopGraphIndex(projectId: string): Promise<LoopGraphIndex>;
   getLoopGraph(projectId: string, loopId: string): Promise<LoopGraphDocument | null>;

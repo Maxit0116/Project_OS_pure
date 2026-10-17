@@ -1,0 +1,97 @@
+.root {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.trigger {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 8px 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--tech-border);
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.trigger:hover,
+.triggerOpen {
+  border-color: color-mix(in srgb, var(--tech-accent) 45%, var(--tech-border));
+  background: color-mix(in srgb, var(--tech-accent) 10%, var(--tech-bg-muted));
+}
+
+.triggerLabel {
+  line-height: 1;
+}
+
+.chevron {
+  color: var(--tech-text-secondary);
+  flex-shrink: 0;
+}
+
+.triggerOpen .chevron {
+  transform: rotate(180deg);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tech-accent);
+  flex-shrink: 0;
+}
+
+.menuAnchor {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 80;
+}
+
+.menu {
+  min-width: 132px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.option {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tech-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.option:hover {
+  background: var(--color-hover-overlay);
+}
+
+.optionActive {
+  background: color-mix(in srgb, var(--tech-accent) 14%, transparent);
+  color: var(--tech-accent);
+}
