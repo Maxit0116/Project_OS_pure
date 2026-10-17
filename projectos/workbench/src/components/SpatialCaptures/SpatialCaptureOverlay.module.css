@@ -73,10 +73,83 @@
   contain: layout paint;
 }
 
+.bannerRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
 .banner {
   font-size: 11px;
   color: var(--color-text-secondary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zoomControls {
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-surface, rgba(20, 20, 22, 0.92));
+}
+
+.zoomBtn,
+.zoomLabel {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  height: 26px;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zoomBtn {
+  width: 28px;
+}
+
+.zoomBtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.zoomLabel {
+  min-width: 52px;
+  padding: 0 6px;
+  border-left: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.zoomBtn:hover:not(:disabled),
+.zoomLabel:hover {
+  background: color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+}
+
+.stagePannable {
+  cursor: grab;
+}
+
+.stagePannable :global(textarea) {
+  cursor: text;
+}
+
+.stagePanning,
+.stagePanning :global(.overlay-panel-drag-handle) {
+  cursor: grabbing;
 }
 
 .stageViewport {
@@ -91,6 +164,13 @@
   border: 1px solid var(--color-border);
   background: #0a0a0b;
   contain: layout paint;
+  touch-action: none;
+  user-select: none;
+}
+
+.stageViewport :global(textarea),
+.stageViewport :global(input) {
+  user-select: text;
 }
 
 .backdrop {

@@ -9,6 +9,7 @@ export type DiffReadyNotificationContext = {
   codeSubTab: CodeSubTab
   windowFocused: boolean
   rightPanelTab: RightPanelTab
+  agentFlowOpen: boolean
 }
 
 export type DiffReadyCompletion = {
@@ -30,12 +31,14 @@ export function captureDiffReadyNotificationContext(state: {
   codeSubTab: CodeSubTab
   windowFocused: boolean
   rightPanelTab: RightPanelTab
+  agentFlowOpen: boolean
 }): DiffReadyNotificationContext {
   return {
     centerTab: state.centerTab,
     codeSubTab: state.codeSubTab,
     windowFocused: state.windowFocused,
     rightPanelTab: state.rightPanelTab,
+    agentFlowOpen: state.agentFlowOpen,
   }
 }
 export const DIFF_READY_BANNER_AUTO_DISMISS_MS = 8000
@@ -47,7 +50,7 @@ export function shouldSuppressDiffReadyNotification(state: {
   context: DiffReadyNotificationContext
 }): boolean {
   if (!state.enabled) return true
-  const { centerTab, codeSubTab, windowFocused, rightPanelTab } = state.context
+  const { centerTab, codeSubTab, windowFocused, rightPanelTab, agentFlowOpen } = state.context
   // Only suppress when the user is already looking at the result *and* the
   // window is focused. Being on the diff tab while away (other Space / app)
   // must still deliver a system notification.
@@ -62,7 +65,7 @@ export function shouldSuppressDiffReadyNotification(state: {
   if (
     state.kind === 'ask' &&
     windowFocused &&
-    (centerTab === 'agent-flow' || rightPanelTab === 'chat')
+    (agentFlowOpen || rightPanelTab === 'chat')
   ) {
     return true
   }

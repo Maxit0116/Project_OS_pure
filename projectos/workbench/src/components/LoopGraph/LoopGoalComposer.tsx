@@ -18,7 +18,7 @@ const MODE_ICON = {
 
 export default function LoopGoalComposer() {
   const { ts } = useI18n()
-  const document = useLoopGraphStore((s) => s.document)
+  const loopDocument = useLoopGraphStore((s) => s.document)
   const composerDraft = useLoopGraphStore((s) => s.composerDraft)
   const composerSheet = useLoopGraphStore((s) => s.composerSheet)
   const authoringBusy = useLoopGraphStore((s) => s.authoringBusy)
@@ -37,13 +37,13 @@ export default function LoopGoalComposer() {
   const modeMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useAutoResizeTextarea(composerDraft, 200)
 
-  const mode: LoopComposerMode = document?.composerMode ?? 'ask'
-  const draftContext = document?.draftGoalContext
-  const confirmedContext = document?.confirmedGoalContext
+  const mode: LoopComposerMode = loopDocument?.composerMode ?? 'ask'
+  const draftContext = loopDocument?.draftGoalContext
+  const confirmedContext = loopDocument?.confirmedGoalContext
   const context = draftContext ?? confirmedContext
-  const trace = document?.authoringTrace
-  const offer = document?.pendingGraphEditOffer
-  const canUndo = (document?.draftHistory.length ?? 0) > 0
+  const trace = loopDocument?.authoringTrace
+  const offer = loopDocument?.pendingGraphEditOffer
+  const canUndo = (loopDocument?.draftHistory?.length ?? 0) > 0
 
   const openQuestions = draftContext?.openQuestions ?? []
   const needsClarification = openQuestions.some((q) => !q.answer?.trim())
@@ -70,11 +70,11 @@ export default function LoopGoalComposer() {
         setModeMenuOpen(false)
       }
     }
-    document.addEventListener('mousedown', onPointerDown)
-    return () => document.removeEventListener('mousedown', onPointerDown)
+    window.document.addEventListener('mousedown', onPointerDown)
+    return () => window.document.removeEventListener('mousedown', onPointerDown)
   }, [modeMenuOpen])
 
-  if (!document) return null
+  if (!loopDocument) return null
 
   const ModeIcon = MODE_ICON[mode]
   const modeLabel =
@@ -392,10 +392,10 @@ export default function LoopGoalComposer() {
           </div>
         </div>
 
-        {document.linkedSessionIds.length > 0 ? (
+        {(loopDocument.linkedSessionIds?.length ?? 0) > 0 ? (
           <span className={styles.metaHint}>
             {ts('chat.loopGraph.linkedSessions', {
-              count: String(document.linkedSessionIds.length),
+              count: String(loopDocument.linkedSessionIds.length),
             })}
           </span>
         ) : null}

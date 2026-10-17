@@ -4,7 +4,6 @@ import { isDesktopApp } from '../data/clientMode'
 import { useI18n } from '../i18n'
 import FunctionMap from '../components/FunctionMap/FunctionMap'
 import MapChromeAnchor from '../components/FunctionMap/MapChromeAnchor'
-import AgentFlowPanel from '../components/AgentFlow/AgentFlowPanel'
 import DiffReviewPanel from '../components/DiffReview/DiffReviewPanel'
 import CodeEditorWorkspace from '../components/CodeEditor/CodeEditorWorkspace'
 import { hasOpenEditorFiles } from '../components/CodeEditor/editorPaneHelpers'
@@ -31,9 +30,6 @@ export default function CenterPanel({ mapBleed }: Props) {
   const selectFile = useWorkbenchStore((s) => s.selectFile)
   const clearSelection = useWorkbenchStore((s) => s.clearSelection)
   const mapContent = useWorkbenchStore((s) => s.mapContent)
-  const flowSteps = useWorkbenchStore((s) => s.flowSteps)
-  const flowStatus = useWorkbenchStore((s) => s.flowStatus)
-  const diffReady = useWorkbenchStore((s) => s.diffReady)
   const generatedDiff = useWorkbenchStore((s) => s.generatedDiff)
   const applyResult = useWorkbenchStore((s) => s.applyResult)
   const applyCurrentDiff = useWorkbenchStore((s) => s.applyCurrentDiff)
@@ -49,7 +45,6 @@ export default function CenterPanel({ mapBleed }: Props) {
   const diffReadyBanner = useWorkbenchStore((s) => s.diffReadyBanner)
   const dismissDiffReadyBanner = useWorkbenchStore((s) => s.dismissDiffReadyBanner)
   const navigateFromAgentNotification = useWorkbenchStore((s) => s.navigateFromAgentNotification)
-  const navigateToDiffReview = useWorkbenchStore((s) => s.navigateToDiffReview)
   const selectedFilePath = useWorkbenchStore((s) => s.selectedFilePath)
   const editorPanes = useWorkbenchStore((s) => s.editorPanes)
   const { ts } = useI18n()
@@ -174,17 +169,6 @@ export default function CenterPanel({ mapBleed }: Props) {
             <div className={styles.tabPane} data-tour="spatial-captures">
               {showCenterBanner ? diffReadyBannerEl : null}
               <SpatialCapturesPanel />
-            </div>
-          )}
-          {centerTab === 'agent-flow' && (
-            <div className={styles.tabPane} data-tour="agent-flow">
-              {showCenterBanner ? diffReadyBannerEl : null}
-              <AgentFlowPanel
-                steps={flowSteps}
-                status={flowStatus}
-                diffReady={diffReady}
-                onReviewDiff={() => void navigateToDiffReview()}
-              />
             </div>
           )}
         </div>

@@ -10,6 +10,7 @@ import type {
 import { emptyComposerDraft } from '@contracts/index'
 import { createMockSampleWorkspace, MockProjectOSApiClient } from '../../../client/mock-project-os-api-client.js'
 import { ProjectOSError } from '../../../errors.js'
+import { useChatSessionStore } from './chatSessionStore'
 import { canSubmitAgentPrompt, useWorkbenchStore } from './workbenchStore'
 
 const mockClient = new MockProjectOSApiClient()
@@ -192,8 +193,9 @@ describe('agent conversation routing', () => {
     const pending = useWorkbenchStore.getState().sendPrompt('What does this file do?')
     await vi.waitFor(() => expect(askAgent).toHaveBeenCalledOnce())
 
+    expect(useChatSessionStore.getState().agentFlowOpen).toBe(true)
     expect(useWorkbenchStore.getState()).toMatchObject({
-      centerTab: 'agent-flow',
+      centerTab: 'function-map',
       agentFlowSubject: 'ask',
       latestAskTrace: {
         status: 'running',
@@ -378,11 +380,11 @@ describe('agent conversation routing', () => {
     await useWorkbenchStore.getState().sendPrompt('Change the heading')
 
     expect(confirmExecution).toHaveBeenCalledWith('ref-automatic')
+    expect(useChatSessionStore.getState().agentFlowOpen).toBe(true)
     expect(useWorkbenchStore.getState()).toMatchObject({
       pendingRefinement: null,
       activeRunId: 'run-automatic',
       agentFlowSubject: 'run',
-      centerTab: 'agent-flow',
     })
   })
 

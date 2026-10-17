@@ -14,6 +14,7 @@ const baseContext = {
   codeSubTab: 'editor' as const,
   windowFocused: true,
   rightPanelTab: 'chat' as const,
+  agentFlowOpen: false,
 }
 
 function completion(
@@ -68,7 +69,7 @@ describe('diffReadyNotification', () => {
         kind: 'diff',
         context: {
           ...baseContext,
-          centerTab: 'agent-flow',
+          agentFlowOpen: true,
         },
       }),
     ).toBe(false)
@@ -81,8 +82,17 @@ describe('diffReadyNotification', () => {
         kind: 'ask',
         context: {
           ...baseContext,
-          centerTab: 'agent-flow',
+          rightPanelTab: 'harness',
+          agentFlowOpen: true,
         },
+      }),
+    ).toBe(true)
+
+    expect(
+      shouldSuppressDiffReadyNotification({
+        enabled: true,
+        kind: 'ask',
+        context: baseContext,
       }),
     ).toBe(true)
 
@@ -142,7 +152,7 @@ describe('diffReadyNotification', () => {
     ).toBe('map_banner')
 
     expect(
-      resolveNotificationChannel({ windowFocused: true, centerTab: 'agent-flow' }),
+      resolveNotificationChannel({ windowFocused: true, centerTab: 'code' }),
     ).toBe('center_banner')
   })
 
@@ -153,7 +163,7 @@ describe('diffReadyNotification', () => {
         context: {
           ...baseContext,
           windowFocused: false,
-          centerTab: 'agent-flow',
+          agentFlowOpen: true,
         },
       }),
     ]

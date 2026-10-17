@@ -7,3 +7,18 @@
 .historyWrap {
   position: relative;
 }
+
+.agentFlowButton {
+  position: relative;
+}
+
+.liveDot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--tech-accent);
+  pointer-events: none;
+}

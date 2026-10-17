@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useMemo, useRef } from 'react'
 import { Search, CornerDownLeft } from 'lucide-react'
+import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useBottomDockStore } from '../../state/bottomDockStore'
 import { useTerminalStore } from '../../state/terminalStore'
@@ -120,7 +121,7 @@ export default function CommandPalette() {
         id: 'go-flow',
         label: ts('commandPalette.goAgentFlow'),
         group: 'Navigation',
-        action: () => setCenterTab('agent-flow'),
+        action: () => useChatSessionStore.getState().presentAgentFlow(),
       },
       {
         id: 'go-code',

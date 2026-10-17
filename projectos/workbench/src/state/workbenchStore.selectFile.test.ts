@@ -87,13 +87,13 @@ describe('workbenchStore.selectFile', () => {
     expect(useWorkbenchStore.getState().editorBuffers[FILE_PATH]).toBe('edited content')
   })
 
-  it('switches to the code tab from function-map, agent-flow, or browser', async () => {
+  it('switches to the code tab from function-map, spatial captures, or browser', async () => {
     const workspace = createMockSampleWorkspace()
     const context = fileContext(workspace)
     const getFileContext = vi.fn(async () => context)
     const getFileContent = vi.fn(async () => 'disk content')
 
-    for (const centerTab of ['function-map', 'agent-flow', 'browser'] as const) {
+    for (const centerTab of ['function-map', 'spatial-captures', 'browser'] as const) {
       useWorkbenchStore.setState({
         client: { getFileContext, getFileContent } as unknown as ProjectOSApi,
         project: workspace.project,

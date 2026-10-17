@@ -6,7 +6,9 @@ import {
   Eraser,
   ListTree,
   MessageCircle,
+  Minus,
   Pencil,
+  Plus,
   Send,
   SquarePen,
   Trash2,
@@ -42,9 +44,11 @@ import {
   resolveComposePanelSize,
   useComposePanelMetrics,
 } from '../../overlay/useComposePanelMetrics'
+import ComposeFlowDrawer from '../../overlay/ComposeFlowDrawer'
 import { cropBackdropRegionPngBase64 } from '../../overlay/cropBackdrop'
 import {
   focusIdsForClick,
+  isCompleteCaptureRegion,
   isOutsideAllRegions,
   isRegionFocused,
   type OverlayArrow,
@@ -59,8 +63,19 @@ import {
   relativePointForAnchor,
   relativeToClient,
 } from '../../overlay/regionAnchors'
+import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useSpatialCaptureStore } from '../../state/spatialCaptureStore'
+import {
+  CAPTURE_ZOOM_MAX,
+  CAPTURE_ZOOM_MIN,
+  captureContentSize,
+  captureViewOverflows,
+  clampCapturePan,
+  clampZoom,
+  panForZoomAtPoint,
+} from './captureViewportCamera'
+import { useCaptureComposeFlows } from './useCaptureComposeFlows'
 import '../../overlay/overlay.css'
 import styles from './SpatialCaptureOverlay.module.css'
 
@@ -91,6 +106,13 @@ type PointerMode =
     }
   | { kind: 'draw'; regionId: string; strokeId: string }
   | {
+      kind: 'pan'
+      originX: number
+      originY: number
+      panX: number
+      panY: number
+    }
+  | {
       kind: 'compose-drag'
       regionId: string
       arrowId: string
@@ -98,6 +120,10 @@ type PointerMode =
       panelWidth: number
       panelHeight: number
     }
+
+const IDLE_HINT = 'Frozen capture · scroll to zoom · drag to select · Esc to exit'
+const ZOOMED_HINT =
+  'Frozen capture · drag empty space to pan · Shift-drag to select · Esc to exit'
 
 function toLocalRect(
   a: { x: number; y: number },
@@ -120,9 +146,10 @@ export default function SpatialCaptureCanvas({
   const project = useWorkbenchStore((s) => s.project)
   const client = useWorkbenchStore((s) => s.client)
   const upsertActiveSession = useSpatialCaptureStore((s) => s.upsertActiveSession)
+  const { ts } = useI18n()
 
   const [regions, setRegions] = useState<OverlayRegion[]>(() =>
-    session.regions.map(captureRegionToOverlay),
+    session.regions.map(captureRegionToOverlay).filter(isCompleteCaptureRegion),
   )
   const [focusedRegionIds, setFocusedRegionIds] = useState<string[]>(() =>
     session.regions[0] ? [session.regions[0].id] : [],
@@ -134,31 +161,61 @@ export default function SpatialCaptureCanvas({
   const [draftRect, setDraftRect] = useState<ScreenRect | null>(null)
   const [pointer, setPointer] = useState<PointerMode>({ kind: 'idle' })
   const [openMenu, setOpenMenu] = useState<'mode' | null>(null)
-  const [status, setStatus] = useState(
-    'Frozen capture · drag to select · Esc to exit',
-  )
+  const [status, setStatus] = useState(IDLE_HINT)
   const [fitScale, setFitScale] = useState(1)
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
   const { metrics: panelMetrics, bindPanel } = useComposePanelMetrics()
+  const flowArrows = useMemo(
+    () =>
+      regions.flatMap((region) =>
+        region.arrows.map((arrow) => ({
+          id: arrow.id,
+          ...(arrow.runId ? { runId: arrow.runId } : {}),
+        })),
+      ),
+    [regions],
+  )
+  const { flows, seedFlow } = useCaptureComposeFlows(
+    flowArrows,
+    client,
+    Boolean(project),
+  )
+
+  const viewport = session.viewport
 
   const viewportHostRef = useRef<HTMLDivElement | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
   const regionsRef = useRef(regions)
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const viewport = session.viewport
+  const zoomRef = useRef(1)
+  const panRef = useRef({ x: 0, y: 0 })
+  const fitScaleRef = useRef(1)
+  const viewportRef = useRef(viewport)
+  zoomRef.current = zoom
+  panRef.current = pan
+  fitScaleRef.current = fitScale
+  viewportRef.current = viewport
 
   useEffect(() => {
     regionsRef.current = regions
   }, [regions])
 
   useEffect(() => {
-    setRegions(session.regions.map(captureRegionToOverlay))
+    setRegions(
+      session.regions.map(captureRegionToOverlay).filter(isCompleteCaptureRegion),
+    )
     const firstRegion = session.regions[0]
     setFocusedRegionIds(firstRegion ? [firstRegion.id] : [])
     setActiveArrowId(
       firstRegion?.arrows[firstRegion.arrows.length - 1]?.id ?? null,
     )
+    zoomRef.current = 1
+    panRef.current = { x: 0, y: 0 }
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+    setStatus(IDLE_HINT)
   }, [session.id])
 
   // Fit entire overlay viewport into the IDE card. Coalesce ResizeObserver
@@ -178,8 +235,20 @@ export default function SpatialCaptureCanvas({
       )
       const clamped = Number.isFinite(next) && next > 0 ? next : 1
       if (Math.abs(clamped - last) < 0.004) return
+      const previous = last
       last = clamped
       setFitScale(clamped)
+      if (previous > 0) {
+        const ratio = clamped / previous
+        const box = host.getBoundingClientRect()
+        const nextPan = clampCapturePan(
+          { x: panRef.current.x * ratio, y: panRef.current.y * ratio },
+          { width: box.width, height: box.height },
+          captureContentSize(viewport, clamped, zoomRef.current),
+        )
+        panRef.current = nextPan
+        setPan(nextPan)
+      }
     }
     const schedule = () => {
       if (raf) return
@@ -193,6 +262,95 @@ export default function SpatialCaptureCanvas({
       if (raf) cancelAnimationFrame(raf)
     }
   }, [viewport.width, viewport.height])
+
+  useEffect(() => {
+    setStatus((current) => {
+      if (current !== IDLE_HINT && current !== ZOOMED_HINT) return current
+      return zoom > 1.001 ? ZOOMED_HINT : IDLE_HINT
+    })
+  }, [zoom])
+
+  function hostSize(): { width: number; height: number } | null {
+    const host = viewportHostRef.current
+    if (!host) return null
+    const box = host.getBoundingClientRect()
+    if (box.width < 1 || box.height < 1) return null
+    return { width: box.width, height: box.height }
+  }
+
+  function viewCanPan(): boolean {
+    const host = hostSize()
+    if (!host) return false
+    return captureViewOverflows(
+      host,
+      captureContentSize(viewportRef.current, fitScaleRef.current, zoomRef.current),
+    )
+  }
+
+  function commitZoom(nextZoom: number, hostX: number, hostY: number) {
+    const clamped = clampZoom(nextZoom)
+    const host = hostSize()
+    const nextPan = host
+      ? panForZoomAtPoint({
+          pan: panRef.current,
+          zoom: zoomRef.current,
+          nextZoom: clamped,
+          hostX,
+          hostY,
+          host,
+          viewport: viewportRef.current,
+          fitScale: fitScaleRef.current,
+        })
+      : panRef.current
+    zoomRef.current = clamped
+    panRef.current = nextPan
+    setZoom(clamped)
+    setPan(nextPan)
+  }
+
+  function zoomBy(factor: number) {
+    const host = hostSize()
+    commitZoom(
+      zoomRef.current * factor,
+      host ? host.width / 2 : 0,
+      host ? host.height / 2 : 0,
+    )
+  }
+
+  function resetZoom() {
+    zoomRef.current = 1
+    panRef.current = { x: 0, y: 0 }
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+  }
+
+  const commitZoomRef = useRef(commitZoom)
+  commitZoomRef.current = commitZoom
+
+  useEffect(() => {
+    const host = viewportHostRef.current
+    if (!host) return
+    const onWheel = (event: WheelEvent) => {
+      const target = event.target
+      if (
+        target instanceof Element &&
+        target.closest('textarea, .overlay-flow-steps, .overlay-panel')
+      ) {
+        return
+      }
+      event.preventDefault()
+      const box = host.getBoundingClientRect()
+      const raw = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY
+      const factor = Math.min(1.18, Math.max(1 / 1.18, Math.exp(-raw * 0.0016)))
+      commitZoomRef.current(
+        zoomRef.current * factor,
+        event.clientX - box.left,
+        event.clientY - box.top,
+      )
+    }
+    host.addEventListener('wheel', onWheel, { passive: false })
+    return () => host.removeEventListener('wheel', onWheel)
+  }, [viewport])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -233,22 +391,30 @@ export default function SpatialCaptureCanvas({
     )
   }
 
+  const sessionRef = useRef(session)
+  sessionRef.current = session
+
+  function persistRegions(nextRegions: OverlayRegion[]) {
+    const current = sessionRef.current
+    const next = buildCaptureSessionFromOverlay({
+      id: current.id,
+      projectId: current.projectId,
+      location: current.location,
+      viewport: current.viewport,
+      regions: nextRegions,
+      ...(current.backdropAssetPath
+        ? { backdropAssetPath: current.backdropAssetPath }
+        : {}),
+      createdAt: current.createdAt,
+      title: current.title,
+    })
+    void upsertActiveSession(next)
+  }
+
   function schedulePersist(nextRegions: OverlayRegion[]) {
     if (persistTimer.current) clearTimeout(persistTimer.current)
     persistTimer.current = setTimeout(() => {
-      const next = buildCaptureSessionFromOverlay({
-        id: session.id,
-        projectId: session.projectId,
-        location: session.location,
-        viewport: session.viewport,
-        regions: nextRegions,
-        ...(session.backdropAssetPath
-          ? { backdropAssetPath: session.backdropAssetPath }
-          : {}),
-        createdAt: session.createdAt,
-        title: session.title,
-      })
-      void upsertActiveSession(next)
+      persistRegions(nextRegions)
     }, 400)
   }
 
@@ -258,6 +424,13 @@ export default function SpatialCaptureCanvas({
       if (persistTimer.current) clearTimeout(persistTimer.current)
     }
   }, [regions])
+
+  useEffect(() => {
+    return () => {
+      if (persistTimer.current) clearTimeout(persistTimer.current)
+      persistRegions(regionsRef.current)
+    }
+  }, [])
 
   async function captureFrozenRegion(
     regionId: string,
@@ -461,6 +634,11 @@ export default function SpatialCaptureCanvas({
         a.id === arrowId ? { ...a, status: 'submitting', prompt: trimmed } : a,
       ),
     }))
+    seedFlow(arrowId, {
+      steps: [{ id: 'submit', label: 'Starting agent…', status: 'running' }],
+      phase: 'thinking',
+      live: false,
+    })
     try {
       await upsertArrowPin(region, { ...arrow, prompt: trimmed })
       const pin = await client.getSpatialPin(project.projectId, arrow.pinId)
@@ -488,6 +666,23 @@ export default function SpatialCaptureCanvas({
         ),
       }))
       setStatus(result.runId ? 'Agent running…' : 'Submitted')
+      if (!result.runId) {
+        seedFlow(arrowId, {
+          steps: [
+            {
+              id: 'done',
+              label: result.planId
+                ? 'Plan ready'
+                : result.debugSessionId
+                  ? 'Debug started'
+                  : 'Answer ready',
+              status: 'complete',
+            },
+          ],
+          phase: 'done',
+          live: false,
+        })
+      }
     } catch {
       updateRegion(regionId, (r) => ({
         ...r,
@@ -496,7 +691,30 @@ export default function SpatialCaptureCanvas({
         ),
       }))
       setStatus('Submit failed')
+      seedFlow(arrowId, {
+        steps: [{ id: 'error', label: 'Submit failed', status: 'error' }],
+        phase: 'error',
+        live: false,
+      })
     }
+  }
+
+  function beginPan(event: React.PointerEvent) {
+    setPointer({
+      kind: 'pan',
+      originX: event.clientX,
+      originY: event.clientY,
+      panX: panRef.current.x,
+      panY: panRef.current.y,
+    })
+    viewportHostRef.current?.setPointerCapture?.(event.pointerId)
+  }
+
+  function onViewportPointerDown(event: React.PointerEvent) {
+    if (event.button !== 0 || event.shiftKey) return
+    if (event.target !== event.currentTarget) return
+    if (!viewCanPan()) return
+    beginPan(event)
   }
 
   function onPointerDown(event: React.PointerEvent) {
@@ -589,6 +807,10 @@ export default function SpatialCaptureCanvas({
         setStatus('Draw cancelled')
         return
       }
+      if (!event.shiftKey && viewCanPan()) {
+        beginPan(event)
+        return
+      }
       setFocusedRegionIds([])
       setActiveArrowId(null)
       setPointer({ kind: 'selecting', origin: pt })
@@ -627,6 +849,23 @@ export default function SpatialCaptureCanvas({
             : stroke,
         ),
       }))
+      return
+    }
+    if (pointer.kind === 'pan') {
+      const host = hostSize()
+      const next = {
+        x: pointer.panX + (event.clientX - pointer.originX),
+        y: pointer.panY + (event.clientY - pointer.originY),
+      }
+      const clamped = host
+        ? clampCapturePan(
+            next,
+            host,
+            captureContentSize(viewportRef.current, fitScaleRef.current, zoomRef.current),
+          )
+        : next
+      panRef.current = clamped
+      setPan(clamped)
       return
     }
     if (pointer.kind === 'compose-drag') {
@@ -699,6 +938,16 @@ export default function SpatialCaptureCanvas({
     }
     if (pointer.kind === 'draw') {
       setPointer({ kind: 'idle' })
+      return
+    }
+    if (pointer.kind === 'pan') {
+      const moved =
+        Math.hypot(event.clientX - pointer.originX, event.clientY - pointer.originY) > 4
+      setPointer({ kind: 'idle' })
+      if (!moved) {
+        setFocusedRegionIds([])
+        setActiveArrowId(null)
+      }
     }
   }
 
@@ -752,26 +1001,78 @@ export default function SpatialCaptureCanvas({
         })()
       : null
 
-  const scaledW = viewport.width * fitScale
-  const scaledH = viewport.height * fitScale
+  const stageScale = fitScale * zoom
+  const scaledW = viewport.width * stageScale
+  const scaledH = viewport.height * stageScale
+  const panning = pointer.kind === 'pan'
+  const pannable = zoom > 1.001
+  const zoomPercent = Math.round(zoom * 100)
 
   return (
     <div className={styles.canvasShell}>
-      <div className={styles.banner}>{status}</div>
-      <div ref={viewportHostRef} className={styles.stageViewport}>
+      <div className={styles.bannerRow}>
+        <div className={styles.banner}>{status}</div>
+        <div
+          className={styles.zoomControls}
+          role="group"
+          aria-label={ts('spatialCaptures.zoomLevel')}
+        >
+          <button
+            type="button"
+            className={styles.zoomBtn}
+            aria-label={ts('spatialCaptures.zoomOut')}
+            disabled={zoom <= CAPTURE_ZOOM_MIN + 0.001}
+            onClick={() => zoomBy(1 / 1.25)}
+          >
+            <Minus size={14} strokeWidth={2} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className={styles.zoomLabel}
+            aria-label={ts('spatialCaptures.zoomReset')}
+            title={ts('spatialCaptures.zoomReset')}
+            onClick={resetZoom}
+          >
+            {zoomPercent}%
+          </button>
+          <button
+            type="button"
+            className={styles.zoomBtn}
+            aria-label={ts('spatialCaptures.zoomIn')}
+            disabled={zoom >= CAPTURE_ZOOM_MAX - 0.001}
+            onClick={() => zoomBy(1.25)}
+          >
+            <Plus size={14} strokeWidth={2} aria-hidden />
+          </button>
+        </div>
+      </div>
+      <div
+        ref={viewportHostRef}
+        className={styles.stageViewport}
+        onPointerDown={onViewportPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
         <div
           className={styles.stageScaler}
-          style={{ width: scaledW, height: scaledH }}
+          style={{
+            width: scaledW,
+            height: scaledH,
+            transform: `translate(${pan.x}px, ${pan.y}px)`,
+          }}
         >
           <div
             ref={stageRef}
             className={`overlay-root overlay-root-embedded${
               pointer.kind === 'compose-drag' ? ' overlay-root-dragging' : ''
+            }${pannable ? ` ${styles.stagePannable}` : ''}${
+              panning ? ` ${styles.stagePanning}` : ''
             }`}
             style={{
               width: viewport.width,
               height: viewport.height,
-              transform: `scale(${fitScale})`,
+              transform: `scale(${stageScale})`,
               transformOrigin: 'top left',
             }}
             onPointerDown={onPointerDown}
@@ -913,6 +1214,12 @@ export default function SpatialCaptureCanvas({
                     setActiveArrowId(arrow.id)
                   }}
                 >
+                  {flows[arrow.id] ? (
+                    <ComposeFlowDrawer
+                      steps={flows[arrow.id]!.steps}
+                      phase={flows[arrow.id]!.phase}
+                    />
+                  ) : null}
                   <div
                     className="overlay-panel-header overlay-panel-drag-handle"
                     title="Drag to move card and arrow tip"

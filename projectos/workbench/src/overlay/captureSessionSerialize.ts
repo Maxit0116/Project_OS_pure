@@ -5,7 +5,11 @@ import type {
   SpatialCaptureViewport,
 } from '@contracts/spatial-capture-session'
 import type { LocationKey } from '@contracts/spatial-pin'
-import type { OverlayArrow, OverlayRegion } from './overlayRegions'
+import {
+  isCompleteCaptureRegion,
+  type OverlayArrow,
+  type OverlayRegion,
+} from './overlayRegions'
 
 export function overlayArrowToCapture(
   arrow: OverlayArrow,
@@ -92,7 +96,9 @@ export function buildCaptureSessionFromOverlay(input: {
   title?: string
 }): SpatialCaptureSession {
   const now = new Date().toISOString()
-  const regions = input.regions.map(overlayRegionToCapture)
+  const regions = input.regions
+    .filter(isCompleteCaptureRegion)
+    .map(overlayRegionToCapture)
   const firstPrompt = regions
     .flatMap((r) => r.arrows)
     .map((a) => a.prompt.trim())

@@ -5,6 +5,7 @@ import { normalizeRecentWorkspacePath } from '../state/recentWorkspaces'
 import { isDesktopApp } from '../data/clientMode'
 import { useBottomDockStore } from '../state/bottomDockStore'
 import { useTerminalStore } from '../state/terminalStore'
+import { useChatSessionStore } from '../state/chatSessionStore'
 import { useWorkbenchStore } from '../state/workbenchStore'
 import { dispatchCommandPalette } from './commandPaletteController'
 import { setKeyboardShortcutsOpen } from './keyboardShortcutsController'
@@ -118,7 +119,7 @@ export function executeAppMenuCommand(command: AppMenuCommand): void {
       return
     case 'show-agent-flow':
       if (!workspaceReady()) return
-      useWorkbenchStore.getState().setCenterTab('agent-flow')
+      useChatSessionStore.getState().presentAgentFlow()
       return
     case 'show-code':
       if (!workspaceReady()) return

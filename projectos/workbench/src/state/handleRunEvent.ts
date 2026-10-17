@@ -19,6 +19,7 @@ import { sanitizeErrorMessage } from '../../../utils/sanitize-error-message'
 import { truncateDiffReadySummary } from '../notifications/diffReadyNotification'
 import type { CenterTab, ChatMessage, CodeSubTab } from './workbenchStore'
 import { logRunEventToActivity } from './activityLogFromRunEvent'
+import { useChatSessionStore } from './chatSessionStore'
 
 export interface FlowCorrection {
   id: string
@@ -113,7 +114,6 @@ export function reduceRunEventState(
 
   if (event.type === 'run_started') {
     patch.flowStatus = 'running'
-    patch.centerTab = 'agent-flow'
   }
 
   if (event.type === 'prompt_refined') {
@@ -266,6 +266,9 @@ export function handleRunEvent(
 ) {
   logRunEventToActivity(event)
   set((s) => ({ ...s, ...reduceRunEventState(s, event) }))
+  if (event.type === 'run_started') {
+    useChatSessionStore.getState().openAgentFlowForRun(event.runId)
+  }
 
   if (event.type === 'step_failed') {
     const payload = event.payload ?? {}

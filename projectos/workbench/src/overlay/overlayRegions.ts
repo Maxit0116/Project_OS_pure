@@ -37,11 +37,18 @@ export interface OverlayRegion {
   arrows: OverlayArrow[]
   drawStrokes: AnnotationStroke[]
   snapshotAssetPath?: string
-  /** True once ≥1 arrow has been committed (tail locked + prompt spawned). */
+  /** True once ≥1 arrow has been committed (tail locked + compose card shown). */
   flowComplete: boolean
   /** Show 8 anchor dots after click when flowComplete. */
   showAnchors: boolean
   tool: RegionTool
+}
+
+/** Box + arrow + compose card. Bare selections are discarded on exit. */
+export function isCompleteCaptureRegion(
+  region: Pick<OverlayRegion, 'flowComplete' | 'arrows'>,
+): boolean {
+  return region.flowComplete && region.arrows.length > 0
 }
 
 export function rectsOverlap(a: ScreenRect, b: ScreenRect): boolean {

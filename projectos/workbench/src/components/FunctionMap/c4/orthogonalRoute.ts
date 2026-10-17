@@ -1,10 +1,18 @@
 /**
  * Classic C4-style orthogonal (multi-bend) edge routing with:
- * - ports on all four sides of each node
+ * - ports on all four sides of each node (or a shape-specific subset)
  * - same-side sharing when space allows (readability)
  * - hard per-side port limit to avoid crowded attachments
  * - label-aware lane spacing + crossing avoidance
+ * - irregular silhouettes (person / database / queue / …) attach to
+ *   straight body edges via shapePortProfile
  */
+
+import type { C4ShapeKind } from './types'
+import {
+  getShapePortProfile,
+  sideAttachMode,
+} from './shapePortProfile'
 
 export interface RoutePoint {
   x: number
@@ -17,6 +25,8 @@ export interface RouteRect {
   y: number
   width: number
   height: number
+  /** When set, port layout follows the silhouette profile for this shape. */
+  shape?: C4ShapeKind
 }
 
 export type RouteSide = 'left' | 'right' | 'top' | 'bottom'
@@ -100,6 +110,46 @@ export function portsForSide(side: RouteSide): number {
   return side === 'left' || side === 'right' ? PORTS_LEFT_RIGHT : PORTS_TOP_BOTTOM
 }
 
+/** Silhouette body rect (AABB minus shape insets). Used for straight-edge ports. */
+export function portBodyRect(node: RouteRect): RouteRect {
+  const { bodyInset } = getShapePortProfile(node.shape)
+  const left = bodyInset.left
+  const right = bodyInset.right
+  const top = bodyInset.top
+  const bottom = bodyInset.bottom
+  return {
+    id: node.id,
+    x: node.x + left,
+    y: node.y + top,
+    width: Math.max(1, node.width - left - right),
+    height: Math.max(1, node.height - top - bottom),
+    shape: node.shape,
+  }
+}
+
+/**
+ * Rect whose border hosts ports for `side`.
+ * Most sides use the body; arcs/caps (database top, queue ends) use the outer AABB.
+ */
+export function portAttachRect(node: RouteRect, side: RouteSide): RouteRect {
+  const profile = getShapePortProfile(node.shape)
+  if (sideAttachMode(profile, side) === 'outer') {
+    return node
+  }
+  return portBodyRect(node)
+}
+
+/** First ranked side that still has port capacity (skips disabled silhouette faces). */
+export function firstPortableSide(
+  rect: RouteRect,
+  ranks: RouteSide[],
+): RouteSide {
+  for (const side of ranks) {
+    if (sidePortCapacity(rect, side) > 0) return side
+  }
+  return ranks[0] ?? 'right'
+}
+
 /**
  * Fixed ports that equally divide a side: at (i+1)/(count+1).
  * - 3 → 0.25, 0.5, 0.75
@@ -161,16 +211,17 @@ export function attach(
   side: RouteSide,
   along = 0.5,
 ): RoutePoint {
+  const box = portAttachRect(rect, side)
   const t = Math.min(1, Math.max(0, along))
   switch (side) {
     case 'left':
-      return { x: rect.x, y: rect.y + rect.height * t }
+      return { x: box.x, y: box.y + box.height * t }
     case 'right':
-      return { x: rect.x + rect.width, y: rect.y + rect.height * t }
+      return { x: box.x + box.width, y: box.y + box.height * t }
     case 'top':
-      return { x: rect.x + rect.width * t, y: rect.y }
+      return { x: box.x + box.width * t, y: box.y }
     case 'bottom':
-      return { x: rect.x + rect.width * t, y: rect.y + rect.height }
+      return { x: box.x + box.width * t, y: box.y + box.height }
   }
 }
 
@@ -393,8 +444,9 @@ function exitFrom(point: RoutePoint, side: RouteSide, dist: number): RoutePoint 
 }
 
 /**
- * How many ports fit on a side for a rectangular node.
- * Default: left/right = 3, top/bottom = 4; shrink only if the side is tiny.
+ * How many ports fit on a side.
+ * Default rectangle: left/right = 3, top/bottom = 4; shrink if the side is tiny.
+ * Shaped nodes use `shapePortProfile.sidePorts` and the attach-rect length.
  */
 export function sidePortCapacity(
   rect: RouteRect,
@@ -402,9 +454,16 @@ export function sidePortCapacity(
   maxPerSide?: number,
   minGap = MIN_PORT_GAP,
 ): number {
-  const target = maxPerSide ?? portsForSide(side)
+  const profile = getShapePortProfile(rect.shape)
+  const profileTarget = profile.sidePorts[side]
+  if (profileTarget <= 0) return 0
+  // Never exceed the silhouette's per-side budget (e.g. database arcs = 1).
+  const target =
+    maxPerSide == null ? profileTarget : Math.min(profileTarget, maxPerSide)
+  if (target <= 0) return 0
+  const box = portAttachRect(rect, side)
   const length =
-    side === 'left' || side === 'right' ? rect.height : rect.width
+    side === 'left' || side === 'right' ? box.height : box.width
   const bySpace = Math.max(1, Math.floor((length - 20) / minGap) + 1)
   return Math.min(target, bySpace)
 }
@@ -814,6 +873,7 @@ function buildNodePortGrid(node: RouteRect): FixedPort[] {
   const ports: FixedPort[] = []
   for (const side of ALL_SIDES) {
     const cap = sidePortCapacity(node, side)
+    if (cap <= 0) continue
     const alongs = fixedPortAlongs(cap)
     alongs.forEach((along, index) => {
       ports.push({ side, index, along })
@@ -914,9 +974,9 @@ export function assignEdgePorts(input: {
     }
 
     if (best === Number.NEGATIVE_INFINITY) {
-      // Over-subscribed node — still take preferred faces (will share ports).
-      chosenSource = sourceRanks[0]!
-      chosenTarget = targetRanks[0]!
+      // Over-subscribed node — still take preferred portable faces (will share ports).
+      chosenSource = firstPortableSide(source, sourceRanks)
+      chosenTarget = firstPortableSide(target, targetRanks)
     }
 
     reserveSide(edge.source, chosenSource)
@@ -1164,8 +1224,10 @@ export function buildOrthogonalRoute(
 
   const sourceRanks = rankSides(input.source, input.target, 'source')
   const targetRanks = rankSides(input.source, input.target, 'target')
-  const sourceSide = input.sourceSide ?? sourceRanks[0]!
-  const targetSide = input.targetSide ?? targetRanks[0]!
+  const sourceSide =
+    input.sourceSide ?? firstPortableSide(input.source, sourceRanks)
+  const targetSide =
+    input.targetSide ?? firstPortableSide(input.target, targetRanks)
 
   const sourceSlot = input.sourceSlot ?? 0
   const sourceSlotCount = Math.max(1, input.sourceSlotCount ?? 1)

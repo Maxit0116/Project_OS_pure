@@ -54,4 +54,21 @@ describe('captureSessionSerialize', () => {
     expect(session.title).toBe('Hello')
     expect(session.status).toBe('archived')
   })
+
+  it('drops regions that never got an arrow and compose card', () => {
+    const bare: OverlayRegion = {
+      ...region,
+      id: 'region_bare',
+      arrows: [],
+      flowComplete: false,
+    }
+    const session = buildCaptureSessionFromOverlay({
+      id: 'cap_abc',
+      projectId: 'proj',
+      location: { surface: 'screen', url: 'spatial://screen' },
+      viewport: { width: 1000, height: 800 },
+      regions: [bare, region],
+    })
+    expect(session.regions.map((item) => item.id)).toEqual(['region_1'])
+  })
 })

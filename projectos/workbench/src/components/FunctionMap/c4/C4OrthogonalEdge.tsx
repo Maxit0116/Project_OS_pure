@@ -21,7 +21,14 @@ import {
   type RouteRect,
   type RouteSide,
 } from './orthogonalRoute'
+import type { C4ShapeKind } from './types'
 import styles from '../FloatingStraightEdge.module.css'
+
+function shapeFromNodeData(data: unknown): C4ShapeKind | undefined {
+  if (!data || typeof data !== 'object') return undefined
+  const shape = (data as { shape?: unknown }).shape
+  return typeof shape === 'string' ? (shape as C4ShapeKind) : undefined
+}
 
 type Props = EdgeProps & EdgeLabelOptions
 
@@ -105,6 +112,7 @@ function C4OrthogonalEdge({
       y: sourceNode.internals.positionAbsolute.y,
       width: sw,
       height: sh,
+      shape: shapeFromNodeData(sourceNode.data),
     }
     const targetRect: RouteRect = {
       id: target,
@@ -112,6 +120,7 @@ function C4OrthogonalEdge({
       y: targetNode.internals.positionAbsolute.y,
       width: tw,
       height: th,
+      shape: shapeFromNodeData(targetNode.data),
     }
 
     // Prefer canvas-global route, but re-pin ports onto measured node boxes

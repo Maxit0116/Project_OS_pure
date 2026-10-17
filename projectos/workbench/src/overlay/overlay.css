@@ -152,6 +152,69 @@
   box-shadow: var(--tech-shadow-focus);
 }
 
+.overlay-save-prompt {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 8, 10, 0.45);
+  pointer-events: auto;
+}
+
+.overlay-save-prompt-card {
+  width: min(380px, calc(100vw - 32px));
+  padding: 16px 16px 14px;
+  border-radius: 12px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--tech-shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.overlay-save-prompt-card h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--color-text-primary);
+}
+
+.overlay-save-prompt-card p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+.overlay-save-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.overlay-save-prompt-btn {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-primary);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.overlay-save-prompt-btn-primary {
+  background: var(--color-accent);
+  border-color: transparent;
+  color: #fff;
+}
+
 /* ── Compose panel ─────────────────────────────────────────── */
 
 .overlay-panel {
@@ -188,6 +251,93 @@
 .overlay-compose-row-split .overlay-composer {
   flex: 1;
   min-width: 0;
+}
+
+.overlay-flow-bookmark-tab {
+  position: absolute;
+  top: 0;
+  left: 12px;
+  z-index: 2;
+  height: 0;
+}
+
+.overlay-flow-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 6px 6px 0 0;
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.overlay-flow-bookmark-tab .overlay-flow-tab {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  transform: translateY(-1px);
+  color: var(--tech-text-secondary);
+}
+
+.overlay-flow-bookmark-current .overlay-flow-tab,
+.overlay-flow-bookmark-open .overlay-flow-tab {
+  width: 100%;
+  border-radius: 4px;
+  justify-content: flex-start;
+}
+
+.overlay-flow-tab .overlay-flow-step-dot {
+  margin-top: 0;
+}
+
+.overlay-flow-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-flow-tab-dot-live {
+  background: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 28%, transparent);
+}
+
+.overlay-flow-sheet {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    grid-template-rows 180ms var(--ease-out),
+    opacity 160ms var(--ease-out);
+}
+
+.overlay-flow-sheet-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  pointer-events: auto;
+  margin-top: 6px;
+}
+
+.overlay-flow-sheet-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.overlay-flow-steps-history {
+  max-height: 160px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay-flow-sheet {
+    transition: none;
+  }
 }
 
 .overlay-flow-rail {

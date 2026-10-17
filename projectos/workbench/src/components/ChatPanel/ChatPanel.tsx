@@ -24,6 +24,10 @@ import { useVoiceInput } from './voice/useVoiceInput'
 import PromptComposer from './composer/PromptComposer'
 import { setComposerText } from './composer/composerTokens'
 import AttachmentChips from './composer/AttachmentChips'
+import {
+  isSpatialPinSnapshotAttachment,
+  parseSpatialPinChatContent,
+} from './spatialPinChatDisplay'
 import LoopAuthoringBanner from '../LoopGraph/LoopAuthoringBanner'
 import styles from './ChatPanel.module.css'
 
@@ -179,6 +183,10 @@ export default function ChatPanel() {
       <div className={styles.messages} ref={messagesRef}>
         {inheritedDigest ? <InheritedSessionCard digest={inheritedDigest} /> : null}
         {messages.map((msg) => {
+          const spatialPin = msg.role === 'user' && parseSpatialPinChatContent(msg.content)
+          const attachments = spatialPin
+            ? (msg.attachments ?? []).filter((item) => !isSpatialPinSnapshotAttachment(item))
+            : (msg.attachments ?? [])
           const showCopy =
             chatMode === 'ask' && msg.role === 'assistant' && msg.content.trim().length > 0
           const showBranch =
@@ -188,9 +196,9 @@ export default function ChatPanel() {
           return (
             <div key={msg.id} className={`${styles.message} ${styles[msg.role]}`}>
               <div className={styles.messageBody}>
-                {msg.role === 'user' && (msg.attachments?.length || msg.invokedSkillId) ? (
+                {msg.role === 'user' && (attachments.length || msg.invokedSkillId) ? (
                   <AttachmentChips
-                    attachments={msg.attachments ?? []}
+                    attachments={attachments}
                     invokedSkillLabel={msg.invokedSkillId}
                   />
                 ) : null}

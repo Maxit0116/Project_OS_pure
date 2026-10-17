@@ -1,7 +1,8 @@
 import { useRef } from 'react'
-import { GitBranch, History, Plus, RefreshCw, X } from 'lucide-react'
+import { GitBranch, History, Plus, RefreshCw, Workflow, X } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useChatSessionStore } from '../../state/chatSessionStore'
+import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
 import ChatHistoryMenu from './ChatHistoryMenu'
 import styles from './ChatHistoryActions.module.css'
@@ -22,9 +23,14 @@ export default function ChatHistoryActions({
   const historyOpen = useChatSessionStore((s) => s.historyOpen)
   const sessionGraphOpen = useChatSessionStore((s) => s.sessionGraphOpen)
   const loopGraphOpen = useChatSessionStore((s) => s.loopGraphOpen)
+  const agentFlowOpen = useChatSessionStore((s) => s.agentFlowOpen)
   const toggleHistory = useChatSessionStore((s) => s.toggleHistory)
   const toggleSessionGraph = useChatSessionStore((s) => s.toggleSessionGraph)
   const toggleLoopGraph = useChatSessionStore((s) => s.toggleLoopGraph)
+  const toggleAgentFlow = useChatSessionStore((s) => s.toggleAgentFlow)
+  const flowStatus = useWorkbenchStore((s) => s.flowStatus)
+  const refineLoading = useWorkbenchStore((s) => s.refineLoading)
+  const agentFlowLive = !agentFlowOpen && (flowStatus === 'running' || refineLoading)
   const setHistoryOpen = useChatSessionStore((s) => s.setHistoryOpen)
   const createSession = useChatSessionStore((s) => s.createSession)
   const historyAnchorRef = useRef<HTMLDivElement>(null)
@@ -66,6 +72,19 @@ export default function ChatHistoryActions({
             onClick={toggleLoopGraph}
           >
             <RefreshCw size={16} aria-hidden />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={styles.agentFlowButton}
+            aria-label={ts('agentFlow.title')}
+            aria-pressed={agentFlowOpen}
+            title={ts('agentFlow.title')}
+            onClick={toggleAgentFlow}
+          >
+            <Workflow size={16} aria-hidden />
+            {agentFlowLive ? <span className={styles.liveDot} aria-hidden /> : null}
           </Button>
           <div className={styles.historyWrap} ref={historyAnchorRef}>
             <Button

@@ -2917,6 +2917,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
             y: pos.y,
             width: c4?.width ?? NODE_WIDTH,
             height: c4?.height ?? NODE_HEIGHT,
+            shape: c4?.shape,
           }
         })
       : undefined

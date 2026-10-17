@@ -166,6 +166,7 @@ export function expandIfCramped(diagram: C4Diagram): C4Diagram {
     y: node.position.y,
     width: node.width,
     height: node.height,
+    shape: node.shape,
   }))
   const gap = minNodeGap(rects)
   if (gap >= TARGET_NODE_GAP) return diagram
@@ -265,12 +266,15 @@ export function separateNodesForLabels(diagram: C4Diagram): C4Diagram {
       const targetSize = sizeById.get(edge.target)
       if (!sourcePos || !targetPos || !sourceSize || !targetSize) continue
 
+      const sourceNode = diagram.nodes.find((node) => node.id === edge.source)
+      const targetNode = diagram.nodes.find((node) => node.id === edge.target)
       const sourceRect: RouteRect = {
         id: edge.source,
         x: sourcePos.x,
         y: sourcePos.y,
         width: sourceSize.width,
         height: sourceSize.height,
+        shape: sourceNode?.shape,
       }
       const targetRect: RouteRect = {
         id: edge.target,
@@ -278,6 +282,7 @@ export function separateNodesForLabels(diagram: C4Diagram): C4Diagram {
         y: targetPos.y,
         width: targetSize.width,
         height: targetSize.height,
+        shape: targetNode?.shape,
       }
       const labelText = formatC4EdgeLabel(
         edge.label,

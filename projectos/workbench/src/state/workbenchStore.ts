@@ -172,7 +172,6 @@ export type CenterTab =
   | 'function-map'
   | 'spatial-captures'
   | 'code'
-  | 'agent-flow'
   | 'browser'
 
 export type DesignSurfaceFocus =
@@ -1143,7 +1142,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     enqueueDiffReadyBatch(
       {
         ...item,
-        context: item.context ?? captureDiffReadyNotificationContext(state),
+        context: item.context ?? captureDiffReadyNotificationContext({
+          ...state,
+          agentFlowOpen: useChatSessionStore.getState().agentFlowOpen,
+        }),
       },
       flushDiffReadyNotifications,
     )
@@ -1288,8 +1290,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       return
     }
 
+    useChatSessionStore.getState().presentAgentFlow()
     set({
-      centerTab: 'agent-flow',
       agentFlowSubject: 'ask',
       rightPanelTab: 'chat',
       diffReadyBanner: null,
@@ -2028,6 +2030,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             nodeId: selectedNodeId!,
           }
       const userMsg = buildUserMessage()
+      useChatSessionStore.getState().presentAgentFlow()
       set((current) => ({
         messages: [...current.messages, userMsg],
         composerDraft: clearedDraft,
@@ -2035,7 +2038,6 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         refinementConfirmed: false,
         refineLoading: true,
         rightPanelTab: 'chat',
-        centerTab: 'agent-flow',
         agentFlowSubject: 'ask',
         latestAskTrace: { status: 'running', scope: askScope },
       }))
@@ -2143,6 +2145,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             nodeId: selectedNodeId!,
           }
       const userMsg = buildUserMessage()
+      useChatSessionStore.getState().presentAgentFlow()
       set((current) => ({
         messages: [...current.messages, userMsg],
         composerDraft: clearedDraft,
@@ -2150,7 +2153,6 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         planConfirmed: false,
         refineLoading: true,
         rightPanelTab: 'chat',
-        centerTab: 'agent-flow',
         agentFlowSubject: 'plan',
         latestPlanTrace: {
           status: 'running',
@@ -2239,12 +2241,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             nodeId: selectedNodeId!,
           }
       const userMsg = buildUserMessage()
+      useChatSessionStore.getState().presentAgentFlow()
       set((current) => ({
         messages: [...current.messages, userMsg],
         composerDraft: clearedDraft,
         refineLoading: true,
         rightPanelTab: 'chat',
-        centerTab: 'agent-flow',
         agentFlowSubject: 'debug',
       }))
       try {
@@ -2347,6 +2349,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       if (!subscriptionProjectId || get().project?.projectId !== subscriptionProjectId) return
 
       pushToast({ type: 'info', message: getStoreMessage(locale, 'toast.agentRunning') })
+      useChatSessionStore.getState().presentAgentFlow()
       set({
         refinementConfirmed: true,
         activeRunId: run.runId,
@@ -2364,7 +2367,6 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         verificationResult: null,
         verificationCommandApproval: null,
         verificationLoading: false,
-        centerTab: 'agent-flow',
         harnessFixRunId: null,
         selectedFlowStepId: null,
         runDisposable: null,
@@ -2613,6 +2615,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     set({ refineLoading: true, planConfirmed: true })
     try {
       const refinement = await client.buildPlan(pendingPlan.id)
+      useChatSessionStore.getState().presentAgentFlow()
       set({
         refineLoading: false,
         pendingPlan: null,
@@ -2621,7 +2624,6 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         chatMode: 'change',
         agentFlowSubject: 'run',
         rightPanelTab: 'chat',
-        centerTab: 'agent-flow',
       })
       pushToast({ type: 'info', message: getStoreMessage(locale, 'plan.buildStarted') })
       await get().confirmRefinement()
@@ -2639,7 +2641,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   submitPlanClarification: async (answers) => {
     const { client, pendingPlan, project } = get()
     if (!project || !pendingPlan || pendingPlan.status !== 'needs_clarification') return
-    set({ refineLoading: true, centerTab: 'agent-flow', agentFlowSubject: 'plan' })
+    useChatSessionStore.getState().presentAgentFlow()
+    set({ refineLoading: true, agentFlowSubject: 'plan' })
     try {
       const priorAnswers = (pendingPlan.clarifyingQuestions ?? [])
         .filter((question) => question.answer?.trim())
@@ -2762,12 +2765,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
     try {
       const run = await client.confirmDebugFix(debugSession.sessionId)
+      useChatSessionStore.getState().presentAgentFlow()
       set({
         refineLoading: false,
         activeRunId: run.runId,
         flowStatus: 'running',
         agentFlowSubject: 'run',
-        centerTab: 'agent-flow',
         harnessFixRunId: null,
         debugSession: {
           ...debugSession,
@@ -3067,6 +3070,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         rawError: AUTH_ERROR_RAW,
         ...chatSessionRequestFields(),
       })
+      useChatSessionStore.getState().presentAgentFlow()
       set({
         harnessRecord,
         harnessFixRunId: null,
@@ -3087,7 +3091,6 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         flowCorrections: [],
         flowStatus: 'idle',
         agentFlowSubject: 'debug',
-        centerTab: 'agent-flow',
         activeRunId: null,
         runDisposable: null,
         flashKey: get().flashKey + 1,
@@ -3104,6 +3107,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
     try {
       const run = await client.startHarnessFix(harnessRecord.errorId)
+      useChatSessionStore.getState().presentAgentFlow()
       set({
         harnessFixRunId: run.runId,
         activeRunId: run.runId,
@@ -3115,7 +3119,6 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         flowCorrections: [],
         flowStatus: 'running',
         agentFlowSubject: 'run',
-        centerTab: 'agent-flow',
         selectedFlowStepId: null,
       })
 

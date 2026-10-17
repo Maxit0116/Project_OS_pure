@@ -17,6 +17,7 @@ import { useEditorShortcuts } from '../components/CodeEditor/useEditorShortcuts'
 import WorkbenchSidePanels from './WorkbenchSidePanels'
 import SessionGraphOverlay from '../components/SessionGraph/SessionGraphOverlay'
 import LoopGraphOverlay from '../components/LoopGraph/LoopGraphOverlay'
+import AgentFlowOverlay from '../components/AgentFlow/AgentFlowOverlay'
 import SpatialCaptureOverlay from '../components/SpatialCaptures/SpatialCaptureOverlay'
 import EdgeRails from './EdgeRails'
 import { FunctionMapBleedRoot } from '../components/FunctionMap/FunctionMapBleedLayer'
@@ -87,7 +88,6 @@ export default function AppShell() {
     centerTab === 'function-map' ||
     centerTab === 'spatial-captures' ||
     centerTab === 'code' ||
-    centerTab === 'agent-flow' ||
     centerTab === 'browser'
 
   const workbenchBodyClassName = [
@@ -149,6 +149,7 @@ export default function AppShell() {
 
           <SessionGraphOverlay />
           <LoopGraphOverlay />
+          <AgentFlowOverlay />
           <SpatialCaptureOverlay />
           <EdgeRails
             leftMounted={leftPresence.mounted}

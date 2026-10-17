@@ -33,7 +33,10 @@ const TITLE_SUMMARIZE_DEBOUNCE_MS = 1500
 const CANVAS_OVERLAY_KEY = 'projectos_canvas_overlay'
 const SESSION_GRAPH_OPEN_KEY = 'projectos_session_graph_open'
 
-export type CanvasOverlay = 'none' | 'session' | 'loop' | 'spatial'
+export type CanvasOverlay = 'none' | 'session' | 'loop' | 'spatial' | 'agent-flow'
+
+/** Suppresses auto-open while a run id is not known yet (Ask / Plan still starting). */
+const AGENT_FLOW_DISMISS_IDLE = '__agent_flow_idle__'
 
 function readCanvasOverlay(): CanvasOverlay {
   if (typeof localStorage === 'undefined') return 'none'
@@ -43,6 +46,7 @@ function readCanvasOverlay(): CanvasOverlay {
       raw === 'session' ||
       raw === 'loop' ||
       raw === 'spatial' ||
+      raw === 'agent-flow' ||
       raw === 'none'
     ) {
       return raw
@@ -77,6 +81,9 @@ interface ChatSessionStore {
   sessionGraphOpen: boolean
   loopGraphOpen: boolean
   spatialCaptureOpen: boolean
+  agentFlowOpen: boolean
+  /** Run id the user hid for this round. Auto-open skips that id until a new present. */
+  agentFlowDismissedRunId: string | null
   inheritedDigest: SessionContextDigest | null
   loading: boolean
 
@@ -91,6 +98,14 @@ interface ChatSessionStore {
   toggleLoopGraph: () => void
   setSpatialCaptureOpen: (open: boolean) => void
   toggleSpatialCapture: () => void
+  setAgentFlowOpen: (open: boolean) => void
+  toggleAgentFlow: () => void
+  /** User or command asked to see Agent Flow. Clears a previous dismiss. */
+  presentAgentFlow: () => void
+  /** Live run start. Stays closed when the user already dismissed this run. */
+  openAgentFlowForRun: (runId: string | null) => void
+  /** Close the Agent Flow card. A busy run will not auto-open again. */
+  closeAgentFlow: () => void
   switchSession: (sessionId: string) => Promise<void>
   createSession: (options?: {
     seedWelcome?: boolean
@@ -206,6 +221,7 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
     refineLoading: false,
   })
   if (hydrated.activeRunId) {
+    useChatSessionStore.getState().presentAgentFlow()
     void restoreRunFlow(hydrated.activeRunId)
   }
 }
@@ -216,6 +232,7 @@ function overlayState(overlay: CanvasOverlay) {
     sessionGraphOpen: overlay === 'session',
     loopGraphOpen: overlay === 'loop',
     spatialCaptureOpen: overlay === 'spatial',
+    agentFlowOpen: overlay === 'agent-flow',
   }
 }
 
@@ -225,6 +242,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   activeSessionId: null,
   historyOpen: false,
   ...overlayState(readCanvasOverlay()),
+  agentFlowDismissedRunId: null,
   inheritedDigest: null,
   loading: false,
 
@@ -291,6 +309,41 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       get().canvasOverlay === 'spatial' ? 'none' : 'spatial'
     writeCanvasOverlay(overlay)
     set(overlayState(overlay))
+  },
+
+  setAgentFlowOpen: (open) => {
+    if (open) get().presentAgentFlow()
+    else get().closeAgentFlow()
+  },
+
+  toggleAgentFlow: () => {
+    if (get().canvasOverlay === 'agent-flow') get().closeAgentFlow()
+    else get().presentAgentFlow()
+  },
+
+  presentAgentFlow: () => {
+    writeCanvasOverlay('agent-flow')
+    set({ ...overlayState('agent-flow'), agentFlowDismissedRunId: null })
+  },
+
+  openAgentFlowForRun: (runId) => {
+    const dismissed = get().agentFlowDismissedRunId
+    if (runId && dismissed === runId) return
+    if (!runId && dismissed === AGENT_FLOW_DISMISS_IDLE) return
+    writeCanvasOverlay('agent-flow')
+    set(overlayState('agent-flow'))
+  },
+
+  closeAgentFlow: () => {
+    if (get().canvasOverlay !== 'agent-flow') return
+    const workbench = useWorkbenchStore.getState()
+    const busy = workbench.flowStatus === 'running' || workbench.refineLoading
+    const token = busy ? (workbench.activeRunId ?? AGENT_FLOW_DISMISS_IDLE) : null
+    writeCanvasOverlay('none')
+    set({
+      ...overlayState('none'),
+      ...(token ? { agentFlowDismissedRunId: token } : {}),
+    })
   },
 
   loadForWorkspace: async () => {

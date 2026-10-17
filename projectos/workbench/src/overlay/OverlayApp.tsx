@@ -29,10 +29,9 @@ import {
 } from '@contracts/spatial-pin'
 import {
   applyRunEventToCompactFlow,
-  currentCompactFlowLabel,
 } from './coarseFlow'
 import type { CoarseFlowLabel, CompactFlowStep } from './coarseFlow'
-import AgentActivityIndicator from '../components/ui/AgentActivityIndicator'
+import ComposeFlowDrawer from './ComposeFlowDrawer'
 import {
   colorForArrowIndex,
   hitTestAnchor,
@@ -52,6 +51,7 @@ import {
 } from './useComposePanelMetrics'
 import {
   focusIdsForClick,
+  isCompleteCaptureRegion,
   isOutsideAllRegions,
   isRegionFocused,
   type OverlayArrow,
@@ -140,6 +140,7 @@ export function OverlayApp() {
   const [location, setLocation] = useState<LocationKey | null>(null)
   const [webEnhanceAvailable, setWebEnhanceAvailable] = useState(false)
   const [status, setStatus] = useState('Drag to select a region on any screen')
+  const [savePromptOpen, setSavePromptOpen] = useState(false)
   const [flow, setFlow] = useState<CoarseFlowLabel | null>(null)
   const [flowSteps, setFlowSteps] = useState<CompactFlowStep[]>([])
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
@@ -199,6 +200,7 @@ export function OverlayApp() {
       captureSessionCreatedAtRef.current = new Date().toISOString()
       backdropAssetPathRef.current = undefined
       solidifyingRef.current = false
+      setSavePromptOpen(false)
       setStatus('Drag any on-screen region · Esc to cancel')
       void refreshContext()
       // Defer ready until useLayoutEffect sees this epoch (post-commit).
@@ -598,9 +600,21 @@ export function OverlayApp() {
     window.projectOS.spatialPin.notifySessionSolidified?.(sessionId)
   }
 
+  async function hideOverlayOnly(): Promise<void> {
+    if (solidifyingRef.current) return
+    solidifyingRef.current = true
+    try {
+      await window.projectOS?.spatialPin.hideOverlay()
+    } finally {
+      solidifyingRef.current = false
+      setSavePromptOpen(false)
+    }
+  }
+
   async function solidifyThenHide(): Promise<void> {
     if (solidifyingRef.current) return
     solidifyingRef.current = true
+    setSavePromptOpen(false)
     try {
       await solidifyCaptureSession()
     } catch {
@@ -612,7 +626,22 @@ export function OverlayApp() {
       solidifyingRef.current = false
     }
   }
-  solidifyThenHideRef.current = solidifyThenHide
+
+  /** Esc / Exit: drop bare regions; ask before saving a finished capture. */
+  async function requestExit(): Promise<void> {
+    if (solidifyingRef.current) return
+    if (savePromptOpen) {
+      await hideOverlayOnly()
+      return
+    }
+    const complete = regionsRef.current.filter(isCompleteCaptureRegion)
+    if (complete.length === 0) {
+      await hideOverlayOnly()
+      return
+    }
+    setSavePromptOpen(true)
+  }
+  solidifyThenHideRef.current = requestExit
 
   function commitArrow(
     regionId: string,
@@ -1091,14 +1120,12 @@ export function OverlayApp() {
   function layoutArrowCompose(
     region: OverlayRegion,
     arrow: OverlayArrow,
-    withFlow: boolean,
   ): ComposeLayoutResult {
-    const fallbackWidth = withFlow ? 520 : 360
     const { width: panelWidth, height: panelHeight } = resolveComposePanelSize(
       panelMetrics,
       arrow.id,
-      fallbackWidth,
-      estimateComposePanelHeight(withFlow),
+      360,
+      estimateComposePanelHeight(false),
     )
     const tip = relativeToClient(region.captureRect, arrow.tail)
     // After commit, attach is locked — only tip/card move together when dragging.
@@ -1128,9 +1155,8 @@ export function OverlayApp() {
     event: React.PointerEvent,
     region: OverlayRegion,
     arrow: OverlayArrow,
-    withFlow: boolean,
   ) {
-    const layout = layoutArrowCompose(region, arrow, withFlow)
+    const layout = layoutArrowCompose(region, arrow)
     event.preventDefault()
     event.stopPropagation()
     setFocusedRegionIds([region.id])
@@ -1153,7 +1179,10 @@ export function OverlayApp() {
     <div
       ref={rootRef}
       className={`overlay-root${pointer.kind === 'compose-drag' ? ' overlay-root-dragging' : ''}`}
-      onPointerDown={onPointerDown}
+      onPointerDown={(event) => {
+        if (savePromptOpen) return
+        onPointerDown(event)
+      }}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
@@ -1166,11 +1195,45 @@ export function OverlayApp() {
         aria-label="Exit Spatial Pin"
         title="Exit (Esc)"
         onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => void solidifyThenHideRef.current()}
+        onClick={() => void requestExit()}
       >
         <X size={14} strokeWidth={2.25} aria-hidden />
         <span>Exit</span>
       </button>
+
+      {savePromptOpen ? (
+        <div
+          className="overlay-save-prompt"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="overlay-save-prompt-title"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="overlay-save-prompt-card">
+            <h2 id="overlay-save-prompt-title">Save to Spatial Captures?</h2>
+            <p>
+              Finished regions (selection, arrow, and compose card) can be kept.
+              A selection by itself is discarded.
+            </p>
+            <div className="overlay-save-prompt-actions">
+              <button
+                type="button"
+                className="overlay-save-prompt-btn"
+                onClick={() => void hideOverlayOnly()}
+              >
+                Don&apos;t save
+              </button>
+              <button
+                type="button"
+                className="overlay-save-prompt-btn overlay-save-prompt-btn-primary"
+                onClick={() => void solidifyThenHide()}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {regions.length === 0 && !draftRect ? (
         <div className="overlay-hint">
@@ -1211,8 +1274,7 @@ export function OverlayApp() {
         {regions.map((region) =>
           region.arrows.map((arrow) => {
             const head = relativeToClient(region.captureRect, arrow.head)
-            const withFlow = showFlowRail && arrow.id === activeArrowId
-            const layout = layoutArrowCompose(region, arrow, withFlow)
+            const layout = layoutArrowCompose(region, arrow)
             const focused = isRegionFocused(focusedRegionIds, region.id)
             return (
               <g
@@ -1244,8 +1306,7 @@ export function OverlayApp() {
       {regions.map((region) =>
         region.arrows.map((arrow) => {
           const head = relativeToClient(region.captureRect, arrow.head)
-          const withFlow = showFlowRail && arrow.id === activeArrowId
-          const layout = layoutArrowCompose(region, arrow, withFlow)
+          const layout = layoutArrowCompose(region, arrow)
           const midX = (head.x + layout.attachScreen.x) / 2
           const midY = (head.y + layout.attachScreen.y) / 2
           const focused = isRegionFocused(focusedRegionIds, region.id)
@@ -1272,8 +1333,7 @@ export function OverlayApp() {
       {arrowComposes.map(({ region, arrow }) => {
         const focused = isRegionFocused(focusedRegionIds, region.id)
         const isActive = arrow.id === activeArrowId
-        const withFlow = showFlowRail && isActive
-        const layout = layoutArrowCompose(region, arrow, withFlow)
+        const layout = layoutArrowCompose(region, arrow)
         const modeVisual =
           MODES.find((item) => item.id === region.mode) ?? MODES[1]!
         const ModeIcon = modeVisual.icon
@@ -1295,6 +1355,9 @@ export function OverlayApp() {
               setActiveArrowId(arrow.id)
             }}
           >
+            {showFlowRail && isActive ? (
+              <ComposeFlowDrawer steps={flowSteps} phase={flow} />
+            ) : null}
             <div
               className="overlay-panel-header overlay-panel-drag-handle"
               title="Drag to move card and arrow tip"
@@ -1308,7 +1371,7 @@ export function OverlayApp() {
                 ) {
                   return
                 }
-                beginComposeDrag(event, region, arrow, withFlow)
+                beginComposeDrag(event, region, arrow)
               }}
             >
               <span
@@ -1347,9 +1410,7 @@ export function OverlayApp() {
               </button>
             </div>
 
-            <div
-              className={`overlay-compose-row${withFlow ? ' overlay-compose-row-split' : ''}`}
-            >
+            <div className="overlay-compose-row">
               <div className="overlay-composer">
                 <div className="overlay-composer-body">
                   <textarea
@@ -1467,43 +1528,6 @@ export function OverlayApp() {
                   </button>
                 </div>
               </div>
-
-              {withFlow ? (
-                <aside className="overlay-flow-rail" aria-live="polite">
-                  <div className="overlay-flow-rail-header">Flow</div>
-                  <AgentActivityIndicator
-                    state={
-                      flow === 'reading'
-                        ? 'searching'
-                        : flow === 'writing'
-                          ? 'shaping'
-                          : flow === 'verifying' || flow === 'error'
-                            ? 'solving'
-                            : flow === 'done'
-                              ? 'composing'
-                              : flow === 'thinking'
-                                ? 'working'
-                                : 'composing'
-                    }
-                    label={currentCompactFlowLabel(flowSteps, flow)}
-                  />
-                  {flowSteps.length > 0 ? (
-                    <ol className="overlay-flow-steps">
-                      {flowSteps.slice(-6).map((step) => (
-                        <li
-                          key={step.id}
-                          className={`overlay-flow-step overlay-flow-step-${step.status}`}
-                        >
-                          <span className="overlay-flow-step-dot" aria-hidden />
-                          <span className="overlay-flow-step-label">
-                            {step.label}
-                          </span>
-                        </li>
-                      ))}
-                    </ol>
-                  ) : null}
-                </aside>
-              ) : null}
             </div>
 
             {isActive ? (
