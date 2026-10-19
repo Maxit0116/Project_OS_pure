@@ -6,6 +6,7 @@
 import type {
   ArchitectureLevel,
   ArchitectureView,
+  FileEntry,
   FunctionalEdge,
   FunctionalNode,
   GraphSourceKind,
@@ -39,13 +40,23 @@ function stableViewKey(level: ArchitectureLevel, parentId?: string | null): stri
   return `view_${level}_${parentId}`
 }
 
+/** A component can open a code diagram when files are linked or owned in fileIndex. */
+export function componentHasCodeGraph(
+  node: FunctionalNode,
+  fileIndex?: ReadonlyArray<Pick<FileEntry, 'nodeIds'>>,
+): boolean {
+  if (node.level !== 'component') return false
+  if (node.linkedFiles.length > 0) return true
+  return (fileIndex ?? []).some((file) => file.nodeIds.includes(node.id))
+}
+
 /**
  * Synthesize default named views: one context, one container per system,
  * one component per container. Keys are stable across regenerates.
  */
 export function synthesizeDefaultArchitectureViews(
   nodes: FunctionalNode[],
-  options?: { sourceKind?: GraphSourceKind },
+  options?: { sourceKind?: GraphSourceKind; fileIndex?: ReadonlyArray<Pick<FileEntry, 'nodeIds'>> },
 ): ArchitectureView[] {
   const sourceKind = options?.sourceKind ?? 'ai'
   const views: ArchitectureView[] = [
@@ -88,12 +99,9 @@ export function synthesizeDefaultArchitectureViews(
   }
 
   const componentsWithFiles = nodes.filter(
-    (node) =>
-      node.level === 'component' &&
-      (node.linkedFiles.length > 0 || (node.children?.length ?? 0) > 0),
+    (node) => node.level === 'component' && componentHasCodeGraph(node, options?.fileIndex),
   )
   for (const component of componentsWithFiles) {
-    if (component.linkedFiles.length === 0) continue
     views.push({
       key: stableViewKey('code', component.id),
       title: `${component.name} Code`,

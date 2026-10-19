@@ -8,6 +8,7 @@ import type {
 } from '../../../../contracts/index.js'
 import {
   applyViewNodeFilters,
+  componentHasCodeGraph,
   findArchitectureView,
   liftRelationshipsToVisibleAncestors,
   resolveArchitectureView,
@@ -19,6 +20,7 @@ import {
 export type { ArchitectureViewScope }
 export {
   applyViewNodeFilters,
+  componentHasCodeGraph,
   findArchitectureView,
   liftRelationshipsToVisibleAncestors,
   resolveArchitectureView,
@@ -44,16 +46,8 @@ export function availableArchitectureLevels(
   fileIndex: FileEntry[] = [],
 ): ArchitectureLevel[] {
   const available = new Set(nodes.map((node) => node.level).filter(Boolean))
-  const componentIds = new Set(
-    nodes.filter((node) => node.level === 'component').map((node) => node.id),
-  )
-  const hasLinkedFiles = nodes.some(
-    (node) => node.level === 'component' && node.linkedFiles.length > 0,
-  )
-  const hasOwnedFiles = fileIndex.some((file) =>
-    file.nodeIds.some((nodeId) => componentIds.has(nodeId)),
-  )
-  if (hasLinkedFiles || hasOwnedFiles) {
+  const hasLinkedFiles = nodes.some((node) => componentHasCodeGraph(node, fileIndex))
+  if (hasLinkedFiles) {
     available.add('code')
   }
   return ARCHITECTURE_LEVELS.filter((level) => available.has(level))
@@ -67,16 +61,12 @@ export function availableArchitectureLevels(
 export function defaultArchitectureScopeId(
   nodes: FunctionalNode[],
   level: ArchitectureLevel,
+  fileIndex: ReadonlyArray<Pick<FileEntry, 'nodeIds'>> = [],
 ): string | null {
   if (level === 'context') return null
 
   if (level === 'code') {
-    return (
-      nodes.find(
-        (candidate) =>
-          candidate.level === 'component' && candidate.linkedFiles.length > 0,
-      )?.id ?? null
-    )
+    return nodes.find((candidate) => componentHasCodeGraph(candidate, fileIndex))?.id ?? null
   }
 
   if (level === 'container') {
@@ -459,6 +449,7 @@ export function architectureScopeForSelection(
   nodes: FunctionalNode[],
   level: ArchitectureLevel,
   selectedNodeId: string | null,
+  fileIndex: ReadonlyArray<Pick<FileEntry, 'nodeIds'>> = [],
 ): ArchitectureViewScope {
   if (!selectedNodeId) return {}
 
@@ -480,11 +471,7 @@ export function architectureScopeForSelection(
     return { parentId: selectedNode.id }
   }
 
-  if (
-    level === 'code' &&
-    selectedNode.level === 'component' &&
-    selectedNode.linkedFiles.length > 0
-  ) {
+  if (level === 'code' && componentHasCodeGraph(selectedNode, fileIndex)) {
     return { parentId: selectedNode.id }
   }
 

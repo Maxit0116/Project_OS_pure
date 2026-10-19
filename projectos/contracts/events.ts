@@ -157,6 +157,10 @@ export const FileReadPayloadSchema = z.object({
   path: z.string().min(1),
   byteLength: z.number().int().nonnegative(),
   status: z.enum(["ok", "failed"]),
+  startLine: z.number().int().positive().optional(),
+  endLine: z.number().int().positive().optional(),
+  excerpt: z.string().max(12_000).optional(),
+  truncated: z.boolean().optional(),
 }).strict();
 
 export const McpToolCallPayloadSchema = z.object({
@@ -245,6 +249,9 @@ export const DiffProposedPayloadSchema = z.object({
   files: z.array(z.object({
     path: z.string().min(1),
     operation: z.enum(["modify", "create", "delete"]),
+    additions: z.number().int().nonnegative().optional(),
+    deletions: z.number().int().nonnegative().optional(),
+    hunkHeader: z.string().max(200).optional(),
   }).strict()),
 }).strict();
 
@@ -257,6 +264,11 @@ export const ApplyResultTracePayloadSchema = z.object({
 export const VerificationResultPayloadSchema = z.object({
   command: z.string().min(1).optional(),
   status: z.enum(["passed", "failed", "not_run"]),
+  exitCode: z.number().int().nullable().optional(),
+  stdout: z.string().max(12_000).optional(),
+  stderr: z.string().max(12_000).optional(),
+  truncated: z.boolean().optional(),
+  durationMs: z.number().int().nonnegative().optional(),
 }).strict();
 
 /** Hash and budget flag only. Never the note text. */

@@ -2102,7 +2102,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       "plan",
       this.retrievalOptions(workspace),
     );
-    const plan = await this.planService.createPlan({
+    const created = await this.planService.createPlan({
       projectId: parsedRequest.projectId,
       scope: resolvedScope,
       objective: parsedRequest.objective,
@@ -2129,8 +2129,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           }
         : {}),
     });
+    const plan = ImplementationPlanSchema.parse({
+      ...created,
+      ...(planExploration.trace.rounds.length > 0
+        ? { explorationTrace: planExploration.trace }
+        : {}),
+    });
     this.persistPlan(workspace, plan);
-    return ImplementationPlanSchema.parse(plan);
+    return plan;
   }
 
   async updatePlan(request: UpdatePlanRequest): Promise<ImplementationPlan> {
@@ -2305,6 +2311,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           const exploration = exploreForAskQuestion(
             workspace,
             parsedRequest.bugDescription,
+            {
+              allowedReadPaths: localContext.allowedReadPaths,
+              maxRounds: 2,
+              maxReads: 3,
+            },
           );
           const hypotheses = await this.debugHypothesisService.generateHypotheses({
             projectId: parsedRequest.projectId,
@@ -2317,6 +2328,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           session = {
             ...session,
             hypotheses,
+            ...(exploration.trace.rounds.length > 0
+              ? { explorationTrace: exploration.trace }
+              : {}),
             updatedAt: new Date().toISOString(),
           };
         } catch (error) {

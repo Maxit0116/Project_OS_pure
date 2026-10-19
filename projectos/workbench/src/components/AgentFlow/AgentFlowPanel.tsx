@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import type {
   AgentActionEvent,
   AgentDelegationEvent,
@@ -21,6 +21,8 @@ import AgentFlowStepDetail from './AgentFlowStepDetail'
 import AgentActionRow from './AgentActionRow'
 import AskTraceView from './AskTraceView'
 import PlanTraceView from './PlanTraceView'
+import AgentActivityDetails from './AgentActivityDetails'
+import { buildActivityLabels, projectAgentActivities } from './projectAgentActivities'
 import RestrictedMarkdown from '../ChatPanel/RestrictedMarkdown'
 import TabBar from '../ui/TabBar'
 import Button from '../ui/Button'
@@ -54,10 +56,40 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
   const agentFlowSubject = useWorkbenchStore((s) => s.agentFlowSubject)
   const latestAskTrace = useWorkbenchStore((s) => s.latestAskTrace)
   const latestPlanTrace = useWorkbenchStore((s) => s.latestPlanTrace)
+  const messages = useWorkbenchStore((s) => s.messages)
+  const chatMode = useWorkbenchStore((s) => s.chatMode)
+  const activeRunId = useWorkbenchStore((s) => s.activeRunId)
+  const selectedActivityId = useWorkbenchStore((s) => s.selectedActivityId)
   const debugSession = useWorkbenchStore((s) => s.debugSession)
   const stopAgentRun = useWorkbenchStore((s) => s.stopAgentRun)
   const refineLoading = useWorkbenchStore((s) => s.refineLoading)
   const { ts } = useI18n()
+  const activities = useMemo(() => projectAgentActivities({
+    messages,
+    latestAskTrace,
+    latestPlanTrace,
+    activeRunId,
+    flowActions,
+      flowTransientTraces,
+      chatMode,
+      debugExploration: debugSession?.explorationTrace ?? null,
+    }, buildActivityLabels(ts)), [
+    messages,
+    latestAskTrace,
+    latestPlanTrace,
+    activeRunId,
+    flowActions,
+    flowTransientTraces,
+    chatMode,
+    debugSession,
+    ts,
+  ])
+  const activityDetails = (
+    <AgentActivityDetails
+      activities={activities.filter((activity) => !activity.phaseId)}
+      selectedId={selectedActivityId}
+    />
+  )
   const timelineRef = useRef<HTMLDivElement>(null)
   const prevStepCount = useRef(steps.length)
 
@@ -84,6 +116,7 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
           </span>
         </div>
         <AskTraceView trace={latestAskTrace} />
+        {activityDetails}
       </div>
     )
   }
@@ -96,6 +129,7 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
           <span className={styles.status}>{ts('plan.title')}</span>
         </div>
         <PlanTraceView trace={latestPlanTrace} />
+        {activityDetails}
       </div>
     )
   }
@@ -113,11 +147,12 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
           <p>{ts('debug.hypotheses')}: {debugSession.hypotheses.length}</p>
           <p>{ts('debug.reproSteps')}: {debugSession.reproSteps.length}</p>
         </section>
+        {activityDetails}
       </div>
     )
   }
 
-  if (steps.length === 0 && status === 'idle') {
+  if (steps.length === 0 && status === 'idle' && activities.length === 0) {
     return (
       <EmptyState
         icon={<Workflow size={16} />}
@@ -145,7 +180,8 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
         hasCorrection={flowCorrections.some((c) => c.stepId === step.id)}
       />,
     ]
-    if (phaseActions.length > 0 || phaseTraces.length > 0) {
+    const phaseActivities = activities.filter((activity) => activity.phaseId === step.id)
+    if (phaseActions.length > 0 || phaseTraces.length > 0 || phaseActivities.length > 0) {
       items.push(
         <section
           key={`${step.id}_actions`}
@@ -158,6 +194,9 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
           {phaseTraces.map((trace) => (
             <TransientReasoningTrace key={trace.traceId} trace={trace} />
           ))}
+          {phaseActivities.length > 0 ? (
+            <AgentActivityDetails activities={phaseActivities} selectedId={selectedActivityId} />
+          ) : null}
         </section>,
       )
     }
@@ -213,6 +252,7 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
 
       {agentFlowViewMode === 'timeline' ? (
         <div className={styles.timeline} ref={timelineRef}>
+          {activityDetails}
           {timelineItems}
           {flowDelegationEvents.length > 0 && (
             <DelegatedRunTree

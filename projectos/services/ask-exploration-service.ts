@@ -4,6 +4,9 @@ import type { CapabilityContext } from "../contracts/tool-policy.js";
 import type { LoadedProjectOSWorkspace } from "../persistence/workspace-store.js";
 import { resolveContainedPath } from "../utils/path-containment.js";
 import {
+  excerptWindow,
+} from "./agent-activity-evidence.js";
+import {
   assertToolAllowed,
   readCapabilityContext,
 } from "./harness/tool-policy.js";
@@ -14,10 +17,27 @@ export interface AskExplorationHit {
   preview: string;
 }
 
+export interface AskExplorationRead {
+  path: string;
+  startLine: number;
+  endLine: number;
+  excerpt: string;
+  truncated: boolean;
+}
+
+export interface AskExplorationRound {
+  index: number;
+  symbols: string[];
+  hits: AskExplorationHit[];
+  reads: AskExplorationRead[];
+}
+
 export interface AskExplorationTrace {
   queriedSymbols: string[];
   hits: AskExplorationHit[];
   readPaths: string[];
+  reads: AskExplorationRead[];
+  rounds: AskExplorationRound[];
   truncated: boolean;
   roundsUsed: number;
   maxRounds: number;
@@ -94,18 +114,20 @@ export function exploreForAskQuestion(
 
   const queriedSymbols: string[] = [];
   const hits: AskExplorationHit[] = [];
+  const rounds: AskExplorationRound[] = [];
   const seenHitKeys = new Set<string>();
   let roundSymbols = extractSymbols(question);
   let roundsUsed = 0;
 
   for (let round = 0; round < maxRounds; round += 1) {
     if (roundSymbols.length === 0 || hits.length >= maxHits) break;
-    for (const symbol of roundSymbols) {
+    const symbols = [...roundSymbols];
+    for (const symbol of symbols) {
       if (!queriedSymbols.includes(symbol)) queriedSymbols.push(symbol);
     }
     const roundStart = hits.length;
     collectHits({
-      symbols: roundSymbols,
+      symbols,
       allowList,
       readCached,
       hits,
@@ -113,12 +135,16 @@ export function exploreForAskQuestion(
       maxHits,
     });
     roundsUsed = round + 1;
+    const roundRecord: AskExplorationRound = {
+      index: roundsUsed,
+      symbols,
+      hits: hits.slice(roundStart),
+      reads: [],
+    };
+    rounds.push(roundRecord);
     if (hits.length === roundStart) break;
     if (round + 1 >= maxRounds) break;
-    const previewText = hits
-      .slice(roundStart)
-      .map((hit) => hit.preview)
-      .join("\n");
+    const previewText = roundRecord.hits.map((hit) => hit.preview).join("\n");
     const next = extractSymbols(previewText).filter(
       (symbol) => !queriedSymbols.includes(symbol),
     );
@@ -126,13 +152,24 @@ export function exploreForAskQuestion(
   }
 
   const readPaths: string[] = [];
+  const reads: AskExplorationRead[] = [];
   const supplementalChunks: string[] = [];
+  const roundByPath = new Map<string, AskExplorationRound>();
+  for (const roundRecord of rounds) {
+    for (const hit of roundRecord.hits) {
+      if (!roundByPath.has(hit.path)) roundByPath.set(hit.path, roundRecord);
+    }
+  }
   for (const hit of hits) {
     if (readPaths.length >= maxReads) break;
     if (readPaths.includes(hit.path)) continue;
     const content = readCached(hit.path);
     if (content === undefined) continue;
     readPaths.push(hit.path);
+    const window = excerptWindow(content, hit.line);
+    const read = { path: hit.path, ...window };
+    reads.push(read);
+    roundByPath.get(hit.path)?.reads.push(read);
     supplementalChunks.push(
       `### ${hit.path}\n\`\`\`\n${content.slice(0, 4_000)}\n\`\`\``,
     );
@@ -142,6 +179,8 @@ export function exploreForAskQuestion(
     queriedSymbols,
     hits,
     readPaths,
+    reads,
+    rounds,
     truncated: hits.length >= maxHits || readPaths.length >= maxReads,
     roundsUsed,
     maxRounds,

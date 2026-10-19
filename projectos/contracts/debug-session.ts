@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AgentConversationScopeSchema } from "./agent-conversation.js";
+import { AgentConversationScopeSchema, AskExplorationTraceSchema } from "./agent-conversation.js";
 import {
   HarnessHypothesisSchema,
   HarnessProposedFixSchema,
@@ -67,6 +67,7 @@ export const DebugSessionSchema = z
     verification: HarnessVerificationSchema,
     debugLogPort: z.number().int().positive().optional(),
     chatSessionId: z.string().min(1).optional(),
+    explorationTrace: AskExplorationTraceSchema.optional(),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1),
   })

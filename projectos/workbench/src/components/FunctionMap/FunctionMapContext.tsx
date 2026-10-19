@@ -21,6 +21,7 @@ import type {
 import {
   architectureScopeForSelection,
   availableArchitectureLevels,
+  componentHasCodeGraph,
   defaultArchitectureScopeId,
   findArchitectureView,
   projectArchitectureView,
@@ -337,8 +338,9 @@ export function resolveFunctionMapPreviewPosition(
 function defaultScopeIdForLevel(
   nodes: FunctionalNode[],
   level: ArchitectureLevel,
+  fileIndex: ReadonlyArray<Pick<FileEntry, 'nodeIds'>> = [],
 ): string | null {
-  return defaultArchitectureScopeId(nodes, level)
+  return defaultArchitectureScopeId(nodes, level, fileIndex)
 }
 
 function buildArchitectureBreadcrumbs(
@@ -415,21 +417,24 @@ export function FunctionMapProvider({
           (node) =>
             node.id === selectedNodeId &&
             node.level === 'component' &&
-            node.linkedFiles.some((file) => file.path === selectedFilePath),
+            node.linkedFiles.some((file) => file.path === selectedFilePath) ||
+            fileIndex.some(
+              (file) => file.path === selectedFilePath && file.nodeIds.includes(node.id),
+            ),
         )?.id ?? null
       : null
   const initialLevel: ArchitectureLevel = selectedFileOwnerId ? 'code' : preferredLevel
   const [architectureLevel, setArchitectureLevelState] =
     useState<ArchitectureLevel>(initialLevel)
   const [architectureScopeId, setArchitectureScopeId] = useState<string | null>(() =>
-    selectedFileOwnerId ?? defaultScopeIdForLevel(nodes, initialLevel),
+    selectedFileOwnerId ?? defaultScopeIdForLevel(nodes, initialLevel, fileIndex),
   )
   const architectureViews = useMemo(
     () =>
       architectureViewsProp?.length
         ? architectureViewsProp
-        : synthesizeDefaultArchitectureViews(nodes, { sourceKind: 'heuristic' }),
-    [architectureViewsProp, nodes],
+        : synthesizeDefaultArchitectureViews(nodes, { sourceKind: 'heuristic', fileIndex }),
+    [architectureViewsProp, nodes, fileIndex],
   )
   const [activeViewKey, setActiveViewKeyState] = useState<string | null>(null)
   const [collapsedBoundaryIds, setCollapsedBoundaryIds] = useState<Set<string>>(
@@ -557,9 +562,9 @@ export function FunctionMapProvider({
   useEffect(() => {
     if (!architectureLevels.includes(architectureLevel)) {
       setArchitectureLevelState(preferredLevel)
-      setArchitectureScopeId(defaultScopeIdForLevel(nodes, preferredLevel))
+      setArchitectureScopeId(defaultScopeIdForLevel(nodes, preferredLevel, fileIndex))
     }
-  }, [architectureLevel, architectureLevels, nodes, preferredLevel])
+  }, [architectureLevel, architectureLevels, fileIndex, nodes, preferredLevel])
 
   useEffect(() => {
     setFocusedCodeNodeId(null)
@@ -621,7 +626,7 @@ export function FunctionMapProvider({
   const setArchitectureLevel = useCallback(
     (level: ArchitectureLevel) => {
       setArchitectureLevelState(level)
-      const scopeId = defaultScopeIdForLevel(nodes, level)
+      const scopeId = defaultScopeIdForLevel(nodes, level, fileIndex)
       setArchitectureScopeId(scopeId)
       const matching = viewsForLevel(architectureViews, level)
       const preferred =
@@ -636,7 +641,7 @@ export function FunctionMapProvider({
       setExpandedPipeIds(new Set())
       clearAllFrozenPlanetOrbits()
     },
-    [nodes, architectureViews, collapseAllClusters, clearAllFrozenPlanetOrbits],
+    [nodes, fileIndex, architectureViews, collapseAllClusters, clearAllFrozenPlanetOrbits],
   )
 
   const toggleBoundaryCollapsed = useCallback((boundaryId: string) => {
@@ -873,7 +878,7 @@ export function FunctionMapProvider({
     (nodeId: string) => {
       const node = nodes.find((candidate) => candidate.id === nodeId)
       if (!node) return false
-      if (node.level === 'component' && node.linkedFiles.length > 0) return true
+      if (componentHasCodeGraph(node, fileIndex)) return true
       if (
         node.children?.some((childId) =>
           nodes.some((candidate) => candidate.id === childId && candidate.level),
@@ -886,16 +891,17 @@ export function FunctionMapProvider({
         (candidate) => candidate.parentId === nodeId && Boolean(candidate.level),
       )
     },
-    [nodes],
+    [nodes, fileIndex],
   )
 
   const isComponentFileDrillTarget = useCallback(
     (nodeId: string) => {
       if (architectureLevel !== 'component') return false
       const node = nodes.find((candidate) => candidate.id === nodeId)
-      return node?.level === 'component' && node.linkedFiles.length > 0
+      if (!node) return false
+      return componentHasCodeGraph(node, fileIndex)
     },
-    [architectureLevel, nodes],
+    [architectureLevel, fileIndex, nodes],
   )
 
   const drillIntoNode = useCallback(
@@ -919,7 +925,7 @@ export function FunctionMapProvider({
         return true
       }
 
-      if (node.level === 'component' && node.linkedFiles.length > 0) {
+      if (componentHasCodeGraph(node, fileIndex)) {
         setArchitectureScopeId(node.id)
         setArchitectureLevelState('code')
         setActiveViewKeyState(
@@ -962,7 +968,7 @@ export function FunctionMapProvider({
       setHorizonPhase('off')
       return true
     },
-    [nodes, architectureViews, collapseAllClusters, clearAllFrozenPlanetOrbits],
+    [nodes, fileIndex, architectureViews, collapseAllClusters, clearAllFrozenPlanetOrbits],
   )
 
   const drillOut = useCallback(() => {
@@ -1003,8 +1009,8 @@ export function FunctionMapProvider({
   }, [architectureViews, activeViewKey])
 
   const selectedArchitectureScope = useMemo(
-    () => architectureScopeForSelection(nodes, architectureLevel, selectedNodeId),
-    [nodes, architectureLevel, selectedNodeId],
+    () => architectureScopeForSelection(nodes, architectureLevel, selectedNodeId, fileIndex),
+    [nodes, architectureLevel, selectedNodeId, fileIndex],
   )
   // Code layer keeps the full component file graph on selection / open-file.
   // One-hop focus is architecture-level only (not driven by code-file clicks).

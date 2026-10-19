@@ -60,24 +60,22 @@ afterEach(() => {
 })
 
 describe('AskTraceView', () => {
-  it('renders context metadata, provider-supplied reasoning, and the answer as Markdown', () => {
+  it('keeps the answer in the trace and leaves evidence to the activity detail', () => {
     useWorkbenchStore.setState({ locale: 'en' })
     const result = answerResult()
     const html = renderToStaticMarkup(
       <AskTraceView trace={{ status: 'complete', scope: result.scope, result }} />,
     )
 
-    expect(html).toContain('app/login/page.tsx')
-    expect(html).toContain('lib/auth.ts')
-    expect(html).toContain('sensitive_path')
-    expect(html).toContain(`sha256:${'a'.repeat(64)}`)
-    expect(html).toContain('模型推理 — 由提供商返回，可能不完整或不可靠')
-    expect(html).toContain('Provider trace</span></h2>')
-    expect(html).toContain('Answer</span></h2>')
+    expect(html).toContain('data-ask-trace="answer"')
     expect(html).toContain('<strong>OAuth</strong>')
+    expect(html).not.toContain('data-ask-trace="reasoning"')
+    expect(html).not.toContain('data-ask-trace="retrieval"')
+    expect(html).not.toContain('lib/secret.ts')
+    expect(html).not.toContain('Provider trace')
   })
 
-  it('shows retrieval paths and omission reasons without quotes', () => {
+  it('does not render retrieval or reasoning disclosures', () => {
     const result = answerResult(false)
     result.retrievalSummary = {
       searched: true,
@@ -91,10 +89,9 @@ describe('AskTraceView', () => {
     const html = renderToStaticMarkup(
       <AskTraceView trace={{ status: 'complete', scope: result.scope, result }} />,
     )
-    expect(html).toContain('data-ask-trace="retrieval"')
-    expect(html).toContain('src/billing.ts')
-    expect(html).toContain('secret · 1')
-    expect(html).not.toContain('export function')
+    expect(html).not.toContain('data-ask-trace="retrieval"')
+    expect(html).not.toContain('src/billing.ts')
+    expect(html).toContain('data-ask-trace="answer"')
   })
 
   it('does not render a reasoning disclosure when the provider supplied none', () => {

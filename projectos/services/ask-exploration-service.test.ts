@@ -36,6 +36,9 @@ describe("exploreForAskQuestion", () => {
     expect(result.trace.readPaths).not.toContain("secret.ts");
     expect(result.supplementalMarkdown).toContain("Ask exploration (read-only)");
     expect(result.trace.hits.length).toBeGreaterThan(0);
+    expect(result.trace.reads[0]?.path).toMatch(/^src\//);
+    expect(result.trace.reads[0]?.excerpt).toContain("AuthService");
+    expect(result.trace.reads[0]?.startLine).toBeGreaterThan(0);
   });
 
   it("respects allowedReadPaths ACL (node/file scope)", () => {
@@ -93,6 +96,8 @@ describe("exploreForAskQuestion", () => {
     expect(result.trace.queriedSymbols).toContain("AuthService");
     expect(result.trace.maxRounds).toBe(2);
     expect(result.trace.roundsUsed).toBeGreaterThanOrEqual(1);
+    expect(result.trace.rounds.length).toBe(result.trace.roundsUsed);
+    expect(result.trace.rounds[0]?.symbols).toContain("AuthService");
     expect(result.supplementalMarkdown).toMatch(/Rounds used: \d+\/2/);
     expect(result.trace.hits.length).toBeGreaterThan(0);
   });

@@ -1,0 +1,49 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+  font: inherit;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover .summary {
+  color: var(--tech-text-primary);
+}
+
+.row:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+  border-radius: 4px;
+}
+
+.mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tech-text-secondary);
+  flex: none;
+}
+
+.running .mark {
+  background: var(--tech-accent);
+}
+
+.error .mark {
+  background: var(--color-danger, #f87171);
+}
+
+.summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

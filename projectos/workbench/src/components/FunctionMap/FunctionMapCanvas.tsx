@@ -1083,6 +1083,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       graphNodes,
       architectureLevel,
       selectedNodeId,
+      fileIndex,
     )
     if (
       scope.focusNodeId &&
@@ -1097,6 +1098,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     graphNodes,
     selectedNodeId,
     architectureScopeId,
+    fileIndex,
   ])
 
   const isLayeredArchitectureMap = useMemo(

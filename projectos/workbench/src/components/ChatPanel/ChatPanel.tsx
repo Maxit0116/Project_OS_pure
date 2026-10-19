@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GitBranch } from 'lucide-react'
 import { CustomModeIcon } from './customModeIcons'
 import { canSubmitAgentPrompt, useWorkbenchStore } from '../../state/workbenchStore'
@@ -17,6 +17,13 @@ import ChatMessageContent from './ChatMessageContent'
 import ChatMessageCopyButton from './ChatMessageCopyButton'
 import InheritedSessionCard from './InheritedSessionCard'
 import AgentActivityIndicator from '../ui/AgentActivityIndicator'
+import AgentActivitySummaryRow from '../AgentFlow/AgentActivitySummaryRow'
+import {
+  activitiesForMessage,
+  buildActivityLabels,
+  liveActivities,
+  projectAgentActivities,
+} from '../AgentFlow/projectAgentActivities'
 import { VoiceInputErrorBanner } from './VoiceInputControls'
 import { mergeBaseWithSpoken } from './voice/mergeTranscript'
 import { useChatVoiceBackend } from './voice/useChatVoiceBackend'
@@ -80,6 +87,11 @@ export default function ChatPanel() {
   const reviseRefinement = useWorkbenchStore((s) => s.reviseRefinement)
   const refineLoading = useWorkbenchStore((s) => s.refineLoading)
   const flowStatus = useWorkbenchStore((s) => s.flowStatus)
+  const flowActions = useWorkbenchStore((s) => s.flowActions)
+  const flowTransientTraces = useWorkbenchStore((s) => s.flowTransientTraces)
+  const activeRunId = useWorkbenchStore((s) => s.activeRunId)
+  const latestAskTrace = useWorkbenchStore((s) => s.latestAskTrace)
+  const latestPlanTrace = useWorkbenchStore((s) => s.latestPlanTrace)
   const chatMode = useWorkbenchStore((s) => s.chatMode)
   const selectedNodeId = useWorkbenchStore((s) => s.selectedNodeId)
   const selectedFilePath = useWorkbenchStore((s) => s.selectedFilePath)
@@ -97,6 +109,36 @@ export default function ChatPanel() {
   const pendingChangesDrawerVisible = useWorkbenchStore(selectPendingChangesDrawerVisible)
   const pendingChangesUndoMode = useWorkbenchStore(selectPendingChangesDrawerUndoMode)
   const { ts } = useI18n()
+  const agentActivities = useMemo(() => projectAgentActivities({
+    messages,
+    latestAskTrace,
+    latestPlanTrace,
+    activeRunId,
+    flowActions,
+      flowTransientTraces,
+      chatMode,
+      debugExploration: debugSession?.explorationTrace ?? null,
+    }, buildActivityLabels(ts)), [
+    messages,
+    latestAskTrace,
+    latestPlanTrace,
+    activeRunId,
+    flowActions,
+    flowTransientTraces,
+    chatMode,
+    debugSession,
+    ts,
+  ])
+  const openActivity = (id: string) => {
+    useWorkbenchStore.getState().setSelectedActivityId(id)
+    useChatSessionStore.getState().presentAgentFlow()
+  }
+  const unanchoredActivities = liveActivities(agentActivities)
+  const planActivityRows = unanchoredActivities.filter((activity) => activity.mode === 'plan')
+  const debugActivityRows = unanchoredActivities.filter((activity) => activity.mode === 'debug')
+  const runActivityRows = unanchoredActivities.filter(
+    (activity) => activity.mode !== 'plan' && activity.mode !== 'debug',
+  )
   const messagesRef = useRef<HTMLDivElement>(null)
   const baseInputRef = useRef('')
   const voiceUpdatingRef = useRef(false)
@@ -258,52 +300,15 @@ export default function ChatPanel() {
                   />
                 ) : null}
                 <div className={styles.bubble} title={formatTime(msg.timestamp)}>
-                  {msg.explorationTrace ? (
-                    <details className={styles.explorationTrace}>
-                      <summary>
-                        {msg.explorationTrace.readPaths.length > 0
-                          ? ts('chat.exploredFiles', {
-                              count: msg.explorationTrace.readPaths.length,
-                            })
-                          : ts('chat.exploredFilesEmpty')}
-                      </summary>
-                      <p className={styles.explorationHint}>
-                        {ts('chat.exploredRoundsHint', {
-                          rounds:
-                            msg.explorationTrace.roundsUsed ??
-                            msg.explorationTrace.maxRounds ??
-                            1,
-                        })}
-                      </p>
-                      <ul>
-                        {msg.explorationTrace.readPaths.map((path) => (
-                          <li key={path}>{path}</li>
-                        ))}
-                      </ul>
-                    </details>
-                  ) : null}
-                  {msg.retrievalSummary?.searched ? (
-                    <details className={styles.explorationTrace}>
-                      <summary>
-                        {msg.retrievalSummary.hitCount > 0
-                          ? ts('chat.retrievalHits', {
-                              count: msg.retrievalSummary.hitCount,
-                            })
-                          : ts('chat.retrievalEmpty')}
-                      </summary>
-                      <p className={styles.explorationHint}>{ts('chat.retrievalAdvisory')}</p>
-                      {msg.retrievalSummary.includesComposedGraph ? (
-                        <p className={styles.explorationHint}>
-                          {ts('chat.retrievalComposedGraph')}
-                        </p>
-                      ) : null}
-                      <ul>
-                        {msg.retrievalSummary.paths.map((path) => (
-                          <li key={path}>{path}</li>
-                        ))}
-                      </ul>
-                    </details>
-                  ) : null}
+                  {activitiesForMessage(agentActivities, msg.id).map((activity) => (
+                    <AgentActivitySummaryRow
+                      key={activity.id}
+                      id={activity.id}
+                      status={activity.status}
+                      summary={activity.summary}
+                      onOpen={() => openActivity(activity.id)}
+                    />
+                  ))}
                   <ChatMessageContent message={msg} />
                 </div>
                 {(showCopy || showBranch || msg.checkpointId) && (
@@ -344,6 +349,15 @@ export default function ChatPanel() {
             onRevise={handleRevise}
           />
         )}
+        {planActivityRows.map((activity) => (
+          <AgentActivitySummaryRow
+            key={activity.id}
+            id={activity.id}
+            status={activity.status}
+            summary={activity.summary}
+            onOpen={() => openActivity(activity.id)}
+          />
+        ))}
         {chatMode === 'plan' && pendingPlan && (
           <PlanReviewCard
             plan={pendingPlan}
@@ -428,6 +442,15 @@ export default function ChatPanel() {
             </button>
           </div>
         )}
+        {debugActivityRows.map((activity) => (
+          <AgentActivitySummaryRow
+            key={activity.id}
+            id={activity.id}
+            status={activity.status}
+            summary={activity.summary}
+            onOpen={() => openActivity(activity.id)}
+          />
+        ))}
         {chatMode === 'debug' && debugSession && (
           <DebugSessionPanel
             session={debugSession}
@@ -477,6 +500,15 @@ export default function ChatPanel() {
             ) : null}
           </div>
         ) : null}
+        {runActivityRows.map((activity) => (
+          <AgentActivitySummaryRow
+            key={activity.id}
+            id={activity.id}
+            status={activity.status}
+            summary={activity.summary}
+            onOpen={() => openActivity(activity.id)}
+          />
+        ))}
         {refineLoading && (
           <AgentActivityIndicator
             className={styles.refiningStatus}

@@ -11,6 +11,7 @@ import type {
   ProjectGraph,
 } from "../contracts/graph.js";
 import {
+  componentHasCodeGraph,
   liftRelationshipsToVisibleAncestors,
   synthesizeDefaultArchitectureViews,
 } from "../shared/c4-architecture-views/index.js";
@@ -47,7 +48,10 @@ function edgeTech(edge: FunctionalEdge): string {
 
 function resolvedViews(graph: ProjectGraph): ArchitectureView[] {
   if (graph.views?.length) return graph.views;
-  return synthesizeDefaultArchitectureViews(graph.nodes, { sourceKind: "heuristic" });
+  return synthesizeDefaultArchitectureViews(graph.nodes, {
+    sourceKind: "heuristic",
+    fileIndex: graph.fileIndex,
+  });
 }
 
 function nodesForView(
@@ -228,26 +232,30 @@ function buildMermaidCode(graph: ProjectGraph, parentId?: string): string {
           (node) => node.id === parentId && node.level === "component",
         )
       : undefined) ??
-    graph.nodes.find(
-      (node) => node.level === "component" && node.linkedFiles.length > 0,
-    );
+    graph.nodes.find((node) => componentHasCodeGraph(node, graph.fileIndex));
   if (!component) {
     return [
       "flowchart LR",
       `  empty["${escapeMermaid(graph.projectName)} — no code view"]`,
     ].join("\n");
   }
-  const files = component.linkedFiles;
-  const pathSet = new Set(files.map((file) => file.path));
+  const paths = [
+    ...component.linkedFiles.map((file) => file.path),
+    ...graph.fileIndex
+      .filter((entry) => entry.nodeIds.includes(component.id))
+      .map((entry) => entry.path)
+      .filter((path) => !component.linkedFiles.some((file) => file.path === path)),
+  ];
+  const pathSet = new Set(paths);
   const lines = [
     "flowchart LR",
     `  subgraph ${component.id}["${escapeMermaid(component.name)}"]`,
   ];
   const idByPath = new Map<string, string>();
-  files.forEach((file, index) => {
+  paths.forEach((path, index) => {
     const id = `f${index}`;
-    idByPath.set(file.path, id);
-    const base = file.path.split("/").pop() ?? file.path;
+    idByPath.set(path, id);
+    const base = path.split("/").pop() ?? path;
     lines.push(`    ${id}["${escapeMermaid(base)}"]`);
   });
   lines.push("  end");

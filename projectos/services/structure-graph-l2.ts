@@ -201,7 +201,98 @@ export function assignFilesToComponents(input: {
     bucket.push(file);
   }
 
+  const claimed = new Set<string>();
+  for (const paths of assigned.values()) {
+    for (const path of paths) claimed.add(path);
+  }
+  const pending = ranked.filter((file) => isSourceFile(file) && !claimed.has(file));
+  for (const file of pending) {
+    const target = pickBackfillComponent(file, input.components, assigned, maxFiles);
+    if (!target) break;
+    assigned.get(target)!.push(file);
+  }
+  rebalanceEmptyComponents(input.components, assigned, maxFiles);
+
   return assigned;
+}
+
+function isSourceFile(file: string): boolean {
+  return SOURCE_EXTS.has(extname(file).toLowerCase());
+}
+
+export function countSourceFiles(files: readonly string[]): number {
+  return files.filter((file) => isSourceFile(file)).length;
+}
+
+function directoryOverlap(file: string, anchors: string[]): number {
+  const fileDirs = file.split("/").slice(0, -1);
+  let best = 0;
+  for (const raw of anchors) {
+    const anchor = raw.trim().replace(/^\.\//, "").replace(/\/+$/, "");
+    if (!anchor) continue;
+    const parts = anchor.split("/");
+    const anchorDirs =
+      extname(parts[parts.length - 1] ?? "").length > 0 ? parts.slice(0, -1) : parts;
+    let shared = 0;
+    const limit = Math.min(fileDirs.length, anchorDirs.length);
+    for (let index = 0; index < limit; index += 1) {
+      if (fileDirs[index] !== anchorDirs[index]) break;
+      shared += 1;
+    }
+    best = Math.max(best, shared);
+  }
+  return best;
+}
+
+function pickBackfillComponent(
+  file: string,
+  components: ComponentFileHint[],
+  assigned: Map<string, string[]>,
+  maxFiles: number,
+): string | null {
+  let best: { id: string; score: number; count: number } | null = null;
+  for (const component of components) {
+    const bucket = assigned.get(component.id) ?? [];
+    if (bucket.length >= maxFiles) continue;
+    const score = directoryOverlap(file, [...component.pathHints, ...bucket]);
+    const count = bucket.length;
+    if (
+      !best ||
+      score > best.score ||
+      (score === best.score && count < best.count)
+    ) {
+      best = { id: component.id, score, count };
+    }
+  }
+  return best?.id ?? null;
+}
+
+/** Move spare source files onto components that hints left empty. */
+function rebalanceEmptyComponents(
+  components: ComponentFileHint[],
+  assigned: Map<string, string[]>,
+  maxFiles: number,
+): void {
+  const sourceCount = (id: string): number =>
+    (assigned.get(id) ?? []).filter((file) => isSourceFile(file)).length;
+
+  for (const target of components) {
+    if (sourceCount(target.id) > 0) continue;
+    const bucket = assigned.get(target.id);
+    if (!bucket || bucket.length >= maxFiles) continue;
+    const donor = [...components]
+      .filter((component) => sourceCount(component.id) > 1)
+      .sort((left, right) => sourceCount(right.id) - sourceCount(left.id))[0];
+    if (!donor) break;
+    const donorBucket = assigned.get(donor.id)!;
+    for (let index = donorBucket.length - 1; index >= 0; index -= 1) {
+      const file = donorBucket[index];
+      if (!file || !isSourceFile(file)) continue;
+      donorBucket.splice(index, 1);
+      bucket.push(file);
+      break;
+    }
+  }
 }
 
 function hintScore(file: string, hints: string[]): number {
@@ -257,9 +348,56 @@ export function parsePackageImports(source: string): string[] {
   return Array.from(new Set(specs));
 }
 
+/** Python `from .session import x` / `from ..billing.plan import Plan`. */
+export function parsePythonRelativeImports(source: string): string[] {
+  const specs: string[] = [];
+  const pattern = /^\s*from\s+(\.+[A-Za-z_][\w.]*)\s+import\s+/gm;
+  for (const match of source.matchAll(pattern)) {
+    const spec = match[1];
+    if (spec) specs.push(spec);
+  }
+  return Array.from(new Set(specs));
+}
+
+/** Go quoted import paths (`import "module/pkg"` and grouped import blocks). */
+export function parseGoImports(source: string): string[] {
+  const specs: string[] = [];
+  const pattern = /["']([A-Za-z0-9_./-]+\/[A-Za-z0-9_./-]+)["']/g;
+  const blocks = source.match(/import\s*(?:\([^)]*\)|"[^"]+"|'[^']+')/g) ?? [];
+  for (const block of blocks) {
+    for (const match of block.matchAll(pattern)) {
+      const spec = match[1];
+      if (spec) specs.push(spec);
+    }
+  }
+  return Array.from(new Set(specs));
+}
+
+/** Rust `use crate::foo::bar`, `use super::foo`, and `mod foo`. */
+export function parseRustImports(source: string): string[] {
+  const specs: string[] = [];
+  for (const match of source.matchAll(
+    /^\s*use\s+((?:crate|super|self)(?:::[A-Za-z_][\w]*)+)\s*;/gm,
+  )) {
+    const spec = match[1];
+    if (spec) specs.push(spec);
+  }
+  for (const match of source.matchAll(/^\s*(?:pub\s+)?mod\s+([A-Za-z_][\w]*)\s*;/gm)) {
+    const spec = match[1];
+    if (spec) specs.push(`mod:${spec}`);
+  }
+  return Array.from(new Set(specs));
+}
+
 export function parseImportSpecs(source: string): string[] {
   return Array.from(
-    new Set([...parseRelativeImports(source), ...parsePackageImports(source)]),
+    new Set([
+      ...parseRelativeImports(source),
+      ...parsePackageImports(source),
+      ...parsePythonRelativeImports(source),
+      ...parseGoImports(source),
+      ...parseRustImports(source),
+    ]),
   );
 }
 
@@ -304,12 +442,91 @@ function resolvePackageImportPath(spec: string, files: Set<string>): string | nu
   return null;
 }
 
+function resolvePythonRelativeImport(
+  fromFile: string,
+  spec: string,
+  files: Set<string>,
+): string | null {
+  const dots = /^(\.+)/.exec(spec)?.[1]?.length ?? 0;
+  if (dots === 0) return null;
+  let dir = dirname(fromFile).split(sep).join("/");
+  for (let index = 1; index < dots; index += 1) {
+    const parent = dirname(dir);
+    dir = parent === dir ? "" : parent.split(sep).join("/");
+  }
+  const rest = spec.slice(dots).replace(/\./g, "/");
+  const base = rest ? (dir ? `${dir}/${rest}` : rest) : dir;
+  const candidates = [`${base}.py`, `${base}/__init__.py`];
+  return candidates.find((candidate) => files.has(candidate)) ?? null;
+}
+
+function resolveGoImportPath(spec: string, files: Set<string>): string | null {
+  const parts = spec.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  for (let length = parts.length; length >= 2; length -= 1) {
+    const suffix = parts.slice(parts.length - length).join("/");
+    const last = parts[parts.length - 1]!;
+    const matches = [...files].filter((file) => {
+      if (!file.endsWith(".go")) return false;
+      const stem = file.slice(0, -3);
+      return stem === suffix || stem.endsWith(`/${suffix}`) || stem.endsWith(`/${suffix}/${last}`);
+    });
+    if (matches.length === 1) return matches[0]!;
+  }
+  return null;
+}
+
+function resolveRustImportPath(
+  fromFile: string,
+  spec: string,
+  files: Set<string>,
+): string | null {
+  if (spec.startsWith("mod:")) {
+    const name = spec.slice(4);
+    const dir = dirname(fromFile).split(sep).join("/");
+    const candidates = [`${dir}/${name}.rs`, `${dir}/${name}/mod.rs`];
+    return candidates.find((candidate) => files.has(candidate)) ?? null;
+  }
+  let relative = spec;
+  let dir = dirname(fromFile).split(sep).join("/");
+  if (relative.startsWith("crate::")) {
+    relative = relative.slice("crate::".length);
+    dir = "";
+  } else if (relative.startsWith("super::")) {
+    relative = relative.slice("super::".length);
+    const parent = dirname(dir);
+    dir = parent === dir ? "" : parent.split(sep).join("/");
+  } else if (relative.startsWith("self::")) {
+    relative = relative.slice("self::".length);
+  } else {
+    return null;
+  }
+  const rest = relative.replace(/::/g, "/");
+  const base = dir ? `${dir}/${rest}` : rest;
+  const candidates = [
+    `${base}.rs`,
+    `${base}/mod.rs`,
+    `src/${base}.rs`,
+    `src/${base}/mod.rs`,
+  ];
+  return candidates.find((candidate) => files.has(candidate)) ?? null;
+}
+
 export function resolveImportPath(
   fromFile: string,
   spec: string,
   files: Set<string>,
 ): string | null {
+  if (spec.startsWith("mod:") || spec.startsWith("crate::") || spec.startsWith("super::") || spec.startsWith("self::")) {
+    return resolveRustImportPath(fromFile, spec, files);
+  }
+  if (/^\.+[A-Za-z_]/.test(spec)) {
+    return resolvePythonRelativeImport(fromFile, spec, files);
+  }
   if (!spec.startsWith(".")) {
+    if (spec.includes("/")) {
+      return resolveGoImportPath(spec, files) ?? resolvePackageImportPath(spec, files);
+    }
     return resolvePackageImportPath(spec, files);
   }
   const fromDir = dirname(fromFile);
@@ -327,6 +544,10 @@ export function resolveImportPath(
     `${normalized}.kt`,
     `${normalized}.java`,
     `${normalized}.py`,
+    `${normalized}.go`,
+    `${normalized}.rs`,
+    `${normalized}/mod.rs`,
+    `${normalized}/__init__.py`,
     `${normalized}/index.ts`,
     `${normalized}/index.js`,
     `${normalized}/index.tsx`,
@@ -486,6 +707,17 @@ export function assessL2GraphQuality(
     if (options.language === "en" && cjkCount / named.length > 0.6) {
       reasons.push("language_mismatch_expected_en");
     }
+  }
+
+  const unowned = components.filter(
+    (node) =>
+      node.linkedFiles.length === 0 &&
+      !graph.fileIndex.some((file) => file.nodeIds.includes(node.id)),
+  );
+  const mounted = components.length - unowned.length;
+  const couldCover = Math.min(components.length, options.sourceFileCount);
+  if (unowned.length > 0 && mounted < couldCover) {
+    reasons.push(`components_without_code:${unowned.length}`);
   }
 
   if (options.sourceFileCount >= 6) {

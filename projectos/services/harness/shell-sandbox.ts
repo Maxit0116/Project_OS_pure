@@ -338,7 +338,18 @@ function spawnCaptured(
     });
 
     let output = "";
-    const appendOutput = (chunk: Uint8Array): void => {
+    let stdout = "";
+    let stderr = "";
+    const appendStream = (bucket: "stdout" | "stderr", chunk: Uint8Array): void => {
+      const current = bucket === "stdout" ? stdout : stderr;
+      if (current.length >= OUTPUT_LIMIT_BYTES) return;
+      const piece = Buffer.from(chunk).toString("utf8");
+      const next = (current + piece).slice(0, OUTPUT_LIMIT_BYTES);
+      if (bucket === "stdout") stdout = next;
+      else stderr = next;
+    };
+    const appendOutput = (bucket: "stdout" | "stderr", chunk: Uint8Array): void => {
+      appendStream(bucket, chunk);
       outputBytes += chunk.byteLength;
       if (outputBytes > OUTPUT_LIMIT_BYTES) {
         outputTruncated = true;
@@ -350,8 +361,8 @@ function spawnCaptured(
       }
       output += Buffer.from(chunk).toString("utf8");
     };
-    child.stdout?.on("data", appendOutput);
-    child.stderr?.on("data", appendOutput);
+    child.stdout?.on("data", (chunk: Uint8Array) => appendOutput("stdout", chunk));
+    child.stderr?.on("data", (chunk: Uint8Array) => appendOutput("stderr", chunk));
 
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -372,6 +383,8 @@ function spawnCaptured(
         timedOut,
         outputTruncated,
         ...(output ? { output } : {}),
+        ...(stdout ? { stdout } : {}),
+        ...(stderr ? { stderr } : {}),
       });
     };
 

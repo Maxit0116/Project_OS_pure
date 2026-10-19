@@ -1,0 +1,66 @@
+.list {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 720px);
+}
+
+.card {
+  padding: 10px 12px;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.card h3 {
+  margin: 0 0 6px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.selected {
+  border-color: var(--tech-accent);
+}
+
+.meta {
+  margin: 4px 0;
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+  font-size: var(--font-size-xs);
+}
+
+.hash {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--font-size-xs);
+  word-break: break-all;
+}
+
+.hits,
+.card ul,
+.card ol {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+.card pre {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  font-size: var(--font-size-xs);
+}
+
+.link {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tech-accent);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.link:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}

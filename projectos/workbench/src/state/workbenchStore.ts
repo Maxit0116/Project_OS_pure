@@ -405,6 +405,7 @@ export interface WorkbenchState {
   directoryTreeExpansion: Record<string, boolean>
   directoryListings: Record<string, DirectoryListing>
   selectedFlowStepId: string | null
+  selectedActivityId: string | null
   bouncingNodeIds: string[]
   flashKey: number
   leftPanelOpen: boolean
@@ -530,6 +531,7 @@ export interface WorkbenchState {
   toggleDirectoryTreeExpanded: (folderPath: string, depth: number) => void
   loadDirectoryListing: (relativePath: string) => Promise<void>
   setSelectedFlowStepId: (id: string | null) => void
+  setSelectedActivityId: (id: string | null) => void
   setLeftPanelOpen: (open: boolean) => void
   setRightPanelOpen: (open: boolean) => void
   clearShouldStartOnboarding: () => void
@@ -1185,6 +1187,7 @@ const initialTransientState = {
   harnessFixRunId: null as string | null,
   refineLoading: false,
   selectedFlowStepId: null as string | null,
+  selectedActivityId: null as string | null,
   bouncingNodeIds: [] as string[],
   semanticTreeExpansion: {} as Record<string, boolean>,
   directoryTreeExpansion: {} as Record<string, boolean>,
@@ -1599,6 +1602,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
   },
   setSelectedFlowStepId: (id) => set({ selectedFlowStepId: id }),
+  setSelectedActivityId: (id) => set({ selectedActivityId: id }),
   setLeftPanelOpen: (open) => {
     set({ leftPanelOpen: open })
     if (open) get().reclampPanelLayout()
@@ -1622,6 +1626,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         item.id === stepId ? { ...item, status: 'warning' as const } : item,
       ),
       selectedFlowStepId: null,
+      selectedActivityId: null,
     }))
     pushToast({
       type: 'info',
@@ -2739,6 +2744,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         verificationLoading: false,
         harnessFixRunId: null,
         selectedFlowStepId: null,
+      selectedActivityId: null,
         runDisposable: null,
         pendingChangesDrawerDismissedRunId: null,
         pendingChangesDrawerExpanded: true,
@@ -3327,6 +3333,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       pendingChangesDrawerDismissedRunId: null,
       pendingChangesDrawerExpanded: true,
       selectedFlowStepId: null,
+      selectedActivityId: null,
       runDisposable: null,
     })
 
@@ -3740,6 +3747,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         flowStatus: 'running',
         agentFlowSubject: 'run',
         selectedFlowStepId: null,
+      selectedActivityId: null,
       })
 
       const disposable = client.streamAgentRun(run.runId, (event) => {

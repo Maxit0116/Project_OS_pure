@@ -33,74 +33,12 @@ export default function AskTraceView({ trace }: { trace: LatestAskTrace }) {
     )
   }
 
-  const { contextSummary, reasoning, answer } = trace.result
+  const { answer } = trace.result
   return (
     <div className={styles.trace}>
-      <section className={styles.card} data-ask-trace="context">
-        <h3>{ts('agentFlow.askContextTitle')}</h3>
-        <ScopeSummary scope={trace.scope} />
-        <p className={styles.contextMeta}>
-          {ts('agentFlow.askContextMeta', {
-            count: contextSummary.files.length,
-            synopsis: contextSummary.synopsisPresent
-              ? ts('agentFlow.synopsisIncluded')
-              : ts('agentFlow.synopsisMissing'),
-          })}
-        </p>
-        <code className={styles.bundleHash}>{contextSummary.bundleHash}</code>
-        <ul className={styles.files}>
-          {contextSummary.files.map((file) => (
-            <li key={file.path}>
-              <code>{file.path}</code>
-              <span>
-                {ts('agentFlow.askContextFile', {
-                  disposition: ts(`agentFlow.askDisposition.${file.disposition}`),
-                  included: file.includedByteLength ?? 0,
-                  total: file.byteLength ?? 0,
-                })}
-                {file.omissionReason ? ` · ${file.omissionReason}` : ''}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {trace.result.retrievalSummary?.searched ? (
-        <section className={styles.card} data-ask-trace="retrieval">
-          <h3>
-            {trace.result.retrievalSummary.hitCount > 0
-              ? ts('chat.retrievalHits', { count: trace.result.retrievalSummary.hitCount })
-              : ts('chat.retrievalEmpty')}
-          </h3>
-          <p className={styles.contextMeta}>{ts('chat.retrievalAdvisory')}</p>
-          {trace.result.retrievalSummary.includesComposedGraph ? (
-            <p className={styles.contextMeta}>{ts('chat.retrievalComposedGraph')}</p>
-          ) : null}
-          <ul className={styles.files}>
-            {trace.result.retrievalSummary.paths.map((path) => (
-              <li key={path}><code>{path}</code></li>
-            ))}
-          </ul>
-          {trace.result.retrievalSummary.omissions.map((omission) => (
-            <p key={omission.reason} className={styles.contextMeta}>
-              {omission.reason} · {omission.count}
-            </p>
-          ))}
-        </section>
-      ) : null}
-
-      {reasoning && (
-        <details className={styles.card} data-ask-trace="reasoning">
-          <summary>{ts('agentFlow.askReasoningTitle')}</summary>
-          {reasoning.truncated && (
-            <p className={styles.truncated}>{ts('agentFlow.askReasoningTruncated')}</p>
-          )}
-          <RestrictedMarkdown>{reasoning.content}</RestrictedMarkdown>
-        </details>
-      )}
-
       <section className={styles.card} data-ask-trace="answer">
         <h3>{ts('agentFlow.askAnswerTitle')}</h3>
+        <ScopeSummary scope={trace.scope} />
         <RestrictedMarkdown>{answer}</RestrictedMarkdown>
         {trace.result.responseLanguage.validation === 'mismatch_after_retry' && (
           <p className={styles.languageNotice} data-ask-trace="language-notice">

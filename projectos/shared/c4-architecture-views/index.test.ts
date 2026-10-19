@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FunctionalEdge, FunctionalNode } from "../../contracts/graph.js";
 import {
+  componentHasCodeGraph,
   liftRelationshipsToVisibleAncestors,
   mergeArchitectureViews,
   synthesizeDefaultArchitectureViews,
@@ -50,6 +51,23 @@ describe("c4-architecture-views", () => {
       "view_component_web",
       "view_code_identity",
     ]);
+  });
+
+  it("synthesizes a code view from fileIndex ownership when linkedFiles is empty", () => {
+    const component = node("identity", "component", "web", "component");
+    component.linkedFiles = [];
+    const views = synthesizeDefaultArchitectureViews(
+      [
+        node("system", "context", undefined, "software_system"),
+        node("web", "container", "system", "container"),
+        component,
+      ],
+      {
+        fileIndex: [{ path: "qimen/chart.py", nodeIds: ["identity"], type: "lib", imports: [], exports: [], status: "normal" }],
+      },
+    );
+    expect(componentHasCodeGraph(component, [{ nodeIds: ["identity"] }])).toBe(true);
+    expect(views.some((view) => view.key === "view_code_identity")).toBe(true);
   });
 
   it("preserves locked views on regenerate", () => {

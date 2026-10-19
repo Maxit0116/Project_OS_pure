@@ -33,6 +33,7 @@ import {
   buildFileIndexAndRelations,
   collectRepoFiles,
   collectWorkspaceTechSignals,
+  countSourceFiles,
   defaultArchitecture,
   detectReadmeLanguage,
   enrichNodesForC4Shapes,
@@ -710,7 +711,10 @@ function acceptRefinedGraph(
         existing: base.views,
         generated:
           incoming.views ??
-          synthesizeDefaultArchitectureViews(incoming.nodes, { sourceKind: "ai" }),
+          synthesizeDefaultArchitectureViews(incoming.nodes, {
+            sourceKind: "ai",
+            fileIndex: incoming.fileIndex,
+          }),
         mode: "regenerate",
       }),
     };
@@ -752,7 +756,10 @@ function acceptRefinedGraph(
       existing: base.views,
       generated:
         incoming.views ??
-        synthesizeDefaultArchitectureViews(nodes, { sourceKind: "ai" }),
+        synthesizeDefaultArchitectureViews(nodes, {
+          sourceKind: "ai",
+          fileIndex: base.fileIndex,
+        }),
       mode: "refine",
     }),
   };
@@ -1148,7 +1155,7 @@ function assembleFromRounds(input: {
     architecture: architecture ?? defaultArchitecture(input.language),
     nodes,
     edges,
-    views: synthesizeDefaultArchitectureViews(nodes, { sourceKind: "ai" }),
+    views: synthesizeDefaultArchitectureViews(nodes, { sourceKind: "ai", fileIndex }),
     fileIndex,
     fileRelations,
     topology: {
@@ -1422,6 +1429,7 @@ export async function runStructureGraphAiScan(
     });
     const generatedViews = synthesizeDefaultArchitectureViews(enrichedNodes, {
       sourceKind: "ai",
+      fileIndex: merged.fileIndex,
     });
     const views = mergeArchitectureViews({
       existing: scanMode === "regenerate" ? merged.views : (input.graph.views ?? merged.views),
@@ -1445,7 +1453,7 @@ export async function runStructureGraphAiScan(
     activeStep = "validate_save";
     emitStep("step_started", "validate_save");
     const quality = assessL2GraphQuality(result, {
-      sourceFileCount: files.length,
+      sourceFileCount: countSourceFiles(files),
       language,
     });
     if (!quality.complete) {

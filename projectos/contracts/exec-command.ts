@@ -14,6 +14,8 @@ export const VerificationCommandResultSchema = z.object({
   timedOut: z.boolean(),
   outputTruncated: z.boolean(),
   output: z.string().optional(),
+  stdout: z.string().optional(),
+  stderr: z.string().optional(),
 }).strict();
 
 export const VerificationRunResultSchema = z.object({

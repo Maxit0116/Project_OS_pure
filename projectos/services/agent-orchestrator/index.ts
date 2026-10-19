@@ -93,6 +93,11 @@ import { responseLanguageInstructionForTag } from "../agent-language-policy.js";
 import { summarizeLocalContext } from "../local-context-summary.js";
 import { sanitizeErrorMessage } from "../../utils/sanitize-error-message.js";
 import { redactText } from "../model-gateway/redaction.js";
+import {
+  excerptWindow,
+  hunkStats,
+  verificationTraceFields,
+} from "../agent-activity-evidence.js";
 import { createProviderReasoningTrace } from "../reasoning-trace.js";
 import { computeProjectGraphHash } from "../graph-change-set-engine.js";
 import {
@@ -1310,10 +1315,7 @@ export class AgentOrchestrator {
         workspace,
         state,
         createActionEvent(runId, "diff_proposed", {
-          files: diff.files.map((file) => ({
-            path: file.path,
-            operation: file.changeType,
-          })),
+          files: diffProposedFiles(diff),
         }),
       );
       state.diff = diff;
@@ -4652,16 +4654,22 @@ export class AgentOrchestrator {
       );
       return;
     }
-    for (const result of verification.results) {
-      this.emit(
-        workspace,
-        state,
-        createActionEvent(state.run.runId, "verification_result", {
-          command: formatVerificationCommand(result.command.command, result.command.args),
-          status: result.status,
-        }, phaseId),
-      );
-    }
+      for (const result of verification.results) {
+        const traced = verificationTraceFields(result);
+        this.emit(
+          workspace,
+          state,
+          createActionEvent(state.run.runId, "verification_result", {
+            command: formatVerificationCommand(result.command.command, result.command.args),
+            status: result.status,
+            exitCode: traced.exitCode,
+            ...(traced.stdout ? { stdout: traced.stdout } : {}),
+            ...(traced.stderr ? { stderr: traced.stderr } : {}),
+            truncated: traced.truncated,
+            durationMs: traced.durationMs,
+          }, phaseId),
+        );
+      }
   }
 
   private async runLiveModelChangePipeline(
@@ -5475,12 +5483,18 @@ export class AgentOrchestrator {
       );
     } else {
       for (const result of verification.results) {
+        const traced = verificationTraceFields(result);
         this.emit(
           workspace,
           state,
           createActionEvent(state.run.runId, "verification_result", {
             command: formatVerificationCommand(result.command.command, result.command.args),
             status: result.status,
+            exitCode: traced.exitCode,
+            ...(traced.stdout ? { stdout: traced.stdout } : {}),
+            ...(traced.stderr ? { stderr: traced.stderr } : {}),
+            truncated: traced.truncated,
+            durationMs: traced.durationMs,
           }, verifyStep.id),
         );
       }
@@ -5531,10 +5545,7 @@ export class AgentOrchestrator {
       workspace,
       state,
       createActionEvent(state.run.runId, "diff_proposed", {
-        files: diff.files.map((file) => ({
-          path: file.path,
-          operation: file.changeType,
-        })),
+        files: diffProposedFiles(diff),
       }, phaseId),
     );
   }
@@ -5994,7 +6005,7 @@ export class AgentOrchestrator {
         files: state.refinement.affectedFiles.map((path) => ({
           path,
           changeType: "modify",
-          before: this.readWorkspaceFile(workspace, state, path),
+          before: this.readWorkspaceFile(workspace, state, path, phaseId),
           patch: `# Planned change for ${path}\n${state.refinement.understood}`,
         })),
       });
@@ -6229,6 +6240,7 @@ export class AgentOrchestrator {
     workspace: LoadedProjectOSWorkspace,
     state: OrchestratorRunState,
     relativePath: string,
+    phaseId?: string,
   ): string | undefined {
     if (!relativePath) {
       return undefined;
@@ -6238,6 +6250,7 @@ export class AgentOrchestrator {
         resolveContainedPath(workspace.workspaceRoot, relativePath),
         "utf8",
       );
+      const window = excerptWindow(content);
       this.emit(
         workspace,
         state,
@@ -6245,7 +6258,11 @@ export class AgentOrchestrator {
           path: relativePath,
           byteLength: new TextEncoder().encode(content).byteLength,
           status: "ok",
-        }),
+          startLine: window.startLine,
+          endLine: window.endLine,
+          excerpt: window.excerpt,
+          truncated: window.truncated,
+        }, phaseId),
       );
       return content;
     } catch {
@@ -6256,7 +6273,7 @@ export class AgentOrchestrator {
           path: relativePath,
           byteLength: 0,
           status: "failed",
-        }),
+        }, phaseId),
       );
       return undefined;
     }
@@ -6595,6 +6612,25 @@ function createDelegationEvent<TType extends AgentDelegationEvent["type"]>(
     timestamp: new Date().toISOString(),
     type,
     payload,
+  });
+}
+
+function diffProposedFiles(diff: { files: Array<{
+  path: string
+  changeType: "modify" | "create" | "delete"
+  before?: string
+  after?: string
+  patch?: string
+}> }) {
+  return diff.files.map((file) => {
+    const stats = hunkStats(file);
+    return {
+      path: file.path,
+      operation: file.changeType,
+      additions: stats.additions,
+      deletions: stats.deletions,
+      hunkHeader: stats.hunkHeader,
+    };
   });
 }
 

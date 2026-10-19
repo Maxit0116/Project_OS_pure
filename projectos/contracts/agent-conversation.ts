@@ -64,11 +64,28 @@ export const AskExplorationHitSchema = z
   })
   .strict();
 
+export const AskExplorationReadSchema = z
+  .object({
+    path: z.string().min(1),
+    startLine: z.number().int().positive(),
+    endLine: z.number().int().positive(),
+    excerpt: z.string().max(12_000),
+    truncated: z.boolean(),
+  })
+  .strict();
+
 export const AskExplorationTraceSchema = z
   .object({
     queriedSymbols: z.array(z.string()),
     hits: z.array(AskExplorationHitSchema),
     readPaths: z.array(z.string()),
+    reads: z.array(AskExplorationReadSchema).max(8).optional(),
+    rounds: z.array(z.object({
+      index: z.number().int().min(1).max(5),
+      symbols: z.array(z.string()),
+      hits: z.array(AskExplorationHitSchema),
+      reads: z.array(AskExplorationReadSchema).max(8),
+    }).strict()).max(5).optional(),
     truncated: z.boolean(),
     /** Actual exploration passes executed (≤ requested maxRounds). */
     roundsUsed: z.number().int().min(0).max(5).optional(),

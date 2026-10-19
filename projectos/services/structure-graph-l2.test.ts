@@ -12,8 +12,11 @@ import {
   enrichNodesForC4Shapes,
   isDirShellName,
   mergeStructureGraphs,
+  parseGoImports,
   parsePackageImports,
+  parsePythonRelativeImports,
   parseRelativeImports,
+  parseRustImports,
   pruneDanglingEdges,
   resolveImportPath,
 } from "./structure-graph-l2.js";
@@ -35,6 +38,49 @@ describe("structure-graph-l2 helpers", () => {
   it("flags directory-shell names", () => {
     expect(isDirShellName("android module")).toBe(true);
     expect(isDirShellName("Identity & access")).toBe(false);
+  });
+
+  it("assigns unmatched source files onto components whose hints miss", () => {
+    const assigned = assignFilesToComponents({
+      files: ["qimen/chart.py", "qimen/palace.py", "qimen/stem.py"],
+      components: [
+        { id: "c_chart", pathHints: ["src/missing"] },
+        { id: "c_palace", pathHints: ["lib/nope"] },
+      ],
+    });
+    expect(assigned.get("c_chart")?.length).toBeGreaterThan(0);
+    expect(assigned.get("c_palace")?.length).toBeGreaterThan(0);
+    expect([...(assigned.get("c_chart") ?? []), ...(assigned.get("c_palace") ?? [])].sort()).toEqual([
+      "qimen/chart.py",
+      "qimen/palace.py",
+      "qimen/stem.py",
+    ]);
+  });
+
+  it("resolves Python, Go, and Rust imports onto repo files", () => {
+    const python = parsePythonRelativeImports("from .palace import Palace\nfrom ..stem.table import Table\n");
+    expect(python).toEqual([".palace", "..stem.table"]);
+    const pyFiles = new Set(["qimen/chart.py", "qimen/palace.py", "qimen/stem/table.py"]);
+    expect(resolveImportPath("qimen/chart.py", ".palace", pyFiles)).toBe("qimen/palace.py");
+    expect(resolveImportPath("qimen/core/chart.py", "..stem.table", pyFiles)).toBe(
+      "qimen/stem/table.py",
+    );
+
+    expect(parseGoImports('import "example.com/qimen/chart"\n')).toContain("example.com/qimen/chart");
+    const goFiles = new Set(["qimen/chart.go", "qimen/palace.go"]);
+    expect(resolveImportPath("qimen/palace.go", "example.com/qimen/chart", goFiles)).toBe(
+      "qimen/chart.go",
+    );
+
+    expect(parseRustImports("use crate::chart::stem;\nmod palace;\n")).toEqual([
+      "crate::chart::stem",
+      "mod:palace",
+    ]);
+    const rustFiles = new Set(["src/chart/stem.rs", "src/palace.rs"]);
+    expect(resolveImportPath("src/main.rs", "crate::chart::stem", rustFiles)).toBe(
+      "src/chart/stem.rs",
+    );
+    expect(resolveImportPath("src/main.rs", "mod:palace", rustFiles)).toBe("src/palace.rs");
   });
 
   it("assigns files by longest path hint", () => {
@@ -87,6 +133,9 @@ describe("structure-graph-l2 helpers", () => {
     const result = assessL2GraphQuality(graph, { sourceFileCount: 20, language: "en" });
     expect(result.complete).toBe(false);
     expect(result.reasons.some((reason) => reason.startsWith("dir_shell"))).toBe(true);
+    expect(result.reasons.some((reason) => reason.startsWith("components_without_code"))).toBe(
+      true,
+    );
   });
 
   it("collects C4 tech signals from prisma, package.json, and queue deps", () => {
