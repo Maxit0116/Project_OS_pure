@@ -35,6 +35,8 @@ export interface GroundedAnswerInput {
   thinkingDepth: ThinkingDepth;
   responseLanguage: ResolvedResponseLanguage;
   supplementalMarkdown?: string;
+  /** Project rules / harness mode notes assembled by {@link buildHarnessInstructions}. */
+  instructionAppendix?: string;
   images?: Array<{ mimeType: "image/png" | "image/jpeg"; base64: string }>;
 }
 
@@ -89,6 +91,9 @@ export class GroundedAnswerService {
       modelPreference: input.profile.id,
       systemPrompt: [
         READ_ONLY_ANSWER_PROMPT,
+        ...(input.instructionAppendix?.trim()
+          ? [input.instructionAppendix.trim()]
+          : []),
         scopeInstruction(input.localContext),
         responseLanguageInstruction(input.responseLanguage),
         ...(input.supplementalMarkdown?.trim()
@@ -100,7 +105,7 @@ export class GroundedAnswerService {
         ...(retry
           ? [`Your previous response used the wrong language. Answer again using ${input.responseLanguage.tag} only, except for code and identifiers.`]
           : []),
-      ].join("\n"),
+      ].join("\n\n"),
       input: {
         mode: "ask",
         writeCapability: false,

@@ -9,11 +9,16 @@ import type { VerificationRunResult } from "./exec-command.js";
 import type { VerificationCommandApprovalStatus } from "./verification-command-approval.js";
 import type { AgentRunEvent, AgentTransientTrace } from "./events.js";
 import type { ProjectGraph, StructureScanOptions } from "./graph.js";
+import type {
+  StructureScanProgress,
+  StructureScanProgressEvent,
+} from "./structure-scan-progress.js";
 import type { HarnessRecord } from "./harness.js";
 import type {
   CreatePlanRequest,
   ImplementationPlan,
   UpdatePlanRequest,
+  WorkspacePlanSummary,
 } from "./implementation-plan.js";
 import type {
   DebugSession,
@@ -83,6 +88,18 @@ import type {
   LoopInstanceEvent,
   LoopSpec,
 } from "./loop-graph.js";
+import type { AgentHarnessConfig } from "./agent-harness-config.js";
+import type {
+  AgentMemoryDocument,
+  MemoryAdmissionState,
+  MemoryCandidate,
+  MemorySettingsPatch,
+} from "./agent-memory.js";
+import type {
+  AgentWorktreeRecord,
+  CreateAgentWorktreeOptions,
+  MergeAgentWorktreeOptions,
+} from "./agent-worktree.js";
 
 export interface Disposable {
   dispose(): void;
@@ -95,6 +112,17 @@ export interface ProjectOSApi {
     projectId: string,
     options?: StructureScanOptions,
   ): Promise<ProjectGraph>;
+  /** Latest structure-scan progress snapshot for a loaded project (or null). */
+  getStructureScanProgress(
+    projectId: string,
+  ): Promise<StructureScanProgress | null>;
+  /** Live structure-scan progress events for a project. */
+  streamStructureScan(
+    projectId: string,
+    cb: (event: StructureScanProgressEvent) => void,
+  ): Disposable;
+  /** Cancel an in-flight structure scan; keeps the previous graph on disk. */
+  cancelStructureScan(projectId: string): Promise<boolean>;
   getProjectGraph(projectId: string): Promise<ProjectGraph>;
   getSemanticTree(projectId: string): Promise<SemanticTree>;
   listWorkspaceDirectory(
@@ -169,11 +197,61 @@ export interface ProjectOSApi {
   askAgent(request: AgentAskRequest): Promise<AgentAnswerResult>;
   listSkills(projectId: string): Promise<ListSkillsResult>;
   getSkill(projectId: string, skillId: string): Promise<SkillContent | null>;
+  /** H4.C — list agent git worktrees under `.projectos/agent-worktrees/`. */
+  listAgentWorktrees(projectId: string): Promise<AgentWorktreeRecord[]>;
+  createAgentWorktree(
+    projectId: string,
+    options?: CreateAgentWorktreeOptions,
+  ): Promise<AgentWorktreeRecord>;
+  /** Requires `options.confirm === true`. Never auto-merges. */
+  mergeAgentWorktree(
+    projectId: string,
+    options: MergeAgentWorktreeOptions,
+  ): Promise<AgentWorktreeRecord>;
+  removeAgentWorktree(
+    projectId: string,
+    worktreeId: string,
+    options?: { deleteBranch?: boolean },
+  ): Promise<AgentWorktreeRecord>;
+  getAgentWorktreeDiff(projectId: string, worktreeId: string): Promise<string>;
+  getAgentHarnessConfig(projectId: string): Promise<AgentHarnessConfig>;
+  saveAgentHarnessConfig(
+    projectId: string,
+    config: AgentHarnessConfig,
+  ): Promise<AgentHarnessConfig>;
+  getAgentMemory(projectId: string): Promise<AgentMemoryDocument>;
+  getAgentMemoryTopic(projectId: string, topicFile: string): Promise<string>;
+  saveAgentMemorySettings(
+    projectId: string,
+    patch: MemorySettingsPatch,
+  ): Promise<AgentMemoryDocument>;
+  submitAgentMemory(
+    projectId: string,
+    candidate: MemoryCandidate,
+  ): Promise<AgentMemoryDocument>;
+  setAgentMemoryEntryState(
+    projectId: string,
+    text: string,
+    state: MemoryAdmissionState,
+  ): Promise<AgentMemoryDocument>;
+  deleteAgentMemoryEntry(
+    projectId: string,
+    text: string,
+  ): Promise<AgentMemoryDocument>;
+  consolidateAgentMemory(projectId: string): Promise<AgentMemoryDocument>;
   createPlan(request: CreatePlanRequest): Promise<ImplementationPlan>;
   updatePlan(request: UpdatePlanRequest): Promise<ImplementationPlan>;
+  /** Persist plan markdown under `.projectos/plans/` (DevPlan M2.A). */
+  savePlanToWorkspace(planId: string): Promise<{ path: string }>;
+  /** List saved plan markdown files under `.projectos/plans/`. */
+  listWorkspacePlans(projectId: string): Promise<WorkspacePlanSummary[]>;
+  /** Reload a saved plan markdown into the in-memory plan store + return it. */
+  loadPlanFromWorkspace(projectId: string, planId: string): Promise<ImplementationPlan>;
   buildPlan(planId: string): Promise<PromptRefinement>;
   refinePrompt(request: PromptRefineRequest): Promise<PromptRefinement>;
   confirmExecution(refinementId: string): Promise<AgentRun>;
+  /** Stop an in-flight agent run. Marks the run cancelled; does not apply half-written diffs. */
+  cancelAgentRun(runId: string): Promise<AgentRun>;
   getAgentRun(runId: string): Promise<AgentRun>;
   getAgentRunEvents(runId: string): Promise<AgentRunEvent[]>;
   streamAgentRun(

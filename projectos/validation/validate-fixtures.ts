@@ -568,7 +568,7 @@ function parseAgentRunEvents(
   return undefined;
 }
 
-function validateGraphReferences(
+export function validateGraphReferences(
   graph: ProjectGraph,
   fileExists: (path: string) => boolean,
   errors: FixtureValidationError[],

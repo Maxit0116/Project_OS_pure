@@ -10,7 +10,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-sm);
   margin-bottom: var(--space-md);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
 }
 
 .header h2 {
@@ -173,6 +181,42 @@
 
 .delegatedChildHeader small {
   color: var(--color-text-muted);
+}
+
+.statusBadge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-muted);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.statusBadge[data-run-status='running'],
+.statusBadge[data-run-status='pending'] {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.statusBadge[data-run-status='complete'],
+.statusBadge[data-run-status='applied'] {
+  color: var(--color-success, #3d9a62);
+  border-color: color-mix(in srgb, var(--color-success, #3d9a62) 35%, transparent);
+}
+
+.statusBadge[data-run-status='error'],
+.statusBadge[data-run-status='recovery_required'],
+.statusBadge[data-run-status='not_applied'] {
+  color: var(--color-error);
+  border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+}
+
+.emptyDelegation {
+  margin: 0 0 var(--space-sm);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
 }
 
 .runMetadata {

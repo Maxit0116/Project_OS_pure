@@ -76,6 +76,7 @@ export const AgentActionEventTypeSchema = z.enum([
   "file_read",
   "model_request",
   "mcp_tool_call",
+  "tool_policy_decision",
   "edit_plan_created",
   "proposal_validation_result",
   "batch_validation_result",
@@ -84,6 +85,7 @@ export const AgentActionEventTypeSchema = z.enum([
   "apply_result",
   "verification_result",
   "initialization_tranche_progress",
+  "memory_index_bound",
 ]);
 
 export const AgentRunEventTypeSchema = z.union([
@@ -165,6 +167,14 @@ export const McpToolCallPayloadSchema = z.object({
   durationMs: z.number().int().nonnegative(),
   resultBytes: z.number().int().nonnegative().optional(),
   error: z.string().max(2_048).optional(),
+}).strict();
+
+/** Harness ToolPolicy allow/ask/deny decision (H3.A polish). */
+export const ToolPolicyDecisionPayloadSchema = z.object({
+  tool: z.string().min(1),
+  decision: z.enum(["allow", "ask", "deny"]),
+  reason: z.string().min(1).max(2_048),
+  match: z.string().min(1).max(500).optional(),
 }).strict();
 
 export const ModelRequestPayloadSchema = z.object({
@@ -249,6 +259,13 @@ export const VerificationResultPayloadSchema = z.object({
   status: z.enum(["passed", "failed", "not_run"]),
 }).strict();
 
+/** Hash and budget flag only. Never the note text. */
+export const MemoryIndexBoundPayloadSchema = z.object({
+  hash: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+  truncated: z.boolean(),
+  entryCount: z.number().int().nonnegative(),
+}).strict();
+
 export const InitializationTrancheProgressPayloadSchema = z.object({
   planId: z.string().min(1),
   trancheId: z.string().min(1),
@@ -280,6 +297,10 @@ export const AgentActionEventSchema = z.discriminatedUnion("type", [
   actionEventSchema(z.literal("file_read"), FileReadPayloadSchema),
   actionEventSchema(z.literal("model_request"), ModelRequestPayloadSchema),
   actionEventSchema(z.literal("mcp_tool_call"), McpToolCallPayloadSchema),
+  actionEventSchema(
+    z.literal("tool_policy_decision"),
+    ToolPolicyDecisionPayloadSchema,
+  ),
   actionEventSchema(z.literal("edit_plan_created"), EditPlanCreatedPayloadSchema),
   actionEventSchema(
     z.literal("proposal_validation_result"),
@@ -296,6 +317,10 @@ export const AgentActionEventSchema = z.discriminatedUnion("type", [
   actionEventSchema(
     z.literal("initialization_tranche_progress"),
     InitializationTrancheProgressPayloadSchema,
+  ),
+  actionEventSchema(
+    z.literal("memory_index_bound"),
+    MemoryIndexBoundPayloadSchema,
   ),
 ]);
 
@@ -419,6 +444,9 @@ export type AgentActionEventType = z.infer<typeof AgentActionEventTypeSchema>;
 export type AgentRunEventType = z.infer<typeof AgentRunEventTypeSchema>;
 export type ContextFileTrace = z.infer<typeof ContextFileTraceSchema>;
 export type McpToolCallPayload = z.infer<typeof McpToolCallPayloadSchema>;
+export type ToolPolicyDecisionPayload = z.infer<
+  typeof ToolPolicyDecisionPayloadSchema
+>;
 export type ContextAssembledPayload = z.infer<
   typeof ContextAssembledPayloadSchema
 >;

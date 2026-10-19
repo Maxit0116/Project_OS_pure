@@ -22,6 +22,7 @@ export function mapRunEventToCoarseFlow(event: unknown): CoarseFlowLabel | null 
     case 'context_assembled':
     case 'context_attached':
     case 'mcp_tool_call':
+    case 'tool_policy_decision':
       return 'reading'
     case 'model_request':
     case 'step_started':

@@ -1,4 +1,6 @@
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -37,5 +39,24 @@ describe("VerificationRunner", () => {
 
     expect(outputResult).toMatchObject({ status: "passed", outputTruncated: true });
     expect(timeoutResult).toMatchObject({ status: "failed", timedOut: true });
+  });
+
+  it("blocks verification denied by permissions.json", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pos-verify-deny-"));
+    mkdirSync(join(root, ".projectos"), { recursive: true });
+    writeFileSync(
+      join(root, ".projectos", "permissions.json"),
+      JSON.stringify({
+        version: "0.1.0",
+        rules: [{ effect: "deny", tool: "run_verification" }],
+      }),
+      "utf8",
+    );
+    const runner = new VerificationRunner();
+    await expect(runner.run([{
+      command: process.execPath,
+      args: ["-e", "process.exit(0)"],
+      timeoutMs: 2_000,
+    }], root)).rejects.toMatchObject({ code: "tool_policy_denied" });
   });
 });

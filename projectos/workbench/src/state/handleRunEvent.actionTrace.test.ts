@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest'
 import type { AgentActionEvent, AgentRunEvent, ProjectOSApi } from '@contracts/index'
 import { AgentRunEventSchema } from '@contracts/index'
 import { agentActionMetadata } from '../components/AgentFlow/AgentActionRow'
-import { reduceRunEventState, type RunEventStoreSlice } from './handleRunEvent'
+import {
+  checkpointPatchForAppliedResult,
+  reduceRunEventState,
+  type RunEventStoreSlice,
+} from './handleRunEvent'
 
 function baseState(): RunEventStoreSlice {
   return {
@@ -159,6 +163,21 @@ describe('Agent Flow action trace state', () => {
       },
     })
     const appliedPatch = reduceRunEventState(baseState(), apply)
+    if (apply.type !== 'apply_result') throw new Error('expected apply_result')
+    const checkpoint = checkpointPatchForAppliedResult(baseState(), apply)
+    expect(checkpoint?.conversationCheckpoints).toEqual([
+      expect.objectContaining({
+        backupId: 'backup-automatic',
+        runId: 'run_trace',
+        filesChanged: ['app/login/page.tsx'],
+      }),
+    ])
+    expect(checkpoint?.messages[0]?.checkpointId).toBe(checkpoint?.conversationCheckpoints[0]?.id)
+    expect(checkpointPatchForAppliedResult(
+      { ...baseState(), conversationCheckpoints: checkpoint?.conversationCheckpoints },
+      apply,
+    )).toBeUndefined()
+
     expect(appliedPatch.applyResult).toEqual({
       runId: 'run_trace',
       applied: true,

@@ -18,11 +18,15 @@ import type {
   HarnessRecord,
   ProjectGraph,
   StructureScanOptions,
+  StructureScanProgress,
+  StructureScanProgressEvent,
   ProjectDescription,
   ProjectOSApi,
   ProjectOSProject,
+  Disposable,
   ProjectOSSettings,
   PromptRefinement,
+  MemoryWriteNotice,
   SemanticTree,
   ThinkingDepth,
   WorkspaceDirectoryEntry,
@@ -82,6 +86,7 @@ import { seedDeepSeekDevProfile } from '../dev/seedDeepSeekDevProfile'
 import type { Locale } from '../i18n/types'
 import type { ToastItem, ToastType } from '../components/ui/Toast'
 import { getStoreMessage, loadLocale, saveLocale } from '../i18n/storeMessages'
+import { applyStructureScanProgressEvent } from './structureScanProgress'
 import {
   applyThemeToDocument,
   loadThemePreference,
@@ -129,6 +134,12 @@ import {
   loadNotifyOnDiffReadyPreference,
   saveNotifyOnDiffReadyPreference,
 } from '../preferences/diffReadyNotifications'
+import {
+  loadChatModeSwitchPreference,
+  saveChatModeSwitchPreference,
+  type ChatModeSwitchPreference,
+} from '../preferences/chatModeSwitch'
+export type { ChatModeSwitchPreference } from '../preferences/chatModeSwitch'
 function loadShowGestureCursorPreference(): boolean {
   return false
 }
@@ -220,6 +231,15 @@ export interface PendingFileOwnerChoice {
   candidateNodeIds: string[]
 }
 
+export interface ConversationCheckpoint {
+  id: string
+  messageId: string
+  backupId: string
+  runId: string
+  createdAt: string
+  filesChanged: string[]
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -229,6 +249,9 @@ export interface ChatMessage {
   timestamp: string
   attachments?: ComposerDraft['attachments']
   invokedSkillId?: string
+  explorationTrace?: import('@contracts/index').AskExplorationTrace
+  retrievalSummary?: import('@contracts/index').RetrievalSummary
+  checkpointId?: string
 }
 
 /** No node/file selection ⇒ whole-project (global) agent scope. */
@@ -253,7 +276,14 @@ export function canSubmitAgentPrompt(state: {
   pendingPlan: import('@contracts/index').ImplementationPlan | null
 }): boolean {
   if (isGlobalAgentScope(state)) {
-    return state.chatMode === 'ask' || state.chatMode === 'debug' || state.chatMode === 'anchored'
+    // M3.B: Ask/Debug/Anchored + Plan/Agent (global planner → leaf child runs)
+    return (
+      state.chatMode === 'ask' ||
+      state.chatMode === 'debug' ||
+      state.chatMode === 'anchored' ||
+      state.chatMode === 'plan' ||
+      state.chatMode === 'change'
+    )
   }
   if (
     !state.selectedNodeId ||
@@ -332,6 +362,8 @@ export interface WorkbenchState {
   error: string | null
   loadingMessage: string | null
   structureRescanLoading: boolean
+  structureScanProgress: StructureScanProgress | null
+  structureScanDisposable: Disposable | null
   client: ProjectOSApi
   project: ProjectOSProject | null
   graph: ProjectGraph | null
@@ -361,6 +393,8 @@ export interface WorkbenchState {
   themePreference: ThemePreference
   resolvedTheme: ResolvedTheme
   notifyOnDiffReady: boolean
+  /** When switching chat modes: open a fresh session (Cursor-like) or keep the same thread. */
+  chatModeSwitch: ChatModeSwitchPreference
   showGestureCursor: boolean
   windowFocused: boolean
   diffReadyBanner: DiffReadyBannerState | null
@@ -386,10 +420,17 @@ export interface WorkbenchState {
   pendingRefinement: PromptRefinement | null
   refinementConfirmed: boolean
   pendingPlan: import('@contracts/index').ImplementationPlan | null
+  /** Last plan that was built — used by Return to plan. */
+  lastBuiltPlan: import('@contracts/index').ImplementationPlan | null
   planConfirmed: boolean
   debugSession: import('@contracts/index').DebugSession | null
   composerDraft: ComposerDraft
   chatMode: ChatMode
+  /** Pinned skill body injected every turn until cleared (Custom Mode). */
+  activeCustomModeSkillId: string | null
+  /** Built-in chat mode to restore when exiting Custom Mode. */
+  customModePreviousChatMode: ChatMode | null
+  conversationCheckpoints: ConversationCheckpoint[]
   latestAskTrace: LatestAskTrace | null
   latestPlanTrace: LatestPlanTrace | null
   agentFlowSubject: AgentFlowSubject
@@ -469,6 +510,7 @@ export interface WorkbenchState {
   setThemePreference: (theme: ThemePreference) => void
   setResolvedTheme: (theme: ResolvedTheme) => void
   setNotifyOnDiffReady: (enabled: boolean) => void
+  setChatModeSwitch: (value: ChatModeSwitchPreference) => void
   setShowGestureCursor: (show: boolean) => void
   setWindowFocused: (focused: boolean) => void
   dismissDiffReadyBanner: () => void
@@ -497,6 +539,7 @@ export interface WorkbenchState {
   openSampleWorkspace: () => Promise<void>
   openWorkspace: (path: string) => Promise<void>
   rescanStructureGraph: (options?: StructureScanOptions) => Promise<void>
+  cancelStructureScan: () => Promise<void>
   /** Debounced refine when workspace files change (C4 Pulse incremental). */
   queueStructureRefineForChangedFiles: (changedFiles: string[]) => void
   setCenterTab: (tab: CenterTab) => void
@@ -520,7 +563,14 @@ export interface WorkbenchState {
   setRightPanelTab: (tab: RightPanelTab) => void
   setChatInput: (value: string) => void
   setComposerDraft: (draft: ComposerDraft) => void
-  setChatMode: (mode: ChatMode) => void
+  /**
+   * Switch chat mode. By default (`chatModeSwitch: 'new_session'`) opens a fresh
+   * session so Ask/Plan/Agent/Debug contexts do not mix. Pass `{ isolate: false }`
+   * to flip mode in-place (demo scripts, same-session preference).
+   */
+  setChatMode: (mode: ChatMode, options?: { isolate?: boolean }) => Promise<void>
+  /** Stop the active agent run (dispose stream + server cancel). */
+  stopAgentRun: () => Promise<void>
   updateEditorBuffer: (path: string, content: string) => void
   saveEditorFile: (path: string) => Promise<void>
   isEditorDirty: (path: string) => boolean
@@ -551,6 +601,27 @@ export interface WorkbenchState {
     answers: Array<{ questionId: string; answer: string; selectedOptionId?: string }>,
   ) => Promise<void>
   revisePlan: () => void
+  savePlanEdits: (patch: {
+    objective: string
+    steps: import('@contracts/index').ImplementationPlan['steps']
+    todos: import('@contracts/index').ImplementationPlan['todos']
+    rationale: string
+  }) => Promise<void>
+  savePlanToWorkspace: () => Promise<void>
+  returnToPlan: () => void
+  setActiveCustomModeSkillId: (skillId: string | null) => void
+  exitCustomMode: () => void
+  loadPlanFromWorkspace: (planId: string) => Promise<void>
+  listWorkspacePlans: () => Promise<
+    Array<{
+      id: string
+      path: string
+      objective: string
+      status?: string
+      updatedAt?: string
+    }>
+  >
+  restoreConversationCheckpoint: (checkpointId: string) => Promise<void>
   submitDebugRepro: () => Promise<void>
   confirmDebugFix: () => Promise<void>
   markDebugFixed: () => Promise<void>
@@ -686,6 +757,23 @@ function toastId() {
   return createClientId('toast_')
 }
 
+function notifyMemoryWrite(
+  pushToast: WorkbenchState['pushToast'],
+  locale: Locale,
+  notice: MemoryWriteNotice | undefined,
+) {
+  if (!notice) return
+  const key = !notice.accepted
+    ? 'toast.memoryRejected'
+    : notice.op === 'forget'
+      ? 'toast.memoryForgotten'
+      : 'toast.memorySaved'
+  pushToast({
+    type: notice.accepted ? 'info' : 'warning',
+    message: getStoreMessage(locale, key),
+  })
+}
+
 type FlowStatus = WorkbenchState['flowStatus']
 
 async function reconcileStaleFlowStatus(
@@ -708,6 +796,22 @@ async function reconcileStaleFlowStatus(
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
+}
+
+/** Compact, user-visible reason for structure rescan failures (IPC preserves message). */
+function formatStructureRescanFailure(error: unknown): string | null {
+  if (!(error instanceof Error) || !error.message.trim()) return null
+  const sanitized = sanitizeErrorMessage(error.message).replace(/\s+/g, ' ').trim()
+  if (!sanitized) return null
+  return sanitized.length > 180 ? `${sanitized.slice(0, 177)}…` : sanitized
+}
+
+function isStructureScanCancellation(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const code = 'code' in error ? String((error as { code?: unknown }).code ?? '') : ''
+  if (code === 'operation_cancelled') return true
+  const message = error instanceof Error ? error.message : ''
+  return /structure map generation was cancelled|operation_cancelled/i.test(message)
 }
 
 function ensureBuffer(buffers: Record<string, string>, path: string): Record<string, string> {
@@ -807,6 +911,122 @@ function disposeActiveRunSubscriptions(
   disposable?.dispose()
 }
 
+function disposeStructureScanSubscription(
+  get: () => WorkbenchState,
+  set: (partial: Partial<WorkbenchState>) => void,
+): void {
+  const disposable = get().structureScanDisposable
+  set({ structureScanDisposable: null })
+  disposable?.dispose()
+}
+
+function attachStructureScanSubscription(
+  projectId: string,
+  client: ProjectOSApi,
+  locale: Locale,
+  get: () => WorkbenchState,
+  set: (partial: Partial<WorkbenchState> | ((s: WorkbenchState) => Partial<WorkbenchState>)) => void,
+): void {
+  disposeStructureScanSubscription(get, set)
+
+  const applyEvent = (event: StructureScanProgressEvent) => {
+    const prior = get().structureScanProgress
+    // Drop success/fail handlers if this scan was already cancelled locally.
+    if (
+      prior &&
+      prior.scanId === event.scanId &&
+      prior.status === 'cancelled' &&
+      (event.type === 'scan_completed' || event.type === 'scan_failed')
+    ) {
+      return
+    }
+
+    set((state) => {
+      const next = applyStructureScanProgressEvent(state.structureScanProgress, event)
+      return {
+        structureScanProgress: next,
+        structureRescanLoading: next.status === 'running',
+      }
+    })
+    if (event.type === 'scan_completed') {
+      if (get().structureScanProgress?.status === 'cancelled') return
+      void (async () => {
+        try {
+          const [graph, tree] = await Promise.all([
+            client.getProjectGraph(projectId),
+            client.getSemanticTree(projectId),
+          ])
+          if (get().project?.projectId !== projectId) return
+          if (get().structureScanProgress?.status === 'cancelled') return
+          set({
+            graph,
+            tree,
+            structureRescanLoading: false,
+            structureScanProgress: applyStructureScanProgressEvent(
+              get().structureScanProgress,
+              event,
+            ),
+          })
+          get().pushToast({
+            type: 'success',
+            message: getStoreMessage(locale, 'map.structureScan.success'),
+          })
+          window.setTimeout(() => {
+            const current = get().structureScanProgress
+            if (
+              current?.scanId === event.scanId &&
+              current.status === 'success'
+            ) {
+              set({ structureScanProgress: null })
+            }
+          }, 4_500)
+        } catch {
+          set({ structureRescanLoading: false })
+        }
+      })()
+    }
+    if (event.type === 'scan_failed') {
+      if (get().structureScanProgress?.status === 'cancelled') return
+      set({ structureRescanLoading: false })
+      get().pushToast({
+        type: 'warning',
+        message: getStoreMessage(locale, 'map.structureScan.failedDetail', {
+          reason: event.message,
+        }),
+      })
+    }
+    if (event.type === 'scan_cancelled') {
+      set({ structureRescanLoading: false })
+      // Avoid duplicate toasts when cancelStructureScan already notified.
+      if (prior?.status !== 'cancelled') {
+        get().pushToast({
+          type: 'info',
+          message: getStoreMessage(locale, 'map.structureScan.cancelled'),
+        })
+      }
+      window.setTimeout(() => {
+        const current = get().structureScanProgress
+        if (
+          current?.scanId === event.scanId &&
+          current.status === 'cancelled'
+        ) {
+          set({ structureScanProgress: null })
+        }
+      }, 2_500)
+    }
+  }
+
+  const disposable = client.streamStructureScan(projectId, applyEvent)
+  set({ structureScanDisposable: disposable })
+  void client.getStructureScanProgress(projectId).then((snapshot) => {
+    if (!snapshot || get().project?.projectId !== projectId) return
+    set({
+      structureScanProgress: snapshot,
+      structureRescanLoading: snapshot.status === 'running',
+    })
+  })
+}
+
 async function loadWorkspaceIntoStore(
   project: ProjectOSProject,
   client: ProjectOSApi,
@@ -816,6 +1036,8 @@ async function loadWorkspaceIntoStore(
   options: { shouldStartOnboarding?: boolean } = {},
 ) {
   disposeActiveRunSubscriptions(get, set)
+  disposeStructureScanSubscription(get, set)
+  set({ structureScanProgress: null, structureRescanLoading: false })
   await useTerminalStore.getState().disposeAllSessions()
   await useDiagnosticsStore.getState().dispose()
   useOutlineStore.getState().clear()
@@ -898,6 +1120,7 @@ async function loadWorkspaceIntoStore(
       autoDismiss: 8000,
     })
   }
+  attachStructureScanSubscription(project.projectId, client, locale, get, set)
   await useChatSessionStore.getState().loadForWorkspace()
   await useTerminalStore.getState().syncMapSessions(mapContent.artifacts)
   await useDiagnosticsStore.getState().init(project.workspaceRoot)
@@ -926,10 +1149,14 @@ const initialTransientState = {
   pendingRefinement: null as PromptRefinement | null,
   refinementConfirmed: false,
   pendingPlan: null as import('@contracts/index').ImplementationPlan | null,
+  lastBuiltPlan: null as import('@contracts/index').ImplementationPlan | null,
   planConfirmed: false,
   debugSession: null as import('@contracts/index').DebugSession | null,
   composerDraft: emptyComposerDraft(),
   chatMode: 'ask' as ChatMode,
+  activeCustomModeSkillId: null as string | null,
+  customModePreviousChatMode: null as ChatMode | null,
+  conversationCheckpoints: [] as ConversationCheckpoint[],
   latestAskTrace: null as LatestAskTrace | null,
   latestPlanTrace: null as LatestPlanTrace | null,
   agentFlowSubject: 'run' as AgentFlowSubject,
@@ -1172,6 +1399,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   error: null,
   loadingMessage: null,
   structureRescanLoading: false,
+  structureScanProgress: null,
+  structureScanDisposable: null,
   client: createWorkbenchClient(),
   project: null,
   graph: null,
@@ -1182,6 +1411,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   themePreference: loadThemePreference(),
   resolvedTheme: resolveTheme(loadThemePreference()),
   notifyOnDiffReady: loadNotifyOnDiffReadyPreference(),
+  chatModeSwitch: loadChatModeSwitchPreference(),
   showGestureCursor: loadShowGestureCursorPreference(),
   windowFocused: typeof document !== 'undefined' ? document.hasFocus() : true,
   diffReadyBanner: null,
@@ -1234,6 +1464,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       return
     }
     set({ notifyOnDiffReady: enabled })
+  },
+
+  setChatModeSwitch: (value) => {
+    saveChatModeSwitchPreference(value)
+    set({ chatModeSwitch: value })
   },
 
   setShowGestureCursor: (show) => {
@@ -1423,7 +1658,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     set({
       phase: 'loading',
       error: null,
-      loadingMessage: getStoreMessage(locale, 'welcome.analyzingStructure'),
+      loadingMessage: getStoreMessage(locale, 'welcome.opening'),
     })
     try {
       const project = await client.openWorkspace(trimmed)
@@ -1443,6 +1678,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     if (!project || structureRescanLoading) return
     const mode = options?.mode ?? 'regenerate'
     set({ structureRescanLoading: true })
+    attachStructureScanSubscription(project.projectId, client, locale, get, set)
     const loadingKey =
       mode === 'refine' || mode === 'acceptRefine'
         ? 'map.refiningStructure'
@@ -1468,17 +1704,70 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       })
       const tree = await client.getSemanticTree(project.projectId)
       set({ graph, tree, structureRescanLoading: false })
-      pushToast({
-        type: 'success',
-        message: getStoreMessage(locale, 'map.rescanStructureDone'),
-      })
+      // Progress stream already toasts success on scan_completed; avoid duplicate
+      // when the stream delivered first. Still toast if progress UI was idle.
+      if (get().structureScanProgress?.status !== 'success') {
+        pushToast({
+          type: 'success',
+          message: getStoreMessage(locale, 'map.rescanStructureDone'),
+        })
+      }
     } catch (err) {
       set({ structureRescanLoading: false })
+      const progressStatus = get().structureScanProgress?.status
+      if (progressStatus === 'failed' || progressStatus === 'cancelled') return
+      if (isStructureScanCancellation(err)) return
+      const reason = formatStructureRescanFailure(err)
       pushToast({
         type: 'warning',
-        message: getStoreMessage(locale, 'map.rescanStructureFailed'),
+        message: reason
+          ? getStoreMessage(locale, 'map.rescanStructureFailedDetail', {
+              reason,
+            })
+          : getStoreMessage(locale, 'map.rescanStructureFailed'),
       })
-      void err
+    }
+  },
+
+  cancelStructureScan: async () => {
+    const { client, project, locale, structureRescanLoading, structureScanProgress } =
+      get()
+    if (!project || !structureRescanLoading) return
+    if (structureScanProgress?.status === 'cancelled') return
+
+    // Optimistic UI: settle immediately; backend abort catches up.
+    const cancelledProgress = structureScanProgress
+      ? applyStructureScanProgressEvent(structureScanProgress, {
+          type: 'scan_cancelled',
+          scanId: structureScanProgress.scanId,
+          projectId: project.projectId,
+          timestamp: new Date().toISOString(),
+        })
+      : null
+    set({
+      structureRescanLoading: false,
+      ...(cancelledProgress ? { structureScanProgress: cancelledProgress } : {}),
+    })
+    get().pushToast({
+      type: 'info',
+      message: getStoreMessage(locale, 'map.structureScan.cancelled'),
+    })
+    if (cancelledProgress) {
+      window.setTimeout(() => {
+        const current = get().structureScanProgress
+        if (
+          current?.scanId === cancelledProgress.scanId &&
+          current.status === 'cancelled'
+        ) {
+          set({ structureScanProgress: null })
+        }
+      }, 2_500)
+    }
+
+    try {
+      await client.cancelStructureScan(project.projectId)
+    } catch {
+      // Best-effort; UI already settled.
     }
   },
 
@@ -1657,10 +1946,65 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     set({ composerDraft: draft })
     scheduleChatSessionPersist()
   },
-  setChatMode: (mode) => {
-    set({ chatMode: mode })
+  setChatMode: async (mode, options) => {
+    const state = get()
+    if (state.chatMode === mode) return
+
+    const isolate = options?.isolate ?? state.chatModeSwitch === 'new_session'
+    if (!isolate || !state.project) {
+      set({ chatMode: mode })
+      scheduleChatSessionPersist()
+      return
+    }
+
+    const modeTitleKey =
+      mode === 'ask'
+        ? 'chat.askMode'
+        : mode === 'plan'
+          ? 'chat.planMode'
+          : mode === 'debug'
+            ? 'chat.debugMode'
+            : mode === 'anchored'
+              ? 'chat.anchoredMode'
+              : 'chat.changeMode'
+
+    await useChatSessionStore.getState().createSession({
+      seedWelcome: false,
+      chatMode: mode,
+      draftInput: state.composerDraft.text,
+      activate: true,
+      title: getStoreMessage(state.locale, modeTitleKey),
+    })
+  },
+
+  stopAgentRun: async () => {
+    const { client, activeRunId, flowStatus, refineLoading, pushToast, locale } = get()
+    if (!activeRunId && flowStatus !== 'running' && !refineLoading) return
+
+    const runId = activeRunId
+    disposeActiveRunSubscriptions(get, set)
+    set({
+      flowStatus: 'idle',
+      refineLoading: false,
+      activeRunId: null,
+    })
+
+    if (client && runId && typeof client.cancelAgentRun === 'function') {
+      try {
+        await client.cancelAgentRun(runId)
+      } catch (error) {
+        console.error('[workbench] cancelAgentRun failed', error)
+      }
+    }
+
+    pushToast({
+      type: 'info',
+      message: getStoreMessage(locale, 'chat.agentStopped'),
+      autoDismiss: 2500,
+    })
     scheduleChatSessionPersist()
   },
+
   dismissError: () => set({ error: null }),
 
   updateEditorBuffer: (path, content) => {
@@ -1942,13 +2286,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       return
     }
 
+    const effectiveSkillId =
+      draft.invokedSkillId ?? get().activeCustomModeSkillId ?? undefined
+    const composerFieldsWithMode = {
+      ...composerFields,
+      ...(effectiveSkillId ? { invokedSkillId: effectiveSkillId } : {}),
+    }
+
     const buildUserMessage = (): ChatMessage => ({
       id: msgId(),
       role: 'user',
       content: rawPrompt.trim(),
       timestamp: new Date().toISOString(),
       ...(draft.attachments.length > 0 ? { attachments: draft.attachments } : {}),
-      ...(draft.invokedSkillId ? { invokedSkillId: draft.invokedSkillId } : {}),
+      ...(effectiveSkillId ? { invokedSkillId: effectiveSkillId } : {}),
     })
 
     const clearedDraft = emptyComposerDraft()
@@ -1981,7 +2332,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           question: rawPrompt.trim(),
           language: { mode: 'auto' },
           ...chatSessionRequestFields(),
-          ...composerFields,
+          ...composerFieldsWithMode,
         })
         set((current) => ({
           refineLoading: false,
@@ -2002,6 +2353,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             },
           ],
         }))
+        notifyMemoryWrite(pushToast, get().locale, answer.memoryWrite)
       } catch (error) {
         set({
           refineLoading: false,
@@ -2047,8 +2399,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           scope: askScope,
           question: rawPrompt.trim(),
           language: { mode: 'auto' },
+          exploration: { maxRounds: 2 },
           ...chatSessionRequestFields(),
-          ...composerFields,
+          ...composerFieldsWithMode,
         })
         set((current) => ({
           refineLoading: false,
@@ -2064,6 +2417,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
               role: 'assistant' as const,
               content: answer.answer,
               format: 'markdown' as const,
+              ...(answer.explorationTrace
+                ? { explorationTrace: answer.explorationTrace }
+                : {}),
+              ...(answer.retrievalSummary?.searched
+                ? { retrievalSummary: answer.retrievalSummary }
+                : {}),
               ...(answer.responseLanguage.validation === 'mismatch_after_retry'
                 ? {
                     notice: getStoreMessage(
@@ -2081,6 +2440,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           summary: truncateDiffReadySummary(rawPrompt.trim()),
           completedAt: Date.now(),
         })
+        notifyMemoryWrite(pushToast, get().locale, answer.memoryWrite)
       } catch (error) {
         const ownershipFailure = readFileOwnershipFailure(error)
         if (selectedFilePath && ownershipFailure?.code === 'ownership_ambiguous') {
@@ -2165,7 +2525,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           scope: planScope,
           objective: rawPrompt.trim(),
           ...chatSessionRequestFields(),
-          ...composerFields,
+          ...composerFieldsWithMode,
         }))
         if (plan.status === 'needs_clarification') {
           const questions = plan.clarifyingQuestions ?? []
@@ -2255,12 +2615,21 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           scope: debugScope,
           bugDescription: rawPrompt.trim(),
           ...chatSessionRequestFields(),
-          ...composerFields,
+          ...composerFieldsWithMode,
         })
-        set({
+        set((current) => ({
           refineLoading: false,
           debugSession: session,
-        })
+          messages: [
+            ...current.messages,
+            {
+              id: msgId(),
+              role: 'system' as const,
+              content: getStoreMessage(current.locale, 'debug.chatStageReproduce'),
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        }))
       } catch (error) {
         set({
           refineLoading: false,
@@ -2304,7 +2673,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         filePath: selectedFilePath ?? undefined,
         rawPrompt: rawPrompt.trim(),
         ...chatSessionRequestFields(),
-        ...composerFields,
+        ...composerFieldsWithMode,
       })
       set((state) => ({
         pendingRefinement: refinement,
@@ -2314,6 +2683,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ? [...state.messages, createFallbackChatMessage(refinement.fallback, state.locale)]
           : state.messages,
       }))
+      notifyMemoryWrite(pushToast, get().locale, refinement.memoryWrite)
       if (refinement.fallback) {
         pushToast({
           type: 'warning',
@@ -2612,12 +2982,21 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   confirmPlanBuild: async () => {
     const { client, pendingPlan, pushToast, locale } = get()
     if (!pendingPlan || pendingPlan.status !== 'ready') return
+    if (pendingPlan.steps.length === 0) {
+      pushToast({
+        type: 'warning',
+        message: getStoreMessage(locale, 'plan.buildNeedsSteps'),
+        autoDismiss: 3000,
+      })
+      return
+    }
     set({ refineLoading: true, planConfirmed: true })
     try {
       const refinement = await client.buildPlan(pendingPlan.id)
       useChatSessionStore.getState().presentAgentFlow()
       set({
         refineLoading: false,
+        lastBuiltPlan: pendingPlan,
         pendingPlan: null,
         pendingRefinement: refinement,
         refinementConfirmed: true,
@@ -2636,6 +3015,178 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       })
     }
     scheduleChatSessionPersist()
+  },
+
+  savePlanEdits: async (patch) => {
+    const { client, pendingPlan, pushToast, locale } = get()
+    if (!pendingPlan || pendingPlan.status !== 'ready') return
+    try {
+      const updated = await client.updatePlan({
+        planId: pendingPlan.id,
+        objective: patch.objective,
+        steps: patch.steps,
+        todos: patch.todos,
+        rationale: patch.rationale,
+        status: 'ready',
+      })
+      set({
+        pendingPlan: withPlanQuestionOptions(updated),
+        latestPlanTrace: {
+          status: 'complete',
+          scope: updated.scope,
+          result: updated,
+        },
+      })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'plan.editsSaved'),
+        autoDismiss: 2500,
+      })
+      scheduleChatSessionPersist()
+    } catch (error) {
+      set({ error: errorMessage(error, 'Failed to save plan edits') })
+    }
+  },
+
+  savePlanToWorkspace: async () => {
+    const { client, pendingPlan, pushToast, locale } = get()
+    if (!client || !pendingPlan) return
+    if (typeof client.savePlanToWorkspace !== 'function') {
+      pushToast({
+        type: 'warning',
+        message: getStoreMessage(locale, 'common.comingSoon'),
+        autoDismiss: 2500,
+      })
+      return
+    }
+    try {
+      await client.savePlanToWorkspace(pendingPlan.id)
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'plan.savedToWorkspace'),
+        autoDismiss: 3000,
+      })
+    } catch (error) {
+      set({ error: errorMessage(error, 'Failed to save plan to workspace') })
+    }
+  },
+
+  returnToPlan: () => {
+    const { lastBuiltPlan, applyResult } = get()
+    if (!lastBuiltPlan) return
+    const restorePlan = () => {
+      set({
+        pendingPlan: { ...lastBuiltPlan, status: 'ready' },
+        planConfirmed: false,
+        chatMode: 'plan',
+        pendingRefinement: null,
+        refinementConfirmed: false,
+        agentFlowSubject: 'plan',
+        rightPanelTab: 'chat',
+      })
+      scheduleChatSessionPersist()
+    }
+    if (applyResult?.applied && applyResult.backupId) {
+      void get()
+        .undoCurrentApply()
+        .then(restorePlan)
+        .catch(() => restorePlan())
+      return
+    }
+    restorePlan()
+  },
+
+  setActiveCustomModeSkillId: (skillId) => {
+    if (!skillId) {
+      set({ activeCustomModeSkillId: null, customModePreviousChatMode: null })
+      scheduleChatSessionPersist()
+      return
+    }
+    const { activeCustomModeSkillId, chatMode, customModePreviousChatMode } = get()
+    set({
+      activeCustomModeSkillId: skillId,
+      customModePreviousChatMode:
+        activeCustomModeSkillId && customModePreviousChatMode
+          ? customModePreviousChatMode
+          : chatMode,
+    })
+    scheduleChatSessionPersist()
+  },
+
+  exitCustomMode: () => {
+    const { customModePreviousChatMode, chatMode } = get()
+    const restoreMode = customModePreviousChatMode ?? chatMode
+    set({
+      activeCustomModeSkillId: null,
+      customModePreviousChatMode: null,
+      chatMode: restoreMode,
+    })
+    scheduleChatSessionPersist()
+  },
+
+  listWorkspacePlans: async () => {
+    const { client, project } = get()
+    if (!client || !project || typeof client.listWorkspacePlans !== 'function') {
+      return []
+    }
+    try {
+      return await client.listWorkspacePlans(project.projectId)
+    } catch {
+      return []
+    }
+  },
+
+  loadPlanFromWorkspace: async (planId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!client || !project) return
+    if (typeof client.loadPlanFromWorkspace !== 'function') {
+      pushToast({
+        type: 'warning',
+        message: getStoreMessage(locale, 'common.comingSoon'),
+        autoDismiss: 2500,
+      })
+      return
+    }
+    try {
+      const plan = await client.loadPlanFromWorkspace(project.projectId, planId)
+      set({
+        pendingPlan: withPlanQuestionOptions(plan),
+        planConfirmed: false,
+        chatMode: 'plan',
+        agentFlowSubject: 'plan',
+        rightPanelTab: 'chat',
+        latestPlanTrace: {
+          status: 'complete',
+          scope: plan.scope,
+          result: plan,
+        },
+      })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'plan.loadedFromWorkspace'),
+        autoDismiss: 3000,
+      })
+      scheduleChatSessionPersist()
+    } catch (error) {
+      set({ error: errorMessage(error, 'Failed to load plan from workspace') })
+    }
+  },
+
+  restoreConversationCheckpoint: async (checkpointId) => {
+    const { client, project, conversationCheckpoints, pushToast, locale } = get()
+    if (!client || !project) return
+    const checkpoint = conversationCheckpoints.find((item) => item.id === checkpointId)
+    if (!checkpoint) return
+    try {
+      await client.restoreApplyBackup(project.projectId, checkpoint.backupId)
+      pushToast({
+        type: 'info',
+        message: getStoreMessage(locale, 'chat.checkpointRestored'),
+        autoDismiss: 3000,
+      })
+    } catch (error) {
+      set({ error: errorMessage(error, 'Failed to restore checkpoint') })
+    }
   },
 
   submitPlanClarification: async (answers) => {
@@ -2720,7 +3271,23 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
     try {
       const session = await client.submitDebugRepro({ sessionId: debugSession.sessionId })
-      set({ debugSession: session })
+      set((current) => ({
+        debugSession: session,
+        messages: [
+          ...current.messages,
+          {
+            id: msgId(),
+            role: 'system' as const,
+            content: getStoreMessage(
+              current.locale,
+              session.phase === 'fix' || session.phase === 'verify'
+                ? 'debug.chatStageFix'
+                : 'debug.chatStageReproduce',
+            ),
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }))
       scheduleChatSessionPersist()
     } catch (error) {
       set({ error: errorMessage(error, 'Failed to submit debug reproduction') })
@@ -2766,7 +3333,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     try {
       const run = await client.confirmDebugFix(debugSession.sessionId)
       useChatSessionStore.getState().presentAgentFlow()
-      set({
+      set((current) => ({
         refineLoading: false,
         activeRunId: run.runId,
         flowStatus: 'running',
@@ -2778,7 +3345,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           linkedRunId: run.runId,
           updatedAt: new Date().toISOString(),
         },
-      })
+        messages: [
+          ...current.messages,
+          {
+            id: msgId(),
+            role: 'system' as const,
+            content: getStoreMessage(current.locale, 'debug.chatStageVerify'),
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }))
       const disposable = client.streamAgentRun(run.runId, (event) => {
         handleRunEvent(event, set, get)
         scheduleChatSessionPersist()
@@ -2896,21 +3472,64 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         type: 'success',
         message: getStoreMessage(locale, 'toast.applySuccess', { count: applyResult.filesChanged.length }),
       })
-      set({
-        applyResult,
-        verificationResult: null,
-        verificationCommandApproval: null,
-        currentWork,
-        graph,
-        tree,
-        editorBuffers: generatedDiff
-          ? applyDiffToBuffers(editorBuffers, generatedDiff)
-          : editorBuffers,
-        editorSavedBuffers: generatedDiff
-          ? applyDiffToBuffers(get().editorSavedBuffers, generatedDiff)
-          : get().editorSavedBuffers,
-        flowStatus: 'complete',
-        bouncingNodeIds: bounceIds,
+      const existingCheckpoint = applyResult.backupId
+        ? get().conversationCheckpoints.find(
+            (item) => item.runId === activeRunId && item.backupId === applyResult.backupId,
+          )
+        : undefined
+      const checkpointId =
+        !existingCheckpoint && applyResult.applied && applyResult.backupId
+          ? `ckpt_${crypto.randomUUID()}`
+          : undefined
+      const checkpointMessageId = checkpointId ? msgId() : undefined
+      set((current) => {
+        const checkpoints =
+          checkpointId && applyResult.backupId
+            ? [
+                ...current.conversationCheckpoints,
+                {
+                  id: checkpointId,
+                  messageId: checkpointMessageId!,
+                  backupId: applyResult.backupId,
+                  runId: activeRunId,
+                  createdAt: new Date().toISOString(),
+                  filesChanged: applyResult.filesChanged,
+                },
+              ]
+            : current.conversationCheckpoints
+        const messages =
+          checkpointId && checkpointMessageId
+            ? [
+                ...current.messages,
+                {
+                  id: checkpointMessageId,
+                  role: 'system' as const,
+                  content: getStoreMessage(locale, 'chat.checkpointCreated', {
+                    count: applyResult.filesChanged.length,
+                  }),
+                  timestamp: new Date().toISOString(),
+                  checkpointId,
+                },
+              ]
+            : current.messages
+        return {
+          applyResult,
+          verificationResult: null,
+          verificationCommandApproval: null,
+          currentWork,
+          graph,
+          tree,
+          editorBuffers: generatedDiff
+            ? applyDiffToBuffers(editorBuffers, generatedDiff)
+            : editorBuffers,
+          editorSavedBuffers: generatedDiff
+            ? applyDiffToBuffers(current.editorSavedBuffers, generatedDiff)
+            : current.editorSavedBuffers,
+          flowStatus: 'complete' as const,
+          bouncingNodeIds: bounceIds,
+          conversationCheckpoints: checkpoints,
+          messages,
+        }
       })
       if (generatedDiff) {
         for (const file of generatedDiff.files) {
@@ -2918,6 +3537,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         }
       }
       setTimeout(() => set({ bouncingNodeIds: [] }), 600)
+      scheduleChatSessionPersist()
     } catch (err) {
       set({ error: errorMessage(err, 'Failed to apply diff') })
     }
@@ -3168,7 +3788,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
   runGoogleLoginScenario: async () => {
     const { selectFile, setChatInput, setChatMode, sendPrompt } = get()
-    setChatMode('change')
+    await setChatMode('change', { isolate: false })
     await selectFile('app/login/page.tsx', 'feat_login')
     setChatInput(GOOGLE_LOGIN_PROMPT)
     await sendPrompt(GOOGLE_LOGIN_PROMPT)

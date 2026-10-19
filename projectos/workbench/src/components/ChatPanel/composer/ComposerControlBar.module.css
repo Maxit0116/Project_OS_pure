@@ -70,8 +70,8 @@
 }
 
 .dropdownModes {
-  min-width: 148px;
-  max-width: min(200px, 80vw);
+  min-width: 220px;
+  max-width: min(320px, 80vw);
 }
 
 .menuItem {
@@ -119,6 +119,38 @@
 .modeLabel {
   font-weight: 500;
   color: var(--mode-color);
+}
+
+.modeMenuCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.modeHelp {
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+  color: var(--color-text-secondary);
+  font-weight: 400;
+}
+
+.modeCapability {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  opacity: 0.85;
+}
+
+.chipCapability {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  opacity: 0.9;
+  flex-shrink: 0;
 }
 
 .modeMenuItem:hover {

@@ -94,16 +94,61 @@ import {
   type LocalContextBundle,
   type NodeContextBundle,
 } from "../contracts/local-context.js";
-import type {
-  FileEntry,
-  FunctionalNode,
-  LinkedFile,
-  LinkedFileRole,
-  ProjectGraph,
-  StructureScanOptions,
+import {
+  StructureScanOptionsSchema,
+  type FileEntry,
+  type FunctionalNode,
+  type LinkedFile,
+  type LinkedFileRole,
+  type ProjectGraph,
+  type StructureScanOptions,
 } from "../contracts/graph.js";
-import { StructureScanOptionsSchema } from "../contracts/graph.js";
 import { HarnessRecordSchema, type HarnessRecord } from "../contracts/harness.js";
+import { buildHarnessInstructions } from "./harness/instructions.js";
+import {
+  AgentMemoryDocumentSchema,
+  MemoryAdmissionStateSchema,
+  MemoryCandidateSchema,
+  MemorySettingsPatchSchema,
+  type AgentMemoryDocument,
+  type MemoryAdmissionState,
+  type MemorySettingsPatch,
+} from "../contracts/agent-memory.js";
+import {
+  AgentMemoryStore,
+  hashMemoryIndex,
+  parseExplicitMemoryCommand,
+  type MemoryInjectionSnapshot,
+} from "./harness/memory.js";
+import {
+  memoryProposalSkipReason,
+  memoryProposalSystemPrompt,
+  memoryProposalUserPrompt,
+  parseMemoryProposalOutput,
+} from "./harness/memory-proposals.js";
+import { modelHarnessSystemDelta } from "./harness/model-variants.js";
+import {
+  loadAgentHarnessConfig,
+  saveAgentHarnessConfig as persistAgentHarnessConfig,
+} from "./harness/harness-config.js";
+import {
+  createAgentWorktree,
+  getAgentWorktreeDiff,
+  listAgentWorktrees,
+  mergeAgentWorktree,
+  removeAgentWorktree,
+} from "./harness/worktree.js";
+import type { AgentHarnessConfig } from "../contracts/agent-harness-config.js";
+import type {
+  AgentWorktreeRecord,
+  CreateAgentWorktreeOptions,
+  MergeAgentWorktreeOptions,
+} from "../contracts/agent-worktree.js";
+import { loadProjectRulesMarkdown } from "./harness/rules.js";
+import {
+  assertToolAllowed,
+  writeCapabilityContext,
+} from "./harness/tool-policy.js";
 import {
   CreatePlanRequestSchema,
   ImplementationPlanSchema,
@@ -215,6 +260,13 @@ import {
 } from "./code-file-understanding-store.js";
 import { GroundedAnswerService } from "./grounded-answer-service.js";
 import { PlanService, buildPromptFromPlan } from "./plan-service.js";
+import { exploreForAskQuestion } from "./ask-exploration-service.js";
+import { retrieveForUtterance } from "./retrieval/broker.js";
+import {
+  parsePlanMarkdown,
+  serializePlanMarkdown,
+} from "./plan-workspace-markdown.js";
+import { DebugHypothesisService } from "./debug-hypothesis-service.js";
 import { LocalContextAssembler } from "./local-context-assembler.js";
 import {
   chooseRootCause,
@@ -245,7 +297,13 @@ import {
   projectSemanticTreeFromGraph,
   runStructureGraphAiScan,
 } from "./structure-graph-ai-scan.js";
+import { StructureScanProgressTracker } from "./structure-scan-progress-tracker.js";
+import { assertPersistableProjectGraph } from "../validation/persistable-graph.js";
 import { ensureWorkspaceBootstrapped } from "./workspace-bootstrap.js";
+import type {
+  StructureScanProgress,
+  StructureScanProgressEvent,
+} from "../contracts/structure-scan-progress.js";
 import type { PromptComposerFields } from "../contracts/prompt-composer.js";
 import type { ListSkillsResult, SkillContent } from "../contracts/skills.js";
 import {
@@ -296,6 +354,13 @@ export interface ProjectOSLocalApiOptions {
   dependencyImpactScanner?: DependencyImpactScannerDependency;
   /** Desktop main injects shell.openExternal; tests may omit. */
   openExternalUrl?: (url: string) => Promise<void>;
+  /**
+   * Directory for personal agent memory (`<userData>/agent-memory`).
+   * Omit in tests that are not exercising memory.
+   */
+  agentMemoryRoot?: string;
+  /** Tests use 0. Production waits so an in-progress follow-up is not summarized. */
+  memoryProposalDelayMs?: number;
 }
 
 export interface VerificationRunnerDependency {
@@ -375,6 +440,10 @@ interface StoredRefinement {
   projectId: string;
   requestedScope: RequestedLocalScope;
   responseLanguage: string;
+  /** Memory index captured before this turn's remember/forget write. */
+  memoryIndexMarkdown?: string;
+  memoryInjection?: MemoryInjectionSnapshot;
+  rawPrompt?: string;
 }
 
 export interface LocalContextAllowedWriteTarget {
@@ -523,12 +592,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   protected readonly codeFileUnderstandingService: CodeFileUnderstandingService;
   private readonly groundedAnswerService: GroundedAnswerService;
   private readonly planService: PlanService;
+  private readonly debugHypothesisService: DebugHypothesisService;
   private readonly localContextAssembler: LocalContextAssemblerDependency;
   private readonly verificationRunner: VerificationRunnerDependency | undefined;
   private readonly verificationCommandApproval: VerificationCommandApprovalService;
   private readonly workspaceTransactionCoordinator: WorkspaceTransactionCoordinatorDependency | undefined;
   private readonly dependencyImpactScanner: DependencyImpactScannerDependency | undefined;
   private readonly openExternalUrl: ((url: string) => Promise<void>) | undefined;
+  private readonly agentMemoryRoot: string | undefined;
+  private readonly memoryProposalDelayMs: number;
+  private readonly memoryProposalTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly orchestrator: AgentOrchestrator;
   private readonly workspacesByProjectId = new Map<
     string,
@@ -549,6 +622,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     string,
     Promise<CodeFileUnderstandingEntry>
   >();
+  private readonly structureScanProgress = new StructureScanProgressTracker();
+  private readonly structureScanInflight = new Map<string, Promise<void>>();
+  private readonly structureScanAbortByProjectId = new Map<string, AbortController>();
   private readonly boundRunAuthorizations = new Map<
     string,
     BoundRunAuthorization
@@ -588,6 +664,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     );
     this.groundedAnswerService = new GroundedAnswerService(this.modelGateway);
     this.planService = new PlanService(this.modelGateway);
+    this.debugHypothesisService = new DebugHypothesisService(this.modelGateway);
     this.localContextAssembler = options.localContextAssembler ?? new LocalContextAssembler();
     this.verificationRunner = options.verificationRunner;
     this.verificationCommandApproval = new VerificationCommandApprovalService(
@@ -596,6 +673,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     this.workspaceTransactionCoordinator = options.workspaceTransactionCoordinator;
     this.dependencyImpactScanner = options.dependencyImpactScanner;
     this.openExternalUrl = options.openExternalUrl;
+    this.agentMemoryRoot = options.agentMemoryRoot;
+    this.memoryProposalDelayMs = options.memoryProposalDelayMs ?? 1_200;
     if (options.writeTransactionRuntime) {
       this.writeTransactionRuntime = Promise.resolve(options.writeTransactionRuntime);
     }
@@ -677,6 +756,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           this.executeConfiguredVerification(parentRun.runId, workspace),
         release: (parentRunId) => this.releaseGreenfieldInitialization(parentRunId),
       },
+      loadMemoryIndexMarkdown: (workspace) => this.currentMemoryInjection(workspace),
+      onRootRunCompleted: (workspace, snapshot) => {
+        this.scheduleMemoryProposal(workspace, snapshot);
+      },
       ...(options.runEventPersistence
         ? { eventPersistence: options.runEventPersistence }
         : {}),
@@ -697,38 +780,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async openWorkspace(path: string): Promise<ProjectOSProject> {
     ensureWorkspaceBootstrapped(path);
     let workspace = this.workspaceStore.loadWorkspace(path);
-
-    if (
-      !workspace.workspaceRoot.startsWith("mock://") &&
-      graphNeedsAiScan(workspace.graph)
-    ) {
-      const profile = this.settingsService.resolveModelProfile(workspace.settings);
-      if (profile) {
-        try {
-          const scanned = await runStructureGraphAiScan({
-            workspaceRoot: workspace.workspaceRoot,
-            projectId: workspace.project.projectId,
-            displayName: workspace.project.displayName,
-            graph: workspace.graph,
-            profile,
-            gateway: this.modelGateway,
-          });
-          await this.workspaceStore.writeGraph(workspace.workspaceRoot, scanned);
-          const semanticTree = projectSemanticTreeFromGraph({
-            projectId: workspace.project.projectId,
-            projectName: workspace.project.displayName,
-            graph: scanned,
-          });
-          await this.workspaceStore.writeSemanticTree(
-            workspace.workspaceRoot,
-            semanticTree,
-          );
-          workspace = this.workspaceStore.loadWorkspace(path);
-        } catch {
-          // Keep heuristic / existing graph if AI scan fails.
-        }
-      }
-    }
 
     const recoveryResults = workspace.workspaceRoot.startsWith("mock://")
       ? []
@@ -767,6 +818,22 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       projectId,
       new ScenarioRegistry(workspace),
     );
+
+    // TTFT: return heuristic/bootstrap graph immediately; AI scan upgrades in background.
+    if (
+      !workspace.workspaceRoot.startsWith("mock://") &&
+      graphNeedsAiScan(workspace.graph)
+    ) {
+      const profile = this.settingsService.resolveModelProfile(workspace.settings);
+      if (profile) {
+        this.enqueueStructureScan(projectId, {
+          force: false,
+          userInitiated: false,
+          scanMode: "regenerate",
+        });
+      }
+    }
+
     // project.json keeps a portable relative root ("."); the client needs the
     // absolute path of the opened workspace for recent-list identity and shell cwd.
     return {
@@ -791,13 +858,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         "Configure a default model profile before scanning the structure map",
       );
     }
-    const scanned = await runStructureGraphAiScan({
-      workspaceRoot: workspace.workspaceRoot,
-      projectId: workspace.project.projectId,
-      displayName: workspace.project.displayName,
-      graph: workspace.graph,
-      profile,
-      gateway: this.modelGateway,
+    await this.runStructureScanAndPersist(projectId, {
       force: parsedOptions.force === true,
       userInitiated: true,
       scanMode: parsedOptions.mode,
@@ -805,19 +866,273 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       changedFiles: parsedOptions.changedFiles,
       refinedGraph: parsedOptions.refinedGraph,
     });
-    await this.workspaceStore.writeGraph(workspace.workspaceRoot, scanned);
+    const reloaded = this.requireLoadedWorkspace(projectId);
+    return cloneJson(reloaded.graph);
+  }
+
+  async getStructureScanProgress(
+    projectId: string,
+  ): Promise<StructureScanProgress | null> {
+    this.requireLoadedWorkspace(projectId);
+    return this.structureScanProgress.getProgress(projectId);
+  }
+
+  streamStructureScan(
+    projectId: string,
+    cb: (event: StructureScanProgressEvent) => void,
+  ): Disposable {
+    this.requireLoadedWorkspace(projectId);
+    return this.structureScanProgress.subscribe(projectId, cb);
+  }
+
+  async cancelStructureScan(projectId: string): Promise<boolean> {
+    this.requireLoadedWorkspace(projectId);
+    const controller = this.structureScanAbortByProjectId.get(projectId);
+    const progress = this.structureScanProgress.getProgress(projectId);
+    const running =
+      progress?.status === "running" ||
+      (controller !== undefined && !controller.signal.aborted);
+    if (!running) {
+      return false;
+    }
+    // Emit cancelled immediately so the UI settles before the in-flight
+    // model request finishes tearing down.
+    this.structureScanProgress.cancelRunning(projectId);
+    if (controller && !controller.signal.aborted) {
+      controller.abort();
+    }
+    return true;
+  }
+
+  /**
+   * Wait until any in-flight structure scan for the project settles.
+   * Used by tests and callers that need the upgraded graph after openWorkspace.
+   */
+  async awaitStructureScan(projectId: string): Promise<void> {
+    const inflight = this.structureScanInflight.get(projectId);
+    if (inflight) await inflight;
+  }
+
+  private enqueueStructureScan(
+    projectId: string,
+    options: {
+      force: boolean;
+      userInitiated: boolean;
+      scanMode: StructureScanOptions["mode"];
+      nodeIds?: string[];
+      changedFiles?: string[];
+      refinedGraph?: unknown;
+    },
+  ): void {
+    if (this.structureScanInflight.has(projectId)) return;
+    let settle!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    this.structureScanInflight.set(projectId, gate);
+    void this.executeStructureScan(projectId, options)
+      .catch(() => {
+        // Background openWorkspace scan: keep heuristic graph on failure.
+      })
+      .finally(() => {
+        settle();
+        if (this.structureScanInflight.get(projectId) === gate) {
+          this.structureScanInflight.delete(projectId);
+        }
+      });
+  }
+
+  private async runStructureScanAndPersist(
+    projectId: string,
+    options: {
+      force: boolean;
+      userInitiated: boolean;
+      scanMode: StructureScanOptions["mode"];
+      nodeIds?: string[];
+      changedFiles?: string[];
+      refinedGraph?: unknown;
+    },
+  ): Promise<void> {
+    const prior = this.structureScanInflight.get(projectId);
+    if (prior) {
+      await prior.catch(() => undefined);
+    }
+
+    let settle!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    this.structureScanInflight.set(projectId, gate);
+    try {
+      await this.executeStructureScan(projectId, options);
+    } finally {
+      settle();
+      if (this.structureScanInflight.get(projectId) === gate) {
+        this.structureScanInflight.delete(projectId);
+      }
+    }
+  }
+
+  private async executeStructureScan(
+    projectId: string,
+    options: {
+      force: boolean;
+      userInitiated: boolean;
+      scanMode: StructureScanOptions["mode"];
+      nodeIds?: string[];
+      changedFiles?: string[];
+      refinedGraph?: unknown;
+    },
+  ): Promise<void> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    if (!options.userInitiated && !graphNeedsAiScan(workspace.graph)) {
+      return;
+    }
+    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    if (!profile) {
+      throw new ProjectOSError(
+        "settings_not_found",
+        "Configure a default model profile before scanning the structure map",
+      );
+    }
+
+    const skipMapContext =
+      options.scanMode === "prepareRefine" ||
+      options.scanMode === "acceptRefine";
+    const { scanId, report } = this.structureScanProgress.begin({
+      projectId,
+      mode: options.scanMode ?? "regenerate",
+      skipMapContext,
+    });
+
+    const abortController = new AbortController();
+    this.structureScanAbortByProjectId.set(projectId, abortController);
+
+    try {
+      const scanned = await runStructureGraphAiScan({
+        workspaceRoot: workspace.workspaceRoot,
+        projectId: workspace.project.projectId,
+        displayName: workspace.project.displayName,
+        graph: workspace.graph,
+        profile,
+        gateway: this.modelGateway,
+        force: options.force,
+        userInitiated: options.userInitiated,
+        scanMode: options.scanMode,
+        nodeIds: options.nodeIds,
+        changedFiles: options.changedFiles,
+        refinedGraph: options.refinedGraph,
+        scanId,
+        onProgress: report,
+        signal: abortController.signal,
+      });
+      const alreadyCancelled =
+        abortController.signal.aborted ||
+        this.structureScanProgress.getProgress(projectId)?.status ===
+          "cancelled";
+      if (alreadyCancelled) {
+        throw new ProjectOSError(
+          "operation_cancelled",
+          "Structure map generation was cancelled",
+        );
+      }
+      const reloaded = await this.persistScannedStructureGraph(
+        workspace,
+        scanned,
+      );
+      this.workspacesByProjectId.set(projectId, reloaded);
+      report({
+        type: "scan_completed",
+        scanId,
+        projectId,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      const cancelled =
+        abortController.signal.aborted ||
+        this.structureScanProgress.getProgress(projectId)?.status ===
+          "cancelled" ||
+        (error instanceof ProjectOSError &&
+          error.code === "operation_cancelled");
+      if (cancelled) {
+        // Do not persist — keep the previous graph on disk and in memory.
+        // cancelStructureScan may have already emitted scan_cancelled for TTFT.
+        if (
+          this.structureScanProgress.getProgress(projectId)?.status !==
+          "cancelled"
+        ) {
+          report({
+            type: "scan_cancelled",
+            scanId,
+            projectId,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        throw new ProjectOSError(
+          "operation_cancelled",
+          "Structure map generation was cancelled",
+          { cause: error instanceof Error ? error : undefined },
+        );
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      report({
+        type: "scan_failed",
+        scanId,
+        projectId,
+        timestamp: new Date().toISOString(),
+        message,
+      });
+      throw error;
+    } finally {
+      if (this.structureScanAbortByProjectId.get(projectId) === abortController) {
+        this.structureScanAbortByProjectId.delete(projectId);
+      }
+    }
+  }
+
+  /**
+   * Validate → write graph+tree → reload. On any post-write failure, restore
+   * the previous durable graph/tree so regenerate cannot brick the workspace.
+   */
+  private async persistScannedStructureGraph(
+    workspace: LoadedProjectOSWorkspace,
+    scanned: ProjectGraph,
+  ): Promise<LoadedProjectOSWorkspace> {
+    assertPersistableProjectGraph(scanned, {
+      workspaceRoot: workspace.workspaceRoot,
+      ignoreMissingFiles: true,
+    });
+
     const semanticTree = projectSemanticTreeFromGraph({
       projectId: workspace.project.projectId,
       projectName: workspace.project.displayName,
       graph: scanned,
     });
-    await this.workspaceStore.writeSemanticTree(
-      workspace.workspaceRoot,
-      semanticTree,
-    );
-    const reloaded = this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
-    this.workspacesByProjectId.set(projectId, reloaded);
-    return cloneJson(reloaded.graph);
+    const previousGraph = workspace.graph;
+    const previousTree = workspace.semanticTree;
+
+    try {
+      await this.workspaceStore.writeGraph(workspace.workspaceRoot, scanned);
+      await this.workspaceStore.writeSemanticTree(
+        workspace.workspaceRoot,
+        semanticTree,
+      );
+      return this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
+    } catch (error) {
+      try {
+        await this.workspaceStore.writeGraph(
+          workspace.workspaceRoot,
+          previousGraph,
+        );
+        await this.workspaceStore.writeSemanticTree(
+          workspace.workspaceRoot,
+          previousTree,
+        );
+      } catch {
+        // Best-effort restore; surface the original failure.
+      }
+      throw error;
+    }
   }
 
   /** Desktop-main authority; intentionally not exposed through ProjectOSApi or IPC. */
@@ -1373,6 +1688,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async askAgent(request: AgentAskRequest): Promise<AgentAnswerResult> {
     const parsedRequest = AgentAskRequestSchema.parse(request);
     const workspace = this.requireLoadedWorkspace(parsedRequest.projectId);
+    const memoryTurn = this.beginMemoryTurn(workspace, parsedRequest.question);
     const profile = this.settingsService.resolveModelProfile(workspace.settings);
     if (!profile) {
       throw new ProjectOSError(
@@ -1429,9 +1745,41 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       parsedRequest.projectId,
       parsedRequest.chatSessionId,
     );
-    const supplementalMarkdown = [augmented.supplementalMarkdown, sessionContext]
+    const explorationMaxRounds = parsedRequest.exploration?.maxRounds ?? 2;
+    const exploration =
+      explorationMaxRounds > 0
+        ? exploreForAskQuestion(workspace, parsedRequest.question, {
+            allowedReadPaths: localContext.allowedReadPaths,
+            maxRounds: explorationMaxRounds,
+            maxReads: Math.max(3, explorationMaxRounds + 1),
+          })
+        : null;
+    const retrieval = retrieveForUtterance(
+      workspace,
+      parsedRequest.question,
+      "ask",
+      this.retrievalOptions(workspace),
+    );
+    const supplementalMarkdown = [
+      augmented.supplementalMarkdown,
+      sessionContext,
+      exploration?.supplementalMarkdown ?? "",
+      retrieval.fence,
+    ]
       .filter((part) => part.trim().length > 0)
       .join("\n\n");
+    // Rules → system (always-on). Skills stay in supplementalMarkdown (on-demand).
+    const modelDelta = modelHarnessSystemDelta(
+      profile,
+      workspace.workspaceRoot,
+    );
+    const instructionAppendix = buildHarnessInstructions({
+      baseSystemPrompt: "",
+      mode: "ask",
+      rulesMarkdown: loadProjectRulesMarkdown(workspace.workspaceRoot),
+      ...(memoryTurn.index ? { memoryIndexMarkdown: memoryTurn.index } : {}),
+      ...(modelDelta ? { modelDelta } : {}),
+    });
     const result = await this.groundedAnswerService.answer({
       projectId: parsedRequest.projectId,
       question: parsedRequest.question,
@@ -1440,12 +1788,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       thinkingDepth: workspace.settings.execution.thinkingDepth,
       responseLanguage,
       supplementalMarkdown,
+      ...(instructionAppendix.trim()
+        ? { instructionAppendix }
+        : {}),
       ...(parsedRequest.images?.length
         ? { images: parsedRequest.images }
         : {}),
     });
     const contextSummary = summarizeLocalContext(augmented.bundle);
-    return AgentAnswerResultSchema.parse({
+    const parsed = AgentAnswerResultSchema.parse({
       id: `answer_${globalThis.crypto.randomUUID()}`,
       projectId: parsedRequest.projectId,
       scope: resolvedScope,
@@ -1458,13 +1809,37 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         bundleHash: augmented.attachmentSummary.bundleHash,
       },
       ...(result.reasoning ? { reasoning: result.reasoning } : {}),
+      ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
+      ...(exploration ? { explorationTrace: exploration.trace } : {}),
+      ...(retrieval.summary.searched ? { retrievalSummary: retrieval.summary } : {}),
       responseLanguage: {
         tag: responseLanguage.tag,
         source: responseLanguage.source,
         validation: result.validation,
       },
       createdAt: new Date().toISOString(),
+      ...(memoryTurn.injection.markdown
+        ? {
+            memoryIndex: {
+              hash: memoryTurn.injection.hash,
+              truncated: memoryTurn.injection.truncated,
+              entryCount: memoryTurn.injection.entryCount,
+            },
+          }
+        : {}),
     });
+    if (!memoryTurn.notice) {
+      this.scheduleMemoryProposal(workspace, {
+        runId: `ask_${crypto.randomUUID()}`,
+        runStatus: "complete",
+        userPrompt: parsedRequest.question,
+        understood: "",
+        usedMcp: false,
+        verificationFailed: false,
+        rolledBack: false,
+      });
+    }
+    return parsed;
   }
 
   async listSkills(projectId: string): Promise<ListSkillsResult> {
@@ -1475,6 +1850,141 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async getSkill(projectId: string, skillId: string): Promise<SkillContent | null> {
     const workspace = this.requireLoadedWorkspace(projectId);
     return getProjectSkill(workspace.workspaceRoot, skillId);
+  }
+
+  async listAgentWorktrees(projectId: string): Promise<AgentWorktreeRecord[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return listAgentWorktrees(workspace.workspaceRoot);
+  }
+
+  async createAgentWorktree(
+    projectId: string,
+    options: CreateAgentWorktreeOptions = {},
+  ): Promise<AgentWorktreeRecord> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return createAgentWorktree(workspace.workspaceRoot, options);
+  }
+
+  async mergeAgentWorktree(
+    projectId: string,
+    options: MergeAgentWorktreeOptions,
+  ): Promise<AgentWorktreeRecord> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return mergeAgentWorktree(workspace.workspaceRoot, options);
+  }
+
+  async removeAgentWorktree(
+    projectId: string,
+    worktreeId: string,
+    options: { deleteBranch?: boolean } = {},
+  ): Promise<AgentWorktreeRecord> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return removeAgentWorktree(workspace.workspaceRoot, worktreeId, options);
+  }
+
+  async getAgentWorktreeDiff(
+    projectId: string,
+    worktreeId: string,
+  ): Promise<string> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return getAgentWorktreeDiff(workspace.workspaceRoot, worktreeId);
+  }
+
+  async getAgentHarnessConfig(projectId: string): Promise<AgentHarnessConfig> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return loadAgentHarnessConfig(workspace.workspaceRoot);
+  }
+
+  async saveAgentHarnessConfig(
+    projectId: string,
+    config: AgentHarnessConfig,
+  ): Promise<AgentHarnessConfig> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return persistAgentHarnessConfig(workspace.workspaceRoot, config);
+  }
+
+  async getAgentMemory(projectId: string): Promise<AgentMemoryDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const store = this.memoryStoreFor(workspace);
+    if (!store) {
+      return AgentMemoryDocumentSchema.parse({
+        settings: {
+          version: "0.1.0",
+          enabled: false,
+          useMemories: false,
+          generateMemories: false,
+          isolateByCheckout: false,
+        },
+        entries: [],
+        diagnostics: [],
+        nearBudget: false,
+        injectableEntryCount: 0,
+      });
+    }
+    return store.load();
+  }
+
+  async getAgentMemoryTopic(projectId: string, topicFile: string): Promise<string> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return this.memoryStoreFor(workspace)?.readTopic(topicFile) ?? "";
+  }
+
+  async saveAgentMemorySettings(
+    projectId: string,
+    patch: MemorySettingsPatch,
+  ): Promise<AgentMemoryDocument> {
+    const parsed = MemorySettingsPatchSchema.parse(patch);
+    return this.requireMemoryStore(projectId).saveSettings(parsed);
+  }
+
+  async submitAgentMemory(
+    projectId: string,
+    candidate: import("../contracts/agent-memory.js").MemoryCandidate,
+  ): Promise<AgentMemoryDocument> {
+    const parsed = MemoryCandidateSchema.parse(candidate);
+    const store = this.requireMemoryStore(projectId);
+    const notice = store.applyCandidate(parsed);
+    if (!notice.accepted) {
+      throw new ProjectOSError(
+        "invalid_settings",
+        notice.reason === "secret"
+          ? "That memory was not saved because it looks like a secret"
+          : `Memory was not saved (${notice.reason ?? "rejected"})`,
+      );
+    }
+    return store.load();
+  }
+
+  async setAgentMemoryEntryState(
+    projectId: string,
+    text: string,
+    state: MemoryAdmissionState,
+  ): Promise<AgentMemoryDocument> {
+    const parsedState = MemoryAdmissionStateSchema.parse(state);
+    return this.requireMemoryStore(projectId).setEntryState(text, parsedState);
+  }
+
+  async deleteAgentMemoryEntry(
+    projectId: string,
+    text: string,
+  ): Promise<AgentMemoryDocument> {
+    return this.requireMemoryStore(projectId).deleteEntry(text);
+  }
+
+  async consolidateAgentMemory(projectId: string): Promise<AgentMemoryDocument> {
+    return this.requireMemoryStore(projectId).consolidate();
+  }
+
+  private requireMemoryStore(projectId: string): AgentMemoryStore {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const store = this.memoryStoreFor(workspace);
+    if (!store) {
+      throw new ProjectOSError(
+        "invalid_settings",
+        "Agent memory storage is not configured",
+      );
+    }
+    return store;
   }
 
   private async augmentComposerContext(
@@ -1581,6 +2091,17 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const stored = parsedRequest.existingPlanId
       ? this.plansById.get(parsedRequest.existingPlanId)
       : undefined;
+    const planExploration = exploreForAskQuestion(workspace, parsedRequest.objective, {
+      allowedReadPaths: localContext.allowedReadPaths,
+      maxRounds: 2,
+      maxReads: 3,
+    });
+    const planRetrieval = retrieveForUtterance(
+      workspace,
+      parsedRequest.objective,
+      "plan",
+      this.retrievalOptions(workspace),
+    );
     const plan = await this.planService.createPlan({
       projectId: parsedRequest.projectId,
       scope: resolvedScope,
@@ -1593,6 +2114,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       supplementalMarkdown: [
         augmented.supplementalMarkdown,
         await this.sessionContextMarkdown(parsedRequest.projectId, parsedRequest.chatSessionId),
+        planExploration.supplementalMarkdown,
+        planRetrieval.fence,
       ]
         .filter((part) => part.trim().length > 0)
         .join("\n\n"),
@@ -1631,6 +2154,82 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
     this.persistPlan(workspace, updated);
     return ImplementationPlanSchema.parse(updated);
+  }
+
+  async savePlanToWorkspace(planId: string): Promise<{ path: string }> {
+    const stored = this.plansById.get(planId);
+    if (!stored) {
+      throw new ProjectOSError("plan_not_found", `No implementation plan found for '${planId}'`);
+    }
+    const workspace = this.requireLoadedWorkspace(stored.projectId);
+    const dir = join(workspace.workspaceRoot, ".projectos", "plans");
+    mkdirSync(dir, { recursive: true });
+    const relativePath = `.projectos/plans/${stored.id}.md`;
+    const absolute = join(workspace.workspaceRoot, relativePath);
+    writeFileSync(absolute, serializePlanMarkdown(stored), "utf8");
+    return { path: relativePath };
+  }
+
+  async listWorkspacePlans(projectId: string): Promise<
+    Array<{
+      id: string;
+      path: string;
+      objective: string;
+      status?: ImplementationPlan["status"];
+      updatedAt?: string;
+    }>
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const dir = join(workspace.workspaceRoot, ".projectos", "plans");
+    if (!existsSync(dir)) return [];
+    const entries = readdirSync(dir)
+      .filter((name) => name.endsWith(".md"))
+      .sort((a, b) => a.localeCompare(b));
+    const summaries = [];
+    for (const name of entries) {
+      const planId = name.replace(/\.md$/u, "");
+      const relativePath = `.projectos/plans/${name}`;
+      const absolute = join(workspace.workspaceRoot, relativePath);
+      try {
+        const markdown = readFileSync(absolute, "utf8");
+        const plan = parsePlanMarkdown(markdown, { projectId, planId });
+        summaries.push({
+          id: plan.id,
+          path: relativePath,
+          objective: plan.objective,
+          status: plan.status,
+          updatedAt: plan.updatedAt,
+        });
+      } catch {
+        summaries.push({
+          id: planId,
+          path: relativePath,
+          objective: planId,
+        });
+      }
+    }
+    return summaries.sort((a, b) =>
+      (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""),
+    );
+  }
+
+  async loadPlanFromWorkspace(
+    projectId: string,
+    planId: string,
+  ): Promise<ImplementationPlan> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const relativePath = `.projectos/plans/${planId}.md`;
+    const absolute = join(workspace.workspaceRoot, relativePath);
+    if (!existsSync(absolute)) {
+      throw new ProjectOSError(
+        "plan_not_found",
+        `No workspace plan markdown at '${relativePath}'`,
+      );
+    }
+    const markdown = readFileSync(absolute, "utf8");
+    const plan = parsePlanMarkdown(markdown, { projectId, planId });
+    this.persistPlan(workspace, plan);
+    return ImplementationPlanSchema.parse(plan);
   }
 
   async buildPlan(planId: string): Promise<PromptRefinement> {
@@ -1695,10 +2294,49 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     );
     if (!harnessRecord) {
       session = prepareManualDebugSession(session, scopeFiles);
+      const profile = this.settingsService.resolveModelProfile(workspace.settings);
+      if (profile) {
+        try {
+          const { localContext } = await this.resolveConversationContext(
+            parsedRequest.projectId,
+            parsedRequest.scope,
+            parsedRequest.bugDescription,
+          );
+          const exploration = exploreForAskQuestion(
+            workspace,
+            parsedRequest.bugDescription,
+          );
+          const hypotheses = await this.debugHypothesisService.generateHypotheses({
+            projectId: parsedRequest.projectId,
+            bugDescription: parsedRequest.bugDescription,
+            localContext,
+            profile,
+            thinkingDepth: workspace.settings.execution.thinkingDepth,
+            supplementalMarkdown: exploration.supplementalMarkdown,
+          });
+          session = {
+            ...session,
+            hypotheses,
+            updatedAt: new Date().toISOString(),
+          };
+        } catch (error) {
+          console.error("[projectos] debug hypothesis generation failed", error);
+        }
+      }
     }
     let backupByFile = new Map<string, string>();
     if (session.phase === "instrument" && scopeFiles.length > 0) {
-      const specs = buildInstrumentationSpecs(session, scopeFiles);
+      const profile = this.settingsService.resolveModelProfile(workspace.settings);
+      const specs = profile
+        ? await this.debugHypothesisService.proposeInstrumentationSpecs({
+            projectId: parsedRequest.projectId,
+            session,
+            scopeFiles,
+            workspaceRoot: workspace.workspaceRoot,
+            profile,
+            thinkingDepth: workspace.settings.execution.thinkingDepth,
+          })
+        : buildInstrumentationSpecs(session, scopeFiles);
       const applied = debugInstrumentationService.apply({
         workspaceRoot: workspace.workspaceRoot,
         sessionId: session.sessionId,
@@ -1738,7 +2376,30 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       phase: "analyze",
       updatedAt: new Date().toISOString(),
     };
-    session = chooseRootCause(session);
+    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    if (profile && collected.length > 0) {
+      try {
+        const analyzed = await this.debugHypothesisService.chooseRootCauseFromLogs({
+          projectId: stored.session.projectId,
+          session,
+          logs: collected,
+          profile,
+          thinkingDepth: workspace.settings.execution.thinkingDepth,
+        });
+        session = {
+          ...session,
+          chosenRootCauseId: analyzed.chosenRootCauseId,
+          proposedFix: analyzed.proposedFix,
+          phase: "fix",
+          updatedAt: new Date().toISOString(),
+        };
+      } catch (error) {
+        console.error("[projectos] debug root-cause analysis failed", error);
+        session = chooseRootCause(session);
+      }
+    } else {
+      session = chooseRootCause(session);
+    }
     stored.session = session;
     this.persistDebugSession(workspace, session);
     return DebugSessionSchema.parse(session);
@@ -1772,12 +2433,25 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const scope = stored.session.scope;
       const fixSummary =
         stored.session.proposedFix?.summary ?? stored.session.bugDescription;
+      const logEvidence = stored.session.logEntries
+        .slice(0, 12)
+        .map((entry) => {
+          const payload =
+            typeof entry.payload === "string"
+              ? entry.payload
+              : JSON.stringify(entry.payload);
+          return `- [${entry.hypothesisId ?? "log"}] ${payload.slice(0, 240)}`;
+        })
+        .join("\n");
       const rawPrompt = [
         "Fix the following bug in this workspace.",
         "",
         `Bug: ${stored.session.bugDescription}`,
         "",
         `Proposed fix direction: ${fixSummary}`,
+        ...(logEvidence
+          ? ["", "Runtime log evidence (bounded):", logEvidence]
+          : []),
       ].join("\n");
       const filePath = resolveDebugFixFilePath(stored.session, workspace);
       if (!filePath) {
@@ -1839,6 +2513,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
 
   async refinePrompt(request: PromptRefineRequest): Promise<PromptRefinement> {
     const workspace = this.requireLoadedWorkspace(request.projectId);
+    const memoryTurn = this.beginMemoryTurn(workspace, request.rawPrompt);
     const responseLanguage = resolveResponseLanguage(request.rawPrompt);
     const registry = this.registriesByProjectId.get(request.projectId);
     const route = pickRefinementBackend({
@@ -1874,8 +2549,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           const refinement: PromptRefinement = {
             ...refined,
             executionPolicy: workspace.settings.execution.changeExecutionPolicy,
+            ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
           };
-          this.storeRefinement(request, refinement, responseLanguage);
+          this.storeRefinement(request, refinement, responseLanguage, memoryTurn.injection);
           return refinement;
         } catch (error) {
           console.error("[projectos] model refinement failed", error);
@@ -1898,9 +2574,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       registry?.findPromptRefinement(request) ??
       createGenericPromptRefinement(request);
     const refinement: PromptRefinement = modelFallback
-      ? { ...baseRefinement, fallback: modelFallback }
-      : baseRefinement;
-    this.storeRefinement(request, refinement, responseLanguage);
+      ? {
+          ...baseRefinement,
+          fallback: modelFallback,
+          ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
+        }
+      : {
+          ...baseRefinement,
+          ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
+        };
+    this.storeRefinement(request, refinement, responseLanguage, memoryTurn.injection);
     return refinement;
   }
 
@@ -1999,6 +2682,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
                         ? "container_planner"
                         : "node_planner"
                     : "leaf_file_editor",
+                ...(stored.memoryInjection
+                  ? { memoryInjection: stored.memoryInjection }
+                  : {}),
+                ...(stored.rawPrompt ? { userPrompt: stored.rawPrompt } : {}),
               },
             );
           } catch (error) {
@@ -2031,6 +2718,33 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       "refinement_not_found",
       `No executable scenario is registered for refinement '${refinementId}'`,
     );
+  }
+
+  async cancelAgentRun(runId: string): Promise<AgentRun> {
+    const orchestratorCancelled = this.orchestrator.cancelRun(runId);
+    if (orchestratorCancelled) {
+      return cloneJson(orchestratorCancelled.run);
+    }
+
+    const registeredRun = this.registeredRunsByRunId.get(runId);
+    if (!registeredRun) {
+      throw new ProjectOSError(
+        "run_not_found",
+        `Agent run '${runId}' has not been registered`,
+      );
+    }
+
+    if (
+      registeredRun.run.status === "queued" ||
+      registeredRun.run.status === "running"
+    ) {
+      registeredRun.run = {
+        ...registeredRun.run,
+        status: "cancelled",
+        completedAt: registeredRun.run.completedAt ?? new Date().toISOString(),
+      };
+    }
+    return cloneJson(registeredRun.run);
   }
 
   async getAgentRun(runId: string): Promise<AgentRun> {
@@ -2504,10 +3218,29 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         "Verification execution is not available in this runtime",
       );
     }
-    const commandResults = await this.verificationRunner.run(
-      commands,
-      workspace.workspaceRoot,
-    );
+    let commandResults;
+    try {
+      commandResults = await this.verificationRunner.run(
+        commands,
+        workspace.workspaceRoot,
+      );
+    } catch (error) {
+      if (error instanceof ProjectOSError && error.code === "tool_policy_denied") {
+        const match = typeof error.details?.match === "string"
+          ? error.details.match
+          : undefined;
+        const tool = typeof error.details?.tool === "string"
+          ? error.details.tool
+          : "run_verification";
+        this.orchestrator.recordToolPolicyDecision(workspace, runId, {
+          tool,
+          decision: "deny",
+          reason: error.message,
+          ...(match ? { match } : {}),
+        });
+      }
+      throw error;
+    }
     return VerificationRunResultSchema.parse({
       runId,
       status: commandResults.every((result) => result.status === "passed")
@@ -4444,6 +5177,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
     this.activeGreenfieldInitializations.delete(projectId);
     this.fallbackNotices.delete(projectId);
+    this.structureScanAbortByProjectId.get(projectId)?.abort();
+    this.structureScanAbortByProjectId.delete(projectId);
+    this.structureScanProgress.clearProject(projectId);
+    this.structureScanInflight.delete(projectId);
     this.orchestrator.clearProjectRuns(projectId);
   }
 
@@ -4603,7 +5340,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     request: PromptRefineRequest,
     refinement: PromptRefinement,
     responseLanguage: ResolvedResponseLanguage,
+    memoryInjection?: MemoryInjectionSnapshot,
   ): void {
+    const previous = this.refinementsById.get(refinement.id);
+    const injection = memoryInjection ?? previous?.memoryInjection;
     this.refinementsById.set(refinement.id, {
       refinement,
       projectId: request.projectId,
@@ -4612,7 +5352,120 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         selectedFilePath: request.filePath,
       },
       responseLanguage: responseLanguage.tag,
+      rawPrompt: request.rawPrompt,
+      ...(injection
+        ? { memoryInjection: injection, memoryIndexMarkdown: injection.markdown }
+        : {}),
     });
+  }
+
+  private retrievalOptions(workspace: LoadedProjectOSWorkspace) {
+    return {
+      ...(this.agentMemoryRoot ? { memoryRoot: this.agentMemoryRoot } : {}),
+      memoryEgress: workspace.settings.retrieval?.memoryEgress === true,
+      allowExternalDocs: workspace.settings.retrieval?.externalDocs === true,
+    };
+  }
+
+  private memoryStoreFor(
+    workspace: LoadedProjectOSWorkspace,
+  ): AgentMemoryStore | null {
+    if (!this.agentMemoryRoot) return null;
+    return new AgentMemoryStore({
+      root: this.agentMemoryRoot,
+      workspaceRoot: workspace.workspaceRoot,
+    });
+  }
+
+  private currentMemoryInjection(workspace: LoadedProjectOSWorkspace): MemoryInjectionSnapshot {
+    return this.memoryStoreFor(workspace)?.injectionSnapshot()
+      ?? {
+        markdown: "",
+        hash: hashMemoryIndex(""),
+        truncated: false,
+        entryCount: 0,
+      };
+  }
+
+  private beginMemoryTurn(
+    workspace: LoadedProjectOSWorkspace,
+    message: string,
+  ): {
+    index: string;
+    injection: MemoryInjectionSnapshot;
+    notice?: import("../contracts/agent-memory.js").MemoryWriteNotice;
+  } {
+    const injection = this.currentMemoryInjection(workspace);
+    const store = this.memoryStoreFor(workspace);
+    if (!store) return { index: "", injection };
+    const command = parseExplicitMemoryCommand(message);
+    if (!command) return { index: injection.markdown, injection };
+    return { index: injection.markdown, injection, notice: store.applyCandidate(command) };
+  }
+
+  private scheduleMemoryProposal(
+    workspace: LoadedProjectOSWorkspace,
+    snapshot: import("./agent-orchestrator/index.js").MemoryProposalRunSnapshot,
+  ): void {
+    const store = this.memoryStoreFor(workspace);
+    if (!store) return;
+    const settings = store.load().settings;
+    const reason = memoryProposalSkipReason({
+      enabled: settings.enabled,
+      generateMemories: settings.generateMemories,
+      ...(snapshot.parentRunId ? { parentRunId: snapshot.parentRunId } : {}),
+      runStatus: snapshot.runStatus,
+      userText: snapshot.userPrompt,
+      usedMcp: snapshot.usedMcp,
+      verificationFailed: snapshot.verificationFailed,
+      rolledBack: snapshot.rolledBack,
+    });
+    if (reason) return;
+    const projectId = workspace.project.projectId;
+    const pending = this.memoryProposalTimers.get(projectId);
+    if (pending) clearTimeout(pending);
+    const fire = (): void => {
+      if (this.orchestrator.hasInFlightWork(projectId)) {
+        this.memoryProposalTimers.set(
+          projectId,
+          setTimeout(fire, this.memoryProposalDelayMs),
+        );
+        return;
+      }
+      this.memoryProposalTimers.delete(projectId);
+      void this.extractMemoryProposals(workspace, snapshot).catch((error: unknown) => {
+        console.error("[projectos] memory proposal failed", error);
+      });
+    };
+    this.memoryProposalTimers.set(projectId, setTimeout(fire, this.memoryProposalDelayMs));
+  }
+
+  private async extractMemoryProposals(
+    workspace: LoadedProjectOSWorkspace,
+    snapshot: import("./agent-orchestrator/index.js").MemoryProposalRunSnapshot,
+  ): Promise<void> {
+    const store = this.memoryStoreFor(workspace);
+    if (!store) return;
+    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    if (!profile) return;
+    const response = await this.modelGateway.complete(profile, {
+      projectId: workspace.project.projectId,
+      requestKind: "context_summary",
+      input: memoryProposalUserPrompt({
+        userText: snapshot.userPrompt,
+        understood: snapshot.understood,
+      }),
+      systemPrompt: memoryProposalSystemPrompt(),
+      redactionPolicy: "secrets_and_paths",
+      maxOutputTokens: 400,
+    });
+    for (const note of parseMemoryProposalOutput(response.output)) {
+      store.proposeObserved({
+        type: note.type,
+        text: note.text,
+        sourceRunId: snapshot.runId,
+      });
+    }
   }
 
   private async resolveConversationContext(
@@ -7479,6 +8332,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         `must modify the ${fixtureAuthorization.files.size} authorized file(s), received ${diff.files.length}`,
       );
     }
+    assertDiffPathsAllowedByPolicy(
+      runId,
+      diff.files.map((file) => file.path),
+      [...fixtureAuthorization.files.keys()],
+    );
     const seen = new Set<string>();
     for (const file of diff.files) {
       const authorized = fixtureAuthorization.files.get(file.path);
@@ -7613,6 +8471,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ) {
         throw diffScopeViolation(runId, "does not match its single authorized create operation");
       }
+      assertDiffPathsAllowedByPolicy(
+        runId,
+        [createAuthorization.intendedFilePath],
+        [createAuthorization.intendedFilePath],
+      );
       try {
         const parentStats = lstatSync(createAuthorization.authorization.parentCanonicalPath);
         if (
@@ -7649,6 +8512,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ) {
         throw diffScopeViolation(runId, "does not match its single authorized delete operation");
       }
+      assertDiffPathsAllowedByPolicy(
+        runId,
+        [deleteAuthorization.targetPath],
+        [deleteAuthorization.targetPath],
+      );
       let canonicalPath: string;
       let stats: ReturnType<typeof lstatSync>;
       try {
@@ -7703,6 +8571,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         `may only modify '${authorization.selectedFilePath}', not '${file.path}'`,
       );
     }
+
+    assertDiffPathsAllowedByPolicy(
+      runId,
+      [file.path],
+      [authorization.selectedFilePath],
+    );
 
     let canonicalPath: string;
     let stats: ReturnType<typeof lstatSync>;
@@ -8028,6 +8902,25 @@ function diffScopeViolation(runId: string, reason: string): ProjectOSError {
     "diff_scope_violation",
     `Generated diff for run '${runId}' violates its bound scope: ${reason}`,
   );
+}
+
+/** Path-level write gate (H0 ToolPolicy); identity checks remain in the caller. */
+function assertDiffPathsAllowedByPolicy(
+  runId: string,
+  paths: string[],
+  allowedWritePaths: string[],
+): void {
+  try {
+    assertToolAllowed(
+      { tool: "generate_diff", paths },
+      writeCapabilityContext({ allowedWritePaths }),
+    );
+  } catch (error) {
+    if (error instanceof ProjectOSError && error.code === "tool_policy_denied") {
+      throw diffScopeViolation(runId, error.message);
+    }
+    throw error;
+  }
 }
 
 function inferCreatedFileType(path: string): FileEntry["type"] {

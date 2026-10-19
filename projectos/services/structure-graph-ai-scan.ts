@@ -14,6 +14,7 @@ import {
   type ProjectGraph,
   type StructureScanMode,
 } from "../contracts/graph.js";
+import type { StructureScanProgressEvent } from "../contracts/structure-scan-progress.js";
 import type { ModelProfile } from "../contracts/settings.js";
 import { ProjectOSError } from "../errors.js";
 import {
@@ -37,9 +38,11 @@ import {
   enrichNodesForC4Shapes,
   ensureEdgeFields,
   mergeStructureGraphs,
+  pruneDanglingEdges,
   rebuildHierarchy,
   type ScanLanguage,
 } from "./structure-graph-l2.js";
+import { stepEvent } from "./structure-scan-progress-tracker.js";
 
 export const AI_SCAN_GRAPH_GENERATOR_TAG = "ai-scan";
 export const BOOTSTRAP_GRAPH_TAGS = new Set(["heuristic", "bootstrap"]);
@@ -590,6 +593,10 @@ export function parseProjectGraphFromModelOutput(
   );
 }
 
+export type StructureScanProgressReporter = (
+  event: StructureScanProgressEvent,
+) => void;
+
 export interface RunStructureGraphAiScanInput {
   workspaceRoot: string;
   projectId: string;
@@ -610,6 +617,11 @@ export interface RunStructureGraphAiScanInput {
   changedFiles?: string[];
   /** Refined graph payload for acceptRefine agent-mode. */
   refinedGraph?: unknown;
+  /** Optional progress fan-out (scan_planned is emitted by the tracker). */
+  scanId?: string;
+  onProgress?: StructureScanProgressReporter;
+  /** Abort in-flight model rounds; caller must not persist a partial graph. */
+  signal?: AbortSignal;
 }
 
 export interface StructureRefinePreparePayload {
@@ -965,27 +977,67 @@ function normalizeEdge(raw: Record<string, unknown>, index: number): FunctionalE
   );
 }
 
+function throwIfScanAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw new ProjectOSError(
+    "operation_cancelled",
+    "Structure map generation was cancelled",
+  );
+}
+
+function asScanCancellationError(error: unknown): ProjectOSError | null {
+  if (error instanceof ProjectOSError && error.code === "operation_cancelled") {
+    return error;
+  }
+  if (error instanceof Error) {
+    const name = error.name;
+    const message = error.message;
+    if (
+      name === "AbortError" ||
+      message === "Model request cancelled" ||
+      /structure map generation was cancelled/i.test(message)
+    ) {
+      return new ProjectOSError(
+        "operation_cancelled",
+        "Structure map generation was cancelled",
+        { cause: error },
+      );
+    }
+  }
+  return null;
+}
+
 async function completeJsonRound(
   input: RunStructureGraphAiScanInput,
   systemPrompt: string,
   task: string,
   extra: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const response = await input.gateway.complete(input.profile, {
-    projectId: input.projectId,
-    requestKind: "structure_graph_scan",
-    modelPreference: input.profile.id,
-    systemPrompt,
-    input: {
-      task,
-      repo: basename(input.workspaceRoot),
-      ...extra,
-    },
-    redactionPolicy: "secrets_and_paths",
-    maxOutputTokens: STRUCTURE_SCAN_MAX_OUTPUT_TOKENS,
-    thinkingDepth: "medium",
-  });
-  return parseModelJsonObject(response.output);
+  throwIfScanAborted(input.signal);
+  try {
+    const response = await input.gateway.complete(
+      input.profile,
+      {
+        projectId: input.projectId,
+        requestKind: "structure_graph_scan",
+        modelPreference: input.profile.id,
+        systemPrompt,
+        input: {
+          task,
+          repo: basename(input.workspaceRoot),
+          ...extra,
+        },
+        redactionPolicy: "secrets_and_paths",
+        maxOutputTokens: STRUCTURE_SCAN_MAX_OUTPUT_TOKENS,
+        thinkingDepth: "medium",
+      },
+      input.signal ? { signal: input.signal } : undefined,
+    );
+    throwIfScanAborted(input.signal);
+    return parseModelJsonObject(response.output);
+  } catch (error) {
+    throw asScanCancellationError(error) ?? error;
+  }
 }
 
 function attachFilesToNodes(
@@ -1076,10 +1128,14 @@ function assembleFromRounds(input: {
     assignments,
   });
 
-  const edges = [
-    ...asRecordArray(input.roundA.edges),
-    ...asRecordArray(input.roundB.edges),
-  ].map((raw, index) => normalizeEdge(raw, index));
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const edges = pruneDanglingEdges(
+    [
+      ...asRecordArray(input.roundA.edges),
+      ...asRecordArray(input.roundB.edges),
+    ].map((raw, index) => normalizeEdge(raw, index)),
+    nodeIds,
+  );
 
   const graph: ProjectGraph = {
     version: "0.5.0",
@@ -1124,6 +1180,17 @@ export async function runStructureGraphAiScan(
   input: RunStructureGraphAiScanInput,
 ): Promise<ProjectGraph> {
   const scanMode: StructureScanMode = input.scanMode ?? "regenerate";
+  const scanId = input.scanId ?? "anonymous";
+  const projectId = input.projectId;
+  const report = input.onProgress;
+  const emitStep = (
+    type: "step_started" | "step_completed" | "step_skipped",
+    stepId: Parameters<typeof stepEvent>[1]["stepId"],
+    detail?: string,
+  ): void => {
+    report?.(stepEvent(type, { scanId, projectId, stepId, detail }));
+  };
+
   if (
     !input.force &&
     scanMode === "regenerate" &&
@@ -1147,6 +1214,7 @@ export async function runStructureGraphAiScan(
   }
 
   if (scanMode === "prepareRefine") {
+    emitStep("step_started", "index_repo");
     const bundle = loadPromptBundle(input.workspaceRoot);
     const payload = buildRefinePreparePayload(input, bundle);
     // Persist prompts beside the workspace for agent consumption.
@@ -1157,6 +1225,15 @@ export async function runStructureGraphAiScan(
       `${JSON.stringify(payload, null, 2)}\n`,
       "utf8",
     );
+    emitStep("step_completed", "index_repo", "refine prompts ready");
+    for (const stepId of [
+      "map_context",
+      "map_components",
+      "link_code",
+      "validate_save",
+    ] as const) {
+      emitStep("step_skipped", stepId);
+    }
     return input.graph;
   }
 
@@ -1167,170 +1244,234 @@ export async function runStructureGraphAiScan(
         "acceptRefine requires refinedGraph",
       );
     }
-    return acceptRefinedGraph(
+    emitStep("step_started", "validate_save");
+    const accepted = acceptRefinedGraph(
       input.graph,
       input.refinedGraph,
       input.force === true,
     );
+    emitStep("step_completed", "validate_save");
+    return accepted;
   }
 
-  const language = detectReadmeLanguage(input.workspaceRoot);
-  const files = collectRepoFiles(input.workspaceRoot, 400);
-  const contentHash = computeRepoScanContentHash(input.workspaceRoot, files);
-  const cachedHash = readScanCacheHash(input.workspaceRoot);
-  const hashUnchanged = cachedHash !== null && cachedHash === contentHash;
+  let activeStep: Parameters<typeof stepEvent>[1]["stepId"] = "index_repo";
+  try {
+    emitStep("step_started", "index_repo");
+    const language = detectReadmeLanguage(input.workspaceRoot);
+    const files = collectRepoFiles(input.workspaceRoot, 400);
+    const contentHash = computeRepoScanContentHash(input.workspaceRoot, files);
+    const cachedHash = readScanCacheHash(input.workspaceRoot);
+    const hashUnchanged = cachedHash !== null && cachedHash === contentHash;
+    emitStep(
+      "step_completed",
+      "index_repo",
+      `${files.length} files · ${language === "zh-CN" ? "zh-CN" : "en"}`,
+    );
 
-  if (
-    !input.force &&
-    scanMode === "refine" &&
-    hashUnchanged &&
-    !graphNeedsAiScan(input.graph) &&
-    (!input.changedFiles || input.changedFiles.length === 0)
-  ) {
-    return input.graph;
-  }
+    if (
+      !input.force &&
+      scanMode === "refine" &&
+      hashUnchanged &&
+      !graphNeedsAiScan(input.graph) &&
+      (!input.changedFiles || input.changedFiles.length === 0)
+    ) {
+      for (const stepId of [
+        "map_context",
+        "map_components",
+        "link_code",
+        "validate_save",
+      ] as const) {
+        emitStep("step_skipped", stepId, "cache unchanged");
+      }
+      return input.graph;
+    }
 
-  const bundle = loadPromptBundle(input.workspaceRoot);
-  const repoContext = buildRepoScanContext({
-    workspaceRoot: input.workspaceRoot,
-    displayName: input.displayName,
-    graph: input.graph,
-  });
-  const fileList = files.slice(0, 180).map((path) => `- ${path}`).join("\n");
-  const changedNote =
-    input.changedFiles && input.changedFiles.length > 0
-      ? `Changed files to prioritize (keep unrelated node ids/names stable): ${input.changedFiles
-          .slice(0, 80)
-          .join(", ")}`
-      : "";
+    const bundle = loadPromptBundle(input.workspaceRoot);
+    const repoContext = buildRepoScanContext({
+      workspaceRoot: input.workspaceRoot,
+      displayName: input.displayName,
+      graph: input.graph,
+    });
+    const fileList = files.slice(0, 180).map((path) => `- ${path}`).join("\n");
+    const changedNote =
+      input.changedFiles && input.changedFiles.length > 0
+        ? `Changed files to prioritize (keep unrelated node ids/names stable): ${input.changedFiles
+            .slice(0, 80)
+            .join(", ")}`
+        : "";
 
-  const skipRoundA =
-    ((scanMode === "refine" || scanMode === "deepen") &&
-      input.graph.nodes.some((node) => node.level === "container") &&
-      (hashUnchanged || (input.changedFiles?.length ?? 0) > 0)) ||
-    (scanMode === "refine" && hashUnchanged && !input.force);
+    const skipRoundA =
+      ((scanMode === "refine" || scanMode === "deepen") &&
+        input.graph.nodes.some((node) => node.level === "container") &&
+        (hashUnchanged || (input.changedFiles?.length ?? 0) > 0)) ||
+      (scanMode === "refine" && hashUnchanged && !input.force);
 
-  let roundA: Record<string, unknown>;
-  if (skipRoundA) {
-    roundA = {
-      architecture: input.graph.architecture,
-      nodes: input.graph.nodes.filter(
-        (node) => node.level === "context" || node.level === "container",
-      ),
-      edges: input.graph.edges,
-    };
-  } else {
-    roundA = await completeJsonRound(
+    let roundA: Record<string, unknown>;
+    if (skipRoundA) {
+      emitStep("step_skipped", "map_context", "reuse existing containers");
+      roundA = {
+        architecture: input.graph.architecture,
+        nodes: input.graph.nodes.filter(
+          (node) => node.level === "context" || node.level === "container",
+        ),
+        edges: input.graph.edges,
+      };
+    } else {
+      activeStep = "map_context";
+      emitStep("step_started", "map_context");
+      roundA = await completeJsonRound(
+        input,
+        [
+          bundle,
+          "",
+          "ROUND A: emit ONLY context + container nodes (no components, no fileIndex, no fileRelations).",
+          `Language for names: ${language === "zh-CN" ? "Chinese" : "English"} (follow README).`,
+          "Include 0–4 person actors, 1 software_system, 0–4 external_system (SaaS/cloud/third-party), 2–6 containers.",
+          "Use elementType data_store (level=container) for databases/caches; short technology strings for C4 shapes:",
+          "Next.js, React, Vue, React Native, Flutter, Node.js / Express, NestJS, PostgreSQL, MySQL, MongoDB, SQLite, Redis, Kafka, RabbitMQ, SQS.",
+          "Every relationship MUST include short technology/protocol (HTTP, HTTPS, gRPC, Kafka, SQL, WebSocket, …).",
+          "Optional enrichment: notes, openQuestions (for low confidence), owners.",
+          "Nesting: containers/data_stores parentId = software_system id. Never emit layout coordinates.",
+          "Product names only — never 'android module' / 'src module'.",
+          "Return one JSON object: { architecture, nodes, edges }.",
+          changedNote,
+          `projectId: ${input.projectId}`,
+          `Repo: ${input.displayName}`,
+        ].join("\n"),
+        "structure_graph_round_a",
+        { context: repoContext, language },
+      );
+      const roundANodes = Array.isArray(roundA.nodes) ? roundA.nodes.length : 0;
+      emitStep(
+        "step_completed",
+        "map_context",
+        roundANodes > 0 ? `${roundANodes} context/container nodes` : undefined,
+      );
+    }
+
+    const deepenNote =
+      scanMode === "deepen"
+        ? `Only deepen these node ids and their children: ${(input.nodeIds ?? []).join(", ")}`
+        : scanMode === "refine"
+          ? "Keep existing node ids when possible; add missing components."
+          : "Create a full component set.";
+
+    activeStep = "map_components";
+    emitStep("step_started", "map_components");
+    const roundB = await completeJsonRound(
       input,
       [
         bundle,
         "",
-        "ROUND A: emit ONLY context + container nodes (no components, no fileIndex, no fileRelations).",
-        `Language for names: ${language === "zh-CN" ? "Chinese" : "English"} (follow README).`,
-        "Include 0–4 person actors, 1 software_system, 0–4 external_system (SaaS/cloud/third-party), 2–6 containers.",
-        "Use elementType data_store (level=container) for databases/caches; short technology strings for C4 shapes:",
-        "Next.js, React, Vue, React Native, Flutter, Node.js / Express, NestJS, PostgreSQL, MySQL, MongoDB, SQLite, Redis, Kafka, RabbitMQ, SQS.",
-        "Every relationship MUST include short technology/protocol (HTTP, HTTPS, gRPC, Kafka, SQL, WebSocket, …).",
-        "Optional enrichment: notes, openQuestions (for low confidence), owners.",
-        "Nesting: containers/data_stores parentId = software_system id. Never emit layout coordinates.",
-        "Product names only — never 'android module' / 'src module'.",
-        "Return one JSON object: { architecture, nodes, edges }.",
+        "ROUND B: emit ONLY components with pathHints. No fileIndex, no fileRelations.",
+        `Language for names: ${language === "zh-CN" ? "Chinese" : "English"}.`,
+        "Each container needs 2–6 components (about 8–20 total). Product capability names, not directory shells.",
+        "Each component: { id, name, parentId, description, summary, responsibility, layer, pathHints: string[], technology?, notes?, openQuestions?, owners? }.",
+        "pathHints must be real path prefixes from the file list (e.g. android/app/src, src/auth).",
+        "Edges between components MUST include technology/protocol when known.",
+        deepenNote,
         changedNote,
+        "Return one JSON object: { components, edges }.",
         `projectId: ${input.projectId}`,
-        `Repo: ${input.displayName}`,
       ].join("\n"),
-      "structure_graph_round_a",
-      { context: repoContext, language },
+      "structure_graph_round_b",
+      {
+        language,
+        files: fileList,
+        roundA,
+        changedFiles: input.changedFiles?.slice(0, 80) ?? [],
+        existingComponents: input.graph.nodes
+          .filter((node) => node.level === "component")
+          .map((node) => ({ id: node.id, name: node.name, parentId: node.parentId })),
+      },
     );
-  }
+    const componentCount = Array.isArray(roundB.components)
+      ? roundB.components.length
+      : Array.isArray(roundB.nodes)
+        ? roundB.nodes.length
+        : 0;
+    emitStep(
+      "step_completed",
+      "map_components",
+      componentCount > 0 ? `${componentCount} components` : undefined,
+    );
 
-  const deepenNote =
-    scanMode === "deepen"
-      ? `Only deepen these node ids and their children: ${(input.nodeIds ?? []).join(", ")}`
-      : scanMode === "refine"
-        ? "Keep existing node ids when possible; add missing components."
-        : "Create a full component set.";
-
-  const roundB = await completeJsonRound(
-    input,
-    [
-      bundle,
-      "",
-      "ROUND B: emit ONLY components with pathHints. No fileIndex, no fileRelations.",
-      `Language for names: ${language === "zh-CN" ? "Chinese" : "English"}.`,
-      "Each container needs 2–6 components (about 8–20 total). Product capability names, not directory shells.",
-      "Each component: { id, name, parentId, description, summary, responsibility, layer, pathHints: string[], technology?, notes?, openQuestions?, owners? }.",
-      "pathHints must be real path prefixes from the file list (e.g. android/app/src, src/auth).",
-      "Edges between components MUST include technology/protocol when known.",
-      deepenNote,
-      changedNote,
-      "Return one JSON object: { components, edges }.",
-      `projectId: ${input.projectId}`,
-    ].join("\n"),
-    "structure_graph_round_b",
-    {
+    activeStep = "link_code";
+    emitStep("step_started", "link_code");
+    const assembled = assembleFromRounds({
+      projectId: input.projectId,
+      projectName: input.displayName,
+      workspaceRoot: input.workspaceRoot,
       language,
-      files: fileList,
+      projectType: input.graph.projectType,
       roundA,
-      changedFiles: input.changedFiles?.slice(0, 80) ?? [],
-      existingComponents: input.graph.nodes
-        .filter((node) => node.level === "component")
-        .map((node) => ({ id: node.id, name: node.name, parentId: node.parentId })),
-    },
-  );
+      roundB,
+    });
 
-  const assembled = assembleFromRounds({
-    projectId: input.projectId,
-    projectName: input.displayName,
-    workspaceRoot: input.workspaceRoot,
-    language,
-    projectType: input.graph.projectType,
-    roundA,
-    roundB,
-  });
+    const merged = mergeStructureGraphs({
+      base: input.graph,
+      incoming: assembled,
+      mode: scanMode,
+      deepenIds: input.nodeIds,
+    });
 
-  const merged =
-    scanMode === "regenerate"
-      ? assembled
-      : mergeStructureGraphs({
-          base: input.graph,
-          incoming: assembled,
-          mode: scanMode,
-          deepenIds: input.nodeIds,
-        });
+    const enrichedNodes = enrichNodesForC4Shapes({
+      nodes: merged.nodes,
+      workspaceRoot: input.workspaceRoot,
+      files,
+    });
+    const generatedViews = synthesizeDefaultArchitectureViews(enrichedNodes, {
+      sourceKind: "ai",
+    });
+    const views = mergeArchitectureViews({
+      existing: scanMode === "regenerate" ? merged.views : (input.graph.views ?? merged.views),
+      generated: generatedViews,
+      mode: scanMode === "regenerate" ? "regenerate" : "refine",
+    });
 
-  const enrichedNodes = enrichNodesForC4Shapes({
-    nodes: merged.nodes,
-    workspaceRoot: input.workspaceRoot,
-    files,
-  });
-  const generatedViews = synthesizeDefaultArchitectureViews(enrichedNodes, {
-    sourceKind: "ai",
-  });
-  const views = mergeArchitectureViews({
-    existing: scanMode === "regenerate" ? merged.views : (input.graph.views ?? merged.views),
-    generated: generatedViews,
-    mode: scanMode === "regenerate" ? "regenerate" : "refine",
-  });
-
-  const result: ProjectGraph = {
-    ...merged,
-    version: "0.5.0",
-    authored: input.force ? false : merged.authored === true ? true : false,
-    nodes: enrichedNodes,
-    views,
-  };
-
-  const quality = assessL2GraphQuality(result, {
-    sourceFileCount: files.length,
-    language,
-  });
-  if (!quality.complete) {
-    throw new ProjectOSError(
-      "agent_orchestration_failed",
-      `L2 quality gate failed: ${quality.reasons.join(",")}`,
+    const result: ProjectGraph = {
+      ...merged,
+      version: "0.5.0",
+      authored: input.force ? false : merged.authored === true ? true : false,
+      nodes: enrichedNodes,
+      views,
+    };
+    emitStep(
+      "step_completed",
+      "link_code",
+      `${result.fileIndex.length} files · ${result.fileRelations.length} relations`,
     );
+
+    activeStep = "validate_save";
+    emitStep("step_started", "validate_save");
+    const quality = assessL2GraphQuality(result, {
+      sourceFileCount: files.length,
+      language,
+    });
+    if (!quality.complete) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        `L2 quality gate failed: ${quality.reasons.join(",")}`,
+      );
+    }
+    writeScanCacheHash(input.workspaceRoot, contentHash);
+    emitStep("step_completed", "validate_save", "quality OK");
+    return result;
+  } catch (error) {
+    const cancelled = asScanCancellationError(error);
+    if (cancelled) {
+      throw cancelled;
+    }
+    const message =
+      error instanceof Error ? error.message : String(error);
+    report?.({
+      type: "step_failed",
+      scanId,
+      projectId,
+      timestamp: new Date().toISOString(),
+      stepId: activeStep,
+      message,
+    });
+    throw error;
   }
-  writeScanCacheHash(input.workspaceRoot, contentHash);
-  return result;
 }

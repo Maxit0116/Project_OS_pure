@@ -11,6 +11,7 @@ export type ProjectOSErrorCode =
   | "run_not_found"
   | "diff_not_found"
   | "harness_record_not_found"
+  | "tool_policy_denied"
   | "map_artifact_not_found"
   | "map_stack_not_found"
   | "map_stack_type_mismatch"
@@ -66,12 +67,15 @@ export type ProjectOSErrorCode =
   | "github_oauth_not_configured"
   | "git_sync_failed"
   | "git_conflict"
+  | "git_worktree_failed"
+  | "git_context_unavailable"
   | "pr_not_found"
   | "daily_brief_not_found"
   | "annotation_not_found"
   | "spatial_pin_invalid"
   | "loop_graph_not_found"
-  | "loop_graph_invalid";
+  | "loop_graph_invalid"
+  | "operation_cancelled";
 
 export interface ProjectOSErrorOptions {
   cause?: unknown;

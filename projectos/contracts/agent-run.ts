@@ -13,6 +13,7 @@ export const AgentRunStatusSchema = z.enum([
   "awaiting_review",
   "complete",
   "error",
+  "cancelled",
 ]);
 
 export const AgentRunScopeSchema = z.discriminatedUnion("kind", [

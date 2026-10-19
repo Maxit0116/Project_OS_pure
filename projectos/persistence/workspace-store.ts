@@ -63,8 +63,10 @@ import { resolveContainedPath } from "../utils/path-containment.js";
 import {
   DemoResetSchema,
   DemoScenarioSchema,
+  isEdgeTopologyFixtureError,
   type DemoReset,
   type DemoScenario,
+  type FixtureValidationError,
   validateWorkspaceFixtures,
 } from "../validation/index.js";
 
@@ -110,7 +112,17 @@ export class ProjectOSWorkspaceStore {
 
   loadWorkspace(workspaceRoot: string): LoadedProjectOSWorkspace {
     const resolvedWorkspaceRoot = validateWorkspacePath(workspaceRoot);
-    const validation = validateWorkspaceFixtures(resolvedWorkspaceRoot);
+    let validation = validateWorkspaceFixtures(resolvedWorkspaceRoot);
+    if (!validation.ok) {
+      const repaired = tryRepairDanglingGraphEdges(
+        resolvedWorkspaceRoot,
+        validation.errors,
+        this.persistencePrimitives,
+      );
+      if (repaired) {
+        validation = validateWorkspaceFixtures(resolvedWorkspaceRoot);
+      }
+    }
     if (!validation.ok) {
       throw new ProjectOSError(
         "invalid_workspace_fixtures",
@@ -417,6 +429,75 @@ function writeDurableJsonReplacing(
     `${JSON.stringify(value, null, 2)}\n`,
     primitives,
   );
+}
+
+/**
+ * Best-effort open repair: drop empty / dangling / self-loop edges from raw
+ * graph.json so a previously corrupted regenerate cannot brick the workspace.
+ */
+function tryRepairDanglingGraphEdges(
+  workspaceRoot: string,
+  errors: FixtureValidationError[],
+  primitives: WorkspacePersistencePrimitives,
+): boolean {
+  const edgeRelated = errors.some(isEdgeTopologyFixtureError);
+  if (!edgeRelated) return false;
+
+  const graphPath = join(workspaceRoot, ".projectos", "graph.json");
+  if (!existsSync(graphPath)) return false;
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(graphPath, "utf8")) as unknown;
+  } catch {
+    return false;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const root = raw as Record<string, unknown>;
+  if (!Array.isArray(root.nodes) || !Array.isArray(root.edges)) return false;
+
+  const nodeIds = new Set(
+    root.nodes
+      .filter(
+        (node): node is Record<string, unknown> =>
+          !!node && typeof node === "object" && !Array.isArray(node),
+      )
+      .map((node) => (typeof node.id === "string" ? node.id : ""))
+      .filter((id) => id.length > 0),
+  );
+
+  const before = root.edges.length;
+  const seenIds = new Set<string>();
+  root.edges = root.edges.filter((edge) => {
+    if (!edge || typeof edge !== "object" || Array.isArray(edge)) return false;
+    const record = edge as Record<string, unknown>;
+    const source = typeof record.source === "string" ? record.source.trim() : "";
+    const target = typeof record.target === "string" ? record.target.trim() : "";
+    if (
+      source.length === 0 ||
+      target.length === 0 ||
+      source === target ||
+      !nodeIds.has(source) ||
+      !nodeIds.has(target)
+    ) {
+      return false;
+    }
+    const id = typeof record.id === "string" ? record.id : "";
+    if (id.length > 0) {
+      if (seenIds.has(id)) return false;
+      seenIds.add(id);
+    }
+    return true;
+  });
+
+  if (root.edges.length === before) return false;
+
+  try {
+    writeDurableJsonReplacing(graphPath, root, primitives);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function deriveProjectDescription(

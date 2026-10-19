@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { MemoryWriteNoticeSchema } from "./agent-memory.js";
 import { ConfidenceSchema } from "./confidence.js";
 import { ModelImagePartSchema } from "./model-gateway.js";
 import { ChangeExecutionPolicySchema } from "./settings.js";
@@ -45,6 +46,7 @@ export const PromptRefinementSchema = z
     executionPolicy: ChangeExecutionPolicySchema.optional(),
     fallback: PromptRefinementFallbackSchema.optional(),
     sourcePlanId: z.string().min(1).optional(),
+    memoryWrite: MemoryWriteNoticeSchema.optional(),
   })
   .strict();
 

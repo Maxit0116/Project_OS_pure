@@ -50,6 +50,7 @@ export interface RunEventStoreSlice {
   highlightedFilePaths: string[]
   diffReady: boolean
   messages: ChatMessage[]
+  conversationCheckpoints?: ConversationCheckpointDraft[]
   applyResult?: ApplyResult | null
   verificationResult?: VerificationRunResult | null
 }
@@ -224,15 +225,20 @@ export function reduceRunEventState(
 
 export function isAgentActionEvent(event: AgentRunEvent): event is AgentActionEvent {
   return event.type === 'context_assembled' ||
+    event.type === 'context_attached' ||
     event.type === 'file_read' ||
     event.type === 'model_request' ||
+    event.type === 'mcp_tool_call' ||
+    event.type === 'tool_policy_decision' ||
     event.type === 'edit_plan_created' ||
     event.type === 'proposal_validation_result' ||
     event.type === 'batch_validation_result' ||
     event.type === 'decision_summary' ||
     event.type === 'diff_proposed' ||
     event.type === 'apply_result' ||
-    event.type === 'verification_result'
+    event.type === 'verification_result' ||
+    event.type === 'initialization_tranche_progress' ||
+    event.type === 'memory_index_bound'
 }
 
 export function isAgentDelegationEvent(event: AgentRunEvent): event is AgentDelegationEvent {
@@ -257,6 +263,63 @@ export function applyRunEventsToState(
     patch = { ...patch, ...eventPatch }
   }
   return patch
+}
+
+export interface ConversationCheckpointDraft {
+  id: string
+  messageId: string
+  backupId: string
+  runId: string
+  createdAt: string
+  filesChanged: string[]
+}
+
+/**
+ * Conversation checkpoint for a successful apply that carries a backup.
+ * Skips when the same run+backup is already recorded (manual apply path).
+ */
+export function checkpointPatchForAppliedResult(
+  state: {
+    locale: Locale
+    messages: ChatMessage[]
+    conversationCheckpoints?: readonly ConversationCheckpointDraft[]
+  },
+  event: Extract<AgentActionEvent, { type: 'apply_result' }>,
+  ids?: { checkpointId?: string; messageId?: string; createdAt?: string },
+): { conversationCheckpoints: ConversationCheckpointDraft[]; messages: ChatMessage[] } | undefined {
+  if (event.payload.outcome !== 'applied' || !event.payload.backupId) return undefined
+  const existing = state.conversationCheckpoints ?? []
+  if (existing.some((item) => item.runId === event.runId && item.backupId === event.payload.backupId)) {
+    return undefined
+  }
+  const checkpointId = ids?.checkpointId ?? `ckpt_${event.eventId}`
+  const messageId = ids?.messageId ?? `ckpt_msg_${event.eventId}`
+  const checkpoint: ConversationCheckpointDraft = {
+    id: checkpointId,
+    messageId,
+    backupId: event.payload.backupId,
+    runId: event.runId,
+    createdAt: ids?.createdAt ?? event.timestamp,
+    filesChanged: event.payload.filesWritten,
+  }
+  const alreadyMessaged = state.messages.some((message) => message.id === messageId)
+  return {
+    conversationCheckpoints: [...existing, checkpoint],
+    messages: alreadyMessaged
+      ? state.messages
+      : [
+          ...state.messages,
+          {
+            id: messageId,
+            role: 'system',
+            content: getStoreMessage(state.locale, 'chat.checkpointCreated', {
+              count: event.payload.filesWritten.length,
+            }),
+            timestamp: checkpoint.createdAt,
+            checkpointId,
+          },
+        ],
+  }
 }
 
 export function handleRunEvent(
@@ -301,6 +364,11 @@ export function handleRunEvent(
   }
 
   if (event.type === 'apply_result' && event.payload.outcome === 'applied') {
+    const checkpoint = checkpointPatchForAppliedResult(get(), event)
+    if (checkpoint) {
+      set(checkpoint)
+      useChatSessionStore.getState().schedulePersist()
+    }
     const { client, project, pushToast, locale } = get()
     pushToast({
       type: 'success',

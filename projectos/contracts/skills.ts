@@ -10,6 +10,10 @@ export const SkillDescriptorSchema = z
     paths: z.array(z.string().min(1)).optional(),
     disableModelInvocation: z.boolean().optional(),
     scopeRoot: z.string().min(1).optional(),
+    /** When true, skill can be pinned as a Custom Mode (DevPlan M2.C). */
+    usableAsMode: z.boolean().optional(),
+    icon: z.string().min(1).optional(),
+    color: z.string().min(1).optional(),
   })
   .strict();
 

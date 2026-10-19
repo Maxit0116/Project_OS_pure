@@ -862,9 +862,25 @@ export function sanitizeLegacyProjectGraph(
       return { ...picked, linkedFiles };
     });
 
+  const nodeIdSet = new Set(
+    nodes
+      .map((node) => (typeof node.id === "string" ? node.id : ""))
+      .filter((id) => id.length > 0),
+  );
   const edges = edgesIn
     .filter((edge): edge is Record<string, unknown> => !!edge && typeof edge === "object")
-    .map((edge) => pickDefined(edge, EDGE_KEYS));
+    .map((edge) => pickDefined(edge, EDGE_KEYS))
+    .filter((edge) => {
+      const source = typeof edge.source === "string" ? edge.source.trim() : "";
+      const target = typeof edge.target === "string" ? edge.target.trim() : "";
+      return (
+        source.length > 0 &&
+        target.length > 0 &&
+        source !== target &&
+        nodeIdSet.has(source) &&
+        nodeIdSet.has(target)
+      );
+    });
 
   const fileIndex = fileIndexIn
     .filter(

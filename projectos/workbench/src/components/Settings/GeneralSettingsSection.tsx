@@ -1,11 +1,13 @@
 import { useI18n } from '../../i18n'
-import { useWorkbenchStore } from '../../state/workbenchStore'
+import { useWorkbenchStore, type ChatModeSwitchPreference } from '../../state/workbenchStore'
 import PresentationModeToggle from './PresentationModeToggle'
 import styles from './SettingsPanel.module.css'
 
 export default function GeneralSettingsSection() {
   const settings = useWorkbenchStore((s) => s.settings)
   const updateSettings = useWorkbenchStore((s) => s.updateSettings)
+  const chatModeSwitch = useWorkbenchStore((s) => s.chatModeSwitch)
+  const setChatModeSwitch = useWorkbenchStore((s) => s.setChatModeSwitch)
   const { ts } = useI18n()
 
   if (!settings) return null
@@ -54,6 +56,20 @@ export default function GeneralSettingsSection() {
         >
           <option value="automatic">{ts('settings.changePolicyAutomatic')}</option>
           <option value="review_first">{ts('settings.changePolicyReviewFirst')}</option>
+        </select>
+      </label>
+      <label className={styles.field}>
+        <span className={styles.label}>{ts('settings.chatModeSwitch')}</span>
+        <span className={styles.help}>{ts('settings.chatModeSwitchDesc')}</span>
+        <select
+          className={styles.select}
+          value={chatModeSwitch}
+          onChange={(e) =>
+            setChatModeSwitch(e.target.value as ChatModeSwitchPreference)
+          }
+        >
+          <option value="new_session">{ts('settings.chatModeSwitchNewSession')}</option>
+          <option value="same_session">{ts('settings.chatModeSwitchSameSession')}</option>
         </select>
       </label>
     </section>

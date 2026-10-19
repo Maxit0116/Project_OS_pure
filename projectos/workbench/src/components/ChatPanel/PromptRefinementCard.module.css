@@ -108,6 +108,26 @@
   margin-top: 12px;
 }
 
+.editArea,
+.editInput {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  color: var(--color-text-primary);
+  background: var(--color-bg-muted);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+
+.editInput {
+  resize: none;
+}
+
 .confirm {
   padding: 8px 14px;
   font-size: var(--font-size-sm);

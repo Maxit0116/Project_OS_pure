@@ -1,5 +1,7 @@
 import type { DiffFileStat } from '../components/PendingChangesDrawer/diffFileStats'
 
+export type { DiffFileStat }
+
 export type PendingChangesDrawerUndoMode = 'dismiss' | 'restore'
 
 export type PendingChangesDrawerSlice = {
@@ -10,7 +12,7 @@ export type PendingChangesDrawerSlice = {
 }
 
 export function selectPendingChangesDrawerVisible(state: {
-  chatMode: 'ask' | 'change'
+  chatMode: 'ask' | 'change' | 'plan' | 'debug' | 'anchored'
   generatedDiff: { files: unknown[] } | null
   activeRunId: string | null
   pendingChangesDrawerDismissedRunId: string | null

@@ -43,6 +43,7 @@ import {
   type TransactionGroupBackupMetadata,
 } from "../contracts/write-transaction.js";
 import { ProjectOSError } from "../errors.js";
+import { appendRetrievalChangeFeed } from "./retrieval/code-index.js";
 import { resolveContainedPath } from "../utils/path-containment.js";
 import { withProjectWriteTransactionLock } from "./project-write-transaction-lock.js";
 
@@ -330,6 +331,22 @@ export class RecoverableWriteTransactionKernel {
       }
       compensateAcceptance = typeof compensation === "function" ? compensation : undefined;
       updateJournal(journalPath, journal, { state: "committed" });
+      try {
+        appendRetrievalChangeFeed(
+          request.projectOSRoot,
+          prepared.flatMap((plan) => {
+            if (plan.authorization.operation === "internal") return [];
+            return [{
+              path: pathOf(plan),
+              ...(plan.afterSha256 ? { sha256: plan.afterSha256 } : {}),
+              ...(plan.authorization.operation === "delete" ? { deleted: true } : {}),
+            }];
+          }),
+        );
+      } catch {
+        // A feed failure must not roll back a commit. Retrieval still
+        // refuses quotes whose file hash no longer matches.
+      }
       return committed;
     } catch (error) {
       for (const plan of prepared) removeFileIfPresent(plan.temporaryPath);

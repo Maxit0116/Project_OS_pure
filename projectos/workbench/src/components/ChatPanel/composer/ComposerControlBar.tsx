@@ -7,7 +7,11 @@ import { GlassLens } from '../../Glass'
 import Button from '../../ui/Button'
 import Chip from '../../ui/Chip'
 import { VoiceInputDock } from '../VoiceInputControls'
-import { CHAT_MODE_VISUALS, CHAT_MODES } from './chatModeVisuals'
+import {
+  CHAT_MODE_VISUALS,
+  CHAT_MODES,
+  chatModeHelpKey,
+} from './chatModeVisuals'
 import styles from './ComposerControlBar.module.css'
 
 const THINKING_DEPTHS: ThinkingDepth[] = ['off', 'low', 'medium', 'high']
@@ -34,6 +38,9 @@ interface ComposerControlBarProps {
   chatMode: ChatMode
   onChatModeChange: (mode: ChatMode) => void
   submitDisabled: boolean
+  /** When true, show Stop instead of (or beside) Send. */
+  stopVisible?: boolean
+  onStop?: () => void
   voice: VoiceInputDockProps
 }
 
@@ -41,6 +48,8 @@ export default function ComposerControlBar({
   chatMode,
   onChatModeChange,
   submitDisabled,
+  stopVisible = false,
+  onStop,
   voice,
 }: ComposerControlBarProps) {
   const settings = useWorkbenchStore((s) => s.settings)
@@ -93,6 +102,9 @@ export default function ComposerControlBar({
 
   const currentModeVisual = CHAT_MODE_VISUALS[chatMode]
   const CurrentModeIcon = currentModeVisual.icon
+  const capabilityLabel = currentModeVisual.canEdit
+    ? ts('chat.modeCanEdit')
+    : ts('chat.modeReadOnly')
 
   return (
     <div className={styles.footer} ref={barRef}>
@@ -109,6 +121,9 @@ export default function ComposerControlBar({
             <CurrentModeIcon size={14} strokeWidth={2} className={styles.chipModeIcon} aria-hidden />
             <span className={styles.chipModeLabel}>
               {ts(`chat.${chatMode}Mode` as 'chat.askMode')}
+            </span>
+            <span className={styles.chipCapability} aria-hidden>
+              {capabilityLabel}
             </span>
             <span aria-hidden>▾</span>
           </Chip>
@@ -134,8 +149,16 @@ export default function ComposerControlBar({
                       }}
                     >
                       <ModeIcon size={16} strokeWidth={2} className={styles.modeIcon} aria-hidden />
-                      <span className={styles.modeLabel}>
-                        {ts(`chat.${mode}Mode` as 'chat.askMode')}
+                      <span className={styles.modeMenuCopy}>
+                        <span className={styles.modeLabel}>
+                          {ts(`chat.${mode}Mode` as 'chat.askMode')}
+                        </span>
+                        <span className={styles.modeHelp}>
+                          {ts(chatModeHelpKey(mode))}
+                        </span>
+                        <span className={styles.modeCapability}>
+                          {visual.canEdit ? ts('chat.modeCanEdit') : ts('chat.modeReadOnly')}
+                        </span>
                       </span>
                     </button>
                   )
@@ -212,9 +235,15 @@ export default function ComposerControlBar({
 
       <div className={styles.rightCluster}>
         <VoiceInputDock {...voice} inline />
-        <Button type="submit" size="sm" disabled={submitDisabled}>
-          {ts('common.send')}
-        </Button>
+        {stopVisible ? (
+          <Button type="button" size="sm" variant="secondary" onClick={() => onStop?.()}>
+            {ts('chat.stop')}
+          </Button>
+        ) : (
+          <Button type="submit" size="sm" disabled={submitDisabled}>
+            {ts('common.send')}
+          </Button>
+        )}
       </div>
     </div>
   )

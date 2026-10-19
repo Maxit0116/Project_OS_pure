@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { GitBranch } from 'lucide-react'
+import { CustomModeIcon } from './customModeIcons'
 import { canSubmitAgentPrompt, useWorkbenchStore } from '../../state/workbenchStore'
 import { useChatSessionStore } from '../../state/chatSessionStore'
 import {
@@ -29,6 +30,7 @@ import {
   parseSpatialPinChatContent,
 } from './spatialPinChatDisplay'
 import LoopAuthoringBanner from '../LoopGraph/LoopAuthoringBanner'
+import { shouldSuggestPlanMode } from './suggestPlanMode'
 import styles from './ChatPanel.module.css'
 
 export default function ChatPanel() {
@@ -49,6 +51,29 @@ export default function ChatPanel() {
   const confirmPlanBuild = useWorkbenchStore((s) => s.confirmPlanBuild)
   const submitPlanClarification = useWorkbenchStore((s) => s.submitPlanClarification)
   const revisePlan = useWorkbenchStore((s) => s.revisePlan)
+  const savePlanEdits = useWorkbenchStore((s) => s.savePlanEdits)
+  const savePlanToWorkspace = useWorkbenchStore((s) => s.savePlanToWorkspace)
+  const returnToPlan = useWorkbenchStore((s) => s.returnToPlan)
+  const lastBuiltPlan = useWorkbenchStore((s) => s.lastBuiltPlan)
+  const activeCustomModeSkillId = useWorkbenchStore((s) => s.activeCustomModeSkillId)
+  const setActiveCustomModeSkillId = useWorkbenchStore((s) => s.setActiveCustomModeSkillId)
+  const exitCustomMode = useWorkbenchStore((s) => s.exitCustomMode)
+  const loadPlanFromWorkspace = useWorkbenchStore((s) => s.loadPlanFromWorkspace)
+  const listWorkspacePlans = useWorkbenchStore((s) => s.listWorkspacePlans)
+  const restoreConversationCheckpoint = useWorkbenchStore((s) => s.restoreConversationCheckpoint)
+  const client = useWorkbenchStore((s) => s.client)
+  const project = useWorkbenchStore((s) => s.project)
+  const globalAgentActive = useWorkbenchStore((s) => s.globalAgentActive)
+  const [suggestPlanDismissed, setSuggestPlanDismissed] = useState(false)
+  const [customModeMeta, setCustomModeMeta] = useState<{
+    name: string
+    icon?: string
+    color?: string
+  } | null>(null)
+  const [planSavingEdits, setPlanSavingEdits] = useState(false)
+  const [workspacePlans, setWorkspacePlans] = useState<
+    Array<{ id: string; objective: string; updatedAt?: string }>
+  >([])
   const submitDebugRepro = useWorkbenchStore((s) => s.submitDebugRepro)
   const confirmDebugFix = useWorkbenchStore((s) => s.confirmDebugFix)
   const markDebugFixed = useWorkbenchStore((s) => s.markDebugFixed)
@@ -56,9 +81,12 @@ export default function ChatPanel() {
   const refineLoading = useWorkbenchStore((s) => s.refineLoading)
   const flowStatus = useWorkbenchStore((s) => s.flowStatus)
   const chatMode = useWorkbenchStore((s) => s.chatMode)
+  const selectedNodeId = useWorkbenchStore((s) => s.selectedNodeId)
   const selectedFilePath = useWorkbenchStore((s) => s.selectedFilePath)
   const setChatMode = useWorkbenchStore((s) => s.setChatMode)
+  const stopAgentRun = useWorkbenchStore((s) => s.stopAgentRun)
   const canSubmit = useWorkbenchStore(canSubmitAgentPrompt)
+  const agentStopVisible = flowStatus === 'running' || refineLoading
   const locale = useWorkbenchStore((s) => s.locale)
   const diffFileStats = useWorkbenchStore((s) => s.diffFileStats)
   const pendingChangesDrawerExpanded = useWorkbenchStore((s) => s.pendingChangesDrawerExpanded)
@@ -178,9 +206,36 @@ export default function ChatPanel() {
   const formatTime = (iso: string) =>
     new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 
+  useEffect(() => {
+    if (!activeCustomModeSkillId || !client || !project) {
+      setCustomModeMeta(null)
+      return
+    }
+    let cancelled = false
+    void client.listSkills(project.projectId).then((result) => {
+      if (cancelled) return
+      const skill = result.skills.find((item) => item.id === activeCustomModeSkillId)
+      setCustomModeMeta({
+        name: skill?.name ?? activeCustomModeSkillId,
+        ...(skill?.icon ? { icon: skill.icon } : {}),
+        ...(skill?.color ? { color: skill.color } : {}),
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [activeCustomModeSkillId, client, project])
+
+  const showGlobalAgentHint =
+    (globalAgentActive || (!selectedNodeId && !selectedFilePath)) &&
+    (chatMode === 'change' || chatMode === 'plan')
+
   return (
     <div className={styles.panel}>
       <div className={styles.messages} ref={messagesRef}>
+        {showGlobalAgentHint ? (
+          <div className={styles.suggestPlanBanner}>{ts('chat.globalAgentEmptyHint')}</div>
+        ) : null}
         {inheritedDigest ? <InheritedSessionCard digest={inheritedDigest} /> : null}
         {messages.map((msg) => {
           const spatialPin = msg.role === 'user' && parseSpatialPinChatContent(msg.content)
@@ -203,10 +258,65 @@ export default function ChatPanel() {
                   />
                 ) : null}
                 <div className={styles.bubble} title={formatTime(msg.timestamp)}>
+                  {msg.explorationTrace ? (
+                    <details className={styles.explorationTrace}>
+                      <summary>
+                        {msg.explorationTrace.readPaths.length > 0
+                          ? ts('chat.exploredFiles', {
+                              count: msg.explorationTrace.readPaths.length,
+                            })
+                          : ts('chat.exploredFilesEmpty')}
+                      </summary>
+                      <p className={styles.explorationHint}>
+                        {ts('chat.exploredRoundsHint', {
+                          rounds:
+                            msg.explorationTrace.roundsUsed ??
+                            msg.explorationTrace.maxRounds ??
+                            1,
+                        })}
+                      </p>
+                      <ul>
+                        {msg.explorationTrace.readPaths.map((path) => (
+                          <li key={path}>{path}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
+                  {msg.retrievalSummary?.searched ? (
+                    <details className={styles.explorationTrace}>
+                      <summary>
+                        {msg.retrievalSummary.hitCount > 0
+                          ? ts('chat.retrievalHits', {
+                              count: msg.retrievalSummary.hitCount,
+                            })
+                          : ts('chat.retrievalEmpty')}
+                      </summary>
+                      <p className={styles.explorationHint}>{ts('chat.retrievalAdvisory')}</p>
+                      {msg.retrievalSummary.includesComposedGraph ? (
+                        <p className={styles.explorationHint}>
+                          {ts('chat.retrievalComposedGraph')}
+                        </p>
+                      ) : null}
+                      <ul>
+                        {msg.retrievalSummary.paths.map((path) => (
+                          <li key={path}>{path}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
                   <ChatMessageContent message={msg} />
                 </div>
-                {(showCopy || showBranch) && (
+                {(showCopy || showBranch || msg.checkpointId) && (
                   <div className={styles.messageActions}>
+                    {msg.checkpointId ? (
+                      <button
+                        type="button"
+                        className={styles.copyButton}
+                        onClick={() => void restoreConversationCheckpoint(msg.checkpointId!)}
+                      >
+                        {ts('chat.restoreCheckpoint')}
+                      </button>
+                    ) : null}
                     {showBranch ? (
                       <button
                         type="button"
@@ -241,8 +351,82 @@ export default function ChatPanel() {
             submittingClarification={refineLoading}
             onBuild={() => void confirmPlanBuild()}
             onRevise={() => revisePlan()}
+            savingEdits={planSavingEdits}
+            onSaveEdits={(patch) => {
+              setPlanSavingEdits(true)
+              void savePlanEdits(patch).finally(() => setPlanSavingEdits(false))
+            }}
+            onSaveToWorkspace={() => void savePlanToWorkspace()}
+            onLoadFromWorkspace={() => void loadPlanFromWorkspace(pendingPlan.id)}
+            workspacePlans={workspacePlans}
+            onBrowseWorkspacePlans={() => {
+              void listWorkspacePlans().then((plans) => {
+                setWorkspacePlans(plans)
+                if (plans.length === 0) {
+                  useWorkbenchStore.getState().pushToast({
+                    type: 'info',
+                    message: ts('plan.noWorkspacePlans'),
+                    autoDismiss: 2500,
+                  })
+                }
+              })
+            }}
+            onSelectWorkspacePlan={(planId) => {
+              void loadPlanFromWorkspace(planId)
+              setWorkspacePlans([])
+            }}
             onSubmitClarification={(answers) => void submitPlanClarification(answers)}
           />
+        )}
+        {chatMode === 'plan' && !pendingPlan && (
+          <div className={styles.returnToPlanBar}>
+            <button
+              type="button"
+              className={styles.returnToPlanBtn}
+              onClick={() => {
+                void listWorkspacePlans().then((plans) => {
+                  setWorkspacePlans(plans)
+                  if (plans.length === 0) {
+                    useWorkbenchStore.getState().pushToast({
+                      type: 'info',
+                      message: ts('plan.noWorkspacePlans'),
+                      autoDismiss: 2500,
+                    })
+                  }
+                })
+              }}
+            >
+              {ts('plan.openSavedPlan')}
+            </button>
+            {workspacePlans.length > 0 ? (
+              <select
+                className={styles.planSelect}
+                defaultValue=""
+                onChange={(event) => {
+                  const value = event.target.value
+                  if (!value) return
+                  void loadPlanFromWorkspace(value)
+                  setWorkspacePlans([])
+                }}
+              >
+                <option value="" disabled>
+                  {ts('plan.selectWorkspacePlanPlaceholder')}
+                </option>
+                {workspacePlans.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.objective}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+          </div>
+        )}
+        {lastBuiltPlan && chatMode === 'change' && !pendingPlan && (
+          <div className={styles.returnToPlanBar}>
+            <button type="button" className={styles.returnToPlanBtn} onClick={() => returnToPlan()}>
+              {ts('plan.returnToPlan')}
+            </button>
+          </div>
         )}
         {chatMode === 'debug' && debugSession && (
           <DebugSessionPanel
@@ -253,6 +437,46 @@ export default function ChatPanel() {
             onMarkFixed={() => void markDebugFixed()}
           />
         )}
+        {chatMode === 'debug' && debugSession && !refineLoading && flowStatus !== 'running' ? (
+          <div className={styles.debugChatCta}>
+            {debugSession.phase === 'hypothesize' ? (
+              <button
+                type="button"
+                className={styles.debugCtaButton}
+                onClick={() => void submitDebugRepro()}
+              >
+                {ts('debug.chatCtaContinue')}
+              </button>
+            ) : null}
+            {debugSession.phase === 'reproduce' ? (
+              <button
+                type="button"
+                className={styles.debugCtaButton}
+                onClick={() => void submitDebugRepro()}
+              >
+                {ts('debug.chatCtaReproduce')}
+              </button>
+            ) : null}
+            {debugSession.phase === 'fix' ? (
+              <button
+                type="button"
+                className={styles.debugCtaButton}
+                onClick={() => void confirmDebugFix()}
+              >
+                {ts('debug.chatCtaApplyFix')}
+              </button>
+            ) : null}
+            {debugSession.phase === 'verify' ? (
+              <button
+                type="button"
+                className={styles.debugCtaButton}
+                onClick={() => void markDebugFixed()}
+              >
+                {ts('debug.chatCtaMarkFixed')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {refineLoading && (
           <AgentActivityIndicator
             className={styles.refiningStatus}
@@ -279,6 +503,58 @@ export default function ChatPanel() {
 
         <div className={styles.inputStack}>
           <LoopAuthoringBanner />
+          {activeCustomModeSkillId ? (
+            <div
+              className={styles.customModeChip}
+              style={
+                customModeMeta?.color
+                  ? { borderColor: customModeMeta.color, ['--custom-mode-accent' as string]: customModeMeta.color }
+                  : undefined
+              }
+            >
+              <CustomModeIcon
+                icon={customModeMeta?.icon}
+                className={styles.customModeIcon}
+                color={customModeMeta?.color}
+              />
+              <span>
+                {ts('chat.customModeActive', {
+                  name: customModeMeta?.name ?? activeCustomModeSkillId,
+                })}
+              </span>
+              <div className={styles.suggestPlanActions}>
+                <button
+                  type="button"
+                  className={styles.returnToPlanBtn}
+                  onClick={() => exitCustomMode()}
+                >
+                  {ts('chat.exitCustomMode')}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {!suggestPlanDismissed &&
+          shouldSuggestPlanMode(composerDraft.text, chatMode) ? (
+            <div className={styles.suggestPlanBanner}>
+              <span>{ts('plan.suggestBanner')}</span>
+              <div className={styles.suggestPlanActions}>
+                <button
+                  type="button"
+                  className={styles.returnToPlanBtn}
+                  onClick={() => void setChatMode('plan')}
+                >
+                  {ts('plan.suggestBannerAction')}
+                </button>
+                <button
+                  type="button"
+                  className={styles.returnToPlanBtn}
+                  onClick={() => setSuggestPlanDismissed(true)}
+                >
+                  {ts('plan.suggestBannerDismiss')}
+                </button>
+              </div>
+            </div>
+          ) : null}
           <VoiceInputErrorBanner
             errorKey={voiceState.error}
             onDismiss={dismissError}
@@ -287,11 +563,14 @@ export default function ChatPanel() {
           <PromptComposer
             draft={composerDraft}
             onDraftChange={setComposerDraft}
-            onModeSelect={setChatMode}
-            onChatModeChange={setChatMode}
-            disabled={refineLoading}
+            onModeSelect={(mode) => void setChatMode(mode)}
+            onChatModeChange={(mode) => void setChatMode(mode)}
+            onUseAsCustomMode={(skillId) => setActiveCustomModeSkillId(skillId)}
+            disabled={refineLoading && flowStatus !== 'running'}
             chatMode={chatMode}
             submitDisabled={!composerDraft.text.trim() || refineLoading || !canSubmit}
+            stopVisible={agentStopVisible}
+            onStop={() => void stopAgentRun()}
             voice={{
               isRecording,
               isTranscribing,
@@ -328,7 +607,7 @@ export default function ChatPanel() {
               }
               if (event.key === 'Tab' && event.shiftKey) {
                 event.preventDefault()
-                setChatMode(cycleChatMode(chatMode))
+                void setChatMode(cycleChatMode(chatMode))
                 return
               }
               if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {

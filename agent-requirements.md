@@ -1,6 +1,10 @@
 # Agent Requirements & Roadmap
 
 > Source of truth for the graph-scoped agent work. Status tags: **[DONE]** shipped · **[NEXT]** the slice we build now · **[PLANNED]** locked, later · **[DEFERRED]** own future phase. Human vision + this session's locked decisions kept verbatim at the bottom.
+>
+> **Harness 总地图（对标 Cursor / Devin / Codex、波次 H0–H4）**：[`docs/features/Agent-Harness-Dev-Plan.md`](docs/features/Agent-Harness-Dev-Plan.md)。本文仍是 leaf pipeline / 委托 / 事务不变量的权威；Harness 文档负责运行时骨架与大厂差距排期，不平行改写 Part 5。  
+> **Memory 开发计划（学习笔记，不是 Phase G）**：[`docs/features/Agent-Memory-Dev-Plan.md`](docs/features/Agent-Memory-Dev-Plan.md)。G 与 Part 7 的排期仍以本文为准。  
+> **RAG 开发计划（共享检索，不是向量库替代功能图）**：[`docs/features/RAG-Dev-Plan.md`](docs/features/RAG-Dev-Plan.md)。Part 7 的约束仍以本文为准。
 
 ## Vision in one line
 A **layered agent system**: a **Global agent** above the architecture graph decomposes intent into **plans** and delegates down the graph (产品全景 → 系统组成 → 功能模块/node → file). **Only leaf file-agents write.** Every change is **visible** (honest step trace) and **reversible** (undo). A non-coder never has to confirm — an **agent** validates and the change is undoable.
@@ -73,7 +77,7 @@ Add/delete nodes, wiring, file create/delete, and initialization are a **genuine
 
 ---
 
-## Part 3 — Modify-flow redesign  [NEXT] (item "D")
+## Part 3 — Modify-flow redesign  [DONE core — D1–D3 live] (item "D")
 
 ### 3.1 The theater problem — fix first
 The current live sequence `understand → retrieve_context → inspect_files → plan → generate_diff → verify` is partly **fabricated**:
@@ -95,7 +99,7 @@ The current live sequence `understand → retrieve_context → inspect_files →
 Drop `understand`/`retrieve_context`/`inspect_files` as separate steps (they overlap "locate/plan" or merely summarize the same bundle). Slice mapping: **D1** ships phases 1 + 3 + 6 honestly around today's single generate call (apply/verify keep `awaiting_review`); **D2** adds phase 2; **D3** adds phase 4 + automatic apply (phase 5). See Part 4.
 
 ### 3.3 Route decision
-- **Route ① — orchestrated visible pipeline [NEXT].** Fixed sequence, any model, deterministic; "tool calls" are our real orchestrated operations shown honestly.
+- **Route ① — orchestrated visible pipeline [DONE].** Fixed sequence, any model, deterministic; "tool calls" are our real orchestrated operations shown honestly. *(Live Change: D1–D3 in `runLiveModelChangePipeline`.)*
 - **Route ② — model-directed tool loop [DEFERRED].** Model chooses read/grep/edit, we execute + loop. Needs reliable function-calling; K2 can't do stable structured output, let alone a loop. Adds schema-compliance, read-scope, termination, context-growth, recovery failure modes.
 - **Later middle-ground (not first slice):** a bounded context-expansion request — the locate call may return `needsMoreContext: [path]`, and the server permits **one** additional read **only from already-authorized `allowedReadPaths`**. Limited model-directed retrieval without a general tool loop.
 
@@ -118,13 +122,13 @@ The honest phase sequence is safety/lifecycle architecture, not cosmetic configu
 
 ## Part 4 — Roadmap (Codex writes, I verify; slice-by-slice with gates)
 
-- **[NEXT] D1 — Remove theater, truthful boundaries (no new model call).** Built-in live Change only. Replace the configurable generic loop with real lifecycle steps around operations that already occur (context prepared → generate proposal); wrap the existing `generateDiff()` in the real generate step instead of a fake `generate_diff` step + separate call; remove the fake model verify step (`not_run` stays honest, no "Verify ✓" shown). Decide + test the `stepSequence` compatibility policy (§3.6). Preserve fixture/scenario/external streams exactly. Apply/verify keep today's `awaiting_review` behavior. Independently valuable: fewer calls, lower latency, honest UI, clean baseline.
-- **[PLANNED] D2 — Real locate plan + phase-linked observability.** Add the private `FileEditPlan`; add the real locate call (fail-closed, retry once, no echo of rejected output); feed the validated plan into the existing search/replace generation; add `phaseId` to typed action events; add model stages `locate`/`edit`; add sanitized `edit_plan_created`; interleave actions under phases in Agent Flow; route provider reasoning through a **separate transient channel** (never the persisting `emit()` path).
-- **[PLANNED] D3 — Default automatic leaf flow.** Add execution policy `automatic | review_first`; default non-coder mode to `automatic`; keep refinement confirmation only in `review_first`; add the independent agent proposal-validation phase (§3.2 phase 4); apply through the existing bound single-file authorization; run configured verification; report passed/failed/not-run; expose undo prominently; **never auto-undo on failed verification**. Gives E a truthful, reversible leaf primitive to orchestrate.
-- **[PLANNED] E — node→file planner (2 layers).** Node agent plans → per-file **child runs** (§2.5 authorization) → **agent batch validation** (§2.4) → **transaction-group commit (a)** → task-level undo. This is the "core" node-first planner.
-- **[PLANNED] F — recurse upward.** container/context/Global plan→delegate. `AgentRun` gains a **scope kind + parent/root run + role + delegation** contract (it is flat today — no hierarchy); non-leaf runs emit `plan_created / task_delegated / child_run_started / child_run_completed / plan_completed | plan_partially_completed`. Shared visual vocabulary with leaf runs, distinct domain objects.
+- **[DONE] D1 — Remove theater, truthful boundaries (no new model call).** Built-in live Change only. Replace the configurable generic loop with real lifecycle steps around operations that already occur (context prepared → generate proposal); wrap the existing `generateDiff()` in the real generate step instead of a fake `generate_diff` step + separate call; remove the fake model verify step (`not_run` stays honest, no "Verify ✓" shown). Decide + test the `stepSequence` compatibility policy (§3.6). Preserve fixture/scenario/external streams exactly. Apply/verify keep today's `awaiting_review` behavior. Independently valuable: fewer calls, lower latency, honest UI, clean baseline. *(Live path: `runLiveModelChangePipeline`; fixture/scenario streams unchanged.)*
+- **[DONE] D2 — Real locate plan + phase-linked observability.** Add the private `FileEditPlan`; add the real locate call (fail-closed, retry once, no echo of rejected output); feed the validated plan into the existing search/replace generation; add `phaseId` to typed action events; add model stages `locate`/`edit`; add sanitized `edit_plan_created`; interleave actions under phases in Agent Flow; route provider reasoning through a **separate transient channel** (never the persisting `emit()` path). *(Shipped inside live Change; polish/UI interleave may continue.)*
+- **[DONE] D3 — Default automatic leaf flow.** Add execution policy `automatic | review_first`; default non-coder mode to `automatic`; keep refinement confirmation only in `review_first`; add the independent agent proposal-validation phase (§3.2 phase 4); apply through the existing bound single-file authorization; run configured verification; report passed/failed/not-run; expose undo prominently; **never auto-undo on failed verification**. Gives E a truthful, reversible leaf primitive to orchestrate. *(Live path implements automatic + validate_proposal + apply/verify.)*
+- **[DONE] E — node→file planner (2 layers).** Component `node-plan` → per-file **child runs** (§2.5) → **agent batch validation** (`validate_delegated_batch`; single-file may synthesize; multi-file attempts the model first, synthesizes only after retry failure) → **transaction-group commit (a)** → task-level undo via one `backupId`. *(Live: `runNodePlanningPipeline` + `commitDelegatedTransactionGroup`.)*
+- **[DONE] F — recurse upward.** container/context/Global plan→delegate. `AgentRun` carries **scope kind + parent/root run + role**; non-leaf runs emit `plan_created / task_delegated / child_run_started / child_run_completed / plan_completed | plan_partially_completed`. Whole-tree batch + one commit for deep trees. *(Live: `runHierarchyPlanningPipeline` / `commitWholeTreeTransactionGroup`.)*
 - **[PLANNED] S0–S6 — file create/delete + graph mutation.** See Part 6.
-- **[DEFERRED] G — persistent memory agents (phase A).** Per-node persistent agents; retained records become eligible source material for agent-native memory (§2.2). The ephemeral-but-audited model stands until this ships.
+- **[DEFERRED] G — persistent memory agents (phase A).** Per-node persistent agents; retained records become eligible source material for agent-native memory (§2.2). The ephemeral-but-audited model stands until this ships. Cross-session personal notes (not per-node agents) are sequenced in [`docs/features/Agent-Memory-Dev-Plan.md`](docs/features/Agent-Memory-Dev-Plan.md) and must not be treated as G.
 - **[DEFERRED]** Model-directed tool loop (route ②); agent-profile CRUD; full analyzer reconciliation service; shadow-workspace pre-publication verification (delete "integrity" beyond impact-aware).
 
 ---
@@ -166,7 +170,7 @@ Corrections folded in from review: "create without graph" is dishonest (orphan f
 
 ## Part 7 — Shared retrieval / RAG for every agent  [FUTURE — design notes only, not scheduled]
 
-Human vision: keep the per-agent deterministic LocalContextBundle (node/file/global), and add a large **shared retrieval database** every agent can draw on (RAG) to pull in relevant context beyond its bounded scope. Recorded here after a Claude↔Codex design pass; **do not implement yet**.
+Human vision: keep the per-agent deterministic LocalContextBundle (node/file/global), and add a large **shared retrieval database** every agent can draw on (RAG) to pull in relevant context beyond its bounded scope. Recorded here after a Claude↔Codex design pass; **do not implement yet**. Implementation sequence, corpora, and broker contract: [`docs/features/RAG-Dev-Plan.md`](docs/features/RAG-Dev-Plan.md). Personal markdown memory (index injection, admission state) is a separate, smaller track: [`docs/features/Agent-Memory-Dev-Plan.md`](docs/features/Agent-Memory-Dev-Plan.md). That track does not authorize a vector broker; when this Part is built, only `corroborated` memory entries are eligible corpus.
 
 **Verdict: workable and desirable — but the design object is a provenance-aware retrieval BROKER + immutable snapshots, not "a vector store agents query."**
 

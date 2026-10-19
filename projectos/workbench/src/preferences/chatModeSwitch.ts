@@ -1,0 +1,21 @@
+export type ChatModeSwitchPreference = 'new_session' | 'same_session'
+
+const MODE_SWITCH_KEY = 'projectos_chat_mode_switch'
+
+export function loadChatModeSwitchPreference(): ChatModeSwitchPreference {
+  try {
+    const stored = localStorage.getItem(MODE_SWITCH_KEY)
+    if (stored === 'same_session' || stored === 'new_session') return stored
+  } catch {
+    /* ignore */
+  }
+  return 'new_session'
+}
+
+export function saveChatModeSwitchPreference(value: ChatModeSwitchPreference) {
+  try {
+    localStorage.setItem(MODE_SWITCH_KEY, value)
+  } catch {
+    /* ignore */
+  }
+}

@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   CurrentWorkStateSchema,
   type CurrentWorkState,
@@ -147,6 +149,7 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
         options.workspace ?? createMockSampleWorkspace(),
       ),
       runEventPersistence: options.runEventPersistence ?? "memory",
+      agentMemoryRoot: join(tmpdir(), "projectos-mock-agent-memory"),
       ...(options.localContextAssembler
         ? { localContextAssembler: options.localContextAssembler }
         : {}),

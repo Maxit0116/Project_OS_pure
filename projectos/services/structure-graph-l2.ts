@@ -495,6 +495,19 @@ export function assessL2GraphQuality(
     if (!hasCodeEdge) reasons.push("missing_code_layer_edges");
   }
 
+  const nodeIds = new Set(graph.nodes.map((node) => node.id));
+  const invalidEdges = (graph.edges ?? []).filter(
+    (edge) =>
+      edge.source.trim().length === 0 ||
+      edge.target.trim().length === 0 ||
+      edge.source === edge.target ||
+      !nodeIds.has(edge.source) ||
+      !nodeIds.has(edge.target),
+  );
+  if (invalidEdges.length > 0) {
+    reasons.push(`invalid_edges:${invalidEdges.length}`);
+  }
+
   return { complete: reasons.length === 0, reasons };
 }
 
@@ -551,13 +564,37 @@ export function defaultArchitecture(language: ScanLanguage): ProjectArchitecture
   };
 }
 
+/**
+ * Drop edges that would fail workspace fixture validation: empty endpoints,
+ * unknown node ids, or self-loops. AI rounds occasionally omit source/target.
+ */
+export function pruneDanglingEdges(
+  edges: FunctionalEdge[],
+  nodeIds: ReadonlySet<string>,
+): FunctionalEdge[] {
+  return edges.filter(
+    (edge) =>
+      edge.source.trim().length > 0 &&
+      edge.target.trim().length > 0 &&
+      edge.source !== edge.target &&
+      nodeIds.has(edge.source) &&
+      nodeIds.has(edge.target),
+  );
+}
+
 export function mergeStructureGraphs(input: {
   base: ProjectGraph;
   incoming: ProjectGraph;
   mode: StructureScanMode;
   deepenIds?: string[];
 }): ProjectGraph {
-  if (input.mode === "regenerate") return input.incoming;
+  if (input.mode === "regenerate") {
+    const nodeIds = new Set(input.incoming.nodes.map((node) => node.id));
+    return {
+      ...input.incoming,
+      edges: pruneDanglingEdges(input.incoming.edges, nodeIds),
+    };
+  }
 
   const deepen = new Set(input.deepenIds ?? []);
   const keepNode = (node: FunctionalNode): boolean => {
@@ -608,9 +645,10 @@ export function mergeStructureGraphs(input: {
 
   const nodes = [...nodesById.values()];
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const edgesById = new Map(input.base.edges.map((edge) => [edge.id, edge]));
-  for (const edge of input.incoming.edges) {
-    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
+  const edgesById = new Map(
+    pruneDanglingEdges(input.base.edges, nodeIds).map((edge) => [edge.id, edge]),
+  );
+  for (const edge of pruneDanglingEdges(input.incoming.edges, nodeIds)) {
     const existing = edgesById.get(edge.id);
     if (!existing || preferIncoming(existing.sourceKind, edge.sourceKind)) {
       edgesById.set(edge.id, edge);

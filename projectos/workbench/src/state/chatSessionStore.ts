@@ -112,6 +112,8 @@ interface ChatSessionStore {
     chatMode?: ChatMode
     draftInput?: string
     activate?: boolean
+    /** Provisional title (e.g. mode name when switching modes). */
+    title?: string
   }) => Promise<string>
   persistActiveSession: () => Promise<void>
   schedulePersist: () => void
@@ -208,6 +210,9 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
     agentFlowSubject: hydrated.agentFlowSubject,
     flowStatus: hydrated.flowStatus,
     activeRunId: hydrated.activeRunId,
+    activeCustomModeSkillId: hydrated.activeCustomModeSkillId,
+    customModePreviousChatMode: hydrated.customModePreviousChatMode,
+    conversationCheckpoints: hydrated.conversationCheckpoints,
     flowSteps: [],
     flowActions: [],
     flowDelegationEvents: [],
@@ -496,7 +501,13 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   createSession: async (options = {}) => {
-    const { seedWelcome = true, chatMode = 'ask', draftInput = '', activate = true } = options
+    const {
+      seedWelcome = true,
+      chatMode = 'ask',
+      draftInput = '',
+      activate = true,
+      title = '',
+    } = options
     await get().persistActiveSession()
 
     const { client, project, locale } = useWorkbenchStore.getState()
@@ -508,7 +519,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       version: '0.2.0',
       head: {
         id: sessionId,
-        title: '',
+        title,
         createdAt: now,
         lastUpdatedAt: now,
         chatMode,

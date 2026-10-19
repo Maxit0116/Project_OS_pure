@@ -20,6 +20,10 @@ import type { VerificationRunResult } from "../contracts/exec-command.js";
 import type { VerificationCommandApprovalStatus } from "../contracts/verification-command-approval.js";
 import type { AgentRunEvent, AgentTransientTrace } from "../contracts/events.js";
 import type { ProjectGraph, StructureScanOptions } from "../contracts/graph.js";
+import type {
+  StructureScanProgress,
+  StructureScanProgressEvent,
+} from "../contracts/structure-scan-progress.js";
 import type { HarnessRecord } from "../contracts/harness.js";
 import type {
   CreatePlanRequest,
@@ -46,6 +50,18 @@ import type {
   UpdateMapArtifactPatch,
 } from "../contracts/map-content.js";
 import type { ListSkillsResult, SkillContent } from "../contracts/skills.js";
+import type { AgentHarnessConfig } from "../contracts/agent-harness-config.js";
+import type {
+  AgentMemoryDocument,
+  MemoryAdmissionState,
+  MemoryCandidate,
+  MemorySettingsPatch,
+} from "../contracts/agent-memory.js";
+import type {
+  AgentWorktreeRecord,
+  CreateAgentWorktreeOptions,
+  MergeAgentWorktreeOptions,
+} from "../contracts/agent-worktree.js";
 import type {
   LocationHint,
   ResolvedSpatialPin,
@@ -77,6 +93,23 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   analyzeWorkspace(projectId: string, options?: StructureScanOptions): Promise<ProjectGraph> {
     return this.transport.analyzeWorkspace(projectId, options);
+  }
+
+  getStructureScanProgress(
+    projectId: string,
+  ): Promise<StructureScanProgress | null> {
+    return this.transport.getStructureScanProgress(projectId);
+  }
+
+  streamStructureScan(
+    projectId: string,
+    cb: (event: StructureScanProgressEvent) => void,
+  ): Disposable {
+    return this.transport.streamStructureScan(projectId, cb);
+  }
+
+  cancelStructureScan(projectId: string): Promise<boolean> {
+    return this.transport.cancelStructureScan(projectId);
   }
 
   getProjectGraph(projectId: string): Promise<ProjectGraph> {
@@ -246,12 +279,106 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.getSkill(projectId, skillId);
   }
 
+  listAgentWorktrees(projectId: string): Promise<AgentWorktreeRecord[]> {
+    return this.transport.listAgentWorktrees(projectId);
+  }
+
+  createAgentWorktree(
+    projectId: string,
+    options?: CreateAgentWorktreeOptions,
+  ): Promise<AgentWorktreeRecord> {
+    return this.transport.createAgentWorktree(projectId, options);
+  }
+
+  mergeAgentWorktree(
+    projectId: string,
+    options: MergeAgentWorktreeOptions,
+  ): Promise<AgentWorktreeRecord> {
+    return this.transport.mergeAgentWorktree(projectId, options);
+  }
+
+  removeAgentWorktree(
+    projectId: string,
+    worktreeId: string,
+    options?: { deleteBranch?: boolean },
+  ): Promise<AgentWorktreeRecord> {
+    return this.transport.removeAgentWorktree(projectId, worktreeId, options);
+  }
+
+  getAgentWorktreeDiff(projectId: string, worktreeId: string): Promise<string> {
+    return this.transport.getAgentWorktreeDiff(projectId, worktreeId);
+  }
+
+  getAgentHarnessConfig(projectId: string): Promise<AgentHarnessConfig> {
+    return this.transport.getAgentHarnessConfig(projectId);
+  }
+
+  saveAgentHarnessConfig(
+    projectId: string,
+    config: AgentHarnessConfig,
+  ): Promise<AgentHarnessConfig> {
+    return this.transport.saveAgentHarnessConfig(projectId, config);
+  }
+
+  getAgentMemory(projectId: string): Promise<AgentMemoryDocument> {
+    return this.transport.getAgentMemory(projectId);
+  }
+
+  getAgentMemoryTopic(projectId: string, topicFile: string): Promise<string> {
+    return this.transport.getAgentMemoryTopic(projectId, topicFile);
+  }
+
+  saveAgentMemorySettings(
+    projectId: string,
+    patch: MemorySettingsPatch,
+  ): Promise<AgentMemoryDocument> {
+    return this.transport.saveAgentMemorySettings(projectId, patch);
+  }
+
+  submitAgentMemory(
+    projectId: string,
+    candidate: MemoryCandidate,
+  ): Promise<AgentMemoryDocument> {
+    return this.transport.submitAgentMemory(projectId, candidate);
+  }
+
+  setAgentMemoryEntryState(
+    projectId: string,
+    text: string,
+    state: MemoryAdmissionState,
+  ): Promise<AgentMemoryDocument> {
+    return this.transport.setAgentMemoryEntryState(projectId, text, state);
+  }
+
+  deleteAgentMemoryEntry(
+    projectId: string,
+    text: string,
+  ): Promise<AgentMemoryDocument> {
+    return this.transport.deleteAgentMemoryEntry(projectId, text);
+  }
+
+  consolidateAgentMemory(projectId: string): Promise<AgentMemoryDocument> {
+    return this.transport.consolidateAgentMemory(projectId);
+  }
+
   createPlan(request: CreatePlanRequest): Promise<ImplementationPlan> {
     return this.transport.createPlan(request);
   }
 
   updatePlan(request: UpdatePlanRequest): Promise<ImplementationPlan> {
     return this.transport.updatePlan(request);
+  }
+
+  savePlanToWorkspace(planId: string): Promise<{ path: string }> {
+    return this.transport.savePlanToWorkspace(planId);
+  }
+
+  listWorkspacePlans(projectId: string): Promise<import("../contracts/implementation-plan.js").WorkspacePlanSummary[]> {
+    return this.transport.listWorkspacePlans(projectId);
+  }
+
+  loadPlanFromWorkspace(projectId: string, planId: string): Promise<ImplementationPlan> {
+    return this.transport.loadPlanFromWorkspace(projectId, planId);
   }
 
   buildPlan(planId: string): Promise<PromptRefinement> {
@@ -264,6 +391,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   confirmExecution(refinementId: string): Promise<AgentRun> {
     return this.transport.confirmExecution(refinementId);
+  }
+
+  cancelAgentRun(runId: string): Promise<AgentRun> {
+    return this.transport.cancelAgentRun(runId);
   }
 
   getAgentRun(runId: string): Promise<AgentRun> {

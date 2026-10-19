@@ -65,6 +65,30 @@ export default function AskTraceView({ trace }: { trace: LatestAskTrace }) {
         </ul>
       </section>
 
+      {trace.result.retrievalSummary?.searched ? (
+        <section className={styles.card} data-ask-trace="retrieval">
+          <h3>
+            {trace.result.retrievalSummary.hitCount > 0
+              ? ts('chat.retrievalHits', { count: trace.result.retrievalSummary.hitCount })
+              : ts('chat.retrievalEmpty')}
+          </h3>
+          <p className={styles.contextMeta}>{ts('chat.retrievalAdvisory')}</p>
+          {trace.result.retrievalSummary.includesComposedGraph ? (
+            <p className={styles.contextMeta}>{ts('chat.retrievalComposedGraph')}</p>
+          ) : null}
+          <ul className={styles.files}>
+            {trace.result.retrievalSummary.paths.map((path) => (
+              <li key={path}><code>{path}</code></li>
+            ))}
+          </ul>
+          {trace.result.retrievalSummary.omissions.map((omission) => (
+            <p key={omission.reason} className={styles.contextMeta}>
+              {omission.reason} · {omission.count}
+            </p>
+          ))}
+        </section>
+      ) : null}
+
       {reasoning && (
         <details className={styles.card} data-ask-trace="reasoning">
           <summary>{ts('agentFlow.askReasoningTitle')}</summary>

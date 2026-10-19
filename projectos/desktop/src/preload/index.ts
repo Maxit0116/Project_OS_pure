@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AgentRunEvent, AgentTransientTrace } from '../../../contracts/events.js'
+import type { StructureScanProgressEvent } from '../../../contracts/structure-scan-progress.js'
 import type { Disposable } from '../../../contracts/api.js'
 import type {
   AgentAnswerResult,
@@ -14,6 +15,10 @@ import type { ProjectDescription } from '../../../contracts/project-description.
 import type { AppMenuState } from '../../../contracts/app-menu.js'
 type RunEventListener = (runId: string, event: AgentRunEvent) => void
 type RunTransientTraceListener = (runId: string, trace: AgentTransientTrace) => void
+type StructureScanEventListener = (
+  projectId: string,
+  event: StructureScanProgressEvent,
+) => void
 type TerminalDataListener = (terminalId: string, data: string) => void
 type TerminalExitListener = (terminalId: string, exitCode: number) => void
 type ServicesChangedListener = (ports: ServicePort[]) => void
@@ -22,6 +27,7 @@ type FocusChangeListener = (focused: boolean) => void
 type DiffReadyActivatedListener = (payload: { destination: 'ask' | 'diff'; runIds: string[] }) => void
 const runEventListeners = new Set<RunEventListener>()
 const runTransientTraceListeners = new Set<RunTransientTraceListener>()
+const structureScanEventListeners = new Set<StructureScanEventListener>()
 const terminalDataListeners = new Set<TerminalDataListener>()
 const terminalExitListeners = new Set<TerminalExitListener>()
 const servicesChangedListeners = new Set<ServicesChangedListener>()
@@ -39,6 +45,15 @@ ipcRenderer.on('projectos:runTransientTrace', (_event, runId: string, trace: Age
     listener(runId, trace)
   }
 })
+
+ipcRenderer.on(
+  'projectos:structureScanEvent',
+  (_event, projectId: string, scanEvent: StructureScanProgressEvent) => {
+    for (const listener of structureScanEventListeners) {
+      listener(projectId, scanEvent)
+    }
+  },
+)
 
 ipcRenderer.on('terminal:data', (_event, terminalId: string, data: string) => {
   for (const listener of terminalDataListeners) {
@@ -135,6 +150,24 @@ const api = {
   },
   streamUnsubscribe(runId: string): Promise<void> {
     return ipcRenderer.invoke('projectos:streamUnsubscribe', runId).then(() => undefined)
+  },
+  onStructureScanEvent(listener: StructureScanEventListener): Disposable {
+    structureScanEventListeners.add(listener)
+    return {
+      dispose() {
+        structureScanEventListeners.delete(listener)
+      },
+    }
+  },
+  structureScanSubscribe(projectId: string): Promise<void> {
+    return ipcRenderer
+      .invoke('projectos:structureScanSubscribe', projectId)
+      .then(() => undefined)
+  },
+  structureScanUnsubscribe(projectId: string): Promise<void> {
+    return ipcRenderer
+      .invoke('projectos:structureScanUnsubscribe', projectId)
+      .then(() => undefined)
   },
   consumeFallbackNotice(projectId: string): Promise<string | undefined> {
     return ipcRenderer.invoke('projectos:consumeFallbackNotice', projectId)

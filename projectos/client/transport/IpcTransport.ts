@@ -10,6 +10,10 @@ import type { VerificationRunResult } from "../../contracts/exec-command.js";
 import type { VerificationCommandApprovalStatus } from "../../contracts/verification-command-approval.js";
 import type { AgentRunEvent, AgentTransientTrace } from "../../contracts/events.js";
 import type { ProjectGraph, StructureScanOptions } from "../../contracts/graph.js";
+import type {
+  StructureScanProgress,
+  StructureScanProgressEvent,
+} from "../../contracts/structure-scan-progress.js";
 import type { HarnessRecord } from "../../contracts/harness.js";
 import type {
   CreatePlanRequest,
@@ -46,6 +50,18 @@ import type {
   ChatSessionRecord,
 } from "../../contracts/chat-session.js";
 import type { ListSkillsResult, SkillContent } from "../../contracts/skills.js";
+import type { AgentHarnessConfig } from "../../contracts/agent-harness-config.js";
+import type {
+  AgentMemoryDocument,
+  MemoryAdmissionState,
+  MemoryCandidate,
+  MemorySettingsPatch,
+} from "../../contracts/agent-memory.js";
+import type {
+  AgentWorktreeRecord,
+  CreateAgentWorktreeOptions,
+  MergeAgentWorktreeOptions,
+} from "../../contracts/agent-worktree.js";
 import type {
   LocationHint,
   ResolvedSpatialPin,
@@ -173,6 +189,47 @@ export class IpcTransport implements ApiTransport {
 
   analyzeWorkspace(projectId: string, options?: StructureScanOptions): Promise<ProjectGraph> {
     return this.invoke("analyzeWorkspace", projectId, options ?? { mode: "regenerate" });
+  }
+
+  getStructureScanProgress(
+    projectId: string,
+  ): Promise<StructureScanProgress | null> {
+    return this.invoke("getStructureScanProgress", projectId);
+  }
+
+  streamStructureScan(
+    projectId: string,
+    cb: (event: StructureScanProgressEvent) => void,
+  ): Disposable {
+    const bridge = getBridge();
+    let disposed = false;
+
+    const listener = (eventProjectId: string, event: StructureScanProgressEvent) => {
+      if (!disposed && eventProjectId === projectId) {
+        cb(event);
+      }
+    };
+
+    const eventDisposable = bridge.onStructureScanEvent(listener);
+    void bridge.structureScanSubscribe(projectId).catch((error: unknown) => {
+      this.handleAsyncError("structureScanSubscribe", error);
+    });
+
+    const handleAsyncError = this.handleAsyncError.bind(this);
+
+    return {
+      dispose() {
+        disposed = true;
+        eventDisposable.dispose();
+        void bridge.structureScanUnsubscribe(projectId).catch((error: unknown) => {
+          handleAsyncError("structureScanUnsubscribe", error);
+        });
+      },
+    };
+  }
+
+  cancelStructureScan(projectId: string): Promise<boolean> {
+    return this.invoke("cancelStructureScan", projectId);
   }
 
   getProjectGraph(projectId: string): Promise<ProjectGraph> {
@@ -342,12 +399,111 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("getSkill", projectId, skillId);
   }
 
+  listAgentWorktrees(projectId: string): Promise<AgentWorktreeRecord[]> {
+    return this.invoke("listAgentWorktrees", projectId);
+  }
+
+  createAgentWorktree(
+    projectId: string,
+    options: CreateAgentWorktreeOptions = {},
+  ): Promise<AgentWorktreeRecord> {
+    return this.invoke("createAgentWorktree", projectId, options ?? {});
+  }
+
+  mergeAgentWorktree(
+    projectId: string,
+    options: MergeAgentWorktreeOptions,
+  ): Promise<AgentWorktreeRecord> {
+    return this.invoke("mergeAgentWorktree", projectId, options);
+  }
+
+  removeAgentWorktree(
+    projectId: string,
+    worktreeId: string,
+    options: { deleteBranch?: boolean } = {},
+  ): Promise<AgentWorktreeRecord> {
+    return this.invoke(
+      "removeAgentWorktree",
+      projectId,
+      worktreeId,
+      options ?? {},
+    );
+  }
+
+  getAgentWorktreeDiff(projectId: string, worktreeId: string): Promise<string> {
+    return this.invoke("getAgentWorktreeDiff", projectId, worktreeId);
+  }
+
+  getAgentHarnessConfig(projectId: string): Promise<AgentHarnessConfig> {
+    return this.invoke("getAgentHarnessConfig", projectId);
+  }
+
+  saveAgentHarnessConfig(
+    projectId: string,
+    config: AgentHarnessConfig,
+  ): Promise<AgentHarnessConfig> {
+    return this.invoke("saveAgentHarnessConfig", projectId, config);
+  }
+
+  getAgentMemory(projectId: string): Promise<AgentMemoryDocument> {
+    return this.invoke("getAgentMemory", projectId);
+  }
+
+  getAgentMemoryTopic(projectId: string, topicFile: string): Promise<string> {
+    return this.invoke("getAgentMemoryTopic", projectId, topicFile);
+  }
+
+  saveAgentMemorySettings(
+    projectId: string,
+    patch: MemorySettingsPatch,
+  ): Promise<AgentMemoryDocument> {
+    return this.invoke("saveAgentMemorySettings", projectId, patch);
+  }
+
+  submitAgentMemory(
+    projectId: string,
+    candidate: MemoryCandidate,
+  ): Promise<AgentMemoryDocument> {
+    return this.invoke("submitAgentMemory", projectId, candidate);
+  }
+
+  setAgentMemoryEntryState(
+    projectId: string,
+    text: string,
+    state: MemoryAdmissionState,
+  ): Promise<AgentMemoryDocument> {
+    return this.invoke("setAgentMemoryEntryState", projectId, text, state);
+  }
+
+  deleteAgentMemoryEntry(
+    projectId: string,
+    text: string,
+  ): Promise<AgentMemoryDocument> {
+    return this.invoke("deleteAgentMemoryEntry", projectId, text);
+  }
+
+  consolidateAgentMemory(projectId: string): Promise<AgentMemoryDocument> {
+    return this.invoke("consolidateAgentMemory", projectId);
+  }
+
   createPlan(request: CreatePlanRequest): Promise<ImplementationPlan> {
     return this.invoke("createPlan", request);
   }
 
   updatePlan(request: UpdatePlanRequest): Promise<ImplementationPlan> {
     return this.invoke("updatePlan", request);
+  }
+
+  savePlanToWorkspace(planId: string): Promise<{ path: string }> {
+    return this.invoke("savePlanToWorkspace", planId);
+  }
+
+  listWorkspacePlans(projectId: string): Promise<import("../../contracts/implementation-plan.js").WorkspacePlanSummary[]> {
+    return this.invoke("listWorkspacePlans", projectId);
+  }
+
+  loadPlanFromWorkspace(projectId: string, planId: string): Promise<ImplementationPlan> {
+    return this.invoke("loadPlanFromWorkspace", projectId, planId);
   }
 
   buildPlan(planId: string): Promise<PromptRefinement> {
@@ -360,6 +516,10 @@ export class IpcTransport implements ApiTransport {
 
   confirmExecution(refinementId: string): Promise<AgentRun> {
     return this.invoke("confirmExecution", refinementId);
+  }
+
+  cancelAgentRun(runId: string): Promise<AgentRun> {
+    return this.invoke("cancelAgentRun", runId);
   }
 
   getAgentRun(runId: string): Promise<AgentRun> {

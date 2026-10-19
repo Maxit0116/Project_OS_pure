@@ -55,6 +55,8 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
   const latestAskTrace = useWorkbenchStore((s) => s.latestAskTrace)
   const latestPlanTrace = useWorkbenchStore((s) => s.latestPlanTrace)
   const debugSession = useWorkbenchStore((s) => s.debugSession)
+  const stopAgentRun = useWorkbenchStore((s) => s.stopAgentRun)
+  const refineLoading = useWorkbenchStore((s) => s.refineLoading)
   const { ts } = useI18n()
   const timelineRef = useRef<HTMLDivElement>(null)
   const prevStepCount = useRef(steps.length)
@@ -177,9 +179,21 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
     <div className={styles.panel}>
       <div className={styles.header}>
         <h2>{ts('agentFlow.title')}</h2>
-        <span className={styles.status}>
-          {ts(`agentFlow.status.${status}` as 'agentFlow.status.running')}
-        </span>
+        <div className={styles.headerActions}>
+          <span className={styles.status}>
+            {ts(`agentFlow.status.${status}` as 'agentFlow.status.running')}
+          </span>
+          {status === 'running' || refineLoading ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => void stopAgentRun()}
+            >
+              {ts('chat.stop')}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <TabBar
@@ -344,6 +358,9 @@ export function DelegatedRunTree({
         </div>
         <span>{plan.objective}</span>
       </header>
+      {delegated.length === 0 && (
+        <p className={styles.emptyDelegation}>{ts('agentFlow.delegationEmpty')}</p>
+      )}
       <div role="group" className={styles.delegatedChildren}>
         {delegated.map((event) => (
           <DelegatedRunNode
@@ -422,7 +439,9 @@ function DelegatedRunNode({
             <span>{scopeLabel(ts, scopeKind)}</span>
           </span>
         </div>
-        <span>{runStatusLabel(ts, status)}</span>
+        <span className={styles.statusBadge} data-run-status={status}>
+          {runStatusLabel(ts, status)}
+        </span>
       </div>
 
       {plan && (
@@ -460,6 +479,9 @@ function DelegatedRunNode({
         <AgentActionRow key={action.eventId} event={action} />
       ))}
 
+      {hasCycle && (
+        <p className={styles.emptyDelegation}>{ts('agentFlow.delegationCycle')}</p>
+      )}
       {!hasCycle && delegated.length > 0 && (
         <div role="group" className={styles.delegatedChildren}>
           {delegated.map((childEvent) => (
@@ -602,13 +624,17 @@ function isActionEvent(event: AgentRunEvent): event is AgentActionEvent {
     event.type === 'context_attached' ||
     event.type === 'file_read' ||
     event.type === 'model_request' ||
+    event.type === 'mcp_tool_call' ||
+    event.type === 'tool_policy_decision' ||
     event.type === 'edit_plan_created' ||
     event.type === 'proposal_validation_result' ||
     event.type === 'batch_validation_result' ||
     event.type === 'decision_summary' ||
     event.type === 'diff_proposed' ||
     event.type === 'apply_result' ||
-    event.type === 'verification_result'
+    event.type === 'verification_result' ||
+    event.type === 'initialization_tranche_progress' ||
+    event.type === 'memory_index_bound'
 }
 
 export function groupAgentFlowPhaseTrace(

@@ -1,4 +1,5 @@
 import type { AgentRunEvent, AgentTransientTrace } from "../contracts/events.js";
+import type { StructureScanProgressEvent } from "../contracts/structure-scan-progress.js";
 import type { Disposable } from "../contracts/api.js";
 import type {
   AgentAnswerResult,
@@ -36,6 +37,11 @@ export interface ProjectOSBridge {
   ): Disposable;
   streamSubscribe(runId: string): Promise<void>;
   streamUnsubscribe(runId: string): Promise<void>;
+  onStructureScanEvent(
+    listener: (projectId: string, event: StructureScanProgressEvent) => void,
+  ): Disposable;
+  structureScanSubscribe(projectId: string): Promise<void>;
+  structureScanUnsubscribe(projectId: string): Promise<void>;
   consumeFallbackNotice(projectId: string): Promise<string | undefined>;
   shell: {
     pickWorkspaceFolder(): Promise<string | null>;

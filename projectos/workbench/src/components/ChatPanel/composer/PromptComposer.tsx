@@ -39,10 +39,13 @@ interface PromptComposerProps {
   onDraftChange: (draft: ComposerDraft) => void
   onModeSelect?: (mode: ChatMode) => void
   onChatModeChange: (mode: ChatMode) => void
+  onUseAsCustomMode?: (skillId: string) => void
   disabled?: boolean
   placeholder: string
   chatMode: ChatMode
   submitDisabled: boolean
+  stopVisible?: boolean
+  onStop?: () => void
   voice: VoiceProps
   onKeyDownExtra?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
 }
@@ -52,10 +55,13 @@ export default function PromptComposer({
   onDraftChange,
   onModeSelect,
   onChatModeChange,
+  onUseAsCustomMode,
   disabled = false,
   placeholder,
   chatMode,
   submitDisabled,
+  stopVisible = false,
+  onStop,
   voice,
   onKeyDownExtra,
 }: PromptComposerProps) {
@@ -89,7 +95,10 @@ export default function PromptComposer({
     setMenuOpen(Boolean(next))
   }, [textareaRef])
 
-  const handleSelect = (item: (typeof menuItems)[number]) => {
+  const handleSelect = (
+    item: (typeof menuItems)[number],
+    options?: { useAsMode?: boolean },
+  ) => {
     const result = attachmentFromMenuItem(item)
     let nextDraft = trigger
       ? { ...draft, text: removeTriggerToken(draft.text, trigger) }
@@ -97,7 +106,12 @@ export default function PromptComposer({
     if (result.mode && onModeSelect) {
       onModeSelect(result.mode)
     }
-    if (result.invokedSkillId) {
+    const customModeId =
+      result.customModeSkillId ??
+      (options?.useAsMode && result.invokedSkillId ? result.invokedSkillId : undefined)
+    if (customModeId && onUseAsCustomMode) {
+      onUseAsCustomMode(customModeId)
+    } else if (result.invokedSkillId) {
       nextDraft = { ...nextDraft, invokedSkillId: result.invokedSkillId }
     }
     if (result.attachment) {
@@ -124,7 +138,11 @@ export default function PromptComposer({
       if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault()
         const item = menuItems[activeIndex]
-        if (item && !item.disabled) handleSelect(item)
+        if (item && !item.disabled) {
+          handleSelect(item, {
+            useAsMode: event.key === 'Enter' && (event.altKey || event.metaKey),
+          })
+        }
         return
       }
       if (event.key === 'Escape') {
@@ -180,6 +198,8 @@ export default function PromptComposer({
           chatMode={chatMode}
           onChatModeChange={onChatModeChange}
           submitDisabled={submitDisabled}
+          stopVisible={stopVisible}
+          onStop={onStop}
           voice={voice}
         />
       </div>

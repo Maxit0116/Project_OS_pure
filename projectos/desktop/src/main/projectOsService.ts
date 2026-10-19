@@ -8,6 +8,7 @@ import { VerificationRunner } from '../../../services/verification-runner.js'
 import * as writeTransactionModule from '../../../services/recoverable-write-transaction.js'
 import { WorkspaceTransactionCoordinator } from '../../../services/workspace-transaction-coordinator.js'
 import { DependencyImpactScanner } from '../../../services/dependency-impact-scanner.js'
+import { join } from 'node:path'
 import { resolveSampleWorkspaceRoot, resolveUserDataPath } from './paths.js'
 
 let service: ProjectOSLocalApi | null = null
@@ -33,6 +34,7 @@ export function getProjectOsService(): ProjectOSLocalApi {
       openExternalUrl: async (url) => {
         await shell.openExternal(url)
       },
+      agentMemoryRoot: join(userDataPath, 'agent-memory'),
     })
   }
   return service

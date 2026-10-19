@@ -272,11 +272,12 @@ export const FunctionalNodeSchema = z
   })
   .strict();
 
+/** Edge endpoints require non-empty ids. Self-loops are enforced in fixtures / prune. */
 export const FunctionalEdgeSchema = z
   .object({
-    id: z.string(),
-    source: z.string(),
-    target: z.string(),
+    id: z.string().min(1),
+    source: z.string().min(1),
+    target: z.string().min(1),
     relation: FunctionalEdgeRelationSchema,
     label: z.string().optional(),
     purpose: z.string().optional(),

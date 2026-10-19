@@ -42,20 +42,32 @@ export async function wrapProjectOsHandler<T>(
 function safeProjectOsErrorDetails(
   error: ProjectOSError,
 ): Record<string, unknown> | undefined {
-  if (error.code !== 'ownership_ambiguous' && error.code !== 'file_owner_not_found') {
-    return undefined
+  if (error.code === 'ownership_ambiguous' || error.code === 'file_owner_not_found') {
+    const parsed = FileOwnershipErrorDetailsSchema.safeParse(error.details)
+    if (
+      !parsed.success ||
+      parsed.data.selectedFilePath.length > 500 ||
+      parsed.data.candidateNodeIds.length > 64 ||
+      parsed.data.candidateNodeIds.some((nodeId) => nodeId.length > 256)
+    ) {
+      return undefined
+    }
+    return {
+      selectedFilePath: parsed.data.selectedFilePath,
+      candidateNodeIds: [...parsed.data.candidateNodeIds],
+    }
   }
-  const parsed = FileOwnershipErrorDetailsSchema.safeParse(error.details)
+
   if (
-    !parsed.success ||
-    parsed.data.selectedFilePath.length > 500 ||
-    parsed.data.candidateNodeIds.length > 64 ||
-    parsed.data.candidateNodeIds.some((nodeId) => nodeId.length > 256)
+    error.code === 'agent_orchestration_failed' ||
+    error.code === 'invalid_workspace_fixtures'
   ) {
-    return undefined
+    const summary = (error.validationErrors ?? [])
+      .slice(0, 6)
+      .map((item) => `${item.code}: ${item.message}`.slice(0, 240))
+    if (summary.length === 0) return undefined
+    return { validationSummary: summary }
   }
-  return {
-    selectedFilePath: parsed.data.selectedFilePath,
-    candidateNodeIds: [...parsed.data.candidateNodeIds],
-  }
+
+  return undefined
 }

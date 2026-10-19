@@ -1385,9 +1385,13 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     expect(gateway.requests.find((request) =>
       isRecord(request.input) && request.input.mode === "plan_node_delegation"
     )?.input).toMatchObject({ writeCapability: false });
-    // The orchestrator now synthesizes batch validation for multi-file delegated
-    // batches when every leaf already passed independent proposal validation,
-    // so no standalone validate_delegated_batch model call is made.
+    // Multi-file E path must attempt an independent batch model pass.
+    expect(
+      gateway.requests.some(
+        (request) =>
+          isRecord(request.input) && request.input.mode === "validate_delegated_batch",
+      ),
+    ).toBe(true);
     expect(parentEvents.some((event) => event.type === "batch_validation_result")).toBe(true);
     expect(parentEvents.some((event) => event.type === "plan_completed")).toBe(false);
 
@@ -2714,8 +2718,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
     const parent = await api.confirmExecution(refinement.id);
     expect((await waitForRunStatus(api, parent.runId, "error")).status).toBe("error");
-    // Independent proposal validation now feeds synthesized batch validation, so a
-    // malformed/invalid leaf validation prevents any standalone batch model call.
+    // Invalid leaf validation fails closed before batch validation is attempted.
     expect(gateway.requests.filter((request) =>
       isRecord(request.input) && request.input.mode === "validate_delegated_batch"
     )).toHaveLength(0);

@@ -3,7 +3,9 @@ import { z } from "zod";
 import {
   AgentAnswerResultSchema,
   AgentConversationScopeSchema,
+  AskExplorationTraceSchema,
 } from "./agent-conversation.js";
+import { RetrievalSummarySchema } from "./retrieval.js";
 import { DebugSessionSnapshotSchema } from "./debug-session.js";
 import { ImplementationPlanSchema, LatestPlanTraceSchema } from "./implementation-plan.js";
 import { PromptRefinementSchema } from "./prompt-refinement.js";
@@ -12,6 +14,17 @@ import {
   normalizeComposerDraft,
   PromptAttachmentSchema,
 } from "./prompt-composer.js";
+
+export const ConversationCheckpointSchema = z
+  .object({
+    id: z.string().min(1),
+    messageId: z.string().min(1),
+    backupId: z.string().min(1),
+    runId: z.string().min(1),
+    createdAt: z.string().min(1),
+    filesChanged: z.array(z.string()),
+  })
+  .strict();
 
 export const CHAT_SESSION_MAX_COUNT = 100;
 export const CHAT_SESSION_MAX_PINNED = 50;
@@ -64,6 +77,9 @@ export const ChatMessageSchema = z
     timestamp: z.string().min(1),
     attachments: z.array(PromptAttachmentSchema).optional(),
     invokedSkillId: z.string().min(1).optional(),
+    explorationTrace: AskExplorationTraceSchema.optional(),
+    retrievalSummary: RetrievalSummarySchema.optional(),
+    checkpointId: z.string().min(1).optional(),
   })
   .strict();
 
@@ -126,6 +142,9 @@ export const ChatSessionSnapshotSchema = z
     activeRunId: z.string().nullable().optional(),
     hasPendingRefinement: z.boolean().optional(),
     hasPendingPlan: z.boolean().optional(),
+    activeCustomModeSkillId: z.string().min(1).nullable().optional(),
+    customModePreviousChatMode: ChatSessionModeSchema.nullable().optional(),
+    conversationCheckpoints: z.array(ConversationCheckpointSchema).optional(),
   })
   .strict();
 

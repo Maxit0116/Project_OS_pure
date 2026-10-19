@@ -79,6 +79,9 @@ export function buildChatSessionSnapshot(state: WorkbenchState): ChatSessionSnap
     activeRunId: state.activeRunId,
     hasPendingRefinement: Boolean(state.pendingRefinement && !state.refinementConfirmed),
     hasPendingPlan: Boolean(state.pendingPlan && !state.planConfirmed),
+    activeCustomModeSkillId: state.activeCustomModeSkillId,
+    customModePreviousChatMode: state.customModePreviousChatMode,
+    conversationCheckpoints: state.conversationCheckpoints,
   }
 }
 
@@ -153,10 +156,14 @@ export interface HydratedChatSessionState {
   agentFlowSubject: AgentFlowSubject
   flowStatus: WorkbenchState['flowStatus']
   activeRunId: string | null
+  activeCustomModeSkillId: string | null
+  customModePreviousChatMode: ChatMode | null
+  conversationCheckpoints: WorkbenchState['conversationCheckpoints']
 }
 
 export function hydrateChatSessionState(record: ChatSessionRecord): HydratedChatSessionState {
   const snapshot = record.snapshot
+  const previousMode = snapshot?.customModePreviousChatMode
   return {
     messages: record.messages,
     composerDraft: record.draftComposer ?? emptyComposerDraft(record.draftInput ?? ''),
@@ -171,5 +178,9 @@ export function hydrateChatSessionState(record: ChatSessionRecord): HydratedChat
     agentFlowSubject: snapshot?.agentFlowSubject ?? 'run',
     flowStatus: snapshot?.flowStatus ?? record.head.status ?? 'idle',
     activeRunId: snapshot?.activeRunId ?? null,
+    activeCustomModeSkillId: snapshot?.activeCustomModeSkillId ?? null,
+    customModePreviousChatMode:
+      previousMode && previousMode !== 'team_memory' ? previousMode : null,
+    conversationCheckpoints: snapshot?.conversationCheckpoints ?? [],
   }
 }

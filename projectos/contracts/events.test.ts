@@ -143,6 +143,36 @@ describe("agent action event contracts", () => {
     expect(AgentRunEventSchema.safeParse(event).success).toBe(true);
   });
 
+  it("parses tool_policy_decision and mcp_tool_call action events", () => {
+    const policy = AgentActionEventSchema.parse({
+      ...identity,
+      type: "tool_policy_decision",
+      payload: {
+        tool: "mcp_tool",
+        decision: "deny",
+        reason: "No allow rule matched",
+        match: "mcp:demo:lookup",
+      },
+    });
+    expect(policy.type).toBe("tool_policy_decision");
+    expect(AgentRunEventSchema.safeParse(policy).success).toBe(true);
+
+    const mcp = AgentActionEventSchema.parse({
+      ...identity,
+      type: "mcp_tool_call",
+      payload: {
+        serverId: "demo",
+        toolName: "lookup",
+        callId: "call-1",
+        status: "rejected",
+        durationMs: 12,
+        error: "tool_policy_deny",
+      },
+    });
+    expect(mcp.type).toBe("mcp_tool_call");
+    expect(AgentRunEventSchema.safeParse(mcp).success).toBe(true);
+  });
+
   it("binds a metadata-only edit plan to its phase", () => {
     const event = AgentActionEventSchema.parse({
       ...identity,

@@ -1,8 +1,11 @@
 import { z } from "zod";
 
+import { MemoryWriteNoticeSchema } from "./agent-memory.js";
+
 import { ContextAssembledPayloadSchema } from "./events.js";
 import { ModelImagePartSchema } from "./model-gateway.js";
 import { PromptComposerFieldsSchema } from "./prompt-composer.js";
+import { RetrievalSummarySchema } from "./retrieval.js";
 
 export const AgentConversationScopeSchema = z.discriminatedUnion("kind", [
   z
@@ -53,6 +56,26 @@ export const AgentAskLanguageSchema = z.discriminatedUnion("mode", [
     .strict(),
 ]);
 
+export const AskExplorationHitSchema = z
+  .object({
+    path: z.string().min(1),
+    line: z.number().int().positive(),
+    preview: z.string(),
+  })
+  .strict();
+
+export const AskExplorationTraceSchema = z
+  .object({
+    queriedSymbols: z.array(z.string()),
+    hits: z.array(AskExplorationHitSchema),
+    readPaths: z.array(z.string()),
+    truncated: z.boolean(),
+    /** Actual exploration passes executed (≤ requested maxRounds). */
+    roundsUsed: z.number().int().min(0).max(5).optional(),
+    maxRounds: z.number().int().min(0).max(5).optional(),
+  })
+  .strict();
+
 export const AgentAskRequestSchema = z
   .object({
     projectId: z.string().min(1),
@@ -61,6 +84,13 @@ export const AgentAskRequestSchema = z
     language: AgentAskLanguageSchema,
     chatSessionId: z.string().min(1).optional(),
     images: z.array(ModelImagePartSchema).max(4).optional(),
+    /** Optional bounded read-only exploration before answering (DevPlan M1.A). */
+    exploration: z
+      .object({
+        maxRounds: z.number().int().min(0).max(5).default(2),
+      })
+      .strict()
+      .optional(),
   })
   .merge(PromptComposerFieldsSchema)
   .strict();
@@ -97,7 +127,16 @@ export const AgentAnswerResultSchema = z
     contextBundleHash: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
     contextSummary: ContextAssembledPayloadSchema,
     reasoning: AgentAnswerReasoningSchema.optional(),
+    explorationTrace: AskExplorationTraceSchema.optional(),
+    retrievalSummary: RetrievalSummarySchema.optional(),
     responseLanguage: AgentResponseLanguageSchema,
+    memoryWrite: MemoryWriteNoticeSchema.optional(),
+    /** Injected index identity. Does not include note text. */
+    memoryIndex: z.object({
+      hash: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+      truncated: z.boolean(),
+      entryCount: z.number().int().nonnegative(),
+    }).strict().optional(),
     createdAt: z.string().min(1),
   })
   .strict()
@@ -124,3 +163,5 @@ export type AgentResponseLanguage = z.infer<
 >;
 export type AgentAnswerReasoning = z.infer<typeof AgentAnswerReasoningSchema>;
 export type AgentAnswerResult = z.infer<typeof AgentAnswerResultSchema>;
+export type AskExplorationTrace = z.infer<typeof AskExplorationTraceSchema>;
+export type AskExplorationHit = z.infer<typeof AskExplorationHitSchema>;

@@ -19,6 +19,7 @@ import AgentProfilesSection from './AgentProfilesSection'
 import NotificationSettingsSection from './NotificationSettingsSection'
 import ProjectDescriptionSection from './ProjectDescriptionSection'
 import SpatialPinSettingsSection from './SpatialPinSettingsSection'
+import HarnessSettingsSection from './HarnessSettingsSection'
 import { trapDialogTab } from './settingsDialogFocus'
 import styles from './SettingsPanel.module.css'
 
@@ -32,6 +33,7 @@ type SettingsView =
   | 'models'
   | 'agents'
   | 'spatialPin'
+  | 'harness'
 
 interface Props {
   onClose: () => void
@@ -107,6 +109,11 @@ export default function SettingsPanel({ onClose }: Props) {
       label: ts('settings.tabs.spatialPin'),
       summary: ts('settings.spatialPinSummary'),
     },
+    {
+      id: 'harness',
+      label: ts('settings.tabs.harness'),
+      summary: ts('settings.harness.summary'),
+    },
   ]
 
   const viewTitle =
@@ -162,6 +169,7 @@ export default function SettingsPanel({ onClose }: Props) {
             {view === 'models' && <ModelProfilesSection />}
             {view === 'agents' && <AgentProfilesSection />}
             {view === 'spatialPin' && <SpatialPinSettingsSection />}
+            {view === 'harness' && <HarnessSettingsSection />}
           </div>
         </div>
       </GlassLens>

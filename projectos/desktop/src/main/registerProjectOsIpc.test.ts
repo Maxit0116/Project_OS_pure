@@ -128,6 +128,8 @@ describe("ProjectOS production IPC installer", () => {
       ...PROJECTOS_IPC_METHODS.map((method) => `projectos:${method}`),
       "projectos:streamSubscribe",
       "projectos:streamUnsubscribe",
+      "projectos:structureScanSubscribe",
+      "projectos:structureScanUnsubscribe",
     ].sort());
   });
 });

@@ -34,6 +34,12 @@ export function agentActionMetadata(event: AgentActionEvent): string[] {
         `${event.payload.serverId} · ${event.payload.toolName}`,
         `${event.payload.status} · ${event.payload.durationMs} ms`,
       ]
+    case 'tool_policy_decision':
+      return [
+        `${event.payload.tool} · ${event.payload.decision}`,
+        event.payload.reason,
+        ...(event.payload.match ? [`match · ${event.payload.match}`] : []),
+      ]
     case 'edit_plan_created':
       return [
         `objective · ${event.payload.objective}`,
@@ -76,6 +82,12 @@ export function agentActionMetadata(event: AgentActionEvent): string[] {
       ]
     case 'verification_result':
       return [event.payload.command ?? '—', event.payload.status]
+    case 'memory_index_bound':
+      return [
+        event.payload.hash,
+        event.payload.truncated ? 'truncated' : 'complete',
+        `${event.payload.entryCount}`,
+      ]
     case 'initialization_tranche_progress':
       return [
         `tranche ${event.payload.order}/${event.payload.totalTranches} · ${event.payload.status}`,
@@ -143,6 +155,19 @@ function localizedAgentActionMetadata(
           ? [ts('agentFlow.actionMeta.mcpError', { error: event.payload.error })]
           : []),
       ]
+    case 'tool_policy_decision':
+      return [
+        ts('agentFlow.actionMeta.toolPolicy', {
+          tool: event.payload.tool,
+          decision: event.payload.decision,
+        }),
+        ts('agentFlow.actionMeta.toolPolicyReason', {
+          reason: event.payload.reason,
+        }),
+        ...(event.payload.match
+          ? [ts('agentFlow.actionMeta.toolPolicyMatch', { match: event.payload.match })]
+          : []),
+      ]
     case 'edit_plan_created':
       return [
         ts('agentFlow.actionMeta.planPath', { path: event.payload.path }),
@@ -206,6 +231,12 @@ function localizedAgentActionMetadata(
       return [
         ts('agentFlow.actionMeta.command', { command: event.payload.command ?? '—' }),
         ts('agentFlow.actionMeta.status', { status: event.payload.status }),
+      ]
+    case 'memory_index_bound':
+      return [
+        event.payload.hash,
+        event.payload.truncated ? 'truncated' : 'complete',
+        `${event.payload.entryCount}`,
       ]
     case 'initialization_tranche_progress':
       return [

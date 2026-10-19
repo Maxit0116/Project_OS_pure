@@ -121,6 +121,11 @@ export const ProjectOSSettingsSchema = z
     verification: z.object({
       commands: z.array(ExecCommandSchema).max(10),
     }).strict().optional(),
+    /** Retrieval corpora that can leave the machine. Both default off. */
+    retrieval: z.object({
+      memoryEgress: z.boolean(),
+      externalDocs: z.boolean(),
+    }).strict().optional(),
   })
   .strict();
 

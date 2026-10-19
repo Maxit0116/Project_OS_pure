@@ -20,6 +20,10 @@ import type { VerificationRunResult } from "../../contracts/exec-command.js";
 import type { VerificationCommandApprovalStatus } from "../../contracts/verification-command-approval.js";
 import type { AgentRunEvent, AgentTransientTrace } from "../../contracts/events.js";
 import type { ProjectGraph, StructureScanOptions } from "../../contracts/graph.js";
+import type {
+  StructureScanProgress,
+  StructureScanProgressEvent,
+} from "../../contracts/structure-scan-progress.js";
 import type { HarnessRecord } from "../../contracts/harness.js";
 import type {
   PromptRefineRequest,
@@ -57,6 +61,23 @@ export class NotConnectedTransport implements ProjectOSApi {
     _projectId: string,
     _options?: StructureScanOptions,
   ): Promise<ProjectGraph> {
+    return transportNotConnected();
+  }
+
+  async getStructureScanProgress(
+    _projectId: string,
+  ): Promise<StructureScanProgress | null> {
+    return transportNotConnected();
+  }
+
+  streamStructureScan(
+    _projectId: string,
+    _cb: (event: StructureScanProgressEvent) => void,
+  ): Disposable {
+    transportNotConnected();
+  }
+
+  async cancelStructureScan(_projectId: string): Promise<boolean> {
     return transportNotConnected();
   }
 
@@ -239,11 +260,107 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async listAgentWorktrees(_projectId: string) {
+    return transportNotConnected();
+  }
+
+  async createAgentWorktree(
+    _projectId: string,
+    _options?: import("../../contracts/agent-worktree.js").CreateAgentWorktreeOptions,
+  ) {
+    return transportNotConnected();
+  }
+
+  async mergeAgentWorktree(
+    _projectId: string,
+    _options: import("../../contracts/agent-worktree.js").MergeAgentWorktreeOptions,
+  ) {
+    return transportNotConnected();
+  }
+
+  async removeAgentWorktree(
+    _projectId: string,
+    _worktreeId: string,
+    _options?: { deleteBranch?: boolean },
+  ) {
+    return transportNotConnected();
+  }
+
+  async getAgentWorktreeDiff(_projectId: string, _worktreeId: string) {
+    return transportNotConnected();
+  }
+
+  async getAgentHarnessConfig(_projectId: string) {
+    return transportNotConnected();
+  }
+
+  async saveAgentHarnessConfig(
+    _projectId: string,
+    _config: import("../../contracts/agent-harness-config.js").AgentHarnessConfig,
+  ) {
+    return transportNotConnected();
+  }
+
+  async getAgentMemory(_projectId: string) {
+    return transportNotConnected();
+  }
+
+  async getAgentMemoryTopic(_projectId: string, _topicFile: string) {
+    return transportNotConnected();
+  }
+
+  async saveAgentMemorySettings(
+    _projectId: string,
+    _patch: import("../../contracts/agent-memory.js").MemorySettingsPatch,
+  ) {
+    return transportNotConnected();
+  }
+
+  async submitAgentMemory(
+    _projectId: string,
+    _candidate: import("../../contracts/agent-memory.js").MemoryCandidate,
+  ) {
+    return transportNotConnected();
+  }
+
+  async setAgentMemoryEntryState(
+    _projectId: string,
+    _text: string,
+    _state: import("../../contracts/agent-memory.js").MemoryAdmissionState,
+  ) {
+    return transportNotConnected();
+  }
+
+  async deleteAgentMemoryEntry(_projectId: string, _text: string) {
+    return transportNotConnected();
+  }
+
+  async consolidateAgentMemory(_projectId: string) {
+    return transportNotConnected();
+  }
+
   async createPlan(_request: import("../../contracts/implementation-plan.js").CreatePlanRequest): Promise<import("../../contracts/implementation-plan.js").ImplementationPlan> {
     return transportNotConnected();
   }
 
   async updatePlan(_request: import("../../contracts/implementation-plan.js").UpdatePlanRequest): Promise<import("../../contracts/implementation-plan.js").ImplementationPlan> {
+    return transportNotConnected();
+  }
+
+  async savePlanToWorkspace(_planId: string): Promise<{ path: string }> {
+    return transportNotConnected();
+  }
+
+  async listWorkspacePlans(
+    _projectId: string,
+  ): Promise<import("../../contracts/implementation-plan.js").WorkspacePlanSummary[]> {
+    return transportNotConnected();
+  }
+
+  async loadPlanFromWorkspace(
+    _projectId: string,
+    _planId: string,
+  ): Promise<import("../../contracts/implementation-plan.js").ImplementationPlan> {
     return transportNotConnected();
   }
 
@@ -256,6 +373,10 @@ export class NotConnectedTransport implements ProjectOSApi {
   }
 
   async confirmExecution(_refinementId: string): Promise<AgentRun> {
+    return transportNotConnected();
+  }
+
+  async cancelAgentRun(_runId: string): Promise<AgentRun> {
     return transportNotConnected();
   }
 

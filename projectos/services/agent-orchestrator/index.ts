@@ -100,6 +100,13 @@ import {
   validateCreateFileContent,
 } from "../create-file-content.js";
 import { childRunFailureCategory } from "./child-failure-category.js";
+import { buildHarnessInstructions } from "../harness/instructions.js";
+import {
+  hashMemoryIndex,
+  type MemoryInjectionSnapshot,
+} from "../harness/memory.js";
+import { modelHarnessSystemDelta } from "../harness/model-variants.js";
+import { loadProjectRulesMarkdown } from "../harness/rules.js";
 
 export interface OrchestratorRunState {
   run: AgentRun;
@@ -139,6 +146,9 @@ export interface OrchestratorRunState {
   wholeTreeTransactionPlan?: WholeTreeTransactionPlan;
   globalContext?: GlobalPlanningContext;
   executionPolicy: ChangeExecutionPolicy;
+  /** Index lines injected for this run. Children reuse the parent snapshot. */
+  memoryInjection?: MemoryInjectionSnapshot;
+  userPrompt?: string;
   validationResult?: AgentProposalValidationResult;
   validatedDiffJson?: string;
   applyResult?: ApplyResult;
@@ -155,6 +165,18 @@ export interface CreateOrchestratorRunOptions {
   rootRunId?: string;
   role?: AgentRun["role"];
   globalContext?: GlobalPlanningContext;
+  /**
+   * Frozen personal-memory index for this user turn.
+   * An empty markdown means the turn snapshot was taken and was empty.
+   * Omit to load the current index (or copy the parent run's snapshot).
+   */
+  memoryInjection?: MemoryInjectionSnapshot;
+  /** @deprecated Prefer memoryInjection. Still accepted from older call sites. */
+  memoryIndexMarkdown?: string;
+  memoryIndexTruncated?: boolean;
+  memoryIndexEntryCount?: number;
+  /** Original user text for a later memory proposal. Not provider reasoning. */
+  userPrompt?: string;
 }
 
 export type GlobalPlanningContext = GlobalContextBundle;
@@ -186,6 +208,36 @@ function deriveScopeFromBoundContext(
     return { kind: "global" };
   }
   return { kind: "node-plan", nodeId: context.scope.nodeId };
+}
+
+const EMPTY_MEMORY_INJECTION: MemoryInjectionSnapshot = {
+  markdown: "",
+  hash: hashMemoryIndex(""),
+  truncated: false,
+  entryCount: 0,
+};
+
+function resolveRunMemoryIndex(
+  options: CreateOrchestratorRunOptions,
+  runs: Map<string, OrchestratorRunState>,
+  load: ((workspace: LoadedProjectOSWorkspace) => MemoryInjectionSnapshot) | undefined,
+  workspace: LoadedProjectOSWorkspace,
+): MemoryInjectionSnapshot {
+  if (options.memoryInjection) return options.memoryInjection;
+  if (options.memoryIndexMarkdown !== undefined) {
+    const markdown = options.memoryIndexMarkdown;
+    return {
+      markdown,
+      hash: hashMemoryIndex(markdown),
+      truncated: options.memoryIndexTruncated ?? false,
+      entryCount: options.memoryIndexEntryCount
+        ?? (markdown.trim() ? markdown.split("\n").filter((line) => line.trim()).length : 0),
+    };
+  }
+  if (options.parentRunId) {
+    return runs.get(options.parentRunId)?.memoryInjection ?? EMPTY_MEMORY_INJECTION;
+  }
+  return load?.(workspace) ?? EMPTY_MEMORY_INJECTION;
 }
 
 function roleForRunScope(
@@ -362,6 +414,24 @@ export interface AgentOrchestratorOptions {
   nodeScaffolding?: NodeScaffoldingDependency;
   nodeDeletion?: NodeDeletionDependency;
   greenfieldInitialization?: GreenfieldInitializationDependency;
+  /** Current injectable memory index. Root runs use this when no turn snapshot is passed. */
+  loadMemoryIndexMarkdown?: (workspace: LoadedProjectOSWorkspace) => MemoryInjectionSnapshot;
+  /** Fired after a root run_completed event is persisted. Must not throw into the run. */
+  onRootRunCompleted?: (
+    workspace: LoadedProjectOSWorkspace,
+    snapshot: MemoryProposalRunSnapshot,
+  ) => void;
+}
+
+export interface MemoryProposalRunSnapshot {
+  runId: string;
+  parentRunId?: string;
+  runStatus: "complete" | "error" | "cancelled" | "queued" | "running" | "awaiting_review";
+  userPrompt: string;
+  understood: string;
+  usedMcp: boolean;
+  verificationFailed: boolean;
+  rolledBack: boolean;
 }
 
 export interface AgentRunEventPersistencePort {
@@ -642,6 +712,12 @@ export class AgentOrchestrator {
   private readonly nodeScaffolding: NodeScaffoldingDependency | undefined;
   private readonly nodeDeletion: NodeDeletionDependency | undefined;
   private readonly greenfieldInitialization: GreenfieldInitializationDependency | undefined;
+  private readonly loadMemoryIndexMarkdown:
+    | ((workspace: LoadedProjectOSWorkspace) => MemoryInjectionSnapshot)
+    | undefined;
+  private readonly onRootRunCompleted:
+    | ((workspace: LoadedProjectOSWorkspace, snapshot: MemoryProposalRunSnapshot) => void)
+    | undefined;
   private readonly runs = new Map<string, OrchestratorRunState>();
   private readonly inFlightRunIds = new Set<string>();
   private readonly runAbortControllers = new Map<string, AbortController>();
@@ -668,6 +744,16 @@ export class AgentOrchestrator {
     this.nodeScaffolding = options.nodeScaffolding;
     this.nodeDeletion = options.nodeDeletion;
     this.greenfieldInitialization = options.greenfieldInitialization;
+    this.loadMemoryIndexMarkdown = options.loadMemoryIndexMarkdown;
+    this.onRootRunCompleted = options.onRootRunCompleted;
+  }
+
+  hasInFlightWork(projectId: string): boolean {
+    for (const runId of this.inFlightRunIds) {
+      const state = this.runs.get(runId);
+      if (state?.run.projectId === projectId && state.status === "running") return true;
+    }
+    return false;
   }
 
   createRun(
@@ -677,21 +763,42 @@ export class AgentOrchestrator {
     options: CreateOrchestratorRunOptions,
   ): OrchestratorRunState {
     const settings = workspace.settings;
-    const agentProfile = this.settingsService.resolveAgentProfile(settings, kind);
-    if (!agentProfile) {
+    const resolvedProfile = this.settingsService.resolveAgentProfile(settings, kind);
+    if (!resolvedProfile) {
       throw new ProjectOSError(
         "agent_orchestration_failed",
         "No agent profile is configured",
       );
     }
-
     const modelProfileId =
-      agentProfile.modelProfileId ||
+      resolvedProfile.modelProfileId ||
       settings.execution.defaultModelProfileId ||
       settings.modelProfiles.find((profile) => profile.isDefault)?.id;
     const modelProfile = modelProfileId
       ? settings.modelProfiles.find((profile) => profile.id === modelProfileId)
       : settings.modelProfiles[0];
+
+    const harnessMode = kind === "debug_fix" ? "debug" : "change";
+    const modelDelta = modelHarnessSystemDelta(
+      modelProfile,
+      workspace.workspaceRoot,
+    );
+    const memoryInjection = resolveRunMemoryIndex(
+      options,
+      this.runs,
+      this.loadMemoryIndexMarkdown,
+      workspace,
+    );
+    const agentProfile = {
+      ...resolvedProfile,
+      systemPrompt: buildHarnessInstructions({
+        baseSystemPrompt: resolvedProfile.systemPrompt,
+        mode: harnessMode,
+        rulesMarkdown: loadProjectRulesMarkdown(workspace.workspaceRoot),
+        ...(memoryInjection.markdown ? { memoryIndexMarkdown: memoryInjection.markdown } : {}),
+        ...(modelDelta ? { modelDelta } : {}),
+      }),
+    };
 
     const scope = options.scope ?? deriveScopeFromBoundContext(options.localContext);
     const role = options.role ?? roleForRunScope(scope);
@@ -728,6 +835,8 @@ export class AgentOrchestrator {
       agentProfile,
       thinkingDepth: settings.execution.thinkingDepth ?? "medium",
       executionPolicy: options.executionPolicy ?? "review_first",
+      memoryInjection,
+      ...(options.userPrompt ? { userPrompt: options.userPrompt } : {}),
       ...(modelProfile ? { modelProfile } : {}),
       ...(options.localContext && isNodeContextBundle(options.localContext)
         ? { nodeContext: cloneJson(options.localContext) }
@@ -742,6 +851,17 @@ export class AgentOrchestrator {
     this.runs.set(run.runId, state);
     this.runAbortControllers.set(run.runId, new AbortController());
     this.eventPersistenceFailedRunIds.delete(run.runId);
+    if (memoryInjection.markdown) {
+      this.emit(
+        workspace,
+        state,
+        createActionEvent(run.runId, "memory_index_bound", {
+          hash: memoryInjection.hash,
+          truncated: memoryInjection.truncated,
+          entryCount: memoryInjection.entryCount,
+        }),
+      );
+    }
     return state;
   }
 
@@ -843,6 +963,55 @@ export class AgentOrchestrator {
   }
 
   getRun(runId: string): OrchestratorRunState | undefined {
+    return this.runs.get(runId);
+  }
+
+  /**
+   * Abort an in-flight run without removing it from memory.
+   * Marks the run `cancelled` so clients can stop streaming and show Stop UI.
+   * Does not apply partial writes — apply only happens after a successful generate path.
+   */
+  cancelRun(runId: string): OrchestratorRunState | undefined {
+    const state = this.runs.get(runId);
+    if (!state) return undefined;
+    if (
+      state.run.status === "complete" ||
+      state.run.status === "awaiting_review" ||
+      state.run.status === "cancelled" ||
+      state.run.status === "error"
+    ) {
+      return state;
+    }
+    const runIds = !state.run.parentRunId
+      ? [...this.runs.entries()]
+          .filter(
+            ([candidateRunId, candidate]) =>
+              candidateRunId === runId || candidate.run.rootRunId === runId,
+          )
+          .map(([candidateRunId]) => candidateRunId)
+      : [runId];
+    for (const candidateRunId of runIds) {
+      this.runAbortControllers.get(candidateRunId)?.abort();
+    }
+    if (!state.run.parentRunId) {
+      this.releaseRunReservations(runId);
+    }
+    for (const candidateRunId of runIds) {
+      const candidate = this.runs.get(candidateRunId);
+      if (!candidate) continue;
+      if (
+        candidate.run.status === "complete" ||
+        candidate.run.status === "awaiting_review" ||
+        candidate.run.status === "cancelled" ||
+        candidate.run.status === "error"
+      ) {
+        continue;
+      }
+      candidate.status = "error";
+      candidate.run.status = "cancelled";
+      candidate.run.completedAt ??= new Date().toISOString();
+      this.inFlightRunIds.delete(candidateRunId);
+    }
     return this.runs.get(runId);
   }
 
@@ -3857,30 +4026,9 @@ export class AgentOrchestrator {
       }
     }
 
-    // Multi-file batches whose leaves already passed independent proposal
-    // validation still fail the redundant model call: DeepSeek fills 4k/8k
-    // restating every parent criterion. Trust the per-file evidence.
-    if (plan.tasks.length === children.length && children.length > 1) {
-      const synthesized = this.synthesizeIndependentChildBatchValidation(
-        state,
-        plan,
-        children,
-        parentContextHash,
-      );
-      if (synthesized) {
-        this.emit(
-          workspace,
-          state,
-          createActionEvent(
-            state.run.runId,
-            "batch_validation_result",
-            sanitizeBatchValidationProjection(synthesized),
-            phaseId,
-          ),
-        );
-        return synthesized;
-      }
-    }
+    // Multi-file batches must attempt an independent batch model pass (DevPlan M3 /
+    // agent-requirements E honesty). Synthesis is only a last-resort fallback after
+    // both model attempts fail — never the primary path.
 
     let firstFailure: BatchValidationFailureCategory | undefined;
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -4026,6 +4174,30 @@ export class AgentOrchestrator {
           firstFailure = failure;
           continue;
         }
+        // Last resort for multi-file: if every leaf already independently validated,
+        // synthesize a batch result with an explicit synthesized rationale rather than
+        // hard-failing when the batch model cannot return usable JSON.
+        if (plan.tasks.length === children.length && children.length > 1) {
+          const synthesized = this.synthesizeIndependentChildBatchValidation(
+            state,
+            plan,
+            children,
+            parentContextHash,
+          );
+          if (synthesized) {
+            this.emit(
+              workspace,
+              state,
+              createActionEvent(
+                state.run.runId,
+                "batch_validation_result",
+                sanitizeBatchValidationProjection(synthesized),
+                phaseId,
+              ),
+            );
+            return synthesized;
+          }
+        }
         throw new ProjectOSError(
           "proposal_validation_failed",
           `Batch validation failed (${safeBatchValidationFailureLabel(failure)})`,
@@ -4153,17 +4325,18 @@ export class AgentOrchestrator {
       tasks,
       crossFileAssessment: {
         status: "consistent",
-        summary: "Each delegated file independently validated as scope-compliant; cross-file consistency follows from disjoint per-file evidence.",
+        summary:
+          "Fallback after batch-model failure: each delegated file independently validated as scope-compliant; cross-file consistency inferred from disjoint per-file evidence.",
       },
       summary: sanitizeValidationNarrative(
         firstSummary,
         500,
-        "Batch validation completed.",
+        "Batch validation completed from independent leaf evidence (model batch unavailable).",
       ),
       rationale: sanitizeValidationNarrative(
         firstRationale,
         500,
-        "The batch was checked against the delegation plan.",
+        "Synthesized after validate_delegated_batch model failure from independently validated leaf proposals.",
       ),
     });
   }
@@ -5423,6 +5596,30 @@ export class AgentOrchestrator {
     this.evictOldTerminalRunTrees();
   }
 
+  recordToolPolicyDecision(
+    workspace: LoadedProjectOSWorkspace,
+    runId: string,
+    payload: {
+      tool: string;
+      decision: "allow" | "ask" | "deny";
+      reason: string;
+      match?: string;
+    },
+  ): void {
+    const state = this.runs.get(runId);
+    if (!state) return;
+    this.emit(
+      workspace,
+      state,
+      createActionEvent(runId, "tool_policy_decision", {
+        tool: payload.tool,
+        decision: payload.decision,
+        reason: payload.reason,
+        ...(payload.match ? { match: payload.match } : {}),
+      }),
+    );
+  }
+
   recordVerificationResult(
     workspace: LoadedProjectOSWorkspace,
     runId: string,
@@ -6185,6 +6382,17 @@ export class AgentOrchestrator {
       listener(cloneJson(event));
     }
     this.evictOldTerminalRunTrees();
+    if (event.type === "run_completed" && !state.run.parentRunId && this.onRootRunCompleted) {
+      const snapshot = memoryProposalSnapshot(state);
+      const notify = this.onRootRunCompleted;
+      queueMicrotask(() => {
+        try {
+          notify(workspace, snapshot);
+        } catch (error) {
+          console.error("[projectos] memory proposal hook failed", error);
+        }
+      });
+    }
   }
 
   private persistEvent(
@@ -6308,6 +6516,31 @@ function completeStep(
     ...runningStep,
     status: "complete",
     outputSummary,
+  };
+}
+
+function memoryProposalSnapshot(state: OrchestratorRunState): MemoryProposalRunSnapshot {
+  let verificationFailed = false;
+  let rolledBack = false;
+  let usedMcp = false;
+  for (const event of state.events) {
+    if (event.type === "verification_result" && event.payload.status === "failed") {
+      verificationFailed = true;
+    }
+    if (event.type === "apply_result" && event.payload.outcome !== "applied") {
+      rolledBack = true;
+    }
+    if (event.type === "mcp_tool_call") usedMcp = true;
+  }
+  return {
+    runId: state.run.runId,
+    ...(state.run.parentRunId ? { parentRunId: state.run.parentRunId } : {}),
+    runStatus: state.run.status,
+    userPrompt: state.userPrompt ?? "",
+    understood: state.refinement.understood.slice(0, 500),
+    usedMcp,
+    verificationFailed,
+    rolledBack,
   };
 }
 

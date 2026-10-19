@@ -112,6 +112,7 @@ describe('agent conversation routing', () => {
       scope: { kind: 'global' },
       question: 'Summarize the project',
       language: { mode: 'auto' },
+      exploration: { maxRounds: 2 },
     })
   })
 
@@ -144,6 +145,7 @@ describe('agent conversation routing', () => {
     })
 
     useWorkbenchStore.getState().openGlobalAgentChat()
+    useWorkbenchStore.setState({ chatMode: 'ask' })
     expect(useWorkbenchStore.getState()).toMatchObject({
       globalAgentActive: true,
       selectedNodeId: null,
@@ -161,6 +163,7 @@ describe('agent conversation routing', () => {
       scope: { kind: 'global' },
       question: 'What is this project?',
       language: { mode: 'auto' },
+      exploration: { maxRounds: 2 },
     })
     expect(useWorkbenchStore.getState().latestAskTrace).toMatchObject({
       status: 'complete',
@@ -263,6 +266,7 @@ describe('agent conversation routing', () => {
       scope: { kind: 'file', nodeId: 'feat_login', selectedFilePath: 'app/login/page.tsx' },
       question: 'What does this file do?',
       language: { mode: 'auto' },
+      exploration: { maxRounds: 2 },
     })
     expect(refinePrompt).not.toHaveBeenCalled()
     expect(useWorkbenchStore.getState().messages).toMatchObject([
@@ -481,6 +485,65 @@ describe('agent conversation routing', () => {
       filePath: undefined,
       rawPrompt: 'Change it',
     }))
+  })
+
+  it('allows global Plan and Agent(change) submit without a selected node', async () => {
+    const createPlan = vi.fn(async () => ({
+      version: '0.1.0' as const,
+      id: 'plan-global',
+      projectId: 'sample-graph-saas',
+      scope: { kind: 'global' as const },
+      objective: 'Plan the change',
+      steps: [
+        {
+          id: 's1',
+          description: 'Step',
+          affectedFiles: [],
+          acceptanceCriteria: ['done'],
+        },
+      ],
+      todos: [],
+      ambiguities: [],
+      rationale: 'Global plan',
+      status: 'ready' as const,
+      createdAt: '2026-07-18T00:00:00.000Z',
+      updatedAt: '2026-07-18T00:00:00.000Z',
+    }))
+    const refinePrompt = vi.fn(async () => ({
+      id: 'refinement-global',
+      understood: 'Change globally',
+      ambiguities: [],
+      suggestions: [],
+      affectedNodeIds: [],
+      affectedFiles: [],
+      confidence: 1,
+      mode: 'model' as const,
+      executionPolicy: 'review_first' as const,
+    }))
+    const workspace = createMockSampleWorkspace()
+    useWorkbenchStore.setState({
+      client: { createPlan, refinePrompt } as unknown as ProjectOSApi,
+      project: workspace.project,
+      graph: workspace.graph,
+      selectedNodeId: null,
+      selectedFilePath: null,
+      pendingFileOwnerChoice: null,
+      fileScopeError: null,
+      globalAgentActive: true,
+      chatMode: 'plan',
+    })
+    expect(canSubmitAgentPrompt(useWorkbenchStore.getState())).toBe(true)
+    await useWorkbenchStore.getState().sendPrompt('Design a multi-file auth refactor')
+    expect(createPlan).toHaveBeenCalled()
+
+    useWorkbenchStore.setState({ chatMode: 'change', pendingPlan: null })
+    expect(canSubmitAgentPrompt(useWorkbenchStore.getState())).toBe(true)
+    await useWorkbenchStore.getState().sendPrompt('Apply a small global improvement')
+    expect(refinePrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawPrompt: 'Apply a small global improvement',
+      }),
+    )
   })
 
   it('turns an ambiguous backend owner response into an explicit chooser', async () => {
@@ -850,7 +913,14 @@ describe('agent conversation routing', () => {
           selectedFilePath: 'app/login/page.tsx',
         },
         objective: 'Plan this',
-        steps: [],
+        steps: [
+          {
+            id: 'step_1',
+            description: 'Update login',
+            affectedFiles: ['app/login/page.tsx'],
+            acceptanceCriteria: ['Login works'],
+          },
+        ],
         todos: [],
         ambiguities: [],
         rationale: 'Because',

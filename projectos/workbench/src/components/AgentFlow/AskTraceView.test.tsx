@@ -77,6 +77,26 @@ describe('AskTraceView', () => {
     expect(html).toContain('<strong>OAuth</strong>')
   })
 
+  it('shows retrieval paths and omission reasons without quotes', () => {
+    const result = answerResult(false)
+    result.retrievalSummary = {
+      searched: true,
+      contentHash: `sha256:${'b'.repeat(64)}`,
+      hitCount: 1,
+      paths: ['src/billing.ts'],
+      corpora: ['current_code'],
+      omissions: [{ reason: 'secret', count: 1 }],
+      includesComposedGraph: false,
+    }
+    const html = renderToStaticMarkup(
+      <AskTraceView trace={{ status: 'complete', scope: result.scope, result }} />,
+    )
+    expect(html).toContain('data-ask-trace="retrieval"')
+    expect(html).toContain('src/billing.ts')
+    expect(html).toContain('secret · 1')
+    expect(html).not.toContain('export function')
+  })
+
   it('does not render a reasoning disclosure when the provider supplied none', () => {
     const result = answerResult(false)
     const html = renderToStaticMarkup(
@@ -84,6 +104,7 @@ describe('AskTraceView', () => {
     )
 
     expect(html).not.toContain('data-ask-trace="reasoning"')
+    expect(html).not.toContain('data-ask-trace="retrieval"')
     expect(html).toContain('data-ask-trace="answer"')
   })
 

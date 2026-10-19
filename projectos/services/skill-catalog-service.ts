@@ -86,6 +86,11 @@ function toDescriptor(
     frontmatter.disableModelInvocation === true
       ? { disableModelInvocation: true }
       : {}),
+    ...(frontmatter["usable-as-mode"] === true || frontmatter.usableAsMode === true
+      ? { usableAsMode: true }
+      : {}),
+    ...(typeof frontmatter.icon === "string" ? { icon: frontmatter.icon } : {}),
+    ...(typeof frontmatter.color === "string" ? { color: frontmatter.color } : {}),
     ...(scopeRoot ? { scopeRoot } : {}),
   });
 }

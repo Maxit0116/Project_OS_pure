@@ -4,10 +4,13 @@ import type {
   ModelToolCall,
   ModelToolDefinition,
 } from "../../contracts/model-gateway.js";
+import type { CapabilityContext, ToolPermissionRule } from "../../contracts/tool-policy.js";
 import type { ModelProfile } from "../../contracts/settings.js";
 import { modelProfileLabel } from "../../contracts/settings.js";
 import type { SecretStore } from "../../persistence/secret-store.js";
 import { ProjectOSError } from "../../errors.js";
+import { loadToolPermissionDocument } from "../harness/permissions.js";
+import { evaluateToolCall } from "../harness/tool-policy.js";
 import { redactText } from "./redaction.js";
 import {
   apiKeyRequired,
@@ -38,10 +41,24 @@ export interface ModelToolLoopOptions {
     result?: ModelToolExecutionResult;
     durationMs?: number;
   }) => void;
+  /** Fired when ToolPolicy blocks or asks (for Agent Flow `tool_policy_decision`). */
+  onPolicyDecision?: (event: {
+    tool: "mcp_tool";
+    decision: "allow" | "ask" | "deny";
+    reason: string;
+    match: string;
+  }) => void;
   maxIterations?: number;
   maxToolCalls?: number;
   maxTotalDurationMs?: number;
   signal?: AbortSignal;
+  /** When set, every tool call is gated by Agent Harness ToolPolicy (H3.A). */
+  toolPolicy?: {
+    context: CapabilityContext;
+    /** Explicit rules. When omitted, load `.projectos/permissions.json` if `workspaceRoot` is set. */
+    rules?: readonly ToolPermissionRule[];
+    workspaceRoot?: string;
+  };
 }
 
 export class ModelGateway {
@@ -54,6 +71,7 @@ export class ModelGateway {
   async complete(
     profile: ModelProfile,
     request: ModelGatewayRequest,
+    options?: { signal?: AbortSignal },
   ): Promise<ModelGatewayResponse> {
     const started = Date.now();
     const resolved = resolveProfileForGateway(profile);
@@ -66,7 +84,17 @@ export class ModelGateway {
       );
     }
 
-    const input = this.buildProviderInput(request);
+    if (options?.signal?.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
+
+    const input: ProviderCompleteInput = {
+      ...this.buildProviderInput(request),
+      ...(options?.signal ? { signal: options.signal } : {}),
+    };
     const result = await adapter.complete(resolved, apiKey, input);
     const output = redactText(result.output, request.redactionPolicy);
     const reasoning = result.reasoning
@@ -174,6 +202,44 @@ export class ModelGateway {
         let execution: ModelToolExecutionResult;
         const callStarted = Date.now();
         try {
+          if (options.toolPolicy) {
+            const permissionRules =
+              options.toolPolicy.rules ??
+              (options.toolPolicy.workspaceRoot
+                ? loadToolPermissionDocument(options.toolPolicy.workspaceRoot).rules
+                : []);
+            const policyDecision = evaluateToolCall(
+              {
+                tool: "mcp_tool",
+                match: call.name,
+              },
+              options.toolPolicy.context,
+              { rules: permissionRules },
+            );
+            options.onPolicyDecision?.({
+              tool: "mcp_tool",
+              decision: policyDecision.decision,
+              reason: policyDecision.reason,
+              match: call.name,
+            });
+            if (policyDecision.decision !== "allow") {
+              execution = {
+                isError: true,
+                content: `tool_policy_${policyDecision.decision}: ${policyDecision.reason}`,
+              };
+              options.onToolCall?.({
+                call,
+                result: execution,
+                durationMs: Date.now() - callStarted,
+              });
+              messages.push({
+                role: "tool",
+                toolCallId: call.id,
+                content: redactText(execution.content, request.redactionPolicy),
+              });
+              continue;
+            }
+          }
           const parsedArguments = JSON.parse(call.arguments) as unknown;
           if (
             parsedArguments === null ||

@@ -11,11 +11,13 @@ import {
   detectReadmeLanguage,
   enrichNodesForC4Shapes,
   isDirShellName,
+  mergeStructureGraphs,
   parsePackageImports,
   parseRelativeImports,
+  pruneDanglingEdges,
   resolveImportPath,
 } from "./structure-graph-l2.js";
-import type { FunctionalNode, ProjectGraph } from "../contracts/graph.js";
+import type { FunctionalEdge, FunctionalNode, ProjectGraph } from "../contracts/graph.js";
 
 describe("structure-graph-l2 helpers", () => {
   it("detects Chinese README language", () => {
@@ -214,6 +216,123 @@ describe("structure-graph-l2 helpers", () => {
 
     const stripe = enriched.find((node) => node.id === "stripe_ext")!;
     expect(stripe.elementType).toBe("external_system");
+  });
+
+  it("prunes empty, unknown, and self-loop edges", () => {
+    const edges: FunctionalEdge[] = [
+      {
+        id: "ok",
+        source: "a",
+        target: "b",
+        relation: "calls",
+        confidence: 0.9,
+      },
+      {
+        id: "empty",
+        source: "",
+        target: "",
+        relation: "depends_on",
+        confidence: 0.7,
+      },
+      {
+        id: "missing",
+        source: "a",
+        target: "missing_node",
+        relation: "uses",
+        confidence: 0.7,
+      },
+      {
+        id: "loop",
+        source: "a",
+        target: "a",
+        relation: "depends_on",
+        confidence: 0.7,
+      },
+    ];
+    expect(pruneDanglingEdges(edges, new Set(["a", "b"])).map((edge) => edge.id)).toEqual([
+      "ok",
+    ]);
+  });
+
+  it("regenerate merge drops dangling AI edges", () => {
+    const base: ProjectGraph = {
+      version: "0.5.0",
+      projectId: "p1",
+      projectName: "Demo",
+      projectType: "node",
+      analyzedAt: new Date().toISOString(),
+      analysisStatus: "complete",
+      architecture: {
+        notation: "c4",
+        defaultLevel: "component",
+        layers: [],
+      },
+      nodes: [
+        {
+          id: "a",
+          type: "capability",
+          name: "A",
+          status: "active",
+          description: "A",
+          summary: "A",
+          responsibility: "A",
+          level: "container",
+          elementType: "container",
+          linkedFiles: [],
+          upstream: [],
+          downstream: [],
+          confidence: 0.8,
+          tags: [],
+        },
+        {
+          id: "b",
+          type: "capability",
+          name: "B",
+          status: "active",
+          description: "B",
+          summary: "B",
+          responsibility: "B",
+          level: "container",
+          elementType: "container",
+          linkedFiles: [],
+          upstream: [],
+          downstream: [],
+          confidence: 0.8,
+          tags: [],
+        },
+      ],
+      edges: [],
+      fileIndex: [],
+      topology: { rootIds: ["a", "b"], maxDepth: 1, totalNodes: 2 },
+      analysisError: null,
+    };
+    const incoming: ProjectGraph = {
+      ...base,
+      edges: [
+        {
+          id: "edge_ok",
+          source: "a",
+          target: "b",
+          relation: "calls",
+          confidence: 0.9,
+        },
+        {
+          id: "edge_api_engine",
+          source: "",
+          target: "",
+          relation: "depends_on",
+          label: " → ",
+          confidence: 0.7,
+          evidence: "Inferred from repository structure",
+        },
+      ],
+    };
+    const merged = mergeStructureGraphs({
+      base,
+      incoming,
+      mode: "regenerate",
+    });
+    expect(merged.edges.map((edge) => edge.id)).toEqual(["edge_ok"]);
   });
 
   it("does not invent new elementType values beyond the schema enum", () => {

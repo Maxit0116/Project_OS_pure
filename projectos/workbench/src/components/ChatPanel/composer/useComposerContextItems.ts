@@ -128,12 +128,25 @@ export function useComposerContextItems({
         const haystack = `${skill.name} ${skill.description}`.toLowerCase()
         return !q || haystack.includes(q)
       })
-      .map((skill) => ({
-        id: `skill:${skill.id}`,
-        label: `/${skill.name}`,
-        description: skill.description,
-        group: ts('composer.groups.skills'),
-      }))
+      .flatMap((skill) => {
+        const items: ComposerMenuItem[] = [
+          {
+            id: `skill:${skill.id}`,
+            label: `/${skill.name}`,
+            description: skill.description,
+            group: ts('composer.groups.skills'),
+          },
+        ]
+        if (skill.usableAsMode) {
+          items.push({
+            id: `skill-mode:${skill.id}`,
+            label: `/${skill.name} · ${ts('chat.useAsMode')}`,
+            description: skill.description,
+            group: ts('composer.groups.skills'),
+          })
+        }
+        return items
+      })
 
     return [...modeItems, ...skillMenu]
   }, [query, skills, triggerKind, ts])
@@ -144,10 +157,14 @@ export function useComposerContextItems({
 export function attachmentFromMenuItem(item: ComposerMenuItem): {
   attachment?: PromptAttachment
   invokedSkillId?: string
+  customModeSkillId?: string
   mode?: 'ask' | 'plan' | 'change' | 'debug'
 } {
   if (item.id.startsWith('mode:')) {
     return { mode: item.id.replace('mode:', '') as 'ask' | 'plan' | 'change' | 'debug' }
+  }
+  if (item.id.startsWith('skill-mode:')) {
+    return { customModeSkillId: item.id.replace('skill-mode:', '') }
   }
   if (item.id.startsWith('skill:')) {
     const skillId = item.id.replace('skill:', '')

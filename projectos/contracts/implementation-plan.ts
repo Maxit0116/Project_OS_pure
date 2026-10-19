@@ -149,4 +149,16 @@ export type ImplementationPlanStatus = z.infer<
 export type ImplementationPlan = z.infer<typeof ImplementationPlanSchema>;
 export type CreatePlanRequest = z.infer<typeof CreatePlanRequestSchema>;
 export type UpdatePlanRequest = z.infer<typeof UpdatePlanRequestSchema>;
+
+export const WorkspacePlanSummarySchema = z
+  .object({
+    id: z.string().min(1),
+    path: z.string().min(1),
+    objective: z.string().min(1),
+    status: ImplementationPlanStatusSchema.optional(),
+    updatedAt: z.string().min(1).optional(),
+  })
+  .strict();
+
+export type WorkspacePlanSummary = z.infer<typeof WorkspacePlanSummarySchema>;
 export type LatestPlanTrace = z.infer<typeof LatestPlanTraceSchema>;
