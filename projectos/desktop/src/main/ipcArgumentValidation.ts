@@ -108,6 +108,7 @@ const PROJECTOS_IPC_SIGNATURES = {
   resolveSpatialPins: ['string', 'record'],
   submitSpatialPin: ['string', 'string'],
   saveSpatialPinSnapshot: ['string', 'string', 'string'],
+  getRepoDesignSystem: ['string'],
   listSpatialCaptureSessions: ['string'],
   getSpatialCaptureSession: ['string', 'string'],
   upsertSpatialCaptureSession: ['string', 'record'],

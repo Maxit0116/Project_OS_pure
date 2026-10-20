@@ -762,6 +762,12 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("saveSpatialPinSnapshot", projectId, pinId, pngBase64);
   }
 
+  getRepoDesignSystem(
+    projectId: string,
+  ): Promise<import("../../contracts/repo-design-system.js").RepoDesignSystemSnapshot> {
+    return this.invoke("getRepoDesignSystem", projectId);
+  }
+
   listSpatialCaptureSessions(
     projectId: string,
   ): Promise<

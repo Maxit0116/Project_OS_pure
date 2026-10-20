@@ -1,6 +1,7 @@
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -293,6 +294,53 @@ describe("ProjectOSWorkspaceStore", () => {
     await expect(api.openWorkspace(resolve("missing-workspace"))).rejects.toMatchObject({
       code: "invalid_workspace_path",
     } satisfies Partial<ProjectOSError>);
+  });
+
+  it("opens a workspace even when historical agent-run events fail current schema", () => {
+    const tempWorkspaceRoot = mkdtempSync(join(tmpdir(), "projectos-agent-run-legacy-"));
+    temporaryRoots.push(tempWorkspaceRoot);
+    cpSync(sampleWorkspaceRoot, tempWorkspaceRoot, { recursive: true });
+
+    const runsDir = join(tempWorkspaceRoot, ".projectos", "agent-runs");
+    mkdirSync(runsDir, { recursive: true });
+    writeFileSync(
+      join(runsDir, "run_legacy_model_request.jsonl"),
+      [
+        JSON.stringify({
+          eventId: "evt_legacy_1",
+          runId: "run_legacy_model_request",
+          timestamp: "2026-10-17T17:38:33.927Z",
+          type: "run_started",
+        }),
+        // Pre-requestId model_request shape still present in real workspaces.
+        JSON.stringify({
+          eventId: "evt_legacy_2",
+          runId: "run_legacy_model_request",
+          timestamp: "2026-10-17T17:38:40.954Z",
+          type: "model_request",
+          phaseId: "phase_plan",
+          payload: {
+            stage: "plan",
+            provider: "DeepSeek",
+            model: "deepseek-v4-flash",
+            durationMs: 7027,
+            status: "ok",
+            tokenUsage: { input: 1896, output: 1199 },
+          },
+        }),
+        JSON.stringify({
+          eventId: "evt_legacy_3",
+          runId: "run_legacy_model_request",
+          timestamp: "2026-10-17T17:38:41.000Z",
+          type: "run_completed",
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const store = new ProjectOSWorkspaceStore();
+    const workspace = store.loadWorkspace(tempWorkspaceRoot);
+    expect(workspace.project.displayName).toBe("saas-starter");
   });
 });
 

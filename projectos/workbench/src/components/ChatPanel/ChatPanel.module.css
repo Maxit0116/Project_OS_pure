@@ -5,8 +5,17 @@
   min-height: 0;
 }
 
+.messagesShell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .messages {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: var(--space-md);
   display: flex;
@@ -18,6 +27,17 @@
 
 .message {
   display: flex;
+}
+
+.navFlash .bubble {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tech-accent) 50%, transparent);
+  transition: box-shadow var(--duration-normal, 250ms) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navFlash .bubble {
+    transition: none;
+  }
 }
 
 .user {

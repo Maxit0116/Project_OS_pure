@@ -53,6 +53,7 @@ describe("spatial-capture-session-service", () => {
           flowComplete: true,
           showAnchors: false,
           tool: "arrow",
+          stencils: [],
           arrows: [
             {
               id: "arrow_1",
@@ -111,6 +112,7 @@ describe("spatial-capture-session-service", () => {
             flowComplete: true,
             showAnchors: false,
             tool: "arrow",
+            stencils: [],
             arrows: [
               {
                 id: "arrow_1",
@@ -157,6 +159,7 @@ describe("spatial-capture-session-service", () => {
             flowComplete: false,
             showAnchors: true,
             tool: "arrow",
+            stencils: [],
             arrows: [],
           },
         ],

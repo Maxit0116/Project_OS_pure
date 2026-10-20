@@ -30,6 +30,15 @@ describe('captureSessionSerialize', () => {
     flowComplete: true,
     showAnchors: false,
     tool: 'arrow',
+    stencils: [
+      {
+        id: 'place_1',
+        stencilId: 'btn-primary',
+        rect: { x: 8, y: 12, width: 96, height: 36 },
+        props: { label: 'Save' },
+        motionModifierIds: ['fade-in'],
+      },
+    ],
     snapshotAssetPath: '.projectos/spatial-pins/assets/pin_x.png',
   }
 
@@ -37,6 +46,8 @@ describe('captureSessionSerialize', () => {
     const captured = overlayRegionToCapture(region)
     const back = captureRegionToOverlay(captured)
     expect(back).toEqual(region)
+    expect(captured.stencils[0]?.stencilId).toBe('btn-primary')
+    expect(captured.stencils[0]?.motionModifierIds).toEqual(['fade-in'])
   })
 
   it('builds a session document from overlay regions', () => {

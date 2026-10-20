@@ -86,3 +86,21 @@ export function isEdgeTopologyFixtureError(error: FixtureValidationError): boole
         error.path.includes("edges")))
   );
 }
+
+/**
+ * Historical agent-run JSONL is append-only telemetry. Schema evolution and
+ * crash-truncated lines are recovered via soft parsing (corruptLines), so these
+ * errors must not block opening an otherwise valid workspace.
+ */
+export function isAgentRunFixtureError(error: FixtureValidationError): boolean {
+  return (
+    error.artifact === "agent-runs" ||
+    error.artifact.startsWith("agent-runs/")
+  );
+}
+
+export function blockingWorkspaceOpenErrors(
+  errors: FixtureValidationError[],
+): FixtureValidationError[] {
+  return errors.filter((error) => !isAgentRunFixtureError(error));
+}

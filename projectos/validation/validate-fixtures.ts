@@ -463,6 +463,9 @@ function readJsonLinesArtifactsInDirectory(
       } catch {
         // A crash can leave a partial last line. Session recovery skips it
         // and reports the line; it must not make the workspace unreadable.
+        // Schema-invalid events that do parse are still reported by
+        // validateWorkspaceFixtureData, but loadWorkspace treats agent-run
+        // errors as non-blocking (see blockingWorkspaceOpenErrors).
       }
     });
     artifacts[fileName] = events;

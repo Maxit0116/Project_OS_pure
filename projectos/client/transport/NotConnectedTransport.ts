@@ -596,6 +596,12 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async getRepoDesignSystem(
+    _projectId: string,
+  ): Promise<import("../../contracts/repo-design-system.js").RepoDesignSystemSnapshot> {
+    return transportNotConnected();
+  }
+
   async listSpatialCaptureSessions(
     _projectId: string,
   ): Promise<

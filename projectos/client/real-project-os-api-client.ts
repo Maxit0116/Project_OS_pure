@@ -607,6 +607,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.saveSpatialPinSnapshot(projectId, pinId, pngBase64);
   }
 
+  getRepoDesignSystem(projectId: string) {
+    return this.transport.getRepoDesignSystem(projectId);
+  }
+
   listSpatialCaptureSessions(projectId: string) {
     return this.transport.listSpatialCaptureSessions(projectId);
   }

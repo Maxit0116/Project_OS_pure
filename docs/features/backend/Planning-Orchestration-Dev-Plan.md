@@ -10,7 +10,8 @@
 - Loop 规格：`services/loop-graph-compiler.ts` 把意图图编成带角色、依赖和停止策略的规格。启发式编译不调用模型。
 - Loop 运行：`services/loop-runtime-service.ts` 的 `stepLoopInstance`。
 
-**对标一句话**：Loop 是可批准的工作流定义。一次 Run 才去改代码和跑验证。节点被标成完成，必须是因为 Run 和验证证据这么说。
+**对标一句话**：Loop 是可批准的工作流定义。一次 Run 才去改代码和跑验证。节点被标成完成，必须是因为 Run 和验证证据这么说。  
+**产品演进权威**：画布工作室、真暂停/恢复、Fresh·Stale、重规划提案、参数化/事件触发等见 [`../Loops-Graph-Workflow-Studio-Dev-Plan.md`](../Loops-Graph-Workflow-Studio-Dev-Plan.md)。本文仅锁定已落地的 P-0–P-3 执行底座。
 
 ## 0. 现状
 

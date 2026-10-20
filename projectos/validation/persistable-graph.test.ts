@@ -4,8 +4,11 @@ import type { ProjectGraph } from "../contracts/graph.js";
 import { ProjectOSError } from "../errors.js";
 import {
   assertPersistableProjectGraph,
+  blockingWorkspaceOpenErrors,
   collectPersistableGraphErrors,
+  isAgentRunFixtureError,
 } from "./persistable-graph.js";
+import type { FixtureValidationError } from "./validate-fixtures.js";
 
 function baseGraph(overrides?: Partial<ProjectGraph>): ProjectGraph {
   return {
@@ -113,5 +116,25 @@ describe("persistable-graph", () => {
       expect(error).toBeInstanceOf(ProjectOSError);
       expect((error as ProjectOSError).message).toContain("not persistable");
     }
+  });
+
+  it("treats agent-run fixture errors as non-blocking for workspace open", () => {
+    const errors: FixtureValidationError[] = [
+      {
+        code: "agent_event_schema_invalid",
+        artifact: "agent-runs/run_legacy.jsonl",
+        path: "1",
+        message: "Invalid input",
+      },
+      {
+        code: "schema_invalid",
+        artifact: "graph.json",
+        path: "nodes.0.id",
+        message: "Required",
+      },
+    ];
+    expect(isAgentRunFixtureError(errors[0]!)).toBe(true);
+    expect(isAgentRunFixtureError(errors[1]!)).toBe(false);
+    expect(blockingWorkspaceOpenErrors(errors)).toEqual([errors[1]]);
   });
 });

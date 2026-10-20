@@ -8,6 +8,10 @@ import {
   SpatialPinModeSchema,
   SpatialPinVersionSchema,
 } from "./spatial-pin.js";
+import {
+  MAX_STENCILS_PER_REGION,
+  StencilPlacementSchema,
+} from "./ui-stencil.js";
 
 export const SpatialCaptureSessionVersionSchema = z.literal("0.1.0");
 
@@ -53,8 +57,12 @@ export const SpatialCaptureRegionSchema = z
     snapshotAssetPath: z.string().max(1024).optional(),
     flowComplete: z.boolean().default(false),
     showAnchors: z.boolean().default(false),
-    tool: z.enum(["arrow", "draw"]).default("arrow"),
+    tool: z.enum(["arrow", "draw", "stencil"]).default("arrow"),
     arrows: z.array(SpatialCaptureArrowSchema).max(200).default([]),
+    stencils: z
+      .array(StencilPlacementSchema)
+      .max(MAX_STENCILS_PER_REGION)
+      .default([]),
   })
   .strict();
 

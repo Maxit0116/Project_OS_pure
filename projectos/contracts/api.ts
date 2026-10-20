@@ -367,6 +367,10 @@ export interface ProjectOSApi {
     pinId: string,
     pngBase64: string,
   ): Promise<{ snapshotAssetPath: string }>;
+  /** Probe workspace for shadcn / Tailwind / motion (UI Stencil codegen honesty). */
+  getRepoDesignSystem(
+    projectId: string,
+  ): Promise<import("./repo-design-system.js").RepoDesignSystemSnapshot>;
   listSpatialCaptureSessions(
     projectId: string,
   ): Promise<SpatialCaptureSessionHead[]>;

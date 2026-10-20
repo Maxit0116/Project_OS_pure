@@ -1,0 +1,73 @@
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--tech-border, rgba(255, 255, 255, 0.08));
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tech-text-secondary, rgba(248, 250, 252, 0.65));
+}
+
+.scopeLabel,
+.motionLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--tech-text-secondary, rgba(248, 250, 252, 0.65));
+}
+
+.scopeSelect {
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--tech-border, rgba(255, 255, 255, 0.08));
+  background: var(--tech-bg-muted, #272f42);
+  color: var(--tech-text-primary, #f8fafc);
+  font-size: 11px;
+  padding: 0 6px;
+}
+
+.scopeSelect:focus-visible {
+  box-shadow: var(--tech-shadow-focus);
+  outline: none;
+}
+
+.briefInput {
+  width: 100%;
+  resize: vertical;
+  min-height: 52px;
+  border-radius: 6px;
+  border: 1px solid var(--tech-border, rgba(255, 255, 255, 0.08));
+  background: var(--tech-bg-muted, #272f42);
+  color: var(--tech-text-primary, #f8fafc);
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 6px 8px;
+  font-family: inherit;
+}
+
+.briefInput:focus-visible {
+  box-shadow: var(--tech-shadow-focus);
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block,
+  .briefInput,
+  .scopeSelect {
+    transition: none;
+  }
+}

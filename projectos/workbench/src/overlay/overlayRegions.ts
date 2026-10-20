@@ -4,9 +4,10 @@ import type {
   ScreenRect,
   SpatialPinMode,
 } from '@contracts/spatial-pin'
+import type { StencilPlacement } from '@contracts/ui-stencil'
 import { pointInRect } from './regionAnchors'
 
-export type RegionTool = 'arrow' | 'draw'
+export type RegionTool = 'arrow' | 'draw' | 'stencil'
 
 export interface OverlayArrow {
   id: string
@@ -42,6 +43,8 @@ export interface OverlayRegion {
   /** Show 8 anchor dots after click when flowComplete. */
   showAnchors: boolean
   tool: RegionTool
+  /** UI stencil placements on this region (M0+; Library UI in M1). */
+  stencils: StencilPlacement[]
 }
 
 /** Box + arrow + compose card. Bare selections are discarded on exit. */

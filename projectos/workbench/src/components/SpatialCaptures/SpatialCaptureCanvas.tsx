@@ -4,6 +4,7 @@ import {
   Bug,
   ChevronDown,
   Eraser,
+  LayoutTemplate,
   ListTree,
   MessageCircle,
   Minus,
@@ -24,6 +25,11 @@ import {
   type SpatialPin,
   type SpatialPinMode,
 } from '@contracts/spatial-pin'
+import type { RepoDesignSystemSnapshot } from '@contracts/repo-design-system'
+import {
+  MAX_STENCILS_PER_REGION,
+  type StencilGenerationScope,
+} from '@contracts/ui-stencil'
 import {
   colorForArrowIndex,
   hitTestAnchor,
@@ -76,6 +82,17 @@ import {
   panForZoomAtPoint,
 } from './captureViewportCamera'
 import { useCaptureComposeFlows } from './useCaptureComposeFlows'
+import StencilLibrary from './stencils/StencilLibrary'
+import StencilComposeExtras from './stencils/StencilComposeExtras'
+import {
+  buildPlacementAtStagePoint,
+  combinedBriefForArrow,
+  DEFAULT_STENCIL_SCOPE,
+  placementsForArrow,
+  stageRectForPlacement,
+  stencilTitle,
+} from './stencils/placeStencil'
+import type { StencilUiStrings } from './stencils/stencilStrings'
 import '../../overlay/overlay.css'
 import styles from './SpatialCaptureOverlay.module.css'
 
@@ -161,7 +178,63 @@ export default function SpatialCaptureCanvas({
   const [draftRect, setDraftRect] = useState<ScreenRect | null>(null)
   const [pointer, setPointer] = useState<PointerMode>({ kind: 'idle' })
   const [openMenu, setOpenMenu] = useState<'mode' | null>(null)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [armedStencilId, setArmedStencilId] = useState<string | null>(null)
+  const [armedMotionId, setArmedMotionId] = useState<string | null>(null)
+  const [repoDesignSystem, setRepoDesignSystem] =
+    useState<RepoDesignSystemSnapshot | null>(null)
+  const [stencilBriefByArrow, setStencilBriefByArrow] = useState<
+    Record<string, string>
+  >({})
+  const [stencilScopeByArrow, setStencilScopeByArrow] = useState<
+    Record<string, StencilGenerationScope>
+  >({})
   const [status, setStatus] = useState(IDLE_HINT)
+
+  const stencilStrings: StencilUiStrings = useMemo(
+    () => ({
+      library: ts('spatialCaptures.stencilLibrary'),
+      libraryHint: ts('spatialCaptures.stencilLibraryHint'),
+      close: ts('spatialCaptures.stencilClose'),
+      search: ts('spatialCaptures.stencilSearch'),
+      empty: ts('spatialCaptures.stencilEmpty'),
+      armed: ts('spatialCaptures.stencilArmed'),
+      disarm: ts('spatialCaptures.stencilDisarm'),
+      open: ts('spatialCaptures.stencilOpen'),
+      placeHint: ts('spatialCaptures.stencilPlaceHint'),
+      brief: ts('spatialCaptures.stencilBrief'),
+      briefPlaceholder: ts('spatialCaptures.stencilBriefPlaceholder'),
+      scope: ts('spatialCaptures.stencilScope'),
+      scopeUiOnly: ts('spatialCaptures.stencilScopeUiOnly'),
+      scopeUiApi: ts('spatialCaptures.stencilScopeUiApi'),
+      scopeFull: ts('spatialCaptures.stencilScopeFull'),
+      categoryBase: ts('spatialCaptures.stencilCategory.base'),
+      categoryMotion: ts('spatialCaptures.stencilCategory.motion'),
+      categoryVisual: ts('spatialCaptures.stencilCategory.visual'),
+      categoryPreset: ts('spatialCaptures.stencilCategory.preset'),
+      motionModifier: ts('spatialCaptures.stencilMotionModifier'),
+      motionNone: ts('spatialCaptures.stencilMotionNone'),
+      motionArmed: ts('spatialCaptures.stencilMotionArmed'),
+      licenseNote: ts('spatialCaptures.stencilLicense'),
+    }),
+    [ts],
+  )
+
+  useEffect(() => {
+    if (!libraryOpen || !client || !project) return
+    let cancelled = false
+    void client
+      .getRepoDesignSystem(project.projectId)
+      .then((snapshot) => {
+        if (!cancelled) setRepoDesignSystem(snapshot)
+      })
+      .catch(() => {
+        if (!cancelled) setRepoDesignSystem(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [libraryOpen, client, project])
   const [fitScale, setFitScale] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -359,12 +432,22 @@ export default function SpatialCaptureCanvas({
           setOpenMenu(null)
           return
         }
+        if (armedStencilId || armedMotionId) {
+          setArmedStencilId(null)
+          setArmedMotionId(null)
+          setStatus(IDLE_HINT)
+          return
+        }
+        if (libraryOpen) {
+          setLibraryOpen(false)
+          return
+        }
         onExit()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onExit, openMenu])
+  }, [onExit, openMenu, armedStencilId, armedMotionId, libraryOpen])
 
   function stagePoint(event: {
     clientX: number
@@ -487,6 +570,11 @@ export default function SpatialCaptureCanvas({
         location: session.location,
         captureRect: region.captureRect,
       })
+    const stencilBrief =
+      stencilBriefByArrow[arrow.id]?.trim() ||
+      combinedBriefForArrow(region, arrow.id)
+    const generationScope =
+      stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
     const updated: SpatialPin = {
       ...base,
       updatedAt: new Date().toISOString(),
@@ -497,6 +585,7 @@ export default function SpatialCaptureCanvas({
         ...(region.snapshotAssetPath
           ? { snapshotAssetPath: region.snapshotAssetPath }
           : {}),
+        ...(stencilBrief ? { stencilBrief, generationScope } : {}),
       },
       annotations: {
         version: '0.1.0',
@@ -505,6 +594,139 @@ export default function SpatialCaptureCanvas({
       title: arrow.prompt.trim().slice(0, 60) || `Arrow #${arrow.index}`,
     }
     await client.upsertSpatialPin(project.projectId, updated)
+  }
+
+  function ensureBriefState(arrowId: string, region: OverlayRegion) {
+    setStencilBriefByArrow((prev) => {
+      if (prev[arrowId] !== undefined) return prev
+      const brief = combinedBriefForArrow(region, arrowId)
+      if (!brief) return prev
+      return { ...prev, [arrowId]: brief }
+    })
+    setStencilScopeByArrow((prev) =>
+      prev[arrowId] ? prev : { ...prev, [arrowId]: DEFAULT_STENCIL_SCOPE },
+    )
+  }
+
+  function placeArmedStencil(stagePoint: { x: number; y: number }) {
+    const stencilId = armedStencilId
+    if (!stencilId) return
+
+    const containing = regionsRef.current.filter((region) =>
+      pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
+    )
+    let baseRegion = containing[0]
+    let createdFullFrame = false
+    let fullRect: ScreenRect | null = null
+
+    if (!baseRegion) {
+      const regionId = randomId('region')
+      fullRect = {
+        x: 0,
+        y: 0,
+        width: session.viewport.width,
+        height: session.viewport.height,
+      }
+      baseRegion = {
+        id: regionId,
+        captureRect: fullRect,
+        mode: 'change',
+        regionPrompt: '',
+        arrows: [],
+        drawStrokes: [],
+        flowComplete: false,
+        showAnchors: false,
+        tool: 'stencil',
+        stencils: [],
+      }
+      createdFullFrame = true
+    }
+
+    if ((baseRegion.stencils?.length ?? 0) >= MAX_STENCILS_PER_REGION) {
+      setStatus(`At most ${MAX_STENCILS_PER_REGION} stencils per region`)
+      return
+    }
+
+    const arrowId = randomId('arrow')
+    const pinId = randomId('pin')
+    const index = baseRegion.arrows.length + 1
+    const placement = buildPlacementAtStagePoint({
+      id: randomId('place'),
+      stencilId,
+      stagePoint,
+      region: baseRegion,
+      arrowId,
+      ...(armedMotionId ? { motionModifierId: armedMotionId } : {}),
+    })
+    const localCenter = {
+      x:
+        (placement.rect.x + placement.rect.width / 2) /
+        Math.max(1, baseRegion.captureRect.width),
+      y:
+        (placement.rect.y + placement.rect.height / 2) /
+        Math.max(1, baseRegion.captureRect.height),
+    }
+    const head = {
+      x: Math.min(0.98, Math.max(0.02, localCenter.x)),
+      y: Math.min(0.98, Math.max(0.02, localCenter.y)),
+    }
+    const tail = { x: head.x + 0.35, y: head.y }
+    const layout = layoutComposeForArrow({
+      region: baseRegion.captureRect,
+      headScreen: relativeToClient(baseRegion.captureRect, head),
+      preferredTailScreen: relativeToClient(baseRegion.captureRect, tail),
+      panelWidth: 360,
+      panelHeight: estimateComposePanelHeight(false),
+      viewport: {
+        width: session.viewport.width,
+        height: session.viewport.height,
+      },
+    })
+    const arrow: OverlayArrow = {
+      id: arrowId,
+      index,
+      color: colorForArrowIndex(index),
+      anchor: nearestAnchorToRelative(head),
+      head,
+      tail,
+      composeAttach: layout.attach,
+      prompt: '',
+      pinId,
+      status: 'draft',
+    }
+    const nextRegion: OverlayRegion = {
+      ...baseRegion,
+      arrows: [...baseRegion.arrows, arrow],
+      stencils: [...(baseRegion.stencils ?? []), placement],
+      flowComplete: true,
+      showAnchors: false,
+      tool: 'stencil',
+    }
+
+    setRegions((prev) => {
+      if (createdFullFrame) return [...prev, nextRegion]
+      return prev.map((region) =>
+        region.id === nextRegion.id ? nextRegion : region,
+      )
+    })
+    regionsRef.current = createdFullFrame
+      ? [...regionsRef.current, nextRegion]
+      : regionsRef.current.map((region) =>
+          region.id === nextRegion.id ? nextRegion : region,
+        )
+
+    if (createdFullFrame && fullRect) {
+      void captureFrozenRegion(nextRegion.id, fullRect)
+    }
+
+    ensureBriefState(arrowId, nextRegion)
+    setActiveArrowId(arrowId)
+    setFocusedRegionIds([nextRegion.id])
+    setArmedStencilId(null)
+    setArmedMotionId(null)
+    setStatus(`${stencilTitle(stencilId)} placed · enter intent, then Send`)
+    requestAnimationFrame(() => promptRef.current?.focus())
+    void upsertArrowPin(nextRegion, arrow)
   }
 
   function layoutArrowCompose(
@@ -592,9 +814,22 @@ export default function SpatialCaptureCanvas({
     updateRegion(regionId, (r) => ({
       ...r,
       arrows: r.arrows.filter((a) => a.id !== arrowId),
+      stencils: (r.stencils ?? []).filter((item) => item.arrowId !== arrowId),
       flowComplete: r.arrows.some((a) => a.id !== arrowId),
       showAnchors: true,
     }))
+    setStencilBriefByArrow((prev) => {
+      if (!(arrowId in prev)) return prev
+      const next = { ...prev }
+      delete next[arrowId]
+      return next
+    })
+    setStencilScopeByArrow((prev) => {
+      if (!(arrowId in prev)) return prev
+      const next = { ...prev }
+      delete next[arrowId]
+      return next
+    })
     if (activeArrowId === arrowId) setActiveArrowId(null)
   }
 
@@ -642,10 +877,20 @@ export default function SpatialCaptureCanvas({
     try {
       await upsertArrowPin(region, { ...arrow, prompt: trimmed })
       const pin = await client.getSpatialPin(project.projectId, arrow.pinId)
+      const stencilBrief =
+        stencilBriefByArrow[arrow.id]?.trim() ||
+        combinedBriefForArrow(region, arrow.id)
+      const generationScope =
+        stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
       if (pin) {
         await client.upsertSpatialPin(project.projectId, {
           ...pin,
-          composer: { ...pin.composer, prompt: trimmed, mode: region.mode },
+          composer: {
+            ...pin.composer,
+            prompt: trimmed,
+            mode: region.mode,
+            ...(stencilBrief ? { stencilBrief, generationScope } : {}),
+          },
         })
       }
       const result = await client.submitSpatialPin(
@@ -721,6 +966,12 @@ export default function SpatialCaptureCanvas({
     if (event.button !== 0) return
     if (pointer.kind !== 'idle') return
     const pt = stagePoint(event)
+
+    if (armedStencilId) {
+      event.preventDefault()
+      placeArmedStencil(pt)
+      return
+    }
 
     const anchorCandidates =
       focusedRegionIds.length > 0
@@ -907,6 +1158,7 @@ export default function SpatialCaptureCanvas({
         flowComplete: false,
         showAnchors: true,
         tool: 'arrow',
+        stencils: [],
       }
       setRegions((prev) => [...prev, region])
       setFocusedRegionIds([regionId])
@@ -1044,8 +1296,48 @@ export default function SpatialCaptureCanvas({
           >
             <Plus size={14} strokeWidth={2} aria-hidden />
           </button>
+          <button
+            type="button"
+            className={`${styles.zoomBtn}${libraryOpen || armedStencilId ? ` ${styles.zoomBtnActive}` : ''}`}
+            aria-label={ts('spatialCaptures.stencilOpen')}
+            aria-pressed={libraryOpen}
+            title={ts('spatialCaptures.stencilOpen')}
+            onClick={() => {
+              setLibraryOpen((open) => !open)
+              if (libraryOpen) {
+                setArmedStencilId(null)
+                setArmedMotionId(null)
+              }
+            }}
+          >
+            <LayoutTemplate size={14} strokeWidth={2} aria-hidden />
+          </button>
         </div>
       </div>
+
+      <StencilLibrary
+        open={libraryOpen}
+        armedStencilId={armedStencilId}
+        armedMotionId={armedMotionId}
+        repoDesignSystem={repoDesignSystem}
+        strings={stencilStrings}
+        onClose={() => {
+          setLibraryOpen(false)
+          setArmedStencilId(null)
+          setArmedMotionId(null)
+        }}
+        onArm={(stencilId) => {
+          setArmedStencilId(stencilId)
+          setStatus(stencilStrings.placeHint)
+        }}
+        onArmMotion={setArmedMotionId}
+        onDisarm={() => {
+          setArmedStencilId(null)
+          setArmedMotionId(null)
+          setStatus(IDLE_HINT)
+        }}
+      />
+
       <div
         ref={viewportHostRef}
         className={styles.stageViewport}
@@ -1126,6 +1418,32 @@ export default function SpatialCaptureCanvas({
                 onSetTool={(tool) => setRegionTool(region.id, tool)}
               />
             ))}
+
+            {regions.map((region) =>
+              (region.stencils ?? []).map((placement) => {
+                const box = stageRectForPlacement(region, placement)
+                const focused = isRegionFocused(focusedRegionIds, region.id)
+                return (
+                  <div
+                    key={placement.id}
+                    className={`${styles.stencilPlacement}${
+                      focused ? '' : ` ${styles.stencilPlacementDimmed}`
+                    }`}
+                    style={{
+                      left: box.x,
+                      top: box.y,
+                      width: box.width,
+                      height: box.height,
+                    }}
+                    title={stencilTitle(placement.stencilId)}
+                  >
+                    <span className={styles.stencilPlacementLabel}>
+                      {stencilTitle(placement.stencilId)}
+                    </span>
+                  </div>
+                )
+              }),
+            )}
 
             <svg className="overlay-arrows-layer" aria-hidden>
               {regions.map((region) =>
@@ -1296,6 +1614,50 @@ export default function SpatialCaptureCanvas({
                             }
                           }}
                         />
+                        {placementsForArrow(region, arrow.id).length > 0 ? (
+                          <StencilComposeExtras
+                            region={region}
+                            arrowId={arrow.id}
+                            strings={stencilStrings}
+                            brief={
+                              stencilBriefByArrow[arrow.id] ??
+                              combinedBriefForArrow(region, arrow.id) ??
+                              ''
+                            }
+                            scope={
+                              stencilScopeByArrow[arrow.id] ??
+                              DEFAULT_STENCIL_SCOPE
+                            }
+                            onBriefChange={(value) => {
+                              setStencilBriefByArrow((prev) => ({
+                                ...prev,
+                                [arrow.id]: value,
+                              }))
+                              updateRegion(region.id, (r) => ({
+                                ...r,
+                                stencils: (r.stencils ?? []).map((item) =>
+                                  item.arrowId === arrow.id
+                                    ? { ...item, briefOverride: value }
+                                    : item,
+                                ),
+                              }))
+                            }}
+                            onScopeChange={(value) => {
+                              setStencilScopeByArrow((prev) => ({
+                                ...prev,
+                                [arrow.id]: value,
+                              }))
+                            }}
+                            onPlacementsChange={(stencils) => {
+                              updateRegion(region.id, { stencils })
+                            }}
+                            onFocus={() => {
+                              setFocusedRegionIds([region.id])
+                              setActiveArrowId(arrow.id)
+                              ensureBriefState(arrow.id, region)
+                            }}
+                          />
+                        ) : null}
                       </div>
                       <div className="overlay-composer-footer">
                         <div className="overlay-toolbar-left">

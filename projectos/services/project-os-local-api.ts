@@ -4744,6 +4744,30 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
   }
 
+  /** Best-effort: find stencil placements linked to this pin via capture sessions. */
+  private async findStencilPlacementsForPin(
+    projectId: string,
+    pinId: string,
+  ): Promise<import("../contracts/ui-stencil.js").StencilPlacement[]> {
+    try {
+      const heads = await this.listSpatialCaptureSessions(projectId);
+      for (const head of heads) {
+        const session = await this.getSpatialCaptureSession(projectId, head.id);
+        if (!session) continue;
+        for (const region of session.regions) {
+          const arrow = region.arrows.find((item) => item.pinId === pinId);
+          if (!arrow) continue;
+          return (region.stencils ?? []).filter(
+            (placement) => placement.arrowId === arrow.id,
+          );
+        }
+      }
+    } catch {
+      // Capture session lookup is best-effort for brief enrichment.
+    }
+    return [];
+  }
+
   async listSpatialCaptureSessions(
     projectId: string,
   ): Promise<
@@ -4944,6 +4968,18 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return { snapshotAssetPath };
   }
 
+  async getRepoDesignSystem(
+    projectId: string,
+  ): Promise<
+    import("../contracts/repo-design-system.js").RepoDesignSystemSnapshot
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { detectRepoDesignSystemFromWorkspace } = await import(
+      "./repo-design-system-service.js"
+    );
+    return detectRepoDesignSystemFromWorkspace(workspace.workspaceRoot);
+  }
+
   async submitSpatialPin(
     projectId: string,
     pinId: string,
@@ -4967,8 +5003,28 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const { buildSpatialPinUserContent } = await import(
       "../contracts/spatial-pin.js"
     );
+    const { detectRepoDesignSystemFromWorkspace } = await import(
+      "./repo-design-system-service.js"
+    );
+    const {
+      collectRepoAwareCodegenHints,
+      formatRepoConstraintLines,
+    } = await import("../contracts/repo-design-system.js");
+    const { getStencilCatalogMap } = await import("../contracts/ui-stencil.js");
     const now = new Date().toISOString();
-    const userContent = buildSpatialPinUserContent(pin);
+    const repo = detectRepoDesignSystemFromWorkspace(workspace.workspaceRoot);
+    const placements = await this.findStencilPlacementsForPin(projectId, pinId);
+    const catalog = getStencilCatalogMap();
+    const codegenHints = collectRepoAwareCodegenHints(
+      placements,
+      catalog,
+      repo,
+    );
+    const userContent = buildSpatialPinUserContent(pin, {
+      ...(placements.length > 0 ? { placements } : {}),
+      repoConstraintLines: formatRepoConstraintLines(repo),
+      ...(codegenHints.length > 0 ? { codegenHints } : {}),
+    });
     const images = this.loadSpatialPinImages(
       workspace.workspaceRoot,
       pin.composer.snapshotAssetPath,

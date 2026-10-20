@@ -34,6 +34,7 @@ function session(
         showAnchors: false,
         tool: 'arrow',
         arrows,
+        stencils: [],
       },
     ],
   }

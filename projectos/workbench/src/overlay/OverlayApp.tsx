@@ -4,6 +4,7 @@ import {
   Bug,
   ChevronDown,
   Eraser,
+  LayoutTemplate,
   ListTree,
   MessageCircle,
   Pencil,
@@ -27,6 +28,23 @@ import {
   emptyAnnotationDoc,
   isWebSurface,
 } from '@contracts/spatial-pin'
+import type { RepoDesignSystemSnapshot } from '@contracts/repo-design-system'
+import {
+  MAX_STENCILS_PER_REGION,
+  type StencilGenerationScope,
+} from '@contracts/ui-stencil'
+import StencilLibrary from '../components/SpatialCaptures/stencils/StencilLibrary'
+import StencilComposeExtras from '../components/SpatialCaptures/stencils/StencilComposeExtras'
+import {
+  buildPlacementAtStagePoint,
+  combinedBriefForArrow,
+  DEFAULT_STENCIL_SCOPE,
+  placementsForArrow,
+  stageRectForPlacement,
+  stencilTitle,
+} from '../components/SpatialCaptures/stencils/placeStencil'
+import { STENCIL_UI_STRINGS_EN } from '../components/SpatialCaptures/stencils/stencilStrings'
+import stencilPlacementStyles from '../components/SpatialCaptures/SpatialCaptureOverlay.module.css'
 import {
   applyRunEventToCompactFlow,
 } from './coarseFlow'
@@ -135,6 +153,17 @@ export function OverlayApp() {
   const [draftRect, setDraftRect] = useState<ScreenRect | null>(null)
   const [pointer, setPointer] = useState<PointerMode>({ kind: 'idle' })
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [armedStencilId, setArmedStencilId] = useState<string | null>(null)
+  const [armedMotionId, setArmedMotionId] = useState<string | null>(null)
+  const [repoDesignSystem, setRepoDesignSystem] =
+    useState<RepoDesignSystemSnapshot | null>(null)
+  const [stencilBriefByArrow, setStencilBriefByArrow] = useState<
+    Record<string, string>
+  >({})
+  const [stencilScopeByArrow, setStencilScopeByArrow] = useState<
+    Record<string, StencilGenerationScope>
+  >({})
   const [projectId, setProjectId] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<SpatialPinProjectCandidate[]>([])
   const [location, setLocation] = useState<LocationKey | null>(null)
@@ -169,6 +198,25 @@ export function OverlayApp() {
   useEffect(() => {
     projectIdRef.current = projectId
   }, [projectId])
+
+  useEffect(() => {
+    if (!libraryOpen || !projectId || !window.projectOS) return
+    let cancelled = false
+    void window.projectOS
+      .invoke('getRepoDesignSystem', projectId)
+      .then((snapshot) => {
+        if (!cancelled) {
+          setRepoDesignSystem(snapshot as RepoDesignSystemSnapshot)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRepoDesignSystem(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [libraryOpen, projectId])
+
   useEffect(() => {
     locationRef.current = location
   }, [location])
@@ -250,12 +298,22 @@ export function OverlayApp() {
           setOpenMenu(null)
           return
         }
+        if (armedStencilId || armedMotionId) {
+          setArmedStencilId(null)
+          setArmedMotionId(null)
+          setStatus('Drag to select a region on any screen')
+          return
+        }
+        if (libraryOpen) {
+          setLibraryOpen(false)
+          return
+        }
         void solidifyThenHideRef.current()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openMenu])
+  }, [openMenu, armedStencilId, armedMotionId, libraryOpen])
 
   useEffect(() => {
     if (!openMenu) return
@@ -539,6 +597,12 @@ export function OverlayApp() {
         captureRect: region.captureRect,
       })
 
+    const stencilBrief =
+      stencilBriefByArrow[arrow.id]?.trim() ||
+      combinedBriefForArrow(region, arrow.id)
+    const generationScope =
+      stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
+
     const updated: SpatialPin = {
       ...base,
       updatedAt: new Date().toISOString(),
@@ -547,6 +611,7 @@ export function OverlayApp() {
         mode: region.mode,
         prompt: arrow.prompt,
         ...(snapshotAssetPath ? { snapshotAssetPath } : {}),
+        ...(stencilBrief ? { stencilBrief, generationScope } : {}),
       },
       annotations: {
         version: '0.1.0',
@@ -555,6 +620,137 @@ export function OverlayApp() {
       title: arrow.prompt.trim().slice(0, 60) || `Arrow #${arrow.index}`,
     }
     await window.projectOS.invoke('upsertSpatialPin', pid, updated)
+  }
+
+  function ensureBriefState(arrowId: string, region: OverlayRegion) {
+    setStencilBriefByArrow((prev) => {
+      if (prev[arrowId] !== undefined) return prev
+      const brief = combinedBriefForArrow(region, arrowId)
+      if (!brief) return prev
+      return { ...prev, [arrowId]: brief }
+    })
+    setStencilScopeByArrow((prev) =>
+      prev[arrowId] ? prev : { ...prev, [arrowId]: DEFAULT_STENCIL_SCOPE },
+    )
+  }
+
+  function placeArmedStencil(stagePoint: { x: number; y: number }) {
+    const stencilId = armedStencilId
+    if (!stencilId) return
+
+    const containing = regionsRef.current.filter((region) =>
+      pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
+    )
+    let baseRegion = containing[0]
+    let createdFullFrame = false
+    let fullRect: ScreenRect | null = null
+
+    if (!baseRegion) {
+      const regionId = randomId('region')
+      // Full-screen region in overlay client coords.
+      fullRect = {
+        x: 0,
+        y: 0,
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }
+      baseRegion = {
+        id: regionId,
+        captureRect: fullRect,
+        mode: 'change',
+        regionPrompt: '',
+        arrows: [],
+        drawStrokes: [],
+        flowComplete: false,
+        showAnchors: false,
+        tool: 'stencil',
+        stencils: [],
+      }
+      createdFullFrame = true
+    }
+
+    if ((baseRegion.stencils?.length ?? 0) >= MAX_STENCILS_PER_REGION) {
+      setStatus(`At most ${MAX_STENCILS_PER_REGION} stencils per region`)
+      return
+    }
+
+    const arrowId = randomId('arrow')
+    const pinId = randomId('pin')
+    const index = baseRegion.arrows.length + 1
+    const placement = buildPlacementAtStagePoint({
+      id: randomId('place'),
+      stencilId,
+      stagePoint,
+      region: baseRegion,
+      arrowId,
+      ...(armedMotionId ? { motionModifierId: armedMotionId } : {}),
+    })
+    const localCenter = {
+      x:
+        (placement.rect.x + placement.rect.width / 2) /
+        Math.max(1, baseRegion.captureRect.width),
+      y:
+        (placement.rect.y + placement.rect.height / 2) /
+        Math.max(1, baseRegion.captureRect.height),
+    }
+    const head = {
+      x: Math.min(0.98, Math.max(0.02, localCenter.x)),
+      y: Math.min(0.98, Math.max(0.02, localCenter.y)),
+    }
+    const tail = { x: head.x + 0.35, y: head.y }
+    const layout = layoutComposeForArrow({
+      region: baseRegion.captureRect,
+      headScreen: relativeToClient(baseRegion.captureRect, head),
+      preferredTailScreen: relativeToClient(baseRegion.captureRect, tail),
+      panelWidth: 360,
+      panelHeight: estimateComposePanelHeight(false),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    })
+    const arrow: OverlayArrow = {
+      id: arrowId,
+      index,
+      color: colorForArrowIndex(index),
+      anchor: nearestAnchorToRelative(head),
+      head,
+      tail,
+      composeAttach: layout.attach,
+      prompt: '',
+      pinId,
+      status: 'draft',
+    }
+    const nextRegion: OverlayRegion = {
+      ...baseRegion,
+      arrows: [...baseRegion.arrows, arrow],
+      stencils: [...(baseRegion.stencils ?? []), placement],
+      flowComplete: true,
+      showAnchors: false,
+      tool: 'stencil',
+    }
+
+    setRegions((prev) => {
+      if (createdFullFrame) return [...prev, nextRegion]
+      return prev.map((region) =>
+        region.id === nextRegion.id ? nextRegion : region,
+      )
+    })
+    regionsRef.current = createdFullFrame
+      ? [...regionsRef.current, nextRegion]
+      : regionsRef.current.map((region) =>
+          region.id === nextRegion.id ? nextRegion : region,
+        )
+
+    if (createdFullFrame && fullRect) {
+      void captureRegion(nextRegion.id, fullRect)
+    }
+
+    ensureBriefState(arrowId, nextRegion)
+    setActiveArrowId(arrowId)
+    setFocusedRegionIds([nextRegion.id])
+    setArmedStencilId(null)
+    setArmedMotionId(null)
+    setStatus(`${stencilTitle(stencilId)} placed · enter intent, then Send`)
+    requestAnimationFrame(() => promptRef.current?.focus())
+    void upsertArrowPin(nextRegion, arrow)
   }
 
   async function solidifyCaptureSession(): Promise<void> {
@@ -701,6 +897,12 @@ export function OverlayApp() {
   function onPointerDown(event: React.PointerEvent) {
     if (pointer.kind !== 'idle') return
     const { clientX, clientY } = event
+
+    if (armedStencilId) {
+      event.preventDefault()
+      placeArmedStencil({ x: clientX, y: clientY })
+      return
+    }
 
     // Hit-test visible anchors (first arrow after select, or add-arrow after click).
     const anchorCandidates =
@@ -886,6 +1088,7 @@ export function OverlayApp() {
         flowComplete: false,
         showAnchors: true,
         tool: 'arrow',
+        stencils: [],
       }
       setRegions((prev) => [...prev, region])
       setFocusedRegionIds([regionId])
@@ -977,15 +1180,34 @@ export function OverlayApp() {
     setStatus(`Submitting arrow #${arrow.index}…`)
 
     try {
-      await upsertArrowPin(
-        {
-          ...region,
-          snapshotAssetPath:
-            region.snapshotAssetPath ??
-            snapshotByRegionRef.current.get(regionId),
-        },
-        { ...arrow, prompt: trimmed },
-      )
+      const withSnapshot = {
+        ...region,
+        snapshotAssetPath:
+          region.snapshotAssetPath ??
+          snapshotByRegionRef.current.get(regionId),
+      }
+      await upsertArrowPin(withSnapshot, { ...arrow, prompt: trimmed })
+      const pin = (await window.projectOS.invoke(
+        'getSpatialPin',
+        pid,
+        arrow.pinId,
+      )) as SpatialPin | null
+      const stencilBrief =
+        stencilBriefByArrow[arrow.id]?.trim() ||
+        combinedBriefForArrow(region, arrow.id)
+      const generationScope =
+        stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
+      if (pin) {
+        await window.projectOS.invoke('upsertSpatialPin', pid, {
+          ...pin,
+          composer: {
+            ...pin.composer,
+            prompt: trimmed,
+            mode: region.mode,
+            ...(stencilBrief ? { stencilBrief, generationScope } : {}),
+          },
+        })
+      }
       const result = (await window.projectOS.invoke(
         'submitSpatialPin',
         pid,
@@ -1054,9 +1276,22 @@ export function OverlayApp() {
       return {
         ...r,
         arrows: remaining,
+        stencils: (r.stencils ?? []).filter((item) => item.arrowId !== arrowId),
         flowComplete: remaining.length > 0,
         showAnchors: remaining.length === 0,
       }
+    })
+    setStencilBriefByArrow((prev) => {
+      if (!(arrowId in prev)) return prev
+      const next = { ...prev }
+      delete next[arrowId]
+      return next
+    })
+    setStencilScopeByArrow((prev) => {
+      if (!(arrowId in prev)) return prev
+      const next = { ...prev }
+      delete next[arrowId]
+      return next
     })
     setActiveArrowId((current) => {
       if (current !== arrowId) return current
@@ -1201,6 +1436,52 @@ export function OverlayApp() {
         <span>Exit</span>
       </button>
 
+      <button
+        type="button"
+        className={`overlay-stencil-toggle${
+          libraryOpen || armedStencilId ? ' overlay-stencil-toggle-active' : ''
+        }`}
+        aria-label={STENCIL_UI_STRINGS_EN.open}
+        aria-pressed={libraryOpen}
+        title={STENCIL_UI_STRINGS_EN.open}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={() => {
+          setLibraryOpen((open) => {
+            if (open) {
+              setArmedStencilId(null)
+              setArmedMotionId(null)
+            }
+            return !open
+          })
+        }}
+      >
+        <LayoutTemplate size={14} strokeWidth={2} aria-hidden />
+        <span>{STENCIL_UI_STRINGS_EN.open}</span>
+      </button>
+
+      <StencilLibrary
+        open={libraryOpen}
+        armedStencilId={armedStencilId}
+        armedMotionId={armedMotionId}
+        repoDesignSystem={repoDesignSystem}
+        strings={STENCIL_UI_STRINGS_EN}
+        onClose={() => {
+          setLibraryOpen(false)
+          setArmedStencilId(null)
+          setArmedMotionId(null)
+        }}
+        onArm={(stencilId) => {
+          setArmedStencilId(stencilId)
+          setStatus(STENCIL_UI_STRINGS_EN.placeHint)
+        }}
+        onArmMotion={setArmedMotionId}
+        onDisarm={() => {
+          setArmedStencilId(null)
+          setArmedMotionId(null)
+          setStatus('Drag to select a region on any screen')
+        }}
+      />
+
       {savePromptOpen ? (
         <div
           className="overlay-save-prompt"
@@ -1268,6 +1549,35 @@ export function OverlayApp() {
           />
         )
       })}
+
+      {regions.map((region) =>
+        (region.stencils ?? []).map((placement) => {
+          const box = stageRectForPlacement(region, placement)
+          const focused = isRegionFocused(focusedRegionIds, region.id)
+          return (
+            <div
+              key={placement.id}
+              className={`${stencilPlacementStyles.stencilPlacement}${
+                focused ? '' : ` ${stencilPlacementStyles.stencilPlacementDimmed}`
+              }`}
+              style={{
+                left: box.x,
+                top: box.y,
+                width: box.width,
+                height: box.height,
+              }}
+              title={stencilTitle(placement.stencilId)}
+            >
+              <span className={stencilPlacementStyles.stencilPlacementLabel}>
+                {stencilTitle(placement.stencilId)}
+                {placement.motionModifierIds?.[0]
+                  ? ` + ${stencilTitle(placement.motionModifierIds[0])}`
+                  : ''}
+              </span>
+            </div>
+          )
+        }),
+      )}
 
       {/* Committed arrows — tip docks to compose card's best of 8 anchors */}
       <svg className="overlay-arrows-layer" aria-hidden>
@@ -1450,6 +1760,49 @@ export function OverlayApp() {
                       }
                     }}
                   />
+                  {placementsForArrow(region, arrow.id).length > 0 ? (
+                    <StencilComposeExtras
+                      region={region}
+                      arrowId={arrow.id}
+                      strings={STENCIL_UI_STRINGS_EN}
+                      brief={
+                        stencilBriefByArrow[arrow.id] ??
+                        combinedBriefForArrow(region, arrow.id) ??
+                        ''
+                      }
+                      scope={
+                        stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
+                      }
+                      onBriefChange={(value) => {
+                        setStencilBriefByArrow((prev) => ({
+                          ...prev,
+                          [arrow.id]: value,
+                        }))
+                        updateRegion(region.id, (r) => ({
+                          ...r,
+                          stencils: (r.stencils ?? []).map((item) =>
+                            item.arrowId === arrow.id
+                              ? { ...item, briefOverride: value }
+                              : item,
+                          ),
+                        }))
+                      }}
+                      onScopeChange={(value) => {
+                        setStencilScopeByArrow((prev) => ({
+                          ...prev,
+                          [arrow.id]: value,
+                        }))
+                      }}
+                      onPlacementsChange={(stencils) => {
+                        updateRegion(region.id, { stencils })
+                      }}
+                      onFocus={() => {
+                        setFocusedRegionIds([region.id])
+                        setActiveArrowId(arrow.id)
+                        ensureBriefState(arrow.id, region)
+                      }}
+                    />
+                  ) : null}
                 </div>
                 <div className="overlay-composer-footer">
                   <div className="overlay-toolbar-left">

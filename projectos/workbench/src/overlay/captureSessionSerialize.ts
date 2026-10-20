@@ -42,6 +42,7 @@ export function overlayRegionToCapture(
     showAnchors: region.showAnchors,
     tool: region.tool,
     arrows: region.arrows.map(overlayArrowToCapture),
+    stencils: region.stencils ?? [],
     ...(region.snapshotAssetPath
       ? { snapshotAssetPath: region.snapshotAssetPath }
       : {}),
@@ -79,6 +80,7 @@ export function captureRegionToOverlay(
     showAnchors: region.showAnchors ?? false,
     tool: region.tool ?? 'arrow',
     arrows: (region.arrows ?? []).map(captureArrowToOverlay),
+    stencils: region.stencils ?? [],
     ...(region.snapshotAssetPath
       ? { snapshotAssetPath: region.snapshotAssetPath }
       : {}),

@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+import {
+  StencilGenerationScopeSchema,
+  buildSpatialPinUserContentWithStencils,
+  type StencilPlacement,
+} from "./ui-stencil.js";
+
 export const SpatialPinVersionSchema = z.literal("0.1.0");
 
 export const SpatialPinStatusSchema = z.enum([
@@ -158,6 +164,9 @@ export const PinComposerSchema = z
     mode: SpatialPinModeSchema,
     prompt: z.string().max(16_000),
     snapshotAssetPath: z.string().max(1024).optional(),
+    /** User-edited or baked stencil brief carried into submit (UI Stencil on Capture). */
+    stencilBrief: z.string().max(16_000).optional(),
+    generationScope: StencilGenerationScopeSchema.optional(),
   })
   .strict();
 
@@ -478,9 +487,8 @@ function hasHostLocationFields(location: LocationKey): boolean {
   );
 }
 
-/** Format prompt + host/snapshot metadata for chat and agent submission. */
-export function buildSpatialPinUserContent(pin: SpatialPin): string {
-  const prompt = pin.composer.prompt.trim();
+/** Host / snapshot / arrow metadata line historically wrapped in `[...]`. */
+export function formatSpatialPinLocationLine(pin: SpatialPin): string {
   const loc = pin.location;
   const lines: string[] = [
     `Spatial pin on ${loc.surface}`,
@@ -509,8 +517,34 @@ export function buildSpatialPinUserContent(pin: SpatialPin): string {
       `arrow=#${stroke.index} color=${stroke.color} anchor=${stroke.anchor} head=${stroke.head.x.toFixed(2)},${stroke.head.y.toFixed(2)} tail=${stroke.tail.x.toFixed(2)},${stroke.tail.y.toFixed(2)}`,
     );
   }
-  const locationLine = lines.join(" · ");
-  return `${prompt}\n\n[${locationLine}]`;
+  return lines.join(" · ");
+}
+
+export interface BuildSpatialPinUserContentOptions {
+  placements?: readonly StencilPlacement[];
+  outOfScope?: string;
+  repoConstraintLines?: readonly string[];
+  codegenHints?: readonly string[];
+}
+
+/**
+ * Format prompt + host/snapshot metadata for chat and agent submission.
+ * With stencil placements or composer.stencilBrief, emits layered stencil-aware content.
+ */
+export function buildSpatialPinUserContent(
+  pin: SpatialPin,
+  options?: BuildSpatialPinUserContentOptions,
+): string {
+  const locationLine = formatSpatialPinLocationLine(pin);
+  return buildSpatialPinUserContentWithStencils(pin.composer, {
+    locationLine,
+    ...(options?.placements ? { placements: options.placements } : {}),
+    ...(options?.outOfScope ? { outOfScope: options.outOfScope } : {}),
+    ...(options?.repoConstraintLines
+      ? { repoConstraintLines: options.repoConstraintLines }
+      : {}),
+    ...(options?.codegenHints ? { codegenHints: options.codegenHints } : {}),
+  });
 }
 
 /** Build a persisted arrow stroke from region-relative head/tail. */

@@ -63,6 +63,7 @@ import { resolveContainedPath } from "../utils/path-containment.js";
 import {
   DemoResetSchema,
   DemoScenarioSchema,
+  blockingWorkspaceOpenErrors,
   isEdgeTopologyFixtureError,
   type DemoReset,
   type DemoScenario,
@@ -123,11 +124,12 @@ export class ProjectOSWorkspaceStore {
         validation = validateWorkspaceFixtures(resolvedWorkspaceRoot);
       }
     }
-    if (!validation.ok) {
+    const blockingErrors = blockingWorkspaceOpenErrors(validation.errors);
+    if (blockingErrors.length > 0) {
       throw new ProjectOSError(
         "invalid_workspace_fixtures",
         `Project OS fixtures are invalid for workspace '${resolvedWorkspaceRoot}'`,
-        { validationErrors: validation.errors },
+        { validationErrors: blockingErrors },
       );
     }
 

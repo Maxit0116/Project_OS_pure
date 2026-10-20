@@ -21,6 +21,7 @@
 | Tools | [`Tools-Integrations-Dev-Plan.md`](Tools-Integrations-Dev-Plan.md) T-0–T-3 | `ToolResult` 信封；Git 只读 status；写仍只走事务 |
 | Sandbox | [`Sandbox-Runtime-Dev-Plan.md`](Sandbox-Runtime-Dev-Plan.md) SB-0–SB-2 | 并发上限、进程组清理、保护路径监视。仍 `softOnly`，无 OS 隔离 |
 | Planning | [`Planning-Orchestration-Dev-Plan.md`](Planning-Orchestration-Dev-Plan.md) P-0–P-3 | Implement 附着叶子 Run；verify 只认证据；失败才沿 feedback 再开一轮 |
+| Loops Graph Studio | [`../Loops-Graph-Workflow-Studio-Dev-Plan.md`](../Loops-Graph-Workflow-Studio-Dev-Plan.md) | 产品级工作流编排演进（画布、可靠性、重规划、触发）；复用 Planning 底座，不另起 Runtime |
 | Verification | [`Verification-Eval-Dev-Plan.md`](Verification-Eval-Dev-Plan.md) V-0–V-3 | 每次运行有证据；`not_run` 不是通过；离线分数不进用户验收 |
 | Session | [`Session-State-Dev-Plan.md`](Session-State-Dev-Plan.md) S-0–S-2 | 半截运行是 `interrupted`；已写入的不会因继续而再写一遍 |
 | Security | [`Security-Governance-Dev-Plan.md`](Security-Governance-Dev-Plan.md) SEC-0–SEC-3 | 审批与拒绝写入审计；无账号系统 |

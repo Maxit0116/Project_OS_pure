@@ -38,6 +38,8 @@ import {
 } from './spatialPinChatDisplay'
 import LoopAuthoringBanner from '../LoopGraph/LoopAuthoringBanner'
 import { shouldSuggestPlanMode } from './suggestPlanMode'
+import ConversationNavRail from './ConversationNavRail'
+import { collectUserTurns } from './conversationNavTurns'
 import styles from './ChatPanel.module.css'
 
 export default function ChatPanel() {
@@ -139,10 +141,32 @@ export default function ChatPanel() {
   const runActivityRows = unanchoredActivities.filter(
     (activity) => activity.mode !== 'plan' && activity.mode !== 'debug',
   )
+  const panelRef = useRef<HTMLDivElement>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
   const baseInputRef = useRef('')
   const voiceUpdatingRef = useRef(false)
   const voiceBackend = useChatVoiceBackend(locale)
+  const navTurns = useMemo(
+    () => collectUserTurns(messages, agentActivities),
+    [messages, agentActivities],
+  )
+
+  const chatModeNavLabel = useMemo(() => {
+    switch (chatMode) {
+      case 'ask':
+        return ts('chat.askMode')
+      case 'change':
+        return ts('chat.changeMode')
+      case 'plan':
+        return ts('chat.planMode')
+      case 'debug':
+        return ts('chat.debugMode')
+      case 'anchored':
+        return ts('chat.anchoredMode')
+      default:
+        return undefined
+    }
+  }, [chatMode, ts])
 
   const applyVoiceText = (spoken: string, commit = false) => {
     const merged = mergeBaseWithSpoken(baseInputRef.current, spoken)
@@ -273,8 +297,9 @@ export default function ChatPanel() {
     (chatMode === 'change' || chatMode === 'plan')
 
   return (
-    <div className={styles.panel}>
-      <div className={styles.messages} ref={messagesRef}>
+    <div className={styles.panel} ref={panelRef}>
+      <div className={styles.messagesShell}>
+        <div className={styles.messages} ref={messagesRef}>
         {showGlobalAgentHint ? (
           <div className={styles.suggestPlanBanner}>{ts('chat.globalAgentEmptyHint')}</div>
         ) : null}
@@ -290,8 +315,13 @@ export default function ChatPanel() {
             !!activeSessionId &&
             (msg.role === 'user' || msg.role === 'assistant') &&
             msg.content.trim().length > 0
+          const isUserTurn = msg.role === 'user' && msg.content.trim().length > 0
           return (
-            <div key={msg.id} className={`${styles.message} ${styles[msg.role]}`}>
+            <div
+              key={msg.id}
+              className={`${styles.message} ${styles[msg.role]}`}
+              {...(isUserTurn ? { 'data-message-id': msg.id } : {})}
+            >
               <div className={styles.messageBody}>
                 {msg.role === 'user' && (attachments.length || msg.invokedSkillId) ? (
                   <AttachmentChips
@@ -517,6 +547,15 @@ export default function ChatPanel() {
             label={ts('chat.refining')}
           />
         )}
+        </div>
+        <ConversationNavRail
+          turns={navTurns}
+          scrollParentRef={messagesRef}
+          scopeRef={panelRef}
+          modeLabel={chatModeNavLabel}
+          flashClassName={styles.navFlash}
+          onOpenActivity={openActivity}
+        />
       </div>
       <form className={styles.inputArea} onSubmit={handleSubmit}>
         {pendingChangesDrawerVisible && diffFileStats.length > 0 ? (

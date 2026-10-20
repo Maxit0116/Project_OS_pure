@@ -69,6 +69,7 @@ describe('overlayRegions focus', () => {
       flowComplete: false,
       showAnchors: false,
       tool: 'arrow',
+      stencils: [],
     }
   }
 
