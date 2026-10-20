@@ -977,6 +977,30 @@
   pointer-events: none;
 }
 
+.overlay-resize-handle {
+  position: absolute;
+  z-index: 28;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 2px;
+  border: 1.5px solid #fff;
+  background: var(--tech-accent, var(--color-accent));
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.overlay-resize-handle[data-handle='topLeft'],
+.overlay-resize-handle[data-handle='bottomRight'] {
+  cursor: nwse-resize;
+}
+
+.overlay-resize-handle[data-handle='topRight'],
+.overlay-resize-handle[data-handle='bottomLeft'] {
+  cursor: nesw-resize;
+}
+
 .overlay-region-tools {
   position: absolute;
   z-index: 30;

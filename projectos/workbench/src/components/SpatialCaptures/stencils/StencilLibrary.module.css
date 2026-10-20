@@ -1,19 +1,171 @@
+.root {
+  --stencil-drawer-width: min(300px, calc(100% - 24px));
+  --stencil-preview-width: min(280px, calc(100vw - var(--stencil-drawer-width) - 48px));
+  --stencil-drawer-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.edgeZone {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--stencil-edge, 18px);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.edgeGrip {
+  width: 3px;
+  height: 56px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tech-text-secondary) 35%, transparent);
+  opacity: 0.55;
+  transform: translateZ(0);
+  transition:
+    opacity 180ms var(--stencil-drawer-ease),
+    transform 180ms var(--stencil-drawer-ease),
+    background 180ms var(--stencil-drawer-ease);
+}
+
+.rootOpen .edgeGrip,
+.edgeZone:hover .edgeGrip {
+  opacity: 0.95;
+  transform: scaleY(1.28) translateZ(0);
+  background: color-mix(in srgb, var(--tech-accent) 70%, transparent);
+}
+
 .drawer {
   position: absolute;
   top: 52px;
-  left: 12px;
+  right: var(--stencil-edge, 18px);
   bottom: 56px;
-  width: min(300px, calc(100% - 24px));
-  z-index: 60;
+  width: var(--stencil-drawer-width);
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  border-radius: 8px;
+  border-radius: 8px 0 0 8px;
+  border: 1px solid var(--tech-border);
+  border-right: none;
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-md);
+  transform: translate3d(calc(100% + var(--stencil-edge, 18px)), 0, 0);
+  pointer-events: none;
+  will-change: transform;
+  backface-visibility: hidden;
+  transition: transform 320ms var(--stencil-drawer-ease);
+}
+
+.rootOpen .drawer {
+  transform: translate3d(0, 0, 0);
+  pointer-events: auto;
+}
+
+.preview {
+  position: absolute;
+  right: calc(var(--stencil-drawer-width) + var(--stencil-edge, 18px) + 10px);
+  width: var(--stencil-preview-width);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 10px;
   border: 1px solid var(--tech-border);
   background: var(--tech-bg-elevated);
   box-shadow: var(--tech-shadow-md);
   pointer-events: auto;
+  transform: translate3d(0, 0, 0);
+  will-change: transform, opacity;
+  animation: stencilPreviewIn 180ms var(--stencil-drawer-ease);
+}
+
+.previewBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.previewTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.previewTitle {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--tech-text-primary);
+}
+
+.previewCategory {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--tech-border);
+  color: var(--tech-text-secondary, rgba(248, 250, 252, 0.65));
+}
+
+.previewCategory[data-category='base'] {
+  border-color: color-mix(in srgb, #38bdf8 40%, var(--tech-border));
+}
+
+.previewCategory[data-category='motion'] {
+  border-color: color-mix(in srgb, #a78bfa 40%, var(--tech-border));
+}
+
+.previewCategory[data-category='visual'] {
+  border-color: color-mix(in srgb, #fbbf24 40%, var(--tech-border));
+}
+
+.previewCategory[data-category='preset'] {
+  border-color: color-mix(in srgb, #34d399 40%, var(--tech-border));
+}
+
+.previewDesc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--tech-text-secondary, rgba(248, 250, 252, 0.72));
+}
+
+.previewLicense,
+.previewHint,
+.previewMaps {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--tech-text-secondary, rgba(248, 250, 252, 0.45));
+}
+
+.previewMaps {
+  color: color-mix(in srgb, #34d399 75%, var(--tech-text-secondary));
+}
+
+@keyframes stencilPreviewIn {
+  from {
+    opacity: 0;
+    transform: translate3d(6px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
 }
 
 .header {
@@ -331,8 +483,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .motionChip {
+  .drawer,
+  .edgeGrip,
+  .motionChip,
+  .preview {
     transition: none;
+    animation: none;
   }
 
   .row,

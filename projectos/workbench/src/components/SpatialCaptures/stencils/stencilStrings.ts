@@ -2,6 +2,7 @@
 export interface StencilUiStrings {
   library: string
   libraryHint: string
+  edgeHint: string
   close: string
   search: string
   empty: string
@@ -9,6 +10,7 @@ export interface StencilUiStrings {
   disarm: string
   open: string
   placeHint: string
+  dragHint: string
   brief: string
   briefPlaceholder: string
   scope: string
@@ -27,14 +29,16 @@ export interface StencilUiStrings {
 
 export const STENCIL_UI_STRINGS_EN: StencilUiStrings = {
   library: 'UI Stencils',
-  libraryHint: 'Arm a template, then click the screenshot to place it.',
+  libraryHint: 'Drag a template onto the capture · motion in Compose.',
+  edgeHint: 'Hover the right edge to open UI Stencils',
   close: 'Close stencil library',
   search: 'Search stencils',
   empty: 'No stencils match',
-  armed: 'Armed: {name} — click to place',
+  armed: 'Dragging: {name}',
   disarm: 'Clear',
   open: 'Stencils',
-  placeHint: 'Click the capture to place the stencil · Esc clears arm',
+  placeHint: 'Drag a stencil from the right-edge library onto the capture',
+  dragHint: 'Drop on the capture to place',
   brief: 'Stencil brief',
   briefPlaceholder: 'Editable brief sent with your intent…',
   scope: 'Scope',

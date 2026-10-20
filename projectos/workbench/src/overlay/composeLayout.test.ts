@@ -51,15 +51,14 @@ describe('composeLayout', () => {
     expect(dock.y).toBeCloseTo(tip.y, 5)
   })
 
-  it('docks corner tips onto the rounded outline, not the box corner', () => {
+  it('docks tip onto an edge midpoint of the card', () => {
     const tip = { x: 400, y: 300 }
-    const card = cardPinnedToTip(tip, 'bottomRight', 360, 180)
-    const dock = composeAttachScreenPoint(card, 'bottomRight')
+    const card = cardPinnedToTip(tip, 'right', 360, 180)
+    const dock = composeAttachScreenPoint(card, 'right')
     expect(dock.x).toBeCloseTo(tip.x, 5)
     expect(dock.y).toBeCloseTo(tip.y, 5)
-    // Geometric box corner sits outside the rounded chrome.
-    expect(card.x + card.width).toBeGreaterThan(tip.x)
-    expect(card.y + card.height).toBeGreaterThan(tip.y)
+    expect(card.x + card.width).toBeCloseTo(tip.x, 5)
+    expect(card.y + card.height / 2).toBeCloseTo(tip.y, 5)
   })
 
   it('avoids covering the arrow shaft when tip is left of the region', () => {
@@ -77,7 +76,20 @@ describe('composeLayout', () => {
     expect(result.attachScreen).toEqual(tip)
     expect(overlapArea(result.card, region)).toBe(0)
     expect(arrowShaftHitsCard(head, tip, result.card)).toBe(false)
-    // Card should sit further left of tip (attach on right side of card).
-    expect(['right', 'topRight', 'bottomRight']).toContain(result.attach)
+    // Card should sit further left of tip (attach on right edge of card).
+    expect(result.attach).toBe('right')
+  })
+
+  it('only considers edge midpoints for compose attach', () => {
+    const region = { x: 200, y: 200, width: 240, height: 160 }
+    const result = layoutComposeForArrow({
+      region,
+      headScreen: { x: 440, y: 280 },
+      preferredTailScreen: { x: 620, y: 280 },
+      panelWidth: 360,
+      panelHeight: 200,
+      viewport,
+    })
+    expect(['top', 'right', 'bottom', 'left']).toContain(result.attach)
   })
 })

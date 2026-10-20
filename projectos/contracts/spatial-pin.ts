@@ -94,7 +94,11 @@ export const AnnotationPointUnboundedSchema = z
   })
   .strict();
 
-/** Eight arrowhead anchors on a capture rect (corners + edge midpoints). */
+/**
+ * Anchors on a capture / compose rect.
+ * Region→compose arrow heads use edge midpoints only; corners remain for
+ * compose-card docking and legacy data (normalized to edges at draw time).
+ */
 export const AnnotationAnchorSchema = z.enum([
   "top",
   "right",

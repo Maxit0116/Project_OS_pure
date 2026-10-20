@@ -13,11 +13,15 @@ import type { OverlayRegion } from './overlayRegions'
 describe('regionAnchors', () => {
   const rect = { x: 100, y: 50, width: 200, height: 100 }
 
-  it('lists eight anchors at corners and edge midpoints', () => {
+  it('lists four edge-midpoint anchors (corners are resize handles)', () => {
     const anchors = listRegionAnchors(rect)
-    expect(anchors).toHaveLength(8)
-    const topLeft = anchors.find((a) => a.anchor === 'topLeft')
-    expect(topLeft?.screen).toEqual({ x: 100, y: 50 })
+    expect(anchors).toHaveLength(4)
+    expect(anchors.map((a) => a.anchor).sort()).toEqual([
+      'bottom',
+      'left',
+      'right',
+      'top',
+    ])
     const right = anchors.find((a) => a.anchor === 'right')
     expect(right?.screen).toEqual({ x: 300, y: 100 })
   })
@@ -38,10 +42,11 @@ describe('regionAnchors', () => {
 })
 
 describe('arrowGeometry', () => {
-  it('picks the closest of eight anchors to a tail', () => {
+  it('picks the closest edge-midpoint anchor to a tail', () => {
     expect(nearestAnchorToRelative({ x: 1.2, y: 0.5 })).toBe('right')
     expect(nearestAnchorToRelative({ x: 0.5, y: -0.2 })).toBe('top')
-    expect(nearestAnchorToRelative({ x: 0, y: 0 })).toBe('topLeft')
+    // Legacy corner coords collapse onto the nearest edge.
+    expect(nearestAnchorToRelative({ x: 0, y: 0 })).toBe('top')
   })
 
   it('renumbers and recolors after delete', () => {

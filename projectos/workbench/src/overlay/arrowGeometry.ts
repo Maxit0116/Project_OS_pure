@@ -1,6 +1,6 @@
 import type { AnnotationAnchor, ScreenRect } from '@contracts/spatial-pin'
 import {
-  ALL_ANCHORS,
+  EDGE_ANCHORS,
   listRegionAnchors,
   relativePointForAnchor,
   relativeToClient,
@@ -33,13 +33,13 @@ function dist2(
   return dx * dx + dy * dy
 }
 
-/** Nearest of the 8 anchors to a region-relative point (typically the tail). */
+/** Nearest edge-midpoint anchor to a region-relative point. */
 export function nearestAnchorToRelative(
   rel: { x: number; y: number },
 ): AnnotationAnchor {
   let best: AnnotationAnchor = 'top'
   let bestD = Infinity
-  for (const anchor of ALL_ANCHORS) {
+  for (const anchor of EDGE_ANCHORS) {
     const p = relativePointForAnchor(anchor)
     const d = dist2(p, rel)
     if (d < bestD) {

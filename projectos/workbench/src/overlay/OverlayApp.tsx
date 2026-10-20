@@ -35,16 +35,37 @@ import {
 } from '@contracts/ui-stencil'
 import StencilLibrary from '../components/SpatialCaptures/stencils/StencilLibrary'
 import StencilComposeExtras from '../components/SpatialCaptures/stencils/StencilComposeExtras'
+import StencilLiveStub from '../components/SpatialCaptures/stencils/StencilLiveStub'
+import StencilPreviewVisual from '../components/SpatialCaptures/stencils/StencilPreviewVisual'
 import {
   buildPlacementAtStagePoint,
   combinedBriefForArrow,
+  defaultStencilSize,
   DEFAULT_STENCIL_SCOPE,
   placementsForArrow,
   stageRectForPlacement,
+  stencilDefinition,
   stencilTitle,
 } from '../components/SpatialCaptures/stencils/placeStencil'
-import { STENCIL_UI_STRINGS_EN } from '../components/SpatialCaptures/stencils/stencilStrings'
+import {
+  formatStencilString,
+  STENCIL_UI_STRINGS_EN,
+} from '../components/SpatialCaptures/stencils/stencilStrings'
+import {
+  clampLocalRectInRegion,
+  movedCaptureRect,
+  movedPlacementWithRegionFollow,
+  REGION_DRAG_THRESHOLD_PX,
+  regionRectForStencilDrop,
+  resizedRectFromHandle,
+  RESIZE_HANDLES,
+  resizeHandleScreenPoint,
+  STENCIL_DRAG_THRESHOLD_PX,
+  type ResizeHandle,
+} from '../components/SpatialCaptures/stencils/regionDrag'
 import stencilPlacementStyles from '../components/SpatialCaptures/SpatialCaptureOverlay.module.css'
+import ComposeArrowPath from './ComposeArrowPath'
+import { routeComposeArrowCurve } from './composeArrowCurve'
 import {
   applyRunEventToCompactFlow,
 } from './coarseFlow'
@@ -63,6 +84,7 @@ import {
   layoutComposeForArrow,
   type ComposeLayoutResult,
 } from './composeLayout'
+import { resolveArrowEdgeConnection } from './composeConnection'
 import {
   resolveComposePanelSize,
   useComposePanelMetrics,
@@ -83,6 +105,7 @@ import {
   pointInRect,
   relativePointForAnchor,
   relativeToClient,
+  toEdgeAnchor,
 } from './regionAnchors'
 import { buildCaptureSessionFromOverlay } from './captureSessionSerialize'
 
@@ -111,6 +134,39 @@ type PointerMode =
       grabOffset: { x: number; y: number }
       panelWidth: number
       panelHeight: number
+    }
+  | {
+      kind: 'region-drag'
+      regionId: string
+      startX: number
+      startY: number
+      originRect: ScreenRect
+      moved: boolean
+    }
+  | {
+      kind: 'placement-drag'
+      regionId: string
+      placementId: string
+      arrowId?: string
+      startX: number
+      startY: number
+      originRect: ScreenRect
+      originCaptureRect: ScreenRect
+    }
+  | {
+      kind: 'region-resize'
+      regionId: string
+      handle: ResizeHandle
+      originRect: ScreenRect
+    }
+  | {
+      kind: 'placement-resize'
+      regionId: string
+      placementId: string
+      arrowId?: string
+      handle: ResizeHandle
+      originLocal: ScreenRect
+      originCaptureRect: ScreenRect
     }
 
 const MODES: Array<{
@@ -154,8 +210,14 @@ export function OverlayApp() {
   const [pointer, setPointer] = useState<PointerMode>({ kind: 'idle' })
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
   const [libraryOpen, setLibraryOpen] = useState(false)
-  const [armedStencilId, setArmedStencilId] = useState<string | null>(null)
-  const [armedMotionId, setArmedMotionId] = useState<string | null>(null)
+  const [libraryRevealed, setLibraryRevealed] = useState(false)
+  const [libraryCollapseToken, setLibraryCollapseToken] = useState(0)
+  const [placeDrag, setPlaceDrag] = useState<{
+    stencilId: string
+    clientX: number
+    clientY: number
+    active: boolean
+  } | null>(null)
   const [repoDesignSystem, setRepoDesignSystem] =
     useState<RepoDesignSystemSnapshot | null>(null)
   const [stencilBriefByArrow, setStencilBriefByArrow] = useState<
@@ -183,6 +245,8 @@ export function OverlayApp() {
   const projectIdRef = useRef<string | null>(null)
   const locationRef = useRef<LocationKey | null>(null)
   const regionsRef = useRef(regions)
+  /** Invalidate in-flight library→canvas pointer listeners (Esc / close). */
+  const placeDragSessionRef = useRef(0)
   const snapshotByRegionRef = useRef<Map<string, string>>(new Map())
   /** In-memory session id for this overlay open; written to disk only on Esc solidify. */
   const captureSessionIdRef = useRef<string | null>(null)
@@ -200,7 +264,7 @@ export function OverlayApp() {
   }, [projectId])
 
   useEffect(() => {
-    if (!libraryOpen || !projectId || !window.projectOS) return
+    if (!libraryRevealed || !projectId || !window.projectOS) return
     let cancelled = false
     void window.projectOS
       .invoke('getRepoDesignSystem', projectId)
@@ -215,7 +279,7 @@ export function OverlayApp() {
     return () => {
       cancelled = true
     }
-  }, [libraryOpen, projectId])
+  }, [libraryRevealed, projectId])
 
   useEffect(() => {
     locationRef.current = location
@@ -223,6 +287,10 @@ export function OverlayApp() {
   useEffect(() => {
     regionsRef.current = regions
   }, [regions])
+  const focusedRegionIdsRef = useRef(focusedRegionIds)
+  useEffect(() => {
+    focusedRegionIdsRef.current = focusedRegionIds
+  }, [focusedRegionIds])
   useEffect(() => {
     displayBoundsRef.current = displayBounds
   }, [displayBounds])
@@ -291,6 +359,27 @@ export function OverlayApp() {
     return () => cancelAnimationFrame(id)
   }, [captureEpoch])
 
+  function cancelPlaceDrag() {
+    placeDragSessionRef.current += 1
+    setPlaceDrag(null)
+  }
+
+  function collapseLibrary() {
+    setLibraryOpen(false)
+    setLibraryCollapseToken((token) => token + 1)
+  }
+
+  function exitStencilChrome() {
+    collapseLibrary()
+    cancelPlaceDrag()
+    setRegions((prev) =>
+      prev.map((region) =>
+        region.tool === 'stencil' ? { ...region, tool: 'arrow' } : region,
+      ),
+    )
+    setStatus('Drag to select a region on any screen')
+  }
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -298,14 +387,8 @@ export function OverlayApp() {
           setOpenMenu(null)
           return
         }
-        if (armedStencilId || armedMotionId) {
-          setArmedStencilId(null)
-          setArmedMotionId(null)
-          setStatus('Drag to select a region on any screen')
-          return
-        }
-        if (libraryOpen) {
-          setLibraryOpen(false)
+        if (placeDrag || libraryRevealed || libraryOpen) {
+          exitStencilChrome()
           return
         }
         void solidifyThenHideRef.current()
@@ -313,7 +396,7 @@ export function OverlayApp() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openMenu, armedStencilId, armedMotionId, libraryOpen])
+  }, [openMenu, placeDrag, libraryOpen, libraryRevealed])
 
   useEffect(() => {
     if (!openMenu) return
@@ -634,10 +717,10 @@ export function OverlayApp() {
     )
   }
 
-  function placeArmedStencil(stagePoint: { x: number; y: number }) {
-    const stencilId = armedStencilId
-    if (!stencilId) return
-
+  function placeStencil(
+    stencilId: string,
+    stagePoint: { x: number; y: number },
+  ) {
     const containing = regionsRef.current.filter((region) =>
       pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
     )
@@ -647,13 +730,11 @@ export function OverlayApp() {
 
     if (!baseRegion) {
       const regionId = randomId('region')
-      // Full-screen region in overlay client coords.
-      fullRect = {
-        x: 0,
-        y: 0,
-        width: window.innerWidth,
-        height: window.innerHeight,
-      }
+      fullRect = regionRectForStencilDrop(
+        stagePoint,
+        defaultStencilSize(stencilId),
+        { width: window.innerWidth, height: window.innerHeight },
+      )
       baseRegion = {
         id: regionId,
         captureRect: fullRect,
@@ -663,7 +744,7 @@ export function OverlayApp() {
         drawStrokes: [],
         flowComplete: false,
         showAnchors: false,
-        tool: 'stencil',
+        tool: 'arrow',
         stencils: [],
       }
       createdFullFrame = true
@@ -683,7 +764,6 @@ export function OverlayApp() {
       stagePoint,
       region: baseRegion,
       arrowId,
-      ...(armedMotionId ? { motionModifierId: armedMotionId } : {}),
     })
     const localCenter = {
       x:
@@ -706,7 +786,7 @@ export function OverlayApp() {
       panelHeight: estimateComposePanelHeight(false),
       viewport: { width: window.innerWidth, height: window.innerHeight },
     })
-    const arrow: OverlayArrow = {
+    const draftArrow: OverlayArrow = {
       id: arrowId,
       index,
       color: colorForArrowIndex(index),
@@ -718,13 +798,34 @@ export function OverlayApp() {
       pinId,
       status: 'draft',
     }
-    const nextRegion: OverlayRegion = {
+    const regionForConn: OverlayRegion = {
       ...baseRegion,
-      arrows: [...baseRegion.arrows, arrow],
+      arrows: [...baseRegion.arrows, draftArrow],
       stencils: [...(baseRegion.stencils ?? []), placement],
       flowComplete: true,
       showAnchors: false,
-      tool: 'stencil',
+      tool: 'arrow',
+    }
+    const conn = resolveArrowEdgeConnection(
+      regionForConn,
+      draftArrow,
+      layout.card,
+    )
+    const tip = composeAttachScreenPoint(layout.card, conn.cardAnchor)
+    const arrow: OverlayArrow = {
+      ...draftArrow,
+      composeAttach: conn.cardAnchor,
+      anchor: conn.targetAnchor,
+      head: clientToRelative(
+        baseRegion.captureRect,
+        conn.headScreen.x,
+        conn.headScreen.y,
+      ),
+      tail: clientToRelative(baseRegion.captureRect, tip.x, tip.y),
+    }
+    const nextRegion: OverlayRegion = {
+      ...regionForConn,
+      arrows: [...baseRegion.arrows, arrow],
     }
 
     setRegions((prev) => {
@@ -746,11 +847,137 @@ export function OverlayApp() {
     ensureBriefState(arrowId, nextRegion)
     setActiveArrowId(arrowId)
     setFocusedRegionIds([nextRegion.id])
-    setArmedStencilId(null)
-    setArmedMotionId(null)
+    collapseLibrary()
+    cancelPlaceDrag()
     setStatus(`${stencilTitle(stencilId)} placed · enter intent, then Send`)
     requestAnimationFrame(() => promptRef.current?.focus())
     void upsertArrowPin(nextRegion, arrow)
+  }
+
+  function beginPlacementDrag(
+    event: React.PointerEvent,
+    region: OverlayRegion,
+    placementId: string,
+  ) {
+    const placement = (region.stencils ?? []).find((item) => item.id === placementId)
+    if (!placement) return
+    event.preventDefault()
+    event.stopPropagation()
+    setFocusedRegionIds([region.id])
+    if (placement.arrowId) setActiveArrowId(placement.arrowId)
+    setPointer({
+      kind: 'placement-drag',
+      regionId: region.id,
+      placementId,
+      ...(placement.arrowId ? { arrowId: placement.arrowId } : {}),
+      startX: event.clientX,
+      startY: event.clientY,
+      originRect: placement.rect,
+      originCaptureRect: region.captureRect,
+    })
+    rootRef.current?.setPointerCapture?.(event.pointerId)
+    setStatus('Drag stencil · release to drop')
+  }
+
+  function beginRegionResize(
+    event: React.PointerEvent,
+    region: OverlayRegion,
+    handle: ResizeHandle,
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
+    setFocusedRegionIds([region.id])
+    setPointer({
+      kind: 'region-resize',
+      regionId: region.id,
+      handle,
+      originRect: region.captureRect,
+    })
+    rootRef.current?.setPointerCapture?.(event.pointerId)
+    setStatus('Drag corner to resize region')
+  }
+
+  function beginPlacementResize(
+    event: React.PointerEvent,
+    region: OverlayRegion,
+    placementId: string,
+    handle: ResizeHandle,
+  ) {
+    const placement = (region.stencils ?? []).find((item) => item.id === placementId)
+    if (!placement) return
+    event.preventDefault()
+    event.stopPropagation()
+    setFocusedRegionIds([region.id])
+    if (placement.arrowId) setActiveArrowId(placement.arrowId)
+    setPointer({
+      kind: 'placement-resize',
+      regionId: region.id,
+      placementId,
+      ...(placement.arrowId ? { arrowId: placement.arrowId } : {}),
+      handle,
+      originLocal: placement.rect,
+      originCaptureRect: region.captureRect,
+    })
+    rootRef.current?.setPointerCapture?.(event.pointerId)
+    setStatus('Drag corner to resize stencil')
+  }
+
+  function beginPlaceDrag(
+    stencilId: string,
+    clientX: number,
+    clientY: number,
+  ) {
+    const sessionId = ++placeDragSessionRef.current
+    setPlaceDrag({ stencilId, clientX, clientY, active: false })
+    setStatus(
+      formatStencilString(STENCIL_UI_STRINGS_EN.armed, {
+        name: stencilTitle(stencilId),
+      }),
+    )
+
+    let becameActive = false
+    const onMove = (event: PointerEvent) => {
+      if (sessionId !== placeDragSessionRef.current) return
+      const dist = Math.hypot(event.clientX - clientX, event.clientY - clientY)
+      const active = dist >= STENCIL_DRAG_THRESHOLD_PX
+      if (active && !becameActive) {
+        becameActive = true
+        collapseLibrary()
+      }
+      setPlaceDrag({
+        stencilId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        active: becameActive,
+      })
+    }
+
+    const onUp = (event: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      if (sessionId !== placeDragSessionRef.current) return
+      const dist = Math.hypot(event.clientX - clientX, event.clientY - clientY)
+      const active = becameActive || dist >= STENCIL_DRAG_THRESHOLD_PX
+      if (active) {
+        placeStencil(stencilId, { x: event.clientX, y: event.clientY })
+        return
+      }
+      const focused = regionsRef.current.find((r) =>
+        focusedRegionIdsRef.current.includes(r.id),
+      )
+      const target = focused
+        ? {
+            x: focused.captureRect.x + focused.captureRect.width / 2,
+            y: focused.captureRect.y + focused.captureRect.height / 2,
+          }
+        : { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+      placeStencil(stencilId, target)
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   async function solidifyCaptureSession(): Promise<void> {
@@ -896,13 +1123,8 @@ export function OverlayApp() {
 
   function onPointerDown(event: React.PointerEvent) {
     if (pointer.kind !== 'idle') return
+    if (placeDrag?.active) return
     const { clientX, clientY } = event
-
-    if (armedStencilId) {
-      event.preventDefault()
-      placeArmedStencil({ x: clientX, y: clientY })
-      return
-    }
 
     // Hit-test visible anchors (first arrow after select, or add-arrow after click).
     const anchorCandidates =
@@ -952,8 +1174,9 @@ export function OverlayApp() {
 
     const containing = focusIdsForClick(regions, clientX, clientY)
     if (containing.length > 0) {
+      const primaryId = containing[0]!
+      const primary = regions.find((r) => r.id === primaryId)
       setFocusedRegionIds(containing)
-      // Keep compose cards visible — only dim non-focused regions (never unmount).
       setActiveArrowId((current) => {
         if (current) {
           const stillVisible = regions.some(
@@ -965,6 +1188,30 @@ export function OverlayApp() {
         const first = regions.find((r) => containing.includes(r.id))
         return first?.arrows[first.arrows.length - 1]?.id ?? null
       })
+      if (primary && primary.tool !== 'draw') {
+        setRegions((prev) =>
+          prev.map((region) => {
+            if (!containing.includes(region.id)) {
+              return { ...region, showAnchors: false }
+            }
+            return {
+              ...region,
+              showAnchors: false,
+              tool: region.tool === 'draw' ? 'arrow' : region.tool,
+            }
+          }),
+        )
+        setPointer({
+          kind: 'region-drag',
+          regionId: primary.id,
+          startX: clientX,
+          startY: clientY,
+          originRect: primary.captureRect,
+          moved: false,
+        })
+        setStatus('Drag to move region · release to drop')
+        return
+      }
       setRegions((prev) =>
         prev.map((region) => {
           if (!containing.includes(region.id)) {
@@ -973,7 +1220,7 @@ export function OverlayApp() {
           return { ...region, showAnchors: true, tool: 'arrow' }
         }),
       )
-      setStatus('Drag from a corner or edge midpoint to place an arrow')
+      setStatus('Drag from an edge midpoint to place an arrow')
       return
     }
 
@@ -1029,22 +1276,37 @@ export function OverlayApp() {
     if (pointer.kind === 'compose-drag') {
       const region = regionsRef.current.find((r) => r.id === pointer.regionId)
       const arrow = region?.arrows.find((a) => a.id === pointer.arrowId)
-      if (!region || !arrow?.composeAttach) return
-      const cardX = event.clientX - pointer.grabOffset.x
-      const cardY = event.clientY - pointer.grabOffset.y
+      if (!region || !arrow) return
       const card = {
-        x: cardX,
-        y: cardY,
+        x: event.clientX - pointer.grabOffset.x,
+        y: event.clientY - pointer.grabOffset.y,
         width: pointer.panelWidth,
         height: pointer.panelHeight,
       }
-      // Tip follows the locked card connection point — direction/length change.
-      const tip = composeAttachScreenPoint(card, arrow.composeAttach)
-      const nextTail = clientToRelative(region.captureRect, tip.x, tip.y)
+      // Auto-pick facing edge midpoints as the card moves.
+      const conn = resolveArrowEdgeConnection(region, arrow, card)
+      const nextTail = clientToRelative(
+        region.captureRect,
+        conn.attachScreen.x,
+        conn.attachScreen.y,
+      )
+      const nextHead = clientToRelative(
+        region.captureRect,
+        conn.headScreen.x,
+        conn.headScreen.y,
+      )
       updateRegion(pointer.regionId, (r) => ({
         ...r,
         arrows: r.arrows.map((a) =>
-          a.id === pointer.arrowId ? { ...a, tail: nextTail } : a,
+          a.id === pointer.arrowId
+            ? {
+                ...a,
+                tail: nextTail,
+                head: nextHead,
+                composeAttach: conn.cardAnchor,
+                anchor: conn.targetAnchor,
+              }
+            : a,
         ),
       }))
       return
@@ -1064,6 +1326,156 @@ export function OverlayApp() {
             : stroke,
         ),
       }))
+      return
+    }
+    if (pointer.kind === 'region-drag') {
+      const dx = event.clientX - pointer.startX
+      const dy = event.clientY - pointer.startY
+      const dist = Math.hypot(dx, dy)
+      if (!pointer.moved && dist < REGION_DRAG_THRESHOLD_PX) return
+      const nextRect = movedCaptureRect(
+        pointer.originRect,
+        dx,
+        dy,
+        { width: window.innerWidth, height: window.innerHeight },
+      )
+      updateRegion(pointer.regionId, { captureRect: nextRect })
+      if (!pointer.moved) {
+        setPointer({ ...pointer, moved: true })
+      }
+      return
+    }
+    if (pointer.kind === 'placement-drag') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      if (!region) return
+      const dx = event.clientX - pointer.startX
+      const dy = event.clientY - pointer.startY
+      const { nextCapture, nextLocal } = movedPlacementWithRegionFollow(
+        pointer.originRect,
+        dx,
+        dy,
+        pointer.originCaptureRect,
+        { width: window.innerWidth, height: window.innerHeight },
+      )
+      updateRegion(pointer.regionId, (r) => {
+        const stencils = (r.stencils ?? []).map((item) =>
+          item.id === pointer.placementId ? { ...item, rect: nextLocal } : item,
+        )
+        let arrows = r.arrows
+        if (pointer.arrowId) {
+          const head = {
+            x: Math.min(
+              0.98,
+              Math.max(
+                0.02,
+                (nextLocal.x + nextLocal.width / 2) /
+                  Math.max(1, nextCapture.width),
+              ),
+            ),
+            y: Math.min(
+              0.98,
+              Math.max(
+                0.02,
+                (nextLocal.y + nextLocal.height / 2) /
+                  Math.max(1, nextCapture.height),
+              ),
+            ),
+          }
+          arrows = r.arrows.map((arrow) =>
+            arrow.id === pointer.arrowId
+              ? {
+                  ...arrow,
+                  head,
+                  anchor: nearestAnchorToRelative(head),
+                }
+              : arrow,
+          )
+        }
+        return { ...r, captureRect: nextCapture, stencils, arrows }
+      })
+      return
+    }
+    if (pointer.kind === 'region-resize') {
+      const nextRect = resizedRectFromHandle(
+        pointer.originRect,
+        pointer.handle,
+        event.clientX,
+        event.clientY,
+        undefined,
+        { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight },
+      )
+      updateRegion(pointer.regionId, (r) => ({
+        ...r,
+        captureRect: nextRect,
+        stencils: (r.stencils ?? []).map((item) => {
+          const next = clampLocalRectInRegion(item.rect, nextRect)
+          return next.x === item.rect.x &&
+            next.y === item.rect.y &&
+            next.width === item.rect.width &&
+            next.height === item.rect.height
+            ? item
+            : { ...item, rect: next }
+        }),
+      }))
+      return
+    }
+    if (pointer.kind === 'placement-resize') {
+      const originStage = {
+        x: pointer.originCaptureRect.x + pointer.originLocal.x,
+        y: pointer.originCaptureRect.y + pointer.originLocal.y,
+        width: pointer.originLocal.width,
+        height: pointer.originLocal.height,
+      }
+      const nextStage = resizedRectFromHandle(
+        originStage,
+        pointer.handle,
+        event.clientX,
+        event.clientY,
+        undefined,
+        pointer.originCaptureRect,
+      )
+      const nextLocal = {
+        x: nextStage.x - pointer.originCaptureRect.x,
+        y: nextStage.y - pointer.originCaptureRect.y,
+        width: nextStage.width,
+        height: nextStage.height,
+      }
+      updateRegion(pointer.regionId, (r) => {
+        const stencils = (r.stencils ?? []).map((item) =>
+          item.id === pointer.placementId ? { ...item, rect: nextLocal } : item,
+        )
+        let arrows = r.arrows
+        if (pointer.arrowId) {
+          const head = {
+            x: Math.min(
+              0.98,
+              Math.max(
+                0.02,
+                (nextLocal.x + nextLocal.width / 2) /
+                  Math.max(1, r.captureRect.width),
+              ),
+            ),
+            y: Math.min(
+              0.98,
+              Math.max(
+                0.02,
+                (nextLocal.y + nextLocal.height / 2) /
+                  Math.max(1, r.captureRect.height),
+              ),
+            ),
+          }
+          arrows = r.arrows.map((arrow) =>
+            arrow.id === pointer.arrowId
+              ? {
+                  ...arrow,
+                  head,
+                  anchor: nearestAnchorToRelative(head),
+                }
+              : arrow,
+          )
+        }
+        return { ...r, stencils, arrows }
+      })
     }
   }
 
@@ -1093,7 +1505,7 @@ export function OverlayApp() {
       setRegions((prev) => [...prev, region])
       setFocusedRegionIds([regionId])
       setActiveArrowId(null)
-      setStatus('Drag from a corner or edge midpoint · tail may leave the box')
+      setStatus('Drag from an edge midpoint · tail may leave the box')
       void captureRegion(regionId, rect)
       return
     }
@@ -1107,8 +1519,9 @@ export function OverlayApp() {
         event.clientX,
         event.clientY,
       )
-      const finalAnchor =
-        pointer.lockedAnchor ?? nearestAnchorToRelative(tail)
+      const finalAnchor = toEdgeAnchor(
+        pointer.lockedAnchor ?? nearestAnchorToRelative(tail),
+      )
       const finalHead = relativePointForAnchor(finalAnchor)
       const dx = (tail.x - finalHead.x) * region.captureRect.width
       const dy = (tail.y - finalHead.y) * region.captureRect.height
@@ -1138,6 +1551,88 @@ export function OverlayApp() {
 
     if (pointer.kind === 'draw') {
       setPointer({ kind: 'idle' })
+      return
+    }
+
+    if (pointer.kind === 'region-drag') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      const moved = pointer.moved
+      setPointer({ kind: 'idle' })
+      if (!region) return
+      if (!moved) {
+        setRegions((prev) =>
+          prev.map((item) =>
+            item.id === region.id
+              ? { ...item, showAnchors: true, tool: 'arrow' }
+              : item,
+          ),
+        )
+        setStatus('Drag from an edge midpoint to place an arrow')
+        return
+      }
+      void captureRegion(region.id, region.captureRect)
+      setStatus('Region moved · snapshot updated')
+      return
+    }
+
+    if (pointer.kind === 'placement-drag') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      const arrow = pointer.arrowId
+        ? region?.arrows.find((a) => a.id === pointer.arrowId)
+        : undefined
+      const regionMoved =
+        !!region &&
+        (region.captureRect.x !== pointer.originCaptureRect.x ||
+          region.captureRect.y !== pointer.originCaptureRect.y)
+      setPointer({ kind: 'idle' })
+      if (region && arrow) {
+        void upsertArrowPin(
+          {
+            ...region,
+            snapshotAssetPath:
+              region.snapshotAssetPath ??
+              snapshotByRegionRef.current.get(region.id),
+          },
+          arrow,
+        )
+      }
+      if (region && regionMoved) {
+        void captureRegion(region.id, region.captureRect)
+      }
+      setStatus('Drag to select a region on any screen')
+      return
+    }
+
+    if (pointer.kind === 'region-resize') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      setPointer({ kind: 'idle' })
+      if (region) {
+        void captureRegion(region.id, region.captureRect)
+        setStatus('Region resized · snapshot updated')
+      } else {
+        setStatus('Drag to select a region on any screen')
+      }
+      return
+    }
+
+    if (pointer.kind === 'placement-resize') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      const arrow = pointer.arrowId
+        ? region?.arrows.find((a) => a.id === pointer.arrowId)
+        : undefined
+      setPointer({ kind: 'idle' })
+      if (region && arrow) {
+        void upsertArrowPin(
+          {
+            ...region,
+            snapshotAssetPath:
+              region.snapshotAssetPath ??
+              snapshotByRegionRef.current.get(region.id),
+          },
+          arrow,
+        )
+      }
+      setStatus('Drag to select a region on any screen')
     }
   }
 
@@ -1328,8 +1823,9 @@ export function OverlayApp() {
     if (pointer.kind !== 'arrow') return null
     const region = regions.find((r) => r.id === pointer.regionId)
     if (!region) return null
-    const anchor =
-      pointer.lockedAnchor ?? nearestAnchorToRelative(pointer.liveTail)
+    const anchor = toEdgeAnchor(
+      pointer.lockedAnchor ?? nearestAnchorToRelative(pointer.liveTail),
+    )
     const headRel = relativePointForAnchor(anchor)
     return {
       region,
@@ -1363,16 +1859,11 @@ export function OverlayApp() {
       estimateComposePanelHeight(false),
     )
     const tip = relativeToClient(region.captureRect, arrow.tail)
-    // After commit, attach is locked — only tip/card move together when dragging.
     if (arrow.composeAttach) {
+      const attach = toEdgeAnchor(arrow.composeAttach)
       return {
-        card: cardPinnedToTip(
-          tip,
-          arrow.composeAttach,
-          panelWidth,
-          panelHeight,
-        ),
-        attach: arrow.composeAttach,
+        card: cardPinnedToTip(tip, attach, panelWidth, panelHeight),
+        attach,
         attachScreen: tip,
       }
     }
@@ -1439,20 +1930,18 @@ export function OverlayApp() {
       <button
         type="button"
         className={`overlay-stencil-toggle${
-          libraryOpen || armedStencilId ? ' overlay-stencil-toggle-active' : ''
+          libraryRevealed || placeDrag ? ' overlay-stencil-toggle-active' : ''
         }`}
         aria-label={STENCIL_UI_STRINGS_EN.open}
         aria-pressed={libraryOpen}
-        title={STENCIL_UI_STRINGS_EN.open}
+        title={STENCIL_UI_STRINGS_EN.edgeHint}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={() => {
-          setLibraryOpen((open) => {
-            if (open) {
-              setArmedStencilId(null)
-              setArmedMotionId(null)
-            }
-            return !open
-          })
+          if (libraryOpen) {
+            exitStencilChrome()
+            return
+          }
+          setLibraryOpen(true)
         }}
       >
         <LayoutTemplate size={14} strokeWidth={2} aria-hidden />
@@ -1461,26 +1950,35 @@ export function OverlayApp() {
 
       <StencilLibrary
         open={libraryOpen}
-        armedStencilId={armedStencilId}
-        armedMotionId={armedMotionId}
+        collapseToken={libraryCollapseToken}
+        draggingStencilId={placeDrag?.stencilId ?? null}
         repoDesignSystem={repoDesignSystem}
         strings={STENCIL_UI_STRINGS_EN}
+        onRevealChange={setLibraryRevealed}
         onClose={() => {
-          setLibraryOpen(false)
-          setArmedStencilId(null)
-          setArmedMotionId(null)
+          exitStencilChrome()
         }}
-        onArm={(stencilId) => {
-          setArmedStencilId(stencilId)
-          setStatus(STENCIL_UI_STRINGS_EN.placeHint)
-        }}
-        onArmMotion={setArmedMotionId}
-        onDisarm={() => {
-          setArmedStencilId(null)
-          setArmedMotionId(null)
-          setStatus('Drag to select a region on any screen')
-        }}
+        onPlaceDragStart={beginPlaceDrag}
       />
+
+      {placeDrag?.active ? (
+        <div
+          className={stencilPlacementStyles.stencilDragGhost}
+          style={{ left: placeDrag.clientX, top: placeDrag.clientY }}
+          aria-hidden
+        >
+          <StencilPreviewVisual
+            stencilId={placeDrag.stencilId}
+            category={
+              stencilDefinition(placeDrag.stencilId)?.category ?? 'base'
+            }
+            title={stencilTitle(placeDrag.stencilId)}
+          />
+          <span className={stencilPlacementStyles.stencilDragGhostLabel}>
+            {STENCIL_UI_STRINGS_EN.dragHint}
+          </span>
+        </div>
+      ) : null}
 
       {savePromptOpen ? (
         <div
@@ -1555,58 +2053,100 @@ export function OverlayApp() {
           const box = stageRectForPlacement(region, placement)
           const focused = isRegionFocused(focusedRegionIds, region.id)
           return (
-            <div
+            <StencilLiveStub
               key={placement.id}
-              className={`${stencilPlacementStyles.stencilPlacement}${
-                focused ? '' : ` ${stencilPlacementStyles.stencilPlacementDimmed}`
-              }`}
+              stencilId={placement.stencilId}
+              dimmed={!focused}
               style={{
                 left: box.x,
                 top: box.y,
-                width: box.width,
-                height: box.height,
+                width: Math.max(box.width, 48),
+                height: Math.max(box.height, 36),
               }}
-              title={stencilTitle(placement.stencilId)}
-            >
-              <span className={stencilPlacementStyles.stencilPlacementLabel}>
-                {stencilTitle(placement.stencilId)}
-                {placement.motionModifierIds?.[0]
-                  ? ` + ${stencilTitle(placement.motionModifierIds[0])}`
-                  : ''}
-              </span>
-            </div>
+              onMovePointerDown={(event) =>
+                beginPlacementDrag(event, region, placement.id)
+              }
+            />
           )
         }),
       )}
 
-      {/* Committed arrows — tip docks to compose card's best of 8 anchors */}
+      {regions.map((region) => {
+        const focused = isRegionFocused(focusedRegionIds, region.id)
+        if (!focused || region.tool === 'draw') return null
+        return (
+          <div key={`resize-${region.id}`}>
+            {RESIZE_HANDLES.map((handle) => {
+              const p = resizeHandleScreenPoint(region.captureRect, handle)
+              return (
+                <button
+                  key={handle}
+                  type="button"
+                  className="overlay-resize-handle"
+                  data-handle={handle}
+                  style={{ left: p.x, top: p.y }}
+                  aria-label={`Resize region ${handle}`}
+                  onPointerDown={(event) =>
+                    beginRegionResize(event, region, handle)
+                  }
+                />
+              )
+            })}
+            {(region.stencils ?? []).map((placement) => {
+              const box = stageRectForPlacement(region, placement)
+              return RESIZE_HANDLES.map((handle) => {
+                const p = resizeHandleScreenPoint(box, handle)
+                return (
+                  <button
+                    key={`${placement.id}-${handle}`}
+                    type="button"
+                    className="overlay-resize-handle"
+                    data-handle={handle}
+                    style={{ left: p.x, top: p.y }}
+                    aria-label={`Resize stencil ${handle}`}
+                    onPointerDown={(event) =>
+                      beginPlacementResize(event, region, placement.id, handle)
+                    }
+                  />
+                )
+              })
+            })}
+          </div>
+        )
+      })}
+
+      {/* Committed arrows — edge midpoints only; curve avoids card/region/stub */}
       <svg className="overlay-arrows-layer" aria-hidden>
         {regions.map((region) =>
           region.arrows.map((arrow) => {
-            const head = relativeToClient(region.captureRect, arrow.head)
             const layout = layoutArrowCompose(region, arrow)
+            const conn = resolveArrowEdgeConnection(region, arrow, layout.card)
             const focused = isRegionFocused(focusedRegionIds, region.id)
             return (
               <g
                 key={arrow.id}
                 className={focused ? undefined : 'overlay-arrow-dimmed'}
               >
-                <ArrowPath
-                  head={head}
-                  tail={layout.attachScreen}
+                <ComposeArrowPath
+                  head={conn.headScreen}
+                  tail={conn.attachScreen}
                   color={arrow.color}
                   index={arrow.index}
+                  headAnchor={conn.targetAnchor}
+                  tailAnchor={conn.cardAnchor}
+                  obstacles={conn.obstacles}
                 />
               </g>
             )
           }),
         )}
         {liveArrow ? (
-          <ArrowPath
+          <ComposeArrowPath
             head={liveArrow.head}
             tail={liveArrow.tail}
             color={liveArrow.color}
             index={liveArrow.index}
+            headAnchor={liveArrow.anchor}
             preview
           />
         ) : null}
@@ -1615,10 +2155,17 @@ export function OverlayApp() {
       {/* Click arrow index badge to focus that arrow's big compose */}
       {regions.map((region) =>
         region.arrows.map((arrow) => {
-          const head = relativeToClient(region.captureRect, arrow.head)
           const layout = layoutArrowCompose(region, arrow)
-          const midX = (head.x + layout.attachScreen.x) / 2
-          const midY = (head.y + layout.attachScreen.y) / 2
+          const conn = resolveArrowEdgeConnection(region, arrow, layout.card)
+          const { mid } = routeComposeArrowCurve({
+            from: conn.attachScreen,
+            to: conn.headScreen,
+            fromAnchor: conn.cardAnchor,
+            toAnchor: conn.targetAnchor,
+            obstacles: conn.obstacles,
+          })
+          const midX = mid.x
+          const midY = mid.y
           const focused = isRegionFocused(focusedRegionIds, region.id)
           return (
             <button
@@ -2046,60 +2593,6 @@ function RegionView({
         </div>
       ) : null}
     </>
-  )
-}
-
-function ArrowPath({
-  head,
-  tail,
-  color,
-  index,
-  preview,
-}: {
-  head: { x: number; y: number }
-  tail: { x: number; y: number }
-  color: string
-  index: number
-  preview?: boolean
-}) {
-  // Visual: line from tail → head; arrowhead at head (region side).
-  const angle = Math.atan2(head.y - tail.y, head.x - tail.x)
-  const size = 10
-  const ax = head.x - size * Math.cos(angle - Math.PI / 6)
-  const ay = head.y - size * Math.sin(angle - Math.PI / 6)
-  const bx = head.x - size * Math.cos(angle + Math.PI / 6)
-  const by = head.y - size * Math.sin(angle + Math.PI / 6)
-  const midX = (head.x + tail.x) / 2
-  const midY = (head.y + tail.y) / 2
-  return (
-    <g opacity={preview ? 0.85 : 1}>
-      <line
-        x1={tail.x}
-        y1={tail.y}
-        x2={head.x}
-        y2={head.y}
-        stroke={color}
-        strokeWidth={2.25}
-        strokeLinecap="round"
-      />
-      <polygon
-        points={`${head.x},${head.y} ${ax},${ay} ${bx},${by}`}
-        fill={color}
-      />
-      <circle cx={tail.x} cy={tail.y} r={3.5} fill={color} />
-      <g transform={`translate(${midX + 6}, ${midY - 6})`}>
-        <circle r={8} fill={color} />
-        <text
-          textAnchor="middle"
-          dominantBaseline="central"
-          fill="#fff"
-          fontSize="10"
-          fontWeight="700"
-        >
-          {index}
-        </text>
-      </g>
-    </g>
   )
 }
 

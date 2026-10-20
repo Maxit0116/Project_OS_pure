@@ -19,6 +19,7 @@ const ANCHOR_RELS: Record<AnnotationAnchor, { x: number; y: number }> = {
   left: { x: 0, y: 0.5 },
 }
 
+/** All eight anchors — used by compose-card docking. */
 export const ALL_ANCHORS: AnnotationAnchor[] = [
   'topLeft',
   'top',
@@ -27,6 +28,14 @@ export const ALL_ANCHORS: AnnotationAnchor[] = [
   'bottomRight',
   'bottom',
   'bottomLeft',
+  'left',
+]
+
+/** Region arrow heads: edge midpoints only (corners are resize handles). */
+export const EDGE_ANCHORS: AnnotationAnchor[] = [
+  'top',
+  'right',
+  'bottom',
   'left',
 ]
 
@@ -47,12 +56,37 @@ export function screenPointForAnchor(
   }
 }
 
+/** Edge-midpoint anchors for drawing / hitting region→compose arrows. */
 export function listRegionAnchors(rect: ScreenRect): AnchorPoint[] {
-  return ALL_ANCHORS.map((anchor) => ({
+  return EDGE_ANCHORS.map((anchor) => ({
     anchor,
     rel: relativePointForAnchor(anchor),
     screen: screenPointForAnchor(rect, anchor),
   }))
+}
+
+/** Collapse a legacy corner anchor onto the nearest edge midpoint. */
+export function toEdgeAnchor(anchor: AnnotationAnchor): AnnotationAnchor {
+  if (
+    anchor === 'top' ||
+    anchor === 'right' ||
+    anchor === 'bottom' ||
+    anchor === 'left'
+  ) {
+    return anchor
+  }
+  const rel = ANCHOR_RELS[anchor]
+  let best: AnnotationAnchor = 'top'
+  let bestD = Infinity
+  for (const edge of EDGE_ANCHORS) {
+    const p = ANCHOR_RELS[edge]
+    const d = (p.x - rel.x) ** 2 + (p.y - rel.y) ** 2
+    if (d < bestD) {
+      bestD = d
+      best = edge
+    }
+  }
+  return best
 }
 
 /** Convert overlay client coords → region-relative (may be outside [0,1]). */

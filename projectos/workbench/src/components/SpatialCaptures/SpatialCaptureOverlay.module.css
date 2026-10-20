@@ -193,34 +193,25 @@
   background: color-mix(in srgb, var(--tech-accent, var(--color-accent)) 14%, transparent);
 }
 
-.stencilPlacement {
-  position: absolute;
-  box-sizing: border-box;
-  border: 1.5px dashed color-mix(in srgb, var(--tech-accent, #22c55e) 75%, white);
-  background: color-mix(in srgb, var(--tech-accent, #22c55e) 12%, transparent);
-  border-radius: 6px;
+.stencilDragGhost {
+  position: fixed;
+  z-index: 120;
+  width: 200px;
   pointer-events: none;
-  z-index: 4;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  padding: 4px 6px;
-}
-
-.stencilPlacementDimmed {
-  opacity: 0.45;
-}
-
-.stencilPlacementLabel {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--tech-text-primary, #f8fafc);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
-  max-width: 100%;
+  transform: translate(-40%, -30%);
+  border-radius: 10px;
+  border: 1px solid var(--tech-border);
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-md);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.stencilDragGhostLabel {
+  display: block;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--tech-text-secondary, rgba(248, 250, 252, 0.7));
 }
 
 .stencilBriefBlock {

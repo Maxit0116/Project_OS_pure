@@ -46,6 +46,7 @@ import {
   layoutComposeForArrow,
   type ComposeLayoutResult,
 } from '../../overlay/composeLayout'
+import { resolveArrowEdgeConnection } from '../../overlay/composeConnection'
 import {
   resolveComposePanelSize,
   useComposePanelMetrics,
@@ -68,6 +69,7 @@ import {
   pointInRect,
   relativePointForAnchor,
   relativeToClient,
+  toEdgeAnchor,
 } from '../../overlay/regionAnchors'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
@@ -84,15 +86,36 @@ import {
 import { useCaptureComposeFlows } from './useCaptureComposeFlows'
 import StencilLibrary from './stencils/StencilLibrary'
 import StencilComposeExtras from './stencils/StencilComposeExtras'
+import StencilLiveStub from './stencils/StencilLiveStub'
+import StencilPreviewVisual from './stencils/StencilPreviewVisual'
 import {
   buildPlacementAtStagePoint,
   combinedBriefForArrow,
+  defaultStencilSize,
   DEFAULT_STENCIL_SCOPE,
   placementsForArrow,
   stageRectForPlacement,
+  stencilDefinition,
   stencilTitle,
 } from './stencils/placeStencil'
-import type { StencilUiStrings } from './stencils/stencilStrings'
+import {
+  formatStencilString,
+  type StencilUiStrings,
+} from './stencils/stencilStrings'
+import {
+  clampLocalRectInRegion,
+  movedCaptureRect,
+  movedPlacementWithRegionFollow,
+  REGION_DRAG_THRESHOLD_PX,
+  regionRectForStencilDrop,
+  resizedRectFromHandle,
+  RESIZE_HANDLES,
+  resizeHandleScreenPoint,
+  STENCIL_DRAG_THRESHOLD_PX,
+  type ResizeHandle,
+} from './stencils/regionDrag'
+import ComposeArrowPath from '../../overlay/ComposeArrowPath'
+import { routeComposeArrowCurve } from '../../overlay/composeArrowCurve'
 import '../../overlay/overlay.css'
 import styles from './SpatialCaptureOverlay.module.css'
 
@@ -137,6 +160,39 @@ type PointerMode =
       panelWidth: number
       panelHeight: number
     }
+  | {
+      kind: 'region-drag'
+      regionId: string
+      startX: number
+      startY: number
+      originRect: ScreenRect
+      moved: boolean
+    }
+  | {
+      kind: 'placement-drag'
+      regionId: string
+      placementId: string
+      arrowId?: string
+      startX: number
+      startY: number
+      originRect: ScreenRect
+      originCaptureRect: ScreenRect
+    }
+  | {
+      kind: 'region-resize'
+      regionId: string
+      handle: ResizeHandle
+      originRect: ScreenRect
+    }
+  | {
+      kind: 'placement-resize'
+      regionId: string
+      placementId: string
+      arrowId?: string
+      handle: ResizeHandle
+      originLocal: ScreenRect
+      originCaptureRect: ScreenRect
+    }
 
 const IDLE_HINT = 'Frozen capture · scroll to zoom · drag to select · Esc to exit'
 const ZOOMED_HINT =
@@ -179,8 +235,14 @@ export default function SpatialCaptureCanvas({
   const [pointer, setPointer] = useState<PointerMode>({ kind: 'idle' })
   const [openMenu, setOpenMenu] = useState<'mode' | null>(null)
   const [libraryOpen, setLibraryOpen] = useState(false)
-  const [armedStencilId, setArmedStencilId] = useState<string | null>(null)
-  const [armedMotionId, setArmedMotionId] = useState<string | null>(null)
+  const [libraryRevealed, setLibraryRevealed] = useState(false)
+  const [libraryCollapseToken, setLibraryCollapseToken] = useState(0)
+  const [placeDrag, setPlaceDrag] = useState<{
+    stencilId: string
+    clientX: number
+    clientY: number
+    active: boolean
+  } | null>(null)
   const [repoDesignSystem, setRepoDesignSystem] =
     useState<RepoDesignSystemSnapshot | null>(null)
   const [stencilBriefByArrow, setStencilBriefByArrow] = useState<
@@ -195,6 +257,7 @@ export default function SpatialCaptureCanvas({
     () => ({
       library: ts('spatialCaptures.stencilLibrary'),
       libraryHint: ts('spatialCaptures.stencilLibraryHint'),
+      edgeHint: ts('spatialCaptures.stencilEdgeHint'),
       close: ts('spatialCaptures.stencilClose'),
       search: ts('spatialCaptures.stencilSearch'),
       empty: ts('spatialCaptures.stencilEmpty'),
@@ -202,6 +265,7 @@ export default function SpatialCaptureCanvas({
       disarm: ts('spatialCaptures.stencilDisarm'),
       open: ts('spatialCaptures.stencilOpen'),
       placeHint: ts('spatialCaptures.stencilPlaceHint'),
+      dragHint: ts('spatialCaptures.stencilDragHint'),
       brief: ts('spatialCaptures.stencilBrief'),
       briefPlaceholder: ts('spatialCaptures.stencilBriefPlaceholder'),
       scope: ts('spatialCaptures.stencilScope'),
@@ -221,7 +285,7 @@ export default function SpatialCaptureCanvas({
   )
 
   useEffect(() => {
-    if (!libraryOpen || !client || !project) return
+    if (!libraryRevealed || !client || !project) return
     let cancelled = false
     void client
       .getRepoDesignSystem(project.projectId)
@@ -234,7 +298,7 @@ export default function SpatialCaptureCanvas({
     return () => {
       cancelled = true
     }
-  }, [libraryOpen, client, project])
+  }, [libraryRevealed, client, project])
   const [fitScale, setFitScale] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -261,6 +325,9 @@ export default function SpatialCaptureCanvas({
   const stageRef = useRef<HTMLDivElement | null>(null)
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
   const regionsRef = useRef(regions)
+  const focusedRegionIdsRef = useRef(focusedRegionIds)
+  /** Invalidate in-flight library→canvas pointer listeners (Esc / close). */
+  const placeDragSessionRef = useRef(0)
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const zoomRef = useRef(1)
   const panRef = useRef({ x: 0, y: 0 })
@@ -274,6 +341,10 @@ export default function SpatialCaptureCanvas({
   useEffect(() => {
     regionsRef.current = regions
   }, [regions])
+
+  useEffect(() => {
+    focusedRegionIdsRef.current = focusedRegionIds
+  }, [focusedRegionIds])
 
   useEffect(() => {
     setRegions(
@@ -425,6 +496,27 @@ export default function SpatialCaptureCanvas({
     return () => host.removeEventListener('wheel', onWheel)
   }, [viewport])
 
+  function cancelPlaceDrag() {
+    placeDragSessionRef.current += 1
+    setPlaceDrag(null)
+  }
+
+  function collapseLibrary() {
+    setLibraryOpen(false)
+    setLibraryCollapseToken((token) => token + 1)
+  }
+
+  function exitStencilChrome() {
+    collapseLibrary()
+    cancelPlaceDrag()
+    setRegions((prev) =>
+      prev.map((region) =>
+        region.tool === 'stencil' ? { ...region, tool: 'arrow' } : region,
+      ),
+    )
+    setStatus(IDLE_HINT)
+  }
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -432,14 +524,8 @@ export default function SpatialCaptureCanvas({
           setOpenMenu(null)
           return
         }
-        if (armedStencilId || armedMotionId) {
-          setArmedStencilId(null)
-          setArmedMotionId(null)
-          setStatus(IDLE_HINT)
-          return
-        }
-        if (libraryOpen) {
-          setLibraryOpen(false)
+        if (placeDrag || libraryRevealed || libraryOpen) {
+          exitStencilChrome()
           return
         }
         onExit()
@@ -447,7 +533,7 @@ export default function SpatialCaptureCanvas({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onExit, openMenu, armedStencilId, armedMotionId, libraryOpen])
+  }, [onExit, openMenu, placeDrag, libraryOpen, libraryRevealed])
 
   function stagePoint(event: {
     clientX: number
@@ -542,7 +628,7 @@ export default function SpatialCaptureCanvas({
         pngBase64,
       )
       updateRegion(regionId, { snapshotAssetPath: saved.snapshotAssetPath })
-      setStatus('Region ready · drag from a corner or edge midpoint')
+      setStatus('Region ready · drag from an edge midpoint')
     } catch {
       setStatus('Failed to crop region from frozen backdrop')
     }
@@ -608,10 +694,10 @@ export default function SpatialCaptureCanvas({
     )
   }
 
-  function placeArmedStencil(stagePoint: { x: number; y: number }) {
-    const stencilId = armedStencilId
-    if (!stencilId) return
-
+  function placeStencil(
+    stencilId: string,
+    stagePoint: { x: number; y: number },
+  ) {
     const containing = regionsRef.current.filter((region) =>
       pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
     )
@@ -621,12 +707,13 @@ export default function SpatialCaptureCanvas({
 
     if (!baseRegion) {
       const regionId = randomId('region')
-      fullRect = {
-        x: 0,
-        y: 0,
-        width: session.viewport.width,
-        height: session.viewport.height,
-      }
+      // Snug region around the drop — leave the rest of the stage free for
+      // new box-selects (do not lock the whole viewport into one region).
+      fullRect = regionRectForStencilDrop(
+        stagePoint,
+        defaultStencilSize(stencilId),
+        session.viewport,
+      )
       baseRegion = {
         id: regionId,
         captureRect: fullRect,
@@ -636,7 +723,7 @@ export default function SpatialCaptureCanvas({
         drawStrokes: [],
         flowComplete: false,
         showAnchors: false,
-        tool: 'stencil',
+        tool: 'arrow',
         stencils: [],
       }
       createdFullFrame = true
@@ -656,7 +743,6 @@ export default function SpatialCaptureCanvas({
       stagePoint,
       region: baseRegion,
       arrowId,
-      ...(armedMotionId ? { motionModifierId: armedMotionId } : {}),
     })
     const localCenter = {
       x:
@@ -682,7 +768,7 @@ export default function SpatialCaptureCanvas({
         height: session.viewport.height,
       },
     })
-    const arrow: OverlayArrow = {
+    const draftArrow: OverlayArrow = {
       id: arrowId,
       index,
       color: colorForArrowIndex(index),
@@ -694,13 +780,34 @@ export default function SpatialCaptureCanvas({
       pinId,
       status: 'draft',
     }
-    const nextRegion: OverlayRegion = {
+    const regionForConn: OverlayRegion = {
       ...baseRegion,
-      arrows: [...baseRegion.arrows, arrow],
+      arrows: [...baseRegion.arrows, draftArrow],
       stencils: [...(baseRegion.stencils ?? []), placement],
       flowComplete: true,
       showAnchors: false,
-      tool: 'stencil',
+      tool: 'arrow',
+    }
+    const conn = resolveArrowEdgeConnection(
+      regionForConn,
+      draftArrow,
+      layout.card,
+    )
+    const tip = composeAttachScreenPoint(layout.card, conn.cardAnchor)
+    const arrow: OverlayArrow = {
+      ...draftArrow,
+      composeAttach: conn.cardAnchor,
+      anchor: conn.targetAnchor,
+      head: clientToRelative(
+        baseRegion.captureRect,
+        conn.headScreen.x,
+        conn.headScreen.y,
+      ),
+      tail: clientToRelative(baseRegion.captureRect, tip.x, tip.y),
+    }
+    const nextRegion: OverlayRegion = {
+      ...regionForConn,
+      arrows: [...baseRegion.arrows, arrow],
     }
 
     setRegions((prev) => {
@@ -722,11 +829,93 @@ export default function SpatialCaptureCanvas({
     ensureBriefState(arrowId, nextRegion)
     setActiveArrowId(arrowId)
     setFocusedRegionIds([nextRegion.id])
-    setArmedStencilId(null)
-    setArmedMotionId(null)
+    collapseLibrary()
+    cancelPlaceDrag()
     setStatus(`${stencilTitle(stencilId)} placed · enter intent, then Send`)
     requestAnimationFrame(() => promptRef.current?.focus())
     void upsertArrowPin(nextRegion, arrow)
+  }
+
+  function beginPlaceDrag(
+    stencilId: string,
+    clientX: number,
+    clientY: number,
+  ) {
+    const sessionId = ++placeDragSessionRef.current
+    setPlaceDrag({ stencilId, clientX, clientY, active: false })
+    setStatus(
+      formatStencilString(stencilStrings.armed, {
+        name: stencilTitle(stencilId),
+      }),
+    )
+
+    let becameActive = false
+    const onMove = (event: PointerEvent) => {
+      if (sessionId !== placeDragSessionRef.current) return
+      const dist = Math.hypot(event.clientX - clientX, event.clientY - clientY)
+      const active = dist >= STENCIL_DRAG_THRESHOLD_PX
+      if (active && !becameActive) {
+        becameActive = true
+        collapseLibrary()
+      }
+      setPlaceDrag({
+        stencilId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        active: becameActive,
+      })
+    }
+
+    const onUp = (event: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      if (sessionId !== placeDragSessionRef.current) return
+      const dist = Math.hypot(event.clientX - clientX, event.clientY - clientY)
+      const active = becameActive || dist >= STENCIL_DRAG_THRESHOLD_PX
+      const stage = stageRef.current
+      if (!stage) {
+        cancelPlaceDrag()
+        setStatus(IDLE_HINT)
+        return
+      }
+      const box = stage.getBoundingClientRect()
+      const overStage =
+        event.clientX >= box.left &&
+        event.clientX <= box.right &&
+        event.clientY >= box.top &&
+        event.clientY <= box.bottom
+      const pt = {
+        x: ((event.clientX - box.left) / Math.max(1, box.width)) * viewport.width,
+        y: ((event.clientY - box.top) / Math.max(1, box.height)) * viewport.height,
+      }
+      if (active && overStage) {
+        placeStencil(stencilId, pt)
+        return
+      }
+      if (!active) {
+        const focused = regionsRef.current.find((r) =>
+          focusedRegionIdsRef.current.includes(r.id),
+        )
+        const target = focused
+          ? {
+              x: focused.captureRect.x + focused.captureRect.width / 2,
+              y: focused.captureRect.y + focused.captureRect.height / 2,
+            }
+          : {
+              x: session.viewport.width / 2,
+              y: session.viewport.height / 2,
+            }
+        placeStencil(stencilId, target)
+        return
+      }
+      cancelPlaceDrag()
+      setStatus(IDLE_HINT)
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   function layoutArrowCompose(
@@ -741,14 +930,10 @@ export default function SpatialCaptureCanvas({
     )
     const tip = relativeToClient(region.captureRect, arrow.tail)
     if (arrow.composeAttach) {
+      const attach = toEdgeAnchor(arrow.composeAttach)
       return {
-        card: cardPinnedToTip(
-          tip,
-          arrow.composeAttach,
-          panelWidth,
-          panelHeight,
-        ),
-        attach: arrow.composeAttach,
+        card: cardPinnedToTip(tip, attach, panelWidth, panelHeight),
+        attach,
         attachScreen: tip,
       }
     }
@@ -962,16 +1147,81 @@ export default function SpatialCaptureCanvas({
     beginPan(event)
   }
 
+  function beginPlacementDrag(
+    event: React.PointerEvent,
+    region: OverlayRegion,
+    placementId: string,
+  ) {
+    const placement = (region.stencils ?? []).find((item) => item.id === placementId)
+    if (!placement) return
+    event.preventDefault()
+    event.stopPropagation()
+    const pt = stagePoint(event)
+    setFocusedRegionIds([region.id])
+    if (placement.arrowId) setActiveArrowId(placement.arrowId)
+    setPointer({
+      kind: 'placement-drag',
+      regionId: region.id,
+      placementId,
+      ...(placement.arrowId ? { arrowId: placement.arrowId } : {}),
+      startX: pt.x,
+      startY: pt.y,
+      originRect: placement.rect,
+      originCaptureRect: region.captureRect,
+    })
+    stageRef.current?.setPointerCapture?.(event.pointerId)
+    setStatus('Drag stencil · release to drop')
+  }
+
+  function beginRegionResize(
+    event: React.PointerEvent,
+    region: OverlayRegion,
+    handle: ResizeHandle,
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
+    setFocusedRegionIds([region.id])
+    setPointer({
+      kind: 'region-resize',
+      regionId: region.id,
+      handle,
+      originRect: region.captureRect,
+    })
+    stageRef.current?.setPointerCapture?.(event.pointerId)
+    setStatus('Drag corner to resize region')
+  }
+
+  function beginPlacementResize(
+    event: React.PointerEvent,
+    region: OverlayRegion,
+    placementId: string,
+    handle: ResizeHandle,
+  ) {
+    const placement = (region.stencils ?? []).find((item) => item.id === placementId)
+    if (!placement) return
+    event.preventDefault()
+    event.stopPropagation()
+    setFocusedRegionIds([region.id])
+    if (placement.arrowId) setActiveArrowId(placement.arrowId)
+    setPointer({
+      kind: 'placement-resize',
+      regionId: region.id,
+      placementId,
+      ...(placement.arrowId ? { arrowId: placement.arrowId } : {}),
+      handle,
+      originLocal: placement.rect,
+      originCaptureRect: region.captureRect,
+    })
+    stageRef.current?.setPointerCapture?.(event.pointerId)
+    setStatus('Drag corner to resize stencil')
+  }
+
   function onPointerDown(event: React.PointerEvent) {
     if (event.button !== 0) return
     if (pointer.kind !== 'idle') return
+    // Only block the stage while an active library→canvas drag is in flight.
+    if (placeDrag?.active) return
     const pt = stagePoint(event)
-
-    if (armedStencilId) {
-      event.preventDefault()
-      placeArmedStencil(pt)
-      return
-    }
 
     const anchorCandidates =
       focusedRegionIds.length > 0
@@ -1020,6 +1270,8 @@ export default function SpatialCaptureCanvas({
 
     const containing = focusIdsForClick(regionsRef.current, pt.x, pt.y)
     if (containing.length > 0) {
+      const primaryId = containing[0]!
+      const primary = regionsRef.current.find((r) => r.id === primaryId)
       setFocusedRegionIds(containing)
       setActiveArrowId((current) => {
         if (current) {
@@ -1033,6 +1285,32 @@ export default function SpatialCaptureCanvas({
         const first = regionsRef.current.find((r) => containing.includes(r.id))
         return first?.arrows[first.arrows.length - 1]?.id ?? null
       })
+      // Drag region when not in draw tool (clear/delete are buttons, not modes).
+      if (primary && primary.tool !== 'draw') {
+        setRegions((prev) =>
+          prev.map((region) => {
+            if (!containing.includes(region.id)) {
+              return { ...region, showAnchors: false }
+            }
+            return {
+              ...region,
+              showAnchors: false,
+              tool: region.tool === 'draw' ? 'arrow' : region.tool,
+            }
+          }),
+        )
+        setPointer({
+          kind: 'region-drag',
+          regionId: primary.id,
+          startX: pt.x,
+          startY: pt.y,
+          originRect: primary.captureRect,
+          moved: false,
+        })
+        stageRef.current?.setPointerCapture?.(event.pointerId)
+        setStatus('Drag to move region · release to drop')
+        return
+      }
       setRegions((prev) =>
         prev.map((region) => {
           if (!containing.includes(region.id)) {
@@ -1041,7 +1319,7 @@ export default function SpatialCaptureCanvas({
           return { ...region, showAnchors: true, tool: 'arrow' }
         }),
       )
-      setStatus('Drag from a corner or edge midpoint to place an arrow')
+      setStatus('Drag from an edge midpoint to place an arrow')
       return
     }
 
@@ -1122,21 +1400,181 @@ export default function SpatialCaptureCanvas({
     if (pointer.kind === 'compose-drag') {
       const region = regionsRef.current.find((r) => r.id === pointer.regionId)
       const arrow = region?.arrows.find((a) => a.id === pointer.arrowId)
-      if (!region || !arrow?.composeAttach) return
+      if (!region || !arrow) return
       const card = {
         x: pt.x - pointer.grabOffset.x,
         y: pt.y - pointer.grabOffset.y,
         width: pointer.panelWidth,
         height: pointer.panelHeight,
       }
-      const tip = composeAttachScreenPoint(card, arrow.composeAttach)
-      const nextTail = clientToRelative(region.captureRect, tip.x, tip.y)
+      // Auto-pick facing edge midpoints as the card moves.
+      const conn = resolveArrowEdgeConnection(region, arrow, card)
+      const nextTail = clientToRelative(
+        region.captureRect,
+        conn.attachScreen.x,
+        conn.attachScreen.y,
+      )
+      const nextHead = clientToRelative(
+        region.captureRect,
+        conn.headScreen.x,
+        conn.headScreen.y,
+      )
       updateRegion(pointer.regionId, (r) => ({
         ...r,
         arrows: r.arrows.map((a) =>
-          a.id === pointer.arrowId ? { ...a, tail: nextTail } : a,
+          a.id === pointer.arrowId
+            ? {
+                ...a,
+                tail: nextTail,
+                head: nextHead,
+                composeAttach: conn.cardAnchor,
+                anchor: conn.targetAnchor,
+              }
+            : a,
         ),
       }))
+      return
+    }
+    if (pointer.kind === 'region-drag') {
+      const dx = pt.x - pointer.startX
+      const dy = pt.y - pointer.startY
+      const dist = Math.hypot(dx, dy)
+      if (!pointer.moved && dist < REGION_DRAG_THRESHOLD_PX) return
+      const nextRect = movedCaptureRect(
+        pointer.originRect,
+        dx,
+        dy,
+        session.viewport,
+      )
+      updateRegion(pointer.regionId, { captureRect: nextRect })
+      if (!pointer.moved) {
+        setPointer({ ...pointer, moved: true })
+      }
+      return
+    }
+    if (pointer.kind === 'placement-drag') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      if (!region) return
+      const dx = pt.x - pointer.startX
+      const dy = pt.y - pointer.startY
+      const { nextCapture, nextLocal } = movedPlacementWithRegionFollow(
+        pointer.originRect,
+        dx,
+        dy,
+        pointer.originCaptureRect,
+        session.viewport,
+      )
+      updateRegion(pointer.regionId, (r) => {
+        const stencils = (r.stencils ?? []).map((item) =>
+          item.id === pointer.placementId ? { ...item, rect: nextLocal } : item,
+        )
+        let arrows = r.arrows
+        if (pointer.arrowId) {
+          const head = {
+            x: Math.min(
+              0.98,
+              Math.max(
+                0.02,
+                (nextLocal.x + nextLocal.width / 2) /
+                  Math.max(1, nextCapture.width),
+              ),
+            ),
+            y: Math.min(
+              0.98,
+              Math.max(
+                0.02,
+                (nextLocal.y + nextLocal.height / 2) /
+                  Math.max(1, nextCapture.height),
+              ),
+            ),
+          }
+          arrows = r.arrows.map((arrow) =>
+            arrow.id === pointer.arrowId
+              ? {
+                  ...arrow,
+                  head,
+                  anchor: nearestAnchorToRelative(head),
+                }
+              : arrow,
+          )
+        }
+        return { ...r, captureRect: nextCapture, stencils, arrows }
+      })
+      return
+    }
+    if (pointer.kind === 'region-resize') {
+      const nextRect = resizedRectFromHandle(
+        pointer.originRect,
+        pointer.handle,
+        pt.x,
+        pt.y,
+        undefined,
+        { x: 0, y: 0, width: session.viewport.width, height: session.viewport.height },
+      )
+      updateRegion(pointer.regionId, (r) => ({
+        ...r,
+        captureRect: nextRect,
+        stencils: clampStencilsToRegion(r.stencils ?? [], nextRect),
+      }))
+      return
+    }
+    if (pointer.kind === 'placement-resize') {
+      const originStage = {
+        x: pointer.originCaptureRect.x + pointer.originLocal.x,
+        y: pointer.originCaptureRect.y + pointer.originLocal.y,
+        width: pointer.originLocal.width,
+        height: pointer.originLocal.height,
+      }
+      const nextStage = resizedRectFromHandle(
+        originStage,
+        pointer.handle,
+        pt.x,
+        pt.y,
+        undefined,
+        pointer.originCaptureRect,
+      )
+      const nextLocal = {
+        x: nextStage.x - pointer.originCaptureRect.x,
+        y: nextStage.y - pointer.originCaptureRect.y,
+        width: nextStage.width,
+        height: nextStage.height,
+      }
+      updateRegion(pointer.regionId, (r) => {
+        const stencils = (r.stencils ?? []).map((item) =>
+          item.id === pointer.placementId ? { ...item, rect: nextLocal } : item,
+        )
+        let arrows = r.arrows
+        if (pointer.arrowId) {
+          const head = {
+            x: Math.min(
+              0.98,
+              Math.max(
+                0.02,
+                (nextLocal.x + nextLocal.width / 2) /
+                  Math.max(1, r.captureRect.width),
+              ),
+            ),
+            y: Math.min(
+              0.98,
+              Math.max(
+                0.02,
+                (nextLocal.y + nextLocal.height / 2) /
+                  Math.max(1, r.captureRect.height),
+              ),
+            ),
+          }
+          arrows = r.arrows.map((arrow) =>
+            arrow.id === pointer.arrowId
+              ? {
+                  ...arrow,
+                  head,
+                  anchor: nearestAnchorToRelative(head),
+                }
+              : arrow,
+          )
+        }
+        return { ...r, stencils, arrows }
+      })
     }
   }
 
@@ -1163,7 +1601,7 @@ export default function SpatialCaptureCanvas({
       setRegions((prev) => [...prev, region])
       setFocusedRegionIds([regionId])
       setActiveArrowId(null)
-      setStatus('Drag from a corner or edge midpoint · tail may leave the box')
+      setStatus('Drag from an edge midpoint · tail may leave the box')
       void captureFrozenRegion(regionId, rect)
       return
     }
@@ -1172,8 +1610,9 @@ export default function SpatialCaptureCanvas({
       setPointer({ kind: 'idle' })
       if (!region) return
       const tail = clientToRelative(region.captureRect, pt.x, pt.y)
-      const finalAnchor =
-        pointer.lockedAnchor ?? nearestAnchorToRelative(tail)
+      const finalAnchor = toEdgeAnchor(
+        pointer.lockedAnchor ?? nearestAnchorToRelative(tail),
+      )
       const finalHead = relativePointForAnchor(finalAnchor)
       const dx = (tail.x - finalHead.x) * region.captureRect.width
       const dy = (tail.y - finalHead.y) * region.captureRect.height
@@ -1200,7 +1639,80 @@ export default function SpatialCaptureCanvas({
         setFocusedRegionIds([])
         setActiveArrowId(null)
       }
+      return
     }
+    if (pointer.kind === 'region-drag') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      const moved = pointer.moved
+      setPointer({ kind: 'idle' })
+      if (!region) return
+      if (!moved) {
+        setRegions((prev) =>
+          prev.map((item) =>
+            item.id === region.id
+              ? { ...item, showAnchors: true, tool: 'arrow' }
+              : item,
+          ),
+        )
+        setStatus('Drag from an edge midpoint to place an arrow')
+        return
+      }
+      void captureFrozenRegion(region.id, region.captureRect)
+      setStatus('Region moved · snapshot updated')
+      return
+    }
+    if (pointer.kind === 'placement-drag') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      const arrow = pointer.arrowId
+        ? region?.arrows.find((a) => a.id === pointer.arrowId)
+        : undefined
+      const regionMoved =
+        !!region &&
+        (region.captureRect.x !== pointer.originCaptureRect.x ||
+          region.captureRect.y !== pointer.originCaptureRect.y)
+      setPointer({ kind: 'idle' })
+      if (region && arrow) void upsertArrowPin(region, arrow)
+      if (region && regionMoved) {
+        void captureFrozenRegion(region.id, region.captureRect)
+      }
+      setStatus(IDLE_HINT)
+      return
+    }
+    if (pointer.kind === 'region-resize') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      setPointer({ kind: 'idle' })
+      if (region) {
+        void captureFrozenRegion(region.id, region.captureRect)
+        setStatus('Region resized · snapshot updated')
+      } else {
+        setStatus(IDLE_HINT)
+      }
+      return
+    }
+    if (pointer.kind === 'placement-resize') {
+      const region = regionsRef.current.find((r) => r.id === pointer.regionId)
+      const arrow = pointer.arrowId
+        ? region?.arrows.find((a) => a.id === pointer.arrowId)
+        : undefined
+      setPointer({ kind: 'idle' })
+      if (region && arrow) void upsertArrowPin(region, arrow)
+      setStatus(IDLE_HINT)
+    }
+  }
+
+  function clampStencilsToRegion(
+    stencils: NonNullable<OverlayRegion['stencils']>,
+    regionRect: ScreenRect,
+  ): NonNullable<OverlayRegion['stencils']> {
+    return stencils.map((item) => {
+      const next = clampLocalRectInRegion(item.rect, regionRect)
+      return next.x === item.rect.x &&
+        next.y === item.rect.y &&
+        next.width === item.rect.width &&
+        next.height === item.rect.height
+        ? item
+        : { ...item, rect: next }
+    })
   }
 
   function beginComposeDrag(
@@ -1243,12 +1755,14 @@ export default function SpatialCaptureCanvas({
       ? (() => {
           const region = regions.find((r) => r.id === pointer.regionId)
           if (!region || !pointer.lockedAnchor) return null
-          const head = relativePointForAnchor(pointer.lockedAnchor)
+          const headAnchor = toEdgeAnchor(pointer.lockedAnchor)
+          const head = relativePointForAnchor(headAnchor)
           return {
             head: relativeToClient(region.captureRect, head),
             tail: relativeToClient(region.captureRect, pointer.liveTail),
             color: colorForArrowIndex(region.arrows.length + 1),
             index: region.arrows.length + 1,
+            headAnchor,
           }
         })()
       : null
@@ -1298,16 +1812,16 @@ export default function SpatialCaptureCanvas({
           </button>
           <button
             type="button"
-            className={`${styles.zoomBtn}${libraryOpen || armedStencilId ? ` ${styles.zoomBtnActive}` : ''}`}
+            className={`${styles.zoomBtn}${libraryRevealed || placeDrag ? ` ${styles.zoomBtnActive}` : ''}`}
             aria-label={ts('spatialCaptures.stencilOpen')}
             aria-pressed={libraryOpen}
-            title={ts('spatialCaptures.stencilOpen')}
+            title={ts('spatialCaptures.stencilEdgeHint')}
             onClick={() => {
-              setLibraryOpen((open) => !open)
               if (libraryOpen) {
-                setArmedStencilId(null)
-                setArmedMotionId(null)
+                exitStencilChrome()
+                return
               }
+              setLibraryOpen(true)
             }}
           >
             <LayoutTemplate size={14} strokeWidth={2} aria-hidden />
@@ -1317,26 +1831,35 @@ export default function SpatialCaptureCanvas({
 
       <StencilLibrary
         open={libraryOpen}
-        armedStencilId={armedStencilId}
-        armedMotionId={armedMotionId}
+        collapseToken={libraryCollapseToken}
+        draggingStencilId={placeDrag?.stencilId ?? null}
         repoDesignSystem={repoDesignSystem}
         strings={stencilStrings}
+        onRevealChange={setLibraryRevealed}
         onClose={() => {
-          setLibraryOpen(false)
-          setArmedStencilId(null)
-          setArmedMotionId(null)
+          exitStencilChrome()
         }}
-        onArm={(stencilId) => {
-          setArmedStencilId(stencilId)
-          setStatus(stencilStrings.placeHint)
-        }}
-        onArmMotion={setArmedMotionId}
-        onDisarm={() => {
-          setArmedStencilId(null)
-          setArmedMotionId(null)
-          setStatus(IDLE_HINT)
-        }}
+        onPlaceDragStart={beginPlaceDrag}
       />
+
+      {placeDrag?.active ? (
+        <div
+          className={styles.stencilDragGhost}
+          style={{ left: placeDrag.clientX, top: placeDrag.clientY }}
+          aria-hidden
+        >
+          <StencilPreviewVisual
+            stencilId={placeDrag.stencilId}
+            category={
+              stencilDefinition(placeDrag.stencilId)?.category ?? 'base'
+            }
+            title={stencilTitle(placeDrag.stencilId)}
+          />
+          <span className={styles.stencilDragGhostLabel}>
+            {stencilStrings.dragHint}
+          </span>
+        </div>
+      ) : null}
 
       <div
         ref={viewportHostRef}
@@ -1424,54 +1947,108 @@ export default function SpatialCaptureCanvas({
                 const box = stageRectForPlacement(region, placement)
                 const focused = isRegionFocused(focusedRegionIds, region.id)
                 return (
-                  <div
+                  <StencilLiveStub
                     key={placement.id}
-                    className={`${styles.stencilPlacement}${
-                      focused ? '' : ` ${styles.stencilPlacementDimmed}`
-                    }`}
+                    stencilId={placement.stencilId}
+                    dimmed={!focused}
                     style={{
                       left: box.x,
                       top: box.y,
-                      width: box.width,
-                      height: box.height,
+                      width: Math.max(box.width, 48),
+                      height: Math.max(box.height, 36),
                     }}
-                    title={stencilTitle(placement.stencilId)}
-                  >
-                    <span className={styles.stencilPlacementLabel}>
-                      {stencilTitle(placement.stencilId)}
-                    </span>
-                  </div>
+                    onMovePointerDown={(event) =>
+                      beginPlacementDrag(event, region, placement.id)
+                    }
+                  />
                 )
               }),
             )}
 
+            {regions.map((region) => {
+              const focused = isRegionFocused(focusedRegionIds, region.id)
+              if (!focused || region.tool === 'draw') return null
+              return (
+                <div key={`resize-${region.id}`}>
+                  {RESIZE_HANDLES.map((handle) => {
+                    const p = resizeHandleScreenPoint(region.captureRect, handle)
+                    return (
+                      <button
+                        key={handle}
+                        type="button"
+                        className="overlay-resize-handle"
+                        data-handle={handle}
+                        style={{ left: p.x, top: p.y }}
+                        aria-label={`Resize region ${handle}`}
+                        onPointerDown={(event) =>
+                          beginRegionResize(event, region, handle)
+                        }
+                      />
+                    )
+                  })}
+                  {(region.stencils ?? []).map((placement) => {
+                    const box = stageRectForPlacement(region, placement)
+                    return RESIZE_HANDLES.map((handle) => {
+                      const p = resizeHandleScreenPoint(box, handle)
+                      return (
+                        <button
+                          key={`${placement.id}-${handle}`}
+                          type="button"
+                          className="overlay-resize-handle"
+                          data-handle={handle}
+                          style={{ left: p.x, top: p.y }}
+                          aria-label={`Resize stencil ${handle}`}
+                          onPointerDown={(event) =>
+                            beginPlacementResize(
+                              event,
+                              region,
+                              placement.id,
+                              handle,
+                            )
+                          }
+                        />
+                      )
+                    })
+                  })}
+                </div>
+              )
+            })}
+
             <svg className="overlay-arrows-layer" aria-hidden>
               {regions.map((region) =>
                 region.arrows.map((arrow) => {
-                  const head = relativeToClient(region.captureRect, arrow.head)
                   const layout = layoutArrowCompose(region, arrow)
+                  const conn = resolveArrowEdgeConnection(
+                    region,
+                    arrow,
+                    layout.card,
+                  )
                   const focused = isRegionFocused(focusedRegionIds, region.id)
                   return (
                     <g
                       key={arrow.id}
                       className={focused ? undefined : 'overlay-arrow-dimmed'}
                     >
-                      <ArrowPath
-                        head={head}
-                        tail={layout.attachScreen}
+                      <ComposeArrowPath
+                        head={conn.headScreen}
+                        tail={conn.attachScreen}
                         color={arrow.color}
                         index={arrow.index}
+                        headAnchor={conn.targetAnchor}
+                        tailAnchor={conn.cardAnchor}
+                        obstacles={conn.obstacles}
                       />
                     </g>
                   )
                 }),
               )}
               {liveArrow ? (
-                <ArrowPath
+                <ComposeArrowPath
                   head={liveArrow.head}
                   tail={liveArrow.tail}
                   color={liveArrow.color}
                   index={liveArrow.index}
+                  headAnchor={liveArrow.headAnchor}
                   preview
                 />
               ) : null}
@@ -1479,10 +2056,21 @@ export default function SpatialCaptureCanvas({
 
             {regions.map((region) =>
               region.arrows.map((arrow) => {
-                const head = relativeToClient(region.captureRect, arrow.head)
                 const layout = layoutArrowCompose(region, arrow)
-                const midX = (head.x + layout.attachScreen.x) / 2
-                const midY = (head.y + layout.attachScreen.y) / 2
+                const conn = resolveArrowEdgeConnection(
+                  region,
+                  arrow,
+                  layout.card,
+                )
+                const { mid } = routeComposeArrowCurve({
+                  from: conn.attachScreen,
+                  to: conn.headScreen,
+                  fromAnchor: conn.cardAnchor,
+                  toAnchor: conn.targetAnchor,
+                  obstacles: conn.obstacles,
+                })
+                const midX = mid.x
+                const midY = mid.y
                 const focused = isRegionFocused(focusedRegionIds, region.id)
                 return (
                   <button
@@ -1882,55 +2470,3 @@ function FrozenRegionView({
   )
 }
 
-function ArrowPath({
-  head,
-  tail,
-  color,
-  index,
-  preview,
-}: {
-  head: { x: number; y: number }
-  tail: { x: number; y: number }
-  color: string
-  index: number
-  preview?: boolean
-}) {
-  const angle = Math.atan2(head.y - tail.y, head.x - tail.x)
-  const size = 10
-  const ax = head.x - size * Math.cos(angle - Math.PI / 6)
-  const ay = head.y - size * Math.sin(angle - Math.PI / 6)
-  const bx = head.x - size * Math.cos(angle + Math.PI / 6)
-  const by = head.y - size * Math.sin(angle + Math.PI / 6)
-  const midX = (head.x + tail.x) / 2
-  const midY = (head.y + tail.y) / 2
-  return (
-    <g opacity={preview ? 0.85 : 1}>
-      <line
-        x1={tail.x}
-        y1={tail.y}
-        x2={head.x}
-        y2={head.y}
-        stroke={color}
-        strokeWidth={2.25}
-        strokeLinecap="round"
-      />
-      <polygon
-        points={`${head.x},${head.y} ${ax},${ay} ${bx},${by}`}
-        fill={color}
-      />
-      <circle cx={tail.x} cy={tail.y} r={3.5} fill={color} />
-      <g transform={`translate(${midX + 6}, ${midY - 6})`}>
-        <circle r={8} fill={color} />
-        <text
-          textAnchor="middle"
-          dominantBaseline="central"
-          fill="#fff"
-          fontSize="10"
-          fontWeight="700"
-        >
-          {index}
-        </text>
-      </g>
-    </g>
-  )
-}

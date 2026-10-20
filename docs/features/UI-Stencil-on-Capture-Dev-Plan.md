@@ -7,7 +7,8 @@
 - 契约：`projectos/contracts/ui-stencil.ts`；region.`stencils`；`composer.stencilBrief` / `generationScope`
 - Catalog：`UI_STENCIL_CATALOG`（Base/Motion/Visual + 3 Screen Presets）；Library 字母色块 + license / Maps-to 行；Motion 修饰符 chips
 - Repo DS：`contracts/repo-design-system.ts`、`services/repo-design-system-service.ts`、`getRepoDesignSystem`
-- UI：`StencilLibrary.tsx`、`StencilComposeExtras.tsx`、`SpatialCaptureCanvas` + Desktop `OverlayApp`
+- UI：`StencilLibrary.tsx`（右缘抽出 + 拖放投放）、`StencilLiveStub.tsx`（画布可交互 stub）、`StencilComposeExtras.tsx`（motion/scope）、`SpatialCaptureCanvas` + Desktop `OverlayApp`
+- Region：非 Draw 模式下按住拖动 `captureRect`，松手重裁 snapshot
 - 双入口共用：placement helpers + brief/scope/motion；Overlay 用 `STENCIL_UI_STRINGS_EN`
 
 **权威交叉引用**：
@@ -351,6 +352,7 @@ Drop on empty   → full-frame region + placement + Compose card
 - [x] Submit：`composer.stencilBrief` + `generationScope` → `buildSpatialPinUserContent` 分层输出
 - [x] i18n（en/zh）
 - [x] 预览：Library 字母色块占位（`previewAsset` 路径预留，静帧 PNG 可后补）
+- [x] 右侧边缘悬停抽出（避开 macOS 台前调度左侧）；行悬停 CSS/动效预览卡 + 描述
 
 **完成标准**：用户可完成「选 Button → 点击投放 → 写一句 → Submit」；agent 消息含 stencil brief。✅
 

@@ -1,5 +1,5 @@
 import type { AnnotationAnchor, ScreenRect } from '@contracts/spatial-pin'
-import { ALL_ANCHORS, pointInRect } from './regionAnchors'
+import { EDGE_ANCHORS, pointInRect, toEdgeAnchor } from './regionAnchors'
 
 const DEFAULT_MARGIN = 12
 /** Matches `.overlay-panel { border-radius: var(--radius-lg) }` (12px). */
@@ -58,7 +58,7 @@ export interface ComposeLayoutInput {
   headScreen: { x: number; y: number }
   /**
    * User-drawn arrow tip — kept fixed (direction + length preserved).
-   * The compose card docks one of its 8 anchors onto this point.
+   * The compose card docks one of its 4 edge midpoints onto this point.
    */
   preferredTailScreen: { x: number; y: number }
   panelWidth: number
@@ -69,7 +69,7 @@ export interface ComposeLayoutInput {
 
 export interface ComposeLayoutResult {
   card: ScreenRect
-  /** Which of the card's 8 anchors sits on the fixed arrow tip. */
+  /** Which of the card's 4 edge midpoints sits on the fixed arrow tip. */
   attach: AnnotationAnchor
   /** Always equals preferredTailScreen (arrow tip unchanged). */
   attachScreen: { x: number; y: number }
@@ -183,7 +183,7 @@ function awayFromHeadBonus(
 
 /**
  * Keep the user-drawn arrow tip fixed. Choose which of the compose card's
- * 8 connection points docks onto that tip so the card avoids covering the
+ * 4 edge midpoints docks onto that tip so the card avoids covering the
  * capture region and the arrow shaft.
  */
 export function layoutComposeForArrow(
@@ -196,7 +196,7 @@ export function layoutComposeForArrow(
   let best: ComposeLayoutResult | null = null
   let bestScore = Infinity
 
-  for (const attach of ALL_ANCHORS) {
+  for (const attach of EDGE_ANCHORS) {
     const card = cardPinnedToTip(
       tip,
       attach,
@@ -227,6 +227,23 @@ export function layoutComposeForArrow(
   )
 }
 
+/** Pin using an edge attach (legacy corners collapse to edges). */
+export function cardPinnedToTipEdge(
+  tip: { x: number; y: number },
+  attach: AnnotationAnchor,
+  panelWidth: number,
+  panelHeight: number,
+  radius = COMPOSE_CARD_RADIUS_PX,
+): ScreenRect {
+  return cardPinnedToTip(
+    tip,
+    toEdgeAnchor(attach),
+    panelWidth,
+    panelHeight,
+    radius,
+  )
+}
+
 /**
  * Estimated compose panel height before the first DOM measure.
  * Prefer live `offsetHeight` via useComposePanelMetrics — a mismatch here
@@ -237,4 +254,4 @@ export function estimateComposePanelHeight(withFlowRail: boolean): number {
   return withFlowRail ? 248 : 180
 }
 
-export { ALL_ANCHORS }
+export { EDGE_ANCHORS, ALL_ANCHORS } from './regionAnchors'
