@@ -57,6 +57,17 @@ describe("ToolPolicy v0 (H0)", () => {
       decision: "deny",
       reason: expect.stringContaining("outside allowedWritePaths"),
     });
+    try {
+      assertToolAllowed({ tool: "apply_diff", path: "src/other.ts" }, writeCtx);
+      throw new Error("expected policy denial");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ProjectOSError);
+      expect((error as ProjectOSError).details?.toolResult).toMatchObject({
+        tool: "apply_diff",
+        ok: false,
+        exitCode: null,
+      });
+    }
   });
 
   it("denies generate_diff when zero write paths are bound", () => {
@@ -91,8 +102,11 @@ describe("ToolPolicy v0 (H0)", () => {
     );
   });
 
-  it("allows list_files as read-only metadata", () => {
+  it("allows list_files and git_status as read-only metadata", () => {
     expect(evaluateToolCall({ tool: "list_files" }, readCtx).decision).toBe(
+      "allow",
+    );
+    expect(evaluateToolCall({ tool: "git_status" }, readCtx).decision).toBe(
       "allow",
     );
   });

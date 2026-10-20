@@ -23,6 +23,7 @@ export const LoopInstanceStatusSchema = z.enum([
   "running",
   "paused",
   "awaiting_hitl",
+  "awaiting_review",
   "complete",
   "error",
 ]);
@@ -179,6 +180,9 @@ export const LoopSpecSchema = z
   })
   .strict();
 
+/** Matches `LoopInstanceSchema.events` max. */
+export const LOOP_INSTANCE_EVENT_LIMIT = 500;
+
 export const LoopInstanceEventSchema = z
   .object({
     id: z.string().min(1),
@@ -199,6 +203,8 @@ export const LoopInstanceEventSchema = z
     ]),
     nodeId: z.string().min(1).optional(),
     message: z.string().trim().max(2000).optional(),
+    agentRunId: z.string().min(1).optional(),
+    evidenceId: z.string().min(1).optional(),
   })
   .strict();
 
@@ -211,7 +217,12 @@ export const LoopInstanceSchema = z
     round: z.number().int().nonnegative(),
     attemptCounts: z.record(z.string(), z.number().int().nonnegative()),
     hitlQuestionIds: z.array(z.string().min(1)).optional(),
-    events: z.array(LoopInstanceEventSchema).max(500),
+    /** Functional-graph node that owns the leaf file. Loop copy cannot set this. */
+    featureNodeId: z.string().min(1).optional(),
+    /** Run attached to the current implement or fix node. */
+    activeRunId: z.string().min(1).optional(),
+    activeRunNodeId: z.string().min(1).optional(),
+    events: z.array(LoopInstanceEventSchema).max(LOOP_INSTANCE_EVENT_LIMIT),
     startedAt: z.string().min(1),
     updatedAt: z.string().min(1),
     completedAt: z.string().min(1).optional(),
@@ -409,6 +420,25 @@ export type IntentGraphHistoryEntry = z.infer<typeof IntentGraphHistoryEntrySche
 export type LoopPendingGraphEditOffer = z.infer<typeof LoopPendingGraphEditOfferSchema>;
 export type LoopAuthoringTurnRequest = z.infer<typeof LoopAuthoringTurnRequestSchema>;
 export type LoopGoalClarificationAnswer = z.infer<typeof LoopGoalClarificationAnswerSchema>;
+
+/**
+ * Keep the newest events, and always retain the earliest `started` marker
+ * when the list is truncated.
+ */
+export function trimLoopInstanceEvents(
+  events: LoopInstanceEvent[],
+  limit = LOOP_INSTANCE_EVENT_LIMIT,
+): LoopInstanceEvent[] {
+  if (events.length <= limit) return events;
+  const startedIndex = events.findIndex((event) => event.type === "started");
+  if (startedIndex < 0 || limit < 1) return events.slice(-limit);
+  const started = events[startedIndex]!;
+  const rest = events.filter((_, index) => index !== startedIndex);
+  const tail = rest.slice(-(limit - 1));
+  const kept = new Set(tail.map((event) => event.id));
+  kept.add(started.id);
+  return events.filter((event) => kept.has(event.id));
+}
 
 export function emptyIntentGraph(revision = 0): IntentGraph {
   return {

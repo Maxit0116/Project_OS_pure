@@ -1180,6 +1180,15 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       runId: run.runId,
       status: "not_run",
       results: [],
+      evidence: {
+        evidenceId: `evidence_${run.runId}`,
+        runId: run.runId,
+        status: "not_run",
+        reason: "not_configured",
+        commands: [],
+        unexpectedPaths: [],
+        suggestedTests: [],
+      },
     });
   });
 

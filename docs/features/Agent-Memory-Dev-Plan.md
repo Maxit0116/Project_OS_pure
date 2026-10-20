@@ -1,6 +1,6 @@
 # Agent Memory：对标 Cursor / Devin / Codex / Claude Code 的开发计划
 
-**状态**：MEM-0–MEM-5 已落地。模型提议只写 `observed`，采用前不进提示词。  
+**状态**：MEM-0–MEM-6 已落地。模型提议只写 `observed`，采用前不进提示词。总索引见 [`Backend-Dev-Plan.md`](backend/Backend-Dev-Plan.md)。  
 **范围**：跨会话、可审查的 **学习记忆**（agent 写下的笔记），以及它和已有 Rules / Skills、未来 Phase G、Part 7 检索的边界  
 **权威交叉引用**：
 - `agent-requirements.md` §2.2 / Part 4 **G** / Part 7 — 短暂实例、审计留痕、记忆准入、检索经纪人
@@ -270,8 +270,8 @@ MemoryCandidate {
 | 每节点常驻 agent、按节点一份记忆 | Phase G |
 | 向量库、检索经纪人、把 run 档案索引成语料 | [`RAG-Dev-Plan.md`](RAG-Dev-Plan.md)。届时 memory 只是其中一个语料，且只有 `corroborated` 可检索 |
 | 主题文件按需读 | 等 Route ② 或 Ask 有界读。在那之前加开会把「索引预算」打穿 |
-| `.projectos/rules` 的 globs / description 触发 | Harness，另开切片 |
-| 自动读仓库里的 `AGENTS.md` | Harness。与 Rules 重复注入要先定优先级 |
+| `.projectos/rules` 的 globs / description 触发 | [`Context-Engineering-Dev-Plan.md`](Context-Engineering-Dev-Plan.md) CTX-2 |
+| 自动读仓库里的 `AGENTS.md` | [`Context-Engineering-Dev-Plan.md`](Context-Engineering-Dev-Plan.md) CTX-3。与 Rules 的优先级在该切片写死 |
 | 团队共享记忆、组织强制开关 | 无多用户产品前不做 |
 | 跨机器同步 | 不做。要同步就让用户自己抄进 Rules 并提交 |
 
@@ -338,3 +338,29 @@ MEM-3 放在审阅之后：没有审阅界面时，自动提议只会堆在磁�
 | 2026-10-19 | MEM-0/1/2/4 与确定性 MEM-5：`contracts/agent-memory.ts`、`services/harness/memory.ts`、指令围栏、设置审阅、显式记住/忘掉。MEM-3 未做 |
 | 2026-10-19 | MEM-1 哈希事件、MEM-3 `observed` 提议、设置过滤与主题原文、合并来源 `consolidate` |
 | 2026-10-19 | 检索经纪人改指向 [`RAG-Dev-Plan.md`](RAG-Dev-Plan.md) |
+| 2026-10-19 | 规则 glob 与 `AGENTS.md` 改指向 [`Context-Engineering-Dev-Plan.md`](Context-Engineering-Dev-Plan.md) CTX-2 / CTX-3 |
+| 2026-10-20 | 追加 MEM-6。任务进度明确不属于本目录。 |
+| 2026-10-20 | MEM-6 落地。点名文件且核验哈希冲突的 `project` 笔记跳过注入，不自动作废。 |
+
+## 9. 合格线后续（MEM-6）
+
+基础版已经满足「跨会话的个人笔记、可审、非授权」。不要把任务进度、架构事实再做一套记忆。
+
+三级里只有用户长期偏好落在这里：
+
+| 层 | 放哪 | 本文件 |
+|----|------|--------|
+| 项目事实 | 代码、功能图、`.projectos/rules`、文件描述 | 不写 |
+| 任务进度 | Agent Run、Loop 实例、验证证据 | 不写。见 Session 与 Planning |
+| 用户偏好 | `AgentMemoryStore` | MEM-0–MEM-5 已做 |
+
+### MEM-6 — 和当前代码冲突的笔记不注入
+
+**依赖**：Code Intelligence CI-0 的文件哈希。笔记若没有点名具体文件，本切片不推断冲突。
+
+- [x] 仅当一条 `project` 笔记显式带有工作区相对路径，且该文件当前哈希与笔记上一次核验哈希不同，注入时跳过该行，并在诊断里计数。
+- [x] 不自动改写成 `superseded`。用户仍可在审阅里看到。
+- [x] 跳过不等于删除。下次哈希又变回核验值时可以再注入。没有核验哈希的旧笔记保持今天的行为。
+- [x] 不做「记忆是否提高成功率」的实验。那要等 Verification V-3 的任务集。
+
+**验收**：用户采用过的路径笔记，在该文件变更后不再进入系统提示。`user` 与 `feedback` 类型不受这条哈希规则影响。笔记仍然不能改变写范围。

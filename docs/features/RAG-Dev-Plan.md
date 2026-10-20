@@ -1,6 +1,6 @@
 # RAG：对标 Cursor / Devin / Codex / Claude Code 的共享检索开发计划
 
-**状态**：Draft（后续共享检索以此为准；尚未开工）  
+**状态**：RAG-0–RAG-4 与 RAG-6–RAG-10 已落地。RAG-5 向量仍关。总索引见 [`Backend-Dev-Plan.md`](backend/Backend-Dev-Plan.md)。  
 **范围**：在已有 **LocalContextBundle** 之外，增加一份全项目可共享、带出处、可重放的检索结果。向量库是可选的发现手段，不是本计划的第一交付物。  
 **权威交叉引用**：
 - `agent-requirements.md` Part 5 不变量、Part 7 原文约束、§2.2 审计记录不是可用记忆、Phase G
@@ -416,3 +416,32 @@ RAG-1 与 Memory MEM-0 可以并行，它们不共享写入路径。不要为了
 | 2026-10-19 | 初稿。对照四家的学习记忆与代码检索公开文档、`agent-requirements` Part 7、Memory 计划的边界，以及 LocalContextBundle 现状。向量检索排在词法搜索和图查询之后，且默认不作为授权通道 |
 | 2026-10-19 | RAG-0、RAG-1、RAG-3 落地：`contracts/retrieval.ts`、`services/retrieval/broker.ts`。Ask 与 Plan 注入建议性快照；叶子 Change 不检索；校验器不能读记忆语料。图命中一律 `composed_graph`。 |
 | 2026-10-19 | RAG-2/4/6/7 与 RAG-8 的 opt-in 落地。向量检索（RAG-5）仍关闭。提交成功后追加变更流，不把索引失败滚回事务。记忆默认不出境。 |
+| 2026-10-19 | 六槽装配、指令激活、`@` 补齐、会话压缩归 [`Context-Engineering-Dev-Plan.md`](Context-Engineering-Dev-Plan.md)。本文件仍是检索经纪人的权威，不重开 RAG-0–8。 |
+| 2026-10-20 | 追加 RAG-9、RAG-10。`symbol` 在代码索引可用前继续拒绝。RAG-5 仍关。 |
+| 2026-10-20 | RAG-9、RAG-10 落地。`symbol` 只走 `lookupSymbols`。评估分数不进提示词。 |
+
+## 10. 合格线后续（RAG-9、RAG-10）
+
+词法、图查询、块索引、运行记录和已采用记忆已经够做基础检索。不要为了「有 RAG」打开向量。
+
+### RAG-9 — `symbol` 交给代码索引
+
+**依赖**：[`Code-Intelligence-Dev-Plan.md`](backend/Code-Intelligence-Dev-Plan.md) CI-2。
+
+- [x] `kind: "symbol"` 只调用 `lookupSymbols`。经纪人仍回源当前文件哈希，对不上就 omission。
+- [x] 叶子 Change 继续不能用检索决定写路径。符号命中和词法命中一样，只是建议。
+- [x] CI-2 未落地时保持今天的拒绝，不要改成词法搜索并假装是符号命中。
+
+**验收**：查询一个导出名，命中带路径和行。文件在索引后被修改，则没有旧行号。写范围与查询前相同。
+
+### RAG-10 — 一小份检索评估
+
+**目标**：以后改排序时能看出有没有变差。不引入向量。
+
+- [x] 准备一组固定查询：精确符号名、文件名、功能图节点名。每条有期望路径。
+- [x] 报告命中是否包含期望路径，以及 omission 数量。
+- [x] 这个分数不进入运行时提示词，也不当成用户问题的答案。
+
+**验收**：在期望文件被改名之后，评估能显示未命中，而不是仍返回旧路径。
+
+**继续不做**：RAG-5 嵌入、把全部文档向量化、用检索分数当写授权。

@@ -409,6 +409,7 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     projectId: string,
     loopId: string,
     specVersion?: string,
+    _featureNodeId?: string,
   ): Promise<LoopGraphDocument> {
     return Promise.resolve(mockStartLoopInstance(projectId, loopId, specVersion));
   }

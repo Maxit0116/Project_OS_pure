@@ -82,6 +82,9 @@ export function buildChatSessionSnapshot(state: WorkbenchState): ChatSessionSnap
     activeCustomModeSkillId: state.activeCustomModeSkillId,
     customModePreviousChatMode: state.customModePreviousChatMode,
     conversationCheckpoints: state.conversationCheckpoints,
+    ...(state.latestContextAssembly
+      ? { latestContextAssembly: state.latestContextAssembly }
+      : {}),
   }
 }
 
@@ -159,6 +162,7 @@ export interface HydratedChatSessionState {
   activeCustomModeSkillId: string | null
   customModePreviousChatMode: ChatMode | null
   conversationCheckpoints: WorkbenchState['conversationCheckpoints']
+  latestContextAssembly: WorkbenchState['latestContextAssembly']
 }
 
 export function hydrateChatSessionState(record: ChatSessionRecord): HydratedChatSessionState {
@@ -182,5 +186,6 @@ export function hydrateChatSessionState(record: ChatSessionRecord): HydratedChat
     customModePreviousChatMode:
       previousMode && previousMode !== 'team_memory' ? previousMode : null,
     conversationCheckpoints: snapshot?.conversationCheckpoints ?? [],
+    latestContextAssembly: snapshot?.latestContextAssembly ?? null,
   }
 }

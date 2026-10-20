@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { VerificationEvidenceSchema } from "./verification-evidence.js";
+
 export const ExecCommandSchema = z.object({
   command: z.string().trim().min(1),
   args: z.array(z.string()),
@@ -22,6 +24,7 @@ export const VerificationRunResultSchema = z.object({
   runId: z.string().min(1),
   status: z.enum(["passed", "failed", "not_run"]),
   results: z.array(VerificationCommandResultSchema),
+  evidence: VerificationEvidenceSchema.optional(),
 }).strict();
 
 export type ExecCommand = z.infer<typeof ExecCommandSchema>;

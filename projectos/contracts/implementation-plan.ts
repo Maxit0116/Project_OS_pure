@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { AgentConversationScopeSchema, AskExplorationTraceSchema } from "./agent-conversation.js";
+import { ContextAssemblySchema } from "./context-assembly.js";
 import { ModelImagePartSchema } from "./model-gateway.js";
 import { PromptComposerFieldsSchema } from "./prompt-composer.js";
 
@@ -62,6 +63,7 @@ export const ImplementationPlanSchema = z
     clarifyingQuestions: z.array(ClarifyingQuestionSchema).optional(),
     rationale: z.string().trim().min(1),
     explorationTrace: AskExplorationTraceSchema.optional(),
+    contextAssembly: ContextAssemblySchema.optional(),
     status: ImplementationPlanStatusSchema,
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1),

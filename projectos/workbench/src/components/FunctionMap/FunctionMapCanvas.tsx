@@ -47,6 +47,13 @@ import type {
   MapArtifact,
   MapArtifactType,
 } from '@contracts/index'
+import {
+  deriveExecutionEdges,
+  focusNodeIdSet,
+  summarizeNodeLiveActivity,
+} from '../../../../services/live-graph/index.js'
+import { impactStructureGraph } from '../../../../services/structure-graph-impact.js'
+import type { LiveExecutionEdge } from '@contracts/index'
 import type { BoundsRect } from '@contracts/index'
 import {
   getActiveStackMember,
@@ -203,6 +210,60 @@ interface ActiveLayerFocusTransition extends LayerFocusTransition {
 }
 
 const ARTIFACT_LINK_EDGE_COLOR = 'var(--color-violet)'
+
+const LIVE_EXEC_EDGE_COLORS: Record<LiveExecutionEdge['kind'], string> = {
+  read_context: '#3b82f6',
+  edit_create: '#f59e0b',
+  impact: '#a78bfa',
+  delegation: '#14b8a6',
+}
+
+function toLiveExecutionFlowEdge(
+  edge: LiveExecutionEdge,
+  resolveOpacity: (edgeId: string, sourceId: string, targetId: string) => number,
+): Edge {
+  const color = LIVE_EXEC_EDGE_COLORS[edge.kind]
+  return {
+    id: edge.id,
+    source: edge.sourceNodeId,
+    target: edge.targetNodeId,
+    type: 'floatingStraight' as const,
+    animated: edge.kind !== 'impact',
+    selectable: false,
+    focusable: false,
+    data: {
+      liveExecution: true,
+      liveKind: edge.kind,
+      inferred: edge.inferred,
+      detailVisibility: 'always',
+      relationship: edge.label,
+    },
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      width: 14,
+      height: 14,
+      color,
+    },
+    style: {
+      stroke: color,
+      strokeWidth: edge.kind === 'impact' ? 1.4 : 2,
+      strokeDasharray: edge.inferred ? '2 4' : '8 4',
+      opacity: resolveOpacity(edge.id, edge.sourceNodeId, edge.targetNodeId),
+    },
+    label: edge.label,
+    labelStyle: { fill: 'var(--color-text-primary)', fontSize: 10, fontWeight: 600 },
+    labelBgStyle: {
+      fill: 'var(--color-bg-elevated)',
+      fillOpacity: 0.96,
+      stroke: color,
+      strokeOpacity: 0.35,
+    },
+    labelBgPadding: [6, 3] as [number, number],
+    labelBgBorderRadius: 6,
+    zIndex: 2,
+    interactionWidth: 16,
+  }
+}
 
 const STATUS_COLORS: Record<string, string> = {
   active: 'var(--color-success)',
@@ -737,6 +798,7 @@ function joinFlowNodeVisualKey(parts: readonly unknown[]): string {
 function flowNodeDataVisualKey(node: Node): string {
   const data = (node.data ?? {}) as Record<string, unknown>
   if (node.type === 'feature') {
+    const live = data.liveSummary as { primaryKind?: string; primaryStatus?: string; activeCount?: number } | null | undefined
     return joinFlowNodeVisualKey([
       data.label,
       data.nameEn,
@@ -750,10 +812,14 @@ function flowNodeDataVisualKey(node: Node): string {
       data.dimmed,
       data.focusOpacity,
       data.flash,
+      live?.primaryKind,
+      live?.primaryStatus,
+      live?.activeCount,
     ])
   }
   if (node.type === 'c4Shape') {
     const members = Array.isArray(data.members) ? data.members.join(',') : ''
+    const live = data.liveSummary as { primaryKind?: string; primaryStatus?: string; activeCount?: number } | null | undefined
     return joinFlowNodeVisualKey([
       data.shape,
       data.label,
@@ -765,6 +831,9 @@ function flowNodeDataVisualKey(node: Node): string {
       data.dimmed,
       data.canOpenGraph,
       data.openGraphLabel,
+      live?.primaryKind,
+      live?.primaryStatus,
+      live?.activeCount,
     ])
   }
   if (node.type === 'c4Boundary') {
@@ -924,7 +993,16 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   isLayerFocusActiveRef.current = isLayerFocusActive
   const bouncingNodeIds = useWorkbenchStore((s) => s.bouncingNodeIds)
   const flashKey = useWorkbenchStore((s) => s.flashKey)
+  const executionOverlay = useWorkbenchStore((s) => s.executionOverlay)
+  const liveGraphFocusTaskId = useWorkbenchStore((s) => s.liveGraphFocusTaskId)
   const durableGraph = useWorkbenchStore((s) => s.graph)
+  const liveFocusNodeIds = useMemo(
+    () =>
+      liveGraphFocusTaskId
+        ? focusNodeIdSet(executionOverlay, liveGraphFocusTaskId)
+        : null,
+    [executionOverlay, liveGraphFocusTaskId],
+  )
   const mapContent = useWorkbenchStore((s) => s.mapContent)
   const selectedArtifactId = useWorkbenchStore((s) => s.selectedArtifactId)
   const mapArtifactCreateFlow = useWorkbenchStore((s) => s.mapArtifactCreateFlow)
@@ -1779,6 +1857,9 @@ function FunctionMapCanvasInner({ bleed }: Props) {
           ? (layerFocusTransitionSample.nodeOpacityById[n.id] ?? 0)
           : 1
         const searchDimmed = matchingIds !== null && !matchingIds.has(n.id)
+        const focusDimmed =
+          liveFocusNodeIds !== null && liveFocusNodeIds.size > 0 && !liveFocusNodeIds.has(n.id)
+        const nodeDimmed = searchDimmed || focusDimmed
         const c4Node = c4NodeById?.get(n.id)
         const width = c4Node?.width ?? NODE_WIDTH
         const height = c4Node?.height ?? NODE_HEIGHT
@@ -1813,7 +1894,8 @@ function FunctionMapCanvasInner({ bleed }: Props) {
               stereotype: c4Node.stereotype,
               members: c4Node.members,
               selected: n.id === selectedNodeId,
-              dimmed: searchDimmed,
+              dimmed: nodeDimmed,
+              liveSummary: summarizeNodeLiveActivity(executionOverlay, n.id),
               canOpenGraph: canDrillIntoNode(n.id),
               onOpenGraph: () => drillIntoNode(n.id),
               openGraphLabel,
@@ -1879,9 +1961,10 @@ function FunctionMapCanvasInner({ bleed }: Props) {
           })(),
           isSelected: n.id === selectedNodeId,
           isBouncing: bouncingNodeIds.includes(n.id),
-          dimmed: searchDimmed,
+          dimmed: nodeDimmed,
           focusOpacity,
           flash: n.id === selectedNodeId ? flashKey : 0,
+          liveSummary: summarizeNodeLiveActivity(executionOverlay, n.id),
         },
       }}),
       ...artifactFlowNodes,
@@ -1897,7 +1980,9 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       selectedNodeId,
       bouncingNodeIds,
       matchingIds,
+      liveFocusNodeIds,
       flashKey,
+      executionOverlay,
       layoutVersion,
       layerFocusTransitionSample,
       artifactFlowNodes,
@@ -2905,8 +2990,32 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         : 1
       const searchOpacity =
         matchingIds && (!matchingIds.has(sourceId) || !matchingIds.has(targetId)) ? 0.2 : 1
-      return focusOpacity * searchOpacity
+      const liveFocusOpacity =
+        liveFocusNodeIds && liveFocusNodeIds.size > 0
+          ? liveFocusNodeIds.has(sourceId) && liveFocusNodeIds.has(targetId)
+            ? 1
+            : 0.18
+          : 1
+      return focusOpacity * searchOpacity * liveFocusOpacity
     }
+
+    const liveExecEdges = deriveExecutionEdges(executionOverlay, {
+      focusTaskId: liveGraphFocusTaskId,
+      currentTaskOnly: !liveGraphFocusTaskId,
+      resolveImpactDependents: durableGraph
+        ? (nodeId) =>
+            impactStructureGraph(durableGraph, nodeId, { depth: 1 }).dependents.map(
+              (item) => item.id,
+            )
+        : undefined,
+    })
+    const visibleNodeIds = new Set(displayFeatureNodes.map((node) => node.id))
+    const liveExecFlowEdges: Edge[] = liveExecEdges
+      .filter(
+        (edge) =>
+          visibleNodeIds.has(edge.sourceNodeId) && visibleNodeIds.has(edge.targetNodeId),
+      )
+      .map((edge) => toLiveExecutionFlowEdge(edge, resolveEdgeOpacity))
     const livePositions = c4LiveFrame?.positions
     const c4Obstacles = useC4Visuals
       ? displayFeatureNodes.map((node) => {
@@ -3067,7 +3176,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     })
 
     if (!showArtifacts) {
-      return graphEdges
+      return [...graphEdges, ...liveExecFlowEdges]
     }
 
     const featureNodeIds = new Set(displayFeatureNodes.map((n) => n.id))
@@ -3156,7 +3265,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       })
     }
 
-    return [...graphEdges, ...artifactLinkEdges]
+    return [...graphEdges, ...artifactLinkEdges, ...liveExecFlowEdges]
   }, [
     displayEdges,
     displayFeatureNodes,
@@ -3169,6 +3278,10 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     c4NodeById,
     positionsById,
     c4LiveFrame,
+    executionOverlay,
+    liveGraphFocusTaskId,
+    liveFocusNodeIds,
+    durableGraph,
   ])
 
   useEffect(() => {

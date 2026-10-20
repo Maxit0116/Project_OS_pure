@@ -11,6 +11,7 @@ import {
   pushIntentGraphHistory,
   summarizeGoalContextForGraphPrompt,
   suggestIntentEdgeKind,
+  trimLoopInstanceEvents,
   validateLoopSpecTopology,
 } from "./loop-graph.js";
 
@@ -296,5 +297,21 @@ describe("loop-graph contracts", () => {
     expect(issues.some((issue) => issue.message.includes("At most one feedback"))).toBe(
       true,
     );
+  });
+
+  it("keeps the started event when trimming the instance log", () => {
+    const started = {
+      id: "evt_started",
+      at: "2026-01-01T00:00:00.000Z",
+      type: "started" as const,
+    };
+    const rest = Array.from({ length: 5 }, (_, index) => ({
+      id: `evt_${index}`,
+      at: "2026-01-01T00:00:01.000Z",
+      type: "message" as const,
+      message: `m${index}`,
+    }));
+    const trimmed = trimLoopInstanceEvents([started, ...rest], 3);
+    expect(trimmed.map((event) => event.id)).toEqual(["evt_started", "evt_3", "evt_4"]);
   });
 });

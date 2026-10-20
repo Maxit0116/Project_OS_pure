@@ -10,6 +10,7 @@ import {
   normalizeLoopGraphDocument,
   pushIntentGraphHistory,
   summarizeGoalContextForGraphPrompt,
+  trimLoopInstanceEvents,
   validateLoopSpecTopology,
   type LoopAuthoringTurnRequest,
   type LoopCompileResult,
@@ -23,6 +24,10 @@ import {
   type LoopInstanceEvent,
   type LoopSpec,
 } from "../contracts/loop-graph.js";
+import {
+  LOOP_FILES_NOT_ATTACHED,
+  LOOP_VERIFICATION_NOT_RUN,
+} from "../services/loop-execution.js";
 import { compileIntentGraphHeuristic } from "../services/loop-graph-compiler.js";
 import {
   applyLoopGoalClarificationHeuristic,
@@ -209,10 +214,10 @@ function pushEvent(
   const at = new Date().toISOString();
   return {
     ...instance,
-    events: [
+    events: trimLoopInstanceEvents([
       ...instance.events,
       { id: `evt_${randomUUID()}`, at, type, message, nodeId },
-    ].slice(-500),
+    ]),
     updatedAt: at,
   };
 }
@@ -258,20 +263,37 @@ function mockStep(doc: LoopGraphDocument, instanceId: string): LoopGraphDocument
       "Decision required",
       cursor,
     );
+  } else if (node.role === "verify") {
+    next = pushEvent(
+      { ...next, status: "awaiting_hitl", hitlQuestionIds: ["verification_not_run"] },
+      "awaiting_hitl",
+      LOOP_VERIFICATION_NOT_RUN,
+      cursor,
+    );
+  } else if (node.role === "implement" || node.role === "fix") {
+    next = pushEvent(
+      {
+        ...next,
+        status: "error",
+        errorMessage: LOOP_FILES_NOT_ATTACHED,
+        completedAt: new Date().toISOString(),
+      },
+      "node_failed",
+      LOOP_FILES_NOT_ATTACHED,
+      cursor,
+    );
   } else {
-    next = pushEvent(next, "node_completed", `Completed ${node.role}`, cursor);
-    const nextId = spec.edges.find(
-      (edge) => edge.kind === "depends" && edge.from === cursor,
-    )?.to;
-    if (!nextId) {
-      next = pushEvent(
-        { ...next, status: "complete", completedAt: new Date().toISOString() },
-        "completed",
-        "Loop complete",
-      );
-    } else {
-      next = { ...next, cursorNodeId: nextId };
-    }
+    next = pushEvent(
+      {
+        ...next,
+        status: "error",
+        errorMessage: `Unsupported loop role ${node.role}`,
+        completedAt: new Date().toISOString(),
+      },
+      "node_failed",
+      `Unsupported loop role ${node.role}`,
+      cursor,
+    );
   }
 
   return {

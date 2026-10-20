@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { MemoryWriteNoticeSchema } from "./agent-memory.js";
+import { ContextAssemblySchema } from "./context-assembly.js";
 
 import { ContextAssembledPayloadSchema } from "./events.js";
 import { ModelImagePartSchema } from "./model-gateway.js";
@@ -154,6 +155,8 @@ export const AgentAnswerResultSchema = z
       truncated: z.boolean(),
       entryCount: z.number().int().nonnegative(),
     }).strict().optional(),
+    /** Six-slot record. Hashes and sizes only. */
+    contextAssembly: ContextAssemblySchema.optional(),
     createdAt: z.string().min(1),
   })
   .strict()

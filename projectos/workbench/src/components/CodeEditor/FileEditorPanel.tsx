@@ -14,6 +14,7 @@ import { useMarkdownEditorScrollSync } from '../Markdown/useMarkdownEditorScroll
 import { codeEditorOptions } from './editorPresentation'
 import { editorThemeName } from './editorTheme'
 import { registerEditor, revealPosition, unregisterEditor } from './editorNavigation'
+import { hashEditorText, setEditorSelection } from './editorSelection'
 import { MonacoEditor } from './monacoEditorLazy'
 import { trackSemanticTokenModel } from './semanticTokens'
 import styles from './FileEditorPanel.module.css'
@@ -152,6 +153,37 @@ export default function FileEditorPanel({ filePath, content, onChange, showHeade
       />
     </div>
   ) : null
+
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor || !editorMounted) return
+    const subscription = editor.onDidChangeCursorSelection(() => {
+      const selection = editor.getSelection()
+      const model = editor.getModel()
+      if (!selection || selection.isEmpty() || !model) {
+        setEditorSelection(null)
+        return
+      }
+      const raw = model.getValueInRange(selection)
+      const text = raw.length > 16_000 ? raw.slice(0, 16_000) : raw
+      void Promise.all([hashEditorText(model.getValue()), hashEditorText(text)]).then(
+        ([contentHash, sliceHash]) => {
+          setEditorSelection({
+            path: filePath,
+            startLine: selection.startLineNumber,
+            endLine: selection.endLineNumber,
+            contentHash,
+            sliceHash,
+            text,
+          })
+        },
+      )
+    })
+    return () => {
+      subscription.dispose()
+      setEditorSelection(null)
+    }
+  }, [editorMounted, filePath])
 
   const monacoEditor = showMonaco ? (
     <Suspense fallback={<div className={styles.loading}>{ts('editor.loading')}</div>}>

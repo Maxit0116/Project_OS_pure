@@ -332,4 +332,37 @@ describe("retrieval broker", () => {
     expect(opened.fence.indexOf("not write authorization")).toBeLessThan(opened.fence.indexOf("InvoiceGlossary"));
     expect(writePathsIgnoringSnapshot(["src/owned.ts"], opened.snapshot)).toEqual(["src/owned.ts"]);
   });
+
+  it("resolves a symbol from the code index and drops the old line after an edit", () => {
+    const loaded = workspace();
+    const writes = ["src/owned.ts"];
+    const first = retrieve(
+      loaded,
+      { projectId: "proj_rag", kind: "symbol", query: "InvoiceTotal" },
+      "ask",
+    );
+    expect(first.snapshot.searched).toBe(true);
+    expect(first.snapshot.hits[0]?.path).toBe("src/billing.ts");
+    expect(first.snapshot.hits[0]?.quote).toContain("line 1");
+    expect(writePathsIgnoringSnapshot(writes, first.snapshot)).toEqual(writes);
+    writeFileSync(
+      join(loaded.workspaceRoot, "src", "billing.ts"),
+      "\nexport function InvoiceTotal() {\n  return 2\n}\n",
+      "utf8",
+    );
+    const moved = retrieve(
+      loaded,
+      { projectId: "proj_rag", kind: "symbol", query: "InvoiceTotal" },
+      "ask",
+    );
+    expect(moved.snapshot.hits[0]?.quote).toContain("line 2");
+    expect(moved.snapshot.hits[0]?.quote).not.toContain("line 1");
+    const denied = retrieve(
+      loaded,
+      { projectId: "proj_rag", kind: "symbol", query: "InvoiceTotal" },
+      "leaf_change",
+    );
+    expect(denied.snapshot.searched).toBe(false);
+    expect(denied.snapshot.hits).toEqual([]);
+  });
 });

@@ -13,12 +13,18 @@ export interface VerificationCommandApprovalRecord {
 }
 
 export interface VerificationCommandApprovalStore {
+  /**
+   * False for the process-local fallback. A new service instance must not
+   * observe approvals that were only stored in memory.
+   */
+  readonly durable: boolean;
   get(workspaceIdentity: string): Promise<VerificationCommandApprovalRecord | undefined>;
   set(record: VerificationCommandApprovalRecord): Promise<void>;
 }
 
 export class InMemoryVerificationCommandApprovalStore
 implements VerificationCommandApprovalStore {
+  readonly durable = false;
   private readonly records = new Map<string, VerificationCommandApprovalRecord>();
 
   async get(
@@ -38,6 +44,11 @@ export class VerificationCommandApprovalService {
     private readonly store: VerificationCommandApprovalStore =
       new InMemoryVerificationCommandApprovalStore(),
   ) {}
+
+  /** Production must inject the file store. A new process must not see memory. */
+  usesDurableStore(): boolean {
+    return this.store.durable;
+  }
 
   async inspect(input: {
     projectId: string;

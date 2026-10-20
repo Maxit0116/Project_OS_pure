@@ -133,7 +133,7 @@ export default function LoopGraphOverlay() {
       [...instances]
         .reverse()
         .find((item) =>
-          ['queued', 'running', 'paused', 'awaiting_hitl'].includes(item.status),
+          ['queued', 'running', 'paused', 'awaiting_hitl', 'awaiting_review'].includes(item.status),
         ) ?? instances[instances.length - 1]
     )
   }, [document])

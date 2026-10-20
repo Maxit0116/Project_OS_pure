@@ -43,6 +43,7 @@ export type ProjectOSErrorCode =
   | "diff_stale"
   | "verification_unavailable"
   | "verification_approval_required"
+  | "pipeline_budget_exceeded"
   | "backup_not_found"
   | "undo_stale"
   | "restore_failed"

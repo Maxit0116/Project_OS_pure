@@ -5,6 +5,7 @@ import type {
   AgentRunEvent,
   ApplyResult,
   CurrentWorkState,
+  ExecutionOverlay,
   HarnessRecord,
   ProjectGraph,
   ProjectOSApi,
@@ -12,6 +13,10 @@ import type {
   SemanticTree,
   VerificationRunResult,
 } from '@contracts/index'
+import {
+  applyAgentRunEventToOverlay,
+  emptyExecutionOverlay,
+} from '../../../services/live-graph/index.js'
 import type { Locale } from '../i18n/types'
 import type { ToastType } from '../components/ui/Toast'
 import { getStoreMessage } from '../i18n/storeMessages'
@@ -48,11 +53,14 @@ export interface RunEventStoreSlice {
   refinementConfirmed: boolean
   selectedNodeId: string | null
   highlightedFilePaths: string[]
+  /** Live Graph execution overlay; rebuilt from run events, not Chat text. */
+  executionOverlay: ExecutionOverlay | null
   diffReady: boolean
   messages: ChatMessage[]
   conversationCheckpoints?: ConversationCheckpointDraft[]
   applyResult?: ApplyResult | null
   verificationResult?: VerificationRunResult | null
+  graph?: ProjectGraph | null
 }
 
 export interface RunEventWritable extends RunEventStoreSlice {
@@ -113,6 +121,13 @@ export function reduceRunEventState(
       : [...existing, event]
   }
 
+  const fileIndex = state.graph?.fileIndex ?? []
+  // Multi-agent: keep the session overlay across child/sibling runIds.
+  // Brand-new user runs clear executionOverlay in the store before streaming.
+  const overlayBase =
+    state.executionOverlay ?? emptyExecutionOverlay(event.runId, event.timestamp)
+  patch.executionOverlay = applyAgentRunEventToOverlay(overlayBase, event, fileIndex)
+
   if (event.type === 'run_started') {
     patch.flowStatus = 'running'
   }
@@ -136,6 +151,10 @@ export function reduceRunEventState(
 
   if (event.type === 'step_completed' && event.step) {
     patch.flowSteps = upsertFlowStep(state.flowSteps, { ...event.step, status: 'complete' })
+  }
+
+  if (event.type === 'run_interrupted' || event.type === 'run_cancelled') {
+    patch.flowStatus = 'error'
   }
 
   if (event.type === 'step_failed') {

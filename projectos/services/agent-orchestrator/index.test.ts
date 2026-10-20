@@ -29,6 +29,8 @@ import {
   type GreenfieldInitializationDependency,
   type HierarchyDelegationDependency,
 } from "./index.js";
+import type { LeafPipelineBudget } from "../harness/pipeline-budget.js";
+import { buildVerificationEvidence } from "../verification-evidence.js";
 import { CREATE_FILE_MAX_BYTES } from "../create-file-content.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
@@ -462,7 +464,10 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
       orchestrator.startRun(workspace, state.run.runId, toolContext()),
     ).rejects.toMatchObject({
       code: "diff_scope_violation",
-      details: { failureCategory: "wrong_path_or_scope" },
+      details: {
+        failureCategory: "wrong_path_or_scope",
+        toolResult: { tool: "apply_diff", ok: false, exitCode: null },
+      },
     });
 
     expect(state.status).toBe("error");
@@ -909,7 +914,384 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     });
     expect(state.events.find((event) => event.type === "verification_completed")?.payload)
       .toMatchObject({ status: "failed" });
+    expect(state.events.find((event) => event.type === "run_completed")?.payload)
+      .toMatchObject({ failureReason: "verification_failed" });
+    expect(state.events.find((event) => event.type === "run_completed")?.payload)
+      .toMatchObject({
+        runUsage: {
+          backend: "model",
+          usage: "reported",
+          inputTokens: 3,
+          outputTokens: 3,
+          childRunIds: [],
+        },
+      });
     expect(state.events.some((event) => event.type === "step_failed")).toBe(false);
+    expect(JSON.stringify(state.events)).not.toContain("repair_attempt");
+  });
+
+  it("repairs a failed verification command once inside the same write scope", async () => {
+    const calls: string[] = [];
+    const automaticLeafExecution: AutomaticLeafExecutionDependency = {
+      async apply(_workspace, run, diff) {
+        calls.push(`apply:${diff.files[0]?.after}`);
+        return {
+          runId: run.runId,
+          applied: true,
+          filesChanged: ["app/login/page.tsx"],
+          verificationStatus: "not_run",
+          outcome: "applied",
+          backupId: calls.length === 1 ? "backup-first" : "backup-repair",
+        };
+      },
+      async verify(_workspace, run) {
+        calls.push("verify");
+        const failed = calls.filter((call) => call === "verify").length === 1;
+        const evidence = buildVerificationEvidence({
+          runId: run.runId,
+          commands: [{
+            result: {
+              tool: "run_verification",
+              ok: !failed,
+              exitCode: failed ? 1 : 0,
+              summary: failed ? "Exit code 1." : "Exit code 0.",
+              output: failed ? "expected marker" : "",
+              truncated: false,
+            },
+          }],
+          plannedPaths: ["app/login/page.tsx"],
+          writtenPaths: ["app/login/page.tsx"],
+          symbolIndexAvailable: false,
+        });
+        return { runId: run.runId, status: evidence.status, results: [], evidence };
+      },
+    };
+    const { orchestrator, workspace, requests } = createModelOrchestrator(
+      [
+        {
+          output: JSON.stringify({
+            summary: "First edit",
+            path: "app/login/page.tsx",
+            edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "REPAIR_BASE_MARKER" }],
+          }),
+        },
+        {
+          output: JSON.stringify({
+            summary: "Repair edit",
+            path: "app/login/page.tsx",
+            edits: [{ search: "REPAIR_BASE_MARKER", replace: "REPAIRED_MARKER" }],
+          }),
+        },
+      ],
+      [],
+      sampleWorkspaceRoot,
+      [{ output: validFileEditPlanOutput() }],
+      "memory",
+      [{ output: validProposalValidationOutput() }, { output: validProposalValidationOutput() }],
+      automaticLeafExecution,
+    );
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+      executionPolicy: "automatic",
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    expect(calls).toEqual([
+      "apply:REPAIR_BASE_MARKER",
+      "verify",
+      "apply:REPAIRED_MARKER",
+      "verify",
+    ]);
+    expect(state.run.status).toBe("complete");
+    expect(state.diff?.files[0]).toMatchObject({
+      before: "REPAIR_BASE_MARKER",
+      after: "REPAIRED_MARKER",
+    });
+    expect(state.applyResult).toMatchObject({
+      backupId: "backup-repair",
+      verificationStatus: "passed",
+    });
+    const generations = requests.filter((request) => request.requestKind === "change_generation");
+    expect(generations).toHaveLength(2);
+    expect(generations[1]?.input).toMatchObject({
+      verificationRepair: {
+        repair_attempt: 1,
+        reason: "command_failed",
+        commands: [{ summary: "Exit code 1.", output: "expected marker", exitCode: 1 }],
+      },
+    });
+    expect(generations[1]?.systemPrompt).toContain("repair_attempt is 1");
+    expect(state.events.filter((event) => event.type === "verification_completed").map((event) => event.payload))
+      .toEqual([
+        {
+          status: "failed",
+          repair_attempt: 1,
+          reason: "command_failed",
+          evidenceId: `evidence_${state.run.runId}`,
+        },
+        {
+          status: "passed",
+          repair_attempt: 1,
+          reason: "commands_passed",
+          evidenceId: `evidence_${state.run.runId}`,
+        },
+      ]);
+    expect(state.events.find((event) => event.type === "run_completed")?.payload)
+      .toMatchObject({ verificationStatus: "passed", repair_attempt: 1 });
+  });
+
+  it("stops in error when the single repair still fails verification", async () => {
+    let verifyCalls = 0;
+    const automaticLeafExecution: AutomaticLeafExecutionDependency = {
+      async apply(_workspace, run) {
+        return {
+          runId: run.runId,
+          applied: true,
+          filesChanged: ["app/login/page.tsx"],
+          verificationStatus: "not_run",
+          outcome: "applied",
+          backupId: "backup-still-failed",
+        };
+      },
+      async verify(_workspace, run) {
+        verifyCalls += 1;
+        const evidence = buildVerificationEvidence({
+          runId: run.runId,
+          commands: [{
+            result: {
+              tool: "run_verification",
+              ok: false,
+              exitCode: 1,
+              summary: "Exit code 1.",
+              output: "still failing",
+              truncated: false,
+            },
+          }],
+          plannedPaths: ["app/login/page.tsx"],
+          writtenPaths: ["app/login/page.tsx"],
+          symbolIndexAvailable: false,
+        });
+        return { runId: run.runId, status: "failed" as const, results: [], evidence };
+      },
+    };
+    const { orchestrator, workspace, requests } = createModelOrchestrator(
+      [
+        {
+          output: JSON.stringify({
+            summary: "First edit",
+            path: "app/login/page.tsx",
+            edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "REPAIR_BASE_MARKER" }],
+          }),
+        },
+        {
+          output: JSON.stringify({
+            summary: "Repair edit",
+            path: "app/login/page.tsx",
+            edits: [{ search: "REPAIR_BASE_MARKER", replace: "STILL_FAILING_MARKER" }],
+          }),
+        },
+      ],
+      [],
+      sampleWorkspaceRoot,
+      [{ output: validFileEditPlanOutput() }],
+      "memory",
+      [{ output: validProposalValidationOutput() }],
+      automaticLeafExecution,
+    );
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+      executionPolicy: "automatic",
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    expect(verifyCalls).toBe(2);
+    expect(requests.filter((request) => request.requestKind === "change_generation")).toHaveLength(2);
+    expect(state.run.status).toBe("error");
+    expect(state.applyResult).toMatchObject({ applied: true, verificationStatus: "failed" });
+    expect(state.events.find((event) => event.type === "run_completed")?.payload)
+      .toMatchObject({ verificationStatus: "failed", repair_attempt: 1 });
+  });
+
+  it("rejects an out-of-scope repair diff and does not generate a third time", async () => {
+    let applyCalls = 0;
+    const automaticLeafExecution: AutomaticLeafExecutionDependency = {
+      async apply(_workspace, run) {
+        applyCalls += 1;
+        return {
+          runId: run.runId,
+          applied: true,
+          filesChanged: ["app/login/page.tsx"],
+          verificationStatus: "not_run",
+          outcome: "applied",
+          backupId: "backup-scope",
+        };
+      },
+      async verify(_workspace, run) {
+        const evidence = buildVerificationEvidence({
+          runId: run.runId,
+          commands: [{
+            result: {
+              tool: "run_verification",
+              ok: false,
+              exitCode: 1,
+              summary: "Exit code 1.",
+              output: "fail",
+              truncated: false,
+            },
+          }],
+          plannedPaths: ["app/login/page.tsx"],
+          writtenPaths: ["app/login/page.tsx"],
+          symbolIndexAvailable: false,
+        });
+        return { runId: run.runId, status: "failed" as const, results: [], evidence };
+      },
+    };
+    const { orchestrator, workspace, requests } = createModelOrchestrator(
+      [
+        {
+          output: JSON.stringify({
+            summary: "First edit",
+            path: "app/login/page.tsx",
+            edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "REPAIR_BASE_MARKER" }],
+          }),
+        },
+        {
+          output: JSON.stringify({
+            summary: "Illegal repair",
+            path: "lib/auth.ts",
+            after: "CONNECTED_CONTEXT_MARKER",
+          }),
+        },
+      ],
+      [],
+      sampleWorkspaceRoot,
+      [{ output: validFileEditPlanOutput() }],
+      "memory",
+      [{ output: validProposalValidationOutput() }],
+      automaticLeafExecution,
+    );
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+      executionPolicy: "automatic",
+    });
+
+    await expect(orchestrator.startRun(workspace, state.run.runId, toolContext())).rejects.toMatchObject({
+      code: "diff_scope_violation",
+    });
+
+    expect(applyCalls).toBe(1);
+    expect(requests.filter((request) => request.requestKind === "change_generation")).toHaveLength(2);
+    expect(state.run.status).toBe("error");
+    expect(state.applyResult).toMatchObject({ applied: true, backupId: "backup-scope" });
+    expect(state.events.some((event) =>
+      event.type === "verification_completed" && event.payload?.repair_attempt === 1,
+    )).toBe(true);
+  });
+
+  it("records a denied MCP call on the run without the API key", () => {
+    const auditDirectory = mkdtempSync(join(tmpdir(), "pos-audit-"));
+    temporaryRoots.push(auditDirectory);
+    const secret = `sk-${"a".repeat(24)}`;
+    const { orchestrator, workspace } = createModelOrchestrator(
+      [{ output: "{}" }],
+      [],
+      sampleWorkspaceRoot,
+      [{ output: validFileEditPlanOutput() }],
+      "memory",
+      [{ output: validProposalValidationOutput() }],
+      undefined,
+      undefined,
+      auditDirectory,
+    );
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+    });
+
+    orchestrator.recordToolPolicyDecision(workspace, state.run.runId, {
+      tool: "mcp_tool",
+      decision: "deny",
+      reason: `Denied ${secret}`,
+      match: "mcp:demo:lookup",
+    });
+
+    const serialized = JSON.stringify(state.events);
+    expect(serialized).toContain("\"type\":\"tool_policy_decision\"");
+    expect(serialized).toContain("\"decision\":\"deny\"");
+    expect(serialized).toContain("mcp:demo:lookup");
+    expect(serialized).toContain("approvalId");
+    expect(serialized).not.toContain(secret);
+    const audit = readFileSync(join(auditDirectory, "approvals.jsonl"), "utf8");
+    expect(audit).toContain("\"decision\":\"deny\"");
+    expect(audit).toContain("mcp_tool");
+    expect(audit).not.toContain(secret);
+    expect(audit).not.toContain("Denied");
+  });
+
+  it("stops before the repair generation when the model-call budget is already spent", async () => {
+    let verifyCalls = 0;
+    const automaticLeafExecution: AutomaticLeafExecutionDependency = {
+      async apply(_workspace, run) {
+        return {
+          runId: run.runId,
+          applied: true,
+          filesChanged: ["app/login/page.tsx"],
+          verificationStatus: "not_run",
+          outcome: "applied",
+          backupId: "backup-budget",
+        };
+      },
+      async verify(_workspace, run) {
+        verifyCalls += 1;
+        const evidence = buildVerificationEvidence({
+          runId: run.runId,
+          commands: [{
+            result: {
+              tool: "run_verification",
+              ok: false,
+              exitCode: 1,
+              summary: "Exit code 1.",
+              output: "fail",
+              truncated: false,
+            },
+          }],
+          plannedPaths: ["app/login/page.tsx"],
+          writtenPaths: ["app/login/page.tsx"],
+          symbolIndexAvailable: false,
+        });
+        return { runId: run.runId, status: "failed" as const, results: [], evidence };
+      },
+    };
+    const { orchestrator, workspace, requests } = createModelOrchestrator(
+      JSON.stringify({
+        summary: "First edit",
+        path: "app/login/page.tsx",
+        edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "REPAIR_BASE_MARKER" }],
+      }),
+      [],
+      sampleWorkspaceRoot,
+      [{ output: validFileEditPlanOutput() }],
+      "memory",
+      [{ output: validProposalValidationOutput() }],
+      automaticLeafExecution,
+      { maxModelCalls: 3 },
+    );
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+      executionPolicy: "automatic",
+    });
+
+    await expect(orchestrator.startRun(workspace, state.run.runId, toolContext())).rejects.toMatchObject({
+      code: "pipeline_budget_exceeded",
+    });
+
+    expect(verifyCalls).toBe(1);
+    expect(requests.filter((request) => request.requestKind === "change_generation")).toHaveLength(1);
+    expect(requests).toHaveLength(3);
+    expect(state.run.status).toBe("error");
+    expect(state.applyResult).toMatchObject({ applied: true });
+    expect(JSON.stringify(state.events)).toContain("model call budget exceeded");
   });
 
   it("starts a queued run at most once when duplicate callers race", async () => {
@@ -959,6 +1341,48 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     expect(verifyCalls).toBe(1);
     expect(state.events.filter((event) => event.type === "run_started")).toHaveLength(1);
     expect(state.events.filter((event) => event.type === "apply_result")).toHaveLength(1);
+  });
+
+  it("keeps a gateway time-limit requestId on the run and marks model_error", async () => {
+    const { orchestrator, workspace } = createModelOrchestrator(
+      JSON.stringify({
+        summary: "Should not generate",
+        path: "app/login/page.tsx",
+        edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "MUST_NOT_APPLY" }],
+      }),
+      [],
+      sampleWorkspaceRoot,
+      [{
+        output: validFileEditPlanOutput(),
+        beforeReturn: () => {
+          throw new ProjectOSError(
+            "external_agent_failed",
+            "Model exceeded the 0ms time limit",
+            { details: { requestId: "req_timeout" } },
+          );
+        },
+      }],
+    );
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+      executionPolicy: "automatic",
+    });
+
+    await expect(orchestrator.startRun(workspace, state.run.runId, toolContext()))
+      .rejects.toMatchObject({ code: "external_agent_failed" });
+
+    const modelEvents = state.events.filter((event) => event.type === "model_request");
+    expect(modelEvents).toHaveLength(1);
+    expect(modelEvents[0]?.payload).toMatchObject({
+      requestId: "req_timeout",
+      status: "failed",
+      backend: "model",
+      usage: "missing",
+      tokenUsage: { input: 0, output: 0 },
+    });
+    expect(state.events.find((event) => event.type === "step_failed")?.payload)
+      .toMatchObject({ failureReason: "model_error" });
+    expect(state.events.some((event) => event.type === "run_cancelled")).toBe(false);
   });
 
   it.each(["delete", "clear-project"] as const)(
@@ -1442,10 +1866,14 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     )).toEqual(["locate", "edit", "validate"]);
     expect(state.events.find((event) => event.type === "model_request")?.payload).toEqual({
       stage: "locate",
+      requestId: "req_test",
+      requestKind: "agent_step",
       provider: "test",
       model: "test-model",
       durationMs: 1,
       status: "ok",
+      backend: "model",
+      usage: "reported",
       tokenUsage: { input: 1, output: 1 },
     });
     expect(state.events.find((event) => event.type === "context_assembled")?.payload)
@@ -1490,6 +1918,8 @@ function createModelOrchestrator(
   eventPersistence: AgentRunEventPersistence = "memory",
   validationResponses: StubModelResponse[] = [{ output: validProposalValidationOutput() }],
   automaticLeafExecution?: AutomaticLeafExecutionDependency,
+  pipelineBudget?: Partial<LeafPipelineBudget>,
+  auditDirectory?: string,
 ) {
   const workspace = new ProjectOSWorkspaceStore().loadWorkspace(workspaceRoot);
   workspace.settings = ProjectOSSettingsSchema.parse({
@@ -1576,6 +2006,8 @@ function createModelOrchestrator(
       }
     },
     ...(automaticLeafExecution ? { automaticLeafExecution } : {}),
+    ...(pipelineBudget ? { pipelineBudget } : {}),
+    ...(auditDirectory ? { auditDirectory } : {}),
   });
   return { orchestrator, workspace, requests, scopeValidationCalls };
 }

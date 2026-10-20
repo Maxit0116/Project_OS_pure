@@ -11,8 +11,9 @@
 |---------|------|------|-----------|------|
 | `read_file` | `agent-tools` (`readFile`) | implemented | allow if path ∈ `allowedReadPaths` | 工作区相对路径读 |
 | `list_files` | `agent-tools` (`listFiles`) | implemented | allow（只读索引元数据） | 语义 fileIndex 列表 |
+| `git_status` | `git-context-service` / `agent-tools` (`git_status`) | implemented | allow，与 `list_files` 同级，不要求写能力 | 只读：分支、脏状态、ahead/behind（无上游则省略）、diff 截断标记。不是 `git commit` / push / reset / clean |
 | `get_context` | `agent-tools` (`getContext`) | implemented | allow if path ∈ `allowedReadPaths`（filePath） | nodeId 变体仍走服务，无路径时 H0 要求 path |
-| `grep_workspace` | Ask 探索（服务内启发式） | planned as named tool | deny as open tool | H1.B 用服务端符号 grep + `read_file` Policy，不开放模型调 grep |
+| `grep_workspace` | Ask 探索（服务内启发式） | planned as named tool | deny as open tool | 词法检索和将来的符号查询保持服务器调用。`runAgentTool` 遇到这个名字或任何未注册名字一律 deny，不执行 |
 | `generate_diff` | orchestrator 阶段 | implemented（阶段，非模型随意调） | writeCapability + paths ⊆ `allowedWritePaths` | 生成后仍有 identity 再校验 |
 | `apply_diff` | apply 事务 | implemented（基础设施） | 同上 | 与 generate 共用写 ACL |
 | `run_verification` | verification runner | implemented | 需 writeCapability | 命令白名单 + 另有 approval 流 |
@@ -33,4 +34,4 @@
 
 ## 未知工具
 
-`evaluateToolCall` 对未注册名称一律 **deny**。
+`evaluateToolCall` 对未注册名称一律 **deny**。`grep_workspace` 即使已注册，也不是开放工具。词法检索和符号查询继续由服务器发起。

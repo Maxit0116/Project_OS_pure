@@ -291,10 +291,14 @@ describe("contracts schema hardening", () => {
   it("requires integer event durations and token counts", () => {
     const payload = {
       stage: "generate" as const,
+      requestId: "req_1",
+      requestKind: "change_generation" as const,
       provider: "provider",
       model: "model",
       durationMs: 10,
       status: "ok" as const,
+      backend: "model" as const,
+      usage: "reported" as const,
       tokenUsage: { input: 2, output: 3 },
     };
     expect(ModelRequestPayloadSchema.safeParse(payload).success).toBe(true);

@@ -61,6 +61,36 @@
   color: var(--tech-text-primary);
 }
 
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--tech-border);
+  overflow-x: auto;
+}
+
+.tab {
+  flex-shrink: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--tech-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--tech-text-primary);
+}
+
+.tabActive {
+  color: var(--tech-text-primary);
+  border-bottom-color: var(--tech-accent, #22c55e);
+}
+
 .body {
   flex: 1;
   min-height: 0;
@@ -69,6 +99,83 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.actionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.actionList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.actionList li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.actionButton {
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.actionButton:hover {
+  border-color: var(--tech-border-strong);
+}
+
+.activityMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--tech-text-primary);
+}
+
+.activityMeta span {
+  color: var(--tech-text-secondary);
+  font-size: 11px;
+}
+
+.instructionInput {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 64px;
+  padding: 8px;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.instructionInput:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.actionButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .section {

@@ -21,6 +21,7 @@ const HASH_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 
 export class FileVerificationCommandApprovalStore
 implements VerificationCommandApprovalStore {
+  readonly durable = true;
   private readonly filePath: string;
   private cache: StoredApprovalFile | undefined;
 

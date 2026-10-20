@@ -6,8 +6,9 @@
  * See `docs/features/Agent-Harness-Dev-Plan.md`.
  *
  * Convention: new tools must register in the tool registry and pass
- * {@link evaluateToolCall} / {@link assertToolAllowed}. Do not spawn
- * side effects from the orchestrator without going through Policy.
+ * {@link evaluateToolCall} / {@link assertToolAllowed}. Loop steps,
+ * verification repair, and the symbol index do not add another spawn
+ * or write entry. Do not add a switch that trusts the rest of a run.
  */
 
 export {
@@ -20,6 +21,15 @@ export {
   saveAgentHarnessConfig,
 } from "./harness-config.js";
 export { buildHarnessInstructions } from "./instructions.js";
+export {
+  UNTRUSTED_CONTENT_CATALOG,
+  UNTRUSTED_CONTEXT_SOURCES,
+  projectRulesSection,
+} from "./untrusted-context.js";
+export type {
+  UntrustedContentKind,
+  UntrustedContextSource,
+} from "./untrusted-context.js";
 export {
   AgentMemoryStore,
   hashMemoryIndex,
@@ -35,9 +45,17 @@ export {
   matchPermissionGlob,
   resolvePermissionRules,
 } from "./permissions.js";
+export { reconcileInterruptedAgentRuns } from "./interrupted-runs.js";
+export { decideHarnessResume } from "./resume-policy.js";
 export { runHarnessShell } from "./run-shell.js";
-export type { RunHarnessShellInput } from "./run-shell.js";
-export { loadProjectRulesMarkdown } from "./rules.js";
+export type { RunHarnessShellInput, RunHarnessShellResult } from "./run-shell.js";
+export {
+  applyDiffToToolResult,
+  deniedToolResult,
+  parseFailedTestCount,
+  shellCommandToToolResult,
+} from "./tool-result.js";
+export { loadProjectRules, loadProjectRulesMarkdown } from "./rules.js";
 export {
   classifyShellInvocation,
   loadShellSandboxConfig,

@@ -6,8 +6,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { FileVerificationCommandApprovalStore } from
   "../persistence/verification-command-approval-store.js";
-import { VerificationCommandApprovalService } from
-  "./verification-command-approval.js";
+import {
+  InMemoryVerificationCommandApprovalStore,
+  VerificationCommandApprovalService,
+} from "./verification-command-approval.js";
 
 const temporaryRoots: string[] = [];
 
@@ -59,5 +61,31 @@ describe("VerificationCommandApprovalService", () => {
       "utf8",
     )) as { approvals: Record<string, unknown> };
     expect(Object.keys(stored.approvals)).toHaveLength(1);
+    expect(new FileVerificationCommandApprovalStore(userDataRoot).durable).toBe(true);
+  });
+
+  it("does not keep an in-memory approval for a new service instance", async () => {
+    const input = {
+      projectId: "project-a",
+      canonicalWorkspaceRoot: "/workspaces/project-a",
+      commands: [{ command: "npm", args: ["test"], timeoutMs: 10_000 }],
+    };
+    const service = new VerificationCommandApprovalService(
+      new InMemoryVerificationCommandApprovalStore(),
+    );
+    const pending = await service.inspect(input);
+    if (pending.status !== "approval_required") {
+      throw new Error("Expected approval to be required");
+    }
+    await service.approve({ ...input, commandSetHash: pending.commandSetHash });
+    await expect(service.inspect(input)).resolves.toMatchObject({ status: "approved" });
+
+    const restarted = new VerificationCommandApprovalService(
+      new InMemoryVerificationCommandApprovalStore(),
+    );
+    await expect(restarted.inspect(input)).resolves.toMatchObject({
+      status: "approval_required",
+    });
+    expect(new InMemoryVerificationCommandApprovalStore().durable).toBe(false);
   });
 });

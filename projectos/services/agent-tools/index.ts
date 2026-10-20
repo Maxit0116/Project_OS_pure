@@ -4,6 +4,8 @@ import type { CapabilityContext } from "../../contracts/tool-policy.js";
 import type { ContextPayload } from "../../contracts/context.js";
 import type { LoadedProjectOSWorkspace } from "../../persistence/workspace-store.js";
 import { resolveContainedPath } from "../../utils/path-containment.js";
+import type { ToolResult } from "../../contracts/tool-result.js";
+import { queryGitReadOnlyStatus } from "../git-context-service.js";
 import {
   assertToolAllowed,
   harnessToolNameFromAgentTool,
@@ -18,6 +20,7 @@ export interface AgentToolContext {
 export interface AgentToolResult {
   tool: string;
   output: string;
+  toolResult?: ToolResult;
 }
 
 /**
@@ -47,6 +50,13 @@ export async function runAgentTool(
         tool: toolName,
         output: listSemanticFiles(context.workspace, args.nodeId),
       };
+    }
+    case "git_status": {
+      const toolResult = queryGitReadOnlyStatus(
+        context.workspace.workspaceRoot,
+        policy,
+      );
+      return { tool: toolName, output: toolResult.summary, toolResult };
     }
     case "getContext": {
       if (args.filePath?.trim()) {

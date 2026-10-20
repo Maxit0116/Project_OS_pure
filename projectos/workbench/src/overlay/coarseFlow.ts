@@ -44,6 +44,8 @@ export function mapRunEventToCoarseFlow(event: unknown): CoarseFlowLabel | null 
     case 'step_completed':
       return 'done'
     case 'step_failed':
+    case 'run_cancelled':
+    case 'run_interrupted':
       return 'error'
     default:
       return null

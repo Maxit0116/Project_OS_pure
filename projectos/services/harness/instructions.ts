@@ -13,6 +13,11 @@ export interface BuildHarnessInstructionsInput {
   /** Always-on project rules (from `.projectos/rules`). */
   rulesMarkdown?: string;
   /**
+   * AGENTS.md / CLAUDE.md walked from the repo root.
+   * Already fenced. Not part of Project Rules.
+   */
+  walkMarkdown?: string;
+  /**
    * Injectable memory index lines only (candidate / corroborated).
    * Wrapped as a non-authoritative fence. Empty skips the section.
    */
@@ -25,7 +30,7 @@ export interface BuildHarnessInstructionsInput {
 
 /**
  * Single assembly point for Agent Harness instructions (H2.C).
- * Order: base → mode note → rules → memory index → skills → model delta.
+ * Order: base → mode note → rules → walked instructions → memory index → skills → model delta.
  */
 export function buildHarnessInstructions(
   input: BuildHarnessInstructionsInput,
@@ -40,6 +45,9 @@ export function buildHarnessInstructions(
   if (rules) {
     parts.push(`## Project Rules\n\n${rules}`);
   }
+
+  const walk = input.walkMarkdown?.trim();
+  if (walk) parts.push(walk);
 
   const memory = renderMemoryFence(input.memoryIndexMarkdown ?? "");
   if (memory) parts.push(memory);

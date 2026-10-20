@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -178,6 +179,9 @@ describe("validateWorkspaceFixtureData", () => {
       runEvent("evt_disk_2", "run_completed", "2026-07-07T00:00:01.000Z"),
     ]);
 
+    expect(validateWorkspaceFixtures(root).errors).toEqual([]);
+
+    appendFileSync(runPath, "{partial\n");
     expect(validateWorkspaceFixtures(root).errors).toEqual([]);
 
     writeJsonLines(runPath, [

@@ -60,6 +60,8 @@ export const ModelGatewayResponseSchema = z
     reasoning: z.string().trim().min(1).optional(),
     finishReason: z.string().trim().min(1).optional(),
     usage: ModelGatewayUsageSchema,
+    /** Absent usage is not estimated. Omitted on older responses means reported. */
+    usageStatus: z.enum(["reported", "missing"]).optional(),
     latencyMs: z.number().finite().int().min(0),
   })
   .strict();

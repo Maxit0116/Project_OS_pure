@@ -256,6 +256,10 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async getComposerMentions(_projectId: string, _query: string) {
+    return transportNotConnected();
+  }
+
   async getSkill(_projectId: string, _skillId: string) {
     return transportNotConnected();
   }
@@ -377,6 +381,14 @@ export class NotConnectedTransport implements ProjectOSApi {
   }
 
   async cancelAgentRun(_runId: string): Promise<AgentRun> {
+    return transportNotConnected();
+  }
+
+  async pauseAgentRun(_runId: string): Promise<AgentRun> {
+    return transportNotConnected();
+  }
+
+  async continueAgentRun(_runId: string): Promise<AgentRun> {
     return transportNotConnected();
   }
 
@@ -708,6 +720,7 @@ export class NotConnectedTransport implements ProjectOSApi {
     _projectId: string,
     _loopId: string,
     _specVersion?: string,
+    _featureNodeId?: string,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return transportNotConnected();
   }

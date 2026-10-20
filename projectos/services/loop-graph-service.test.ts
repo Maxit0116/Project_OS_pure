@@ -13,10 +13,7 @@ import {
   listLoopGraphHeads,
   upsertLoopGraph,
 } from "./loop-graph-service.js";
-import {
-  advanceLoopInstance,
-  startLoopInstance,
-} from "./loop-runtime-service.js";
+import { startLoopInstance } from "./loop-runtime-service.js";
 
 describe("loop-graph-service", () => {
   const roots: string[] = [];
@@ -80,15 +77,10 @@ describe("loop-graph-service", () => {
 
     doc = startLoopInstance(root, doc.id);
     const instance = doc.instances[0]!;
-    expect(instance.status === "running" || instance.status === "complete").toBe(true);
-
-    while (
-      doc.instances[0] &&
-      (doc.instances[0].status === "running" || doc.instances[0].status === "queued")
-    ) {
-      doc = advanceLoopInstance(root, doc.id, instance.id);
-    }
-
-    expect(getLoopGraph(root, doc.id)?.instances[0]?.status).toBe("complete");
+    expect(instance.status).toBe("error");
+    expect(instance.errorMessage).toBe("文件未挂接");
+    expect(getLoopGraph(root, doc.id)?.instances[0]?.events.some(
+      (event) => event.message === "Completed implement",
+    )).toBe(false);
   });
 });

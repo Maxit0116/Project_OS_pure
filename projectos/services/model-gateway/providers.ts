@@ -75,6 +75,8 @@ export interface ProviderCompleteResult {
   toolCalls?: ModelToolCall[];
   inputTokens: number;
   outputTokens: number;
+  /** False when the provider omitted usage. Tokens are then 0, not an estimate. */
+  usageReported?: boolean;
 }
 
 export interface ModelProviderAdapter {
@@ -285,8 +287,18 @@ async function fetchWithTimeout(
   throw lastError instanceof Error ? lastError : new Error("Model request failed");
 }
 
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
+function providerUsage(usage: {
+  input?: number;
+  output?: number;
+} | undefined): Pick<ProviderCompleteResult, "inputTokens" | "outputTokens" | "usageReported"> {
+  if (!usage) {
+    return { inputTokens: 0, outputTokens: 0, usageReported: false };
+  }
+  return {
+    inputTokens: usage.input ?? 0,
+    outputTokens: usage.output ?? 0,
+    usageReported: true,
+  };
 }
 
 async function testProviderConnection(
@@ -587,9 +599,9 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
       ...(choice.finish_reason
         ? { finishReason: choice.finish_reason }
         : {}),
-      inputTokens: body.usage?.prompt_tokens ?? estimateTokens(input.userPrompt ?? ""),
-      outputTokens:
-        body.usage?.completion_tokens ?? estimateTokens(message.output),
+      ...providerUsage(body.usage
+        ? { input: body.usage.prompt_tokens, output: body.usage.completion_tokens }
+        : undefined),
     };
   }
 
@@ -645,8 +657,9 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
     return {
       output,
       ...(toolCalls.length ? { toolCalls } : {}),
-      inputTokens: body.usage?.input_tokens ?? estimateTokens(input.userPrompt ?? ""),
-      outputTokens: body.usage?.output_tokens ?? estimateTokens(output),
+      ...providerUsage(body.usage
+        ? { input: body.usage.input_tokens, output: body.usage.output_tokens }
+        : undefined),
     };
   }
 
@@ -721,8 +734,7 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
             })),
           }
         : {}),
-      inputTokens: estimateTokens(input.userPrompt ?? ""),
-      outputTokens: estimateTokens(output),
+      ...providerUsage(undefined),
     };
   }
 

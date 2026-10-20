@@ -25,6 +25,13 @@ describe("DependencyImpactScanner", () => {
 
     expect(result.directImporters).toEqual(["src/direct.ts"]);
     expect(result.reverseTransitiveClosure).toEqual(["src/direct.ts", "src/transitive.ts"]);
+    expect(new DependencyImpactScanner().relations({
+      workspaceRoot: root,
+      targetPath: "src/target.ts",
+    }).closure).toEqual([
+      { path: "src/direct.ts", distance: 1 },
+      { path: "src/transitive.ts", distance: 2 },
+    ]);
     expect(result.scannedFiles).toEqual([
       "src/direct.ts", "src/target.ts", "src/transitive.ts", "src/unrelated.ts",
     ]);

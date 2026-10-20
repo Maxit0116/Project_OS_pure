@@ -456,22 +456,16 @@ function readJsonLinesArtifactsInDirectory(
     }
 
     const events: unknown[] = [];
-    let valid = true;
-    source.split(/\r?\n/u).forEach((line, lineIndex) => {
+    source.split(/\r?\n/u).forEach((line) => {
       if (!line.trim()) return;
       try {
         events.push(JSON.parse(line) as unknown);
-      } catch (error) {
-        valid = false;
-        errors.push({
-          code: "json_parse_error",
-          artifact,
-          path: `line.${lineIndex + 1}`,
-          message: error instanceof Error ? error.message : "Invalid JSONL event",
-        });
+      } catch {
+        // A crash can leave a partial last line. Session recovery skips it
+        // and reports the line; it must not make the workspace unreadable.
       }
     });
-    if (valid) artifacts[fileName] = events;
+    artifacts[fileName] = events;
   }
 
   return artifacts;

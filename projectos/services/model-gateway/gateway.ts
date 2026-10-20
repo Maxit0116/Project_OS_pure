@@ -71,7 +71,7 @@ export class ModelGateway {
   async complete(
     profile: ModelProfile,
     request: ModelGatewayRequest,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; maxTotalDurationMs?: number },
   ): Promise<ModelGatewayResponse> {
     const started = Date.now();
     const resolved = resolveProfileForGateway(profile);
@@ -88,30 +88,51 @@ export class ModelGateway {
       throw new ProjectOSError(
         "operation_cancelled",
         "Model request cancelled",
+        { details: { requestId: newModelRequestId() } },
       );
     }
 
+    const requestId = newModelRequestId();
+    throwIfCallerBudgetSpent(requestId, started, options?.maxTotalDurationMs);
+    const deadline = budgetAbortSignal(options?.signal, options?.maxTotalDurationMs, started);
     const input: ProviderCompleteInput = {
       ...this.buildProviderInput(request),
-      ...(options?.signal ? { signal: options.signal } : {}),
+      ...(deadline.signal ? { signal: deadline.signal } : {}),
     };
-    const result = await adapter.complete(resolved, apiKey, input);
+    let result;
+    try {
+      result = await adapter.complete(resolved, apiKey, input);
+    } catch (error) {
+      if (options?.signal?.aborted) {
+        throw new ProjectOSError(
+          "operation_cancelled",
+          "Model request cancelled",
+          { cause: error, details: { requestId } },
+        );
+      }
+      throwIfCallerBudgetSpent(requestId, started, options?.maxTotalDurationMs);
+      throw attachModelRequestId(requestId, error);
+    } finally {
+      deadline.stop();
+    }
     const output = redactText(result.output, request.redactionPolicy);
     const reasoning = result.reasoning
       ? redactText(result.reasoning, request.redactionPolicy)
       : undefined;
+    const usageReported = result.usageReported !== false;
 
     return {
-      requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      requestId,
       provider: modelProfileLabel(profile),
       model: profile.model,
       output,
       ...(reasoning ? { reasoning } : {}),
       ...(result.finishReason ? { finishReason: result.finishReason } : {}),
       usage: {
-        inputTokens: result.inputTokens,
-        outputTokens: result.outputTokens,
+        inputTokens: usageReported ? result.inputTokens : 0,
+        outputTokens: usageReported ? result.outputTokens : 0,
       },
+      usageStatus: usageReported ? "reported" : "missing",
       latencyMs: Date.now() - started,
     };
   }
@@ -121,7 +142,14 @@ export class ModelGateway {
     request: ModelGatewayRequest,
     options: ModelToolLoopOptions,
   ): Promise<ModelGatewayResponse> {
-    if (options.tools.length === 0) return this.complete(profile, request);
+    if (options.tools.length === 0) {
+      return this.complete(profile, request, {
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.maxTotalDurationMs !== undefined
+          ? { maxTotalDurationMs: options.maxTotalDurationMs }
+          : {}),
+      });
+    }
     const started = Date.now();
     const resolved = resolveProfileForGateway(profile);
     const adapter = createProviderAdapter(resolved.apiFormat);
@@ -133,6 +161,7 @@ export class ModelGateway {
       );
     }
 
+    const requestId = newModelRequestId();
     const baseInput = this.buildProviderInput(request);
     const messages: ProviderMessage[] = [{
       role: "user",
@@ -141,6 +170,7 @@ export class ModelGateway {
     const maxIterations = options.maxIterations ?? 8;
     const maxToolCalls = options.maxToolCalls ?? 32;
     const maxTotalDurationMs = options.maxTotalDurationMs ?? 120_000;
+    let usageMissing = false;
     let toolCallCount = 0;
     let inputTokens = 0;
     let outputTokens = 0;
@@ -149,30 +179,58 @@ export class ModelGateway {
     let lastFinishReason: string | undefined;
 
     for (let iteration = 0; iteration < maxIterations; iteration += 1) {
-      if (Date.now() - started > maxTotalDurationMs) {
+      if (Date.now() - started >= maxTotalDurationMs) {
         throw new ProjectOSError(
           "external_agent_failed",
           `Model exceeded the ${maxTotalDurationMs}ms MCP tool-loop time limit`,
+          { details: { requestId } },
         );
       }
       if (options.signal?.aborted) {
-        throw new ProjectOSError("external_agent_failed", "MCP tool loop was cancelled");
+        throw new ProjectOSError(
+          "external_agent_failed",
+          "MCP tool loop was cancelled",
+          { details: { requestId } },
+        );
       }
+      const deadline = budgetAbortSignal(options.signal, maxTotalDurationMs, started);
       const providerInput: ProviderCompleteInput = {
         ...baseInput,
         messages,
         tools: options.tools,
-        ...(options.signal ? { signal: options.signal } : {}),
+        ...(deadline.signal ? { signal: deadline.signal } : {}),
       };
-      const result = await adapter.complete(resolved, apiKey, providerInput);
-      inputTokens += result.inputTokens;
-      outputTokens += result.outputTokens;
+      let result;
+      try {
+        result = await adapter.complete(resolved, apiKey, providerInput);
+      } catch (error) {
+        if (options.signal?.aborted) {
+          throw new ProjectOSError(
+            "external_agent_failed",
+            "MCP tool loop was cancelled",
+            { cause: error, details: { requestId } },
+          );
+        }
+        if (Date.now() - started >= maxTotalDurationMs) {
+          throw new ProjectOSError(
+            "external_agent_failed",
+            `Model exceeded the ${maxTotalDurationMs}ms MCP tool-loop time limit`,
+            { cause: error, details: { requestId } },
+          );
+        }
+        throw attachModelRequestId(requestId, error);
+      } finally {
+        deadline.stop();
+      }
+      if (result.usageReported === false) usageMissing = true;
+      inputTokens += result.usageReported === false ? 0 : result.inputTokens;
+      outputTokens += result.usageReported === false ? 0 : result.outputTokens;
       lastOutput = result.output;
       lastReasoning = result.reasoning;
       lastFinishReason = result.finishReason;
       if (!result.toolCalls?.length) {
         return {
-          requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          requestId,
           provider: modelProfileLabel(profile),
           model: profile.model,
           output: redactText(lastOutput, request.redactionPolicy),
@@ -181,6 +239,7 @@ export class ModelGateway {
             : {}),
           ...(lastFinishReason ? { finishReason: lastFinishReason } : {}),
           usage: { inputTokens, outputTokens },
+          usageStatus: usageMissing ? "missing" : "reported",
           latencyMs: Date.now() - started,
         };
       }
@@ -191,6 +250,7 @@ export class ModelGateway {
         throw new ProjectOSError(
           "external_agent_failed",
           `Model exceeded the ${maxToolCalls} MCP tool-call limit`,
+          { details: { requestId } },
         );
       }
       messages.push({
@@ -277,6 +337,7 @@ export class ModelGateway {
     throw new ProjectOSError(
       "external_agent_failed",
       `Model exceeded the ${maxIterations} MCP tool-loop iteration limit`,
+      { details: { requestId } },
     );
   }
 
@@ -331,4 +392,63 @@ export class ModelGateway {
       ...(request.images?.length ? { images: request.images } : {}),
     };
   }
+}
+
+function newModelRequestId(): string {
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function throwIfCallerBudgetSpent(
+  requestId: string,
+  started: number,
+  maxTotalDurationMs: number | undefined,
+): void {
+  if (maxTotalDurationMs === undefined) return;
+  if (Date.now() - started < maxTotalDurationMs) return;
+  throw new ProjectOSError(
+    "external_agent_failed",
+    `Model exceeded the ${maxTotalDurationMs}ms time limit`,
+    { details: { requestId } },
+  );
+}
+
+function budgetAbortSignal(
+  parent: AbortSignal | undefined,
+  maxTotalDurationMs: number | undefined,
+  started: number,
+): { signal: AbortSignal | undefined; stop: () => void } {
+  if (parent === undefined && maxTotalDurationMs === undefined) {
+    return { signal: undefined, stop: () => {} };
+  }
+  const controller = new AbortController();
+  const onParentAbort = () => controller.abort();
+  parent?.addEventListener("abort", onParentAbort);
+  if (parent?.aborted) controller.abort();
+  const remaining = maxTotalDurationMs === undefined
+    ? undefined
+    : Math.max(0, maxTotalDurationMs - (Date.now() - started));
+  const timer = remaining === undefined
+    ? undefined
+    : setTimeout(() => controller.abort(), remaining);
+  return {
+    signal: controller.signal,
+    stop: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      parent?.removeEventListener("abort", onParentAbort);
+    },
+  };
+}
+
+function attachModelRequestId(requestId: string, error: unknown): ProjectOSError {
+  if (error instanceof ProjectOSError) {
+    return new ProjectOSError(error.code, error.message, {
+      cause: error.cause ?? error,
+      details: { ...(error.details ?? {}), requestId },
+    });
+  }
+  const message = error instanceof Error ? error.message : "Model request failed";
+  return new ProjectOSError("model_connection_failed", message, {
+    cause: error,
+    details: { requestId },
+  });
 }

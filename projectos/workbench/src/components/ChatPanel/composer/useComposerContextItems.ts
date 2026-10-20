@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { ChatSessionHead, PromptAttachment, SkillDescriptor } from '@contracts/index'
 import { useI18n } from '../../../i18n'
 import { useWorkbenchStore } from '../../../state/workbenchStore'
 import { getTabOutputBuffer } from '../../../state/terminalStore'
 import { useTerminalStore } from '../../../state/terminalStore'
+import { getEditorSelection, subscribeEditorSelection } from '../../CodeEditor/editorSelection'
 import type { ComposerMenuItem } from './ComposerTriggerMenu'
 import { createAttachmentId } from './composerTokens'
 
@@ -22,8 +23,14 @@ export function useComposerContextItems({
   const tree = useWorkbenchStore((s) => s.tree)
   const client = useWorkbenchStore((s) => s.client)
   const selectedFilePath = useWorkbenchStore((s) => s.selectedFilePath)
+  const editorPanes = useWorkbenchStore((s) => s.editorPanes)
+  const selection = useSyncExternalStore(subscribeEditorSelection, getEditorSelection, () => null)
   const [skills, setSkills] = useState<SkillDescriptor[]>([])
   const [chatHeads, setChatHeads] = useState<ChatSessionHead[]>([])
+  const [mentions, setMentions] = useState<{
+    files: string[]
+    rules: Array<{ path: string; description: string }>
+  }>({ files: [], rules: [] })
 
   useEffect(() => {
     if (!project || triggerKind !== '/') return
@@ -36,6 +43,17 @@ export function useComposerContextItems({
     if (!project || triggerKind !== '@') return
     void client.listChatSessionHeads(project.projectId).then(setChatHeads)
   }, [client, project, triggerKind])
+
+  useEffect(() => {
+    if (!project || triggerKind !== '@') return
+    let cancelled = false
+    void client.getComposerMentions(project.projectId, query.trim()).then((result) => {
+      if (!cancelled) setMentions(result)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [client, project, query, triggerKind])
 
   const contextItems = useMemo((): ComposerMenuItem[] => {
     if (triggerKind !== '@') return []
@@ -52,10 +70,15 @@ export function useComposerContextItems({
       })
     }
 
+    const queried = query.trim().length > 0
     const filePaths = new Set<string>()
-    for (const node of graph?.nodes ?? []) {
-      for (const file of node.linkedFiles ?? []) {
-        if (file.path) filePaths.add(file.path)
+    if (queried) {
+      for (const path of mentions.files) filePaths.add(path)
+    } else {
+      for (const node of graph?.nodes ?? []) {
+        for (const file of node.linkedFiles ?? []) {
+          if (file.path) filePaths.add(file.path)
+        }
       }
     }
     for (const path of [...filePaths].sort()) {
@@ -65,6 +88,45 @@ export function useComposerContextItems({
         label: path.split('/').pop() ?? path,
         description: path,
         group: ts('composer.groups.files'),
+      })
+    }
+
+    for (const path of folderPaths(tree)) {
+      if (!match(path)) continue
+      items.push({
+        id: `folder:${path}`,
+        label: path.split('/').pop() ?? path,
+        description: path,
+        group: ts('composer.groups.folders'),
+      })
+    }
+
+    for (const path of openEditorPaths(editorPanes)) {
+      if (!match(path)) continue
+      items.push({
+        id: `editor:${path}`,
+        label: path.split('/').pop() ?? path,
+        description: ts('composer.openEditor'),
+        group: ts('composer.groups.editors'),
+      })
+    }
+
+    if (selection && match(selection.path)) {
+      items.push({
+        id: `selection:${selection.path}:${selection.startLine}-${selection.endLine}`,
+        label: ts('composer.currentSelection'),
+        description: `${selection.path}:${selection.startLine}-${selection.endLine}`,
+        group: ts('composer.groups.selection'),
+      })
+    }
+
+    for (const rule of mentions.rules) {
+      if (!match(`${rule.path} ${rule.description}`)) continue
+      items.push({
+        id: `rule:${rule.path}`,
+        label: rule.path,
+        description: rule.description || ts('composer.rule'),
+        group: ts('composer.groups.rules'),
       })
     }
 
@@ -111,7 +173,7 @@ export function useComposerContextItems({
     }
 
     return items.slice(0, 40)
-  }, [chatHeads, graph?.nodes, query, selectedFilePath, triggerKind, ts, tree])
+  }, [chatHeads, editorPanes, graph?.nodes, mentions, query, selectedFilePath, selection, triggerKind, ts, tree])
 
   const skillItems = useMemo((): ComposerMenuItem[] => {
     if (triggerKind !== '/') return []
@@ -170,8 +232,49 @@ export function attachmentFromMenuItem(item: ComposerMenuItem): {
     const skillId = item.id.replace('skill:', '')
     return { invokedSkillId: skillId }
   }
-  if (item.id.startsWith('file:')) {
-    const path = item.id.replace('file:', '')
+  if (item.id.startsWith('folder:')) {
+    const path = item.id.slice('folder:'.length)
+    return {
+      attachment: {
+        id: createAttachmentId(),
+        label: item.label,
+        ref: { kind: 'folder', path },
+      },
+    }
+  }
+  if (item.id.startsWith('rule:')) {
+    const path = item.id.slice('rule:'.length)
+    return {
+      attachment: {
+        id: createAttachmentId(),
+        label: item.label,
+        ref: { kind: 'rule', path },
+      },
+    }
+  }
+  if (item.id.startsWith('selection:')) {
+    const pin = getEditorSelection()
+    if (!pin) return {}
+    return {
+      attachment: {
+        id: createAttachmentId(),
+        label: item.label,
+        ref: {
+          kind: 'selection',
+          path: pin.path,
+          startLine: pin.startLine,
+          endLine: pin.endLine,
+          contentHash: pin.contentHash,
+          sliceHash: pin.sliceHash,
+          text: pin.text,
+        },
+      },
+    }
+  }
+  if (item.id.startsWith('editor:') || item.id.startsWith('file:')) {
+    const path = item.id.startsWith('editor:')
+      ? item.id.slice('editor:'.length)
+      : item.id.slice('file:'.length)
     return {
       attachment: {
         id: createAttachmentId(),
@@ -243,4 +346,26 @@ export function attachmentFromMenuItem(item: ComposerMenuItem): {
     }
   }
   return {}
+}
+
+interface FolderNode {
+  kind: string
+  path?: string
+  children?: FolderNode[]
+}
+
+function folderPaths(tree: { roots?: FolderNode[] } | null): string[] {
+  const out: string[] = []
+  const walk = (nodes: readonly FolderNode[] | undefined) => {
+    for (const node of nodes ?? []) {
+      if (node.kind === 'folder' && node.path) out.push(node.path)
+      walk(node.children)
+    }
+  }
+  walk(tree?.roots)
+  return out
+}
+
+function openEditorPaths(panes: ReadonlyArray<{ filePaths: readonly string[] }>): string[] {
+  return [...new Set(panes.flatMap((pane) => pane.filePaths))]
 }

@@ -19,6 +19,7 @@ import {
   type RetrievalSummary,
 } from "../../contracts/retrieval.js";
 import type { LoadedProjectOSWorkspace } from "../../persistence/workspace-store.js";
+import { lookupSymbols } from "../code-intelligence/index.js";
 import { AgentMemoryStore } from "../harness/memory.js";
 import { containsHighConfidenceSecret } from "../high-confidence-secret-patterns.js";
 import { DefaultWorkspaceIgnorePolicy } from "../local-context-assembler.js";
@@ -124,7 +125,7 @@ export function retrieve(
     return finish(workspace, caller, request.kind, false, [], omissions);
   }
 
-  if (caller === "leaf_change" || request.kind === "vector" || request.kind === "symbol") {
+  if (caller === "leaf_change" || request.kind === "vector") {
     note("policy_denied");
     return finish(workspace, caller, request.kind, false, [], omissions);
   }
@@ -143,6 +144,16 @@ export function retrieve(
   if (caller !== "ask" && caller !== "plan") {
     note("policy_denied");
     return finish(workspace, caller, request.kind, false, [], omissions);
+  }
+
+  if (request.kind === "symbol") {
+    const hits = symbolHits(
+      workspace,
+      request.query,
+      pathPrefix,
+      note,
+    );
+    return finish(workspace, caller, request.kind, true, hits, omissions);
   }
 
   const query = request.query.trim();
@@ -266,6 +277,47 @@ export function writePathsIgnoringSnapshot(
   _snapshot: RetrievalSnapshot,
 ): string[] {
   return [...writePaths];
+}
+
+function symbolHits(
+  workspace: LoadedProjectOSWorkspace,
+  query: string,
+  pathPrefix: string | undefined,
+  note: (reason: RetrievalOmissionReason, count?: number) => void,
+): DraftHit[] {
+  const name = query.trim();
+  if (!name) return [];
+  const found = lookupSymbols({
+    workspaceRoot: workspace.workspaceRoot,
+    projectId: workspace.project.projectId,
+    name,
+    ...(pathPrefix ? { pathPrefix } : {}),
+    nodeIdsByPath: new Map(
+      workspace.graph.fileIndex.map((entry) => [entry.path, entry.nodeIds]),
+    ),
+  });
+  if (found.omissions.length > 0) note("stale", found.omissions.length);
+  const hits: DraftHit[] = [];
+  for (const symbol of found.symbols) {
+    if (hits.length >= RETRIEVAL_MAX_HITS) {
+      note("budget");
+      break;
+    }
+    const revision = symbol.contentHash;
+    hits.push({
+      corpus: "current_code",
+      stableId: symbol.id,
+      quote: `${symbol.name} ${symbol.kind} line ${symbol.startLine}`.slice(
+        0,
+        RETRIEVAL_MAX_QUOTE_CHARS,
+      ),
+      sourceRevision: revision,
+      validatedAgainst: revision,
+      label: symbol.name,
+      path: symbol.path,
+    });
+  }
+  return hits;
 }
 
 function lexicalHits(

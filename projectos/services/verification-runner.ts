@@ -2,8 +2,13 @@ import type {
   ExecCommand,
   VerificationCommandResult,
 } from "../contracts/exec-command.js";
+import type { ToolResult } from "../contracts/tool-result.js";
 import { runHarnessShell } from "./harness/run-shell.js";
 import { writeCapabilityContext } from "./harness/tool-policy.js";
+
+export interface VerificationCommandExecution extends VerificationCommandResult {
+  toolResult: ToolResult;
+}
 
 export class VerificationRunner {
   /**
@@ -17,12 +22,12 @@ export class VerificationRunner {
   async run(
     commands: ExecCommand[],
     cwd: string,
-  ): Promise<VerificationCommandResult[]> {
+  ): Promise<VerificationCommandExecution[]> {
     const policy = writeCapabilityContext({
       mode: "change",
       allowedWritePaths: [],
     });
-    const results: VerificationCommandResult[] = [];
+    const results: VerificationCommandExecution[] = [];
     for (const command of commands) {
       const sandboxed = await runHarnessShell({
         workspaceRoot: cwd,
@@ -32,8 +37,18 @@ export class VerificationRunner {
         sandboxApprovalResolved: true,
         policyAskResolved: true,
       });
-      const { sandbox: _sandbox, blocked: _blocked, ...result } = sandboxed;
-      results.push(result);
+      results.push({
+        command: sandboxed.command,
+        status: sandboxed.status,
+        exitCode: sandboxed.exitCode,
+        durationMs: sandboxed.durationMs,
+        timedOut: sandboxed.timedOut,
+        outputTruncated: sandboxed.outputTruncated,
+        ...(sandboxed.output !== undefined ? { output: sandboxed.output } : {}),
+        ...(sandboxed.stdout !== undefined ? { stdout: sandboxed.stdout } : {}),
+        ...(sandboxed.stderr !== undefined ? { stderr: sandboxed.stderr } : {}),
+        toolResult: sandboxed.toolResult,
+      });
     }
     return results;
   }

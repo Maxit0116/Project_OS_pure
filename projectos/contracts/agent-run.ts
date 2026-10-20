@@ -14,6 +14,7 @@ export const AgentRunStatusSchema = z.enum([
   "complete",
   "error",
   "cancelled",
+  "interrupted",
 ]);
 
 export const AgentRunScopeSchema = z.discriminatedUnion("kind", [
@@ -63,6 +64,12 @@ export const AgentRunRoleSchema = z.enum([
   "leaf_file_deleter",
 ]);
 
+/**
+ * Run identity (Session S-0). These ids are not interchangeable:
+ * `runId` is one execution. `rootRunId` / `parentRunId` point at the tree.
+ * A chat session stores the same `runId` as `activeRunId` or a checkpoint
+ * `runId`. A Loop instance may later store `agentRunId`. Empty means unknown.
+ */
 export const AgentRunSchema = z
   .object({
     runId: z.string(),

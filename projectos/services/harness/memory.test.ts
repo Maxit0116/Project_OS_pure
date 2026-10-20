@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,7 @@ import { MEMORY_INDEX_MAX_LINES } from "../../contracts/agent-memory.js";
 import {
   AgentMemoryStore,
   hashMemoryIndex,
+  hashWorkspaceFile,
   parseExplicitMemoryCommand,
 } from "./memory.js";
 import { renderMemoryFence } from "./memory.js";
@@ -192,6 +194,46 @@ describe("AgentMemoryStore", () => {
     const snapshot = memory.injectionSnapshot();
     expect(snapshot.entryCount).toBe(0);
     expect(snapshot.markdown).toBe("");
+  });
+
+  it("skips a project note when the named file hash changes and injects it again when the hash returns", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "pos-ws-"));
+    mkdirSync(join(workspaceRoot, "src"), { recursive: true });
+    const file = join(workspaceRoot, "src", "login.ts");
+    writeFileSync(file, "export const login = 1\n");
+    const verified = `sha256:${createHash("sha256").update("export const login = 1\n").digest("hex")}`;
+    const memory = new AgentMemoryStore({
+      root: mkdtempSync(join(tmpdir(), "pos-memory-")),
+      workspaceRoot,
+      now: () => new Date("2026-10-19T03:00:00.000Z"),
+    });
+    memory.saveSettings({ enabled: true, useMemories: true });
+    memory.applyCandidate({
+      op: "upsert",
+      type: "project",
+      text: "login page stays small",
+      workspacePath: "src/login.ts",
+      verifiedContentHash: verified,
+    });
+    memory.applyCandidate({
+      op: "upsert",
+      type: "user",
+      text: "prefer short answers",
+      workspacePath: "src/login.ts",
+      verifiedContentHash: verified,
+    });
+    const reader = (path: string) => hashWorkspaceFile(workspaceRoot, path);
+    expect(memory.injectionSnapshot(reader).markdown).toContain("login page stays small");
+    writeFileSync(file, "export const login = 2\n");
+    const skipped = memory.injectionSnapshot(reader);
+    expect(skipped.markdown).not.toContain("login page stays small");
+    expect(skipped.markdown).toContain("prefer short answers");
+    expect(skipped.skippedStaleCount).toBe(1);
+    expect(memory.load().entries.some((entry) =>
+      entry.text === "login page stays small" && entry.state === "candidate",
+    )).toBe(true);
+    writeFileSync(file, "export const login = 1\n");
+    expect(memory.injectionSnapshot(reader).markdown).toContain("login page stays small");
   });
 });
 

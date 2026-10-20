@@ -1,6 +1,6 @@
 # Agent Harness：对标 Cursor / Devin / Codex 的差距与开发计划
 
-**状态**：Draft（后续开发以此为准）  
+**状态**：H0–H7 已落地。Route ② 仍 DEFERRED。合格线后续见文末；总索引见 [`Backend-Dev-Plan.md`](backend/Backend-Dev-Plan.md)。桌面人工冒烟见 [`Agent-Harness-Eval-Checklist.md`](Agent-Harness-Eval-Checklist.md)。  
 **范围**：Project OS 的 **Agent Harness**（会话生命周期、模式、指令、工具策略、编排循环、验证与可逆性），以及与 **Debug Harness Record** 的边界  
 **权威交叉引用**：
 - `agent-requirements.md` — 图作用域 agent、leaf-only write、诚实 pipeline（D1–D3 / E / F / S0–S6）
@@ -502,10 +502,10 @@ Chat M3 Checkpoint/E ──► H3
 
 建议增加「Harness 对照清单」手工验收（发布前勾选）：
 
-- [ ] 像 Cursor：Mode / Plan / Stop / 可观察步骤  
-- [ ] 像 Codex：副作用必经 Policy；approval 可 pause  
-- [ ] 像 Devin：权限规则可读；计划可落盘  
-- [ ] 仍是 Project OS：图 scope、leaf write、undo、Map 可追踪 Debug Record  
+- [ ] 像 Cursor：Mode / Plan / Stop / 可观察步骤（人工冒烟，见 Eval Checklist）
+- [ ] 像 Codex：副作用必经 Policy；approval 可 pause（内核有单测；UI pause 需人工）
+- [ ] 像 Devin：权限规则可读；计划可落盘（文件与计划已有；设置面需人工）
+- [ ] 仍是 Project OS：图 scope、leaf write、undo、Map 可追踪 Debug Record（内核有单测；Map UX 需人工）
 
 ---
 
@@ -586,4 +586,52 @@ Chat M3 Checkpoint/E ──► H3
 
 - Debug Mode 的 **运行时** 属于 Agent Harness（阶段、工具、Policy）。  
 - Debug Harness **面板 / Record** 属于证据与历史 UX。  
-- 开发时：不要在 `DebugHarnessPanel` 里实现通用 tool loop；通用能力进 harness，Debug 只消费。  
+- 开发时：不要在 `DebugHarnessPanel` 里实现通用 tool loop；通用能力进 harness，Debug 只消费。
+
+## 13. 合格线后续（H5–H7）
+
+H0–H4 已经把策略、诚实流水线、指令、软沙箱和 worktree 做成可用外壳。H5–H7 补上验证失败后的一次修复、中断后续跑，以及叶子预算。Route ② 仍然关闭。
+
+依赖：[`Tools-Integrations-Dev-Plan.md`](backend/Tools-Integrations-Dev-Plan.md) T-0、[`Verification-Eval-Dev-Plan.md`](backend/Verification-Eval-Dev-Plan.md) V-0、[`Session-State-Dev-Plan.md`](backend/Session-State-Dev-Plan.md) S-1 / S-2。
+
+### H5 — 验证失败后最多修复一次
+
+**目标**：命令失败时，服务器把工具结果交回同一次叶子流水线再生成一次，而不是等模型自由选工具。
+
+- [x] 仅当 `VerificationEvidence.status === "failed"` 且原因是命令失败或超时。`not_run`、政策拒绝、计划外路径不进入修复。
+- [x] 同一 `runId` 最多一次。第二次失败就停在 `error`，文件保持已应用，undo 仍可用。
+- [x] 修复生成看到的是 T-0 摘要和截断输出，加上原来的叶子上下文。写范围与第一次相同。
+- [x] 新的 diff 仍走 validate、Policy 和 apply。不跳过校验器。
+- [x] 事件写明 `repair_attempt: 1`。
+
+**验收**：失败的测试命令会带来第二次生成和第二次验证。写范围外的修复 diff 被拒绝，且不会再试第三次。
+
+### H6 — 中断之后的续跑规则
+
+**目标**：Session S-2 的状态机在 Harness 里有对应动作。
+
+- [x] `interrupted` 且没有 backup：`continueAgentRun` 清掉旧 diff，从 live 流水线重新生成，不重放旧模型输出。
+- [x] 已有 backup：`continueAgentRun` 拒绝再次 apply。`applyDiff` 对同一 backup 直接返回已有结果。
+- [x] 取消仍然只走 `cancelAgentRun`，并写入 `run_cancelled`。打开工作区时，未结束且未取消的 jsonl 追加 `run_interrupted`，不自动 apply。
+
+**H6 状态**：Implemented（2026-10-20）。进程重启后的运行不在内存里，继续生成需要这次进程里仍有该 run；已写入的日志只标记中断，不会再写文件。
+
+**验收**：恢复一个写过文件的运行，磁盘内容不因为「继续」而变化，除非用户显式 undo。
+
+### H7 — 流水线预算
+
+**目标**：叶子运行和 MCP 循环使用同一组上限概念。
+
+- [x] 一次运行有最大模型调用次数、最大验证次数、墙钟。H5 的那一次修复计入模型次数。
+- [x] 超出时停止并记录原因，不静默换模型。见网关 GW-1。
+- [x] 数字写死在代码里，不做成隐藏的用户旋钮。
+
+**验收**：把次数调到会在修复前用尽的测试配置时，运行停止，且没有第三次模型生成。
+
+### 修订
+
+| 日期 | 变更 |
+|------|------|
+| 2026-10-20 | 追加 H5–H7。不重开 H0–H4，不打开 Route ②。 |
+| 2026-10-20 | H5/H7 已在叶子流水线；H6 续跑规则、取消事件、启动时中断标记。 |
+| 2026-10-20 | 文首状态与 H6 对齐为已落地；人工冒烟仍走 Eval Checklist。 |  

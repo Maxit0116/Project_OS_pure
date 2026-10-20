@@ -157,4 +157,74 @@ describe("ModelGateway MCP tool loop", () => {
       { decision: "deny", match: "mcp:demo:lookup" },
     ]);
   });
+
+  it("stops a single completion at the caller duration limit before calling the provider", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const secrets = new InMemorySecretStore();
+    await secrets.set("model-key", "secret");
+    const gateway = new ModelGateway({ secretStore: secrets });
+    const request: ModelGatewayRequest = {
+      projectId: "project-test",
+      requestKind: "change_generation",
+      input: { question: "Edit the file" },
+      modelPreference: "model-test",
+      redactionPolicy: "none",
+    };
+
+    await expect(gateway.complete({
+      id: "model-test",
+      name: "Test model",
+      provider: "custom",
+      apiFormat: "openai_chat",
+      model: "test-model",
+      baseUrl: "http://127.0.0.1:4000/v1",
+      apiKeyRef: "model-key",
+    }, request, { maxTotalDurationMs: 0 })).rejects.toMatchObject({
+      code: "external_agent_failed",
+      message: "Model exceeded the 0ms time limit",
+      details: { requestId: expect.stringMatching(/^req_/) },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("stops at the caller duration limit with an error instead of an empty answer", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const secrets = new InMemorySecretStore();
+    await secrets.set("model-key", "secret");
+    const gateway = new ModelGateway({ secretStore: secrets });
+    const request: ModelGatewayRequest = {
+      projectId: "project-test",
+      requestKind: "question_answer",
+      input: { question: "Find the answer" },
+      modelPreference: "model-test",
+      redactionPolicy: "none",
+    };
+
+    await expect(gateway.completeWithTools({
+      id: "model-test",
+      name: "Test model",
+      provider: "custom",
+      apiFormat: "openai_chat",
+      model: "test-model",
+      baseUrl: "http://127.0.0.1:4000/v1",
+      apiKeyRef: "model-key",
+    }, request, {
+      maxTotalDurationMs: 0,
+      tools: [{
+        type: "function",
+        function: {
+          name: "mcp:demo:lookup",
+          description: "Look something up",
+          parameters: { type: "object" },
+        },
+      }],
+      executeTool: async () => ({ content: "unused" }),
+    })).rejects.toMatchObject({
+      code: "external_agent_failed",
+      details: { requestId: expect.stringMatching(/^req_/) },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

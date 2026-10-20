@@ -823,7 +823,13 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     if (!client || !project || !loopId) return
     set({ loading: true, error: null })
     try {
-      const document = await client.startLoopInstance(project.projectId, loopId)
+      const featureNodeId = useWorkbenchStore.getState().selectedNodeId ?? undefined
+      const document = await client.startLoopInstance(
+        project.projectId,
+        loopId,
+        undefined,
+        featureNodeId,
+      )
       const heads = await client.listLoopGraphs(project.projectId)
       set({ document, heads, phase: 'run', loading: false })
     } catch (error) {
@@ -839,7 +845,11 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     const { activeLoopId, document } = get()
     const instance = [...(document?.instances ?? [])]
       .reverse()
-      .find((item) => item.status === 'running' || item.status === 'queued')
+      .find((item) =>
+        item.status === 'running' ||
+        item.status === 'queued' ||
+        item.status === 'awaiting_review',
+      )
     if (!client || !project || !activeLoopId || !instance) return
     const next = await client.pauseLoopInstance(
       project.projectId,

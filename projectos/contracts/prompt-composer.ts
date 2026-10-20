@@ -27,6 +27,25 @@ export const PromptContextRefSchema = z.discriminatedUnion("kind", [
       skillId: z.string().min(1),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("rule"),
+      path: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("selection"),
+      path: z.string().min(1),
+      startLine: z.number().int().positive(),
+      endLine: z.number().int().positive(),
+      contentHash: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+      /** Hash of `text`. The server drops the text when this does not match. */
+      sliceHash: z.string().regex(/^sha256:[a-f0-9]{64}$/u).optional(),
+      /** Selected editor text. Accepted only when it hashes to `sliceHash`. */
+      text: z.string().max(16_000).optional(),
+    })
+    .strict(),
 ]);
 
 export const PromptAttachmentSchema = z

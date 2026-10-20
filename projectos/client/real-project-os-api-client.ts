@@ -275,6 +275,13 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.listSkills(projectId);
   }
 
+  getComposerMentions(
+    projectId: string,
+    query: string,
+  ): Promise<{ files: string[]; rules: Array<{ path: string; description: string }> }> {
+    return this.transport.getComposerMentions(projectId, query);
+  }
+
   getSkill(projectId: string, skillId: string): Promise<SkillContent | null> {
     return this.transport.getSkill(projectId, skillId);
   }
@@ -395,6 +402,14 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   cancelAgentRun(runId: string): Promise<AgentRun> {
     return this.transport.cancelAgentRun(runId);
+  }
+
+  pauseAgentRun(runId: string): Promise<AgentRun> {
+    return this.transport.pauseAgentRun(runId);
+  }
+
+  continueAgentRun(runId: string): Promise<AgentRun> {
+    return this.transport.continueAgentRun(runId);
   }
 
   getAgentRun(runId: string): Promise<AgentRun> {
@@ -678,8 +693,13 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.approveLoopSpec(projectId, loopId, spec);
   }
 
-  startLoopInstance(projectId: string, loopId: string, specVersion?: string) {
-    return this.transport.startLoopInstance(projectId, loopId, specVersion);
+  startLoopInstance(
+    projectId: string,
+    loopId: string,
+    specVersion?: string,
+    featureNodeId?: string,
+  ) {
+    return this.transport.startLoopInstance(projectId, loopId, specVersion, featureNodeId);
   }
 
   pauseLoopInstance(projectId: string, loopId: string, instanceId: string) {

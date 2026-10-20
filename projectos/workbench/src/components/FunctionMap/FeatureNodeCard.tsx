@@ -1,3 +1,4 @@
+import type { LiveNodeSummary } from '@contracts/index'
 import {
   AppWindow,
   Boxes,
@@ -8,6 +9,7 @@ import {
   UserRound,
   type LucideIcon,
 } from 'lucide-react'
+import LiveNodeBadge, { liveRingClass } from './LiveNodeBadge'
 import { OpenGraphButton } from './OpenGraphButton'
 import styles from './FeatureNode.module.css'
 
@@ -40,6 +42,7 @@ export interface FeatureNodeData {
   dimmed?: boolean
   focusOpacity?: number
   flash?: number
+  liveSummary?: LiveNodeSummary | null
 }
 
 const TYPE_ICONS: Record<string, LucideIcon> = {
@@ -82,9 +85,11 @@ export function FeatureNodeCard({ data }: { data: FeatureNodeData }) {
   const focusOpacity = data.focusOpacity ?? 1
   const fullyHidden = focusOpacity < 0.01
 
+  const ring = liveRingClass(data.liveSummary)
+
   return (
     <div
-      className={`${styles.node} ${data.isSelected ? styles.selected : ''} ${isSuggested ? styles.suggested : ''} ${isError ? styles.errorBorder : ''} ${data.isBouncing ? 'node-bounce' : ''} ${isError && data.isSelected ? 'node-error-pulse' : ''} ${data.dimmed ? styles.dimmed : ''}`}
+      className={`${styles.node} ${data.isSelected ? styles.selected : ''} ${isSuggested ? styles.suggested : ''} ${isError ? styles.errorBorder : ''} ${data.isBouncing ? 'node-bounce' : ''} ${isError && data.isSelected ? 'node-error-pulse' : ''} ${data.dimmed ? styles.dimmed : ''} ${ring}`.trim()}
       style={{
         opacity: focusOpacity,
         ...(fullyHidden ? { visibility: 'hidden' as const } : {}),
@@ -92,8 +97,10 @@ export function FeatureNodeCard({ data }: { data: FeatureNodeData }) {
       data-element-type={data.elementType ?? 'architecture'}
       data-tour="architecture-node"
       data-zone-interactive
+      data-live-kind={data.liveSummary?.primaryKind}
       key={data.flash}
     >
+      {data.liveSummary ? <LiveNodeBadge summary={data.liveSummary} compact /> : null}
       <div className={styles.eyebrow}>
         <span className={styles.typeIcon} aria-hidden>
           <TypeIcon size={12} strokeWidth={1.9} />

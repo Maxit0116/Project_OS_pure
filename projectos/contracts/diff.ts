@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { ToolResultSchema } from "./tool-result.js";
+
 export const GeneratedDiffChangeTypeSchema = z.enum([
   "create",
   "modify",
@@ -84,6 +86,7 @@ export const ApplyResultSchema = z
     outcome: z.enum(["applied", "recovery_required", "rejected"]).optional(),
     backupId: z.string().optional(),
     reason: z.string().optional(),
+    toolResult: ToolResultSchema.optional(),
   })
   .strict();
 

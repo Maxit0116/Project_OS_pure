@@ -27,6 +27,10 @@ export const MemoryEntrySchema = z
     source: z.string().min(1),
     added: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
     topicFile: z.string().min(1),
+    /** Workspace-relative file this project note was checked against. */
+    workspacePath: z.string().min(1).max(1_024).optional(),
+    /** sha256 of that file the last time the note was verified. */
+    verifiedContentHash: z.string().regex(/^sha256:[a-f0-9]{64}$/u).optional(),
   })
   .strict();
 
@@ -37,6 +41,8 @@ export const MemoryCandidateSchema = z
     text: z.string(),
     topicFile: z.string().optional(),
     sourceRunId: z.string().min(1).max(80).optional(),
+    workspacePath: z.string().min(1).max(1_024).optional(),
+    verifiedContentHash: z.string().regex(/^sha256:[a-f0-9]{64}$/u).optional(),
   })
   .strict();
 

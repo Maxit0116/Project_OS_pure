@@ -13,7 +13,7 @@ Do not implement a general tool loop inside Debug UI. Debug Mode *consumes* harn
 
 ## Rules
 
-1. Every side-effect tool (write, shell, network, MCP) must pass `evaluateToolCall` / `assertToolAllowed`.
+1. Every side-effect tool (write, shell, network, MCP) must pass `evaluateToolCall` / `assertToolAllowed`. Loop steps, verification repair, and the symbol index do not add another execution entry. There is no “trust this run” switch. Shell asks and worktree merges are approvals only after they are written under the user-data `governance-audit/approvals.jsonl`. An allow that exists only in process memory is not an approval.
 2. Path allow is not enough for commit — inode/device identity and the recoverable transaction kernel remain server authority after Policy allows.
 3. Prefer Route ① (orchestrated honest pipeline) over open model tool loops until Route ② is explicitly un-deferred.
 4. Instructions assemble only via `buildHarnessInstructions` (base + mode + `.projectos/rules` + memory index + skills). Memory files live under the user-data `agent-memory/` directory, not in the workspace.
@@ -54,7 +54,7 @@ Example `sandbox.json`:
 }
 ```
 
-Shell entry: `runHarnessShell` (Policy → classify → soft spawn). Omit `permissionRules` to load `.projectos/permissions.json`. Verification uses the same entry with tool `run_verification`. Unknown binaries and network tools return `ask` — never silent full access. OS Seatbelt/Landlock not in v0 (`softOnly: true`).
+Shell entry: `runHarnessShell` (Policy → classify → soft spawn). Omit `permissionRules` to load `.projectos/permissions.json`. Verification uses the same entry with tool `run_verification`. Unknown binaries and network tools return `ask` — never silent full access. Each workspace soft-runs at most 4 commands; further commands are rejected in the tool result. Timeout and cancel signal the process group (Windows reports `processCleanup: "direct-child-only"`). A change to sandbox or permission files fails that command result and is left in place for review. OS Seatbelt/Landlock, CPU, and memory quotas are not applied (`softOnly: true`).
 
 Workbench: Settings → Agent harness edits these files and manages worktrees (diff preview, confirm merge, remove).
 

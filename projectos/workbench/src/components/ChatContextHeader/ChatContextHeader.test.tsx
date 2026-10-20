@@ -77,4 +77,41 @@ describe('ChatContextHeader', () => {
     expect(html).toContain('context.scopeGlobal')
     expect(html).not.toContain('context.empty')
   })
+
+  it('reads the delivered assembly and keeps an unsearched retrieval slot', () => {
+    const slot = { chars: 0, sha256: `sha256:${'ab'.repeat(32)}` }
+    mockStoreState({
+      context: null,
+      contextLoading: false,
+      graph: { nodes: [] },
+      selectedNodeId: null,
+      globalAgentActive: true,
+      selectedFilePath: null,
+      pendingFileOwnerChoice: null,
+      fileScopeError: null,
+      selectFile: vi.fn(),
+      chooseFileOwner: vi.fn(),
+      latestContextAssembly: {
+        version: '0.1.0',
+        assemblyId: 'asm_test',
+        contentHash: slot.sha256,
+        slots: {
+          instructions: { ...slot, chars: 12 },
+          scope: slot,
+          pins: slot,
+          retrieval: { ...slot, searched: false },
+          memory: slot,
+          session: slot,
+        },
+        omissions: [{ reason: 'editor_buffer', count: 1 }],
+        reserved: 0,
+      },
+    })
+
+    const html = renderToStaticMarkup(<ChatContextHeader />)
+
+    expect(html).toContain('context.usageTitle')
+    expect(html).toContain('context.usageNotSearched')
+    expect(html).toContain('context.usageOmissions.editor_buffer')
+  })
 })

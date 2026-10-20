@@ -477,6 +477,22 @@ describe("thinking depth body mapping", () => {
       finishReason: "length",
       inputTokens: 2,
       outputTokens: 4,
+      usageReported: true,
+    });
+  });
+
+  it("records omitted provider usage as zero instead of an estimate", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: "partial" }, finish_reason: "stop" }],
+    }), { status: 200 })));
+    const adapter = createProviderAdapter("openai_chat");
+
+    await expect(adapter.complete(openAiProfile, "secret", {
+      userPrompt: "generate a long prompt that must not be turned into a token estimate",
+    })).resolves.toMatchObject({
+      inputTokens: 0,
+      outputTokens: 0,
+      usageReported: false,
     });
   });
 });

@@ -1,6 +1,8 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
+import type { LiveNodeSummary } from '@contracts/index'
 import { OpenGraphButton } from '../OpenGraphButton'
+import LiveNodeBadge, { liveRingClass } from '../LiveNodeBadge'
 import type { C4ShapeKind } from './types'
 import { C4_SHAPE_COMPONENTS } from './shapes'
 import styles from '../FeatureNode.module.css'
@@ -14,6 +16,8 @@ export interface C4FlowNodeData {
   members?: string[]
   selected?: boolean
   dimmed?: boolean
+  /** Live Graph activity summary for this architecture node. */
+  liveSummary?: LiveNodeSummary | null
   /** Drill affordance for Wave 2 wiring. */
   canOpenGraph?: boolean
   onOpenGraph?: () => void
@@ -28,8 +32,13 @@ export interface C4FlowNodeData {
  */
 function C4FlowNode({ data }: NodeProps & { data: C4FlowNodeData }) {
   const Shape = C4_SHAPE_COMPONENTS[data.shape] ?? C4_SHAPE_COMPONENTS.system
+  const ring = liveRingClass(data.liveSummary)
   return (
-    <div className={styles.flowHost} data-c4-flow-node={data.shape}>
+    <div
+      className={`${styles.flowHost} ${ring}`.trim()}
+      data-c4-flow-node={data.shape}
+      data-live-kind={data.liveSummary?.primaryKind}
+    >
       <Handle id="t-top" type="target" position={Position.Top} className={styles.handleHidden} />
       <Handle id="t-bottom" type="target" position={Position.Bottom} className={styles.handleHidden} />
       <Handle id="t-left" type="target" position={Position.Left} className={styles.handleHidden} />
@@ -48,6 +57,7 @@ function C4FlowNode({ data }: NodeProps & { data: C4FlowNodeData }) {
         dimmed={data.dimmed}
         className={data.canOpenGraph ? 'has-drill' : undefined}
       />
+      {data.liveSummary ? <LiveNodeBadge summary={data.liveSummary} compact /> : null}
       {data.canOpenGraph && data.onOpenGraph ? (
         <OpenGraphButton
           label={data.openGraphLabel ?? 'Open'}

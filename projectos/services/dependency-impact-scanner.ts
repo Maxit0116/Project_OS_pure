@@ -54,6 +54,26 @@ export interface DependencyImpactScanResult {
   scannedFiles: string[];
 }
 
+export interface ImportClosureFile {
+  path: string;
+  distance: number;
+}
+
+export interface IncomingImport {
+  importerPath: string;
+  specifier: string;
+}
+
+/** Direct and transitive importers from the same graph `scan` uses. */
+export interface ImportRelations {
+  targetPath: string;
+  closure: ImportClosureFile[];
+  /** Files this target imports through a resolved local specifier. */
+  dependsOn: string[];
+  /** Direct importers and the specifier that resolved to the target. */
+  incoming: IncomingImport[];
+}
+
 interface PathMapping {
   pattern: string;
   targets: string[];
@@ -61,78 +81,122 @@ interface PathMapping {
   required: boolean;
 }
 
+interface LoadedImportGraph {
+  targetPath: string;
+  sourceFiles: string[];
+  reverse: Map<string, Set<string>>;
+  forward: Map<string, Set<string>>;
+  incoming: Map<string, IncomingImport[]>;
+}
+
 export class DependencyImpactScanner {
   scan(input: DependencyImpactScanInput): DependencyImpactScanResult {
-    const root = realpathSync(input.workspaceRoot);
-    const targetPath = normalizeRelativePath(input.targetPath);
-    let targetAbsolute: string;
-    try {
-      targetAbsolute = resolveContainedPath(root, targetPath);
-    } catch {
-      throw new DependencyImpactError("invalid_target", "Deletion target is not a contained existing file");
-    }
-    assertNoSymlinkComponents(root, targetPath);
-    const targetStats = lstatSync(targetAbsolute);
-    if (!targetStats.isFile() || targetStats.isSymbolicLink()) {
-      throw new DependencyImpactError("invalid_target", "Deletion target must be a regular non-symlink file");
-    }
-    if (!SOURCE_EXTENSIONS.has(extname(targetPath).toLowerCase())) {
-      throw unavailable("No applicable dependency scanner exists for the target language");
-    }
-
-    const allFiles = collectWorkspaceFiles(root);
-    if (!allFiles.has(targetPath)) {
-      throw new DependencyImpactError("invalid_target", "Deletion target is excluded from dependency scanning");
-    }
-    const overrides = normalizeOverrides(input.contentOverrides, allFiles);
-    const mappings = loadPathMappings(root);
-    const sourceFiles = [...allFiles]
-      .filter((path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase()))
-      .sort(compareText);
-    const reverse = new Map<string, Set<string>>();
-    for (const importerPath of sourceFiles) {
-      if (overrides.get(importerPath) === null) continue;
-      const source = overrides.get(importerPath) ?? readUtf8(root, importerPath);
-      let specifiers: string[];
-      try {
-        specifiers = extractModuleSpecifiers(source);
-      } catch (error) {
-        if (error instanceof DependencyImpactError) {
-          throw new DependencyImpactError(
-            error.code,
-            `${error.message} in '${importerPath}'`,
-          );
-        }
-        throw error;
-      }
-      for (const specifier of specifiers) {
-        const dependency = resolveLocalModule(root, importerPath, specifier, allFiles, mappings);
-        if (!dependency) continue;
-        const importers = reverse.get(dependency) ?? new Set<string>();
-        importers.add(importerPath);
-        reverse.set(dependency, importers);
-      }
-    }
-
-    const directImporters = [...(reverse.get(targetPath) ?? [])].sort(compareText);
-    const closure = new Set<string>();
-    const queue = [...directImporters];
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (current === targetPath || closure.has(current)) continue;
-      closure.add(current);
-      for (const importer of [...(reverse.get(current) ?? [])].sort(compareText)) {
-        if (!closure.has(importer)) queue.push(importer);
-      }
-    }
+    const graph = loadImportGraph(input);
+    const closure = closureWithDistance(graph.reverse, graph.targetPath);
     return {
       scanner: "typescript_javascript_static_imports_v1",
-      targetPath,
-      directImporters,
-      reverseTransitiveClosure: [...closure].sort(compareText),
-      scannedFiles: sourceFiles,
+      targetPath: graph.targetPath,
+      directImporters: [...(graph.reverse.get(graph.targetPath) ?? [])].sort(compareText),
+      reverseTransitiveClosure: closure.map((file) => file.path).sort(compareText),
+      scannedFiles: graph.sourceFiles,
     };
   }
+
+  /** Same import graph as `scan`, with distance and the direct edges into the target. */
+  relations(input: DependencyImpactScanInput): ImportRelations {
+    const graph = loadImportGraph(input);
+    const incoming = [...(graph.incoming.get(graph.targetPath) ?? [])].sort((left, right) =>
+      compareText(left.importerPath, right.importerPath) || compareText(left.specifier, right.specifier));
+    return {
+      targetPath: graph.targetPath,
+      closure: closureWithDistance(graph.reverse, graph.targetPath),
+      dependsOn: [...(graph.forward.get(graph.targetPath) ?? [])].sort(compareText),
+      incoming,
+    };
+  }
+}
+
+function loadImportGraph(input: DependencyImpactScanInput): LoadedImportGraph {
+  const root = realpathSync(input.workspaceRoot);
+  const targetPath = normalizeRelativePath(input.targetPath);
+  let targetAbsolute: string;
+  try {
+    targetAbsolute = resolveContainedPath(root, targetPath);
+  } catch {
+    throw new DependencyImpactError("invalid_target", "Deletion target is not a contained existing file");
+  }
+  assertNoSymlinkComponents(root, targetPath);
+  const targetStats = lstatSync(targetAbsolute);
+  if (!targetStats.isFile() || targetStats.isSymbolicLink()) {
+    throw new DependencyImpactError("invalid_target", "Deletion target must be a regular non-symlink file");
+  }
+  if (!SOURCE_EXTENSIONS.has(extname(targetPath).toLowerCase())) {
+    throw unavailable("No applicable dependency scanner exists for the target language");
+  }
+
+  const allFiles = collectWorkspaceFiles(root);
+  if (!allFiles.has(targetPath)) {
+    throw new DependencyImpactError("invalid_target", "Deletion target is excluded from dependency scanning");
+  }
+  const overrides = normalizeOverrides(input.contentOverrides, allFiles);
+  const mappings = loadPathMappings(root);
+  const sourceFiles = [...allFiles]
+    .filter((path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase()))
+    .sort(compareText);
+  const reverse = new Map<string, Set<string>>();
+  const forward = new Map<string, Set<string>>();
+  const incoming = new Map<string, IncomingImport[]>();
+  for (const importerPath of sourceFiles) {
+    if (overrides.get(importerPath) === null) continue;
+    const source = overrides.get(importerPath) ?? readUtf8(root, importerPath);
+    let specifiers: string[];
+    try {
+      specifiers = extractModuleSpecifiers(source);
+    } catch (error) {
+      if (error instanceof DependencyImpactError) {
+        throw new DependencyImpactError(
+          error.code,
+          `${error.message} in '${importerPath}'`,
+        );
+      }
+      throw error;
+    }
+    for (const specifier of specifiers) {
+      const dependency = resolveLocalModule(root, importerPath, specifier, allFiles, mappings);
+      if (!dependency) continue;
+      const importers = reverse.get(dependency) ?? new Set<string>();
+      importers.add(importerPath);
+      reverse.set(dependency, importers);
+      const dependencies = forward.get(importerPath) ?? new Set<string>();
+      dependencies.add(dependency);
+      forward.set(importerPath, dependencies);
+      const edges = incoming.get(dependency) ?? [];
+      edges.push({ importerPath, specifier });
+      incoming.set(dependency, edges);
+    }
+  }
+  return { targetPath, sourceFiles, reverse, forward, incoming };
+}
+
+function closureWithDistance(
+  reverse: Map<string, Set<string>>,
+  targetPath: string,
+): ImportClosureFile[] {
+  const distances = new Map<string, number>();
+  const queue = [...(reverse.get(targetPath) ?? [])]
+    .sort(compareText)
+    .map((path) => ({ path, distance: 1 }));
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current.path === targetPath || distances.has(current.path)) continue;
+    distances.set(current.path, current.distance);
+    for (const importer of [...(reverse.get(current.path) ?? [])].sort(compareText)) {
+      if (!distances.has(importer)) queue.push({ path: importer, distance: current.distance + 1 });
+    }
+  }
+  return [...distances.entries()]
+    .map(([path, distance]) => ({ path, distance }))
+    .sort((left, right) => left.distance - right.distance || compareText(left.path, right.path));
 }
 
 function collectWorkspaceFiles(root: string): Set<string> {

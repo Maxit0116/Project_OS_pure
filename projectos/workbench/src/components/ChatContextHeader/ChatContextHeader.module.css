@@ -221,3 +221,42 @@
   color: var(--color-text-muted);
   font-weight: var(--font-weight-semibold);
 }
+
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 var(--space-md) var(--space-sm);
+}
+
+.usageTitle {
+  color: var(--tech-text-secondary);
+  font-size: 11px;
+}
+
+.usageRow {
+  display: grid;
+  grid-template-columns: 72px 1fr 72px;
+  gap: 8px;
+  align-items: center;
+  color: var(--tech-text-secondary);
+  font-size: 11px;
+}
+
+.usageTrack {
+  height: 4px;
+  background: var(--tech-bg-muted);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.usageFill {
+  display: block;
+  height: 100%;
+  background: var(--tech-accent);
+}
+
+.usageOmission {
+  color: var(--tech-text-secondary);
+  font-size: 11px;
+}

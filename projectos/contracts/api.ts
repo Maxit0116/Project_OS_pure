@@ -196,6 +196,10 @@ export interface ProjectOSApi {
   ): Promise<CodeFileUnderstandingEntry>;
   askAgent(request: AgentAskRequest): Promise<AgentAnswerResult>;
   listSkills(projectId: string): Promise<ListSkillsResult>;
+  getComposerMentions(
+    projectId: string,
+    query: string,
+  ): Promise<{ files: string[]; rules: Array<{ path: string; description: string }> }>;
   getSkill(projectId: string, skillId: string): Promise<SkillContent | null>;
   /** H4.C — list agent git worktrees under `.projectos/agent-worktrees/`. */
   listAgentWorktrees(projectId: string): Promise<AgentWorktreeRecord[]>;
@@ -252,6 +256,16 @@ export interface ProjectOSApi {
   confirmExecution(refinementId: string): Promise<AgentRun>;
   /** Stop an in-flight agent run. Marks the run cancelled; does not apply half-written diffs. */
   cancelAgentRun(runId: string): Promise<AgentRun>;
+  /**
+   * Pause an in-flight run (Live Graph). Marks `interrupted` so continueAgentRun can resume.
+   * Not the same as cancel — cancelled runs stay cancelled.
+   */
+  pauseAgentRun(runId: string): Promise<AgentRun>;
+  /**
+   * Continue an interrupted run. Applied runs are not written again.
+   * Runs that never applied regenerate from the live pipeline.
+   */
+  continueAgentRun(runId: string): Promise<AgentRun>;
   getAgentRun(runId: string): Promise<AgentRun>;
   getAgentRunEvents(runId: string): Promise<AgentRunEvent[]>;
   streamAgentRun(
@@ -404,6 +418,7 @@ export interface ProjectOSApi {
     projectId: string,
     loopId: string,
     specVersion?: string,
+    featureNodeId?: string,
   ): Promise<LoopGraphDocument>;
   pauseLoopInstance(
     projectId: string,

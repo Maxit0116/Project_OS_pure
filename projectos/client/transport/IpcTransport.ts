@@ -395,6 +395,13 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("listSkills", projectId);
   }
 
+  getComposerMentions(
+    projectId: string,
+    query: string,
+  ): Promise<{ files: string[]; rules: Array<{ path: string; description: string }> }> {
+    return this.invoke("getComposerMentions", projectId, query);
+  }
+
   getSkill(projectId: string, skillId: string): Promise<SkillContent | null> {
     return this.invoke("getSkill", projectId, skillId);
   }
@@ -520,6 +527,14 @@ export class IpcTransport implements ApiTransport {
 
   cancelAgentRun(runId: string): Promise<AgentRun> {
     return this.invoke("cancelAgentRun", runId);
+  }
+
+  pauseAgentRun(runId: string): Promise<AgentRun> {
+    return this.invoke("pauseAgentRun", runId);
+  }
+
+  continueAgentRun(runId: string): Promise<AgentRun> {
+    return this.invoke("continueAgentRun", runId);
   }
 
   getAgentRun(runId: string): Promise<AgentRun> {
@@ -874,9 +889,16 @@ export class IpcTransport implements ApiTransport {
   startLoopInstance(
     projectId: string,
     loopId: string,
-    _specVersion?: string,
+    specVersion?: string,
+    featureNodeId?: string,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
-    return this.invoke("startLoopInstance", projectId, loopId);
+    return this.invoke(
+      "startLoopInstance",
+      projectId,
+      loopId,
+      specVersion ?? "",
+      featureNodeId ?? "",
+    );
   }
 
   pauseLoopInstance(

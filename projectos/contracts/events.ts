@@ -68,6 +68,8 @@ export const AgentLifecycleEventTypeSchema = z.enum([
   "diff_ready",
   "verification_completed",
   "run_completed",
+  "run_cancelled",
+  "run_interrupted",
 ]);
 
 export const AgentActionEventTypeSchema = z.enum([
@@ -179,6 +181,7 @@ export const ToolPolicyDecisionPayloadSchema = z.object({
   decision: z.enum(["allow", "ask", "deny"]),
   reason: z.string().min(1).max(2_048),
   match: z.string().min(1).max(500).optional(),
+  approvalId: z.string().min(1).max(80).optional(),
 }).strict();
 
 export const ModelRequestPayloadSchema = z.object({
@@ -192,10 +195,27 @@ export const ModelRequestPayloadSchema = z.object({
     "plan",
     "validate_batch",
   ]),
+  requestId: z.string().min(1),
+  requestKind: z.enum([
+    "feature_decomposition",
+    "structure_graph_scan",
+    "prompt_refinement",
+    "change_generation",
+    "root_cause_analysis",
+    "implementation_plan",
+    "code_review",
+    "context_summary",
+    "agent_step",
+    "question_answer",
+    "chat_title",
+  ]),
   provider: z.string().min(1),
   model: z.string().min(1),
   durationMs: z.number().finite().int().nonnegative(),
   status: z.enum(["ok", "failed"]),
+  backend: z.enum(["model", "fixture"]),
+  /** `missing` means the provider did not report usage. Zeros are not an estimate. */
+  usage: z.enum(["reported", "missing"]),
   tokenUsage: z.object({
     input: z.number().finite().int().nonnegative(),
     output: z.number().finite().int().nonnegative(),
@@ -259,16 +279,32 @@ export const ApplyResultTracePayloadSchema = z.object({
   filesWritten: z.array(z.string().min(1)),
   backupId: z.string().min(1).optional(),
   outcome: z.enum(["applied", "recovery_required", "rejected"]),
+  approvalId: z.string().min(1).max(80).optional(),
 }).strict();
 
 export const VerificationResultPayloadSchema = z.object({
   command: z.string().min(1).optional(),
   status: z.enum(["passed", "failed", "not_run"]),
+  reason: z.enum([
+    "commands_passed",
+    "command_failed",
+    "not_configured",
+    "approval_required",
+    "policy_denied",
+    "timed_out",
+    "output_truncated",
+    "unexpected_paths",
+  ]).optional(),
+  evidenceId: z.string().min(1).optional(),
   exitCode: z.number().int().nullable().optional(),
   stdout: z.string().max(12_000).optional(),
   stderr: z.string().max(12_000).optional(),
   truncated: z.boolean().optional(),
   durationMs: z.number().int().nonnegative().optional(),
+  /** T-0 summary only. The full command output stays on the tool result. */
+  ok: z.boolean().optional(),
+  summary: z.string().max(400).optional(),
+  approvalId: z.string().min(1).max(80).optional(),
 }).strict();
 
 /** Hash and budget flag only. Never the note text. */

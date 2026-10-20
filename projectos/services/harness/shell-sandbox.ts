@@ -1,5 +1,12 @@
-import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import * as childProcess from "node:child_process";
+import {
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+} from "node:fs";
 import { basename, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 
 import type { ExecCommand, VerificationCommandResult } from "../../contracts/exec-command.js";
@@ -12,6 +19,17 @@ import {
 
 const SANDBOX_FILE = ".projectos/sandbox.json";
 const OUTPUT_LIMIT_BYTES = 64 * 1024;
+
+/**
+ * Soft-runs allowed at once for one workspace. Extra commands are rejected
+ * in the result envelope. This is not a CPU or memory quota.
+ */
+export const SOFT_RUN_CONCURRENCY_LIMIT = 4;
+
+/** How a started command's processes were stopped. Absent when nothing spawned. */
+export type ProcessCleanupMode = "process-group" | "direct-child-only" | "failed";
+
+const inflightSoftRuns = new Map<string, number>();
 
 /** Paths agents must not mutate (Cursor-aligned protected set, relative). */
 export const PROTECTED_PATH_SUFFIXES = [
@@ -262,11 +280,19 @@ export interface RunSandboxedCommandInput {
    * human approval, e.g. verification command-set approval). `deny` still blocks.
    */
   approvalResolved?: boolean;
+  /** Cancelling uses the same process cleanup as a timeout. */
+  signal?: AbortSignal;
 }
 
 export interface RunSandboxedCommandResult extends VerificationCommandResult {
   sandbox: ShellSandboxClassification;
   blocked?: boolean;
+  cancelled?: boolean;
+  /** Set only after a process was started, or when cleanup itself failed. */
+  processCleanup?: ProcessCleanupMode;
+  /** True when a protected sandbox or permission file changed during the run. */
+  protectedPathsChanged?: boolean;
+  concurrencyRejected?: boolean;
 }
 
 /**
@@ -311,30 +337,152 @@ export async function runSandboxedCommand(
     };
   }
 
-  // ask + approvalResolved, or sandboxed → soft-run (still no full-access env).
-  const result = await spawnCaptured(input.command, input.cwd, config);
-  return { ...result, sandbox: classification };
+  if (input.signal?.aborted) {
+    return {
+      command: input.command,
+      status: "failed",
+      exitCode: null,
+      durationMs: 0,
+      timedOut: false,
+      outputTruncated: false,
+      output: "shell_cancelled: command was not run",
+      sandbox: classification,
+      blocked: true,
+      cancelled: true,
+    };
+  }
+
+  const workspaceKey = resolve(input.cwd);
+  if (!acquireSoftRun(workspaceKey)) {
+    return {
+      command: input.command,
+      status: "failed",
+      exitCode: null,
+      durationMs: 0,
+      timedOut: false,
+      outputTruncated: false,
+      output: `shell_concurrency_limit: ${SOFT_RUN_CONCURRENCY_LIMIT}`,
+      sandbox: classification,
+      blocked: true,
+      concurrencyRejected: true,
+    };
+  }
+
+  try {
+    const before = fingerprintProtectedPaths(input.cwd);
+    const result = await spawnCaptured(input.command, input.cwd, config, input.signal);
+    const protectedPathsChanged = fingerprintProtectedPaths(input.cwd) !== before;
+    const notice = "protected_paths_changed: review sandbox and permission files";
+    return {
+      ...result,
+      status: protectedPathsChanged ? "failed" : result.status,
+      sandbox: classification,
+      ...(protectedPathsChanged
+        ? {
+            protectedPathsChanged: true,
+            output: result.output ? `${result.output}\n${notice}` : notice,
+          }
+        : {}),
+    };
+  } finally {
+    releaseSoftRun(workspaceKey);
+  }
+}
+
+function acquireSoftRun(workspaceKey: string): boolean {
+  const current = inflightSoftRuns.get(workspaceKey) ?? 0;
+  if (current >= SOFT_RUN_CONCURRENCY_LIMIT) return false;
+  inflightSoftRuns.set(workspaceKey, current + 1);
+  return true;
+}
+
+function releaseSoftRun(workspaceKey: string): void {
+  const current = inflightSoftRuns.get(workspaceKey) ?? 0;
+  if (current <= 1) inflightSoftRuns.delete(workspaceKey);
+  else inflightSoftRuns.set(workspaceKey, current - 1);
+}
+
+function fingerprintProtectedPaths(workspaceRoot: string): string {
+  const hash = createHash("sha256");
+  for (const suffix of PROTECTED_PATH_SUFFIXES) {
+    hash.update(suffix);
+    hash.update("\0");
+    hash.update(fingerprintPath(join(workspaceRoot, suffix)));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function fingerprintPath(absolute: string): string {
+  if (!existsSync(absolute)) return "absent";
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(absolute);
+  } catch {
+    return "unreadable";
+  }
+  if (stat.isSymbolicLink()) {
+    try {
+      return `link:${readlinkSync(absolute)}`;
+    } catch {
+      return "link:unreadable";
+    }
+  }
+  if (stat.isDirectory()) {
+    const hash = createHash("sha256");
+    let names: string[] = [];
+    try {
+      names = readdirSync(absolute).sort();
+    } catch {
+      return "dir:unreadable";
+    }
+    for (const name of names) {
+      hash.update(name);
+      hash.update("\0");
+      hash.update(fingerprintPath(join(absolute, name)));
+      hash.update("\0");
+    }
+    return hash.digest("hex");
+  }
+  if (!stat.isFile()) return "other";
+  try {
+    return createHash("sha256").update(readFileSync(absolute)).digest("hex");
+  } catch {
+    return "file:unreadable";
+  }
 }
 
 function spawnCaptured(
   command: ExecCommand,
   cwd: string,
   config: ShellSandboxConfig,
-): Promise<VerificationCommandResult> {
+  signal?: AbortSignal,
+): Promise<
+  VerificationCommandResult & {
+    cancelled: boolean;
+    processCleanup: ProcessCleanupMode;
+  }
+> {
+  const useProcessGroup = process.platform !== "win32";
   return new Promise((resolvePromise) => {
     const started = Date.now();
     let outputBytes = 0;
     let outputTruncated = false;
     let timedOut = false;
+    let cancelled = false;
     let settled = false;
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+    let processCleanup: ProcessCleanupMode = useProcessGroup
+      ? "process-group"
+      : "direct-child-only";
 
-    const child = spawn(command.command, command.args, {
+    const child = childProcess.spawn(command.command, command.args, {
       cwd,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       env: buildSandboxedEnv(config),
+      detached: useProcessGroup,
     });
 
     let output = "";
@@ -364,24 +512,66 @@ function spawnCaptured(
     child.stdout?.on("data", (chunk: Uint8Array) => appendOutput("stdout", chunk));
     child.stderr?.on("data", (chunk: Uint8Array) => appendOutput("stderr", chunk));
 
+    const stopChild = (signalName: NodeJS.Signals): void => {
+      const pid = child.pid;
+      if (pid === undefined) {
+        processCleanup = "failed";
+        return;
+      }
+      if (useProcessGroup) {
+        try {
+          process.kill(-pid, signalName);
+          return;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === "ESRCH") return;
+        }
+      }
+      try {
+        child.kill(signalName);
+        if (useProcessGroup) processCleanup = "direct-child-only";
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ESRCH") processCleanup = "failed";
+      }
+    };
+
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 1_000);
+      stopChild("SIGTERM");
+      forceKillTimer = setTimeout(() => stopChild("SIGKILL"), 1_000);
     }, command.timeoutMs);
+
+    const onAbort = (): void => {
+      if (settled || cancelled || timedOut) return;
+      cancelled = true;
+      clearTimeout(timeout);
+      stopChild("SIGTERM");
+      forceKillTimer = setTimeout(() => stopChild("SIGKILL"), 1_000);
+    };
+
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    }
 
     const finish = (exitCode: number | null): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       if (forceKillTimer) clearTimeout(forceKillTimer);
+      signal?.removeEventListener("abort", onAbort);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       resolvePromise({
         command,
-        status: !timedOut && exitCode === 0 ? "passed" : "failed",
+        status: !timedOut && !cancelled && exitCode === 0 ? "passed" : "failed",
         exitCode,
         durationMs: Date.now() - started,
         timedOut,
         outputTruncated,
+        cancelled,
+        processCleanup,
         ...(output ? { output } : {}),
         ...(stdout ? { stdout } : {}),
         ...(stderr ? { stderr } : {}),

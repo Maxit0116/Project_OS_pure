@@ -56,6 +56,23 @@ export interface MemoryInjectionSnapshot {
   hash: string;
   truncated: boolean;
   entryCount: number;
+  /** Project notes skipped because the named file hash no longer matches. */
+  skippedStaleCount: number;
+}
+
+export type FileHashReader = (workspaceRelativePath: string) => string | null;
+
+export function hashWorkspaceFile(
+  workspaceRoot: string,
+  workspaceRelativePath: string,
+): string | null {
+  const path = normalizeWorkspacePath(workspaceRelativePath);
+  if (!path) return null;
+  const absolute = resolve(workspaceRoot, path);
+  const root = resolve(workspaceRoot);
+  if (absolute !== root && !absolute.startsWith(`${root}${sep}`)) return null;
+  if (!existsSync(absolute)) return null;
+  return `sha256:${createHash("sha256").update(readFileSync(absolute)).digest("hex")}`;
 }
 
 export function hashMemoryIndex(markdown: string): string {
@@ -112,22 +129,29 @@ export class AgentMemoryStore {
    * Index body for the next instruction assembly.
    * Empty when the master switch or the use switch is off.
    */
-  injectionMarkdown(): string {
-    return this.injectionSnapshot().markdown;
+  injectionMarkdown(fileHash?: FileHashReader): string {
+    return this.injectionSnapshot(fileHash).markdown;
   }
 
   /** What this session would inject. Hash covers the injected text only. */
-  injectionSnapshot(): MemoryInjectionSnapshot {
+  injectionSnapshot(fileHash?: FileHashReader): MemoryInjectionSnapshot {
     const document = this.load();
     if (!document.settings.enabled || !document.settings.useMemories) {
-      return { markdown: "", hash: hashMemoryIndex(""), truncated: false, entryCount: 0 };
+      return {
+        markdown: "",
+        hash: hashMemoryIndex(""),
+        truncated: false,
+        entryCount: 0,
+        skippedStaleCount: 0,
+      };
     }
-    const rendered = renderInjectable(document.entries);
+    const rendered = renderInjectable(document.entries, fileHash);
     return {
       markdown: rendered.text,
       hash: hashMemoryIndex(rendered.text),
       truncated: rendered.truncated,
       entryCount: rendered.entryCount,
+      skippedStaleCount: rendered.skippedStaleCount,
     };
   }
 
@@ -191,6 +215,12 @@ export class AgentMemoryStore {
       return { op: "upsert", accepted: false, text, reason: "secret" };
     }
     const added = formatDay(this.now());
+    const workspacePath = candidate.workspacePath
+      ? normalizeWorkspacePath(candidate.workspacePath)
+      : undefined;
+    if (candidate.workspacePath && !workspacePath) {
+      return { op: "upsert", accepted: false, text, reason: "path" };
+    }
     const fresh: MemoryEntry = {
       text,
       type,
@@ -198,6 +228,10 @@ export class AgentMemoryStore {
       source,
       added,
       topicFile,
+      ...(workspacePath ? { workspacePath } : {}),
+      ...(candidate.verifiedContentHash
+        ? { verifiedContentHash: candidate.verifiedContentHash }
+        : {}),
     };
     const retired = entries
       .filter((entry) => entry.text === text && entry.state !== "superseded")
@@ -457,12 +491,24 @@ function isInjectable(entry: MemoryEntry): boolean {
   return entry.state === "candidate" || entry.state === "corroborated";
 }
 
-function renderInjectable(entries: MemoryEntry[]): {
+function renderInjectable(
+  entries: MemoryEntry[],
+  fileHash?: FileHashReader,
+): {
   text: string;
   truncated: boolean;
   entryCount: number;
+  skippedStaleCount: number;
 } {
-  const lines = entries.filter(isInjectable).map(formatMemoryLine);
+  let skippedStaleCount = 0;
+  const lines = entries.filter((entry) => {
+    if (!isInjectable(entry)) return false;
+    if (conflictsWithFile(entry, fileHash)) {
+      skippedStaleCount += 1;
+      return false;
+    }
+    return true;
+  }).map(formatMemoryLine);
   const kept: string[] = [];
   let chars = 0;
   let truncated = false;
@@ -474,7 +520,18 @@ function renderInjectable(entries: MemoryEntry[]): {
     kept.push(line);
     chars += line.length + 1;
   }
-  return { text: kept.join("\n"), truncated, entryCount: kept.length };
+  return {
+    text: kept.join("\n"),
+    truncated,
+    entryCount: kept.length,
+    skippedStaleCount,
+  };
+}
+
+function conflictsWithFile(entry: MemoryEntry, fileHash?: FileHashReader): boolean {
+  if (!fileHash || entry.type !== "project") return false;
+  if (!entry.workspacePath || !entry.verifiedContentHash) return false;
+  return fileHash(entry.workspacePath) !== entry.verifiedContentHash;
 }
 
 function isNearBudget(injectable: MemoryEntry[]): boolean {
@@ -485,7 +542,11 @@ function isNearBudget(injectable: MemoryEntry[]): boolean {
 }
 
 function formatMemoryLine(entry: MemoryEntry): string {
-  return `- ${entry.text} [type: ${entry.type}; state: ${entry.state}; source: ${entry.source}; added: ${entry.added}; topic: ${entry.topicFile}]`;
+  const path = entry.workspacePath ? `; path: ${entry.workspacePath}` : "";
+  const verified = entry.verifiedContentHash
+    ? `; verified: ${entry.verifiedContentHash}`
+    : "";
+  return `- ${entry.text} [type: ${entry.type}; state: ${entry.state}; source: ${entry.source}; added: ${entry.added}; topic: ${entry.topicFile}${path}${verified}]`;
 }
 
 function parseMemoryLine(line: string): MemoryEntry | null {
@@ -512,7 +573,20 @@ function parseMemoryLine(line: string): MemoryEntry | null {
   }
   if (!source || !/^\d{4}-\d{2}-\d{2}$/u.test(added ?? "")) return null;
   if (!topicFile || !isSafeTopicFile(topicFile)) return null;
-  return { text, type, state, source, added: added!, topicFile };
+  const workspacePath = meta.path ? normalizeWorkspacePath(meta.path) : undefined;
+  if (meta.path && !workspacePath) return null;
+  const verified = meta.verified;
+  if (verified && !/^sha256:[a-f0-9]{64}$/u.test(verified)) return null;
+  return {
+    text,
+    type,
+    state,
+    source,
+    added: added!,
+    topicFile,
+    ...(workspacePath ? { workspacePath } : {}),
+    ...(verified ? { verifiedContentHash: verified } : {}),
+  };
 }
 
 function parseMeta(raw: string): Record<string, string> | null {
@@ -566,6 +640,13 @@ function resolveTopicFile(
 
 function isSafeTopicFile(name: string): boolean {
   return /^[a-z0-9][a-z0-9_-]{0,40}\.md$/u.test(name) && name !== INDEX_FILE;
+}
+
+function normalizeWorkspacePath(value: string): string | null {
+  const path = value.trim().replaceAll("\\", "/");
+  if (!path || path.startsWith("/") || path.includes("..") || path.includes(":")) return null;
+  if (path.includes(";") || path.includes("]")) return null;
+  return path;
 }
 
 function preferEntry(left: MemoryEntry, right: MemoryEntry): MemoryEntry {

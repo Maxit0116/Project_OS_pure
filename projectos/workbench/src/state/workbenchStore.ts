@@ -106,6 +106,15 @@ import { useBottomDockStore } from './bottomDockStore'
 import { useDiagnosticsStore } from './diagnosticsStore'
 import { useOutlineStore } from './outlineStore'
 import { useChatSessionStore } from './chatSessionStore'
+import {
+  applyAgentRunEventToOverlay,
+  emptyExecutionOverlay,
+  remapExecutionOverlay,
+} from '../../../services/live-graph/index.js'
+import {
+  appendAttachment,
+  setComposerText,
+} from '../components/ChatPanel/composer/composerTokens'
 import { useFileTimelineStore } from './fileTimelineStore'
 import { rememberRecentWorkspace } from './recentWorkspaces'
 import { recordProposedTimelineFromDiff } from './fileTimelineFromRunEvent'
@@ -434,6 +443,8 @@ export interface WorkbenchState {
   conversationCheckpoints: ConversationCheckpoint[]
   latestAskTrace: LatestAskTrace | null
   latestPlanTrace: LatestPlanTrace | null
+  /** Last delivered six-slot record. The context bar reads only this. */
+  latestContextAssembly: import('@contracts/index').ContextAssembly | null
   agentFlowSubject: AgentFlowSubject
 
   activeRunId: string | null
@@ -444,6 +455,12 @@ export interface WorkbenchState {
   flowTransientTraces: AgentTransientTrace[]
   flowCorrections: FlowCorrection[]
   flowStatus: 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error'
+  /** Live Graph overlay driven by run events (see Live-Graph Dev Plan Phase 1). */
+  executionOverlay: import('@contracts/index').ExecutionOverlay | null
+  /** Phase 2: focus a task/phase so only its nodes and execution edges stay emphasized. */
+  liveGraphFocusTaskId: string | null
+  /** Phase 3: run id paused from the graph (interrupted); Resume calls continueAgentRun. */
+  liveGraphPausedRunId: string | null
   diffReady: boolean
   generatedDiff: GeneratedDiff | null
   applyResult: ApplyResult | null
@@ -532,6 +549,19 @@ export interface WorkbenchState {
   loadDirectoryListing: (relativePath: string) => Promise<void>
   setSelectedFlowStepId: (id: string | null) => void
   setSelectedActivityId: (id: string | null) => void
+  setLiveGraphFocusTask: (taskId: string | null) => void
+  /** Attach file/node as composer context (read-only; does not expand write scope). */
+  addGraphContextFromNode: (nodeId: string) => void
+  /** Prefill composer with an instruction scoped to the node; opens chat. */
+  sendGraphInstructionFromNode: (nodeId: string, instruction: string) => void
+  /** Pause via harness interrupt (not cancel). */
+  pauseAgentFromGraph: () => Promise<void>
+  /** Resume a graph-paused (interrupted) run. */
+  resumeAgentFromGraph: () => Promise<void>
+  /** Approve pending verification commands — same path as Diff panel. */
+  approveFromGraph: () => Promise<void>
+  /** Reject / dismiss pending verification approval without approving. */
+  rejectFromGraph: () => void
   setLeftPanelOpen: (open: boolean) => void
   setRightPanelOpen: (open: boolean) => void
   clearShouldStartOnboarding: () => void
@@ -1161,6 +1191,7 @@ const initialTransientState = {
   conversationCheckpoints: [] as ConversationCheckpoint[],
   latestAskTrace: null as LatestAskTrace | null,
   latestPlanTrace: null as LatestPlanTrace | null,
+  latestContextAssembly: null as import('@contracts/index').ContextAssembly | null,
   agentFlowSubject: 'run' as AgentFlowSubject,
   activeRunId: null as string | null,
   flowSteps: [] as AgentFlowStep[],
@@ -1170,6 +1201,9 @@ const initialTransientState = {
   flowTransientTraces: [] as AgentTransientTrace[],
   flowCorrections: [] as FlowCorrection[],
   flowStatus: 'idle' as const,
+  executionOverlay: null as import('@contracts/index').ExecutionOverlay | null,
+  liveGraphFocusTaskId: null as string | null,
+  liveGraphPausedRunId: null as string | null,
   diffReady: false,
   generatedDiff: null as GeneratedDiff | null,
   applyResult: null as ApplyResult | null,
@@ -1603,6 +1637,170 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
   setSelectedFlowStepId: (id) => set({ selectedFlowStepId: id }),
   setSelectedActivityId: (id) => set({ selectedActivityId: id }),
+
+  setLiveGraphFocusTask: (taskId) => set({ liveGraphFocusTaskId: taskId }),
+
+  addGraphContextFromNode: (nodeId) => {
+    const { graph, composerDraft, setComposerDraft, pushToast, locale } = get()
+    const node = graph?.nodes.find((item) => item.id === nodeId)
+    if (!node) return
+    const filePath =
+      node.linkedFiles[0]?.path ??
+      (node.level === 'code' || node.elementType === 'code_element' ? node.name : null)
+    const attachment = filePath
+      ? {
+          id: `att_graph_${crypto.randomUUID()}`,
+          label: filePath.split(/[/\\]/).pop() || filePath,
+          ref: { kind: 'file' as const, path: filePath },
+        }
+      : {
+          id: `att_graph_${crypto.randomUUID()}`,
+          label: node.name,
+          ref: { kind: 'node' as const, nodeId },
+        }
+    const next = appendAttachment(composerDraft, attachment)
+    setComposerDraft(next)
+    useChatSessionStore.getState().presentAgentFlow()
+    set({ rightPanelTab: 'chat' })
+    pushToast({
+      type: 'success',
+      message: getStoreMessage(locale, 'map.liveGraph.contextAdded', {
+        label: attachment.label,
+      }),
+      autoDismiss: 2500,
+    })
+  },
+
+  sendGraphInstructionFromNode: (nodeId, instruction) => {
+    const trimmed = instruction.trim()
+    if (!trimmed) return
+    const { graph, composerDraft, setComposerDraft, flowSteps, injectFlowCorrection, pushToast, locale } =
+      get()
+    const node = graph?.nodes.find((item) => item.id === nodeId)
+    const label = node?.name ?? nodeId
+    const filePath = node?.linkedFiles[0]?.path
+    const scoped = filePath
+      ? `[${filePath}] ${trimmed}`
+      : `[node:${label}] ${trimmed}`
+
+    const runningStep = flowSteps.find((step) => step.status === 'running')
+    if (runningStep && get().flowStatus === 'running') {
+      void injectFlowCorrection(runningStep.id, scoped)
+      return
+    }
+
+    setComposerDraft(setComposerText(composerDraft, scoped))
+    set({ rightPanelTab: 'chat' })
+    useChatSessionStore.getState().presentAgentFlow()
+    pushToast({
+      type: 'info',
+      message: getStoreMessage(locale, 'map.liveGraph.instructionReady'),
+      autoDismiss: 2500,
+    })
+  },
+
+  pauseAgentFromGraph: async () => {
+    const { client, activeRunId, flowStatus, pushToast, locale, executionOverlay, graph } = get()
+    if (!activeRunId || flowStatus !== 'running') return
+    const runId = activeRunId
+    disposeActiveRunSubscriptions(get, set)
+    const settledOverlay =
+      executionOverlay?.runId === runId
+        ? applyAgentRunEventToOverlay(
+            executionOverlay,
+            {
+              eventId: `local_pause_${runId}_${Date.now()}`,
+              runId,
+              timestamp: new Date().toISOString(),
+              type: 'run_interrupted',
+            },
+            graph?.fileIndex ?? [],
+          )
+        : executionOverlay
+    set({
+      flowStatus: 'idle',
+      refineLoading: false,
+      activeRunId: null,
+      liveGraphPausedRunId: runId,
+      executionOverlay: settledOverlay,
+    })
+    if (client && typeof client.pauseAgentRun === 'function') {
+      try {
+        await client.pauseAgentRun(runId)
+      } catch (error) {
+        console.error('[workbench] pauseAgentRun failed', error)
+        pushToast({
+          type: 'error',
+          message: getStoreMessage(locale, 'map.liveGraph.pauseFailed'),
+        })
+        return
+      }
+    }
+    pushToast({
+      type: 'info',
+      message: getStoreMessage(locale, 'map.liveGraph.paused'),
+      autoDismiss: 2500,
+    })
+    scheduleChatSessionPersist()
+  },
+
+  resumeAgentFromGraph: async () => {
+    const { client, liveGraphPausedRunId, project, pushToast, locale } = get()
+    const runId = liveGraphPausedRunId
+    if (!client || !runId || !project) return
+    if (typeof client.continueAgentRun !== 'function') return
+    disposeActiveRunSubscriptions(get, set)
+    try {
+      const run = await client.continueAgentRun(runId)
+      useChatSessionStore.getState().presentAgentFlow()
+      set({
+        activeRunId: run.runId,
+        liveGraphPausedRunId: null,
+        flowStatus: 'running',
+        agentFlowSubject: 'run',
+        refineLoading: false,
+      })
+      const disposable = client.streamAgentRun(run.runId, (event) => {
+        if (
+          get().activeRunId !== run.runId ||
+          get().project?.projectId !== project.projectId
+        ) {
+          return
+        }
+        handleRunEvent(event, set, get)
+        scheduleChatSessionPersist()
+      })
+      set({ runDisposable: disposable })
+      pushToast({
+        type: 'info',
+        message: getStoreMessage(locale, 'map.liveGraph.resumed'),
+        autoDismiss: 2500,
+      })
+      scheduleChatSessionPersist()
+    } catch (error) {
+      console.error('[workbench] continueAgentRun failed', error)
+      pushToast({
+        type: 'error',
+        message: getStoreMessage(locale, 'map.liveGraph.resumeFailed'),
+      })
+    }
+  },
+
+  approveFromGraph: async () => {
+    await get().approveAndRunCurrentVerification()
+  },
+
+  rejectFromGraph: () => {
+    const { verificationCommandApproval, pushToast, locale } = get()
+    if (verificationCommandApproval?.status !== 'approval_required') return
+    set({ verificationCommandApproval: null, verificationLoading: false })
+    pushToast({
+      type: 'info',
+      message: getStoreMessage(locale, 'map.liveGraph.approvalRejected'),
+      autoDismiss: 2500,
+    })
+  },
+
   setLeftPanelOpen: (open) => {
     set({ leftPanelOpen: open })
     if (open) get().reclampPanelLayout()
@@ -1708,7 +1906,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         ...(options?.force === true ? { force: true } : {}),
       })
       const tree = await client.getSemanticTree(project.projectId)
-      set({ graph, tree, structureRescanLoading: false })
+      set((current) => ({
+        graph,
+        tree,
+        structureRescanLoading: false,
+        // Promote ephemeral unmapped activities onto nodes when fileIndex grows.
+        // Never triggers architecture re-layout by itself.
+        executionOverlay: current.executionOverlay
+          ? remapExecutionOverlay(current.executionOverlay, graph.fileIndex ?? [])
+          : current.executionOverlay,
+      }))
       // Progress stream already toasts success on scan_completed; avoid duplicate
       // when the stream delivered first. Still toast if progress UI was idle.
       if (get().structureScanProgress?.status !== 'success') {
@@ -1983,15 +2190,30 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   stopAgentRun: async () => {
-    const { client, activeRunId, flowStatus, refineLoading, pushToast, locale } = get()
+    const { client, activeRunId, flowStatus, refineLoading, pushToast, locale, executionOverlay, graph } =
+      get()
     if (!activeRunId && flowStatus !== 'running' && !refineLoading) return
 
     const runId = activeRunId
     disposeActiveRunSubscriptions(get, set)
+    const settledOverlay =
+      runId && executionOverlay?.runId === runId
+        ? applyAgentRunEventToOverlay(
+            executionOverlay,
+            {
+              eventId: `local_stop_${runId}_${Date.now()}`,
+              runId,
+              timestamp: new Date().toISOString(),
+              type: 'run_cancelled',
+            },
+            graph?.fileIndex ?? [],
+          )
+        : executionOverlay
     set({
       flowStatus: 'idle',
       refineLoading: false,
       activeRunId: null,
+      executionOverlay: settledOverlay,
     })
 
     if (client && runId && typeof client.cancelAgentRun === 'function') {
@@ -2347,6 +2569,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             scope: answer.scope,
             result: answer,
           },
+          latestContextAssembly: answer.contextAssembly ?? null,
           messages: [
             ...current.messages,
             {
@@ -2415,6 +2638,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             scope: answer.scope,
             result: answer,
           },
+          latestContextAssembly: answer.contextAssembly ?? null,
           messages: [
             ...current.messages,
             {
@@ -2545,6 +2769,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
               scope: planScope,
               result: plan,
             },
+            latestContextAssembly: plan.contextAssembly ?? null,
             messages: [
               ...current.messages,
               {
@@ -2557,7 +2782,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             ],
           }))
         } else {
-          set((current) => ({
+          set({
             refineLoading: false,
             pendingPlan: plan,
             latestPlanTrace: {
@@ -2565,7 +2790,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
               scope: planScope,
               result: plan,
             },
-          }))
+            latestContextAssembly: plan.contextAssembly ?? null,
+          })
         }
       } catch (error) {
         set((current) => ({
@@ -2664,6 +2890,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       flowTransientTraces: [],
       flowCorrections: [],
       flowStatus: 'idle',
+      executionOverlay: null,
+      liveGraphFocusTaskId: null,
+        liveGraphPausedRunId: null,
       diffReady: false,
       diffReadyBanner: null,
       pendingChangesDrawerDismissedRunId: null,
@@ -2721,12 +2950,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
     try {
       const run = await client.confirmExecution(pendingRefinement.id)
+      const delivered = run as typeof run & {
+        contextAssembly?: import('@contracts/index').ContextAssembly
+      }
       if (!subscriptionProjectId || get().project?.projectId !== subscriptionProjectId) return
 
       pushToast({ type: 'info', message: getStoreMessage(locale, 'toast.agentRunning') })
       useChatSessionStore.getState().presentAgentFlow()
       set({
         refinementConfirmed: true,
+        latestContextAssembly: delivered.contextAssembly ?? get().latestContextAssembly,
         activeRunId: run.runId,
         flowSteps: [],
         flowActions: [],
@@ -2735,6 +2968,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         flowTransientTraces: [],
         flowCorrections: [],
         flowStatus: 'running',
+        executionOverlay: null,
+        liveGraphFocusTaskId: null,
+        liveGraphPausedRunId: null,
         agentFlowSubject: 'run',
         diffReady: false,
         generatedDiff: null,
@@ -2849,6 +3085,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
               if (!trace || trace.events.some((item) => item.eventId === childEvent.eventId)) {
                 return current
               }
+              const fileIndex = current.graph?.fileIndex ?? []
+              const overlayBase =
+                current.executionOverlay ??
+                emptyExecutionOverlay(rootRunId, childEvent.timestamp)
               return {
                 delegatedRunTraces: {
                   ...current.delegatedRunTraces,
@@ -2857,6 +3097,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
                     events: [...trace.events, childEvent],
                   },
                 },
+                // Feed child honesty into Live Graph without replacing parent apply/verify state.
+                executionOverlay: applyAgentRunEventToOverlay(
+                  overlayBase,
+                  childEvent,
+                  fileIndex,
+                ),
               }
             })
             if (childEvent.type === 'task_delegated') {
@@ -3230,6 +3476,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           plan.status === 'needs_clarification'
             ? { status: 'needs_clarification', scope: plan.scope, result: plan }
             : { status: 'complete', scope: plan.scope, result: plan },
+        latestContextAssembly: plan.contextAssembly ?? null,
       })
       if (plan.status === 'ready') {
         get().pushToast({
@@ -3324,6 +3571,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       delegatedRunTraces: {},
       flowTransientTraces: [],
       flowCorrections: [],
+      executionOverlay: null,
+      liveGraphFocusTaskId: null,
+        liveGraphPausedRunId: null,
       diffReady: false,
       generatedDiff: null,
       applyResult: null,
@@ -3717,6 +3967,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         flowTransientTraces: [],
         flowCorrections: [],
         flowStatus: 'idle',
+        executionOverlay: null,
+        liveGraphFocusTaskId: null,
+        liveGraphPausedRunId: null,
         agentFlowSubject: 'debug',
         activeRunId: null,
         runDisposable: null,
@@ -3745,9 +3998,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         flowTransientTraces: [],
         flowCorrections: [],
         flowStatus: 'running',
+        executionOverlay: null,
+        liveGraphFocusTaskId: null,
+        liveGraphPausedRunId: null,
         agentFlowSubject: 'run',
         selectedFlowStepId: null,
-      selectedActivityId: null,
+        selectedActivityId: null,
       })
 
       const disposable = client.streamAgentRun(run.runId, (event) => {

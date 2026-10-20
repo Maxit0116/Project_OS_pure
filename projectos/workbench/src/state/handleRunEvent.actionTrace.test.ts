@@ -27,14 +27,69 @@ function baseState(): RunEventStoreSlice {
     refinementConfirmed: false,
     selectedNodeId: null,
     highlightedFilePaths: [],
+    executionOverlay: null,
     diffReady: false,
     messages: [],
+    graph: null,
   }
 }
 
 function parse(event: unknown): AgentRunEvent {
   return AgentRunEventSchema.parse(event)
 }
+
+describe('Live Graph execution overlay', () => {
+  it('projects file_read onto mapped nodes from graph.fileIndex', () => {
+    const state = {
+      ...baseState(),
+      graph: {
+        fileIndex: [{ path: 'app/login/page.tsx', nodeIds: ['code_login'], type: 'page', imports: [], exports: [] }],
+      } as RunEventStoreSlice['graph'],
+    }
+    const action = parse({
+      eventId: 'evt_live_read',
+      runId: 'run_live',
+      timestamp: '2026-10-20T00:00:00.000Z',
+      type: 'file_read',
+      payload: { path: 'app/login/page.tsx', byteLength: 12, status: 'ok' },
+    })
+    const patch = reduceRunEventState(state, action)
+    expect(patch.executionOverlay?.activityIdsByNodeId.code_login?.length).toBe(1)
+    expect(patch.executionOverlay?.unmappedActivityIds).toEqual([])
+  })
+
+  it('merges child run events into the same overlay without wiping parent activity', () => {
+    const graph = {
+      fileIndex: [
+        { path: 'app/login/page.tsx', nodeIds: ['code_login'], type: 'page', imports: [], exports: [] },
+      ],
+    } as RunEventStoreSlice['graph']
+    const parent = parse({
+      eventId: 'evt_parent',
+      runId: 'run_parent',
+      timestamp: '2026-10-20T00:00:00.000Z',
+      type: 'file_read',
+      payload: { path: 'app/login/page.tsx', byteLength: 12, status: 'ok' },
+    })
+    const afterParent = reduceRunEventState({ ...baseState(), graph }, parent)
+    const child = parse({
+      eventId: 'evt_child',
+      runId: 'run_child',
+      timestamp: '2026-10-20T00:00:01.000Z',
+      type: 'diff_proposed',
+      payload: { files: [{ path: 'app/login/page.tsx', operation: 'modify' }] },
+    })
+    const afterChild = reduceRunEventState(
+      { ...baseState(), graph, executionOverlay: afterParent.executionOverlay! },
+      child,
+    )
+    expect(afterChild.executionOverlay?.runId).toBe('run_parent')
+    expect(afterChild.executionOverlay?.runIds).toEqual(
+      expect.arrayContaining(['run_parent', 'run_child']),
+    )
+    expect(afterChild.executionOverlay?.activityIdsByNodeId.code_login?.length).toBe(2)
+  })
+})
 
 describe('Agent Flow action trace state', () => {
   it('stores typed action events without disrupting legacy step events', () => {

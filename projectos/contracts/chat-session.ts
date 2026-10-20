@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { ContextAssemblySchema } from "./context-assembly.js";
+
 import {
   AgentAnswerResultSchema,
   AgentConversationScopeSchema,
@@ -145,6 +147,17 @@ export const ChatSessionSnapshotSchema = z
     activeCustomModeSkillId: z.string().min(1).nullable().optional(),
     customModePreviousChatMode: ChatSessionModeSchema.nullable().optional(),
     conversationCheckpoints: z.array(ConversationCheckpointSchema).optional(),
+    /** Hashes of the last delivered six-slot assembly. No slot bodies. */
+    latestContextAssembly: ContextAssemblySchema.optional(),
+  })
+  .strict();
+
+export const SessionCompactionSchema = z
+  .object({
+    hash: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    sourceMessageIds: z.array(z.string().min(1)),
+    summary: z.string().max(8_000),
+    createdAt: z.string().min(1),
   })
   .strict();
 
@@ -158,6 +171,7 @@ export const ChatSessionRecordSchema = z
     snapshot: ChatSessionSnapshotSchema.optional(),
     contextDigest: SessionContextDigestSchema.optional(),
     inheritedDigest: SessionContextDigestSchema.optional(),
+    compaction: SessionCompactionSchema.optional(),
   })
   .strict();
 
@@ -182,5 +196,6 @@ export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export type ChatSessionHead = z.infer<typeof ChatSessionHeadSchema>;
 export type LatestAskTrace = z.infer<typeof LatestAskTraceSchema>;
 export type ChatSessionSnapshot = z.infer<typeof ChatSessionSnapshotSchema>;
+export type SessionCompaction = z.infer<typeof SessionCompactionSchema>;
 export type ChatSessionRecord = z.infer<typeof ChatSessionRecordSchema>;
 export type ChatSessionIndex = z.infer<typeof ChatSessionIndexSchema>;

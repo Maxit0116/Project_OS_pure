@@ -5,12 +5,16 @@ import { join, relative } from "node:path";
 import type { PromptAttachment, PromptContextRef, ResolvedAttachmentPayload } from "../contracts/prompt-composer.js";
 import type { ContextPayload } from "../contracts/context.js";
 import { ProjectOSError } from "../errors.js";
+import { containsHighConfidenceSecret } from "./high-confidence-secret-patterns.js";
 import { getBranchDiff, getWorkingTreeDiff } from "./git-context-service.js";
+import { DefaultWorkspaceIgnorePolicy } from "./local-context-assembler.js";
 import { getProjectSkill } from "./skill-catalog-service.js";
 
 const EXPLICIT_MAX_CHARS = 32_000;
 const FOLDER_MAX_FILES = 40;
 const FOLDER_MAX_CHARS = 16_000;
+const FOLDER_EXCERPT_CHARS = 600;
+const FOLDER_MAX_FILE_BYTES = 200_000;
 const CHAT_MESSAGE_LIMIT = 12;
 
 export interface AttachmentResolverDeps {
@@ -28,6 +32,27 @@ export interface AttachmentResolverDeps {
     bodyText?: string;
   } | null>;
   getTerminalOutput?(tabId: string): string | undefined;
+}
+
+function folderBlock(
+  absolute: string,
+  path: string,
+  ignored: boolean,
+): { text: string; skipped: boolean } {
+  if (ignored) return { text: `- ${path} (ignored)`, skipped: true };
+  let size = 0;
+  try {
+    size = statSync(absolute).size;
+  } catch {
+    return { text: `- ${path} (unreadable)`, skipped: true };
+  }
+  if (size > FOLDER_MAX_FILE_BYTES) return { text: `- ${path} (oversize)`, skipped: true };
+  const bytes = readFileSync(absolute);
+  if (bytes.includes(0)) return { text: `- ${path} (binary)`, skipped: true };
+  const text = bytes.toString("utf8");
+  if (containsHighConfidenceSecret(text)) return { text: `- ${path} (secret)`, skipped: true };
+  const excerpt = text.slice(0, FOLDER_EXCERPT_CHARS);
+  return { text: `### ${path}\n\n${excerpt}`, skipped: false };
 }
 
 function sha256(content: string): string {
@@ -118,17 +143,33 @@ async function resolveRef(
         }
       };
       walk(abs, 0);
-      const manifest = files.map((path) => `- ${path}`).join("\n");
-      const truncated = truncateContent(manifest, FOLDER_MAX_CHARS);
+      const ignored = new DefaultWorkspaceIgnorePolicy().ignoredPaths(deps.workspaceRoot, files);
+      const blocks: string[] = [];
+      let used = 0;
+      let skipped = 0;
+      for (const path of files) {
+        const line = folderBlock(join(deps.workspaceRoot, path), path, ignored.has(path));
+        if (line.skipped) skipped += 1;
+        if (used + line.text.length + 2 > FOLDER_MAX_CHARS) {
+          const marker = `- ${path}`;
+          blocks.push(marker);
+          used += marker.length + 2;
+          skipped += 1;
+          continue;
+        }
+        blocks.push(line.text);
+        used += line.text.length + 2;
+      }
+      const manifest = blocks.join("\n\n");
       return {
         ref,
         label,
         source: "mention",
-        markdown: `# Folder: ${ref.path}\n\n${truncated.content ?? ""}`,
-        disposition: truncated.disposition,
-        byteLength: truncated.byteLength,
-        includedByteLength: truncated.includedByteLength,
-        omissionReason: truncated.omissionReason,
+        markdown: `# Folder: ${ref.path}\n\n${manifest}`,
+        disposition: skipped > 0 ? "truncated" : "exact",
+        byteLength: Buffer.byteLength(manifest, "utf8"),
+        includedByteLength: Buffer.byteLength(manifest, "utf8"),
+        ...(skipped > 0 ? { omissionReason: "folder_excerpt" } : {}),
       };
     }
     case "node": {
@@ -261,6 +302,63 @@ async function resolveRef(
         byteLength: truncated.byteLength,
         includedByteLength: truncated.includedByteLength,
         omissionReason: truncated.omissionReason,
+      };
+    }
+    case "rule": {
+      return {
+        ref,
+        label,
+        source: "mention",
+        disposition: "exact",
+        byteLength: 0,
+        includedByteLength: 0,
+        markdown: "",
+      };
+    }
+    case "selection": {
+      const content = await deps.readFile(ref.path);
+      const hash = sha256(content);
+      const start = Math.min(ref.startLine, ref.endLine);
+      const end = Math.max(ref.startLine, ref.endLine);
+      const submitted = ref.text;
+      const sliceMatches = submitted !== undefined
+        && ref.sliceHash !== undefined
+        && sha256(submitted) === ref.sliceHash;
+      if (submitted !== undefined && !sliceMatches) {
+        return {
+          ref,
+          label,
+          source: "mention",
+          disposition: "omitted",
+          byteLength: Buffer.byteLength(submitted, "utf8"),
+          includedByteLength: 0,
+          omissionReason: "stale_selection",
+        };
+      }
+      const fromDisk = hash === ref.contentHash;
+      if (!fromDisk && !sliceMatches) {
+        return {
+          ref,
+          label,
+          source: "mention",
+          disposition: "omitted",
+          byteLength: Buffer.byteLength(content, "utf8"),
+          includedByteLength: 0,
+          omissionReason: "stale_selection",
+        };
+      }
+      const slice = fromDisk
+        ? content.split(/\r?\n/u).slice(start - 1, end).join("\n")
+        : submitted ?? "";
+      const truncated = truncateContent(slice, EXPLICIT_MAX_CHARS);
+      const origin = fromDisk ? "disk slice" : "editor buffer";
+      return {
+        ref,
+        label,
+        source: "mention",
+        markdown: `# Selection ${ref.path}:${start}-${end} (${origin})\n\n${truncated.content ?? ""}`,
+        ...truncated,
+        ...(fromDisk ? {} : { omissionReason: "editor_buffer" }),
       };
     }
     case "skill": {

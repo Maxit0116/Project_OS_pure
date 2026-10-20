@@ -22,6 +22,8 @@ export function getProjectOsService(): ProjectOSLocalApi {
       sampleWorkspaceRoot: resolveSampleWorkspaceRoot(),
       secretStore: new FileSecretStore(userDataPath),
       verificationCommandApprovalStore: new FileVerificationCommandApprovalStore(userDataPath),
+      auditDirectory: join(userDataPath, 'governance-audit'),
+      requireDurableApprovals: true,
       localContextAssembler: new LocalContextAssembler(),
       verificationRunner: new VerificationRunner(),
       workspaceStore,

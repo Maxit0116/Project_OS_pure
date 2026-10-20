@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  trimLoopInstanceEvents,
   type LoopGraphDocument,
   type LoopHitlAnswer,
   type LoopInstance,
@@ -8,7 +9,14 @@ import {
   type LoopSpec,
   validateLoopSpecTopology,
 } from "../contracts/loop-graph.js";
+import {
+  LOOP_FILES_NOT_ATTACHED,
+  LOOP_VERIFICATION_NOT_RUN,
+  type LoopExecutionHooks,
+} from "./loop-execution.js";
 import { getLoopGraph, upsertLoopGraph } from "./loop-graph-service.js";
+
+export type { LoopExecutionHooks } from "./loop-execution.js";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -24,11 +32,68 @@ function pushEvent(
     type: event.type,
     nodeId: event.nodeId,
     message: event.message,
+    ...(event.agentRunId ? { agentRunId: event.agentRunId } : {}),
+    ...(event.evidenceId ? { evidenceId: event.evidenceId } : {}),
   };
   return {
     ...instance,
-    events: [...instance.events, nextEvent].slice(-500),
+    events: trimLoopInstanceEvents([...instance.events, nextEvent]),
     updatedAt: nextEvent.at,
+  };
+}
+
+function cloneSpecAsPendingDraft(spec: LoopSpec, reason: string): LoopSpec {
+  const copy = structuredClone(spec);
+  const assumptions = [
+    ...(copy.assumptions ?? []),
+    {
+      id: `assume_${randomUUID()}`,
+      text: reason.slice(0, 500),
+    },
+  ].slice(-30);
+  return {
+    ...copy,
+    version: `draft_${randomUUID()}`,
+    createdAt: nowIso(),
+    assumptions,
+  };
+}
+
+/**
+ * Record a spec revision that still needs approval.
+ * The running instance keeps `specVersion` and its current node set.
+ */
+function attachPendingSpecDraft(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  spec: LoopSpec,
+  reason: string,
+): { doc: LoopGraphDocument; instance: LoopInstance } {
+  const specDraft = cloneSpecAsPendingDraft(spec, reason);
+  const compiledAt = specDraft.createdAt;
+  const nextInstance = pushEvent(
+    {
+      ...instance,
+      status: "awaiting_hitl",
+      hitlQuestionIds: ["spec_revision"],
+    },
+    {
+      type: "awaiting_hitl",
+      nodeId: instance.cursorNodeId ?? undefined,
+      message: `Proposed spec draft ${specDraft.version}; running spec remains ${instance.specVersion}`,
+    },
+  );
+  return {
+    instance: nextInstance,
+    doc: {
+      ...doc,
+      pendingCompile: {
+        specDraft,
+        assumptions: specDraft.assumptions ?? [],
+        cycleGates: specDraft.cycleGates ?? [],
+        compiledAt,
+      },
+    },
   };
 }
 
@@ -65,20 +130,50 @@ function replaceInstance(doc: LoopGraphDocument, instance: LoopInstance): LoopGr
   };
 }
 
-/** Execute one scheduler tick: advance cursor, apply verify/feedback/HITL rules. */
+const STEPPABLE = new Set(["queued", "running", "awaiting_review"]);
+
+function failNode(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  nodeId: string,
+  message: string,
+): LoopGraphDocument {
+  const next = pushEvent(
+    {
+      ...instance,
+      status: "error",
+      errorMessage: message.slice(0, 1000),
+      completedAt: nowIso(),
+    },
+    { type: "node_failed", nodeId, message },
+  );
+  return replaceInstance(doc, next);
+}
+
+function isImplementRole(role: string): role is "implement" | "fix" {
+  return role === "implement" || role === "fix";
+}
+
+/**
+ * One scheduler tick. Updates only the instance (cursor, round, events, status).
+ * Approved specs stay frozen. A replan writes `pendingCompile` and waits;
+ * it does not switch `specVersion`.
+ * Implement and fix complete only from an Agent Run. Verify completes only from evidence.
+ */
 export function stepLoopInstance(
   doc: LoopGraphDocument,
   instanceId: string,
-  options?: { forceFailVerify?: boolean },
+  options?: { execution?: LoopExecutionHooks },
 ): LoopGraphDocument {
   const instance = doc.instances.find((item) => item.id === instanceId);
   if (!instance) throw new Error(`Instance not found: ${instanceId}`);
-  if (instance.status !== "running" && instance.status !== "queued") {
+  if (!STEPPABLE.has(instance.status)) {
     return doc;
   }
 
   const spec = findSpec(doc, instance.specVersion);
   if (!spec) throw new Error(`Spec not found: ${instance.specVersion}`);
+  const execution = options?.execution;
 
   let next = instance.status === "queued"
     ? pushEvent({ ...instance, status: "running" }, { type: "started" })
@@ -91,7 +186,15 @@ export function stepLoopInstance(
       { ...next, status: "error", errorMessage: `Missing node ${cursor}`, completedAt: nowIso() },
       { type: "errored", message: `Missing node ${cursor}` },
     );
-    return upsertable(doc, next);
+    return replaceInstance(doc, next);
+  }
+
+  if (isImplementRole(node.role)) {
+    return stepImplementNode(doc, next, spec, node, execution);
+  }
+
+  if (node.role === "decide" && next.events.at(-1)?.type === "hitl_resolved") {
+    return advanceCursor(doc, { ...next, cursorNodeId: cursor }, spec, cursor);
   }
 
   next = pushEvent({ ...next, cursorNodeId: cursor }, {
@@ -109,86 +212,213 @@ export function stepLoopInstance(
       },
       { type: "awaiting_hitl", nodeId: cursor, message: "Decision required" },
     );
-    return upsertable(doc, next);
+    return replaceInstance(doc, next);
   }
 
   if (node.role === "verify") {
-    const failed = options?.forceFailVerify === true;
-    if (failed) {
-      const fb = feedbackTarget(spec);
-      const round = next.round + 1;
-      if (!fb || fb.from !== node.id) {
-        next = pushEvent(
-          {
-            ...next,
-            status: "error",
-            errorMessage: "Verification failed without feedback edge",
-            completedAt: nowIso(),
-          },
-          { type: "node_failed", nodeId: cursor, message: "Verification failed" },
-        );
-        return upsertable(doc, next);
-      }
-      if (round > spec.stopPolicy.maxRounds) {
-        next = pushEvent(
-          {
-            ...next,
-            status: "awaiting_hitl",
-            round,
-            hitlQuestionIds: ["stop_policy"],
-          },
-          {
-            type: "awaiting_hitl",
-            nodeId: cursor,
-            message: `Stop policy reached (${spec.stopPolicy.maxRounds} rounds)`,
-          },
-        );
-        return upsertable(doc, next);
-      }
-      next = pushEvent(
+    return stepVerifyNode(doc, next, spec, node.id, execution);
+  }
+
+  return failNode(doc, next, cursor, `Unsupported loop role ${node.role}`);
+}
+
+function stepImplementNode(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  spec: LoopSpec,
+  node: LoopSpec["nodes"][number],
+  execution: LoopExecutionHooks | undefined,
+): LoopGraphDocument {
+  const polling = instance.activeRunId && instance.activeRunNodeId === node.id;
+  let next = polling
+    ? { ...instance, cursorNodeId: node.id }
+    : pushEvent({ ...instance, cursorNodeId: node.id }, {
+        type: "node_entered",
+        nodeId: node.id,
+        message: node.goal,
+      });
+
+  let run = polling && next.activeRunId
+    ? execution?.readRun(next.activeRunId) ?? null
+    : null;
+
+  if (!polling) {
+    const leaf = execution?.leaf ?? null;
+    if (!leaf || !execution) {
+      return failNode(doc, next, node.id, LOOP_FILES_NOT_ATTACHED);
+    }
+    try {
+      run = execution.startAgentRun({
+        specNodeId: node.id,
+        role: node.role as "implement" | "fix",
+        featureNodeId: leaf.featureNodeId,
+        filePath: leaf.filePath,
+        goal: node.goal,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : LOOP_FILES_NOT_ATTACHED;
+      return failNode(doc, next, node.id, message);
+    }
+    next = {
+      ...next,
+      activeRunId: run.runId,
+      activeRunNodeId: node.id,
+      featureNodeId: leaf.featureNodeId,
+    };
+  }
+
+  if (!run || !next.activeRunId) {
+    return failNode(doc, next, node.id, LOOP_FILES_NOT_ATTACHED);
+  }
+
+  if (run.status === "queued" || run.status === "running") {
+    return replaceInstance(doc, { ...next, status: "running" });
+  }
+  if (run.status === "interrupted") {
+    return replaceInstance(doc, pushEvent(
+      { ...next, status: "paused" },
+      {
+        type: "paused",
+        nodeId: node.id,
+        message: `Agent run ${run.runId} interrupted`,
+        agentRunId: run.runId,
+      },
+    ));
+  }
+  if (run.status === "awaiting_review") {
+    return replaceInstance(doc, { ...next, status: "awaiting_review" });
+  }
+  if (run.status === "complete" && run.applySucceeded) {
+    next = pushEvent(next, {
+      type: "node_completed",
+      nodeId: node.id,
+      message: `Agent run ${run.runId} applied`,
+      agentRunId: run.runId,
+    });
+    return advanceCursor(doc, next, spec, node.id);
+  }
+
+  return failNode(
+    doc,
+    next,
+    node.id,
+    run.status === "cancelled"
+      ? `Agent run ${run.runId} cancelled`
+      : `Agent run ${run.runId} did not apply`,
+  );
+}
+
+function stepVerifyNode(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  spec: LoopSpec,
+  nodeId: string,
+  execution: LoopExecutionHooks | undefined,
+): LoopGraphDocument {
+  const evidence = instance.activeRunId
+    ? execution?.readEvidence(instance.activeRunId) ?? null
+    : null;
+  if (!evidence || evidence.status === "not_run" || evidence.runId !== instance.activeRunId) {
+    const next = pushEvent(
+      {
+        ...instance,
+        status: "awaiting_hitl",
+        hitlQuestionIds: ["verification_not_run"],
+      },
+      {
+        type: "awaiting_hitl",
+        nodeId,
+        message: LOOP_VERIFICATION_NOT_RUN,
+        ...(evidence ? { evidenceId: evidence.id } : {}),
+      },
+    );
+    return replaceInstance(doc, next);
+  }
+
+  if (evidence.status === "failed" && spec.retryPolicy.onFailure === "replan") {
+    const proposed = attachPendingSpecDraft(
+      doc,
+      instance,
+      spec,
+      "Verification failed and retry policy is replan. Approve a new spec version before the instance can follow different steps.",
+    );
+    return replaceInstance(proposed.doc, proposed.instance);
+  }
+
+  if (evidence.status === "failed") {
+    const fb = feedbackTarget(spec);
+    const round = instance.round + 1;
+    if (!fb || fb.from !== nodeId) {
+      return failNode(doc, instance, nodeId, "Verification failed without feedback edge");
+    }
+    const target = spec.nodes.find((item) => item.id === fb.to);
+    if (!target || !isImplementRole(target.role)) {
+      return failNode(doc, instance, nodeId, "Feedback target is not an implement node");
+    }
+    if (round > spec.stopPolicy.maxRounds) {
+      const next = pushEvent(
         {
-          ...next,
+          ...instance,
+          status: "awaiting_hitl",
           round,
-          cursorNodeId: fb.to,
-          attemptCounts: {
-            ...next.attemptCounts,
-            [fb.to]: (next.attemptCounts[fb.to] ?? 0) + 1,
-          },
+          hitlQuestionIds: ["stop_policy"],
         },
         {
-          type: "feedback_taken",
-          nodeId: cursor,
-          message: `Retry via feedback to ${fb.to} (round ${round})`,
+          type: "awaiting_hitl",
+          nodeId,
+          message: `Stop policy reached (${spec.stopPolicy.maxRounds} rounds)`,
+          evidenceId: evidence.id,
         },
       );
-      return upsertable(doc, next);
+      return replaceInstance(doc, next);
     }
-
-    next = pushEvent({ ...next }, {
-      type: "node_completed",
-      nodeId: cursor,
-      message: "Verification passed",
-    });
-  } else {
-    // implement / fix / unknown: mark complete for MVP deterministic runner
-    next = pushEvent({ ...next }, {
-      type: "node_completed",
-      nodeId: cursor,
-      message: `Completed ${node.role}`,
-    });
+    const next = pushEvent(
+      {
+        ...instance,
+        round,
+        cursorNodeId: fb.to,
+        activeRunId: undefined,
+        activeRunNodeId: undefined,
+        attemptCounts: {
+          ...instance.attemptCounts,
+          [fb.to]: (instance.attemptCounts[fb.to] ?? 0) + 1,
+        },
+      },
+      {
+        type: "feedback_taken",
+        nodeId,
+        message: `Retry via feedback to ${fb.to} (round ${round})`,
+        evidenceId: evidence.id,
+      },
+    );
+    return replaceInstance(doc, next);
   }
 
+  const next = pushEvent(instance, {
+    type: "node_completed",
+    nodeId,
+    message: "Verification passed",
+    evidenceId: evidence.id,
+    ...(instance.activeRunId ? { agentRunId: instance.activeRunId } : {}),
+  });
+  return advanceCursor(doc, next, spec, nodeId);
+}
+
+function advanceCursor(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  spec: LoopSpec,
+  cursor: string,
+): LoopGraphDocument {
   const nextId = dependsOutgoing(spec).get(cursor);
   if (!nextId) {
-    next = pushEvent(
-      { ...next, status: "complete", completedAt: nowIso(), cursorNodeId: cursor },
+    const next = pushEvent(
+      { ...instance, status: "complete", completedAt: nowIso(), cursorNodeId: cursor },
       { type: "completed", message: "Loop complete" },
     );
-    return upsertable(doc, next);
+    return replaceInstance(doc, next);
   }
-
-  next = { ...next, cursorNodeId: nextId, updatedAt: nowIso() };
-  return upsertable(doc, next);
+  return replaceInstance(doc, { ...instance, cursorNodeId: nextId, updatedAt: nowIso() });
 }
 
 function upsertable(doc: LoopGraphDocument, instance: LoopInstance): LoopGraphDocument {
@@ -199,6 +429,7 @@ export function startLoopInstance(
   workspaceRoot: string,
   loopId: string,
   specVersion?: string,
+  execution?: LoopExecutionHooks,
 ): LoopGraphDocument {
   const doc = getLoopGraph(workspaceRoot, loopId);
   if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
@@ -216,7 +447,8 @@ export function startLoopInstance(
     item.status === "queued" ||
     item.status === "running" ||
     item.status === "paused" ||
-    item.status === "awaiting_hitl",
+    item.status === "awaiting_hitl" ||
+    item.status === "awaiting_review",
   );
   if (active) {
     throw new Error("A loop instance is already active");
@@ -239,7 +471,7 @@ export function startLoopInstance(
     ...doc,
     instances: [...doc.instances, instance],
   };
-  nextDoc = stepLoopInstance(nextDoc, instance.id);
+  nextDoc = stepLoopInstance(nextDoc, instance.id, { execution });
   return upsertLoopGraph(workspaceRoot, nextDoc);
 }
 
@@ -252,7 +484,11 @@ export function pauseLoopInstance(
   if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
   const instance = doc.instances.find((item) => item.id === instanceId);
   if (!instance) throw new Error(`Instance not found: ${instanceId}`);
-  if (instance.status !== "running" && instance.status !== "queued") {
+  if (
+    instance.status !== "running" &&
+    instance.status !== "queued" &&
+    instance.status !== "awaiting_review"
+  ) {
     return doc;
   }
   const next = pushEvent({ ...instance, status: "paused" }, {
@@ -266,6 +502,7 @@ export function resumeLoopInstance(
   workspaceRoot: string,
   loopId: string,
   instanceId: string,
+  execution?: LoopExecutionHooks,
 ): LoopGraphDocument {
   const doc = getLoopGraph(workspaceRoot, loopId);
   if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
@@ -277,7 +514,7 @@ export function resumeLoopInstance(
     message: "Resumed by user",
   });
   let nextDoc = replaceInstance(doc, next);
-  nextDoc = stepLoopInstance(nextDoc, instanceId);
+  nextDoc = stepLoopInstance(nextDoc, instanceId, { execution });
   return upsertLoopGraph(workspaceRoot, nextDoc);
 }
 
@@ -286,6 +523,7 @@ export function resolveLoopHitl(
   loopId: string,
   instanceId: string,
   answers: LoopHitlAnswer[],
+  execution?: LoopExecutionHooks,
 ): LoopGraphDocument {
   const doc = getLoopGraph(workspaceRoot, loopId);
   if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
@@ -323,7 +561,7 @@ export function resolveLoopHitl(
   }
 
   let nextDoc = replaceInstance(doc, next);
-  nextDoc = stepLoopInstance(nextDoc, instanceId);
+  nextDoc = stepLoopInstance(nextDoc, instanceId, { execution });
   return upsertLoopGraph(workspaceRoot, nextDoc);
 }
 
@@ -341,10 +579,10 @@ export function advanceLoopInstance(
   workspaceRoot: string,
   loopId: string,
   instanceId: string,
-  options?: { forceFailVerify?: boolean },
+  execution?: LoopExecutionHooks,
 ): LoopGraphDocument {
   const doc = getLoopGraph(workspaceRoot, loopId);
   if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
-  const next = stepLoopInstance(doc, instanceId, options);
+  const next = stepLoopInstance(doc, instanceId, { execution });
   return upsertLoopGraph(workspaceRoot, next);
 }

@@ -13,6 +13,7 @@ import { z } from "zod";
 export const HarnessToolNameSchema = z.enum([
   "read_file",
   "list_files",
+  "git_status",
   "get_context",
   "grep_workspace",
   "generate_diff",

@@ -7,6 +7,7 @@ import type {
 } from "../../contracts/tool-policy.js";
 import { HarnessToolNameSchema } from "../../contracts/tool-policy.js";
 import { ProjectOSError } from "../../errors.js";
+import { deniedToolResult, knownHarnessTool } from "./tool-result.js";
 import { resolvePermissionRules } from "./permissions.js";
 
 /** Tools that require an explicit project permission allow (H3). */
@@ -179,11 +180,16 @@ export function evaluateToolCall(
     );
   }
 
-  if (tool === "list_files") {
+  if (tool === "list_files" || tool === "git_status") {
     if (ruleEffect === "ask") {
-      return ask(tool, "Project permissions require approval for list_files");
+      return ask(tool, `Project permissions require approval for ${tool}`);
     }
-    return allow(tool, "Listing semantic file index is read-only metadata");
+    return allow(
+      tool,
+      tool === "git_status"
+        ? "Git status is read-only repository metadata"
+        : "Listing semantic file index is read-only metadata",
+    );
   }
 
   if (READ_PATH_TOOLS.has(tool)) {
@@ -230,6 +236,7 @@ export function assertToolAllowed(
   if (decision.decision === "allow") {
     return decision;
   }
+  const harnessTool = knownHarnessTool(decision.tool);
   throw new ProjectOSError("tool_policy_denied", decision.reason, {
     details: {
       tool: decision.tool,
@@ -238,6 +245,9 @@ export function assertToolAllowed(
       allowedReadPaths: context.allowedReadPaths,
       allowedWritePaths: context.allowedWritePaths,
       writeCapability: context.writeCapability,
+      ...(harnessTool
+        ? { toolResult: deniedToolResult(harnessTool, decision.reason) }
+        : {}),
     },
   });
 }
