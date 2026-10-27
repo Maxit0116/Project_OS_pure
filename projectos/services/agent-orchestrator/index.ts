@@ -1,3 +1,9 @@
+import {
+  resolveModelExecution,
+  runExecutorMetadata,
+  type ModelExecutionSnapshot,
+} from "../harness/executor-selection.js";
+import type { ExecutorSelection } from "../../contracts/executor-selection.js";
 import { mkdirSync, appendFileSync, readFileSync } from "node:fs";
 import { z } from "zod";
 
@@ -197,6 +203,8 @@ export interface OrchestratorRunState {
 }
 
 export interface CreateOrchestratorRunOptions {
+  executorSelection?: ExecutorSelection;
+  modelExecution?: ModelExecutionSnapshot;
   runId?: string;
   localContext?: AgentContextBundle | CreateFileContextBundle;
   executionPolicy?: ChangeExecutionPolicy;
@@ -836,13 +844,21 @@ export class AgentOrchestrator {
         "No agent profile is configured",
       );
     }
-    const modelProfileId =
-      resolvedProfile.modelProfileId ||
+    const parent = options.parentRunId ? this.runs.get(options.parentRunId) : undefined;
+    const inherited = parent?.modelProfile
+      ? { profile: parent.modelProfile, thinkingDepth: parent.thinkingDepth }
+      : undefined;
+    const fallbackProfileId = resolvedProfile.modelProfileId ||
       settings.execution.defaultModelProfileId ||
-      settings.modelProfiles.find((profile) => profile.isDefault)?.id;
-    const modelProfile = modelProfileId
-      ? settings.modelProfiles.find((profile) => profile.id === modelProfileId)
-      : settings.modelProfiles[0];
+      settings.modelProfiles.find((profile) => profile.isDefault)?.id ||
+      settings.modelProfiles[0]?.id;
+    const modelExecution = cloneJson(
+      inherited ??
+        options.modelExecution ??
+        resolveModelExecution(settings, options.executorSelection, fallbackProfileId) ??
+        null,
+    );
+    const modelProfile = modelExecution?.profile;
 
     const harnessMode = kind === "debug_fix" ? "debug" : "change";
     const modelDelta = modelHarnessSystemDelta(
@@ -932,6 +948,7 @@ export class AgentOrchestrator {
       ...(options.parentRunId ? { parentRunId: options.parentRunId } : {}),
       ...(options.rootRunId ? { rootRunId: options.rootRunId } : {}),
       role,
+      ...(modelExecution ? { executor: runExecutorMetadata(modelExecution) } : {}),
       startedAt: new Date().toISOString(),
     });
 
@@ -941,7 +958,8 @@ export class AgentOrchestrator {
       transientTraces: [],
       refinement,
       agentProfile,
-      thinkingDepth: settings.execution.thinkingDepth ?? "medium",
+      thinkingDepth:
+        modelExecution?.thinkingDepth ?? settings.execution.thinkingDepth ?? "medium",
       executionPolicy: options.executionPolicy ?? "review_first",
       memoryInjection,
       contextAssembly: assembled.assembly,

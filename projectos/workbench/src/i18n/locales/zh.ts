@@ -740,6 +740,12 @@ const zh = {
     },
   },
   composer: {
+    searchModels: '搜索模型…',
+    noModelsFound: '没有匹配的模型',
+    manageModels: '管理模型',
+    modelPickerLabel: '选择模型',
+    modelChoiceHelp: '用于下一次请求；正在进行的任务保留原模型。',
+    savingModel: '正在选择…',
     empty: '没有匹配的上下文',
     modelSection: '模型',
     untitledChat: '未命名对话',

@@ -1,3 +1,4 @@
+import { resolveModelExecution, type ModelExecutionSnapshot } from "./harness/executor-selection.js";
 import type { AgentRun } from "../contracts/agent-run.js";
 import type { CreateFileContextBundle } from "../contracts/create-file-context.js";
 import type {
@@ -471,6 +472,8 @@ interface FrozenTurnDelivery {
 }
 
 interface StoredRefinement {
+  /** null freezes fixture routing; undefined belongs to legacy refinements. */
+  modelExecution?: ModelExecutionSnapshot | null;
   refinement: PromptRefinement;
   projectId: string;
   requestedScope: RequestedLocalScope;
@@ -650,6 +653,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly registeredRunsByRunId = new Map<string, RegisteredScenarioRun>();
   private readonly refinementsById = new Map<string, StoredRefinement>();
   private readonly plansById = new Map<string, ImplementationPlan>();
+  private readonly planExecutions = new Map<string, ModelExecutionSnapshot>();
+  private readonly debugExecutions = new Map<string, ModelExecutionSnapshot>();
   private readonly debugSessionsById = new Map<string, DebugSessionStoreState>();
   private readonly activeOrchestratorRuns = new Map<string, ActiveOrchestratorRun>();
   private readonly pendingOrchestratorStarts = new Map<
@@ -1747,8 +1752,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async askAgent(request: AgentAskRequest): Promise<AgentAnswerResult> {
     const parsedRequest = AgentAskRequestSchema.parse(request);
     const workspace = this.requireLoadedWorkspace(parsedRequest.projectId);
+    const modelExecution = resolveModelExecution(workspace.settings, parsedRequest.executorSelection);
+    const profile = modelExecution?.profile;
     const memoryTurn = this.beginMemoryTurn(workspace, parsedRequest.question);
-    const profile = this.settingsService.resolveModelProfile(workspace.settings);
     if (!profile) {
       throw new ProjectOSError(
         "agent_answer_unavailable",
@@ -1872,7 +1878,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       question: parsedRequest.question,
       localContext: augmented.bundle,
       profile,
-      thinkingDepth: workspace.settings.execution.thinkingDepth,
+      thinkingDepth: modelExecution?.thinkingDepth,
       responseLanguage,
       supplementalMarkdown,
       ...(instructionAppendix.trim()
@@ -2245,7 +2251,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async createPlan(request: CreatePlanRequest): Promise<ImplementationPlan> {
     const parsedRequest = CreatePlanRequestSchema.parse(request);
     const workspace = this.requireLoadedWorkspace(parsedRequest.projectId);
-    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    const existing = parsedRequest.existingPlanId ? this.plansById.get(parsedRequest.existingPlanId) : undefined;
+    if (parsedRequest.existingPlanId && (!existing || existing.projectId !== parsedRequest.projectId)) {
+      throw new ProjectOSError("plan_not_found", "The requested plan does not belong to this project");
+    }
+    // Validate explicit choices even on continuation; a continuation keeps its original binding.
+    if (parsedRequest.executorSelection) resolveModelExecution(workspace.settings, parsedRequest.executorSelection);
+    const modelExecution =
+      (existing ? this.planExecutions.get(existing.id) : undefined) ??
+      resolveModelExecution(workspace.settings, parsedRequest.executorSelection);
+    const profile = modelExecution?.profile;
     if (!profile) {
       throw new ProjectOSError(
         "plan_generation_failed",
@@ -2262,9 +2277,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       parsedRequest,
       localContext,
     );
-    const stored = parsedRequest.existingPlanId
-      ? this.plansById.get(parsedRequest.existingPlanId)
-      : undefined;
     const planExploration = exploreForAskQuestion(workspace, parsedRequest.objective, {
       allowedReadPaths: localContext.allowedReadPaths,
       maxRounds: 2,
@@ -2317,7 +2329,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       objective: parsedRequest.objective,
       localContext: augmented.bundle,
       profile,
-      thinkingDepth: workspace.settings.execution.thinkingDepth,
+      thinkingDepth: modelExecution?.thinkingDepth,
       clarifyingAnswers: parsedRequest.clarifyingAnswers,
       existingQuestions: parsedRequest.existingQuestions,
       supplementalMarkdown: [
@@ -2335,7 +2347,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ...(parsedRequest.existingPlanId
         ? {
             existingPlanId: parsedRequest.existingPlanId,
-            existingCreatedAt: stored?.createdAt,
+            existingCreatedAt: existing?.createdAt,
           }
         : {}),
     });
@@ -2347,6 +2359,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       contextAssembly: planAssembly.assembly,
     });
     this.persistPlan(workspace, plan);
+    if (modelExecution) this.planExecutions.set(plan.id, cloneJson(modelExecution));
     await this.rememberContextAssembly(
       parsedRequest.projectId,
       parsedRequest.chatSessionId,
@@ -2470,12 +2483,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const nodeId = stored.scope.kind === "global" ? undefined : stored.scope.nodeId;
     const filePath =
       stored.scope.kind === "file" ? stored.scope.selectedFilePath : undefined;
-    const refinement = await this.refinePrompt({
+    const refinement = await this.refinePromptWithExecution({
       projectId: stored.projectId,
       nodeId,
       filePath,
       rawPrompt,
-    });
+    }, this.planExecutions.get(planId));
     const withPlanSource: PromptRefinement = {
       ...refinement,
       sourcePlanId: planId,
@@ -2498,6 +2511,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async startDebugSession(request: StartDebugSessionRequest): Promise<DebugSession> {
     const parsedRequest = StartDebugSessionRequestSchema.parse(request);
     const workspace = this.requireLoadedWorkspace(parsedRequest.projectId);
+    const modelExecution = resolveModelExecution(workspace.settings, parsedRequest.executorSelection);
     const harnessRecord = parsedRequest.rawError
       ? [...workspace.harnessRecords.values()].find((candidate) =>
           harnessRecordMatchesRawError(candidate, parsedRequest.rawError!),
@@ -2516,7 +2530,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     );
     if (!harnessRecord) {
       session = prepareManualDebugSession(session, scopeFiles);
-      const profile = this.settingsService.resolveModelProfile(workspace.settings);
+      const profile = modelExecution?.profile;
       if (profile) {
         try {
           const { localContext } = await this.resolveConversationContext(
@@ -2538,7 +2552,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             bugDescription: parsedRequest.bugDescription,
             localContext,
             profile,
-            thinkingDepth: workspace.settings.execution.thinkingDepth,
+            thinkingDepth: modelExecution?.thinkingDepth,
             supplementalMarkdown: exploration.supplementalMarkdown,
           });
           session = {
@@ -2556,7 +2570,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
     let backupByFile = new Map<string, string>();
     if (session.phase === "instrument" && scopeFiles.length > 0) {
-      const profile = this.settingsService.resolveModelProfile(workspace.settings);
+      const profile = modelExecution?.profile;
       const specs = profile
         ? await this.debugHypothesisService.proposeInstrumentationSpecs({
             projectId: parsedRequest.projectId,
@@ -2564,7 +2578,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             scopeFiles,
             workspaceRoot: workspace.workspaceRoot,
             profile,
-            thinkingDepth: workspace.settings.execution.thinkingDepth,
+            thinkingDepth: modelExecution?.thinkingDepth,
           })
         : buildInstrumentationSpecs(session, scopeFiles);
       const applied = debugInstrumentationService.apply({
@@ -2586,6 +2600,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         backupByFile,
       });
     }
+    if (modelExecution) this.debugExecutions.set(session.sessionId, cloneJson(modelExecution));
     this.persistDebugSession(workspace, session);
     return DebugSessionSchema.parse(session);
   }
@@ -2606,7 +2621,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       phase: "analyze",
       updatedAt: new Date().toISOString(),
     };
-    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    const modelExecution =
+      this.debugExecutions.get(stored.session.sessionId) ??
+      resolveModelExecution(workspace.settings);
+    const profile = modelExecution?.profile;
     if (profile && collected.length > 0) {
       try {
         const analyzed = await this.debugHypothesisService.chooseRootCauseFromLogs({
@@ -2614,7 +2632,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           session,
           logs: collected,
           profile,
-          thinkingDepth: workspace.settings.execution.thinkingDepth,
+          thinkingDepth: modelExecution?.thinkingDepth,
         });
         session = {
           ...session,
@@ -2695,7 +2713,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         filePath,
         scope.kind !== "global" ? scope.nodeId : undefined,
       );
-      const refinement = await this.refinePrompt({
+      const refinement = await this.refinePromptWithExecution({
         projectId: stored.session.projectId,
         nodeId: ownerScope.nodeId,
         filePath: ownerScope.selectedFilePath,
@@ -2703,7 +2721,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ...(stored.session.chatSessionId
           ? { chatSessionId: stored.session.chatSessionId }
           : {}),
-      });
+      }, this.debugExecutions.get(stored.session.sessionId));
       run = await this.confirmExecution(refinement.id);
     }
 
@@ -2742,18 +2760,28 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   }
 
   async refinePrompt(request: PromptRefineRequest): Promise<PromptRefinement> {
+    return this.refinePromptWithExecution(request);
+  }
+
+  private async refinePromptWithExecution(
+    request: PromptRefineRequest,
+    preservedExecution?: ModelExecutionSnapshot,
+  ): Promise<PromptRefinement> {
     const workspace = this.requireLoadedWorkspace(request.projectId);
+    const selectedExecution =
+      preservedExecution ??
+      resolveModelExecution(workspace.settings, request.executorSelection);
     const memoryTurn = this.beginMemoryTurn(workspace, request.rawPrompt);
     const responseLanguage = resolveResponseLanguage(request.rawPrompt);
     const registry = this.registriesByProjectId.get(request.projectId);
-    const route = pickRefinementBackend({
+    const route = preservedExecution ? { forceFixture: false, backend: "model" as const } : pickRefinementBackend({
       request,
       settings: workspace.settings,
     });
 
     let modelFallback: PromptRefinement["fallback"];
     if (!route.forceFixture && route.backend === "model") {
-      const profile = this.settingsService.resolveModelProfile(workspace.settings);
+      const profile = selectedExecution?.profile;
       if (profile) {
         try {
           const context = request.nodeId
@@ -2771,7 +2799,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             request,
             ...(context ? { context } : {}),
             profile,
-            thinkingDepth: workspace.settings.execution.thinkingDepth,
+            thinkingDepth: selectedExecution?.thinkingDepth,
             responseLanguage,
             supplementalMarkdown,
             knownNodeIds: new Set(workspace.graph.nodes.map((node) => node.id)),
@@ -2781,7 +2809,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             executionPolicy: workspace.settings.execution.changeExecutionPolicy,
             ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
           };
-          await this.storeRefinement(request, refinement, responseLanguage, memoryTurn.injection);
+          await this.storeRefinement(
+            request,
+            refinement,
+            responseLanguage,
+            memoryTurn.injection,
+            route.forceFixture ? null : selectedExecution ?? null,
+          );
           return refinement;
         } catch (error) {
           console.error("[projectos] model refinement failed", error);
@@ -2813,7 +2847,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           ...baseRefinement,
           ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
         };
-    await this.storeRefinement(request, refinement, responseLanguage, memoryTurn.injection);
+    await this.storeRefinement(
+      request,
+      refinement,
+      responseLanguage,
+      memoryTurn.injection,
+      route.forceFixture ? null : selectedExecution ?? null,
+    );
     return refinement;
   }
 
@@ -2823,7 +2863,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const { refinement, projectId } = stored;
         const projectWorkspace = this.workspacesByProjectId.get(projectId);
       if (projectWorkspace) {
-        const usesModel = agentRunUsesModel(projectWorkspace.settings);
+        const usesModel = stored.modelExecution === undefined
+          ? agentRunUsesModel(projectWorkspace.settings)
+          : stored.modelExecution !== null;
         const fileLiveContext = usesModel && stored.requestedScope.selectedFilePath
           ? this.prepareLiveRunContext(projectWorkspace, stored)
           : undefined;
@@ -2883,6 +2925,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
               "feature_change",
               {
                 runId,
+                ...(stored.modelExecution ? { modelExecution: cloneJson(stored.modelExecution) } : {}),
                 ...(isGlobalPlan
                   ? { globalContext: globalContext! }
                   : { localContext: isNodePlan ? nodeContext! : fileLiveContext!.bundle }),
@@ -5897,6 +5940,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         this.refinementsById.delete(refinementId);
       }
     }
+    for (const [planId, plan] of this.plansById.entries()) {
+      if (plan.projectId === projectId) {
+        this.planExecutions.delete(planId);
+      }
+    }
+    for (const [sessionId, stored] of this.debugSessionsById.entries()) {
+      if (stored.session.projectId === projectId) {
+        this.debugExecutions.delete(sessionId);
+      }
+    }
     for (const [runId, authorization] of this.boundRunAuthorizations.entries()) {
       if (authorization.projectId === projectId) {
         this.boundRunAuthorizations.delete(runId);
@@ -6102,6 +6155,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     refinement: PromptRefinement,
     responseLanguage: ResolvedResponseLanguage,
     memoryInjection?: MemoryInjectionSnapshot,
+    modelExecution?: ModelExecutionSnapshot | null,
   ): Promise<void> {
     const previous = this.refinementsById.get(refinement.id);
     const injection = memoryInjection ?? previous?.memoryInjection;
@@ -6113,6 +6167,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const chatSessionId = request.chatSessionId ?? previous?.chatSessionId;
     this.refinementsById.set(refinement.id, {
       refinement,
+      ...(modelExecution !== undefined
+        ? { modelExecution: cloneJson(modelExecution) }
+        : previous?.modelExecution !== undefined
+          ? { modelExecution: cloneJson(previous.modelExecution) }
+          : {}),
       projectId: request.projectId,
       requestedScope: {
         nodeId: request.nodeId,

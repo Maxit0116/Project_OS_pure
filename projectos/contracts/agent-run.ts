@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RunExecutorSchema } from "./executor-selection.js";
 
 export const AgentRunKindSchema = z.enum([
   "feature_change",
@@ -82,6 +83,7 @@ export const AgentRunSchema = z
     parentRunId: z.string().min(1).optional(),
     rootRunId: z.string().min(1).optional(),
     role: AgentRunRoleSchema.optional(),
+    executor: RunExecutorSchema.optional(),
     startedAt: z.string(),
     completedAt: z.string().optional(),
   })

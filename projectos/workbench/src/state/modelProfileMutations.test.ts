@@ -23,6 +23,8 @@ afterEach(() => {
     client: originalClient,
     project: null,
     settings: null,
+    selectedModelProfileId: null,
+    modelSelectionPending: false,
     messages: [],
     toasts: [],
     pendingRefinement: null,
@@ -37,6 +39,32 @@ afterEach(() => {
 })
 
 describe('model profile mutations', () => {
+  it('keeps the previous selection when persisting a new chat model fails', async () => {
+    const workspace = createMockSampleWorkspace()
+    const settings = settingsWithModels(['model-a', 'model-b'])
+    const updateSettings = vi.fn(async () => {
+      throw new Error('settings unavailable')
+    })
+    useWorkbenchStore.setState({
+      client: { updateSettings } as unknown as ProjectOSApi,
+      project: workspace.project,
+      settings,
+      selectedModelProfileId: 'model-a',
+      modelSelectionPending: false,
+      locale: 'en',
+      error: null,
+      toasts: [],
+    })
+
+    await expect(useWorkbenchStore.getState().selectChatModel('model-b')).resolves.toBe(false)
+
+    expect(useWorkbenchStore.getState()).toMatchObject({
+      selectedModelProfileId: 'model-a',
+      modelSelectionPending: false,
+      error: 'settings unavailable',
+    })
+  })
+
   it('upserts an edited profile without duplicating its id and preserves a blank credential', async () => {
     const settings = settingsWithModels(['model-a'])
     const calls: string[] = []

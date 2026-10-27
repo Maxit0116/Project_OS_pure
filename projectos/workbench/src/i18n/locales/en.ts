@@ -740,6 +740,12 @@ const en = {
     },
   },
   composer: {
+    searchModels: 'Search models…',
+    noModelsFound: 'No matching models',
+    manageModels: 'Manage models',
+    modelPickerLabel: 'Choose model',
+    modelChoiceHelp: 'Applies to your next request. Running work keeps its model.',
+    savingModel: 'Selecting…',
     empty: 'No matching context',
     modelSection: 'Model',
     untitledChat: 'Untitled chat',

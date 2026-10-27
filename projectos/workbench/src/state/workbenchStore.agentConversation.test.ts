@@ -23,6 +23,9 @@ afterEach(() => {
     project: null,
     graph: null,
     tree: null,
+    settings: null,
+    selectedModelProfileId: null,
+    modelSelectionPending: false,
     messages: [],
     pendingRefinement: null,
     refinementConfirmed: false,
@@ -68,6 +71,91 @@ function setReadyScope(client: ProjectOSApi, mode: 'ask' | 'change' | 'plan' | '
 }
 
 describe('agent conversation routing', () => {
+  it('sends the selected model as an explicit per-turn executor choice', async () => {
+    const workspace = createMockSampleWorkspace()
+    const askAgent = vi.fn(async (): Promise<AgentAnswerResult> => ({
+      id: 'answer-explicit-model',
+      projectId: workspace.project.projectId,
+      scope: { kind: 'global' },
+      answer: 'Selected model answer.',
+      backend: 'model',
+      modelProfileId: 'model-b',
+      contextBundleHash: `sha256:${'e'.repeat(64)}`,
+      contextSummary: {
+        files: [],
+        synopsisPresent: true,
+        bundleHash: `sha256:${'e'.repeat(64)}`,
+      },
+      responseLanguage: { tag: 'und', source: 'undetermined', validation: 'not_checkable' },
+      createdAt: '2026-07-19T00:00:00.000Z',
+    }))
+    useWorkbenchStore.setState({
+      client: { askAgent } as unknown as ProjectOSApi,
+      project: workspace.project,
+      settings: {
+        ...workspace.settings,
+        presentationMode: false,
+        execution: {
+          ...workspace.settings.execution,
+          mode: 'model',
+          defaultModelProfileId: 'model-a',
+        },
+        modelProfiles: [
+          { id: 'model-a', name: 'A', provider: 'ollama', model: 'a', apiKeyRef: '' },
+          { id: 'model-b', name: 'B', provider: 'ollama', model: 'b', apiKeyRef: '' },
+        ],
+      },
+      selectedModelProfileId: 'model-b',
+      globalAgentActive: true,
+      selectedNodeId: null,
+      selectedFilePath: null,
+      chatMode: 'ask',
+    })
+
+    await useWorkbenchStore.getState().sendPrompt('Use the selected model')
+
+    expect(askAgent).toHaveBeenCalledWith(expect.objectContaining({
+      executorSelection: { kind: 'model', modelProfileId: 'model-b' },
+    }))
+  })
+
+  it('does not attach a live executor choice in fixture mode', async () => {
+    const workspace = createMockSampleWorkspace()
+    const askAgent = vi.fn(async (): Promise<AgentAnswerResult> => ({
+      id: 'answer-fixture',
+      projectId: workspace.project.projectId,
+      scope: { kind: 'global' },
+      answer: 'Fixture answer.',
+      backend: 'fixture',
+      contextBundleHash: `sha256:${'e'.repeat(64)}`,
+      contextSummary: {
+        files: [],
+        synopsisPresent: true,
+        bundleHash: `sha256:${'e'.repeat(64)}`,
+      },
+      responseLanguage: { tag: 'und', source: 'undetermined', validation: 'not_checkable' },
+      createdAt: '2026-07-19T00:00:00.000Z',
+    }))
+    useWorkbenchStore.setState({
+      client: { askAgent } as unknown as ProjectOSApi,
+      project: workspace.project,
+      settings: {
+        ...workspace.settings,
+        presentationMode: false,
+        execution: { ...workspace.settings.execution, mode: 'fixture' },
+      },
+      selectedModelProfileId: 'model-b',
+      globalAgentActive: true,
+      selectedNodeId: null,
+      selectedFilePath: null,
+      chatMode: 'ask',
+    })
+
+    await useWorkbenchStore.getState().sendPrompt('Use the demo')
+
+    expect(askAgent.mock.calls[0]?.[0]).not.toHaveProperty('executorSelection')
+  })
+
   it('treats clearSelection as whole-project scope for Ask', async () => {
     const workspace = createMockSampleWorkspace()
     const askAgent = vi.fn(async (): Promise<AgentAnswerResult> => ({

@@ -1,6 +1,7 @@
 export * from "./activity-log.js";
 export * from "./agent-activity.js";
 export * from "./agent-run.js";
+export * from "./executor-selection.js";
 export * from "./agent-validation.js";
 export * from "./batch-validation.js";
 export * from "./agent-conversation.js";

@@ -12,6 +12,7 @@ import {
   CHAT_MODES,
   chatModeHelpKey,
 } from './chatModeVisuals'
+import ModelPickerMenu from './ModelPickerMenu'
 import styles from './ComposerControlBar.module.css'
 
 const THINKING_DEPTHS: ThinkingDepth[] = ['off', 'low', 'medium', 'high']
@@ -53,6 +54,7 @@ export default function ComposerControlBar({
   voice,
 }: ComposerControlBarProps) {
   const settings = useWorkbenchStore((s) => s.settings)
+  const modelSelectionPending = useWorkbenchStore((s) => s.modelSelectionPending)
   const selectedModelProfileId = useWorkbenchStore((s) => s.selectedModelProfileId)
   const selectChatModel = useWorkbenchStore((s) => s.selectChatModel)
   const setThinkingDepth = useWorkbenchStore((s) => s.setThinkingDepth)
@@ -61,6 +63,7 @@ export default function ComposerControlBar({
 
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
   const barRef = useRef<HTMLDivElement>(null)
+  const modelTriggerRef = useRef<HTMLSpanElement>(null)
 
   useEffect(() => {
     if (!openMenu) return
@@ -69,14 +72,24 @@ export default function ComposerControlBar({
         setOpenMenu(null)
       }
     }
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setOpenMenu(null)
+      modelTriggerRef.current?.closest('button')?.focus()
+    }
     document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
   }, [openMenu])
 
   const thinkingDepth = settings?.execution.thinkingDepth ?? 'medium'
   const modelProfiles = settings?.modelProfiles ?? []
   const selectedModel = modelProfiles.find((profile) => profile.id === selectedModelProfileId)
-  const presentationMode = settings?.presentationMode ?? false
+  const presentationMode = Boolean(settings?.presentationMode || settings?.execution.mode === 'fixture')
   const hasModels = modelProfiles.length > 0
 
   const thinkingLabel = (depth: ThinkingDepth) => {
@@ -183,34 +196,35 @@ export default function ComposerControlBar({
               active={openMenu === 'modelThinking'}
               className={styles.chipTruncate}
               aria-expanded={openMenu === 'modelThinking'}
-              aria-haspopup="listbox"
+              aria-haspopup="dialog"
+              aria-label={ts('composer.modelPickerLabel')}
               onClick={() =>
                 setOpenMenu((current) => (current === 'modelThinking' ? null : 'modelThinking'))}
             >
-              <span className={styles.chipLabel}>{modelThinkingLabel}</span>
+              <span ref={modelTriggerRef} className={styles.chipLabel}>{modelThinkingLabel}</span>
               <span className={styles.chipMeta}>· {thinkingLabel(thinkingDepth)}</span> ▾
             </Chip>
             {openMenu === 'modelThinking' && (
-              <div className={styles.dropdownAnchor}>
+              <div className={styles.dropdownAnchor} role="dialog" aria-label={ts('composer.modelPickerLabel')}>
                 <GlassLens
                 radius={16}
                 tint="overlay"
                 className={`${styles.dropdown} ${styles.dropdownWide} glass-overlay-enter`}
               >
-                <div className={styles.sectionLabel}>{ts('composer.modelSection')}</div>
-                {modelProfiles.map((profile) => (
-                  <button
-                    key={profile.id}
-                    type="button"
-                    className={`${styles.menuItem} ${profile.id === selectedModelProfileId ? styles.menuItemActive : ''}`}
-                    onClick={() => {
-                      void selectChatModel(profile.id)
-                      setOpenMenu(null)
-                    }}
-                  >
-                    {modelProfileLabel(profile)}
-                  </button>
-                ))}
+                <ModelPickerMenu
+                  profiles={modelProfiles}
+                  selectedId={selectedModelProfileId}
+                  pending={modelSelectionPending}
+                  onSelect={(id) => {
+                    void selectChatModel(id).then((selected) => {
+                      if (selected) {
+                        setOpenMenu(null)
+                        modelTriggerRef.current?.closest('button')?.focus()
+                      }
+                    })
+                  }}
+                  onManage={() => { setOpenMenu(null); setSettingsOpen(true) }}
+                />
                 <div className={styles.sectionDivider} />
                 <div className={styles.sectionLabel}>{ts('chat.thinkingDepth')}</div>
                 {THINKING_DEPTHS.map((depth) => (
@@ -240,7 +254,7 @@ export default function ComposerControlBar({
             {ts('chat.stop')}
           </Button>
         ) : (
-          <Button type="submit" size="sm" disabled={submitDisabled}>
+          <Button type="submit" size="sm" disabled={submitDisabled || modelSelectionPending}>
             {ts('common.send')}
           </Button>
         )}

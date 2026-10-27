@@ -283,7 +283,9 @@ export function canSubmitAgentPrompt(state: {
   pendingFileOwnerChoice: PendingFileOwnerChoice | null
   fileScopeError: 'not_mapped' | null
   pendingPlan: import('@contracts/index').ImplementationPlan | null
+  modelSelectionPending?: boolean
 }): boolean {
+  if (state.modelSelectionPending) return false
   if (isGlobalAgentScope(state)) {
     // M3.B: Ask/Debug/Anchored + Plan/Agent (global planner → leaf child runs)
     return (
@@ -483,6 +485,7 @@ export interface WorkbenchState {
   settings: ProjectOSSettings | null
   settingsOpen: boolean
   selectedModelProfileId: string | null
+  modelSelectionPending: boolean
   mapContent: MapContentDocument | null
   features: FeaturesFile | null
   featuresBaseline: FeaturesFile | null
@@ -691,7 +694,7 @@ export interface WorkbenchState {
   refreshMcpTools: (serverId: string) => Promise<McpToolDescriptor[]>
   setSettingsOpen: (open: boolean) => void
   setSelectedModelProfileId: (profileId: string | null) => void
-  selectChatModel: (profileId: string) => Promise<void>
+  selectChatModel: (profileId: string) => Promise<boolean>
   setThinkingDepth: (depth: ThinkingDepth) => Promise<void>
   setPresentationMode: (enabled: boolean) => Promise<void>
   loadMapContent: () => Promise<void>
@@ -1129,6 +1132,7 @@ async function loadWorkspaceIntoStore(
     storyFocusedFeatureId: null,
     settings,
     selectedModelProfileId: defaultModelProfileId,
+    modelSelectionPending: false,
     context: null,
     ...initialTransientState,
     directoryListings: {
@@ -1467,6 +1471,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   projectDescriptionSaving: false,
   settingsOpen: false,
   selectedModelProfileId: null,
+  modelSelectionPending: false,
   mapContent: null,
   features: null,
   featuresBaseline: null,
@@ -2517,6 +2522,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       draft.invokedSkillId ?? get().activeCustomModeSkillId ?? undefined
     const composerFieldsWithMode = {
       ...composerFields,
+      ...(state.selectedModelProfileId && !state.settings?.presentationMode && state.settings?.execution.mode !== 'fixture'
+        ? { executorSelection: { kind: 'model' as const, modelProfileId: state.selectedModelProfileId } }
+        : {}),
       ...(effectiveSkillId ? { invokedSkillId: effectiveSkillId } : {}),
     }
 
@@ -4332,22 +4340,22 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   setSelectedModelProfileId: (profileId) => set({ selectedModelProfileId: profileId }),
 
   selectChatModel: async (profileId) => {
-    const { client, project, settings } = get()
-    if (!project || !settings) return
+    const { client, project, settings, modelSelectionPending } = get()
+    if (!project || !settings || modelSelectionPending) return false
     const projectId = project.projectId
+    set({ modelSelectionPending: true })
     try {
-      const updated = await persistDefaultModelProfile(
-        client,
-        projectId,
-        settings,
-        profileId,
-      )
-      if (get().project?.projectId !== projectId) return
+      const updated = await persistDefaultModelProfile(client, projectId, settings, profileId)
+      if (get().project?.projectId !== projectId) return false
       set({ settings: updated, selectedModelProfileId: profileId, error: null })
+      return true
     } catch (error) {
       if (get().project?.projectId === projectId) {
         reportSettingsMutationFailure(error, 'Failed to select chat model')
       }
+      return false
+    } finally {
+      if (get().project?.projectId === projectId) set({ modelSelectionPending: false })
     }
   },
 
