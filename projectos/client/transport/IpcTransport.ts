@@ -541,6 +541,37 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("getAgentRun", runId);
   }
 
+  listRunDecisions(
+    projectId: string,
+    rootRunId: string,
+  ): Promise<import("../../contracts/run-state.js").RunDecision[]> {
+    return this.invoke("listRunDecisions", projectId, rootRunId);
+  }
+
+  resolveRunDecision(
+    projectId: string,
+    decisionId: string,
+    expectedRevision: number,
+    answer: { optionId: string; text?: string },
+    status?: "resolved" | "declined",
+  ): Promise<import("../../contracts/run-state.js").RunDecision> {
+    return this.invoke(
+      "resolveRunDecision",
+      projectId,
+      decisionId,
+      expectedRevision,
+      answer,
+      status,
+    );
+  }
+
+  getRunCheckpoint(
+    projectId: string,
+    checkpointId: string,
+  ): Promise<import("../../contracts/run-state.js").RunCheckpoint | null> {
+    return this.invoke("getRunCheckpoint", projectId, checkpointId);
+  }
+
   getAgentRunEvents(runId: string): Promise<AgentRunEvent[]> {
     return this.invoke("getAgentRunEvents", runId);
   }

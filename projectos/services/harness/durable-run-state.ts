@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -45,6 +45,15 @@ export class DurableRunStateStore {
     const filePath = join(this.decisionsRoot, `${decisionId}.json`);
     if (!existsSync(filePath)) return null;
     return RunDecisionSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
+  }
+
+  listDecisions(rootRunId: string): RunDecision[] {
+    if (!safeId(rootRunId)) return [];
+    return readdirSync(this.decisionsRoot)
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => this.loadDecision(name.slice(0, -".json".length)))
+      .filter((decision): decision is RunDecision => decision?.rootRunId === rootRunId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
   resolveDecision(

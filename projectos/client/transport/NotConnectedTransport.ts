@@ -396,6 +396,30 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async listRunDecisions(
+    _projectId: string,
+    _rootRunId: string,
+  ): Promise<import("../../contracts/run-state.js").RunDecision[]> {
+    return transportNotConnected();
+  }
+
+  async resolveRunDecision(
+    _projectId: string,
+    _decisionId: string,
+    _expectedRevision: number,
+    _answer: { optionId: string; text?: string },
+    _status?: "resolved" | "declined",
+  ): Promise<import("../../contracts/run-state.js").RunDecision> {
+    return transportNotConnected();
+  }
+
+  async getRunCheckpoint(
+    _projectId: string,
+    _checkpointId: string,
+  ): Promise<import("../../contracts/run-state.js").RunCheckpoint | null> {
+    return transportNotConnected();
+  }
+
   async getAgentRunEvents(_runId: string): Promise<AgentRunEvent[]> {
     return transportNotConnected();
   }

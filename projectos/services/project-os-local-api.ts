@@ -1,5 +1,7 @@
 import { resolveModelExecution, type ModelExecutionSnapshot } from "./harness/executor-selection.js";
+import { DurableRunStateStore } from "./harness/durable-run-state.js";
 import type { AgentRun } from "../contracts/agent-run.js";
+import type { RunCheckpoint, RunDecision } from "../contracts/run-state.js";
 import type { CreateFileContextBundle } from "../contracts/create-file-context.js";
 import type {
   CreateWriteAuthorization,
@@ -3112,6 +3114,56 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     );
   }
 
+  recordRunDecision(decision: RunDecision): RunDecision {
+    const workspace = this.requireLoadedWorkspace(decision.projectId);
+    return this.durableRunStateFor(workspace).saveDecision(decision);
+  }
+
+  recordRunCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
+    const workspace = this.requireLoadedWorkspace(checkpoint.projectId);
+    return this.durableRunStateFor(workspace).saveCheckpoint(checkpoint);
+  }
+
+  async listRunDecisions(
+    projectId: string,
+    rootRunId: string,
+  ): Promise<RunDecision[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return this.durableRunStateFor(workspace).listDecisions(rootRunId);
+  }
+
+  async resolveRunDecision(
+    projectId: string,
+    decisionId: string,
+    expectedRevision: number,
+    answer: { optionId: string; text?: string },
+    status: "resolved" | "declined" = "resolved",
+  ): Promise<RunDecision> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const store = this.durableRunStateFor(workspace);
+    const current = store.loadDecision(decisionId);
+    if (!current || current.projectId !== projectId) {
+      throw new ProjectOSError(
+        "run_not_found",
+        `Run decision '${decisionId}' was not found in project '${projectId}'`,
+      );
+    }
+    return store.resolveDecision(
+      decisionId,
+      expectedRevision,
+      answer,
+      status,
+    );
+  }
+
+  async getRunCheckpoint(
+    projectId: string,
+    checkpointId: string,
+  ): Promise<RunCheckpoint | null> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return this.durableRunStateFor(workspace).loadCheckpoint(checkpointId);
+  }
+
   async getAgentRunEvents(runId: string): Promise<AgentRunEvent[]> {
     const orchestratorRun = this.orchestrator.getRun(runId);
     if (orchestratorRun) {
@@ -6193,6 +6245,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       memoryEgress: workspace.settings.retrieval?.memoryEgress === true,
       allowExternalDocs: workspace.settings.retrieval?.externalDocs === true,
     };
+  }
+
+  private durableRunStateFor(
+    workspace: LoadedProjectOSWorkspace,
+  ): DurableRunStateStore {
+    return new DurableRunStateStore(workspace.projectOSRoot);
   }
 
   private memoryStoreFor(

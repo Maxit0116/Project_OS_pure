@@ -1,4 +1,5 @@
 import type { AgentRun } from "./agent-run.js";
+import type { RunCheckpoint, RunDecision } from "./run-state.js";
 import type {
   AgentAnswerResult,
   AgentAskRequest,
@@ -267,6 +268,15 @@ export interface ProjectOSApi {
    */
   continueAgentRun(runId: string): Promise<AgentRun>;
   getAgentRun(runId: string): Promise<AgentRun>;
+  listRunDecisions(projectId: string, rootRunId: string): Promise<RunDecision[]>;
+  resolveRunDecision(
+    projectId: string,
+    decisionId: string,
+    expectedRevision: number,
+    answer: { optionId: string; text?: string },
+    status?: "resolved" | "declined",
+  ): Promise<RunDecision>;
+  getRunCheckpoint(projectId: string, checkpointId: string): Promise<RunCheckpoint | null>;
   getAgentRunEvents(runId: string): Promise<AgentRunEvent[]>;
   streamAgentRun(
     runId: string,

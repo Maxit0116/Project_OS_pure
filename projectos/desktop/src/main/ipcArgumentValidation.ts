@@ -1,4 +1,10 @@
-type IpcArgumentKind = 'string' | 'record' | 'boolean' | 'array'
+type IpcArgumentKind =
+  | 'string'
+  | 'number'
+  | 'record'
+  | 'boolean'
+  | 'array'
+  | 'decision_status'
 
 const PROJECTOS_IPC_SIGNATURES = {
   openSampleWorkspace: [],
@@ -64,6 +70,9 @@ const PROJECTOS_IPC_SIGNATURES = {
   pauseAgentRun: ['string'],
   continueAgentRun: ['string'],
   getAgentRun: ['string'],
+  listRunDecisions: ['string', 'string'],
+  resolveRunDecision: ['string', 'string', 'number', 'record', 'decision_status'],
+  getRunCheckpoint: ['string', 'string'],
   getAgentRunEvents: ['string'],
   getDiff: ['string'],
   applyDiff: ['string'],
@@ -159,6 +168,10 @@ export function assertProjectOsIpcArgs(
     if (
       kind === 'string'
         ? typeof value !== 'string'
+        : kind === 'number'
+          ? typeof value !== 'number' || !Number.isFinite(value)
+          : kind === 'decision_status'
+            ? value !== undefined && value !== 'resolved' && value !== 'declined'
         : kind === 'boolean'
           ? typeof value !== 'boolean'
           : kind === 'array'

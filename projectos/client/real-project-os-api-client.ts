@@ -1,4 +1,5 @@
 import type { AgentRun } from "../contracts/agent-run.js";
+import type { RunCheckpoint, RunDecision } from "../contracts/run-state.js";
 import type {
   AgentAnswerResult,
   AgentAskRequest,
@@ -414,6 +415,30 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   getAgentRun(runId: string): Promise<AgentRun> {
     return this.transport.getAgentRun(runId);
+  }
+
+  listRunDecisions(projectId: string, rootRunId: string): Promise<RunDecision[]> {
+    return this.transport.listRunDecisions(projectId, rootRunId);
+  }
+
+  resolveRunDecision(
+    projectId: string,
+    decisionId: string,
+    expectedRevision: number,
+    answer: { optionId: string; text?: string },
+    status?: "resolved" | "declined",
+  ): Promise<RunDecision> {
+    return this.transport.resolveRunDecision(
+      projectId,
+      decisionId,
+      expectedRevision,
+      answer,
+      status,
+    );
+  }
+
+  getRunCheckpoint(projectId: string, checkpointId: string): Promise<RunCheckpoint | null> {
+    return this.transport.getRunCheckpoint(projectId, checkpointId);
   }
 
   getAgentRunEvents(runId: string): Promise<AgentRunEvent[]> {
