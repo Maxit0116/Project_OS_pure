@@ -7,10 +7,14 @@ import {
 describe("run-state IPC validation", () => {
   it("exposes decision and checkpoint methods with strict argument shapes", () => {
     expect(PROJECTOS_IPC_METHODS).toEqual(expect.arrayContaining([
+      "getGlobalAgentContext",
+      "inspectAgentNode",
       "listRunDecisions",
       "resolveRunDecision",
       "getRunCheckpoint",
     ]));
+    expect(() => assertProjectOsIpcArgs("getGlobalAgentContext", ["project", "en"])).not.toThrow();
+    expect(() => assertProjectOsIpcArgs("inspectAgentNode", ["project", "node", "en"])).not.toThrow();
     expect(() => assertProjectOsIpcArgs("listRunDecisions", ["project", "run"])).not.toThrow();
     expect(() => assertProjectOsIpcArgs("getRunCheckpoint", ["project", "checkpoint"])).not.toThrow();
     expect(() => assertProjectOsIpcArgs("resolveRunDecision", [

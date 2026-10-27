@@ -255,6 +255,21 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("getFileContext", projectId, path);
   }
 
+  getGlobalAgentContext(
+    projectId: string,
+    responseLanguage: string,
+  ): Promise<import("../../contracts/local-context.js").GlobalContextBundle> {
+    return this.invoke("getGlobalAgentContext", projectId, responseLanguage);
+  }
+
+  inspectAgentNode(
+    projectId: string,
+    nodeId: string,
+    responseLanguage: string,
+  ): Promise<import("../../contracts/local-context.js").NodeContextBundle> {
+    return this.invoke("inspectAgentNode", projectId, nodeId, responseLanguage);
+  }
+
   getFileContent(projectId: string, path: string): Promise<string> {
     return this.invoke("getFileContent", projectId, path);
   }

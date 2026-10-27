@@ -1,5 +1,6 @@
 import type { AgentRun } from "../contracts/agent-run.js";
 import type { RunCheckpoint, RunDecision } from "../contracts/run-state.js";
+import type { GlobalContextBundle, NodeContextBundle } from "../contracts/local-context.js";
 import type {
   AgentAnswerResult,
   AgentAskRequest,
@@ -134,6 +135,21 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   getFileContext(projectId: string, path: string): Promise<ContextPayload> {
     return this.transport.getFileContext(projectId, path);
+  }
+
+  getGlobalAgentContext(
+    projectId: string,
+    responseLanguage: string,
+  ): Promise<GlobalContextBundle> {
+    return this.transport.getGlobalAgentContext(projectId, responseLanguage);
+  }
+
+  inspectAgentNode(
+    projectId: string,
+    nodeId: string,
+    responseLanguage: string,
+  ): Promise<NodeContextBundle> {
+    return this.transport.inspectAgentNode(projectId, nodeId, responseLanguage);
   }
 
   getFileContent(projectId: string, path: string): Promise<string> {

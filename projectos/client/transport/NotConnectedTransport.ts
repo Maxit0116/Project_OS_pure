@@ -110,6 +110,21 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async getGlobalAgentContext(
+    _projectId: string,
+    _responseLanguage: string,
+  ): Promise<import("../../contracts/local-context.js").GlobalContextBundle> {
+    return transportNotConnected();
+  }
+
+  async inspectAgentNode(
+    _projectId: string,
+    _nodeId: string,
+    _responseLanguage: string,
+  ): Promise<import("../../contracts/local-context.js").NodeContextBundle> {
+    return transportNotConnected();
+  }
+
   async getFileContent(_projectId: string, _path: string): Promise<string> {
     return transportNotConnected();
   }

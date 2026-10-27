@@ -17,6 +17,8 @@ const PROJECTOS_IPC_SIGNATURES = {
   listWorkspaceDirectory: ['string', 'string'],
   getNodeContext: ['string', 'string'],
   getFileContext: ['string', 'string'],
+  getGlobalAgentContext: ['string', 'string'],
+  inspectAgentNode: ['string', 'string', 'string'],
   getFileContent: ['string', 'string'],
   getWorkspaceFileDataUrl: ['string', 'string'],
   writeFileContent: ['string', 'string', 'string'],

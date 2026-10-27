@@ -1,5 +1,6 @@
 import type { AgentRun } from "./agent-run.js";
 import type { RunCheckpoint, RunDecision } from "./run-state.js";
+import type { GlobalContextBundle, NodeContextBundle } from "./local-context.js";
 import type {
   AgentAnswerResult,
   AgentAskRequest,
@@ -132,6 +133,15 @@ export interface ProjectOSApi {
   ): Promise<WorkspaceDirectoryEntry[]>;
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload>;
   getFileContext(projectId: string, path: string): Promise<ContextPayload>;
+  getGlobalAgentContext(
+    projectId: string,
+    responseLanguage: string,
+  ): Promise<GlobalContextBundle>;
+  inspectAgentNode(
+    projectId: string,
+    nodeId: string,
+    responseLanguage: string,
+  ): Promise<NodeContextBundle>;
   getFileContent(projectId: string, path: string): Promise<string>;
   getWorkspaceFileDataUrl(projectId: string, path: string): Promise<string>;
   writeFileContent(projectId: string, path: string, content: string): Promise<void>;

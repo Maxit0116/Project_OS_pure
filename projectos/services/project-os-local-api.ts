@@ -1943,6 +1943,28 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return parsed;
   }
 
+  async getGlobalAgentContext(
+    projectId: string,
+    responseLanguage: string,
+  ): Promise<GlobalContextBundle> {
+    return this.createGlobalPlanningContext(
+      this.requireLoadedWorkspace(projectId),
+      responseLanguage,
+    );
+  }
+
+  async inspectAgentNode(
+    projectId: string,
+    nodeId: string,
+    responseLanguage: string,
+  ): Promise<NodeContextBundle> {
+    return this.assembleNodeLocalContext(
+      this.requireLoadedWorkspace(projectId),
+      nodeId,
+      responseLanguage,
+    );
+  }
+
   async listSkills(projectId: string): Promise<ListSkillsResult> {
     const workspace = this.requireLoadedWorkspace(projectId);
     return { skills: listProjectSkills(workspace.workspaceRoot) };
@@ -6513,11 +6535,57 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       level: "context" as const,
       childCount: node.children?.length ?? 0,
     }));
+    const systemNodeIds = new Set(
+      workspace.graph.nodes
+        .filter((node) =>
+          node.elementType === "software_system" ||
+          (node.level === "context" && (node.children ?? []).some((childId) =>
+            nodesById.get(childId)?.level === "container"
+          )))
+        .map((node) => node.id),
+    );
+    const immediateNodeIds = new Set(declaredRoots);
+    for (const systemNodeId of systemNodeIds) {
+      immediateNodeIds.add(systemNodeId);
+      for (const childId of nodesById.get(systemNodeId)?.children ?? []) {
+        if (nodesById.get(childId)?.level === "container") {
+          immediateNodeIds.add(childId);
+        }
+      }
+    }
+    const immediateNodes = [...immediateNodeIds]
+      .map((nodeId) => nodesById.get(nodeId))
+      .filter((node): node is FunctionalNode =>
+        node?.level === "context" || node?.level === "container"
+      )
+      .map((node) => ({
+        id: node.id,
+        name: node.name,
+        summary: node.summary,
+        ...(node.responsibility ? { responsibility: node.responsibility } : {}),
+        level: node.level as "context" | "container",
+        ...(node.elementType ? { elementType: node.elementType } : {}),
+        ...(node.parentId !== undefined ? { parentId: node.parentId } : {}),
+        childCount: node.children?.length ?? 0,
+      }));
+    const immediateRelations = workspace.graph.edges
+      .filter((edge) =>
+        immediateNodeIds.has(edge.source) && immediateNodeIds.has(edge.target)
+      )
+      .map((edge) => ({
+        id: edge.id,
+        sourceNodeId: edge.source,
+        targetNodeId: edge.target,
+        relation: edge.relation,
+        ...(edge.label ? { label: edge.label } : {}),
+      }));
     const hashInput = JSON.stringify({
       projectId: workspace.project.projectId,
       analyzedAt: workspace.graph.analyzedAt,
       description: workspace.projectDescription,
       topLevelNodes,
+      immediateNodes,
+      immediateRelations,
       responseLanguage,
     });
     const contextHash = await sha256Bytes(new TextEncoder().encode(hashInput));
@@ -6534,6 +6602,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       analyzedAt: workspace.graph.analyzedAt,
       responseLanguage,
       topLevelNodes,
+      immediateNodes,
+      immediateRelations,
       allowedReadPaths: [],
       allowedWritePaths: [],
     });
