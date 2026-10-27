@@ -774,6 +774,18 @@ const zh = {
       selection: '选区',
     },
   },
+  decisions: {
+    title: '待处理决定',
+    recommendation: '建议：{value}',
+    note: '可选备注',
+    history: '已回答决定（{count}）',
+    kind: {
+      intent: '意图',
+      clarification: '澄清',
+      scope_change: '范围变更',
+      budget: '预算',
+    },
+  },
   chat: {
     placeholder: '描述你想修改什么，我会先复述理解，再生成修改方案…',
     askPlaceholder: '询问所选节点或文件…',

@@ -11,6 +11,7 @@ import PendingChangesDrawer from '../PendingChangesDrawer/PendingChangesDrawer'
 import { useI18n } from '../../i18n'
 import PromptRefinementCard from './PromptRefinementCard'
 import PlanReviewCard from './PlanReviewCard'
+import PendingRunDecisions from './PendingRunDecisions'
 import DebugSessionPanel from './DebugSessionPanel'
 import { cycleChatMode } from './ChatModeSelector'
 import ChatMessageContent from './ChatMessageContent'
@@ -53,6 +54,9 @@ export default function ChatPanel() {
   const sendPrompt = useWorkbenchStore((s) => s.sendPrompt)
   const pendingRefinement = useWorkbenchStore((s) => s.pendingRefinement)
   const pendingPlan = useWorkbenchStore((s) => s.pendingPlan)
+  const runDecisions = useWorkbenchStore((s) => s.runDecisions)
+  const decisionResolvingIds = useWorkbenchStore((s) => s.decisionResolvingIds)
+  const resolveRunDecision = useWorkbenchStore((s) => s.resolveRunDecision)
   const planConfirmed = useWorkbenchStore((s) => s.planConfirmed)
   const debugSession = useWorkbenchStore((s) => s.debugSession)
   const refinementConfirmed = useWorkbenchStore((s) => s.refinementConfirmed)
@@ -304,6 +308,12 @@ export default function ChatPanel() {
           <div className={styles.suggestPlanBanner}>{ts('chat.globalAgentEmptyHint')}</div>
         ) : null}
         {inheritedDigest ? <InheritedSessionCard digest={inheritedDigest} /> : null}
+        <PendingRunDecisions
+          decisions={runDecisions}
+          resolvingIds={decisionResolvingIds}
+          onResolve={(decision, optionId, text, status) =>
+            void resolveRunDecision(decision, optionId, text, status)}
+        />
         {messages.map((msg) => {
           const spatialPin = msg.role === 'user' && parseSpatialPinChatContent(msg.content)
           const attachments = spatialPin

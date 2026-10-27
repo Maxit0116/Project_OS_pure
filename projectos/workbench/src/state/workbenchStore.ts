@@ -25,6 +25,7 @@ import type {
   ProjectOSProject,
   Disposable,
   ProjectOSSettings,
+  RunDecision,
   PromptRefinement,
   MemoryWriteNotice,
   SemanticTree,
@@ -450,6 +451,8 @@ export interface WorkbenchState {
   agentFlowSubject: AgentFlowSubject
 
   activeRunId: string | null
+  runDecisions: RunDecision[]
+  decisionResolvingIds: string[]
   flowSteps: AgentFlowStep[]
   flowActions: AgentActionEvent[]
   flowDelegationEvents: AgentDelegationEvent[]
@@ -657,6 +660,13 @@ export interface WorkbenchState {
     }>
   >
   restoreConversationCheckpoint: (checkpointId: string) => Promise<void>
+  loadRunDecisions: (rootRunId?: string) => Promise<void>
+  resolveRunDecision: (
+    decision: RunDecision,
+    optionId: string,
+    text?: string,
+    status?: 'resolved' | 'declined',
+  ) => Promise<void>
   submitDebugRepro: () => Promise<void>
   confirmDebugFix: () => Promise<void>
   markDebugFixed: () => Promise<void>
@@ -1198,6 +1208,8 @@ const initialTransientState = {
   latestContextAssembly: null as import('@contracts/index').ContextAssembly | null,
   agentFlowSubject: 'run' as AgentFlowSubject,
   activeRunId: null as string | null,
+  runDecisions: [] as RunDecision[],
+  decisionResolvingIds: [] as string[],
   flowSteps: [] as AgentFlowStep[],
   flowActions: [] as AgentActionEvent[],
   flowDelegationEvents: [] as AgentDelegationEvent[],
@@ -1760,6 +1772,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       useChatSessionStore.getState().presentAgentFlow()
       set({
         activeRunId: run.runId,
+        runDecisions: [],
+        decisionResolvingIds: [],
         liveGraphPausedRunId: null,
         flowStatus: 'running',
         agentFlowSubject: 'run',
@@ -2995,6 +3009,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         diffFileStats: [],
         selectedDiffFilePath: null,
       })
+      void get().loadRunDecisions(run.rootRunId ?? run.runId)
 
       const isCurrentRunSubscription = () => {
         const current = get()
@@ -3446,6 +3461,54 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       })
     } catch (error) {
       set({ error: errorMessage(error, 'Failed to restore checkpoint') })
+    }
+  },
+
+  loadRunDecisions: async (requestedRootRunId) => {
+    const { client, project, activeRunId } = get()
+    const rootRunId = requestedRootRunId ?? activeRunId
+    if (!project || !rootRunId) return
+    const projectId = project.projectId
+    try {
+      const decisions = await client.listRunDecisions(projectId, rootRunId)
+      if (get().project?.projectId !== projectId) return
+      set({ runDecisions: decisions })
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        set({ error: errorMessage(error, 'Failed to load run decisions') })
+      }
+    }
+  },
+
+  resolveRunDecision: async (decision, optionId, text, status = 'resolved') => {
+    const { client, project, decisionResolvingIds } = get()
+    if (!project || decisionResolvingIds.includes(decision.id)) return
+    const projectId = project.projectId
+    set({ decisionResolvingIds: [...decisionResolvingIds, decision.id] })
+    try {
+      const resolved = await client.resolveRunDecision(
+        projectId,
+        decision.id,
+        decision.revision,
+        { optionId, ...(text ? { text } : {}) },
+        status,
+      )
+      if (get().project?.projectId !== projectId) return
+      set((current) => ({
+        runDecisions: current.runDecisions.map((item) =>
+          item.id === resolved.id ? resolved : item),
+        error: null,
+      }))
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        set({ error: errorMessage(error, 'Failed to resolve run decision') })
+      }
+    } finally {
+      if (get().project?.projectId === projectId) {
+        set((current) => ({
+          decisionResolvingIds: current.decisionResolvingIds.filter((id) => id !== decision.id),
+        }))
+      }
     }
   },
 

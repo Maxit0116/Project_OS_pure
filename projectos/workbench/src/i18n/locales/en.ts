@@ -774,6 +774,18 @@ const en = {
       selection: 'Selection',
     },
   },
+  decisions: {
+    title: 'Pending decisions',
+    recommendation: 'Recommended: {value}',
+    note: 'Optional note',
+    history: 'Answered decisions ({count})',
+    kind: {
+      intent: 'Intent',
+      clarification: 'Clarification',
+      scope_change: 'Scope change',
+      budget: 'Budget',
+    },
+  },
   chat: {
     placeholder: 'Describe what you want changed. I’ll restate it before generating a proposal…',
     askPlaceholder: 'Ask about the selected node or file…',
