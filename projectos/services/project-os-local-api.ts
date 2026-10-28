@@ -1,7 +1,13 @@
 import { resolveModelExecution, type ModelExecutionSnapshot } from "./harness/executor-selection.js";
 import { DurableRunStateStore } from "./harness/durable-run-state.js";
 import { RequestIntentExtractionService } from "./request-intent-extraction.js";
-import { intentAllowsFile, intentAllowsNode, RequestIntentService } from "./request-intent-service.js";
+import {
+  intentAllowsFile,
+  intentAllowsNode,
+  intentAllowsNodeAddition,
+  intentAllowsNodeDeletion,
+  RequestIntentService,
+} from "./request-intent-service.js";
 import type { AgentRun } from "../contracts/agent-run.js";
 import {
   ExtractRequestIntentRequestSchema,
@@ -3494,6 +3500,58 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return GeneratedDiffSchema.parse(cloneJson(scenario.diff));
   }
 
+  private async assertApprovedIntentAllowsPublication(
+    state: OrchestratorRunState,
+    workspace: LoadedProjectOSWorkspace,
+  ): Promise<void> {
+    const intent = state.approvedIntent;
+    if (!intent) return;
+    if (!this.requestIntentService.isApprovalValid(intent) ||
+      intent.baseGraphHash !== await computeProjectGraphHash(workspace.graph)) {
+      throw new ProjectOSError(
+        "diff_stale",
+        "Approved intent is invalid or the project graph changed before publication",
+      );
+    }
+
+    const scaffold = state.nodeScaffoldPlan;
+    if (scaffold) {
+      const parentNodeId = scaffold.parentScope.kind === "global"
+        ? undefined
+        : scaffold.parentScope.nodeId;
+      if (!parentNodeId || !intentAllowsNodeAddition(intent, parentNodeId, scaffold.node.name)) {
+        throw new ProjectOSError("diff_scope_violation", "Node scaffold is outside the approved structural intent");
+      }
+    }
+    const deletion = state.nodeDeletionPlan;
+    if (deletion && !intentAllowsNodeDeletion(
+      intent,
+      deletion.rootNodeId,
+      deletion.nodeIds.length - 1,
+      deletion.ownedFilePaths.length,
+    )) {
+      throw new ProjectOSError("diff_scope_violation", "Node deletion is outside the approved structural intent");
+    }
+    if (state.diff && !scaffold && !deletion) {
+      const nodeId = "nodeId" in state.run.scope ? state.run.scope.nodeId : undefined;
+      for (const file of state.diff.files) {
+        if (file.changeType === "create") continue;
+        if (!intentAllowsFile(
+          intent,
+          workspace.graph,
+          file.path,
+          file.changeType === "delete" ? "delete" : "modify",
+          nodeId,
+        )) {
+          throw new ProjectOSError(
+            "diff_scope_violation",
+            `Publication for '${file.path}' exceeds the approved intent capabilities`,
+          );
+        }
+      }
+    }
+  }
+
   async applyDiff(runId: string): Promise<ApplyResult> {
     const alreadyApplied = this.orchestrator.idempotentApplyResult(runId);
     if (alreadyApplied) return alreadyApplied;
@@ -3504,6 +3562,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       }
     }
     const orchestratorRun = this.orchestrator.getRun(runId);
+    if (orchestratorRun) {
+      await this.assertApprovedIntentAllowsPublication(
+        orchestratorRun,
+        this.requireLoadedWorkspace(orchestratorRun.run.projectId),
+      );
+    }
     if (orchestratorRun?.greenfieldPlan && !orchestratorRun.run.parentRunId) {
       const workspace = this.requireLoadedWorkspace(orchestratorRun.run.projectId);
       this.orchestrator.requirePreparedGreenfieldTranche(runId);

@@ -104,6 +104,26 @@ export function intentAllowsFile(
   return owners.length > 0 && owners.every((owner) => touchesOwner(owner.id, "editExisting"));
 }
 
+export function intentAllowsNodeAddition(
+  intent: RequestIntent,
+  parentNodeId: string,
+  name: string,
+): boolean {
+  return intent.structuralEffects.some((effect) =>
+    effect.kind === "add_node" && effect.parentNodeId === parentNodeId && effect.name === name);
+}
+
+export function intentAllowsNodeDeletion(
+  intent: RequestIntent,
+  nodeId: string,
+  descendantCount: number,
+  ownedFileCount: number,
+): boolean {
+  return intent.structuralEffects.some((effect) =>
+    effect.kind === "delete_node" && effect.nodeId === nodeId &&
+    effect.descendantCount === descendantCount && effect.ownedFileCount === ownedFileCount);
+}
+
 export class RequestIntentService {
   normalizeDraft(graph: ProjectGraph, input: RequestIntent): RequestIntent {
     const parsed = RequestIntentSchema.parse(input);

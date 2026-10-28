@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import graphFixture from "../client/sample-projectos-fixtures/graph.json" with { type: "json" };
 import { ProjectGraphSchema } from "../contracts/graph.js";
 import type { RequestIntent } from "../contracts/request-intent.js";
-import { intentAllowsFile, RequestIntentService, smallestPlannerNode } from "./request-intent-service.js";
+import {
+  intentAllowsFile,
+  intentAllowsNodeAddition,
+  intentAllowsNodeDeletion,
+  RequestIntentService,
+  smallestPlannerNode,
+} from "./request-intent-service.js";
 
 const graph = ProjectGraphSchema.parse(graphFixture);
 
@@ -72,5 +78,19 @@ describe("request intent routing and approval", () => {
       ...intent,
       touches: [{ ...intent.touches[0]!, allow: { editExisting: false, addParts: false, deletePartIds: ["feat_checkout"] } }],
     }, graph, checkoutFile, "delete")).toBe(true);
+  });
+
+  it("requires structural publication to match the reviewed parent, target, and impact counts", () => {
+    const intent = {
+      ...draft(["container_next_web"]),
+      structuralEffects: [
+        { kind: "add_node" as const, parentNodeId: "container_next_web", name: "Receipts", source: "model_proposed" as const },
+        { kind: "delete_node" as const, nodeId: "feat_checkout", descendantCount: 2, ownedFileCount: 3, source: "server_derived" as const },
+      ],
+    };
+    expect(intentAllowsNodeAddition(intent, "container_next_web", "Receipts")).toBe(true);
+    expect(intentAllowsNodeAddition(intent, "container_saas_database", "Receipts")).toBe(false);
+    expect(intentAllowsNodeDeletion(intent, "feat_checkout", 2, 3)).toBe(true);
+    expect(intentAllowsNodeDeletion(intent, "feat_checkout", 2, 4)).toBe(false);
   });
 });
