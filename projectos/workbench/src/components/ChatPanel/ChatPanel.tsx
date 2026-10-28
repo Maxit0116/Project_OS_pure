@@ -60,6 +60,7 @@ export default function ChatPanel() {
   const reviseRequestIntent = useWorkbenchStore((s) => s.reviseRequestIntent)
   const pendingPlan = useWorkbenchStore((s) => s.pendingPlan)
   const runDecisions = useWorkbenchStore((s) => s.runDecisions)
+  const focusedDecisionId = useWorkbenchStore((s) => s.focusedDecisionId)
   const decisionResolvingIds = useWorkbenchStore((s) => s.decisionResolvingIds)
   const resolveRunDecision = useWorkbenchStore((s) => s.resolveRunDecision)
   const planConfirmed = useWorkbenchStore((s) => s.planConfirmed)
@@ -325,6 +326,7 @@ export default function ChatPanel() {
         <PendingRunDecisions
           decisions={runDecisions}
           resolvingIds={decisionResolvingIds}
+          focusedDecisionId={focusedDecisionId}
           onResolve={(decision, optionId, text, status) =>
             void resolveRunDecision(decision, optionId, text, status)}
         />

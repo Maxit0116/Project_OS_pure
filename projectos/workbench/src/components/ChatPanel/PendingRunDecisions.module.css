@@ -26,6 +26,12 @@
   padding-top: 12px;
 }
 
+.decision[data-focused='true'], .historyItem[data-focused='true'] {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
+
 .decision + .decision {
   margin-top: 12px;
   border-top: 1px solid var(--color-border-subtle);

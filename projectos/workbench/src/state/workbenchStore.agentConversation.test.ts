@@ -6,6 +6,7 @@ import type {
   AgentRunEvent,
   AgentTransientTrace,
   ProjectOSApi,
+  RunDecision,
   RequestIntent,
 } from '@contracts/index'
 import { emptyComposerDraft } from '@contracts/index'
@@ -34,6 +35,13 @@ afterEach(() => {
     refineLoading: false,
     composerDraft: emptyComposerDraft(),
     activeRunId: null,
+    runDecisions: [],
+    focusedDecisionId: null,
+    decisionResolvingIds: [],
+    toasts: [],
+    rightPanelOpen: false,
+    notifyOnPendingDecision: true,
+    windowFocused: true,
     selectedNodeId: null,
     selectedFilePath: null,
     globalAgentActive: false,
@@ -1049,6 +1057,99 @@ describe('agent conversation routing', () => {
     expect(startDebugSession).toHaveBeenCalledOnce()
     expect(useWorkbenchStore.getState().debugSession?.sessionId).toBe('debug_1')
     expect(useWorkbenchStore.getState().agentFlowSubject).toBe('debug')
+  })
+
+  it('keeps pending decision notifications silent when disabled', async () => {
+    const client = new MockProjectOSApiClient()
+    setReadyScope(client)
+    const projectId = useWorkbenchStore.getState().project!.projectId
+    const decision: RunDecision = {
+      version: '0.1.0',
+      id: `decision_disabled_${crypto.randomUUID()}`,
+      projectId,
+      rootRunId: 'run_decision_disabled',
+      runId: 'run_decision_disabled',
+      kind: 'clarification',
+      question: 'Should the report include archived records?',
+      options: [{ id: 'include', label: 'Include' }, { id: 'exclude', label: 'Exclude' }],
+      status: 'pending',
+      revision: 1,
+      createdAt: new Date().toISOString(),
+    }
+    vi.spyOn(client, 'listRunDecisions').mockResolvedValue([decision])
+    useWorkbenchStore.setState({ notifyOnPendingDecision: false })
+
+    await useWorkbenchStore.getState().loadRunDecisions(decision.rootRunId)
+
+    expect(useWorkbenchStore.getState().runDecisions).toEqual([decision])
+    expect(useWorkbenchStore.getState().focusedDecisionId).toBeNull()
+    expect(useWorkbenchStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('routes a newly pending decision to chat and deduplicates its notification', async () => {
+    const client = new MockProjectOSApiClient()
+    setReadyScope(client)
+    const decision: RunDecision = {
+      version: '0.1.0',
+      id: `decision_pending_${crypto.randomUUID()}`,
+      projectId: 'sample-graph-saas',
+      rootRunId: 'run_decision_pending',
+      runId: 'run_decision_pending',
+      kind: 'scope_change',
+      question: 'Should this update include the settings block?',
+      options: [{ id: 'yes', label: 'Include it' }, { id: 'no', label: 'Keep current scope' }],
+      status: 'pending',
+      revision: 1,
+      createdAt: new Date().toISOString(),
+    }
+    const list = vi.spyOn(client, 'listRunDecisions').mockResolvedValue([decision])
+    useWorkbenchStore.setState({ notifyOnPendingDecision: true, windowFocused: true })
+
+    await useWorkbenchStore.getState().loadRunDecisions(decision.rootRunId)
+    const firstToastCount = useWorkbenchStore.getState().toasts.length
+    await useWorkbenchStore.getState().loadRunDecisions(decision.rootRunId)
+
+    expect(useWorkbenchStore.getState()).toMatchObject({
+      focusedDecisionId: decision.id,
+      activeRunId: decision.rootRunId,
+      rightPanelTab: 'chat',
+      rightPanelOpen: true,
+    })
+    expect(firstToastCount).toBe(1)
+    expect(useWorkbenchStore.getState().toasts).toHaveLength(1)
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('opens a stale decision notification on its recorded history without resolving it', async () => {
+    const client = new MockProjectOSApiClient()
+    setReadyScope(client)
+    const projectId = useWorkbenchStore.getState().project!.projectId
+    const decision: RunDecision = {
+      version: '0.1.0',
+      id: `decision_resolved_${crypto.randomUUID()}`,
+      projectId,
+      rootRunId: 'run_decision_resolved',
+      runId: 'run_decision_resolved',
+      kind: 'clarification',
+      question: 'Use the existing retry policy?',
+      options: [{ id: 'yes', label: 'Use it' }],
+      status: 'resolved',
+      revision: 2,
+      answer: { optionId: 'yes' },
+      createdAt: new Date().toISOString(),
+      resolvedAt: new Date().toISOString(),
+    }
+    const list = vi.spyOn(client, 'listRunDecisions').mockResolvedValue([decision])
+    const resolve = vi.spyOn(client, 'resolveRunDecision')
+
+    await useWorkbenchStore.getState().navigateFromAgentNotification(
+      'decisions', decision.rootRunId, decision.id,
+    )
+
+    expect(list).toHaveBeenCalledWith(decision.projectId, decision.rootRunId)
+    expect(useWorkbenchStore.getState().runDecisions).toEqual([decision])
+    expect(useWorkbenchStore.getState().focusedDecisionId).toBe(decision.id)
+    expect(resolve).not.toHaveBeenCalled()
   })
 })
 

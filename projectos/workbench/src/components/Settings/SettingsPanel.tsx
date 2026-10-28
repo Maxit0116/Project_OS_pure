@@ -44,6 +44,7 @@ export default function SettingsPanel({ onClose }: Props) {
   const locale = useWorkbenchStore((s) => s.locale)
   const themePreference = useWorkbenchStore((s) => s.themePreference)
   const notifyOnDiffReady = useWorkbenchStore((s) => s.notifyOnDiffReady)
+  const notifyOnPendingDecision = useWorkbenchStore((s) => s.notifyOnPendingDecision)
   const { ts } = useI18n()
   const [view, setView] = useState<SettingsView>('hub')
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -99,7 +100,9 @@ export default function SettingsPanel({ onClose }: Props) {
     {
       id: 'notifications',
       label: ts('settings.tabs.notifications'),
-      summary: notifyOnDiffReady ? ts('settings.notificationsSummary') : ts('settings.notificationsOff'),
+      summary: notifyOnDiffReady || notifyOnPendingDecision
+        ? ts('settings.notificationsSummary')
+        : ts('settings.notificationsOff'),
     },
     { id: 'general', label: ts('settings.tabs.general'), summary: settings.presentationMode ? ts('settings.realDemoSummaryDemo') : ts('settings.realDemoSummaryReal') },
     { id: 'models', label: ts('settings.tabs.models'), summary: ts('settings.modelsSummary', { count: settings.modelProfiles.length }) },

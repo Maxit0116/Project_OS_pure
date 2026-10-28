@@ -776,6 +776,9 @@ const en = {
   },
   decisions: {
     title: 'Pending decisions',
+    notificationTitle: 'Run needs your decision',
+    notificationBody: '{question}',
+    notificationToast: 'A run is waiting for your decision: {question}',
     recommendation: 'Recommended: {value}',
     note: 'Optional note',
     history: 'Answered decisions ({count})',
@@ -2226,7 +2229,10 @@ const en = {
     notifyOnDiffReady: 'Notify when agent completes',
     notifyOnDiffReadyDesc:
       'When you are away from Project OS, macOS shows a system notification. When you stay on the map or another view, Project OS shows an in-app banner. Covers Ask and Change runs.',
-    notificationsSummary: 'Diff ready alerts',
+    notifyOnPendingDecision: 'Notify when a run needs a decision',
+    notifyOnPendingDecisionDesc:
+      'Alert when a run pauses for your input. Opening the alert shows the recorded decision; it never approves it.',
+    notificationsSummary: 'Agent and decision alerts',
     notificationsOff: 'Off',
     gesture: {
       showCursor: 'Show hand pointer',

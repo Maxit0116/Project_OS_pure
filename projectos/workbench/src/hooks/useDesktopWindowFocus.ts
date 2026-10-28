@@ -70,7 +70,11 @@ export function useDesktopWindowFocus() {
     document.addEventListener('visibilitychange', onVisibilityChange)
 
     const notifyDisposable = bridge.notify?.onActivated((payload) => {
-      void navigateFromAgentNotification(payload.destination)
+      void navigateFromAgentNotification(
+        payload.destination,
+        payload.runIds[0],
+        payload.decisionId,
+      )
     })
 
     return () => {

@@ -234,21 +234,34 @@ export function parseTerminalResizeArgs(
 export function parseDiffReadyNotificationPayload(input: unknown): {
   title: string
   body: string
+  destination: 'ask' | 'diff' | 'decisions'
   runIds: string[]
+  decisionId?: string
 } {
   if (!isRecord(input)) throw new Error('Notification payload is invalid')
   const { title, body, runIds } = input
+  const destination = input.destination ?? 'diff'
+  const decisionId = input.decisionId
   if (
     typeof title !== 'string' || !title.trim() || title.length > 200 ||
     typeof body !== 'string' || !body.trim() || body.length > 2_000 ||
+    (destination !== 'ask' && destination !== 'diff' && destination !== 'decisions') ||
     !Array.isArray(runIds) || runIds.length === 0 || runIds.length > 128 ||
     runIds.some((runId) =>
       typeof runId !== 'string' || !runId || runId.length > 256 || runId.includes('\0')) ||
-    new Set(runIds).size !== runIds.length
+    new Set(runIds).size !== runIds.length ||
+    destination === 'decisions' && (typeof decisionId !== 'string' || !decisionId || decisionId.length > 256 || decisionId.includes('\0')) ||
+    destination !== 'decisions' && decisionId !== undefined
   ) {
     throw new Error('Notification payload is invalid')
   }
-  return { title, body, runIds: [...runIds] }
+  return {
+    title,
+    body,
+    destination,
+    runIds: [...runIds],
+    ...(typeof decisionId === 'string' ? { decisionId } : {}),
+  }
 }
 
 export function parseWindowTitle(input: unknown): string {

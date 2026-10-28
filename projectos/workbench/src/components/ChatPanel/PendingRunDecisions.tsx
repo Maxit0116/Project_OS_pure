@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { RunDecision } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import styles from './PendingRunDecisions.module.css'
@@ -6,6 +6,7 @@ import styles from './PendingRunDecisions.module.css'
 interface Props {
   decisions: RunDecision[]
   resolvingIds: string[]
+  focusedDecisionId?: string | null
   onResolve: (
     decision: RunDecision,
     optionId: string,
@@ -14,15 +15,28 @@ interface Props {
   ) => void
 }
 
-export default function PendingRunDecisions({ decisions, resolvingIds, onResolve }: Props) {
+export default function PendingRunDecisions({ decisions, resolvingIds, focusedDecisionId, onResolve }: Props) {
   const { ts } = useI18n()
   const [notes, setNotes] = useState<Record<string, string>>({})
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const cardRef = useRef<HTMLElement>(null)
+  const focusedAnswer = decisions.some((decision) =>
+    decision.id === focusedDecisionId && decision.status !== 'pending')
+  useEffect(() => {
+    if (!focusedDecisionId) return
+    const focusedItem = Array.from(cardRef.current?.querySelectorAll<HTMLElement>('[data-decision-id]') ?? [])
+      .find((item) => item.dataset.decisionId === focusedDecisionId)
+    focusedItem?.scrollIntoView?.({ block: 'center' })
+  }, [focusedDecisionId, decisions])
+  useEffect(() => {
+    if (focusedAnswer) setHistoryOpen(true)
+  }, [focusedAnswer])
   if (decisions.length === 0) return null
   const pending = decisions.filter((decision) => decision.status === 'pending')
   const answered = decisions.filter((decision) => decision.status !== 'pending')
 
   return (
-    <section className={styles.card} aria-label={ts('decisions.title')}>
+    <section ref={cardRef} className={styles.card} aria-label={ts('decisions.title')}>
       <header className={styles.header}>
         <span>{ts('decisions.title')}</span>
         <span className={styles.count}>{pending.length}</span>
@@ -30,7 +44,12 @@ export default function PendingRunDecisions({ decisions, resolvingIds, onResolve
       {pending.map((decision) => {
         const resolving = resolvingIds.includes(decision.id)
         return (
-          <article key={decision.id} className={styles.decision} data-decision-id={decision.id}>
+          <article
+            key={decision.id}
+            className={styles.decision}
+            data-decision-id={decision.id}
+            data-focused={focusedDecisionId === decision.id}
+          >
             <span className={styles.kind}>{ts(`decisions.kind.${decision.kind}`)}</span>
             <p>{decision.question}</p>
             {decision.recommendation ? (
@@ -70,10 +89,19 @@ export default function PendingRunDecisions({ decisions, resolvingIds, onResolve
         )
       })}
       {answered.length > 0 ? (
-        <details className={styles.history}>
+        <details
+          className={styles.history}
+          open={historyOpen}
+          onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
+        >
           <summary>{ts('decisions.history', { count: answered.length })}</summary>
           {answered.map((decision) => (
-            <div key={decision.id} className={styles.historyItem}>
+            <div
+              key={decision.id}
+              className={styles.historyItem}
+              data-decision-id={decision.id}
+              data-focused={focusedDecisionId === decision.id}
+            >
               <span>{decision.question}</span>
               <strong>{decision.answer?.text || decision.answer?.optionId || decision.status}</strong>
             </div>

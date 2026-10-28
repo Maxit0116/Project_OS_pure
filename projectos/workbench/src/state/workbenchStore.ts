@@ -146,6 +146,12 @@ import {
   saveNotifyOnDiffReadyPreference,
 } from '../preferences/diffReadyNotifications'
 import {
+  loadNotifyOnPendingDecisionPreference,
+  markRunDecisionNotificationSeen,
+  saveNotifyOnPendingDecisionPreference,
+  wasRunDecisionNotificationSeen,
+} from '../preferences/pendingDecisionNotifications'
+import {
   loadChatModeSwitchPreference,
   saveChatModeSwitchPreference,
   type ChatModeSwitchPreference,
@@ -408,6 +414,7 @@ export interface WorkbenchState {
   themePreference: ThemePreference
   resolvedTheme: ResolvedTheme
   notifyOnDiffReady: boolean
+  notifyOnPendingDecision: boolean
   /** When switching chat modes: open a fresh session (Cursor-like) or keep the same thread. */
   chatModeSwitch: ChatModeSwitchPreference
   showGestureCursor: boolean
@@ -456,6 +463,7 @@ export interface WorkbenchState {
 
   activeRunId: string | null
   runDecisions: RunDecision[]
+  focusedDecisionId: string | null
   decisionResolvingIds: string[]
   flowSteps: AgentFlowStep[]
   flowActions: AgentActionEvent[]
@@ -538,6 +546,7 @@ export interface WorkbenchState {
   setThemePreference: (theme: ThemePreference) => void
   setResolvedTheme: (theme: ResolvedTheme) => void
   setNotifyOnDiffReady: (enabled: boolean) => void
+  setNotifyOnPendingDecision: (enabled: boolean) => void
   setChatModeSwitch: (value: ChatModeSwitchPreference) => void
   setShowGestureCursor: (show: boolean) => void
   setWindowFocused: (focused: boolean) => void
@@ -548,7 +557,11 @@ export interface WorkbenchState {
   setPendingChangesDrawerExpanded: (expanded: boolean) => void
   dismissPendingChanges: () => void
   undoAllPendingChanges: () => Promise<void>
-  navigateFromAgentNotification: (destination: 'ask' | 'diff') => Promise<void>
+  navigateFromAgentNotification: (
+    destination: 'ask' | 'diff' | 'decisions',
+    runId?: string,
+    decisionId?: string,
+  ) => Promise<void>
   maybeNotifyAgentComplete: (item: Omit<DiffReadyCompletion, 'context'> & { context?: DiffReadyCompletion['context'] }) => void
   pushToast: (opts: { type: ToastType; message: string; autoDismiss?: number }) => void
   dismissToast: (id: string) => void
@@ -1216,6 +1229,7 @@ const initialTransientState = {
   agentFlowSubject: 'run' as AgentFlowSubject,
   activeRunId: null as string | null,
   runDecisions: [] as RunDecision[],
+  focusedDecisionId: null as string | null,
   decisionResolvingIds: [] as string[],
   flowSteps: [] as AgentFlowStep[],
   flowActions: [] as AgentActionEvent[],
@@ -1420,6 +1434,44 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     showInAppBanner(channel)
   }
 
+  const notifyPendingDecision = (decision: RunDecision) => {
+    const state = get()
+    if (!state.notifyOnPendingDecision || decision.status !== 'pending' ||
+      wasRunDecisionNotificationSeen(decision.id)) return
+    markRunDecisionNotificationSeen(decision.id)
+    const body = getStoreMessage(state.locale, 'decisions.notificationBody', {
+      question: truncateDiffReadySummary(decision.question, 160),
+    })
+    if (!state.windowFocused && isDesktopApp() && window.projectOS?.notify) {
+      void window.projectOS.notify.showDiffReady({
+        title: getStoreMessage(state.locale, 'decisions.notificationTitle'),
+        body,
+        destination: 'decisions',
+        runIds: [decision.rootRunId],
+        decisionId: decision.id,
+      }).catch((error) => {
+        console.error('[workbench] failed to show decision notification', error)
+        get().pushToast({
+          type: 'info',
+          message: getStoreMessage(get().locale, 'decisions.notificationToast', { question: body }),
+        })
+      })
+      return
+    }
+    useChatSessionStore.getState().presentAgentFlow()
+    set({
+      activeRunId: decision.rootRunId,
+      agentFlowSubject: 'run',
+      rightPanelTab: 'chat',
+      rightPanelOpen: true,
+      focusedDecisionId: decision.id,
+    })
+    get().pushToast({
+      type: 'info',
+      message: getStoreMessage(state.locale, 'decisions.notificationToast', { question: body }),
+    })
+  }
+
   const maybeNotifyAgentComplete = (
     item: Omit<DiffReadyCompletion, 'context'> & { context?: DiffReadyCompletion['context'] },
   ) => {
@@ -1471,6 +1523,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   themePreference: loadThemePreference(),
   resolvedTheme: resolveTheme(loadThemePreference()),
   notifyOnDiffReady: loadNotifyOnDiffReadyPreference(),
+  notifyOnPendingDecision: loadNotifyOnPendingDecisionPreference(),
   chatModeSwitch: loadChatModeSwitchPreference(),
   showGestureCursor: loadShowGestureCursorPreference(),
   windowFocused: typeof document !== 'undefined' ? document.hasFocus() : true,
@@ -1527,6 +1580,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     set({ notifyOnDiffReady: enabled })
   },
 
+  setNotifyOnPendingDecision: (enabled) => {
+    saveNotifyOnPendingDecisionPreference(enabled)
+    set({ notifyOnPendingDecision: enabled })
+  },
+
   setChatModeSwitch: (value) => {
     saveChatModeSwitchPreference(value)
     set({ chatModeSwitch: value })
@@ -1580,7 +1638,21 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     get().dismissPendingChanges()
   },
 
-  navigateFromAgentNotification: async (destination) => {
+  navigateFromAgentNotification: async (destination, runId, decisionId) => {
+    if (destination === 'decisions') {
+      if (!runId || !decisionId) return
+      useChatSessionStore.getState().presentAgentFlow()
+      set({
+        activeRunId: runId,
+        agentFlowSubject: 'run',
+        rightPanelTab: 'chat',
+        rightPanelOpen: true,
+        focusedDecisionId: decisionId,
+        diffReadyBanner: null,
+      })
+      await get().loadRunDecisions(runId)
+      return
+    }
     if (destination === 'diff') {
       await get().navigateToDiffReviewFile()
       return
@@ -1780,6 +1852,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       set({
         activeRunId: run.runId,
         runDecisions: [],
+        focusedDecisionId: null,
         decisionResolvingIds: [],
         liveGraphPausedRunId: null,
         flowStatus: 'running',
@@ -2920,6 +2993,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         flowStatus: 'idle',
         executionOverlay: null,
         runDecisions: [],
+        focusedDecisionId: null,
       }))
       try {
         const intent = await client.extractRequestIntent({
@@ -3035,6 +3109,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         refinementConfirmed: true,
         latestContextAssembly: delivered.contextAssembly ?? get().latestContextAssembly,
         activeRunId: run.runId,
+        runDecisions: [],
+        focusedDecisionId: null,
         flowSteps: [],
         flowActions: [],
         flowDelegationEvents: [],
@@ -3070,6 +3146,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       }
 
       const handledRunEventIds = new Set<string>()
+      let lastDecisionRefreshAt = 0
+      const refreshRunDecisionsIfDue = () => {
+        const now = Date.now()
+        if (now - lastDecisionRefreshAt < 1_500) return
+        lastDecisionRefreshAt = now
+        void get().loadRunDecisions(run.rootRunId ?? run.runId)
+      }
       const applyRunEvent = (event: AgentRunEvent) => {
         if (!isCurrentRunSubscription()) return
         if (handledRunEventIds.has(event.eventId)) return
@@ -3080,6 +3163,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         } catch (error) {
           console.error('[workbench] failed to apply agent run event', event.type, error)
         }
+        refreshRunDecisionsIfDue()
         if (event.type === 'task_delegated') {
           ensureChildSubscription(event, run.runId, run.runId)
         }
@@ -3180,6 +3264,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
                 ),
               }
             })
+            refreshRunDecisionsIfDue()
             if (childEvent.type === 'task_delegated') {
               ensureChildSubscription(childEvent, childRunId, rootRunId)
             }
@@ -3524,7 +3609,19 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     try {
       const decisions = await client.listRunDecisions(projectId, rootRunId)
       if (get().project?.projectId !== projectId) return
-      set({ runDecisions: decisions })
+      const previousPendingIds = new Set(get().runDecisions
+        .filter((item) => item.rootRunId === rootRunId && item.status === 'pending')
+        .map((item) => item.id))
+      const focusedDecisionId = get().focusedDecisionId
+      set({
+        runDecisions: decisions,
+        ...(focusedDecisionId && !decisions.some((item) => item.id === focusedDecisionId)
+          ? { focusedDecisionId: null }
+          : {}),
+      })
+      decisions
+        .filter((item) => item.status === 'pending' && !previousPendingIds.has(item.id))
+        .forEach(notifyPendingDecision)
     } catch (error) {
       if (get().project?.projectId === projectId) {
         set({ error: errorMessage(error, 'Failed to load run decisions') })

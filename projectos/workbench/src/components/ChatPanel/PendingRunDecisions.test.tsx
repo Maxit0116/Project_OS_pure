@@ -40,4 +40,19 @@ describe('PendingRunDecisions', () => {
     expect(html).toMatch(/<summary>[^<]*[（(]1[）)]<\/summary>/u)
     expect(html).toContain('Use the existing preference.')
   })
+
+  it('marks a decision reached from a notification, including answered history', () => {
+    const answered = { ...pending, status: 'resolved' as const, answer: { optionId: 'approve' } }
+    const html = renderToStaticMarkup(
+      <PendingRunDecisions
+        decisions={[answered]}
+        resolvingIds={[]}
+        focusedDecisionId={answered.id}
+        onResolve={vi.fn()}
+      />,
+    )
+    expect(html).toContain('data-decision-id="decision_pending"')
+    expect(html).toContain('data-focused="true"')
+    expect(html).toContain('Approve the additional settings file?')
+  })
 })

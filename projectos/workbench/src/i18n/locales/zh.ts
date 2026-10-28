@@ -776,6 +776,9 @@ const zh = {
   },
   decisions: {
     title: '待处理决定',
+    notificationTitle: '运行需要你的决定',
+    notificationBody: '{question}',
+    notificationToast: '有一个运行正在等待你的决定：{question}',
     recommendation: '建议：{value}',
     note: '可选备注',
     history: '已回答决定（{count}）',
@@ -2220,7 +2223,9 @@ const zh = {
     notifyOnDiffReady: 'Agent 完成时通知',
     notifyOnDiffReadyDesc:
       '当你离开 Project OS 时，macOS 会显示系统通知；当你停留在功能地图或其他视图时，Project OS 会在应用内显示横幅提醒。适用于 Ask 与 Change 模式。',
-    notificationsSummary: 'Diff 就绪提醒',
+    notifyOnPendingDecision: '运行需要决定时通知',
+    notifyOnPendingDecisionDesc: '运行暂停并等待你输入时提醒你。打开通知只会显示已记录的决定，不会自动批准。',
+    notificationsSummary: 'Agent 与决定提醒',
     notificationsOff: '已关闭',
     gesture: {
       showCursor: '显示手势指针',
