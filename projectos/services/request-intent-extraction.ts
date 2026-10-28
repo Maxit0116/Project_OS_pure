@@ -33,23 +33,23 @@ export class RequestIntentExtractionService {
   }): Promise<RequestIntent> {
     const { request, graph, globalContext, execution } = input;
     const modelInput = {
-        rawRequest: request.rawRequest,
-        selectedNodeHint: request.nodeId,
-        selectedFileHint: request.filePath,
-        immediateGraph: globalContext.immediateNodes ?? globalContext.topLevelNodes,
-        immediateRelations: globalContext.immediateRelations ?? [],
-        executorSelection: request.executorSelection,
-        outputSchema: {
-          goal: "string",
-          kind: "change | add_node | delete_node | mixed",
-          touches: [{ nodeId: "known node id", reason: "string", allow: { editExisting: "boolean", addParts: "boolean", deletePartIds: ["known descendant id"] } }],
-          structuralProposals: ["add_node | delete_node | connect_nodes"],
-          assumptions: ["string"],
-          outOfScope: ["string"],
-          acceptance: ["observable outcome"],
-          questions: [{ id: "string", text: "material user choice", options: [{ id: "string", label: "string" }], recommendation: "string" }],
-        },
-      };
+      rawRequest: request.rawRequest,
+      selectedNodeHint: request.nodeId,
+      selectedFileHint: request.filePath,
+      immediateGraph: globalContext.immediateNodes ?? globalContext.topLevelNodes,
+      immediateRelations: globalContext.immediateRelations ?? [],
+      executorSelection: request.executorSelection,
+      outputSchema: {
+        goal: "string",
+        kind: "change | add_node | delete_node | mixed",
+        touches: [{ nodeId: "known node id", reason: "string", allow: { editExisting: "boolean", addParts: "boolean", deletePartIds: ["known descendant id"] } }],
+        structuralProposals: ["add_node | delete_node | connect_nodes"],
+        assumptions: ["string"],
+        outOfScope: ["string"],
+        acceptance: ["observable outcome"],
+        questions: [{ id: "string", text: "material user choice", options: [{ id: "string", label: "string" }], recommendation: "string" }],
+      },
+    };
     const complete = (value: unknown) => this.gateway.complete(execution.profile, {
       projectId: request.projectId,
       requestKind: "request_intent",
@@ -67,16 +67,17 @@ export class RequestIntentExtractionService {
       return RequestIntentDraftSchema.parse(JSON.parse(jsonOutput));
     };
     let draft = await parseDraft(modelInput);
+    const inspectNode = input.inspectNode;
     const drilldownIds = [...new Set(draft.touches
       .map((touch) => touch.nodeId)
       .filter((nodeId) => {
         const node = graph.nodes.find((candidate) => candidate.id === nodeId);
-        return Boolean(input.inspectNode && node?.level && ["context", "container"].includes(node.level) && node.children?.length);
+        return Boolean(inspectNode && node?.level && ["context", "container"].includes(node.level) && node.children?.length);
       }))].slice(0, 6);
-    if (drilldownIds.length && input.inspectNode) {
+    if (drilldownIds.length && inspectNode) {
       const discovered = await Promise.all(drilldownIds.map(async (nodeId) => ({
         selectedNodeId: nodeId,
-        context: await input.inspectNode!(nodeId),
+        context: await inspectNode(nodeId),
       })));
       draft = await parseDraft({
         ...modelInput,
@@ -95,8 +96,9 @@ export class RequestIntentExtractionService {
           const node = graph.nodes.find((candidate) => candidate.id === effect.nodeId);
           if (!node) throw new Error(`Intent references unknown node '${effect.nodeId}'`);
           const descendants = new Set<string>();
+          const nodesById = new Map(graph.nodes.map((candidate) => [candidate.id, candidate]));
           const visit = (nodeId: string) => {
-            const parent = graph.nodes.find((candidate) => candidate.id === nodeId);
+            const parent = nodesById.get(nodeId);
             for (const childId of parent?.children ?? []) {
               if (descendants.has(childId)) continue;
               descendants.add(childId);
