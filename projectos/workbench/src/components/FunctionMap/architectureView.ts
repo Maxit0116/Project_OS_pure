@@ -388,6 +388,12 @@ export function projectArchitectureView(
       node.level === effectiveLevel &&
       (!effectiveScope.parentId || node.parentId === effectiveScope.parentId),
   )
+  if (effectiveLevel === 'context' && !effectiveScope.parentId) {
+    levelNodes = [
+      ...levelNodes,
+      ...nodes.filter((node) => node.standalone && !node.level && !node.parentId),
+    ]
+  }
   levelNodes = applyViewNodeFilters(levelNodes, resolved.view)
   const levelIds = new Set(levelNodes.map((node) => node.id))
 

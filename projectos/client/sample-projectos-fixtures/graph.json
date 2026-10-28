@@ -363,6 +363,7 @@
         "page"
       ],
       "parentId": null,
+      "standalone": true,
       "children": [],
       "refs": [],
       "depth": 0
@@ -667,6 +668,7 @@
         "page"
       ],
       "parentId": null,
+      "standalone": true,
       "children": [],
       "refs": [],
       "depth": 0
@@ -1206,6 +1208,7 @@
         "page"
       ],
       "parentId": null,
+      "standalone": true,
       "children": [],
       "refs": [],
       "depth": 0
@@ -1305,6 +1308,7 @@
         "api"
       ],
       "parentId": null,
+      "standalone": true,
       "children": [],
       "refs": [],
       "depth": 0
