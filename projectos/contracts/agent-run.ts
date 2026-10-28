@@ -92,6 +92,11 @@ export const AgentRunSchema = z
     role: AgentRunRoleSchema.optional(),
     executor: RunExecutorSchema.optional(),
     waitState: AgentRunWaitStateSchema.optional(),
+    approvedIntent: z.object({
+      intentId: z.string().min(1),
+      revision: z.number().int().positive(),
+      approvalHash: z.string().min(1),
+    }).strict().optional(),
     startedAt: z.string(),
     completedAt: z.string().optional(),
   })

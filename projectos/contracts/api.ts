@@ -1,6 +1,7 @@
 import type { AgentRun } from "./agent-run.js";
 import type { RunCheckpoint, RunDecision } from "./run-state.js";
 import type { GlobalContextBundle, NodeContextBundle } from "./local-context.js";
+import type { ExtractRequestIntentRequest, RequestIntent } from "./request-intent.js";
 import type {
   AgentAnswerResult,
   AgentAskRequest,
@@ -142,6 +143,14 @@ export interface ProjectOSApi {
     nodeId: string,
     responseLanguage: string,
   ): Promise<NodeContextBundle>;
+  extractRequestIntent(request: ExtractRequestIntentRequest): Promise<RequestIntent>;
+  approveRequestIntent(
+    projectId: string,
+    intentId: string,
+    expectedRevision: number,
+    answers?: Array<{ questionId: string; answer: string; selectedOptionId?: string }>,
+  ): Promise<RequestIntent>;
+  prepareIntentExecution(projectId: string, intentId: string): Promise<PromptRefinement>;
   getFileContent(projectId: string, path: string): Promise<string>;
   getWorkspaceFileDataUrl(projectId: string, path: string): Promise<string>;
   writeFileContent(projectId: string, path: string, content: string): Promise<void>;

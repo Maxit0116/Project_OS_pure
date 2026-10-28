@@ -4,6 +4,7 @@ import {
   type ModelExecutionSnapshot,
 } from "../harness/executor-selection.js";
 import type { ExecutorSelection } from "../../contracts/executor-selection.js";
+import type { RequestIntent } from "../../contracts/request-intent.js";
 import { mkdirSync, appendFileSync, readFileSync } from "node:fs";
 import { z } from "zod";
 
@@ -185,6 +186,7 @@ export interface OrchestratorRunState {
   memoryInjection?: MemoryInjectionSnapshot;
   /** CTX-0 record for this run. Hashes only. */
   contextAssembly?: ContextAssembly;
+  approvedIntent?: RequestIntent;
   userPrompt?: string;
   validationResult?: AgentProposalValidationResult;
   validatedDiffJson?: string;
@@ -205,6 +207,7 @@ export interface OrchestratorRunState {
 export interface CreateOrchestratorRunOptions {
   executorSelection?: ExecutorSelection;
   modelExecution?: ModelExecutionSnapshot;
+  approvedIntent?: RequestIntent;
   runId?: string;
   localContext?: AgentContextBundle | CreateFileContextBundle;
   executionPolicy?: ChangeExecutionPolicy;
@@ -845,6 +848,7 @@ export class AgentOrchestrator {
       );
     }
     const parent = options.parentRunId ? this.runs.get(options.parentRunId) : undefined;
+    const approvedIntent = parent?.approvedIntent ?? options.approvedIntent;
     const inherited = parent?.modelProfile
       ? { profile: parent.modelProfile, thinkingDepth: parent.thinkingDepth }
       : undefined;
@@ -949,6 +953,11 @@ export class AgentOrchestrator {
       ...(options.rootRunId ? { rootRunId: options.rootRunId } : {}),
       role,
       ...(modelExecution ? { executor: runExecutorMetadata(modelExecution) } : {}),
+      ...(approvedIntent ? { approvedIntent: {
+        intentId: approvedIntent.id,
+        revision: approvedIntent.revision,
+        approvalHash: approvedIntent.approvalHash!,
+      } } : {}),
       startedAt: new Date().toISOString(),
     });
 
@@ -963,6 +972,7 @@ export class AgentOrchestrator {
       executionPolicy: options.executionPolicy ?? "review_first",
       memoryInjection,
       contextAssembly: assembled.assembly,
+      ...(approvedIntent ? { approvedIntent: cloneJson(approvedIntent) } : {}),
       ...(appendix?.markdown ? { taskAppendix: appendix.markdown } : {}),
       ...(options.userPrompt ? { userPrompt: options.userPrompt } : {}),
       ...(modelProfile ? { modelProfile } : {}),

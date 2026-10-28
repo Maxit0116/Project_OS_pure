@@ -525,4 +525,23 @@ Release requires:
 | Selection races and mutable settings | Bind at request acceptance, serialize selection saves, inherit the binding, and reject unavailable explicit choices. |
 | UI appears complete while runtime is incomplete | Show only usable executors; keep capability/status evidence separate from marketing labels. |
 
+## 14. Implementation status (2026-10-28)
+
+This status records the current code evidence; it does not relax the phase acceptance gates above.
+
+| Phase | Current status | Remaining acceptance evidence |
+|---|---|---|
+| **B0 — Baseline** | Partial | Failure inventory exists, but disposable evaluation setup and full baseline classification are not complete. |
+| **B1 — Reliable selection** | Implemented foundation | Explicit model binding is frozen through refinement and child execution; full keyboard, persistence-failure and desktop acceptance still need a fresh run. |
+| **B2 — Adapter contract** | Contract and deterministic fake implemented | Built-in model adapter does not yet use the common adapter contract; no real-runtime transport has passed the shared suite. |
+| **B3 — Durable execution state** | Storage primitives implemented | Waiting is not integrated into the run lifecycle; restart reconciliation and idempotent dispatch/publication recovery are not demonstrated. |
+| **B4 — Discovery and intent** | Partial | Global intent extraction drills into selected branches, presents an approval card and gates node/file delegation. Structural-scope widening and all publication paths still need end-to-end enforcement tests. |
+| **B5 — Waiting UI** | Partial | Chat list/history and map waiting badges use persisted decisions. Decision notifications, preferences/deep links and stale-link acceptance remain open. |
+| **B6 — Hierarchical integration** | Existing foundations | Contract-first producer/consumer fixture and controlled plus held-out cross-block semantic evidence remain open. |
+| **B7 — Graph placement** | Partial | Four sample capabilities are explicitly standalone and appear in the root context projection; schema migration, view/routing coverage and high-fan-out paging remain open. |
+| **B8 — Real agent adapter** | Not started | No selectable production runtime adapter is connected to node tasks and common publication/recovery behavior. |
+| **B9 — Release evidence** | Not started | No complete desktop run/restart/undo matrix or held-out repository report exists. |
+
+The current checkout also has unrelated pre-existing TypeScript diagnostics and user-authored working-tree changes. Verification must distinguish those from errors in the node-harness files and must not stage unrelated workspace edits.
+
 Default UI placement, schema names, and phase order above are concrete recommendations that an engineer can implement. The remaining practical assignments are the first runtime adapter, frontend ownership, and held-out repository. They do not block B0/B1, and they do not change the agreed requirement to support both plug-in modes.

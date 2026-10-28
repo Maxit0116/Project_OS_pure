@@ -26,6 +26,7 @@ import type {
   Disposable,
   ProjectOSSettings,
   RunDecision,
+  RequestIntent,
   PromptRefinement,
   MemoryWriteNotice,
   SemanticTree,
@@ -284,9 +285,11 @@ export function canSubmitAgentPrompt(state: {
   pendingFileOwnerChoice: PendingFileOwnerChoice | null
   fileScopeError: 'not_mapped' | null
   pendingPlan: import('@contracts/index').ImplementationPlan | null
+  pendingIntent: RequestIntent | null
   modelSelectionPending?: boolean
 }): boolean {
   if (state.modelSelectionPending) return false
+  if (state.pendingIntent) return false
   if (isGlobalAgentScope(state)) {
     // M3.B: Ask/Debug/Anchored + Plan/Agent (global planner → leaf child runs)
     return (
@@ -431,6 +434,7 @@ export interface WorkbenchState {
 
   messages: ChatMessage[]
   pendingRefinement: PromptRefinement | null
+  pendingIntent: RequestIntent | null
   refinementConfirmed: boolean
   pendingPlan: import('@contracts/index').ImplementationPlan | null
   /** Last plan that was built — used by Return to plan. */
@@ -668,6 +672,8 @@ export interface WorkbenchState {
     status?: 'resolved' | 'declined',
   ) => Promise<void>
   submitDebugRepro: () => Promise<void>
+  approveRequestIntent: (answers?: Array<{ questionId: string; answer: string; selectedOptionId?: string }>) => Promise<void>
+  reviseRequestIntent: () => void
   confirmDebugFix: () => Promise<void>
   markDebugFixed: () => Promise<void>
   loadDiff: (runId?: string) => Promise<void>
@@ -1193,6 +1199,7 @@ const initialTransientState = {
   >,
   messages: [] as ChatMessage[],
   pendingRefinement: null as PromptRefinement | null,
+  pendingIntent: null as RequestIntent | null,
   refinementConfirmed: false,
   pendingPlan: null as import('@contracts/index').ImplementationPlan | null,
   lastBuiltPlan: null as import('@contracts/index').ImplementationPlan | null,
@@ -2893,6 +2900,51 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       return
     }
 
+    if (chatMode === 'change') {
+      const executorSelection = composerFieldsWithMode.executorSelection
+      if (!executorSelection) {
+        pushToast({ type: 'warning', message: getStoreMessage(state.locale, 'chat.configureModel') })
+        return
+      }
+      get().runDisposable?.dispose()
+      resetDiffReadyBatch()
+      const userMsg = buildUserMessage()
+      set((current) => ({
+        messages: [...current.messages, userMsg],
+        composerDraft: clearedDraft,
+        pendingIntent: null,
+        pendingRefinement: null,
+        refinementConfirmed: false,
+        refineLoading: true,
+        activeRunId: null,
+        flowStatus: 'idle',
+        executionOverlay: null,
+        runDecisions: [],
+      }))
+      try {
+        const intent = await client.extractRequestIntent({
+          projectId: project.projectId,
+          rawRequest: rawPrompt.trim(),
+          nodeId: selectedNodeId ?? undefined,
+          filePath: selectedFilePath ?? undefined,
+          ...composerFieldsWithMode,
+          executorSelection,
+        })
+        set({
+          pendingIntent: intent,
+          rightPanelTab: 'chat',
+          refineLoading: false,
+        })
+      } catch (error) {
+        set({
+          refineLoading: false,
+          error: errorMessage(error, 'Failed to prepare request intent'),
+        })
+      }
+      scheduleChatSessionPersist()
+      return
+    }
+
     get().runDisposable?.dispose()
     resetDiffReadyBatch()
 
@@ -3478,6 +3530,40 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         set({ error: errorMessage(error, 'Failed to load run decisions') })
       }
     }
+  },
+
+  approveRequestIntent: async (answers = []) => {
+    const { client, project, pendingIntent, pushToast, locale } = get()
+    if (!project || !pendingIntent || pendingIntent.status !== 'draft') return
+    const projectId = project.projectId
+    set({ refineLoading: true, error: null })
+    try {
+      const approved = await client.approveRequestIntent(
+        projectId,
+        pendingIntent.id,
+        pendingIntent.revision,
+        answers,
+      )
+      if (get().project?.projectId !== projectId) return
+      const refinement = await client.prepareIntentExecution(projectId, approved.id)
+      if (get().project?.projectId !== projectId) return
+      set({ pendingIntent: null, pendingRefinement: refinement, refinementConfirmed: false, refineLoading: false })
+      await get().confirmRefinement()
+      pushToast({ type: 'info', message: getStoreMessage(locale, 'toast.agentRunning') })
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        set({ refineLoading: false, error: errorMessage(error, 'Failed to approve request intent') })
+      }
+    }
+  },
+
+  reviseRequestIntent: () => {
+    const intent = get().pendingIntent
+    if (!intent) return
+    set((state) => ({
+      pendingIntent: null,
+      composerDraft: setComposerText(state.composerDraft, intent.rawRequest),
+    }))
   },
 
   resolveRunDecision: async (decision, optionId, text, status = 'resolved') => {

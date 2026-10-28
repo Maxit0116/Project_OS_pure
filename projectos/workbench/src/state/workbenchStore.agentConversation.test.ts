@@ -6,6 +6,7 @@ import type {
   AgentRunEvent,
   AgentTransientTrace,
   ProjectOSApi,
+  RequestIntent,
 } from '@contracts/index'
 import { emptyComposerDraft } from '@contracts/index'
 import { createMockSampleWorkspace, MockProjectOSApiClient } from '../../../client/mock-project-os-api-client.js'
@@ -24,6 +25,7 @@ afterEach(() => {
     graph: null,
     tree: null,
     settings: null,
+    pendingIntent: null,
     selectedModelProfileId: null,
     modelSelectionPending: false,
     messages: [],
@@ -54,6 +56,16 @@ afterEach(() => {
 
 function setReadyScope(client: ProjectOSApi, mode: 'ask' | 'change' | 'plan' | 'debug' = 'ask') {
   const workspace = createMockSampleWorkspace()
+  const settings = mode === 'change'
+    ? {
+        ...workspace.settings,
+        presentationMode: false,
+        execution: { ...workspace.settings.execution, mode: 'model' as const, defaultModelProfileId: 'model-1' },
+        modelProfiles: [{
+          id: 'model-1', name: 'Test model', provider: 'ollama' as const, model: 'test-model', apiKeyRef: '',
+        }],
+      }
+    : null
   useWorkbenchStore.setState({
     client,
     project: workspace.project,
@@ -65,9 +77,41 @@ function setReadyScope(client: ProjectOSApi, mode: 'ask' | 'change' | 'plan' | '
     pendingFileOwnerChoice: null,
     fileScopeError: null,
     chatMode: mode,
+    ...(settings ? { settings, selectedModelProfileId: 'model-1' } : {}),
     messages: [],
     locale: 'en',
   })
+}
+
+function requestIntent(projectId: string, id: string, rawRequest: string, nodeId = 'feat_login'): RequestIntent {
+  return {
+    version: '0.1.0',
+    id,
+    projectId,
+    rawRequest,
+    goal: 'Update the login heading',
+    kind: 'change',
+    entryNodeId: nodeId,
+    touches: [{
+      nodeId,
+      reason: 'Owns the requested login experience',
+      allow: { editExisting: true, addParts: false, deletePartIds: [] },
+    }],
+    structuralEffects: [],
+    assumptions: [],
+    outOfScope: [],
+    acceptance: ['The heading changes'],
+    questions: [],
+    executorSelection: { kind: 'model', modelProfileId: 'model-1' },
+    executorSnapshot: {
+      kind: 'model',
+      profile: { id: 'model-1', name: 'Test model', provider: 'ollama', model: 'test-model', apiKeyRef: '' },
+      thinkingDepth: 'medium',
+    },
+    baseGraphHash: 'sha256:graph',
+    revision: 1,
+    status: 'draft',
+  }
 }
 
 describe('agent conversation routing', () => {
@@ -404,101 +448,54 @@ describe('agent conversation routing', () => {
     })
   })
 
-  it('keeps Change on the existing refinement path', async () => {
+  it('routes Change through request intent extraction and includes scope hints', async () => {
     const askAgent = vi.fn()
-    const refinePrompt = vi.fn(async () => ({
-      id: 'ref-1',
-      understood: 'Change the login heading',
-      ambiguities: [],
-      suggestions: [],
-      affectedNodeIds: ['feat_login'],
-      affectedFiles: ['app/login/page.tsx'],
-      confidence: 1,
-      mode: 'model' as const,
-    }))
-    setReadyScope({ askAgent, refinePrompt } as unknown as ProjectOSApi, 'change')
+    const extractRequestIntent = vi.fn(async () => requestIntent('sample-graph-saas', 'intent-1', 'Change the heading'))
+    setReadyScope({ askAgent, extractRequestIntent } as unknown as ProjectOSApi, 'change')
 
     await useWorkbenchStore.getState().sendPrompt('Change the heading')
 
-    expect(refinePrompt).toHaveBeenCalledOnce()
+    expect(extractRequestIntent).toHaveBeenCalledOnce()
+    expect(extractRequestIntent).toHaveBeenCalledWith(expect.objectContaining({
+      rawRequest: 'Change the heading',
+      nodeId: 'feat_login',
+      filePath: 'app/login/page.tsx',
+      executorSelection: { kind: 'model', modelProfileId: 'model-1' },
+    }))
     expect(askAgent).not.toHaveBeenCalled()
-    expect(useWorkbenchStore.getState().pendingRefinement?.id).toBe('ref-1')
+    expect(useWorkbenchStore.getState().pendingIntent?.id).toBe('intent-1')
+    expect(useWorkbenchStore.getState().pendingRefinement).toBeNull()
   })
 
-  it('starts an automatic Change without leaving a confirmation card', async () => {
-    const run = {
-      runId: 'run-automatic',
-      projectId: 'sample-graph-saas',
-      kind: 'feature_change' as const,
-      status: 'running' as const,
-      relatedNodeIds: ['feat_login'],
-      relatedFiles: ['app/login/page.tsx'],
-      startedAt: '2026-07-19T00:00:00.000Z',
-    }
-    const firstEvent: AgentRunEvent = {
-      eventId: 'event-automatic',
-      runId: run.runId,
-      timestamp: run.startedAt,
-      type: 'step_started',
-      step: {
-        id: 'step-context',
-        label: 'Context prepared',
-        kind: 'context_prepared',
-        status: 'running',
-        relatedNodeIds: ['feat_login'],
-        relatedFiles: ['app/login/page.tsx'],
-      },
-    }
-    const refinePrompt = vi.fn(async () => ({
-      id: 'ref-automatic',
-      understood: 'Change the login heading',
-      ambiguities: [],
-      suggestions: [],
-      affectedNodeIds: ['feat_login'],
-      affectedFiles: ['app/login/page.tsx'],
-      confidence: 1,
-      mode: 'model' as const,
-      executionPolicy: 'automatic' as const,
-    }))
-    const confirmExecution = vi.fn(async () => run)
+  it('keeps the intent card as the only human gate before starting a Change', async () => {
+    const intent = requestIntent('sample-graph-saas', 'intent-approved', 'Change the heading')
+    const extractRequestIntent = vi.fn(async () => intent)
+    const confirmExecution = vi.fn()
     const client = {
-      refinePrompt,
+      extractRequestIntent,
+      approveRequestIntent: vi.fn(async () => ({ ...intent, status: 'approved' as const, approvalHash: 'sha256:approved', approvedAt: '2026-10-27T00:00:00Z' })),
+      prepareIntentExecution: vi.fn(async () => ({ id: 'ref-automatic', understood: intent.goal, ambiguities: [], suggestions: [], affectedNodeIds: ['feat_login'], affectedFiles: [], confidence: 1, mode: 'model' as const })),
       confirmExecution,
-      getAgentRunEvents: vi.fn(async () => [firstEvent]),
-      streamAgentRun: vi.fn(() => ({ dispose: vi.fn() })),
     } as unknown as ProjectOSApi
     setReadyScope(client, 'change')
 
     await useWorkbenchStore.getState().sendPrompt('Change the heading')
 
-    expect(confirmExecution).toHaveBeenCalledWith('ref-automatic')
-    expect(useChatSessionStore.getState().agentFlowOpen).toBe(true)
-    expect(useWorkbenchStore.getState()).toMatchObject({
-      pendingRefinement: null,
-      activeRunId: 'run-automatic',
-      agentFlowSubject: 'run',
-    })
+    expect(confirmExecution).not.toHaveBeenCalled()
+    expect(useWorkbenchStore.getState().pendingIntent?.status).toBe('draft')
   })
 
   it('revises the original request without confirming or starting a run', async () => {
     const confirmExecution = vi.fn()
-    const refinePrompt = vi.fn(async () => ({
-      id: 'ref-revise',
-      understood: 'Change the login heading',
-      ambiguities: [],
-      suggestions: ['Keep the heading level'],
-      affectedNodeIds: ['feat_login'],
-      affectedFiles: ['app/login/page.tsx'],
-      confidence: 1,
-      mode: 'model' as const,
-    }))
-    setReadyScope({ refinePrompt, confirmExecution } as unknown as ProjectOSApi, 'change')
+    const extractRequestIntent = vi.fn(async () => requestIntent('sample-graph-saas', 'intent-revise', 'Use a friendlier login heading'))
+    setReadyScope({ extractRequestIntent, confirmExecution } as unknown as ProjectOSApi, 'change')
     await useWorkbenchStore.getState().sendPrompt('Use a friendlier login heading')
 
-    useWorkbenchStore.getState().reviseRefinement()
+    useWorkbenchStore.getState().reviseRequestIntent()
 
     expect(useWorkbenchStore.getState()).toMatchObject({
       composerDraft: emptyComposerDraft('Use a friendlier login heading'),
+      pendingIntent: null,
       pendingRefinement: null,
       refinementConfirmed: false,
       refineLoading: false,
@@ -543,22 +540,19 @@ describe('agent conversation routing', () => {
     }))
   })
 
-  it('allows node-scoped Change to enter the planner without inventing a file scope', async () => {
-    const refinePrompt = vi.fn(async () => ({
-      id: 'refinement-node-plan',
-      understood: 'Change the node',
-      ambiguities: [],
-      suggestions: [],
-      affectedNodeIds: ['feat_login'],
-      affectedFiles: [],
-      confidence: 1,
-      mode: 'model' as const,
-      executionPolicy: 'review_first' as const,
-    }))
+  it('keeps node scope as a discovery hint for Change intent extraction', async () => {
+    const extractRequestIntent = vi.fn(async () => requestIntent('sample-graph-saas', 'intent-node', 'Change it'))
     const workspace = createMockSampleWorkspace()
     useWorkbenchStore.setState({
-      client: { refinePrompt } as unknown as ProjectOSApi,
+      client: { extractRequestIntent } as unknown as ProjectOSApi,
       project: workspace.project,
+      settings: {
+        ...workspace.settings,
+        presentationMode: false,
+        execution: { ...workspace.settings.execution, mode: 'model', defaultModelProfileId: 'model-1' },
+        modelProfiles: [{ id: 'model-1', name: 'Model', provider: 'ollama', model: 'model', apiKeyRef: '' }],
+      },
+      selectedModelProfileId: 'model-1',
       selectedNodeId: 'feat_login',
       selectedFilePath: null,
       pendingFileOwnerChoice: null,
@@ -568,10 +562,10 @@ describe('agent conversation routing', () => {
 
     expect(canSubmitAgentPrompt(useWorkbenchStore.getState())).toBe(true)
     await useWorkbenchStore.getState().sendPrompt('Change it')
-    expect(refinePrompt).toHaveBeenCalledWith(expect.objectContaining({
+    expect(extractRequestIntent).toHaveBeenCalledWith(expect.objectContaining({
       nodeId: 'feat_login',
       filePath: undefined,
-      rawPrompt: 'Change it',
+      rawRequest: 'Change it',
     }))
   })
 
@@ -597,22 +591,19 @@ describe('agent conversation routing', () => {
       createdAt: '2026-07-18T00:00:00.000Z',
       updatedAt: '2026-07-18T00:00:00.000Z',
     }))
-    const refinePrompt = vi.fn(async () => ({
-      id: 'refinement-global',
-      understood: 'Change globally',
-      ambiguities: [],
-      suggestions: [],
-      affectedNodeIds: [],
-      affectedFiles: [],
-      confidence: 1,
-      mode: 'model' as const,
-      executionPolicy: 'review_first' as const,
-    }))
     const workspace = createMockSampleWorkspace()
+    const extractRequestIntent = vi.fn(async () => requestIntent(workspace.project.projectId, 'intent-global', 'Apply a small global improvement'))
     useWorkbenchStore.setState({
-      client: { createPlan, refinePrompt } as unknown as ProjectOSApi,
+      client: { createPlan, extractRequestIntent } as unknown as ProjectOSApi,
       project: workspace.project,
       graph: workspace.graph,
+      settings: {
+        ...workspace.settings,
+        presentationMode: false,
+        execution: { ...workspace.settings.execution, mode: 'model', defaultModelProfileId: 'model-1' },
+        modelProfiles: [{ id: 'model-1', name: 'Test model', provider: 'ollama', model: 'test-model', apiKeyRef: '' }],
+      },
+      selectedModelProfileId: 'model-1',
       selectedNodeId: null,
       selectedFilePath: null,
       pendingFileOwnerChoice: null,
@@ -627,9 +618,9 @@ describe('agent conversation routing', () => {
     useWorkbenchStore.setState({ chatMode: 'change', pendingPlan: null })
     expect(canSubmitAgentPrompt(useWorkbenchStore.getState())).toBe(true)
     await useWorkbenchStore.getState().sendPrompt('Apply a small global improvement')
-    expect(refinePrompt).toHaveBeenCalledWith(
+    expect(extractRequestIntent).toHaveBeenCalledWith(
       expect.objectContaining({
-        rawPrompt: 'Apply a small global improvement',
+        rawRequest: 'Apply a small global improvement',
       }),
     )
   })

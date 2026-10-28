@@ -117,6 +117,28 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async extractRequestIntent(
+    _request: import("../../contracts/request-intent.js").ExtractRequestIntentRequest,
+  ): Promise<import("../../contracts/request-intent.js").RequestIntent> {
+    return transportNotConnected();
+  }
+
+  async approveRequestIntent(
+    _projectId: string,
+    _intentId: string,
+    _expectedRevision: number,
+    _answers?: Array<{ questionId: string; answer: string; selectedOptionId?: string }>,
+  ): Promise<import("../../contracts/request-intent.js").RequestIntent> {
+    return transportNotConnected();
+  }
+
+  async prepareIntentExecution(
+    _projectId: string,
+    _intentId: string,
+  ): Promise<PromptRefinement> {
+    return transportNotConnected();
+  }
+
   async inspectAgentNode(
     _projectId: string,
     _nodeId: string,

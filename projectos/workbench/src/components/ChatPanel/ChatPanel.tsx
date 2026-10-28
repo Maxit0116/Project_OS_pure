@@ -10,6 +10,7 @@ import {
 import PendingChangesDrawer from '../PendingChangesDrawer/PendingChangesDrawer'
 import { useI18n } from '../../i18n'
 import PromptRefinementCard from './PromptRefinementCard'
+import RequestIntentCard from './RequestIntentCard'
 import PlanReviewCard from './PlanReviewCard'
 import PendingRunDecisions from './PendingRunDecisions'
 import DebugSessionPanel from './DebugSessionPanel'
@@ -53,6 +54,10 @@ export default function ChatPanel() {
   const setChatInput = useWorkbenchStore((s) => s.setChatInput)
   const sendPrompt = useWorkbenchStore((s) => s.sendPrompt)
   const pendingRefinement = useWorkbenchStore((s) => s.pendingRefinement)
+  const pendingIntent = useWorkbenchStore((s) => s.pendingIntent)
+  const settings = useWorkbenchStore((s) => s.settings)
+  const approveRequestIntent = useWorkbenchStore((s) => s.approveRequestIntent)
+  const reviseRequestIntent = useWorkbenchStore((s) => s.reviseRequestIntent)
   const pendingPlan = useWorkbenchStore((s) => s.pendingPlan)
   const runDecisions = useWorkbenchStore((s) => s.runDecisions)
   const decisionResolvingIds = useWorkbenchStore((s) => s.decisionResolvingIds)
@@ -240,7 +245,7 @@ export default function ChatPanel() {
     const el = messagesRef.current
     if (!el) return
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-  }, [messages, pendingRefinement, pendingPlan, debugSession, refineLoading])
+  }, [messages, pendingRefinement, pendingIntent, pendingPlan, debugSession, refineLoading])
 
   useEffect(() => {
     if (!isRecording && !isTranscribing) return
@@ -299,6 +304,15 @@ export default function ChatPanel() {
   const showGlobalAgentHint =
     (globalAgentActive || (!selectedNodeId && !selectedFilePath)) &&
     (chatMode === 'change' || chatMode === 'plan')
+  const pendingIntentExecutorLabel = (() => {
+    if (!pendingIntent) return ''
+    const snapshot = pendingIntent.executorSnapshot
+    if (snapshot) return snapshot.profile.displayName ?? snapshot.profile.name
+    const selection = pendingIntent.executorSelection
+    if (selection.kind === 'runtime') return selection.runtimeProfileId
+    return settings?.modelProfiles.find((profile) => profile.id === selection.modelProfileId)?.name ??
+      selection.modelProfileId
+  })()
 
   return (
     <div className={styles.panel} ref={panelRef}>
@@ -380,7 +394,16 @@ export default function ChatPanel() {
             </div>
           )
         })}
-        {chatMode === 'change' && pendingRefinement && !refinementConfirmed && (
+        {chatMode === 'change' && pendingIntent && (
+          <RequestIntentCard
+            intent={pendingIntent}
+            busy={refineLoading}
+            executorLabel={pendingIntentExecutorLabel}
+            onApprove={(answers) => void approveRequestIntent(answers)}
+            onRevise={reviseRequestIntent}
+          />
+        )}
+        {chatMode === 'change' && pendingRefinement && !pendingIntent && !refinementConfirmed && (
           <PromptRefinementCard
             refinement={pendingRefinement}
             targetFile={selectedFilePath}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import graphFixture from "../client/sample-projectos-fixtures/graph.json" with { type: "json" };
 import { ProjectGraphSchema } from "../contracts/graph.js";
 import type { RequestIntent } from "../contracts/request-intent.js";
-import { RequestIntentService, smallestPlannerNode } from "./request-intent-service.js";
+import { intentAllowsFile, RequestIntentService, smallestPlannerNode } from "./request-intent-service.js";
 
 const graph = ProjectGraphSchema.parse(graphFixture);
 
@@ -54,5 +54,23 @@ describe("request intent routing and approval", () => {
       ...draft(["feat_checkout"]),
       questions: [{ id: "q1", text: "Which receipt format?" }],
     }, 1)).toThrow(/unanswered/);
+  });
+
+  it("limits approved file work to the touched component and declared capability", () => {
+    const intent = draft(["feat_checkout"]);
+    const checkoutFile = graph.nodes.find((node) => node.id === "feat_checkout")!.linkedFiles[0]!.path;
+    const notificationFile = graph.nodes.find((node) => node.id === "feat_notifications")!.linkedFiles[0]!.path;
+    expect(intentAllowsFile(intent, graph, checkoutFile, "modify")).toBe(true);
+    expect(intentAllowsFile(intent, graph, notificationFile, "modify")).toBe(false);
+    expect(intentAllowsFile(intent, graph, checkoutFile, "delete")).toBe(false);
+    expect(intentAllowsFile(intent, graph, "src/receipt.ts", "create", "feat_checkout")).toBe(false);
+    expect(intentAllowsFile({
+      ...intent,
+      touches: [{ ...intent.touches[0]!, allow: { editExisting: false, addParts: true, deletePartIds: [] } }],
+    }, graph, "src/receipt.ts", "create", "feat_checkout")).toBe(true);
+    expect(intentAllowsFile({
+      ...intent,
+      touches: [{ ...intent.touches[0]!, allow: { editExisting: false, addParts: false, deletePartIds: ["feat_checkout"] } }],
+    }, graph, checkoutFile, "delete")).toBe(true);
   });
 });

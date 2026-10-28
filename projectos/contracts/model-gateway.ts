@@ -6,6 +6,7 @@ export const ModelRequestKindSchema = z.enum([
   "feature_decomposition",
   "structure_graph_scan",
   "prompt_refinement",
+  "request_intent",
   "change_generation",
   "root_cause_analysis",
   "implementation_plan",

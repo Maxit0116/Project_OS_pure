@@ -10,6 +10,7 @@ import {
   type RunCheckpoint,
   type RunDecision,
 } from "../../contracts/run-state.js";
+import { RequestIntentSchema, type RequestIntent } from "../../contracts/request-intent.js";
 import { cloneJson } from "../../utils/json.js";
 
 function safeId(value: string): boolean {
@@ -25,12 +26,15 @@ function atomicJsonWrite(filePath: string, value: unknown): void {
 export class DurableRunStateStore {
   private readonly decisionsRoot: string;
   private readonly checkpointsRoot: string;
+  private readonly intentsRoot: string;
 
   constructor(projectOSRoot: string) {
     this.decisionsRoot = join(projectOSRoot, "run-decisions");
     this.checkpointsRoot = join(projectOSRoot, "run-checkpoints");
+    this.intentsRoot = join(projectOSRoot, "run-intents");
     mkdirSync(this.decisionsRoot, { recursive: true });
     mkdirSync(this.checkpointsRoot, { recursive: true });
+    mkdirSync(this.intentsRoot, { recursive: true });
   }
 
   saveDecision(decision: RunDecision): RunDecision {
@@ -90,6 +94,31 @@ export class DurableRunStateStore {
     const filePath = join(this.checkpointsRoot, `${checkpointId}.json`);
     if (!existsSync(filePath)) return null;
     return RunCheckpointSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
+  }
+
+  saveIntent(intent: RequestIntent): RequestIntent {
+    const parsed = RequestIntentSchema.parse(intent);
+    if (!safeId(parsed.id)) throw new Error("Unsafe intent id");
+    atomicJsonWrite(join(this.intentsRoot, `${parsed.id}.json`), parsed);
+    return cloneJson(parsed);
+  }
+
+  approveIntent(intentId: string, expectedRevision: number, approved: RequestIntent): RequestIntent {
+    const existing = this.loadIntent(intentId);
+    if (!existing) throw new Error(`Intent '${intentId}' was not found`);
+    if (existing.revision !== expectedRevision) throw new Error("Intent revision is stale");
+    if (existing.status !== "draft") throw new Error("Intent is no longer a draft");
+    if (approved.id !== existing.id || approved.revision !== existing.revision || approved.status !== "approved") {
+      throw new Error("Approved intent does not match the current draft");
+    }
+    return this.saveIntent(approved);
+  }
+
+  loadIntent(intentId: string): RequestIntent | null {
+    if (!safeId(intentId)) return null;
+    const filePath = join(this.intentsRoot, `${intentId}.json`);
+    if (!existsSync(filePath)) return null;
+    return RequestIntentSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
   }
 }
 

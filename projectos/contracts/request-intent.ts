@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { ExecutorSelectionSchema } from "./executor-selection.js";
+import { ModelProfileSchema, ThinkingDepthSchema } from "./settings.js";
 
 export const IntentTouchSchema = z.object({
   nodeId: z.string().min(1),
@@ -40,6 +41,23 @@ export const IntentQuestionSchema = z.object({
   options: z.array(z.object({ id: z.string().min(1), label: z.string().trim().min(1) }).strict()).optional(),
   recommendation: z.string().trim().min(1).optional(),
   answer: z.string().trim().min(1).optional(),
+  selectedOptionId: z.string().min(1).optional(),
+}).strict();
+
+/** Closed model output used before the server derives graph routing and deletion counts. */
+export const RequestIntentDraftSchema = z.object({
+  goal: z.string().trim().min(1),
+  kind: z.enum(["change", "add_node", "delete_node", "mixed"]),
+  touches: z.array(IntentTouchSchema).min(1),
+  structuralProposals: z.array(z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("add_node"), parentNodeId: z.string().min(1), name: z.string().trim().min(1) }).strict(),
+    z.object({ kind: z.literal("delete_node"), nodeId: z.string().min(1) }).strict(),
+    z.object({ kind: z.literal("connect_nodes"), sourceNodeId: z.string().min(1), targetNodeId: z.string().min(1) }).strict(),
+  ])),
+  assumptions: z.array(z.string().trim().min(1)),
+  outOfScope: z.array(z.string().trim().min(1)),
+  acceptance: z.array(z.string().trim().min(1)).min(1),
+  questions: z.array(IntentQuestionSchema),
 }).strict();
 
 export const RequestIntentSchema = z.object({
@@ -57,6 +75,11 @@ export const RequestIntentSchema = z.object({
   acceptance: z.array(z.string().trim().min(1)).min(1),
   questions: z.array(IntentQuestionSchema),
   executorSelection: ExecutorSelectionSchema,
+  executorSnapshot: z.object({
+    kind: z.literal("model"),
+    profile: ModelProfileSchema,
+    thinkingDepth: ThinkingDepthSchema,
+  }).strict().optional(),
   baseGraphHash: z.string().min(1),
   revision: z.number().int().positive(),
   status: z.enum(["draft", "approved", "superseded"]),
@@ -68,7 +91,18 @@ export const RequestIntentSchema = z.object({
   }
 });
 
+export const ExtractRequestIntentRequestSchema = z.object({
+  projectId: z.string().min(1),
+  rawRequest: z.string().trim().min(1),
+  nodeId: z.string().min(1).optional(),
+  filePath: z.string().min(1).optional(),
+  executorSelection: ExecutorSelectionSchema,
+  chatSessionId: z.string().min(1).optional(),
+}).strict();
+
 export type IntentTouch = z.infer<typeof IntentTouchSchema>;
 export type IntentStructuralEffect = z.infer<typeof IntentStructuralEffectSchema>;
 export type IntentQuestion = z.infer<typeof IntentQuestionSchema>;
+export type RequestIntentDraft = z.infer<typeof RequestIntentDraftSchema>;
 export type RequestIntent = z.infer<typeof RequestIntentSchema>;
+export type ExtractRequestIntentRequest = z.infer<typeof ExtractRequestIntentRequestSchema>;

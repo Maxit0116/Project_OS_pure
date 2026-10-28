@@ -262,6 +262,28 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("getGlobalAgentContext", projectId, responseLanguage);
   }
 
+  extractRequestIntent(
+    request: import("../../contracts/request-intent.js").ExtractRequestIntentRequest,
+  ): Promise<import("../../contracts/request-intent.js").RequestIntent> {
+    return this.invoke("extractRequestIntent", request);
+  }
+
+  approveRequestIntent(
+    projectId: string,
+    intentId: string,
+    expectedRevision: number,
+    answers?: Array<{ questionId: string; answer: string; selectedOptionId?: string }>,
+  ): Promise<import("../../contracts/request-intent.js").RequestIntent> {
+    return this.invoke("approveRequestIntent", projectId, intentId, expectedRevision, answers);
+  }
+
+  prepareIntentExecution(
+    projectId: string,
+    intentId: string,
+  ): Promise<PromptRefinement> {
+    return this.invoke("prepareIntentExecution", projectId, intentId);
+  }
+
   inspectAgentNode(
     projectId: string,
     nodeId: string,

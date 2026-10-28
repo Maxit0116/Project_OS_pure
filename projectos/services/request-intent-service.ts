@@ -49,6 +49,61 @@ export function smallestPlannerNode(
   return chains[0]!.find((id) => chains.every((chain) => chain.includes(id))) ?? null;
 }
 
+/** A touched node grants work in its subtree and permits planners on its ancestor route. */
+export function intentAllowsNode(
+  intent: RequestIntent,
+  graph: ProjectGraph,
+  candidateNodeId: string,
+): boolean {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const candidate = nodes.get(candidateNodeId);
+  if (!candidate) return false;
+  return intent.touches.some((touch) => {
+    const touched = nodes.get(touch.nodeId);
+    if (!touched) return false;
+    const candidateAncestors = ancestorIds(candidate, nodes);
+    const touchedAncestors = ancestorIds(touched, nodes);
+    return candidateNodeId === touch.nodeId ||
+      candidateAncestors.includes(touch.nodeId) ||
+      touchedAncestors.includes(candidateNodeId);
+  });
+}
+
+export function intentAllowsFile(
+  intent: RequestIntent,
+  graph: ProjectGraph,
+  filePath: string,
+  operation: "modify" | "create" | "delete",
+  candidateNodeId?: string,
+): boolean {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const ownerIds = new Set(graph.nodes
+    .filter((node) => node.level === "component" && node.linkedFiles.some((file) => file.path === filePath))
+    .map((node) => node.id));
+  for (const file of graph.fileIndex.filter((entry) => entry.path === filePath)) {
+    for (const nodeId of file.nodeIds) {
+      if (nodes.get(nodeId)?.level === "component") ownerIds.add(nodeId);
+    }
+  }
+  const owners = [...ownerIds].map((id) => ({ id, ancestors: ancestorIds(nodes.get(id)!, nodes) }));
+  const touchesOwner = (ownerId: string, capability: "editExisting" | "addParts") => {
+    const ancestors = owners.find((owner) => owner.id === ownerId)?.ancestors ?? [];
+    return intent.touches.some((touch) => touch.allow[capability] && ancestors.includes(touch.nodeId));
+  };
+
+  if (operation === "create") {
+    const parentNode = nodes.get(candidateNodeId ?? "");
+    if (!parentNode) return false;
+    const ancestors = ancestorIds(parentNode, nodes);
+    return intent.touches.some((touch) => touch.allow.addParts && ancestors.includes(touch.nodeId));
+  }
+  if (operation === "delete") {
+    return owners.length > 0 && owners.every((owner) => intent.touches.some((touch) =>
+      touch.allow.deletePartIds.includes(owner.id) && owner.ancestors.includes(touch.nodeId)));
+  }
+  return owners.length > 0 && owners.every((owner) => touchesOwner(owner.id, "editExisting"));
+}
+
 export class RequestIntentService {
   normalizeDraft(graph: ProjectGraph, input: RequestIntent): RequestIntent {
     const parsed = RequestIntentSchema.parse(input);
@@ -95,5 +150,9 @@ export class RequestIntentService {
       approvedAt,
       approvalHash,
     });
+  }
+
+  isApprovalValid(intent: RequestIntent): boolean {
+    return intent.status === "approved" && intent.approvalHash === intentHash(intent);
   }
 }
