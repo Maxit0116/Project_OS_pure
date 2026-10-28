@@ -59,6 +59,7 @@ export * from "./alignment-contract.js";
 export * from "./prompt-refinement.js";
 export * from "./semantic-tree.js";
 export * from "./workspace-directory.js";
+export * from "./workspace-git.js";
 export * from "./service-port.js";
 export * from "./spatial-pin.js";
 export * from "./spatial-capture-session.js";

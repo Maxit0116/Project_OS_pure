@@ -129,6 +129,10 @@ export interface ProjectOSApi {
     projectId: string,
     relativePath: string,
   ): Promise<WorkspaceDirectoryEntry[]>;
+  /** Current branch + dirty flag for compose hub / status chrome. */
+  getWorkspaceGitStatus(
+    projectId: string,
+  ): Promise<import("./workspace-git.js").WorkspaceGitStatus>;
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload>;
   getFileContext(projectId: string, path: string): Promise<ContextPayload>;
   getFileContent(projectId: string, path: string): Promise<string>;

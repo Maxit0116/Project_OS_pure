@@ -20,11 +20,22 @@ import {
   createArrowStroke,
   createDraftSpatialPin,
   emptyAnnotationDoc,
+  emptyPinComposerHub,
   type AnnotationStroke,
+  type PinComposerHub,
+  type PinComposerHubSubagentLink,
   type ScreenRect,
   type SpatialPin,
   type SpatialPinMode,
 } from '@contracts/spatial-pin'
+import {
+  ensureHub,
+  ResearchToggle,
+  SpatialComposeHub,
+  COMPOSE_HUB_STRINGS_EN,
+  type ComposeHubDataSource,
+  type ComposeHubStrings,
+} from '../SpatialComposeHub'
 import type { RepoDesignSystemSnapshot } from '@contracts/repo-design-system'
 import {
   MAX_STENCILS_PER_REGION,
@@ -250,7 +261,50 @@ export default function SpatialCaptureCanvas({
   const [stencilScopeByArrow, setStencilScopeByArrow] = useState<
     Record<string, StencilGenerationScope>
   >({})
+  const [hubByArrow, setHubByArrow] = useState<Record<string, PinComposerHub>>(
+    {},
+  )
+  const [subagentLinksByArrow, setSubagentLinksByArrow] = useState<
+    Record<string, PinComposerHubSubagentLink[]>
+  >({})
+  const [researchLinesByArrow, setResearchLinesByArrow] = useState<
+    Record<string, string[]>
+  >({})
+  const [assetUrls, setAssetUrls] = useState<Record<string, string>>({})
   const [status, setStatus] = useState(IDLE_HINT)
+
+  const composeHubStrings: ComposeHubStrings = useMemo(
+    () => ({
+      ...COMPOSE_HUB_STRINGS_EN,
+      expand: ts('spatialCaptures.composeHub.expand'),
+      collapse: ts('spatialCaptures.composeHub.collapse'),
+      repo: ts('spatialCaptures.composeHub.repo'),
+      repoEmpty: ts('spatialCaptures.composeHub.repoEmpty'),
+      folders: ts('spatialCaptures.composeHub.folders'),
+      foldersEmpty: ts('spatialCaptures.composeHub.foldersEmpty'),
+      foldersAdd: ts('spatialCaptures.composeHub.foldersAdd'),
+      skills: ts('spatialCaptures.composeHub.skills'),
+      skillsEmpty: ts('spatialCaptures.composeHub.skillsEmpty'),
+      skillsAdd: ts('spatialCaptures.composeHub.skillsAdd'),
+      references: ts('spatialCaptures.composeHub.references'),
+      referencesEmpty: ts('spatialCaptures.composeHub.referencesEmpty'),
+      research: ts('spatialCaptures.composeHub.research'),
+      researchEmpty: ts('spatialCaptures.composeHub.researchEmpty'),
+      researchToggle: ts('spatialCaptures.composeHub.researchToggle'),
+      subagent: ts('spatialCaptures.composeHub.subagent'),
+      subagentAdd: ts('spatialCaptures.composeHub.subagentAdd'),
+      subagentName: ts('spatialCaptures.composeHub.subagentName'),
+      subagentBrief: ts('spatialCaptures.composeHub.subagentBrief'),
+      subagentEnabled: ts('spatialCaptures.composeHub.subagentEnabled'),
+      subagentRemove: ts('spatialCaptures.composeHub.subagentRemove'),
+      statusReady: ts('spatialCaptures.composeHub.statusReady'),
+      statusQueued: ts('spatialCaptures.composeHub.statusQueued'),
+      statusRunning: ts('spatialCaptures.composeHub.statusRunning'),
+      statusDone: ts('spatialCaptures.composeHub.statusDone'),
+      statusError: ts('spatialCaptures.composeHub.statusError'),
+    }),
+    [ts],
+  )
 
   const stencilStrings: StencilUiStrings = useMemo(
     () => ({
@@ -527,12 +581,16 @@ export default function SpatialCaptureCanvas({
           exitStencilChrome()
           return
         }
+        if (activeArrowId) {
+          setActiveArrowId(null)
+          return
+        }
         onExit()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onExit, openMenu, placeDrag, libraryOpen, libraryRevealed])
+  }, [onExit, openMenu, placeDrag, libraryOpen, libraryRevealed, activeArrowId])
 
   function stagePoint(event: {
     clientX: number
@@ -660,6 +718,7 @@ export default function SpatialCaptureCanvas({
       combinedBriefForArrow(region, arrow.id)
     const generationScope =
       stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
+    const hub = enrichHubForArrow(arrow.id, region)
     const updated: SpatialPin = {
       ...base,
       updatedAt: new Date().toISOString(),
@@ -671,6 +730,7 @@ export default function SpatialCaptureCanvas({
           ? { snapshotAssetPath: region.snapshotAssetPath }
           : {}),
         ...(stencilBrief ? { stencilBrief, generationScope } : {}),
+        hub,
       },
       annotations: {
         version: '0.1.0',
@@ -680,6 +740,116 @@ export default function SpatialCaptureCanvas({
     }
     await client.upsertSpatialPin(project.projectId, updated)
   }
+
+  function enrichHubForArrow(
+    arrowId: string,
+    region: OverlayRegion,
+  ): PinComposerHub {
+    const base = ensureHub(hubByArrow[arrowId] ?? emptyPinComposerHub())
+    const snapshotAssetPath = region.snapshotAssetPath
+    const references =
+      base.references.length > 0
+        ? base.references
+        : snapshotAssetPath
+          ? [
+              {
+                kind: 'image' as const,
+                id: `ref_${arrowId}_snap`,
+                assetPath: snapshotAssetPath,
+                label: 'Region snapshot',
+              },
+            ]
+          : []
+    return {
+      ...base,
+      repo:
+        base.repo ??
+        (project
+          ? { label: project.displayName || project.projectId, branch: 'main' }
+          : undefined),
+      references,
+    }
+  }
+
+  useEffect(() => {
+    if (!client || !project) return
+    const paths = new Set<string>()
+    for (const region of regions) {
+      if (region.snapshotAssetPath) paths.add(region.snapshotAssetPath)
+    }
+    for (const hub of Object.values(hubByArrow)) {
+      for (const ref of hub.references) {
+        if (ref.kind === 'image') paths.add(ref.assetPath)
+      }
+    }
+    let cancelled = false
+    for (const path of paths) {
+      if (assetUrls[path]) continue
+      void client
+        .readProjectAssetBase64(project.projectId, path)
+        .then((payload) => {
+          if (cancelled || !payload?.base64) return
+          setAssetUrls((prev) =>
+            prev[path]
+              ? prev
+              : {
+                  ...prev,
+                  [path]: `data:${payload.mimeType};base64,${payload.base64}`,
+                },
+          )
+        })
+        .catch(() => undefined)
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [client, project, regions, hubByArrow, assetUrls])
+
+  const hubDataSource = useMemo((): ComposeHubDataSource => {
+    return {
+      listSkills: async () => {
+        if (!client || !project) return []
+        const result = await client.listSkills(project.projectId)
+        return result.skills.map((skill) => ({
+          id: skill.id,
+          name: skill.name,
+          description: skill.description,
+        }))
+      },
+      listDirectories: async (relativePath) => {
+        if (!client || !project) return []
+        const entries = await client.listWorkspaceDirectory(
+          project.projectId,
+          relativePath,
+        )
+        return entries
+          .filter((entry) => entry.kind === 'directory')
+          .map((entry) => ({ name: entry.name, path: entry.path }))
+      },
+      listMentionFiles: async (query) => {
+        if (!client || !project) return []
+        const result = await client.getComposerMentions(
+          project.projectId,
+          query,
+        )
+        return result.files
+      },
+      getGitStatus: async () => {
+        if (!client || !project) return { branch: null, dirty: false }
+        return client.getWorkspaceGitStatus(project.projectId)
+      },
+      listRepoCandidates: async () =>
+        project
+          ? [
+              {
+                projectId: project.projectId,
+                displayName: project.displayName || project.projectId,
+              },
+            ]
+          : [],
+      resolveAssetUrl: (assetPath) => assetUrls[assetPath],
+    }
+  }, [client, project, assetUrls])
 
   function ensureBriefState(arrowId: string, region: OverlayRegion) {
     setStencilBriefByArrow((prev) => {
@@ -705,7 +875,7 @@ export default function SpatialCaptureCanvas({
         !region.hideSelectionChrome &&
         pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
     )
-    let baseRegion = containing[0]
+    let baseRegion: OverlayRegion | undefined = containing[0]
     let createdFullFrame = false
     let fullRect: ScreenRect | null = null
 
@@ -1075,6 +1245,7 @@ export default function SpatialCaptureCanvas({
         combinedBriefForArrow(region, arrow.id)
       const generationScope =
         stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
+      const hub = enrichHubForArrow(arrow.id, region)
       if (pin) {
         await client.upsertSpatialPin(project.projectId, {
           ...pin,
@@ -1083,6 +1254,7 @@ export default function SpatialCaptureCanvas({
             prompt: trimmed,
             mode: region.mode,
             ...(stencilBrief ? { stencilBrief, generationScope } : {}),
+            hub,
           },
         })
       }
@@ -1090,6 +1262,12 @@ export default function SpatialCaptureCanvas({
         project.projectId,
         arrow.pinId,
       )
+      if (result.pin?.links?.composeSubagents) {
+        setSubagentLinksByArrow((prev) => ({
+          ...prev,
+          [arrow.id]: result.pin.links!.composeSubagents!,
+        }))
+      }
       updateRegion(regionId, (r) => ({
         ...r,
         arrows: r.arrows.map((a) =>
@@ -2133,9 +2311,30 @@ export default function SpatialCaptureCanvas({
               const modeVisual =
                 MODES.find((item) => item.id === region.mode) ?? MODES[1]!
               const ModeIcon = modeVisual.icon
+              const hub = enrichHubForArrow(arrow.id, region)
               return (
-                <div
+                <SpatialComposeHub
                   key={`compose-${arrow.id}`}
+                  card={layout.card}
+                  expanded={Boolean(isActive && focused)}
+                  hub={hub}
+                  onHubChange={(next) =>
+                    setHubByArrow((prev) => ({ ...prev, [arrow.id]: next }))
+                  }
+                  subagentLinks={subagentLinksByArrow[arrow.id]}
+                  promptText={arrow.prompt}
+                  researchLines={researchLinesByArrow[arrow.id] ?? []}
+                  onResearchLinesChange={(lines) =>
+                    setResearchLinesByArrow((prev) => ({
+                      ...prev,
+                      [arrow.id]: lines,
+                    }))
+                  }
+                  dataSource={hubDataSource}
+                  resolveAssetUrl={(path) => assetUrls[path]}
+                  strings={composeHubStrings}
+                >
+                <div
                   ref={bindPanel(arrow.id)}
                   className={`overlay-panel overlay-panel-chrome${
                     focused ? '' : ' overlay-panel-dimmed'
@@ -2352,6 +2551,19 @@ export default function SpatialCaptureCanvas({
                               </div>
                             ) : null}
                           </div>
+                          <ResearchToggle
+                            enabled={hub.researchEnabled}
+                            onChange={(next) =>
+                              setHubByArrow((prev) => ({
+                                ...prev,
+                                [arrow.id]: {
+                                  ...ensureHub(prev[arrow.id]),
+                                  researchEnabled: next,
+                                },
+                              }))
+                            }
+                            strings={composeHubStrings}
+                          />
                         </div>
                         <button
                           type="button"
@@ -2376,6 +2588,7 @@ export default function SpatialCaptureCanvas({
                     </div>
                   </div>
                 </div>
+                </SpatialComposeHub>
               )
             })}
           </div>

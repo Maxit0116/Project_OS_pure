@@ -163,6 +163,70 @@ export const AnnotationDocSchema = z
   })
   .strict();
 
+export const PinComposerHubRepoSchema = z
+  .object({
+    label: z.string().min(1).max(240),
+    branch: z.string().min(1).max(240).optional(),
+  })
+  .strict();
+
+export const PinComposerHubReferenceSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("image"),
+      id: z.string().min(1),
+      assetPath: z.string().min(1).max(1024),
+      label: z.string().min(1).max(240).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("file"),
+      id: z.string().min(1),
+      path: z.string().min(1).max(4096),
+      label: z.string().min(1).max(240).optional(),
+    })
+    .strict(),
+]);
+
+export const PinComposerHubSubagentSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1).max(120),
+    brief: z.string().max(4_000).default(""),
+    enabled: z.boolean().default(true),
+  })
+  .strict();
+
+export const PinComposerHubSubagentStatusSchema = z.enum([
+  "ready",
+  "queued",
+  "running",
+  "done",
+  "error",
+]);
+
+export const PinComposerHubSubagentLinkSchema = z
+  .object({
+    slotId: z.string().min(1),
+    status: PinComposerHubSubagentStatusSchema,
+    runId: z.string().min(1).optional(),
+    summary: z.string().max(2_000).optional(),
+  })
+  .strict();
+
+/** Spatial compose hub: left context, research toggle, configurable subagent slots. */
+export const PinComposerHubSchema = z
+  .object({
+    researchEnabled: z.boolean().default(false),
+    repo: PinComposerHubRepoSchema.optional(),
+    folders: z.array(z.string().min(1).max(4096)).max(40).default([]),
+    skillIds: z.array(z.string().min(1)).max(40).default([]),
+    references: z.array(PinComposerHubReferenceSchema).max(40).default([]),
+    subagents: z.array(PinComposerHubSubagentSchema).max(12).default([]),
+  })
+  .strict();
+
 export const PinComposerSchema = z
   .object({
     mode: SpatialPinModeSchema,
@@ -171,6 +235,8 @@ export const PinComposerSchema = z
     /** User-edited or baked stencil brief carried into submit (UI Stencil on Capture). */
     stencilBrief: z.string().max(16_000).optional(),
     generationScope: StencilGenerationScopeSchema.optional(),
+    /** Star-topology assemble state around the compose card. */
+    hub: PinComposerHubSchema.optional(),
   })
   .strict();
 
@@ -181,6 +247,9 @@ export const PinLinksSchema = z
     refinementId: z.string().min(1).optional(),
     planId: z.string().min(1).optional(),
     debugSessionId: z.string().min(1).optional(),
+    /** Compose-hub subagent slot outcomes (child asks / runs). */
+    composeSubagents: z.array(PinComposerHubSubagentLinkSchema).max(12).optional(),
+    childRunIds: z.array(z.string().min(1)).max(12).optional(),
   })
   .strict();
 
@@ -321,6 +390,20 @@ export type AnnotationAnchor = z.infer<typeof AnnotationAnchorSchema>;
 export type AnnotationStroke = z.infer<typeof AnnotationStrokeSchema>;
 export type AnnotationStrokeArrow = z.infer<typeof AnnotationStrokeArrowSchema>;
 export type AnnotationDoc = z.infer<typeof AnnotationDocSchema>;
+export type PinComposerHubRepo = z.infer<typeof PinComposerHubRepoSchema>;
+export type PinComposerHubReference = z.infer<
+  typeof PinComposerHubReferenceSchema
+>;
+export type PinComposerHubSubagent = z.infer<
+  typeof PinComposerHubSubagentSchema
+>;
+export type PinComposerHubSubagentStatus = z.infer<
+  typeof PinComposerHubSubagentStatusSchema
+>;
+export type PinComposerHubSubagentLink = z.infer<
+  typeof PinComposerHubSubagentLinkSchema
+>;
+export type PinComposerHub = z.infer<typeof PinComposerHubSchema>;
 export type PinComposer = z.infer<typeof PinComposerSchema>;
 export type PinLinks = z.infer<typeof PinLinksSchema>;
 export type ResolveState = z.infer<typeof ResolveStateSchema>;
@@ -531,6 +614,54 @@ export interface BuildSpatialPinUserContentOptions {
   codegenHints?: readonly string[];
 }
 
+export function emptyPinComposerHub(): PinComposerHub {
+  return {
+    researchEnabled: false,
+    folders: [],
+    skillIds: [],
+    references: [],
+    subagents: [],
+  };
+}
+
+export function formatPinComposerHubLines(hub: PinComposerHub): string[] {
+  const lines: string[] = [];
+  if (hub.repo) {
+    lines.push(
+      `hub.repo=${hub.repo.label}${hub.repo.branch ? ` @${hub.repo.branch}` : ""}`,
+    );
+  }
+  if (hub.folders.length > 0) {
+    lines.push(`hub.folders=${hub.folders.join(", ")}`);
+  }
+  if (hub.skillIds.length > 0) {
+    lines.push(`hub.skills=${hub.skillIds.join(", ")}`);
+  }
+  if (hub.references.length > 0) {
+    lines.push(
+      `hub.references=${hub.references
+        .map((item) =>
+          item.kind === "image"
+            ? `image:${item.assetPath}`
+            : `file:${item.path}`,
+        )
+        .join(", ")}`,
+    );
+  }
+  if (hub.researchEnabled) {
+    lines.push("hub.research=enabled");
+  }
+  const enabledAgents = hub.subagents.filter((slot) => slot.enabled);
+  if (enabledAgents.length > 0) {
+    lines.push(
+      `hub.subagents=${enabledAgents
+        .map((slot) => `${slot.name}${slot.brief.trim() ? `(${slot.brief.trim().slice(0, 80)})` : ""}`)
+        .join(" | ")}`,
+    );
+  }
+  return lines;
+}
+
 /**
  * Format prompt + host/snapshot metadata for chat and agent submission.
  * With stencil placements or composer.stencilBrief, emits layered stencil-aware content.
@@ -540,7 +671,10 @@ export function buildSpatialPinUserContent(
   options?: BuildSpatialPinUserContentOptions,
 ): string {
   const locationLine = formatSpatialPinLocationLine(pin);
-  return buildSpatialPinUserContentWithStencils(pin.composer, {
+  const hubLines = pin.composer.hub
+    ? formatPinComposerHubLines(pin.composer.hub)
+    : [];
+  const base = buildSpatialPinUserContentWithStencils(pin.composer, {
     locationLine,
     ...(options?.placements ? { placements: options.placements } : {}),
     ...(options?.outOfScope ? { outOfScope: options.outOfScope } : {}),
@@ -549,6 +683,8 @@ export function buildSpatialPinUserContent(
       : {}),
     ...(options?.codegenHints ? { codegenHints: options.codegenHints } : {}),
   });
+  if (hubLines.length === 0) return base;
+  return `${base}\n\n## Compose hub\n${hubLines.map((line) => `- ${line}`).join("\n")}`;
 }
 
 /** Build a persisted arrow stroke from region-relative head/tail. */

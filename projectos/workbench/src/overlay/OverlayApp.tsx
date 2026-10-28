@@ -16,6 +16,8 @@ import {
 import type {
   AnnotationStroke,
   LocationKey,
+  PinComposerHub,
+  PinComposerHubSubagentLink,
   ScreenRect,
   SpatialPin,
   SpatialPinDeviceKind,
@@ -26,8 +28,15 @@ import {
   createArrowStroke,
   createDraftSpatialPin,
   emptyAnnotationDoc,
+  emptyPinComposerHub,
   isWebSurface,
 } from '@contracts/spatial-pin'
+import {
+  ensureHub,
+  ResearchToggle,
+  SpatialComposeHub,
+  type ComposeHubDataSource,
+} from '../components/SpatialComposeHub'
 import type { RepoDesignSystemSnapshot } from '@contracts/repo-design-system'
 import {
   MAX_STENCILS_PER_REGION,
@@ -225,6 +234,16 @@ export function OverlayApp() {
   const [stencilScopeByArrow, setStencilScopeByArrow] = useState<
     Record<string, StencilGenerationScope>
   >({})
+  const [hubByArrow, setHubByArrow] = useState<Record<string, PinComposerHub>>(
+    {},
+  )
+  const [subagentLinksByArrow, setSubagentLinksByArrow] = useState<
+    Record<string, PinComposerHubSubagentLink[]>
+  >({})
+  const [researchLinesByArrow, setResearchLinesByArrow] = useState<
+    Record<string, string[]>
+  >({})
+  const [assetUrls, setAssetUrls] = useState<Record<string, string>>({})
   const [projectId, setProjectId] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<SpatialPinProjectCandidate[]>([])
   const [location, setLocation] = useState<LocationKey | null>(null)
@@ -390,12 +409,16 @@ export function OverlayApp() {
           exitStencilChrome()
           return
         }
+        if (activeArrowId) {
+          setActiveArrowId(null)
+          return
+        }
         void solidifyThenHideRef.current()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openMenu, placeDrag, libraryOpen, libraryRevealed])
+  }, [openMenu, placeDrag, libraryOpen, libraryRevealed, activeArrowId])
 
   useEffect(() => {
     if (!openMenu) return
@@ -472,6 +495,96 @@ export function OverlayApp() {
     }
     setWebEnhanceAvailable(Boolean(session.webEnhanceAvailable))
   }
+
+  useEffect(() => {
+    if (!projectId || !window.projectOS) return
+    const paths = new Set<string>()
+    for (const region of regions) {
+      if (region.snapshotAssetPath) paths.add(region.snapshotAssetPath)
+    }
+    for (const hub of Object.values(hubByArrow)) {
+      for (const ref of hub.references) {
+        if (ref.kind === 'image') paths.add(ref.assetPath)
+      }
+    }
+    let cancelled = false
+    for (const path of paths) {
+      if (assetUrls[path]) continue
+      void window.projectOS
+        .invoke('readProjectAssetBase64', projectId, path)
+        .then((result) => {
+          const payload = result as { base64: string; mimeType: string } | null
+          if (cancelled || !payload?.base64) return
+          setAssetUrls((prev) =>
+            prev[path]
+              ? prev
+              : {
+                  ...prev,
+                  [path]: `data:${payload.mimeType};base64,${payload.base64}`,
+                },
+          )
+        })
+        .catch(() => undefined)
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [projectId, regions, hubByArrow, assetUrls])
+
+  const hubDataSource = useMemo((): ComposeHubDataSource => {
+    return {
+      listSkills: async () => {
+        if (!projectId || !window.projectOS) return []
+        const result = (await window.projectOS.invoke(
+          'listSkills',
+          projectId,
+        )) as { skills: Array<{ id: string; name: string; description: string }> }
+        return (result.skills ?? []).map((skill) => ({
+          id: skill.id,
+          name: skill.name,
+          description: skill.description,
+        }))
+      },
+      listDirectories: async (relativePath) => {
+        if (!projectId || !window.projectOS) return []
+        const entries = (await window.projectOS.invoke(
+          'listWorkspaceDirectory',
+          projectId,
+          relativePath,
+        )) as Array<{ name: string; path: string; kind: string }>
+        return entries
+          .filter((entry) => entry.kind === 'directory')
+          .map((entry) => ({ name: entry.name, path: entry.path }))
+      },
+      listMentionFiles: async (query) => {
+        if (!projectId || !window.projectOS) return []
+        const result = (await window.projectOS.invoke(
+          'getComposerMentions',
+          projectId,
+          query,
+        )) as { files: string[] }
+        return result.files ?? []
+      },
+      getGitStatus: async () => {
+        if (!projectId || !window.projectOS) {
+          return { branch: null, dirty: false }
+        }
+        return (await window.projectOS.invoke(
+          'getWorkspaceGitStatus',
+          projectId,
+        )) as { branch: string | null; dirty: boolean }
+      },
+      listRepoCandidates: async () =>
+        candidates.map((item) => ({
+          projectId: item.projectId,
+          displayName: item.displayName,
+        })),
+      onSelectRepo: async (nextProjectId) => {
+        await onSelectProject(nextProjectId)
+      },
+      resolveAssetUrl: (assetPath) => assetUrls[assetPath],
+    }
+  }, [projectId, candidates, assetUrls])
 
   async function resolvePins(hint: BridgeLocation) {
     const pid = projectIdRef.current ?? (await refreshContext())
@@ -684,6 +797,10 @@ export function OverlayApp() {
       combinedBriefForArrow(region, arrow.id)
     const generationScope =
       stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
+    const hub = enrichHubForArrow(arrow.id, region, {
+      projectLabel:
+        candidates.find((item) => item.projectId === pid)?.displayName ?? pid,
+    })
 
     const updated: SpatialPin = {
       ...base,
@@ -694,6 +811,7 @@ export function OverlayApp() {
         prompt: arrow.prompt,
         ...(snapshotAssetPath ? { snapshotAssetPath } : {}),
         ...(stencilBrief ? { stencilBrief, generationScope } : {}),
+        hub,
       },
       annotations: {
         version: '0.1.0',
@@ -702,6 +820,34 @@ export function OverlayApp() {
       title: arrow.prompt.trim().slice(0, 60) || `Arrow #${arrow.index}`,
     }
     await window.projectOS.invoke('upsertSpatialPin', pid, updated)
+  }
+
+  function enrichHubForArrow(
+    arrowId: string,
+    region: OverlayRegion,
+    opts: { projectLabel: string },
+  ): PinComposerHub {
+    const base = ensureHub(hubByArrow[arrowId] ?? emptyPinComposerHub())
+    const snapshotAssetPath =
+      region.snapshotAssetPath ?? snapshotByRegionRef.current.get(region.id)
+    const references =
+      base.references.length > 0
+        ? base.references
+        : snapshotAssetPath
+          ? [
+              {
+                kind: 'image' as const,
+                id: `ref_${arrowId}_snap`,
+                assetPath: snapshotAssetPath,
+                label: 'Region snapshot',
+              },
+            ]
+          : []
+    return {
+      ...base,
+      repo: base.repo ?? { label: opts.projectLabel, branch: 'main' },
+      references,
+    }
   }
 
   function ensureBriefState(arrowId: string, region: OverlayRegion) {
@@ -725,7 +871,7 @@ export function OverlayApp() {
         !region.hideSelectionChrome &&
         pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
     )
-    let baseRegion = containing[0]
+    let baseRegion: OverlayRegion | undefined = containing[0]
     let createdFullFrame = false
     let fullRect: ScreenRect | null = null
 
@@ -1701,6 +1847,11 @@ export function OverlayApp() {
         combinedBriefForArrow(region, arrow.id)
       const generationScope =
         stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
+      const hub = enrichHubForArrow(arrow.id, region, {
+        projectLabel:
+          candidates.find((item) => item.projectId === pid)?.displayName ??
+          pid,
+      })
       if (pin) {
         await window.projectOS.invoke('upsertSpatialPin', pid, {
           ...pin,
@@ -1709,6 +1860,7 @@ export function OverlayApp() {
             prompt: trimmed,
             mode: region.mode,
             ...(stencilBrief ? { stencilBrief, generationScope } : {}),
+            hub,
           },
         })
       }
@@ -1721,6 +1873,13 @@ export function OverlayApp() {
         chatSessionId: string
         planId?: string
         debugSessionId?: string
+        pin?: SpatialPin
+      }
+      if (result.pin?.links?.composeSubagents) {
+        setSubagentLinksByArrow((prev) => ({
+          ...prev,
+          [arrow.id]: result.pin!.links!.composeSubagents!,
+        }))
       }
 
       updateRegion(regionId, (r) => ({
@@ -2222,9 +2381,35 @@ export function OverlayApp() {
         const modeVisual =
           MODES.find((item) => item.id === region.mode) ?? MODES[1]!
         const ModeIcon = modeVisual.icon
+        const hub = enrichHubForArrow(arrow.id, region, {
+          projectLabel:
+            candidates.find((item) => item.projectId === projectId)
+              ?.displayName ??
+            projectId ??
+            'project',
+        })
         return (
-          <div
+          <SpatialComposeHub
             key={`compose-${arrow.id}`}
+            card={layout.card}
+            expanded={Boolean(isActive && focused)}
+            hub={hub}
+            onHubChange={(next) =>
+              setHubByArrow((prev) => ({ ...prev, [arrow.id]: next }))
+            }
+            subagentLinks={subagentLinksByArrow[arrow.id]}
+            promptText={arrow.prompt}
+            researchLines={researchLinesByArrow[arrow.id] ?? []}
+            onResearchLinesChange={(lines) =>
+              setResearchLinesByArrow((prev) => ({
+                ...prev,
+                [arrow.id]: lines,
+              }))
+            }
+            dataSource={hubDataSource}
+            resolveAssetUrl={(path) => assetUrls[path]}
+          >
+          <div
             ref={bindPanel(arrow.id)}
             className={`overlay-panel overlay-panel-chrome${focused ? '' : ' overlay-panel-dimmed'}`}
             style={{
@@ -2439,6 +2624,18 @@ export function OverlayApp() {
                         </div>
                       ) : null}
                     </div>
+                    <ResearchToggle
+                      enabled={hub.researchEnabled}
+                      onChange={(next) =>
+                        setHubByArrow((prev) => ({
+                          ...prev,
+                          [arrow.id]: {
+                            ...ensureHub(prev[arrow.id]),
+                            researchEnabled: next,
+                          },
+                        }))
+                      }
+                    />
                   </div>
                   <button
                     type="button"
@@ -2477,6 +2674,7 @@ export function OverlayApp() {
               </>
             ) : null}
           </div>
+          </SpatialComposeHub>
         )
       })}
 

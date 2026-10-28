@@ -329,6 +329,9 @@ export default function ChatPanel() {
                   <AttachmentChips
                     attachments={attachments}
                     invokedSkillLabel={msg.invokedSkillId}
+                    onRemove={() => {
+                      /* message history chips are read-only */
+                    }}
                   />
                 ) : null}
                 <div className={styles.bubble} title={formatTime(msg.timestamp)}>

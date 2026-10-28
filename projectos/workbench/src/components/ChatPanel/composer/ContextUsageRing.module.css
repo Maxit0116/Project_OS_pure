@@ -1,0 +1,50 @@
+.ringButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--tech-text-secondary);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+
+.ringButton:hover {
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
+}
+
+.ringButton:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.ringButtonActive {
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
+}
+
+.ringSvg {
+  display: block;
+}
+
+.ringTrack {
+  stroke: color-mix(in srgb, var(--tech-text-muted) 55%, transparent);
+}
+
+.ringProgress {
+  stroke: color-mix(in srgb, var(--tech-text-primary) 82%, transparent);
+  transition: stroke-dashoffset var(--duration-fast) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ringProgress {
+    transition: none;
+  }
+}

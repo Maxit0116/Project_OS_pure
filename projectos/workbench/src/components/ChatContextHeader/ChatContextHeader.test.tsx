@@ -78,7 +78,7 @@ describe('ChatContextHeader', () => {
     expect(html).not.toContain('context.empty')
   })
 
-  it('reads the delivered assembly and keeps usage details collapsed by default', () => {
+  it('does not render context usage in the header anymore', () => {
     const slot = { chars: 0, sha256: `sha256:${'ab'.repeat(32)}` }
     mockStoreState({
       context: null,
@@ -110,12 +110,8 @@ describe('ChatContextHeader', () => {
 
     const html = renderToStaticMarkup(<ChatContextHeader />)
 
-    expect(html).toContain('context.usageTitle')
-    expect(html).toContain('context.usageTotal')
-    expect(html).toContain('aria-controls="chat-context-usage-panel"')
-    expect(html).toContain('aria-expanded="false"')
-    expect(html).not.toContain('context.usageNotSearched')
-    expect(html).not.toContain('context.usageOmissions.editor_buffer')
+    expect(html).not.toContain('context.usageTitle')
+    expect(html).not.toContain('context.usageCardTitle')
     expect(html).not.toContain('context.usageSlots.retrieval')
   })
 })

@@ -1381,6 +1381,18 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return listWorkspaceDirectoryEntries(workspace.workspaceRoot, relativePath);
   }
 
+  async getWorkspaceGitStatus(
+    projectId: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitStatus> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { readGitRepositoryStatus } = await import("./git-context-service.js");
+    const status = readGitRepositoryStatus(workspace.workspaceRoot);
+    return {
+      branch: status.branch,
+      dirty: status.dirty,
+    };
+  }
+
   async getNodeContext(
     projectId: string,
     nodeId: string,
@@ -5410,6 +5422,59 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
     }
 
+    let composeSubagentLinks:
+      | import("../contracts/spatial-pin.js").PinComposerHubSubagentLink[]
+      | undefined;
+    let childRunIds: string[] | undefined;
+    const hub = pin.composer.hub;
+    const enabledSubagents =
+      hub?.subagents.filter((slot) => slot.enabled) ?? [];
+    if (
+      hub &&
+      enabledSubagents.length > 0 &&
+      (pin.composer.mode === "change" || pin.composer.mode === "ask")
+    ) {
+      const { spawnComposeSubagents } = await import("./compose-subagents.js");
+      const spawned = await spawnComposeSubagents(hub, prompt, {
+        ask: async ({ question }) => {
+          const answer = await this.askAgent({
+            projectId,
+            scope,
+            question,
+            language: { mode: "auto" },
+            chatSessionId: sessionId,
+          });
+          return { answer: answer.answer };
+        },
+      });
+      composeSubagentLinks = spawned.links;
+      childRunIds =
+        spawned.childRunIds.length > 0 ? spawned.childRunIds : undefined;
+      if (spawned.results.length > 0) {
+        const latest = await this.getChatSession(projectId, sessionId);
+        if (latest) {
+          const stamped = new Date().toISOString();
+          await this.upsertChatSession(projectId, {
+            ...latest,
+            head: {
+              ...latest.head,
+              lastUpdatedAt: stamped,
+            },
+            messages: [
+              ...latest.messages,
+              ...spawned.results.map((result) => ({
+                id: `msg_${crypto.randomUUID()}`,
+                role: "assistant" as const,
+                content: `### Subagent · ${result.name}\n\n${result.summary}`,
+                format: "markdown" as const,
+                timestamp: stamped,
+              })),
+            ],
+          });
+        }
+      }
+    }
+
     const updatedPin = await this.upsertSpatialPin(projectId, {
       ...pin,
       updatedAt: new Date().toISOString(),
@@ -5422,6 +5487,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ...(refinementId ? { refinementId } : {}),
         ...(planId ? { planId } : {}),
         ...(debugSessionId ? { debugSessionId } : {}),
+        ...(composeSubagentLinks ? { composeSubagents: composeSubagentLinks } : {}),
+        ...(childRunIds ? { childRunIds } : {}),
       },
     });
 

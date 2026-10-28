@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComposerDraft } from '@contracts/index'
 import { useAutoResizeTextarea } from '../../../hooks/useAutoResizeTextarea'
 import { useI18n } from '../../../i18n'
-import type { ChatMode } from '../../../state/workbenchStore'
+import { useWorkbenchStore, type ChatMode } from '../../../state/workbenchStore'
 import AttachmentChips from './AttachmentChips'
 import ComposerControlBar from './ComposerControlBar'
 import ComposerTriggerMenu from './ComposerTriggerMenu'
+import ContextUsageCard from './ContextUsageCard'
+import { CONTEXT_USAGE_CARD_ID, buildContextUsageMetrics } from './contextUsageMetrics'
 import {
   appendAttachment,
   detectComposerTrigger,
@@ -70,7 +72,14 @@ export default function PromptComposer({
   const [menuOpen, setMenuOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
   const [trigger, setTrigger] = useState<ReturnType<typeof detectComposerTrigger>>(null)
+  const [usageOpen, setUsageOpen] = useState(false)
+  const [usageDetailed, setUsageDetailed] = useState(true)
   const composerRef = useRef<HTMLDivElement>(null)
+  const latestContextAssembly = useWorkbenchStore((s) => s.latestContextAssembly)
+  const usageMetrics = useMemo(
+    () => buildContextUsageMetrics(latestContextAssembly),
+    [latestContextAssembly],
+  )
 
   const menuItems = useComposerContextItems({
     triggerKind: trigger?.kind ?? null,
@@ -86,6 +95,26 @@ export default function PromptComposer({
   useEffect(() => {
     setActiveIndex(0)
   }, [menuItems.length, trigger?.query])
+
+  useEffect(() => {
+    if (!usageOpen) return
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (composerRef.current?.contains(target)) return
+      const card = document.getElementById(CONTEXT_USAGE_CARD_ID)
+      if (card?.contains(target)) return
+      setUsageOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setUsageOpen(false)
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [usageOpen])
 
   const syncTrigger = useCallback(() => {
     const textarea = textareaRef.current
@@ -157,6 +186,14 @@ export default function PromptComposer({
 
   return (
     <div className={styles.stack}>
+      <ContextUsageCard
+        assembly={latestContextAssembly}
+        open={usageOpen}
+        detailed={usageDetailed}
+        metrics={usageMetrics}
+        onClose={() => setUsageOpen(false)}
+        onToggleDetailed={() => setUsageDetailed((value) => !value)}
+      />
       <div ref={composerRef} className={styles.inputComposer}>
         <AttachmentChips
           attachments={draft.attachments}
@@ -201,6 +238,9 @@ export default function PromptComposer({
           stopVisible={stopVisible}
           onStop={onStop}
           voice={voice}
+          usageMetrics={usageMetrics}
+          usageOpen={usageOpen}
+          onUsageToggle={() => setUsageOpen((value) => !value)}
         />
       </div>
     </div>

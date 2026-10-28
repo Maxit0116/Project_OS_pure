@@ -96,6 +96,12 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async getWorkspaceGitStatus(
+    _projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitStatus> {
+    return transportNotConnected();
+  }
+
   async getNodeContext(
     _projectId: string,
     _nodeId: string,

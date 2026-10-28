@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import type { ContextAssembly } from '@contracts/index'
 import { isGlobalAgentScope, useWorkbenchStore } from '../../state/workbenchStore'
 import { useI18n } from '../../i18n'
 import Chip from '../ui/Chip'
@@ -23,7 +22,6 @@ export default function ChatContextHeader() {
   const chatMode = useWorkbenchStore((s) => s.chatMode)
   const lastAnchoredAnswer = useWorkbenchStore((s) => s.lastAnchoredAnswer)
   const writeAnchoredAnswerAsDecision = useWorkbenchStore((s) => s.writeAnchoredAnswerAsDecision)
-  const latestContextAssembly = useWorkbenchStore((s) => s.latestContextAssembly)
   const { ts } = useI18n()
   const [expanded, setExpanded] = useState(false)
   const [filesExpanded, setFilesExpanded] = useState(false)
@@ -167,8 +165,6 @@ export default function ChatContextHeader() {
     !wholeProjectScope && <div className={styles.empty}>{ts('context.empty')}</div>
   )
 
-  const assembly = latestContextAssembly ?? undefined
-
   return (
     <div className={styles.header}>
       <button
@@ -199,82 +195,11 @@ export default function ChatContextHeader() {
           <span className={styles.triggerScope}>{scopeLabel}</span>
         )}
       </button>
-      {assembly && <ContextUsage assembly={assembly} />}
 
       {expanded && (
         <div id={DROPDOWN_PANEL_ID} className={styles.dropdownPanel}>
           {scopeStatus}
           {contextDetails}
-        </div>
-      )}
-    </div>
-  )
-}
-
-const USAGE_SLOTS = ['instructions', 'scope', 'pins', 'retrieval', 'memory', 'session'] as const
-const USAGE_PANEL_ID = 'chat-context-usage-panel'
-
-function ContextUsage({ assembly }: { assembly: ContextAssembly }) {
-  const { ts } = useI18n()
-  const [usageExpanded, setUsageExpanded] = useState(false)
-  const total = USAGE_SLOTS.reduce((sum, slot) => sum + assembly.slots[slot].chars, 0)
-
-  return (
-    <div className={styles.usage}>
-      <button
-        type="button"
-        className={styles.usageTrigger}
-        onClick={() => setUsageExpanded((value) => !value)}
-        aria-expanded={usageExpanded}
-        aria-controls={USAGE_PANEL_ID}
-      >
-        <ChevronDown
-          size={12}
-          className={`${styles.usageChevron} ${usageExpanded ? styles.chevronOpen : ''}`}
-          aria-hidden
-        />
-        <span className={styles.usageTitle}>{ts('context.usageTitle')}</span>
-        <span className={styles.usageSummaryTrack} aria-hidden>
-          {USAGE_SLOTS.map((slot) => {
-            const chars = assembly.slots[slot].chars
-            if (chars <= 0 || total <= 0) return null
-            const width = Math.max(2, Math.round((chars / total) * 100))
-            return (
-              <span
-                key={slot}
-                className={styles.usageSummarySegment}
-                style={{ flexGrow: width, flexBasis: 0 }}
-              />
-            )
-          })}
-        </span>
-        <span className={styles.usageTotal}>{ts('context.usageTotal', { count: total })}</span>
-      </button>
-
-      {usageExpanded && (
-        <div id={USAGE_PANEL_ID} className={styles.usagePanel}>
-          {USAGE_SLOTS.map((slot) => {
-            const record = assembly.slots[slot]
-            const width = total > 0 ? Math.round((record.chars / total) * 100) : 0
-            const detail =
-              slot === 'retrieval' && !assembly.slots.retrieval.searched
-                ? ts('context.usageNotSearched')
-                : String(record.chars)
-            return (
-              <div className={styles.usageRow} key={slot}>
-                <span>{ts(`context.usageSlots.${slot}`)}</span>
-                <span className={styles.usageTrack}>
-                  <span className={styles.usageFill} style={{ width: `${width}%` }} />
-                </span>
-                <span>{detail}</span>
-              </div>
-            )
-          })}
-          {assembly.omissions.map((item) => (
-            <div className={styles.usageOmission} key={item.reason}>
-              {ts(`context.usageOmissions.${item.reason}`)} · {item.count}
-            </div>
-          ))}
         </div>
       )}
     </div>

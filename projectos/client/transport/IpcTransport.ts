@@ -247,6 +247,12 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("listWorkspaceDirectory", projectId, relativePath);
   }
 
+  getWorkspaceGitStatus(
+    projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitStatus> {
+    return this.invoke("getWorkspaceGitStatus", projectId);
+  }
+
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload> {
     return this.invoke("getNodeContext", projectId, nodeId);
   }

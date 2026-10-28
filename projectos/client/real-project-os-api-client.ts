@@ -127,6 +127,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.listWorkspaceDirectory(projectId, relativePath);
   }
 
+  getWorkspaceGitStatus(projectId: string) {
+    return this.transport.getWorkspaceGitStatus(projectId);
+  }
+
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload> {
     return this.transport.getNodeContext(projectId, nodeId);
   }

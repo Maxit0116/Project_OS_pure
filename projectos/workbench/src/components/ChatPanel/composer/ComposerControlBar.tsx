@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
+import { ArrowUp, Square } from 'lucide-react'
 import type { ThinkingDepth } from '@contracts/index'
 import { modelProfileLabel } from '@contracts/index'
 import { useWorkbenchStore, type ChatMode } from '../../../state/workbenchStore'
 import { useI18n } from '../../../i18n'
 import { GlassLens } from '../../Glass'
-import Button from '../../ui/Button'
 import Chip from '../../ui/Chip'
 import { VoiceInputDock } from '../VoiceInputControls'
 import {
   CHAT_MODE_VISUALS,
   CHAT_MODES,
 } from './chatModeVisuals'
+import ContextUsageRing from './ContextUsageRing'
+import type { ContextUsageMetrics } from './contextUsageMetrics'
 import styles from './ComposerControlBar.module.css'
 
 const THINKING_DEPTHS: ThinkingDepth[] = ['off', 'low', 'medium', 'high']
@@ -41,6 +43,9 @@ interface ComposerControlBarProps {
   stopVisible?: boolean
   onStop?: () => void
   voice: VoiceInputDockProps
+  usageMetrics: ContextUsageMetrics
+  usageOpen: boolean
+  onUsageToggle: () => void
 }
 
 export default function ComposerControlBar({
@@ -50,6 +55,9 @@ export default function ComposerControlBar({
   stopVisible = false,
   onStop,
   voice,
+  usageMetrics,
+  usageOpen,
+  onUsageToggle,
 }: ComposerControlBarProps) {
   const settings = useWorkbenchStore((s) => s.settings)
   const selectedModelProfileId = useWorkbenchStore((s) => s.selectedModelProfileId)
@@ -219,15 +227,33 @@ export default function ComposerControlBar({
       </div>
 
       <div className={styles.rightCluster}>
+        <ContextUsageRing
+          metrics={usageMetrics}
+          active={usageOpen}
+          onClick={onUsageToggle}
+          label={ts('context.usageRingLabel', { percent: usageMetrics.percentFull })}
+        />
         <VoiceInputDock {...voice} inline />
         {stopVisible ? (
-          <Button type="button" size="sm" variant="secondary" onClick={() => onStop?.()}>
-            {ts('chat.stop')}
-          </Button>
+          <button
+            type="button"
+            className={styles.iconAction}
+            onClick={() => onStop?.()}
+            aria-label={ts('chat.stop')}
+            title={ts('chat.stop')}
+          >
+            <Square size={14} fill="currentColor" aria-hidden />
+          </button>
         ) : (
-          <Button type="submit" size="sm" disabled={submitDisabled}>
-            {ts('common.send')}
-          </Button>
+          <button
+            type="submit"
+            className={`${styles.iconAction} ${styles.sendAction}`}
+            disabled={submitDisabled}
+            aria-label={ts('common.send')}
+            title={ts('common.send')}
+          >
+            <ArrowUp size={16} strokeWidth={2.5} aria-hidden />
+          </button>
         )}
       </div>
     </div>
