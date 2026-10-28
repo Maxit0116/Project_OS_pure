@@ -64,8 +64,18 @@ describe("durable run state", () => {
   it("persists a checkpoint separately from publication receipts", () => {
     const root = mkdtempSync(join(tmpdir(), "run-state-")); roots.push(root);
     const store = new DurableRunStateStore(join(root, ".projectos"));
+    store.saveDecision(decision());
     store.saveCheckpoint(checkpoint());
     expect(store.loadCheckpoint("checkpoint_1")).toMatchObject({ publication: "not_applied", pendingDecisionIds: ["decision_1"] });
+    store.resolveDecision("decision_1", 1, { optionId: "approve" });
+    expect(store.loadCheckpoint("checkpoint_1")?.pendingDecisionIds).toEqual(["decision_1"]);
+    const restartedStore = new DurableRunStateStore(join(root, ".projectos"));
+    expect(restartedStore.loadCheckpoint("checkpoint_1")?.pendingDecisionIds).toEqual(["decision_1"]);
+    expect(restartedStore.loadDecision("decision_1")?.answer?.optionId).toBe("approve");
+    expect(() => store.saveCheckpoint({ ...checkpoint(), pendingDecisionIds: ["missing"] }))
+      .toThrow(/missing, resolved, or foreign pending decision/);
+    expect(() => store.saveCheckpoint({ ...checkpoint(), completedTaskIds: ["unknown"] }))
+      .toThrow(/Completed tasks must be unique checkpoint tasks/);
   });
 
   it("reserves a shared root budget and refuses over-dispatch", () => {

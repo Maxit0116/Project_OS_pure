@@ -85,6 +85,7 @@ export class DurableRunStateStore {
   saveCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
     const parsed = RunCheckpointSchema.parse(checkpoint);
     if (!safeId(parsed.id)) throw new Error("Unsafe checkpoint id");
+    this.validateCheckpointDecisions(parsed, true);
     atomicJsonWrite(join(this.checkpointsRoot, `${parsed.id}.json`), parsed);
     return cloneJson(parsed);
   }
@@ -93,7 +94,21 @@ export class DurableRunStateStore {
     if (!safeId(checkpointId)) return null;
     const filePath = join(this.checkpointsRoot, `${checkpointId}.json`);
     if (!existsSync(filePath)) return null;
-    return RunCheckpointSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
+    const checkpoint = RunCheckpointSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
+    this.validateCheckpointDecisions(checkpoint, false);
+    return checkpoint;
+  }
+
+  private validateCheckpointDecisions(checkpoint: RunCheckpoint, requirePending: boolean): void {
+    for (const decisionId of checkpoint.pendingDecisionIds) {
+      const decision = this.loadDecision(decisionId);
+      if (!decision || decision.projectId !== checkpoint.projectId ||
+        decision.rootRunId !== checkpoint.rootRunId || requirePending && decision.status !== "pending") {
+        throw new Error(requirePending
+          ? `Checkpoint references a missing, resolved, or foreign pending decision '${decisionId}'`
+          : `Checkpoint references a missing or foreign decision '${decisionId}'`);
+      }
+    }
   }
 
   saveIntent(intent: RequestIntent): RequestIntent {

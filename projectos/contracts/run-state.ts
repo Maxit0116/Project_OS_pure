@@ -61,7 +61,25 @@ export const RunCheckpointSchema = z.object({
   eventCursor: z.string().min(1).optional(),
   adapterCheckpoint: z.unknown().optional(),
   updatedAt: z.string().min(1),
-}).strict();
+}).strict().superRefine((checkpoint, ctx) => {
+  const taskIds = new Set(checkpoint.taskIds);
+  const unique = (values: string[]) => new Set(values).size === values.length;
+  if (!unique(checkpoint.taskIds)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["taskIds"], message: "Checkpoint task IDs must be unique" });
+  }
+  if (!unique(checkpoint.completedTaskIds) || checkpoint.completedTaskIds.some((id) => !taskIds.has(id))) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["completedTaskIds"], message: "Completed tasks must be unique checkpoint tasks" });
+  }
+  if (Object.keys(checkpoint.executorSelections).some((taskId) => !taskIds.has(taskId))) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["executorSelections"], message: "Executor selections must belong to checkpoint tasks" });
+  }
+  if (!unique(checkpoint.pendingDecisionIds)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["pendingDecisionIds"], message: "Pending decision IDs must be unique" });
+  }
+  if (!unique(checkpoint.transactionReceiptIds)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["transactionReceiptIds"], message: "Transaction receipt IDs must be unique" });
+  }
+});
 
 export type RunDecision = z.infer<typeof RunDecisionSchema>;
 export type RunDecisionKind = z.infer<typeof RunDecisionKindSchema>;
