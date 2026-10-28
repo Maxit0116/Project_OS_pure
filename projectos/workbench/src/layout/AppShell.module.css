@@ -24,7 +24,7 @@
   min-height: var(--topbar-height);
   padding: 0 var(--space-md);
   -webkit-app-region: no-drag;
-  background: var(--tech-bg-side-panel);
+  background: var(--tech-bg-chrome);
   border-bottom: 1px solid var(--tech-border);
   box-shadow: var(--tech-shadow-sm);
   border-radius: 0;
@@ -320,19 +320,19 @@
 }
 
 .shellChromeBleed .topBar {
-  background: var(--tech-bg-side-panel);
+  background: var(--tech-bg-chrome);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
 .shellChromeBleed :global([data-desktop-title-bar]) {
-  background: var(--tech-bg-side-panel);
+  background: var(--tech-bg-chrome);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
 .shellGraphBleed .terminalBar {
-  background: var(--tech-bg-side-panel);
+  background: var(--tech-bg-chrome);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
@@ -348,7 +348,7 @@
   padding: 0 var(--space-md);
   font-size: var(--font-size-xs);
   color: var(--tech-text-muted);
-  background: var(--tech-bg-side-panel);
+  background: var(--tech-bg-chrome);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   border-top: 1px solid var(--tech-border);
@@ -385,10 +385,10 @@
   }
 
   .topBar {
-    background: var(--tech-bg-side-panel);
+    background: var(--tech-bg-chrome);
   }
 
   .terminalBar {
-    background: var(--tech-bg-side-panel);
+    background: var(--tech-bg-chrome);
   }
 }

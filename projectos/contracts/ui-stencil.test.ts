@@ -109,6 +109,16 @@ describe("stencil brief rendering", () => {
     expect(brief).toContain("Card with title Features");
     expect(brief).toContain("fade-in");
   });
+
+  it("includes user-sized footprint from placement.rect", () => {
+    const brief = renderPlacementBrief(
+      placement({
+        stencilId: "input-text",
+        rect: { x: 10, y: 20, width: 280, height: 64 },
+      }),
+    );
+    expect(brief).toContain("280×64");
+  });
 });
 
 describe("stencil-aware user content", () => {

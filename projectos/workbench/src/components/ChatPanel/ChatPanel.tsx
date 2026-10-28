@@ -86,6 +86,8 @@ export default function ChatPanel() {
   const submitDebugRepro = useWorkbenchStore((s) => s.submitDebugRepro)
   const confirmDebugFix = useWorkbenchStore((s) => s.confirmDebugFix)
   const markDebugFixed = useWorkbenchStore((s) => s.markDebugFixed)
+  const confirmBugAlignment = useWorkbenchStore((s) => s.confirmBugAlignment)
+  const markBugFixed = useWorkbenchStore((s) => s.markBugFixed)
   const reviseRefinement = useWorkbenchStore((s) => s.reviseRefinement)
   const refineLoading = useWorkbenchStore((s) => s.refineLoading)
   const flowStatus = useWorkbenchStore((s) => s.flowStatus)
@@ -375,7 +377,8 @@ export default function ChatPanel() {
             refinement={pendingRefinement}
             targetFile={selectedFilePath}
             confirmed={refinementConfirmed}
-            onConfirm={() => void confirmRefinement()}
+            confirming={refineLoading}
+            onConfirm={(payload) => void confirmRefinement(payload)}
             onRevise={handleRevise}
           />
         )}
@@ -488,6 +491,8 @@ export default function ChatPanel() {
             onReproduced={() => void submitDebugRepro()}
             onConfirmFix={() => void confirmDebugFix()}
             onMarkFixed={() => void markDebugFixed()}
+            onConfirmBugAlignment={(bugs) => void confirmBugAlignment(bugs)}
+            onMarkBugFixed={(bugId) => void markBugFixed(bugId)}
           />
         )}
         {chatMode === 'debug' && debugSession && !refineLoading && flowStatus !== 'running' ? (
@@ -554,7 +559,6 @@ export default function ChatPanel() {
           scopeRef={panelRef}
           modeLabel={chatModeNavLabel}
           flashClassName={styles.navFlash}
-          onOpenActivity={openActivity}
         />
       </div>
       <form className={styles.inputArea} onSubmit={handleSubmit}>

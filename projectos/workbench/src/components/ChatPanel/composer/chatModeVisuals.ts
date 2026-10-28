@@ -4,17 +4,20 @@ import type { ChatMode } from '../../../state/workbenchStore'
 
 export interface ChatModeVisual {
   icon: LucideIcon
-  toneClass: string
-  /** Whether this mode can write files (instrumentation / diffs). */
-  canEdit: boolean
+  /**
+   * CSS module class for the *selected* mode chip (and nav markers).
+   * Dropdown rows stay uncolored — Cursor-style.
+   */
+  toneClass: 'modeAsk' | 'modePlan' | 'modeAgent' | 'modeDebug'
 }
 
 export const CHAT_MODE_VISUALS: Record<ChatMode, ChatModeVisual> = {
-  ask: { icon: MessageCircle, toneClass: 'modeAsk', canEdit: false },
-  plan: { icon: ListTree, toneClass: 'modePlan', canEdit: false },
-  change: { icon: SquarePen, toneClass: 'modeChange', canEdit: true },
-  debug: { icon: Bug, toneClass: 'modeDebug', canEdit: true },
-  anchored: { icon: Anchor, toneClass: 'modeAsk', canEdit: false },
+  ask: { icon: MessageCircle, toneClass: 'modeAsk' },
+  plan: { icon: ListTree, toneClass: 'modePlan' },
+  /** Agent mode — no brand color on the chip / markers. */
+  change: { icon: SquarePen, toneClass: 'modeAgent' },
+  debug: { icon: Bug, toneClass: 'modeDebug' },
+  anchored: { icon: Anchor, toneClass: 'modeAsk' },
 }
 
 /** Modes shown in the picker dropdown (includes Anchored). */
@@ -35,7 +38,14 @@ export function cycleChatMode(current: ChatMode): ChatMode {
   return CYCLE_CHAT_MODES[(index + 1) % CYCLE_CHAT_MODES.length] ?? 'ask'
 }
 
-export function chatModeHelpKey(mode: ChatMode): `chat.${ChatMode}ModeHelp` | 'chat.askModeHelp' {
-  if (mode === 'anchored') return 'chat.anchoredModeHelp'
-  return `chat.${mode}ModeHelp`
+/** Map a persisted / message chatMode string to a tone class for markers. */
+export function toneClassForChatMode(
+  mode: string | undefined | null,
+): ChatModeVisual['toneClass'] | null {
+  if (!mode) return null
+  if (mode === 'ask' || mode === 'anchored') return 'modeAsk'
+  if (mode === 'plan') return 'modePlan'
+  if (mode === 'change') return 'modeAgent'
+  if (mode === 'debug') return 'modeDebug'
+  return null
 }

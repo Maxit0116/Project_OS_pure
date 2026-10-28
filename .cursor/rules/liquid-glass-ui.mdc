@@ -16,14 +16,15 @@ Use `--tech-*` tokens for every surface, border, text color, and shadow. Never h
 
 | Layer | Token | Value (dark) |
 |-------|-------|--------------|
-| App background | `--tech-bg-canvas` | `#0f172a` |
-| Side panels / nav | `--tech-bg-side-panel` | `#1e293b` |
-| Elevated cards | `--tech-bg-elevated` | `#1e293b` |
-| Hover / muted | `--tech-bg-muted` | `#272f42` |
+| App background | `--tech-bg-canvas` | `#181818` |
+| Chrome (title / side / terminal) | `--tech-bg-chrome` | `#141414` |
+| Side panels / nav | `--tech-bg-side-panel` | `#141414` |
+| Elevated cards | `--tech-bg-elevated` | `#1c1c1c` |
+| Hover / muted | `--tech-bg-muted` | `#222222` |
 | Border | `--tech-border` | `rgba(255,255,255,0.08)` |
-| Border (strong) | `--tech-border-strong` | `#334155` |
-| Primary text | `--tech-text-primary` | `#f8fafc` |
-| Accent | `--tech-accent` | `#22c55e` |
+| Border (strong) | `--tech-border-strong` | `rgba(255,255,255,0.16)` |
+| Primary text | `--tech-text-primary` | `rgba(255,255,255,0.92)` |
+| Accent | `--tech-accent` | `#4c7dff` |
 
 Full list in `projectos/workbench/src/styles/tokens.css`.
 

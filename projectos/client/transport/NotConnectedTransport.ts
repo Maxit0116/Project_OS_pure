@@ -372,6 +372,12 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async confirmAlignment(
+    _request: import("../../contracts/alignment-contract.js").ConfirmAlignmentRequest,
+  ): Promise<PromptRefinement> {
+    throw this.notConnected();
+  }
+
   async refinePrompt(_request: PromptRefineRequest): Promise<PromptRefinement> {
     return transportNotConnected();
   }
@@ -469,6 +475,18 @@ export class NotConnectedTransport implements ProjectOSApi {
   }
 
   async cleanupDebugInstrumentation(_sessionId: string): Promise<void> {
+    return transportNotConnected();
+  }
+
+  async confirmBugAlignment(
+    _request: import("../../contracts/alignment-contract.js").ConfirmBugAlignmentRequest,
+  ): Promise<import("../../contracts/debug-session.js").DebugSession> {
+    return transportNotConnected();
+  }
+
+  async markBugFixed(
+    _request: import("../../contracts/alignment-contract.js").MarkBugFixedRequest,
+  ): Promise<import("../../contracts/debug-session.js").DebugSession> {
     return transportNotConnected();
   }
 
@@ -784,6 +802,13 @@ export class NotConnectedTransport implements ProjectOSApi {
     _projectId: string,
     _loopId: string,
     _answers: import("../../contracts/loop-graph.js").LoopGoalClarificationAnswer[],
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async cancelLoopGoalClarification(
+    _projectId: string,
+    _loopId: string,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return transportNotConnected();
   }

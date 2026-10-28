@@ -63,6 +63,11 @@ export const SpatialCaptureRegionSchema = z
       .array(StencilPlacementSchema)
       .max(MAX_STENCILS_PER_REGION)
       .default([]),
+    /**
+     * Full-screenshot region created by dropping a stencil on empty canvas.
+     * Capture/agent still use the full frame; selection chrome is not shown.
+     */
+    hideSelectionChrome: z.boolean().optional(),
   })
   .strict();
 

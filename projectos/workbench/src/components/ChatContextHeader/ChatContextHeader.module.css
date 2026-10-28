@@ -227,11 +227,85 @@
   flex-direction: column;
   gap: 4px;
   padding: 0 var(--space-md) var(--space-sm);
+  border-top: 1px solid var(--tech-border);
+}
+
+.usageTrigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 0;
+  font-family: inherit;
+  text-align: left;
+  color: var(--tech-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.usageTrigger:hover {
+  color: var(--tech-text-primary);
+}
+
+.usageTrigger:focus-visible {
+  box-shadow: var(--tech-shadow-focus);
+  outline: none;
+}
+
+.usageChevron {
+  flex-shrink: 0;
+  color: var(--tech-text-muted);
+  transition: transform var(--duration-fast) var(--ease-out);
 }
 
 .usageTitle {
-  color: var(--tech-text-secondary);
+  flex-shrink: 0;
+  color: inherit;
   font-size: 11px;
+}
+
+.usageSummaryTrack {
+  display: flex;
+  flex: 1;
+  min-width: 32px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--tech-bg-muted);
+  gap: 1px;
+}
+
+.usageSummarySegment {
+  display: block;
+  min-width: 2px;
+  height: 100%;
+  background: var(--tech-accent);
+  opacity: 0.55;
+}
+
+.usageSummarySegment:nth-child(2n) {
+  opacity: 0.75;
+}
+
+.usageSummarySegment:nth-child(3n) {
+  opacity: 0.9;
+}
+
+.usageTotal {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--tech-text-muted);
+}
+
+.usagePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 .usageRow {
@@ -259,4 +333,10 @@
 .usageOmission {
   color: var(--tech-text-secondary);
   font-size: 11px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .usageChevron {
+    transition: none;
+  }
 }

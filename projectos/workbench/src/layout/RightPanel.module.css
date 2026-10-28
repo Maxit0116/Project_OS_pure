@@ -41,13 +41,37 @@
 }
 
 .panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
   height: 100%;
-  overflow: hidden;
   transition: background var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
+}
+
+/*
+ * Beat global `.glass-panel-edge-* { overflow: hidden }` so left-edge chrome
+ * (resize handle / host) is not the clip source. The nav capsule itself is
+ * portaled with position:fixed to escape remaining ancestors.
+ */
+.panel:global(.glass-panel-edge-left),
+.panel:global(.glass-panel-edge-left-drawer),
+.panel:global(.glass-panel-edge-right),
+.panel:global(.glass-panel-edge-right-drawer) {
+  overflow: visible;
+}
+
+/* Zero-size anchor at the sidebar’s left edge — used for fixed-position sync. */
+.navRailHost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 100%;
+  z-index: 30;
+  overflow: visible;
+  pointer-events: none;
 }
 
 .inner {
@@ -124,7 +148,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .panelBleed {
-    background: var(--tech-bg-side-panel);
+    background: var(--tech-bg-chrome);
   }
 }
 

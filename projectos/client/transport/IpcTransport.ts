@@ -521,6 +521,10 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("refinePrompt", request);
   }
 
+  confirmAlignment(request: import("../../contracts/alignment-contract.js").ConfirmAlignmentRequest): Promise<PromptRefinement> {
+    return this.invoke("confirmAlignment", request);
+  }
+
   confirmExecution(refinementId: string): Promise<AgentRun> {
     return this.invoke("confirmExecution", refinementId);
   }
@@ -642,6 +646,18 @@ export class IpcTransport implements ApiTransport {
 
   cleanupDebugInstrumentation(sessionId: string): Promise<void> {
     return this.invoke("cleanupDebugInstrumentation", sessionId);
+  }
+
+  confirmBugAlignment(
+    request: import("../../contracts/alignment-contract.js").ConfirmBugAlignmentRequest,
+  ): Promise<import("../../contracts/debug-session.js").DebugSession> {
+    return this.invoke("confirmBugAlignment", request);
+  }
+
+  markBugFixed(
+    request: import("../../contracts/alignment-contract.js").MarkBugFixedRequest,
+  ): Promise<import("../../contracts/debug-session.js").DebugSession> {
+    return this.invoke("markBugFixed", request);
   }
 
   getDebugLogPort(): Promise<number> {
@@ -962,6 +978,13 @@ export class IpcTransport implements ApiTransport {
     answers: import("../../contracts/loop-graph.js").LoopGoalClarificationAnswer[],
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return this.invoke("answerLoopGoalClarification", projectId, loopId, answers);
+  }
+
+  cancelLoopGoalClarification(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("cancelLoopGoalClarification", projectId, loopId);
   }
 
   confirmLoopGoalContext(

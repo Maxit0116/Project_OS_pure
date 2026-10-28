@@ -10,7 +10,6 @@ import { VoiceInputDock } from '../VoiceInputControls'
 import {
   CHAT_MODE_VISUALS,
   CHAT_MODES,
-  chatModeHelpKey,
 } from './chatModeVisuals'
 import styles from './ComposerControlBar.module.css'
 
@@ -102,9 +101,6 @@ export default function ComposerControlBar({
 
   const currentModeVisual = CHAT_MODE_VISUALS[chatMode]
   const CurrentModeIcon = currentModeVisual.icon
-  const capabilityLabel = currentModeVisual.canEdit
-    ? ts('chat.modeCanEdit')
-    : ts('chat.modeReadOnly')
 
   return (
     <div className={styles.footer} ref={barRef}>
@@ -121,9 +117,6 @@ export default function ComposerControlBar({
             <CurrentModeIcon size={14} strokeWidth={2} className={styles.chipModeIcon} aria-hidden />
             <span className={styles.chipModeLabel}>
               {ts(`chat.${chatMode}Mode` as 'chat.askMode')}
-            </span>
-            <span className={styles.chipCapability} aria-hidden>
-              {capabilityLabel}
             </span>
             <span aria-hidden>▾</span>
           </Chip>
@@ -142,23 +135,15 @@ export default function ComposerControlBar({
                     <button
                       key={mode}
                       type="button"
-                      className={`${styles.menuItem} ${styles.modeMenuItem} ${styles[visual.toneClass]} ${isActive ? styles.modeMenuItemActive : ''}`}
+                      className={`${styles.menuItem} ${styles.modeMenuItem} ${isActive ? styles.modeMenuItemActive : ''}`}
                       onClick={() => {
                         onChatModeChange(mode)
                         setOpenMenu(null)
                       }}
                     >
                       <ModeIcon size={16} strokeWidth={2} className={styles.modeIcon} aria-hidden />
-                      <span className={styles.modeMenuCopy}>
-                        <span className={styles.modeLabel}>
-                          {ts(`chat.${mode}Mode` as 'chat.askMode')}
-                        </span>
-                        <span className={styles.modeHelp}>
-                          {ts(chatModeHelpKey(mode))}
-                        </span>
-                        <span className={styles.modeCapability}>
-                          {visual.canEdit ? ts('chat.modeCanEdit') : ts('chat.modeReadOnly')}
-                        </span>
+                      <span className={styles.modeLabel}>
+                        {ts(`chat.${mode}Mode` as 'chat.askMode')}
                       </span>
                     </button>
                   )

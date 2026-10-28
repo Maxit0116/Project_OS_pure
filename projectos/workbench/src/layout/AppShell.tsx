@@ -14,6 +14,7 @@ import BottomDockPanel from '../components/BottomDock/BottomDockPanel'
 import { useBottomDockStore } from '../state/bottomDockStore'
 import { useTerminalShortcuts } from '../components/Terminal/useTerminalShortcuts'
 import { useEditorShortcuts } from '../components/CodeEditor/useEditorShortcuts'
+import { useKeepAwakeSync } from '../hooks/useKeepAwakeSync'
 import WorkbenchSidePanels from './WorkbenchSidePanels'
 import SessionGraphOverlay from '../components/SessionGraph/SessionGraphOverlay'
 import LoopGraphOverlay from '../components/LoopGraph/LoopGraphOverlay'
@@ -54,6 +55,7 @@ export default function AppShell() {
 
   useTerminalShortcuts()
   useEditorShortcuts()
+  useKeepAwakeSync()
 
   useEffect(() => {
     if (phase === 'ready') {

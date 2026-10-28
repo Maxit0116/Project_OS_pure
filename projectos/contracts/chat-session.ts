@@ -82,6 +82,8 @@ export const ChatMessageSchema = z
     explorationTrace: AskExplorationTraceSchema.optional(),
     retrievalSummary: RetrievalSummarySchema.optional(),
     checkpointId: z.string().min(1).optional(),
+    /** Mode active when this user turn was sent (nav rail color / history). */
+    chatMode: ChatSessionModeSchema.optional(),
   })
   .strict();
 

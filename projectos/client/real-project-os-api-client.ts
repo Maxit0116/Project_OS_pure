@@ -396,6 +396,12 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.refinePrompt(request);
   }
 
+  confirmAlignment(
+    request: import("../contracts/alignment-contract.js").ConfirmAlignmentRequest,
+  ): Promise<PromptRefinement> {
+    return this.transport.confirmAlignment(request);
+  }
+
   confirmExecution(refinementId: string): Promise<AgentRun> {
     return this.transport.confirmExecution(refinementId);
   }
@@ -487,6 +493,18 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   cleanupDebugInstrumentation(sessionId: string): Promise<void> {
     return this.transport.cleanupDebugInstrumentation(sessionId);
+  }
+
+  confirmBugAlignment(
+    request: import("../contracts/alignment-contract.js").ConfirmBugAlignmentRequest,
+  ): Promise<import("../contracts/debug-session.js").DebugSession> {
+    return this.transport.confirmBugAlignment(request);
+  }
+
+  markBugFixed(
+    request: import("../contracts/alignment-contract.js").MarkBugFixedRequest,
+  ): Promise<import("../contracts/debug-session.js").DebugSession> {
+    return this.transport.markBugFixed(request);
   }
 
   getDebugLogPort(): Promise<number> {
@@ -745,6 +763,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     answers: import("../contracts/loop-graph.js").LoopGoalClarificationAnswer[],
   ) {
     return this.transport.answerLoopGoalClarification(projectId, loopId, answers);
+  }
+
+  cancelLoopGoalClarification(projectId: string, loopId: string) {
+    return this.transport.cancelLoopGoalClarification(projectId, loopId);
   }
 
   confirmLoopGoalContext(projectId: string, loopId: string) {

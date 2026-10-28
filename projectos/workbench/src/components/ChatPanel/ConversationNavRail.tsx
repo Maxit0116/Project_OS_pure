@@ -2,25 +2,28 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type RefObject,
 } from 'react'
-import { Search } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import { useI18n } from '../../i18n'
+import { useConversationNavHost } from './ConversationNavHostContext'
 import {
   adjacentTurnId,
   computeActiveTurnId,
-  filterTurnsByQuery,
   flashTurnHighlight,
   latestTurnId,
-  markerTopPercent,
-  NAV_DENSE_TURN_THRESHOLD,
   scrollTurnIntoView,
   shouldShowConversationNav,
   type NavTurn,
 } from './conversationNavTurns'
+import { toneClassForChatMode } from './composer/chatModeVisuals'
+import { useChatSidebarRailAnchor } from './useChatSidebarRailAnchor'
+import { useScrollScrubReveal } from './useScrollScrubReveal'
 import styles from './ConversationNavRail.module.css'
 
 interface Props {
@@ -31,7 +34,6 @@ interface Props {
   modeLabel?: string
   /** CSS module class applied to the jumped message for a brief flash (M1). */
   flashClassName: string
-  onOpenActivity?: (activityId: string) => void
 }
 
 export default function ConversationNavRail({
@@ -40,30 +42,28 @@ export default function ConversationNavRail({
   scopeRef,
   modeLabel,
   flashClassName,
-  onOpenActivity,
 }: Props) {
   const { ts } = useI18n()
+  const host = useConversationNavHost()
   const labelId = useId()
-  const searchInputRef = useRef<HTMLInputElement>(null)
+  const railRef = useRef<HTMLElement | null>(null)
+  const stackRef = useRef<HTMLDivElement | null>(null)
   const turnIds = useMemo(() => turns.map((turn) => turn.id), [turns])
-  const dense = turns.length >= NAV_DENSE_TURN_THRESHOLD
-  const [visible, setVisible] = useState(false)
+  const [eligible, setEligible] = useState(false)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [railHovering, setRailHovering] = useState(false)
+  const [tipAnchor, setTipAnchor] = useState<{ left: number; top: number } | null>(null)
 
-  const filteredTurns = useMemo(
-    () => filterTurnsByQuery(turns, searchQuery),
-    [turns, searchQuery],
-  )
+  const { scrubbing, suppress } = useScrollScrubReveal(scrollParentRef, eligible)
+  const anchor = useChatSidebarRailAnchor(host, eligible, railRef)
 
-  const syncVisibilityAndActive = useCallback(() => {
+  const syncEligibilityAndActive = useCallback(() => {
     const parent = scrollParentRef.current
-    const nextVisible = shouldShowConversationNav(turns.length, parent)
-    setVisible(nextVisible)
-    if (!nextVisible || !parent) {
+    const nextEligible = shouldShowConversationNav(turns.length, parent)
+    setEligible(nextEligible)
+    if (!nextEligible || !parent) {
       setActiveId(null)
       return
     }
@@ -71,7 +71,7 @@ export default function ConversationNavRail({
   }, [scrollParentRef, turnIds, turns.length])
 
   useEffect(() => {
-    syncVisibilityAndActive()
+    syncEligibilityAndActive()
     const parent = scrollParentRef.current
     if (!parent) return
 
@@ -82,7 +82,7 @@ export default function ConversationNavRail({
 
     const ro =
       typeof ResizeObserver !== 'undefined'
-        ? new ResizeObserver(() => syncVisibilityAndActive())
+        ? new ResizeObserver(() => syncEligibilityAndActive())
         : null
     ro?.observe(parent)
 
@@ -90,60 +90,42 @@ export default function ConversationNavRail({
       parent.removeEventListener('scroll', onScroll)
       ro?.disconnect()
     }
-  }, [scrollParentRef, syncVisibilityAndActive, turnIds])
+  }, [scrollParentRef, syncEligibilityAndActive, turnIds])
 
   useEffect(() => {
-    syncVisibilityAndActive()
-  }, [turns, syncVisibilityAndActive])
+    syncEligibilityAndActive()
+  }, [turns, syncEligibilityAndActive])
 
   const jumpTo = useCallback(
     (messageId: string) => {
       const parent = scrollParentRef.current
       if (!parent) return
       setActiveId(messageId)
+      suppress()
       scrollTurnIntoView(parent, messageId)
       flashTurnHighlight(parent, messageId, flashClassName)
     },
-    [flashClassName, scrollParentRef],
+    [flashClassName, scrollParentRef, suppress],
   )
-
-  const closeSearch = useCallback(() => {
-    setSearchOpen(false)
-    setSearchQuery('')
-  }, [])
-
-  const openSearch = useCallback(() => {
-    setSearchOpen(true)
-    requestAnimationFrame(() => searchInputRef.current?.focus())
-  }, [])
 
   useEffect(() => {
     const scope = scopeRef.current
     if (!scope) return
 
+    const inNavSurface = (node: Node | null) =>
+      !!node && (railRef.current?.contains(node) ?? false)
+
     let armed = false
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node
-      armed = scope.contains(target)
-      if (searchOpen && !scope.contains(target)) {
-        closeSearch()
-      }
+      armed = scope.contains(target) || inNavSurface(target)
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.altKey || event.metaKey || event.ctrlKey) return
-      const focusInside = scope.contains(document.activeElement)
+      if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return
+      const focusInside =
+        scope.contains(document.activeElement) || inNavSurface(document.activeElement)
       if (!armed && !focusInside) return
       if (turns.length === 0) return
-
-      // Alt+Shift+F — searchable prompt index (M2)
-      if (event.shiftKey && (event.key === 'f' || event.key === 'F')) {
-        event.preventDefault()
-        if (searchOpen) closeSearch()
-        else openSearch()
-        return
-      }
-
-      if (event.shiftKey) return
 
       const key = event.key
       if (key !== 'ArrowUp' && key !== 'ArrowDown' && key !== 'End') return
@@ -172,142 +154,169 @@ export default function ConversationNavRail({
       window.removeEventListener('pointerdown', onPointerDown, true)
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [
-    activeId,
-    closeSearch,
-    jumpTo,
-    openSearch,
-    scopeRef,
-    scrollParentRef,
-    searchOpen,
-    turnIds,
-    turns.length,
-  ])
+  }, [activeId, jumpTo, scopeRef, scrollParentRef, turnIds, turns.length])
 
-  useEffect(() => {
-    if (!searchOpen) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        closeSearch()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [closeSearch, searchOpen])
-
-  if (!visible || turns.length === 0) return null
+  const revealed =
+    eligible && (scrubbing || railHovering || focusedId != null)
 
   const previewId = hoveredId ?? focusedId
+  const previewTurn = previewId ? turns.find((turn) => turn.id === previewId) : undefined
 
-  return (
-    <nav
-      className={`${styles.rail} ${dense ? styles.railDense : ''}`}
-      aria-labelledby={labelId}
-    >
-      <span id={labelId} className={styles.visuallyHidden}>
-        {ts('chat.nav.railLabel')}
-      </span>
-      <button
-        type="button"
-        className={`${styles.searchToggle} ${searchOpen ? styles.searchToggleActive : ''}`}
-        aria-label={ts('chat.nav.openSearch')}
-        aria-expanded={searchOpen}
-        title={ts('chat.nav.openSearch')}
-        onClick={() => (searchOpen ? closeSearch() : openSearch())}
+  // Keep the active bar visible inside the stack when the list is long.
+  useEffect(() => {
+    if (!revealed || !activeId || !stackRef.current) return
+    const marker = Array.from(
+      stackRef.current.querySelectorAll<HTMLElement>('[data-nav-turn-id]'),
+    ).find((el) => el.getAttribute('data-nav-turn-id') === activeId)
+    marker?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activeId, revealed])
+
+  // Keep the prompt card glued to the hovered marker across zoom / panel resize.
+  useLayoutEffect(() => {
+    if (!revealed || !previewId || !stackRef.current) {
+      setTipAnchor(null)
+      return
+    }
+
+    const stack = stackRef.current
+    let raf = 0
+    let cancelled = false
+
+    const syncTip = () => {
+      if (cancelled) return
+      const marker = Array.from(
+        stack.querySelectorAll<HTMLElement>('[data-nav-turn-id]'),
+      ).find((el) => el.getAttribute('data-nav-turn-id') === previewId)
+      if (!marker) {
+        setTipAnchor(null)
+        return
+      }
+      const rect = marker.getBoundingClientRect()
+      const next = { left: rect.left - 8, top: rect.top + rect.height / 2 }
+      setTipAnchor((prev) => {
+        if (
+          prev &&
+          Math.abs(prev.left - next.left) < 0.5 &&
+          Math.abs(prev.top - next.top) < 0.5
+        ) {
+          return prev
+        }
+        return next
+      })
+    }
+
+    const tick = () => {
+      if (cancelled) return
+      syncTip()
+      raf = window.requestAnimationFrame(tick)
+    }
+
+    syncTip()
+    raf = window.requestAnimationFrame(tick)
+    stack.addEventListener('scroll', syncTip, { passive: true })
+    window.addEventListener('resize', syncTip)
+    const viewport = window.visualViewport
+    viewport?.addEventListener('resize', syncTip)
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(raf)
+      stack.removeEventListener('scroll', syncTip)
+      window.removeEventListener('resize', syncTip)
+      viewport?.removeEventListener('resize', syncTip)
+    }
+  }, [previewId, revealed])
+
+  if (!eligible || turns.length === 0 || !host || !anchor) return null
+
+  const railStyle = {
+    left: anchor.left,
+    top: anchor.top,
+    right: 'auto',
+  } satisfies CSSProperties
+
+  const tipStyle =
+    tipAnchor != null
+      ? ({
+          left: tipAnchor.left,
+          top: tipAnchor.top,
+        } satisfies CSSProperties)
+      : undefined
+
+  return createPortal(
+    <>
+      <nav
+        ref={railRef}
+        className={`${styles.rail} ${revealed ? styles.revealed : ''}`}
+        style={railStyle}
+        aria-labelledby={labelId}
+        aria-hidden={revealed ? undefined : true}
+        data-conversation-nav-rail=""
+        data-nav-side="left-exterior"
+        data-revealed={revealed ? 'true' : 'false'}
+        onPointerEnter={() => setRailHovering(true)}
+        onPointerLeave={() => setRailHovering(false)}
       >
-        <Search size={10} strokeWidth={2} aria-hidden />
-      </button>
-
-      {searchOpen ? (
-        <div className={styles.searchPanel} role="dialog" aria-label={ts('chat.nav.searchTitle')}>
-          <input
-            ref={searchInputRef}
-            className={styles.searchInput}
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder={ts('chat.nav.searchPlaceholder')}
-            aria-label={ts('chat.nav.searchPlaceholder')}
-          />
-          {filteredTurns.length === 0 ? (
-            <div className={styles.searchEmpty}>{ts('chat.nav.searchEmpty')}</div>
-          ) : (
-            <ul className={styles.searchList}>
-              {filteredTurns.map((turn) => (
-                <li key={turn.id}>
-                  <button
-                    type="button"
-                    className={`${styles.searchItem} ${
-                      turn.id === activeId ? styles.searchItemActive : ''
-                    }`}
-                    onClick={() => {
-                      jumpTo(turn.id)
-                      closeSearch()
-                    }}
-                  >
-                    {turn.preview}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+        <span id={labelId} className={styles.visuallyHidden}>
+          {ts('chat.nav.railLabel')}
+        </span>
+        <div
+          ref={stackRef}
+          className={styles.stack}
+          onWheel={(event) => {
+            // Keep stack scrolling local — do not drive the chat transcript.
+            event.stopPropagation()
+          }}
+        >
+          {turns.map((turn) => {
+            const isActive = turn.id === activeId
+            const tone = toneClassForChatMode(turn.chatMode)
+            const toneClass = tone ? styles[tone] : ''
+            return (
+              <button
+                key={turn.id}
+                type="button"
+                data-nav-turn-id={turn.id}
+                className={`${styles.marker} ${toneClass} ${isActive ? styles.markerActive : ''}`}
+                aria-label={ts('chat.nav.markerLabel', { preview: turn.preview })}
+                aria-current={isActive ? 'true' : undefined}
+                tabIndex={revealed ? 0 : -1}
+                onClick={() => jumpTo(turn.id)}
+                onMouseEnter={() => setHoveredId(turn.id)}
+                onMouseLeave={() => setHoveredId((id) => (id === turn.id ? null : id))}
+                onFocus={() => setFocusedId(turn.id)}
+                onBlur={() => setFocusedId((id) => (id === turn.id ? null : id))}
+              >
+                <span className={styles.bar} aria-hidden />
+                {turn.status ? (
+                  <span
+                    className={`${styles.statusDot} ${statusClass(turn.status)}`}
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
+      </nav>
+      {revealed && previewTurn && tipStyle ? (
+        <div
+          className={styles.tooltip}
+          style={tipStyle}
+          role="tooltip"
+          data-conversation-nav-tooltip=""
+        >
+          <span className={styles.tooltipPreview}>{previewTurn.preview}</span>
+          {modeLabel || previewTurn.timestamp ? (
+            <span className={styles.tooltipMeta}>
+              {[modeLabel, formatTime(previewTurn.timestamp), statusLabel(previewTurn.status, ts)]
+                .filter(Boolean)
+                .join(' · ')}
+            </span>
+          ) : null}
         </div>
       ) : null}
-
-      <div className={styles.railTrack}>
-        {turns.map((turn, index) => {
-          const isActive = turn.id === activeId
-          const showTip = previewId === turn.id && !searchOpen
-          return (
-            <button
-              key={turn.id}
-              type="button"
-              className={`${styles.marker} ${isActive ? styles.markerActive : ''}`}
-              style={{ top: `${markerTopPercent(index, turns.length)}%` }}
-              aria-label={ts('chat.nav.markerLabel', { preview: turn.preview })}
-              aria-current={isActive ? 'true' : undefined}
-              onClick={() => jumpTo(turn.id)}
-              onMouseEnter={() => setHoveredId(turn.id)}
-              onMouseLeave={() => setHoveredId((id) => (id === turn.id ? null : id))}
-              onFocus={() => setFocusedId(turn.id)}
-              onBlur={() => setFocusedId((id) => (id === turn.id ? null : id))}
-            >
-              <span className={styles.bar} aria-hidden />
-              {turn.status ? (
-                <span
-                  className={`${styles.statusDot} ${statusClass(turn.status)}`}
-                  aria-hidden
-                />
-              ) : null}
-              {showTip ? (
-                <span className={styles.tooltip} role="tooltip">
-                  <span className={styles.tooltipPreview}>{turn.preview}</span>
-                  {modeLabel || turn.timestamp ? (
-                    <span className={styles.tooltipMeta}>
-                      {[modeLabel, formatTime(turn.timestamp), statusLabel(turn.status, ts)]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </span>
-                  ) : null}
-                  {turn.activityId && onOpenActivity ? (
-                    <button
-                      type="button"
-                      className={styles.tooltipAction}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        onOpenActivity(turn.activityId!)
-                      }}
-                    >
-                      {ts('chat.nav.openActivity')}
-                    </button>
-                  ) : null}
-                </span>
-              ) : null}
-            </button>
-          )
-        })}
-      </div>
-    </nav>
+    </>,
+    document.body,
   )
 }
 

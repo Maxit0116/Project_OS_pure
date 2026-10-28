@@ -1,5 +1,7 @@
 import { useI18n } from '../../i18n'
+import { isDesktopApp, isMacElectronShell } from '../../data/clientMode'
 import { useWorkbenchStore, type ChatModeSwitchPreference } from '../../state/workbenchStore'
+import type { KeepAwakeMode } from '@contracts/keep-awake'
 import PresentationModeToggle from './PresentationModeToggle'
 import styles from './SettingsPanel.module.css'
 
@@ -8,9 +10,14 @@ export default function GeneralSettingsSection() {
   const updateSettings = useWorkbenchStore((s) => s.updateSettings)
   const chatModeSwitch = useWorkbenchStore((s) => s.chatModeSwitch)
   const setChatModeSwitch = useWorkbenchStore((s) => s.setChatModeSwitch)
+  const keepAwakeMode = useWorkbenchStore((s) => s.keepAwakeMode)
+  const keepAwakeStatus = useWorkbenchStore((s) => s.keepAwakeStatus)
+  const setKeepAwakeMode = useWorkbenchStore((s) => s.setKeepAwakeMode)
   const { ts } = useI18n()
 
   if (!settings) return null
+
+  const showKeepAwake = isDesktopApp() && isMacElectronShell()
 
   return (
     <section className={styles.section}>
@@ -68,10 +75,39 @@ export default function GeneralSettingsSection() {
             setChatModeSwitch(e.target.value as ChatModeSwitchPreference)
           }
         >
-          <option value="new_session">{ts('settings.chatModeSwitchNewSession')}</option>
           <option value="same_session">{ts('settings.chatModeSwitchSameSession')}</option>
+          <option value="new_session">{ts('settings.chatModeSwitchNewSession')}</option>
         </select>
       </label>
+      {showKeepAwake && (
+        <label className={styles.field}>
+          <span className={styles.label}>{ts('settings.keepAwake')}</span>
+          <span className={styles.help}>{ts('settings.keepAwakeDesc')}</span>
+          <select
+            className={styles.select}
+            value={keepAwakeMode}
+            onChange={(e) => void setKeepAwakeMode(e.target.value as KeepAwakeMode)}
+          >
+            <option value="off">{ts('settings.keepAwakeOff')}</option>
+            <option value="while_agents_running">{ts('settings.keepAwakeWhileAgents')}</option>
+            <option value="while_app_open">{ts('settings.keepAwakeWhileApp')}</option>
+          </select>
+          {keepAwakeMode !== 'off' && (
+            <span className={styles.help}>
+              {keepAwakeStatus?.lidGuardActive
+                ? ts('settings.keepAwakeStatusLidOn')
+                : keepAwakeStatus?.idleBlocked
+                  ? ts('settings.keepAwakeStatusIdleOnly')
+                  : keepAwakeStatus?.lastError
+                    ? ts('settings.keepAwakeStatusError', { error: keepAwakeStatus.lastError })
+                    : ts('settings.keepAwakeStatusWaiting')}
+            </span>
+          )}
+          {keepAwakeMode !== 'off' && (
+            <span className={styles.help}>{ts('settings.keepAwakeThermalNote')}</span>
+          )}
+        </label>
+      )}
     </section>
   )
 }

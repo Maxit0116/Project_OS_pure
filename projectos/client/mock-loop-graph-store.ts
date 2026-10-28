@@ -4,6 +4,7 @@ import {
   LOOP_GRAPH_VERSION,
   LoopAuthoringTurnRequestSchema,
   createEmptyLoopDocument,
+  emptyAuthoringTrace,
   getIntentGraphCompileIssues,
   headFromLoopDocument,
   isIntentGraphReadyForCompile,
@@ -511,6 +512,36 @@ export function mockAnswerLoopGoalClarification(
     draftGoalContext: result.draftGoalContext,
     authoringThread: [...doc.authoringThread, userMessage, assistant].slice(-200),
     authoringTrace: buildCompleteTrace(result.steps),
+  });
+}
+
+export function mockCancelLoopGoalClarification(
+  projectId: string,
+  loopId: string,
+): LoopGraphDocument {
+  const doc = mockRequireLoop(projectId, loopId);
+  if (!doc.draftGoalContext) {
+    throw new Error("No draft goal context to cancel");
+  }
+  const unanswered = doc.draftGoalContext.openQuestions.some((q) => !q.answer?.trim());
+  if (!unanswered) {
+    throw new Error("No pending clarifying questions to cancel");
+  }
+
+  let thread = doc.authoringThread;
+  if (
+    thread.length >= 2 &&
+    thread[thread.length - 1]?.role === "assistant" &&
+    thread[thread.length - 2]?.role === "user"
+  ) {
+    thread = thread.slice(0, -2);
+  }
+
+  const { draftGoalContext: _removed, ...rest } = doc;
+  return mockUpsertLoopGraph(projectId, {
+    ...rest,
+    authoringThread: thread,
+    authoringTrace: emptyAuthoringTrace(),
   });
 }
 

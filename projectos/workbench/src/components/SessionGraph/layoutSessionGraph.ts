@@ -2,7 +2,8 @@ import type { SessionGraphModel } from '@contracts/index'
 import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js'
 
 export const SESSION_NODE_WIDTH = 228
-export const SESSION_NODE_HEIGHT = 84
+/** Compact card: task + title row and status/actions — description lives in the hover preview. */
+export const SESSION_NODE_HEIGHT = 64
 
 export interface SessionGraphLayout {
   width: number

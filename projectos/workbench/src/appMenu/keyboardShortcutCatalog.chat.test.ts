@@ -6,11 +6,6 @@ describe('KEYBOARD_SHORTCUT_GROUPS chat navigation', () => {
     const chat = KEYBOARD_SHORTCUT_GROUPS.find((group) => group.id === 'chat')
     expect(chat).toBeTruthy()
     const ids = chat?.items.map((item) => item.id) ?? []
-    expect(ids).toEqual([
-      'chat-prev-turn',
-      'chat-next-turn',
-      'chat-latest-turn',
-      'chat-search-turns',
-    ])
+    expect(ids).toEqual(['chat-prev-turn', 'chat-next-turn', 'chat-latest-turn'])
   })
 })

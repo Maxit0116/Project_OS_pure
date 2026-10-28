@@ -47,7 +47,7 @@ export function createMainWindow(initialWorkspacePath?: string): BrowserWindow {
           trafficLightPosition,
         }
       : {}),
-    backgroundColor: '#0d1117',
+    backgroundColor: '#181818',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

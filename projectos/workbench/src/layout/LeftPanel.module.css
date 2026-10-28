@@ -117,7 +117,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .panelBleed {
-    background: var(--tech-bg-side-panel);
+    background: var(--tech-bg-chrome);
   }
 }
 

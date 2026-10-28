@@ -1,9 +1,11 @@
-import { type AnimationEvent, useEffect, useRef } from 'react'
+import { type AnimationEvent, useEffect, useState, useRef } from 'react'
 import { resolveClientMode } from '../data/clientMode'
 import ChatHistoryActions from '../components/ChatHistory/ChatHistoryActions'
+import ChatToolsEdgeRail from '../components/ChatHistory/ChatToolsEdgeRail'
 import ChatSessionTitle from '../components/ChatSessionTitle/ChatSessionTitle'
 import ChatContextHeader from '../components/ChatContextHeader/ChatContextHeader'
 import ChatPanel from '../components/ChatPanel/ChatPanel'
+import { ConversationNavHostContext } from '../components/ChatPanel/ConversationNavHostContext'
 import DebugHarnessPanel from '../components/DebugHarness/DebugHarnessPanel'
 import { GlassPanelShell } from '../components/Glass'
 import { useWorkbenchStore } from '../state/workbenchStore'
@@ -33,6 +35,7 @@ export default function RightPanel({
   onClose,
 }: Props) {
   const panelRef = useRef<HTMLElement>(null)
+  const [navHost, setNavHost] = useState<HTMLElement | null>(null)
   const rightPanelTab = useWorkbenchStore((s) => s.rightPanelTab)
   const setRightPanelTab = useWorkbenchStore((s) => s.setRightPanelTab)
   const harnessRecord = useWorkbenchStore((s) => s.harnessRecord)
@@ -61,49 +64,59 @@ export default function RightPanel({
           : 'glass-slide-right'
 
   const panel = (
-    <aside
-      ref={panelRef}
-      className={`${styles.panel} ${graphBleed ? styles.panelBleed : frostClass} ${motionClass}`}
-      data-tour="chat-panel"
-      onAnimationEnd={shellMotion ? undefined : onMotionEnd}
-    >
-      <div className={styles.header}>
-        <RightPanelTabSelect
-          value={rightPanelTab}
-          onChange={setRightPanelTab}
-          harnessDot={!!harnessRecord}
-        />
-        <div className={styles.headerRight}>
-          <ChatHistoryActions
-            showSessionTools={rightPanelTab === 'chat'}
-            onClose={onClose}
+    <ConversationNavHostContext.Provider value={navHost}>
+      <aside
+        ref={panelRef}
+        className={`${styles.panel} ${graphBleed ? styles.panelBleed : frostClass} ${motionClass}`}
+        data-tour="chat-panel"
+        onAnimationEnd={shellMotion ? undefined : onMotionEnd}
+      >
+        {rightPanelTab === 'chat' ? (
+          <div
+            ref={setNavHost}
+            className={styles.navRailHost}
+            data-conversation-nav-host=""
           />
-          {isDemoMode && <span className={styles.badge}>{ts('demo.mock')}</span>}
+        ) : null}
+        <div className={styles.header}>
+          <RightPanelTabSelect
+            value={rightPanelTab}
+            onChange={setRightPanelTab}
+            harnessDot={!!harnessRecord}
+          />
+          <div className={styles.headerRight}>
+            <ChatHistoryActions
+              showSessionTools={rightPanelTab === 'chat'}
+              onClose={onClose}
+            />
+            {isDemoMode && <span className={styles.badge}>{ts('demo.mock')}</span>}
+          </div>
         </div>
-      </div>
-      <div className={`${styles.body} tab-content-fade`} key={rightPanelTab}>
-        {rightPanelTab === 'chat' && (
-          <div className={styles.chatLayout}>
-            <ChatSessionTitle />
-            <ChatContextHeader />
-            <ChatPanel />
-          </div>
-        )}
-        {rightPanelTab === 'harness' && (
-          <div data-tour="harness-panel" className={styles.harnessPane}>
-            {harnessRecord ? (
-              <DebugHarnessPanel
-                record={harnessRecord}
-                onStartFix={() => void startHarnessFix()}
-                fixStarted={!!harnessFixRunId}
-              />
-            ) : (
-              <div className={styles.harnessEmpty}>{ts('harness.empty')}</div>
-            )}
-          </div>
-        )}
-      </div>
-    </aside>
+        <div className={`${styles.body} tab-content-fade`} key={rightPanelTab}>
+          {rightPanelTab === 'chat' && (
+            <div className={styles.chatLayout}>
+              <ChatSessionTitle />
+              <ChatContextHeader />
+              <ChatPanel />
+            </div>
+          )}
+          {rightPanelTab === 'harness' && (
+            <div data-tour="harness-panel" className={styles.harnessPane}>
+              {harnessRecord ? (
+                <DebugHarnessPanel
+                  record={harnessRecord}
+                  onStartFix={() => void startHarnessFix()}
+                  fixStarted={!!harnessFixRunId}
+                />
+              ) : (
+                <div className={styles.harnessEmpty}>{ts('harness.empty')}</div>
+              )}
+            </div>
+          )}
+        </div>
+        {rightPanelTab === 'chat' ? <ChatToolsEdgeRail /> : null}
+      </aside>
+    </ConversationNavHostContext.Provider>
   )
 
   if (!graphBleed) {

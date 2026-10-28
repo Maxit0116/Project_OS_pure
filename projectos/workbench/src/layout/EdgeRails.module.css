@@ -21,7 +21,7 @@
   height: 56px;
   padding: 0;
   color: var(--color-text-secondary);
-  background: var(--tech-bg-side-panel);
+  background: var(--tech-bg-chrome);
   border: 1px solid var(--tech-border);
   cursor: pointer;
   pointer-events: auto;

@@ -122,9 +122,10 @@ export function useTerminalView({ tabId, mounted, focused, onAuthError }: UseTer
       fontFamily: 'var(--font-mono, ui-monospace, monospace)',
       fontSize: 12,
       theme: {
-        background: '#0d111700',
-        foreground: '#c9d1d9',
-        cursor: '#58a6ff',
+        /* Cursor Dark: terminal.background / terminal.foreground */
+        background: '#141414',
+        foreground: '#F0F0F0',
+        cursor: '#F0F0F0',
       },
       allowProposedApi: true,
     })

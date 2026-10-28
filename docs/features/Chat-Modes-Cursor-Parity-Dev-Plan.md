@@ -229,7 +229,7 @@ startDebugSession
 #### M0.2 切换 mode = 新会话（默认）
 
 - [x] `setChatMode` 默认：`createSession({ chatMode, seedWelcome: false, draftInput: 当前 draft })` 并激活；旧会话保留在历史。
-- [x] Settings 高级项：`chatModeSwitch: 'new_session' | 'same_session'`（默认 `new_session`，localStorage）。
+- [x] Settings 高级项：`chatModeSwitch: 'new_session' | 'same_session'`（默认 `same_session`，localStorage；与 Cursor 多 mode 同会话一致）。
 - [x] 新会话标题带 mode 名（如 `Ask` / `Agent`）。
 - [x] 测试：`workbenchStore.chatMode.test.ts` — 切换 mode 不串 `pendingPlan` / `debugSession` / `pendingRefinement`。
 

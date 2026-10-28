@@ -12,6 +12,7 @@ import type { ServicePort } from "../contracts/service-port.js";
 import type { VerificationCommandApprovalStatus } from "../contracts/verification-command-approval.js";
 import type { ProjectDescription } from "../contracts/project-description.js";
 import type { AppMenuState } from "../contracts/app-menu.js";
+import type { KeepAwakeMode, KeepAwakeStatus } from "../contracts/keep-awake.js";
 
 export interface ProjectOSBridge {
   platform: string;
@@ -76,6 +77,12 @@ export interface ProjectOSBridge {
       runIds: string[]
     }): Promise<void>;
     onActivated(listener: (payload: { destination: 'ask' | 'diff'; runIds: string[] }) => void): Disposable;
+  };
+  keepAwake: {
+    getStatus(): Promise<KeepAwakeStatus>;
+    setMode(mode: KeepAwakeMode): Promise<KeepAwakeStatus>;
+    setAgentActivity(active: boolean): Promise<KeepAwakeStatus>;
+    onStatus(listener: (status: KeepAwakeStatus) => void): Disposable;
   };
   terminal: {
     create(cwd: string): Promise<string>;

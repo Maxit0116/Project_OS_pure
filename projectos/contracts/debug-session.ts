@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { BugAlignmentItemSchema } from "./alignment-contract.js";
 import { AgentConversationScopeSchema, AskExplorationTraceSchema } from "./agent-conversation.js";
 import {
   HarnessHypothesisSchema,
@@ -39,6 +40,7 @@ export const DebugLogEntrySchema = z
   .strict();
 
 export const DebugSessionPhaseSchema = z.enum([
+  "align",
   "hypothesize",
   "instrument",
   "reproduce",
@@ -68,6 +70,9 @@ export const DebugSessionSchema = z
     debugLogPort: z.number().int().positive().optional(),
     chatSessionId: z.string().min(1).optional(),
     explorationTrace: AskExplorationTraceSchema.optional(),
+    /** Multi-bug alignment; absent on legacy sessions = single implicit bug. */
+    bugs: z.array(BugAlignmentItemSchema).max(24).optional(),
+    bugsAligned: z.boolean().optional(),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1),
   })

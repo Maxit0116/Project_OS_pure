@@ -25,7 +25,7 @@
   width: var(--workbench-right-panel-width);
 }
 
-/* Positioning shell only — frost chrome + shadow live on the inner panel. */
+/* Positioning shell — solid Cursor chrome so map bleed cannot show through. */
 .sidePanelFixedLeft,
 .sidePanelFixedRight {
   height: 100%;
@@ -34,8 +34,13 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: transparent;
+  background: var(--tech-bg-chrome);
   overflow: hidden;
+}
+
+/* Let the chat Session Navigator capsule bleed past the left edge into the center. */
+.sidePanelFixedRight {
+  overflow: visible;
 }
 
 .sidePanelFixedLeft {

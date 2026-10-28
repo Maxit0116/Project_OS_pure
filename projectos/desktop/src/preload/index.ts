@@ -13,7 +13,9 @@ import type { ServicePort } from '../../../contracts/service-port.js'
 import type { VerificationCommandApprovalStatus } from '../../../contracts/verification-command-approval.js'
 import type { ProjectDescription } from '../../../contracts/project-description.js'
 import type { AppMenuState } from '../../../contracts/app-menu.js'
+import type { KeepAwakeMode, KeepAwakeStatus } from '../../../contracts/keep-awake.js'
 type RunEventListener = (runId: string, event: AgentRunEvent) => void
+type KeepAwakeStatusListener = (status: KeepAwakeStatus) => void
 type RunTransientTraceListener = (runId: string, trace: AgentTransientTrace) => void
 type StructureScanEventListener = (
   projectId: string,
@@ -34,6 +36,7 @@ const servicesChangedListeners = new Set<ServicesChangedListener>()
 const lspMessageListeners = new Set<LspMessageListener>()
 const focusChangeListeners = new Set<FocusChangeListener>()
 const diffReadyActivatedListeners = new Set<DiffReadyActivatedListener>()
+const keepAwakeStatusListeners = new Set<KeepAwakeStatusListener>()
 ipcRenderer.on('projectos:runEvent', (_event, runId: string, agentEvent: AgentRunEvent) => {
   for (const listener of runEventListeners) {
     listener(runId, agentEvent)
@@ -88,6 +91,12 @@ ipcRenderer.on('window:focusChange', (_event, focused: boolean) => {
 ipcRenderer.on('notify:diffReadyActivated', (_event, payload: { destination: 'ask' | 'diff'; runIds: string[] }) => {
   for (const listener of diffReadyActivatedListeners) {
     listener(payload)
+  }
+})
+
+ipcRenderer.on('keepAwake:status', (_event, status: KeepAwakeStatus) => {
+  for (const listener of keepAwakeStatusListeners) {
+    listener(status)
   }
 })
 
@@ -246,6 +255,25 @@ const api = {
       return {
         dispose() {
           diffReadyActivatedListeners.delete(listener)
+        },
+      }
+    },
+  },
+  keepAwake: {
+    getStatus(): Promise<KeepAwakeStatus> {
+      return ipcRenderer.invoke('keepAwake:getStatus')
+    },
+    setMode(mode: KeepAwakeMode): Promise<KeepAwakeStatus> {
+      return ipcRenderer.invoke('keepAwake:setMode', mode)
+    },
+    setAgentActivity(active: boolean): Promise<KeepAwakeStatus> {
+      return ipcRenderer.invoke('keepAwake:setAgentActivity', active)
+    },
+    onStatus(listener: KeepAwakeStatusListener): Disposable {
+      keepAwakeStatusListeners.add(listener)
+      return {
+        dispose() {
+          keepAwakeStatusListeners.delete(listener)
         },
       }
     },

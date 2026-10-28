@@ -7,7 +7,10 @@ import {
   pointInRect,
   relativeToClient,
 } from './regionAnchors'
-import { focusIdsForClick, isOutsideAllRegions } from './overlayRegions'
+import {
+  focusIdsForClick,
+  isOutsideAllRegions,
+} from './overlayRegions'
 import type { OverlayRegion } from './overlayRegions'
 
 describe('regionAnchors', () => {
@@ -87,5 +90,26 @@ describe('overlayRegions focus', () => {
     expect(focusIdsForClick(regions, 60, 60).sort()).toEqual(['a', 'b'])
     expect(focusIdsForClick(regions, 10, 10)).toEqual(['a'])
     expect(isOutsideAllRegions(regions, 400, 400)).toBe(true)
+  })
+
+  it('ignores full-screenshot stencil backdrops for hit-testing', () => {
+    const regions: OverlayRegion[] = [
+      {
+        ...region('backdrop', { x: 0, y: 0, width: 1000, height: 800 }),
+        hideSelectionChrome: true,
+        flowComplete: true,
+        stencils: [
+          {
+            id: 'p1',
+            stencilId: 'btn-primary',
+            rect: { x: 40, y: 40, width: 120, height: 40 },
+            props: {},
+            motionModifierIds: [],
+          },
+        ],
+      },
+    ]
+    expect(focusIdsForClick(regions, 100, 100)).toEqual([])
+    expect(isOutsideAllRegions(regions, 100, 100)).toBe(true)
   })
 })

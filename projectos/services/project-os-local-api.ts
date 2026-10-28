@@ -286,10 +286,17 @@ import {
 import { DebugHypothesisService } from "./debug-hypothesis-service.js";
 import { LocalContextAssembler } from "./local-context-assembler.js";
 import {
+  applyAlignmentConfirmation,
+  canSkipAlignment,
+  ensureAlignmentOnRefinement,
+} from "./alignment-contract.js";
+import {
+  applyBugAlignmentPatches,
   chooseRootCause,
   createInitialDebugSession,
   debugInstrumentationService,
   buildInstrumentationSpecs,
+  markBugItemFixed,
   mergeInstrumentation,
   findHarnessRecordForSession,
   prepareManualDebugSession,
@@ -297,6 +304,14 @@ import {
   resolveDebugScopeFiles,
   type DebugSessionStoreState,
 } from "./debug-session-service.js";
+import type { ConfirmAlignmentRequest } from "../contracts/alignment-contract.js";
+import {
+  ConfirmAlignmentRequestSchema,
+  ConfirmBugAlignmentRequestSchema,
+  MarkBugFixedRequestSchema,
+  type ConfirmBugAlignmentRequest,
+  type MarkBugFixedRequest,
+} from "../contracts/alignment-contract.js";
 import { getSharedDebugLogServer } from "./debug-log-server.js";
 import { summarizeLocalContext } from "./local-context-summary.js";
 import { resolveAttachments, type AttachmentResolverDeps } from "./attachment-resolver.js";
@@ -2514,7 +2529,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       harnessRecord,
       parsedRequest.scope.kind === "file" ? parsedRequest.scope.selectedFilePath : undefined,
     );
-    if (!harnessRecord) {
+    if (!harnessRecord && session.phase !== "align") {
       session = prepareManualDebugSession(session, scopeFiles);
       const profile = this.settingsService.resolveModelProfile(workspace.settings);
       if (profile) {
@@ -2736,6 +2751,122 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     this.persistDebugSession(workspace, stored.session);
   }
 
+  async confirmBugAlignment(
+    request: ConfirmBugAlignmentRequest,
+  ): Promise<DebugSession> {
+    const parsed = ConfirmBugAlignmentRequestSchema.parse(request);
+    const stored = this.requireDebugSession(parsed.sessionId);
+    const workspace = this.requireLoadedWorkspace(stored.session.projectId);
+    let session: DebugSession;
+    try {
+      session = applyBugAlignmentPatches(stored.session, parsed.bugs);
+    } catch (error) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        error instanceof Error ? error.message : "Bug alignment failed",
+      );
+    }
+
+    const scopeFiles = resolveDebugScopeFiles(
+      session.scope,
+      null,
+      session.scope.kind === "file" ? session.scope.selectedFilePath : undefined,
+    );
+    session = prepareManualDebugSession(session, scopeFiles);
+    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    if (profile) {
+      try {
+        const { localContext } = await this.resolveConversationContext(
+          session.projectId,
+          session.scope,
+          session.bugDescription,
+        );
+        const exploration = exploreForAskQuestion(
+          workspace,
+          session.bugDescription,
+          {
+            allowedReadPaths: localContext.allowedReadPaths,
+            maxRounds: 2,
+            maxReads: 3,
+          },
+        );
+        const hypotheses = await this.debugHypothesisService.generateHypotheses({
+          projectId: session.projectId,
+          bugDescription: session.bugDescription,
+          localContext,
+          profile,
+          thinkingDepth: workspace.settings.execution.thinkingDepth,
+          supplementalMarkdown: exploration.supplementalMarkdown,
+        });
+        session = {
+          ...session,
+          hypotheses,
+          ...(exploration.trace.rounds.length > 0
+            ? { explorationTrace: exploration.trace }
+            : {}),
+          updatedAt: new Date().toISOString(),
+        };
+      } catch (error) {
+        console.error("[projectos] debug hypothesis generation failed", error);
+      }
+    }
+
+    if (session.phase === "instrument" && scopeFiles.length > 0) {
+      const specs = profile
+        ? await this.debugHypothesisService.proposeInstrumentationSpecs({
+            projectId: session.projectId,
+            session,
+            scopeFiles,
+            workspaceRoot: workspace.workspaceRoot,
+            profile,
+            thinkingDepth: workspace.settings.execution.thinkingDepth,
+          })
+        : buildInstrumentationSpecs(session, scopeFiles);
+      const applied = debugInstrumentationService.apply({
+        workspaceRoot: workspace.workspaceRoot,
+        sessionId: session.sessionId,
+        debugLogPort: session.debugLogPort ?? (await getSharedDebugLogServer()).getPort(),
+        specs,
+      });
+      session = {
+        ...session,
+        instrumentation: mergeInstrumentation([], applied.instrumentation),
+        phase: "reproduce",
+        updatedAt: new Date().toISOString(),
+      };
+      stored.backupByFile = applied.backupByFile;
+    }
+
+    stored.session = session;
+    this.persistDebugSession(workspace, session);
+    return DebugSessionSchema.parse(session);
+  }
+
+  async markBugFixed(request: MarkBugFixedRequest): Promise<DebugSession> {
+    const parsed = MarkBugFixedRequestSchema.parse(request);
+    const stored = this.requireDebugSession(parsed.sessionId);
+    const workspace = this.requireLoadedWorkspace(stored.session.projectId);
+    let session = markBugItemFixed(stored.session, parsed.bugId);
+    if (session.phase === "complete") {
+      const logServer = await getSharedDebugLogServer();
+      session = debugInstrumentationService.restoreFromSession(
+        workspace.workspaceRoot,
+        session,
+        stored.backupByFile,
+      );
+      session = {
+        ...session,
+        phase: "complete",
+        updatedAt: new Date().toISOString(),
+      };
+      stored.backupByFile.clear();
+      logServer.clearSession(parsed.sessionId);
+    }
+    stored.session = session;
+    this.persistDebugSession(workspace, session);
+    return DebugSessionSchema.parse(session);
+  }
+
   async getDebugLogPort(): Promise<number> {
     const logServer = await getSharedDebugLogServer();
     return logServer.getPort();
@@ -2776,11 +2907,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             supplementalMarkdown,
             knownNodeIds: new Set(workspace.graph.nodes.map((node) => node.id)),
           });
-          const refinement: PromptRefinement = {
-            ...refined,
-            executionPolicy: workspace.settings.execution.changeExecutionPolicy,
-            ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
-          };
+          const refinement: PromptRefinement = ensureAlignmentOnRefinement(
+            {
+              ...refined,
+              executionPolicy: workspace.settings.execution.changeExecutionPolicy,
+              ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
+            },
+            request.rawPrompt,
+          );
           await this.storeRefinement(request, refinement, responseLanguage, memoryTurn.injection);
           return refinement;
         } catch (error) {
@@ -2803,18 +2937,48 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const baseRefinement =
       registry?.findPromptRefinement(request) ??
       createGenericPromptRefinement(request);
-    const refinement: PromptRefinement = modelFallback
-      ? {
-          ...baseRefinement,
-          fallback: modelFallback,
-          ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
-        }
-      : {
-          ...baseRefinement,
-          ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
-        };
+    const refinement: PromptRefinement = ensureAlignmentOnRefinement(
+      modelFallback
+        ? {
+            ...baseRefinement,
+            fallback: modelFallback,
+            ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
+          }
+        : {
+            ...baseRefinement,
+            ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
+          },
+      request.rawPrompt,
+    );
     await this.storeRefinement(request, refinement, responseLanguage, memoryTurn.injection);
     return refinement;
+  }
+
+  async confirmAlignment(request: ConfirmAlignmentRequest): Promise<PromptRefinement> {
+    const parsed = ConfirmAlignmentRequestSchema.parse(request);
+    const stored = this.refinementsById.get(parsed.refinementId);
+    if (!stored) {
+      throw new ProjectOSError(
+        "refinement_not_found",
+        `No refinement found for id ${parsed.refinementId}`,
+      );
+    }
+    try {
+      const confirmed = applyAlignmentConfirmation(stored.refinement, parsed);
+      stored.refinement = confirmed;
+      this.refinementsById.set(parsed.refinementId, stored);
+      return cloneJson(confirmed);
+    } catch (error) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        error instanceof Error ? error.message : "Alignment confirmation failed",
+      );
+    }
+  }
+
+  /** True when automatic execution may skip the Alignment Card. */
+  alignmentAllowsAutomaticSkip(refinement: PromptRefinement): boolean {
+    return canSkipAlignment(refinement);
   }
 
   async confirmExecution(refinementId: string): Promise<AgentRun> {
@@ -5751,6 +5915,22 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       throw new ProjectOSError(
         "loop_graph_invalid",
         error instanceof Error ? error.message : "Failed to answer clarification",
+      );
+    }
+  }
+
+  async cancelLoopGoalClarification(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { cancelLoopGoalClarification } = await import("./loop-graph-service.js");
+    try {
+      return cancelLoopGoalClarification(workspace.workspaceRoot, loopId);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to cancel clarification",
       );
     }
   }

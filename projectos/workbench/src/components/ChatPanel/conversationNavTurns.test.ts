@@ -4,10 +4,18 @@ import {
   collectUserTurns,
   computeActiveTurnId,
   filterTurnsByQuery,
+  isScrubGesture,
+  isScrubVelocity,
   latestTurnId,
   markerTopPercent,
+  measureScrollVelocity,
   MIN_USER_TURNS_FOR_NAV,
   NAV_DENSE_TURN_THRESHOLD,
+  NAV_RAIL_OUTSIDE_GAP_PX,
+  NAV_RAIL_WIDTH_PX,
+  NAV_SCRUB_BURST_DELTA_PX,
+  NAV_SCRUB_VELOCITY_PX_PER_MS,
+  navRailViewportLeft,
   previewSourceForUserContent,
   resolveTurnStatus,
   shouldShowConversationNav,
@@ -61,12 +69,14 @@ describe('collectUserTurns', () => {
           content: 'run',
           timestamp: '2026-01-01T00:01:00.000Z',
           checkpointId: 'ckpt_1',
+          chatMode: 'plan',
         },
         {
           id: 'u2',
           role: 'user',
           content: 'fix',
           timestamp: '2026-01-01T00:02:00.000Z',
+          chatMode: 'debug',
         },
       ],
       [
@@ -76,7 +86,9 @@ describe('collectUserTurns', () => {
     )
     expect(turns[0]?.status).toBe('running')
     expect(turns[0]?.activityId).toBe('act_run')
+    expect(turns[0]?.chatMode).toBe('plan')
     expect(turns[1]?.status).toBe('error')
+    expect(turns[1]?.chatMode).toBe('debug')
   })
 })
 
@@ -152,6 +164,35 @@ describe('shouldShowConversationNav', () => {
       clientHeight: 200,
     } as HTMLElement
     expect(shouldShowConversationNav(MIN_USER_TURNS_FOR_NAV, fitted)).toBe(false)
+  })
+})
+
+describe('measureScrollVelocity / isScrubVelocity / isScrubGesture', () => {
+  it('returns null for unusable sample gaps', () => {
+    expect(measureScrollVelocity({ top: 0, t: 100 }, { top: 50, t: 100 })).toBeNull()
+    expect(measureScrollVelocity({ top: 0, t: 0 }, { top: 50, t: 200 })).toBeNull()
+  })
+
+  it('detects scrub velocity above threshold', () => {
+    const velocity = measureScrollVelocity({ top: 0, t: 0 }, { top: 80, t: 40 })
+    expect(velocity).toBe(2)
+    expect(isScrubVelocity(velocity)).toBe(true)
+    expect(isScrubVelocity(NAV_SCRUB_VELOCITY_PX_PER_MS - 0.1)).toBe(false)
+  })
+
+  it('accepts burst distance even when frame velocity is low', () => {
+    expect(
+      isScrubGesture({ velocity: 0.1, burstDeltaPx: NAV_SCRUB_BURST_DELTA_PX }),
+    ).toBe(true)
+    expect(isScrubGesture({ velocity: 0.1, burstDeltaPx: 4 })).toBe(false)
+  })
+})
+
+describe('navRailViewportLeft', () => {
+  it('places the rail fully outside the sidebar left edge', () => {
+    expect(navRailViewportLeft(1000)).toBe(
+      1000 - NAV_RAIL_OUTSIDE_GAP_PX - NAV_RAIL_WIDTH_PX,
+    )
   })
 })
 

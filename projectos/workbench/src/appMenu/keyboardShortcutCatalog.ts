@@ -74,11 +74,6 @@ export const KEYBOARD_SHORTCUT_GROUPS: ShortcutCatalogGroup[] = [
         labelKey: 'keyboardShortcuts.latestChatTurn',
         keys: { mac: '⌥End', other: 'Alt+End' },
       },
-      {
-        id: 'chat-search-turns',
-        labelKey: 'keyboardShortcuts.searchChatTurns',
-        keys: { mac: '⌥⇧F', other: 'Alt+Shift+F' },
-      },
     ],
   },
   {

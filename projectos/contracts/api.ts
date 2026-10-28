@@ -253,6 +253,8 @@ export interface ProjectOSApi {
   loadPlanFromWorkspace(projectId: string, planId: string): Promise<ImplementationPlan>;
   buildPlan(planId: string): Promise<PromptRefinement>;
   refinePrompt(request: PromptRefineRequest): Promise<PromptRefinement>;
+  /** Persist user Alignment Card selections before confirmExecution. */
+  confirmAlignment(request: import("./alignment-contract.js").ConfirmAlignmentRequest): Promise<PromptRefinement>;
   confirmExecution(refinementId: string): Promise<AgentRun>;
   /** Stop an in-flight agent run. Marks the run cancelled; does not apply half-written diffs. */
   cancelAgentRun(runId: string): Promise<AgentRun>;
@@ -290,6 +292,12 @@ export interface ProjectOSApi {
   proposeDebugFix(sessionId: string): Promise<DebugSession>;
   confirmDebugFix(sessionId: string): Promise<AgentRun>;
   cleanupDebugInstrumentation(sessionId: string): Promise<void>;
+  confirmBugAlignment(
+    request: import("./alignment-contract.js").ConfirmBugAlignmentRequest,
+  ): Promise<DebugSession>;
+  markBugFixed(
+    request: import("./alignment-contract.js").MarkBugFixedRequest,
+  ): Promise<DebugSession>;
   getDebugLogPort(): Promise<number>;
   getSettings(projectId: string): Promise<ProjectOSSettings>;
   updateSettings(
@@ -460,6 +468,7 @@ export interface ProjectOSApi {
     loopId: string,
     answers: import("./loop-graph.js").LoopGoalClarificationAnswer[],
   ): Promise<LoopGraphDocument>;
+  cancelLoopGoalClarification(projectId: string, loopId: string): Promise<LoopGraphDocument>;
   confirmLoopGoalContext(projectId: string, loopId: string): Promise<LoopGraphDocument>;
   acceptLoopGraphEditOffer(projectId: string, loopId: string): Promise<LoopGraphDocument>;
   dismissLoopGraphEditOffer(projectId: string, loopId: string): Promise<LoopGraphDocument>;

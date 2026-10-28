@@ -32,7 +32,14 @@ const UNTITLED_NODE = 'Untitled'
 export type LoopPhase = 'draw' | 'review' | 'run'
 
 /** Mutual-exclusive bookmark sheet above the goal composer. */
-export type LoopComposerSheet = 'none' | 'flow' | 'context'
+export type LoopComposerSheet = 'none' | 'flow' | 'context' | 'clarify'
+
+function sheetAfterAskTurn(document: LoopGraphDocument): LoopComposerSheet {
+  const needsClarify = document.draftGoalContext?.openQuestions.some(
+    (question) => !question.answer?.trim(),
+  )
+  return needsClarify ? 'clarify' : 'context'
+}
 
 export type LoopDeleteTarget =
   | { type: 'node'; id: string }
@@ -66,11 +73,12 @@ interface LoopGraphStore {
   setPendingDelete: (target: LoopDeleteTarget | null) => void
   setComposerDraft: (value: string) => void
   /** Open a sheet, or collapse it if already open (bookmark toggle). */
-  toggleComposerSheet: (sheet: 'flow' | 'context') => void
+  toggleComposerSheet: (sheet: Exclude<LoopComposerSheet, 'none'>) => void
   setComposerSheet: (sheet: LoopComposerSheet) => void
   setComposerMode: (mode: LoopComposerMode) => Promise<void>
   sendAuthoringTurn: () => Promise<void>
   answerGoalClarification: (answers: LoopGoalClarificationAnswer[]) => Promise<void>
+  cancelGoalClarification: () => Promise<void>
   confirmGoalContext: () => Promise<void>
   acceptGraphEditOffer: () => Promise<void>
   dismissGraphEditOffer: () => Promise<void>
@@ -222,7 +230,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         heads,
         composerDraft: '',
         authoringBusy: false,
-        composerSheet: next.composerMode === 'ask' ? 'context' : 'flow',
+        composerSheet: next.composerMode === 'ask' ? sheetAfterAskTurn(next) : 'flow',
       })
     } catch (error) {
       set({
@@ -236,18 +244,46 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     const { client, project } = useWorkbenchStore.getState()
     const loopId = get().activeLoopId
     if (!client || !project || !loopId || answers.length === 0) return
-    set({ authoringBusy: true, composerSheet: 'context', error: null })
+    set({ authoringBusy: true, error: null })
     try {
       const next = await client.answerLoopGoalClarification(
         project.projectId,
         loopId,
         answers,
       )
-      set({ document: next, authoringBusy: false })
+      set({ document: next, authoringBusy: false, composerSheet: 'context' })
     } catch (error) {
       set({
         authoringBusy: false,
         error: error instanceof Error ? error.message : 'Clarification failed',
+      })
+    }
+  },
+
+  cancelGoalClarification: async () => {
+    const { client, project } = useWorkbenchStore.getState()
+    const loopId = get().activeLoopId
+    const document = get().document
+    if (!client || !project || !loopId || !document) return
+
+    const lastUser = [...document.authoringThread]
+      .reverse()
+      .find((message) => message.role === 'user')
+    const restoredPrompt = lastUser?.content ?? ''
+
+    set({ authoringBusy: true, error: null })
+    try {
+      const next = await client.cancelLoopGoalClarification(project.projectId, loopId)
+      set({
+        document: next,
+        authoringBusy: false,
+        composerDraft: restoredPrompt,
+        composerSheet: 'none',
+      })
+    } catch (error) {
+      set({
+        authoringBusy: false,
+        error: error instanceof Error ? error.message : 'Cancel clarification failed',
       })
     }
   },

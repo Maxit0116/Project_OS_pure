@@ -46,6 +46,7 @@ export function overlayRegionToCapture(
     ...(region.snapshotAssetPath
       ? { snapshotAssetPath: region.snapshotAssetPath }
       : {}),
+    ...(region.hideSelectionChrome ? { hideSelectionChrome: true } : {}),
   }
 }
 
@@ -84,6 +85,7 @@ export function captureRegionToOverlay(
     ...(region.snapshotAssetPath
       ? { snapshotAssetPath: region.snapshotAssetPath }
       : {}),
+    ...(region.hideSelectionChrome ? { hideSelectionChrome: true } : {}),
   }
 }
 

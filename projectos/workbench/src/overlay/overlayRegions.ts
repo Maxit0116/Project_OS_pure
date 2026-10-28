@@ -45,6 +45,18 @@ export interface OverlayRegion {
   tool: RegionTool
   /** UI stencil placements on this region (M0+; Library UI in M1). */
   stencils: StencilPlacement[]
+  /**
+   * Full-screenshot backdrop for stencils dropped on empty canvas.
+   * Selection border / region drag / resize chrome stay hidden.
+   */
+  hideSelectionChrome?: boolean
+}
+
+/** Regions that participate in box-select / region-drag hit-testing. */
+export function interactiveRegions(
+  regions: readonly OverlayRegion[],
+): OverlayRegion[] {
+  return regions.filter((region) => !region.hideSelectionChrome)
 }
 
 /** Box + arrow + compose card. Bare selections are discarded on exit. */
@@ -85,7 +97,11 @@ export function focusIdsForClick(
   clientX: number,
   clientY: number,
 ): string[] {
-  return regionsContainingPoint(regions, clientX, clientY).map((r) => r.id)
+  return regionsContainingPoint(
+    interactiveRegions(regions),
+    clientX,
+    clientY,
+  ).map((r) => r.id)
 }
 
 export function isRegionFocused(
@@ -96,11 +112,14 @@ export function isRegionFocused(
   return (focusedIds as readonly string[]).includes(regionId)
 }
 
-/** True if point is outside every existing region (used to start a new drag). */
+/** True if point is outside every interactive (chrome-visible) region. */
 export function isOutsideAllRegions(
   regions: OverlayRegion[],
   clientX: number,
   clientY: number,
 ): boolean {
-  return regionsContainingPoint(regions, clientX, clientY).length === 0
+  return (
+    regionsContainingPoint(interactiveRegions(regions), clientX, clientY)
+      .length === 0
+  )
 }

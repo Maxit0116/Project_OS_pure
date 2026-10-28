@@ -1,11 +1,11 @@
 # Session Navigator：会话内 Turn 导航轨
 
-**状态**：M0–M2 implemented（2026-10-20）。  
+**状态**：M0–M2 implemented（2026-10-20）；**左侧悬浮 scrub-reveal 改版**（2026-10-28）。  
 **范围**：Workbench AI Chat sidebar 当前 session 内的 turn 级大纲导航——竖向 marker rail、hover/focus 预览、点击跳转、滚动同步高亮、Prev/Next / 回到最新键盘导航；M1 密度与高亮；M2 状态点、可搜索 prompt index、预览跳转 Agent Flow。  
 **产品定位一句话**：用用户意图（user prompt）当章节标题，把长 transcript 变成可一跳到达的目录；不新增存储模型，不替代跨 session 的 Chat History。  
 **实现锚点**：
-- `ConversationNavRail.tsx` + `conversationNavTurns.ts`
-- 挂载：`ChatPanel.tsx`（`messagesShell` overlay + `data-message-id`）
+- `ConversationNavRail.tsx` + `conversationNavTurns.ts` + `useScrollScrubReveal.ts`
+- 挂载：`ChatPanel.tsx`（逻辑 + portal）→ `RightPanel` 左外 host（`ConversationNavHostContext`）
 - 快捷键目录：`keyboardShortcutCatalog.ts`（Chat 组：Prev/Next/Latest + Search）
 
 **权威交叉引用**：
@@ -43,11 +43,11 @@
 
 | 行为 | 规范 |
 |------|------|
-| 布局 | 贴消息滚动区（`.messages`）右缘 overlay；宽度约 8–12px；不挤气泡内容 |
-| Hover / focus | 浮层向左展开：用户原文截断约 80–120 字；可选副信息（相对时间、当前 `chatMode`） |
+| 布局 | 贴 AI Chat sidebar **左外缘**、相对整栏垂直居中的悬浮胶囊（不占侧栏内容宽）；右侧工具轨（`ChatToolsEdgeRail`）保持右缘 |
+| Hover / focus | 浮层向**右**（朝侧栏内侧）展开：用户原文截断约 80–120 字；可选副信息（相对时间、当前 `chatMode`） |
 | Click | 平滑滚到对应用户消息；`block: 'start'` + sticky header 偏移，目标落在可读区顶部（避免落在 composer 附近） |
 | Active | 「距视口顶部最近的 user turn」高亮；点击跳转后**立即**同步；手动滚动持续更新 |
-| 显示条件 | user turn ≥ 3 **且** 消息区可滚动（内容溢出）时显示；否则隐藏 |
+| 显示条件 | 门槛：user turn ≥ 3 **且** 消息区可滚动；**显现**：仅在用户快速 scrub 消息区时淡入，idle / 指针离开后隐藏；hover 胶囊、搜索打开、marker focus 时保持可见；程序化跳转滚动不触发显现 |
 | 键盘（M0 必须） | Prev user turn / Next user turn / 回到最新；建议键位 `Alt+↑` / `Alt+↓` / `Alt+End`；须登记进快捷键面板与 i18n；实现期可微调键位但不得默默无文档 |
 
 ```text
@@ -100,7 +100,7 @@ Messages viewport                         Nav rail
 |----|------|
 | 组件名 | `ConversationNavRail` |
 | 路径 | `projectos/workbench/src/components/ChatPanel/ConversationNavRail.tsx` + `ConversationNavRail.module.css` |
-| 挂载 | `ChatPanel` 消息区：容器 `position: relative`；rail `position: absolute` 贴右 |
+| 挂载 | `RightPanel` 左外 host + `ConversationNavHostContext`；rail portal 自 `ChatPanel`；`overflow: visible` 允许 bleed |
 | 锚点 DOM | user 消息根节点设置 `data-message-id={msg.id}`（或稳定 `id`）；供 jump / IntersectionObserver 使用 |
 | Turn 列表 | `messages.filter(m => m.role === 'user' && m.content.trim().length > 0)` |
 | 预览文案 | 确定性截断（空白折叠）；spatial-pin 等特殊内容取可读摘要，避免整段 JSON |
@@ -251,12 +251,14 @@ M0 不阻塞 Live Graph / Agent Flow；M2 若链到 activity，只读已有 `anc
 7. **M1 密度 = 比例定位，不做分段折叠。** 每条 user turn 始终可点；≥40 turn 缩小 marker（`NAV_DENSE_TURN_THRESHOLD`）。
 8. **M2 状态优先序：error → running → checkpoint。** 只读已有活动与 `checkpointId`。
 9. **搜索快捷键 `Alt+Shift+F`。** 与 M0 的 `Alt+↑/↓/End` 同属 Chat 作用域，避免 ⌘ 冲突。
+10. **布局改版（2026-10-28）：左外居中悬浮 + scrub-reveal。** 不再常驻消息区右缘；与右侧 `ChatToolsEdgeRail` 分工；`NAV_SCRUB_VELOCITY_PX_PER_MS` / idle / programmatic suppress 见 `conversationNavTurns.ts`。
+11. **堆叠形态（2026-10-28）：无外框、等间距、可滚动。** 去掉胶囊边框与 Search/filter（含 `Alt+Shift+F`）；marker 用恒定 `gap` 竖排，溢出时堆叠自身滚动，不挤占侧栏聊天内容。
 
 ---
 
 ## 9. 下一步
 
-本计划 M0–M2 已落地。后续若要跨 session 全局 prompt 搜索或更强的密度分桶，另开计划。
+本计划 M0–M2 与左外 scrub-reveal 改版已落地。后续若要跨 session 全局 prompt 搜索或更强的密度分桶，另开计划。
 
 文档路径：`docs/features/Session-Navigator-Dev-Plan.md`  
 重大偏离先更新「决策记录」再改代码。

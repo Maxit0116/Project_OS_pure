@@ -40,7 +40,6 @@ import StencilPreviewVisual from '../components/SpatialCaptures/stencils/Stencil
 import {
   buildPlacementAtStagePoint,
   combinedBriefForArrow,
-  defaultStencilSize,
   DEFAULT_STENCIL_SCOPE,
   placementsForArrow,
   stageRectForPlacement,
@@ -56,7 +55,7 @@ import {
   movedCaptureRect,
   movedPlacementWithRegionFollow,
   REGION_DRAG_THRESHOLD_PX,
-  regionRectForStencilDrop,
+  resizedPlacementFree,
   resizedRectFromHandle,
   RESIZE_HANDLES,
   resizeHandleScreenPoint,
@@ -721,20 +720,27 @@ export function OverlayApp() {
     stencilId: string,
     stagePoint: { x: number; y: number },
   ) {
-    const containing = regionsRef.current.filter((region) =>
-      pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
+    const containing = regionsRef.current.filter(
+      (region) =>
+        !region.hideSelectionChrome &&
+        pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
     )
     let baseRegion = containing[0]
     let createdFullFrame = false
     let fullRect: ScreenRect | null = null
 
     if (!baseRegion) {
+      baseRegion = regionsRef.current.find((region) => region.hideSelectionChrome)
+    }
+
+    if (!baseRegion) {
       const regionId = randomId('region')
-      fullRect = regionRectForStencilDrop(
-        stagePoint,
-        defaultStencilSize(stencilId),
-        { width: window.innerWidth, height: window.innerHeight },
-      )
+      fullRect = {
+        x: 0,
+        y: 0,
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }
       baseRegion = {
         id: regionId,
         captureRect: fullRect,
@@ -746,6 +752,7 @@ export function OverlayApp() {
         showAnchors: false,
         tool: 'arrow',
         stencils: [],
+        hideSelectionChrome: true,
       }
       createdFullFrame = true
     }
@@ -1420,29 +1427,22 @@ export function OverlayApp() {
       return
     }
     if (pointer.kind === 'placement-resize') {
-      const originStage = {
-        x: pointer.originCaptureRect.x + pointer.originLocal.x,
-        y: pointer.originCaptureRect.y + pointer.originLocal.y,
-        width: pointer.originLocal.width,
-        height: pointer.originLocal.height,
-      }
-      const nextStage = resizedRectFromHandle(
-        originStage,
+      const { nextCapture, nextLocal } = resizedPlacementFree(
+        pointer.originLocal,
+        pointer.originCaptureRect,
         pointer.handle,
         event.clientX,
         event.clientY,
-        undefined,
-        pointer.originCaptureRect,
+        { width: window.innerWidth, height: window.innerHeight },
       )
-      const nextLocal = {
-        x: nextStage.x - pointer.originCaptureRect.x,
-        y: nextStage.y - pointer.originCaptureRect.y,
-        width: nextStage.width,
-        height: nextStage.height,
-      }
       updateRegion(pointer.regionId, (r) => {
         const stencils = (r.stencils ?? []).map((item) =>
-          item.id === pointer.placementId ? { ...item, rect: nextLocal } : item,
+          item.id === pointer.placementId
+            ? { ...item, rect: nextLocal }
+            : {
+                ...item,
+                rect: clampLocalRectInRegion(item.rect, nextCapture),
+              },
         )
         let arrows = r.arrows
         if (pointer.arrowId) {
@@ -1452,7 +1452,7 @@ export function OverlayApp() {
               Math.max(
                 0.02,
                 (nextLocal.x + nextLocal.width / 2) /
-                  Math.max(1, r.captureRect.width),
+                  Math.max(1, nextCapture.width),
               ),
             ),
             y: Math.min(
@@ -1460,7 +1460,7 @@ export function OverlayApp() {
               Math.max(
                 0.02,
                 (nextLocal.y + nextLocal.height / 2) /
-                  Math.max(1, r.captureRect.height),
+                  Math.max(1, nextCapture.height),
               ),
             ),
           }
@@ -1474,7 +1474,7 @@ export function OverlayApp() {
               : arrow,
           )
         }
-        return { ...r, stencils, arrows }
+        return { ...r, captureRect: nextCapture, stencils, arrows }
       })
     }
   }
@@ -1620,6 +1620,12 @@ export function OverlayApp() {
       const arrow = pointer.arrowId
         ? region?.arrows.find((a) => a.id === pointer.arrowId)
         : undefined
+      const regionExpanded =
+        !!region &&
+        (region.captureRect.x !== pointer.originCaptureRect.x ||
+          region.captureRect.y !== pointer.originCaptureRect.y ||
+          region.captureRect.width !== pointer.originCaptureRect.width ||
+          region.captureRect.height !== pointer.originCaptureRect.height)
       setPointer({ kind: 'idle' })
       if (region && arrow) {
         void upsertArrowPin(
@@ -1631,6 +1637,9 @@ export function OverlayApp() {
           },
           arrow,
         )
+      }
+      if (region && regionExpanded) {
+        void captureRegion(region.id, region.captureRect)
       }
       setStatus('Drag to select a region on any screen')
     }
@@ -2052,16 +2061,19 @@ export function OverlayApp() {
         (region.stencils ?? []).map((placement) => {
           const box = stageRectForPlacement(region, placement)
           const focused = isRegionFocused(focusedRegionIds, region.id)
+          const active =
+            focused ||
+            (placement.arrowId != null && placement.arrowId === activeArrowId)
           return (
             <StencilLiveStub
               key={placement.id}
               stencilId={placement.stencilId}
-              dimmed={!focused}
+              dimmed={!active}
               style={{
                 left: box.x,
                 top: box.y,
-                width: Math.max(box.width, 48),
-                height: Math.max(box.height, 36),
+                width: box.width,
+                height: box.height,
               }}
               onMovePointerDown={(event) =>
                 beginPlacementDrag(event, region, placement.id)
@@ -2073,26 +2085,42 @@ export function OverlayApp() {
 
       {regions.map((region) => {
         const focused = isRegionFocused(focusedRegionIds, region.id)
-        if (!focused || region.tool === 'draw') return null
+        if (region.tool === 'draw') return null
+        const stencilHandles = (region.stencils ?? []).filter(
+          (placement) =>
+            focused ||
+            (placement.arrowId != null &&
+              placement.arrowId === activeArrowId) ||
+            (pointer.kind === 'placement-resize' &&
+              pointer.placementId === placement.id),
+        )
+        if (
+          stencilHandles.length === 0 &&
+          !(focused && !region.hideSelectionChrome)
+        ) {
+          return null
+        }
         return (
           <div key={`resize-${region.id}`}>
-            {RESIZE_HANDLES.map((handle) => {
-              const p = resizeHandleScreenPoint(region.captureRect, handle)
-              return (
-                <button
-                  key={handle}
-                  type="button"
-                  className="overlay-resize-handle"
-                  data-handle={handle}
-                  style={{ left: p.x, top: p.y }}
-                  aria-label={`Resize region ${handle}`}
-                  onPointerDown={(event) =>
-                    beginRegionResize(event, region, handle)
-                  }
-                />
-              )
-            })}
-            {(region.stencils ?? []).map((placement) => {
+            {focused && !region.hideSelectionChrome
+              ? RESIZE_HANDLES.map((handle) => {
+                  const p = resizeHandleScreenPoint(region.captureRect, handle)
+                  return (
+                    <button
+                      key={handle}
+                      type="button"
+                      className="overlay-resize-handle"
+                      data-handle={handle}
+                      style={{ left: p.x, top: p.y }}
+                      aria-label={`Resize region ${handle}`}
+                      onPointerDown={(event) =>
+                        beginRegionResize(event, region, handle)
+                      }
+                    />
+                  )
+                })
+              : null}
+            {stencilHandles.map((placement) => {
               const box = stageRectForPlacement(region, placement)
               return RESIZE_HANDLES.map((handle) => {
                 const p = resizeHandleScreenPoint(box, handle)
@@ -2527,6 +2555,29 @@ function RegionView({
   const btnLeft = region.captureRect.x + region.captureRect.width + 6
   const btnTop =
     region.captureRect.y + region.captureRect.height - toolStackHeight
+
+  if (region.hideSelectionChrome) {
+    return (
+      <div
+        className="overlay-selection-chrome-hidden"
+        style={{
+          position: 'absolute',
+          left: region.captureRect.x,
+          top: region.captureRect.y,
+          width: region.captureRect.width,
+          height: region.captureRect.height,
+          pointerEvents: 'none',
+        }}
+        aria-hidden
+      >
+        <canvas
+          ref={canvasRef}
+          className="overlay-canvas"
+          style={{ width: '100%', height: '100%' }}
+        />
+      </div>
+    )
+  }
 
   return (
     <>

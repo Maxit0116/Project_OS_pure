@@ -741,6 +741,11 @@ export function renderPlacementBrief(
     parts.push(interpolateStencilTemplate(motion.briefTemplate, placement.props));
   }
 
+  const r = placement.rect;
+  parts.push(
+    `User-sized on capture to about ${Math.round(r.width)}×${Math.round(r.height)} px — match this footprint in layout.`,
+  );
+
   return parts.join("\n");
 }
 

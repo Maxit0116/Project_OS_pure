@@ -82,6 +82,7 @@ import {
   mockAdvanceLoopInstance,
   mockAnswerLoopGoalClarification,
   mockApproveLoopSpec,
+  mockCancelLoopGoalClarification,
   mockCompileLoopGraph,
   mockConfirmLoopGoalContext,
   mockCreateLoopGraph,
@@ -473,6 +474,13 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     answers: LoopGoalClarificationAnswer[],
   ): Promise<LoopGraphDocument> {
     return Promise.resolve(mockAnswerLoopGoalClarification(projectId, loopId, answers));
+  }
+
+  override cancelLoopGoalClarification(
+    projectId: string,
+    loopId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockCancelLoopGoalClarification(projectId, loopId));
   }
 
   override confirmLoopGoalContext(

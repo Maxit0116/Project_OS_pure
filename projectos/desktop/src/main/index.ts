@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog } from 'electron'
 import { createMainWindow } from './createWindow.js'
 import { registerProjectOsIpc } from './registerProjectOsIpc.js'
 import { registerNotificationIpc } from './registerNotificationIpc.js'
+import { getKeepAwakeService, registerKeepAwakeIpc } from './registerKeepAwakeIpc.js'
 import { registerShellIpc } from './registerShellIpc.js'
 import { registerTerminalIpc } from './terminal/registerTerminalIpc.js'
 import { registerServicesIpc } from './services/registerServicesIpc.js'
@@ -26,6 +27,7 @@ void app.whenReady().then(() => {
   registerWorkspaceWindowIpc()
   registerProjectOsIpc()
   registerNotificationIpc()
+  registerKeepAwakeIpc()
   registerShellIpc()
   registerTerminalIpc()
   registerServicesIpc()
@@ -57,7 +59,14 @@ const quitCoordinator = new AppQuitCoordinator(
     quit: () => app.quit(),
     exit: (exitCode) => app.exit(exitCode),
   },
-  {},
+  {
+    deactivate: async () => {
+      await getKeepAwakeService().deactivate()
+    },
+    stopSync: () => {
+      getKeepAwakeService().stopSync()
+    },
+  },
   {
     onCleanupFailure: (error) => {
       console.error('[projectos] App-exit cleanup did not complete cleanly', error)

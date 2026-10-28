@@ -1,14 +1,17 @@
 :root,
 [data-theme='dark'] {
-  /* Near-black workspace. Neutrals carry hierarchy; accent is selection, not decoration. */
-  --color-bg-base: #0b0b0c;
-  --color-bg-canvas: #0b0b0c;
-  /* Function map canvas — recessed vs side panels; dot grid sits on this fill. */
-  --color-bg-map: #0e0e10;
-  --color-bg-side-panel: #111113;
-  --glass-panel-surface: #111113;
-  --color-bg-elevated: #171719;
-  --color-bg-muted: #1c1c1f;
+  /* Cursor Dark Anysphere neutrals: chrome darker than content; accent is selection.
+   * Chrome maps to sideBar/panel/titleBar/terminal.background (#141414).
+   * Content maps to editor.background (#181818). Official docs name themes only. */
+  --color-bg-base: #181818;
+  --color-bg-canvas: #181818;
+  /* Function map canvas — same as editor/content; side panels are the recessed chrome. */
+  --color-bg-map: #181818;
+  --color-bg-chrome: #141414;
+  --color-bg-side-panel: var(--color-bg-chrome);
+  --glass-panel-surface: var(--color-bg-chrome);
+  --color-bg-elevated: #1c1c1c;
+  --color-bg-muted: #222222;
   --color-map-artifact-chrome: var(--color-bg-muted);
   --color-border: rgba(255, 255, 255, 0.08);
   --color-border-subtle: rgba(255, 255, 255, 0.05);
@@ -62,7 +65,7 @@
   --color-diff-char-added: var(--color-success);
   --color-diff-char-removed: var(--color-error);
   --color-code-bg: #0d0d14;
-  --color-bg-editor: #1e1e1e;
+  --color-bg-editor: #181818;
   --color-hover-overlay: rgba(255, 255, 255, 0.06);
   --color-shimmer-mid: rgba(255, 255, 255, 0.06);
 
@@ -109,9 +112,15 @@
   --tech-bg-base: var(--color-bg-base);
   --tech-bg-canvas: var(--color-bg-canvas);
   --tech-bg-map: var(--color-bg-map);
+  --tech-bg-chrome: var(--color-bg-chrome);
   --tech-bg-side-panel: var(--color-bg-side-panel);
-  --tech-bg-elevated: #171719;
-  --tech-bg-muted: #1c1c1f;
+  --tech-bg-elevated: #1c1c1c;
+  --tech-bg-muted: #222222;
+
+  /* Legacy glass-surface aliases — bottom dock / older views. */
+  --glass-surface: var(--color-bg-chrome);
+  --glass-surface-hover: var(--color-bg-muted);
+  --glass-surface-active: var(--color-bg-elevated);
 
   --tech-border: rgba(255, 255, 255, 0.08);
   --tech-border-subtle: rgba(255, 255, 255, 0.05);
@@ -141,7 +150,8 @@
   --color-bg-canvas: #f7f7f8;
   /* Function map canvas — slightly recessed vs side panels and chrome. */
   --color-bg-map: #efeff1;
-  --color-bg-side-panel: #fbfbfc;
+  --color-bg-chrome: #fbfbfc;
+  --color-bg-side-panel: var(--color-bg-chrome);
   --glass-panel-surface: rgba(255, 255, 255, 0.36);
   --color-bg-elevated: rgba(255, 255, 255, 0.95);
   --color-bg-muted: rgba(242, 242, 247, 0.95);
@@ -228,9 +238,14 @@
   --tech-bg-base: var(--color-bg-base);
   --tech-bg-canvas: var(--color-bg-canvas);
   --tech-bg-map: var(--color-bg-map);
+  --tech-bg-chrome: var(--color-bg-chrome);
   --tech-bg-side-panel: var(--color-bg-side-panel);
   --tech-bg-elevated: #ffffff;
   --tech-bg-muted: #ececee;
+
+  --glass-surface: var(--color-bg-chrome);
+  --glass-surface-hover: var(--color-bg-muted);
+  --glass-surface-active: var(--color-bg-elevated);
 
   --tech-border: rgba(0, 0, 0, 0.08);
   --tech-border-subtle: rgba(0, 0, 0, 0.05);
@@ -327,6 +342,13 @@
   --z-workbench-chrome: 20;
   --z-workbench-side-panel: 20;
   --z-workbench-terminal: 55;
+  /* Above session / loop / agent-flow overlays; scrub rail floats over the center. */
+  --z-conversation-nav: 70;
+
+  /* Chat mode brand colors (selected chip + turn markers). Agent has no tint. */
+  --chat-mode-ask: var(--color-success);
+  --chat-mode-plan: var(--color-warning);
+  --chat-mode-debug: var(--color-error);
 
   /* Overlay side panels + terminal dock layout (runtime sizes set on .workbenchBody) */
   --workbench-left-panel-width: 253px;

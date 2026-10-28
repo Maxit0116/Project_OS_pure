@@ -27,6 +27,7 @@ export default function LoopGoalComposer() {
   const setComposerMode = useLoopGraphStore((s) => s.setComposerMode)
   const sendAuthoringTurn = useLoopGraphStore((s) => s.sendAuthoringTurn)
   const answerGoalClarification = useLoopGraphStore((s) => s.answerGoalClarification)
+  const cancelGoalClarification = useLoopGraphStore((s) => s.cancelGoalClarification)
   const confirmGoalContext = useLoopGraphStore((s) => s.confirmGoalContext)
   const acceptGraphEditOffer = useLoopGraphStore((s) => s.acceptGraphEditOffer)
   const dismissGraphEditOffer = useLoopGraphStore((s) => s.dismissGraphEditOffer)
@@ -144,6 +145,7 @@ export default function LoopGoalComposer() {
 
   const flowOpen = composerSheet === 'flow'
   const contextOpen = composerSheet === 'context'
+  const clarifyOpen = composerSheet === 'clarify' && needsClarification
 
   return (
     <div className={styles.composer} data-loop-goal-composer="">
@@ -183,6 +185,24 @@ export default function LoopGoalComposer() {
             />
             {ts('chat.loopGraph.goalContextSheet')}
           </button>
+          {needsClarification ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={clarifyOpen}
+              className={`${styles.bookmarkTab} ${clarifyOpen ? styles.bookmarkTabActive : ''} ${
+                styles.bookmarkTabAttention
+              }`}
+              onClick={() => toggleComposerSheet('clarify')}
+            >
+              <ChevronUp
+                size={11}
+                aria-hidden
+                className={clarifyOpen ? styles.bookmarkChevronOpen : undefined}
+              />
+              {ts('chat.loopGraph.clarifySheet')}
+            </button>
+          ) : null}
         </div>
 
         {flowOpen ? (
@@ -265,24 +285,40 @@ export default function LoopGoalComposer() {
             )}
           </div>
         ) : null}
-      </div>
 
-      {needsClarification ? (
-        <div className={styles.clarifyCard} data-loop-goal-clarify="">
-          <p>{ts('chat.loopGraph.clarifyHint')}</p>
-          {openQuestions.filter((q) => !q.answer?.trim()).map(renderQuestion)}
-          <div className={styles.clarifyActions}>
-            <button
-              type="button"
-              className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
-              disabled={authoringBusy}
-              onClick={submitClarifications}
-            >
-              {ts('chat.loopGraph.submitClarifications')}
-            </button>
+        {clarifyOpen ? (
+          <div
+            className={`${styles.sheetPanel} ${styles.clarifySheetPanel}`}
+            role="tabpanel"
+            data-loop-sheet="clarify"
+            data-loop-goal-clarify=""
+          >
+            <p className={styles.clarifyHint}>{ts('chat.loopGraph.clarifyHint')}</p>
+            {openQuestions.filter((q) => !q.answer?.trim()).map(renderQuestion)}
+            <div className={styles.clarifyActions}>
+              <button
+                type="button"
+                className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                disabled={authoringBusy}
+                onClick={submitClarifications}
+              >
+                {ts('chat.loopGraph.submitClarifications')}
+              </button>
+              <button
+                type="button"
+                className={styles.actionButton}
+                disabled={authoringBusy}
+                onClick={() => {
+                  setClarifyAnswers({})
+                  void cancelGoalClarification()
+                }}
+              >
+                {ts('chat.loopGraph.cancelClarifications')}
+              </button>
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       {offer ? (
         <div className={styles.offerCard} data-loop-graph-edit-offer="">

@@ -111,6 +111,7 @@ import {
   emptyExecutionOverlay,
   remapExecutionOverlay,
 } from '../../../services/live-graph/index.js'
+import { canSkipAlignment } from '../../../services/alignment-contract.js'
 import {
   appendAttachment,
   setComposerText,
@@ -149,6 +150,11 @@ import {
   type ChatModeSwitchPreference,
 } from '../preferences/chatModeSwitch'
 export type { ChatModeSwitchPreference } from '../preferences/chatModeSwitch'
+import {
+  loadKeepAwakeModePreference,
+  saveKeepAwakeModePreference,
+} from '../preferences/keepAwake'
+import type { KeepAwakeMode, KeepAwakeStatus } from '@contracts/keep-awake'
 function loadShowGestureCursorPreference(): boolean {
   return false
 }
@@ -261,6 +267,8 @@ export interface ChatMessage {
   explorationTrace?: import('@contracts/index').AskExplorationTrace
   retrievalSummary?: import('@contracts/index').RetrievalSummary
   checkpointId?: string
+  /** Mode active when this user turn was sent (nav rail color / history). */
+  chatMode?: ChatMode
 }
 
 /** No node/file selection ⇒ whole-project (global) agent scope. */
@@ -404,6 +412,9 @@ export interface WorkbenchState {
   notifyOnDiffReady: boolean
   /** When switching chat modes: open a fresh session (Cursor-like) or keep the same thread. */
   chatModeSwitch: ChatModeSwitchPreference
+  /** Mac desktop: keep machine awake (incl. lid close) for agent work. */
+  keepAwakeMode: KeepAwakeMode
+  keepAwakeStatus: KeepAwakeStatus | null
   showGestureCursor: boolean
   windowFocused: boolean
   diffReadyBanner: DiffReadyBannerState | null
@@ -529,6 +540,8 @@ export interface WorkbenchState {
   setResolvedTheme: (theme: ResolvedTheme) => void
   setNotifyOnDiffReady: (enabled: boolean) => void
   setChatModeSwitch: (value: ChatModeSwitchPreference) => void
+  setKeepAwakeMode: (mode: KeepAwakeMode) => Promise<void>
+  setKeepAwakeStatus: (status: KeepAwakeStatus | null) => void
   setShowGestureCursor: (show: boolean) => void
   setWindowFocused: (focused: boolean) => void
   dismissDiffReadyBanner: () => void
@@ -596,9 +609,10 @@ export interface WorkbenchState {
   setChatInput: (value: string) => void
   setComposerDraft: (draft: ComposerDraft) => void
   /**
-   * Switch chat mode. By default (`chatModeSwitch: 'new_session'`) opens a fresh
-   * session so Ask/Plan/Agent/Debug contexts do not mix. Pass `{ isolate: false }`
-   * to flip mode in-place (demo scripts, same-session preference).
+   * Switch chat mode. Default preference (`chatModeSwitch: 'same_session'`) flips
+   * mode in the current chat (Cursor-like multi-mode thread). Opt into
+   * `new_session` in Settings to open a fresh chat on each switch. Pass
+   * `{ isolate: false }` to force in-place even when preference is `new_session`.
    */
   setChatMode: (mode: ChatMode, options?: { isolate?: boolean }) => Promise<void>
   /** Stop the active agent run (dispose stream + server cancel). */
@@ -626,8 +640,14 @@ export interface WorkbenchState {
   clearSelection: () => void
   dismissError: () => void
   sendPrompt: (input: string | ComposerDraft) => Promise<void>
-  confirmRefinement: () => Promise<void>
+  confirmRefinement: (
+    alignment?: import('@contracts/index').ConfirmAlignmentRequest,
+  ) => Promise<void>
   reviseRefinement: () => void
+  confirmBugAlignment: (
+    bugs: Array<{ id: string; selected: boolean; comment?: string; rejected?: boolean }>,
+  ) => Promise<void>
+  markBugFixed: (bugId: string) => Promise<void>
   confirmPlanBuild: () => Promise<void>
   submitPlanClarification: (
     answers: Array<{ questionId: string; answer: string; selectedOptionId?: string }>,
@@ -1449,6 +1469,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   resolvedTheme: resolveTheme(loadThemePreference()),
   notifyOnDiffReady: loadNotifyOnDiffReadyPreference(),
   chatModeSwitch: loadChatModeSwitchPreference(),
+  keepAwakeMode: loadKeepAwakeModePreference(),
+  keepAwakeStatus: null,
   showGestureCursor: loadShowGestureCursorPreference(),
   windowFocused: typeof document !== 'undefined' ? document.hasFocus() : true,
   diffReadyBanner: null,
@@ -1507,6 +1529,38 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     saveChatModeSwitchPreference(value)
     set({ chatModeSwitch: value })
   },
+
+  setKeepAwakeMode: async (mode) => {
+    saveKeepAwakeModePreference(mode)
+    set({ keepAwakeMode: mode })
+    if (!isDesktopApp() || !window.projectOS?.keepAwake) return
+    try {
+      const status = await window.projectOS.keepAwake.setMode(mode)
+      if (get().keepAwakeMode === mode) {
+        set({ keepAwakeStatus: status })
+      }
+    } catch (error) {
+      console.error('[workbench] failed to apply keep-awake mode', error)
+      const message = error instanceof Error ? error.message : String(error)
+      set({
+        keepAwakeStatus: {
+          ...(get().keepAwakeStatus ?? {
+            supported: window.projectOS.platform === 'darwin',
+            mode,
+            active: false,
+            idleBlocked: false,
+            lidGuardActive: false,
+            lidGuardSupported: window.projectOS.platform === 'darwin',
+            agentActivity: false,
+          }),
+          mode,
+          lastError: message,
+        },
+      })
+    }
+  },
+
+  setKeepAwakeStatus: (status) => set({ keepAwakeStatus: status }),
 
   setShowGestureCursor: (show) => {
     saveShowGestureCursorPreference(show)
@@ -2525,6 +2579,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       role: 'user',
       content: rawPrompt.trim(),
       timestamp: new Date().toISOString(),
+      chatMode,
       ...(draft.attachments.length > 0 ? { attachments: draft.attachments } : {}),
       ...(effectiveSkillId ? { invokedSkillId: effectiveSkillId } : {}),
     })
@@ -2928,7 +2983,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       } else if (refinement.mode === 'deterministic_fixture' && get().settings && !get().settings?.presentationMode) {
         pushToast({ type: 'info', message: getStoreMessage(get().locale, 'settings.fallbackNotice') })
       }
-      if (refinement.executionPolicy === 'automatic') {
+      if (
+        refinement.executionPolicy === 'automatic' &&
+        canSkipAlignment(refinement)
+      ) {
         await get().confirmRefinement()
         set({ pendingRefinement: null })
       }
@@ -2941,7 +2999,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     scheduleChatSessionPersist()
   },
 
-  confirmRefinement: async () => {
+  confirmRefinement: async (alignment) => {
     const { client, pendingRefinement, pushToast, locale } = get()
     if (!pendingRefinement) return
     const subscriptionProjectId = get().project?.projectId
@@ -2949,7 +3007,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     get().runDisposable?.dispose()
 
     try {
-      const run = await client.confirmExecution(pendingRefinement.id)
+      if (alignment) {
+        const confirmed = await client.confirmAlignment(alignment)
+        set({ pendingRefinement: confirmed })
+      }
+      const refinementId = get().pendingRefinement?.id ?? pendingRefinement.id
+      const run = await client.confirmExecution(refinementId)
       const delivered = run as typeof run & {
         contextAssembly?: import('@contracts/index').ContextAssembly
       }
@@ -3629,16 +3692,88 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const { client, debugSession } = get()
     if (!debugSession) return
     try {
+      const bugs = debugSession.bugs ?? []
+      const openConfirmed = bugs.filter(
+        (bug) =>
+          bug.selected &&
+          bug.status !== 'rejected' &&
+          bug.status !== 'abandoned' &&
+          bug.status !== 'fixed',
+      )
+      if (openConfirmed.length === 1) {
+        const session = await client.markBugFixed({
+          sessionId: debugSession.sessionId,
+          bugId: openConfirmed[0]!.id,
+        })
+        set({ debugSession: session })
+        scheduleChatSessionPersist()
+        return
+      }
       await client.cleanupDebugInstrumentation(debugSession.sessionId)
       set({
         debugSession: {
           ...debugSession,
           phase: 'complete',
+          ...(bugs.length
+            ? {
+                bugs: bugs.map((bug) =>
+                  bug.selected && bug.status !== 'rejected'
+                    ? { ...bug, status: 'fixed' as const, fixedAt: new Date().toISOString() }
+                    : bug,
+                ),
+              }
+            : {}),
         },
       })
       scheduleChatSessionPersist()
     } catch (error) {
       set({ error: errorMessage(error, 'Failed to clean up debug instrumentation') })
+    }
+  },
+
+  confirmBugAlignment: async (bugs) => {
+    const { client, debugSession } = get()
+    if (!debugSession) return
+    try {
+      set({ refineLoading: true })
+      const session = await client.confirmBugAlignment({
+        sessionId: debugSession.sessionId,
+        bugs,
+      })
+      set((current) => ({
+        refineLoading: false,
+        debugSession: session,
+        messages: [
+          ...current.messages,
+          {
+            id: msgId(),
+            role: 'system' as const,
+            content: getStoreMessage(current.locale, 'debug.chatStageReproduce'),
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }))
+      scheduleChatSessionPersist()
+    } catch (error) {
+      set({
+        refineLoading: false,
+        error: errorMessage(error, 'Failed to confirm bug alignment'),
+      })
+    }
+  },
+
+  markBugFixed: async (bugId) => {
+    const { client, debugSession } = get()
+    if (!debugSession) return
+    try {
+      const session = await client.markBugFixed({
+        sessionId: debugSession.sessionId,
+        bugId,
+      })
+      set({ debugSession: session })
+      scheduleChatSessionPersist()
+    } catch (error) {
+      set({ error: errorMessage(error, 'Failed to mark bug fixed') })
     }
   },
 

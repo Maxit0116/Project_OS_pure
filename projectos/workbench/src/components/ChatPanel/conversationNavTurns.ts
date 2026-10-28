@@ -1,10 +1,75 @@
 import { parseSpatialPinChatContent } from './spatialPinChatDisplay'
 
 export const MIN_USER_TURNS_FOR_NAV = 3
-export const NAV_PREVIEW_MAX_CHARS = 100
+export const NAV_PREVIEW_MAX_CHARS = 200
 /** Above this count, markers use compact proportional layout (M1 density). */
 export const NAV_DENSE_TURN_THRESHOLD = 40
 export const NAV_FLASH_MS = 1200
+/**
+ * px/ms — trackpad frames are often ~0.3–0.8; keep this low so intentional
+ * scrubbing reveals the capsule without requiring a violent flick.
+ */
+export const NAV_SCRUB_VELOCITY_PX_PER_MS = 0.35
+/** Ignore scroll samples with dt larger than this (ms) — baseline reset, not a scrub. */
+export const NAV_SCRUB_SAMPLE_MAX_DT_MS = 120
+/** Window for accumulating scroll distance (trackpad inertia = many small frames). */
+export const NAV_SCRUB_BURST_WINDOW_MS = 160
+/** Cumulative |ΔscrollTop| within the burst window that counts as a scrub. */
+export const NAV_SCRUB_BURST_DELTA_PX = 28
+/** Hide the capsule this long after the last scrub/scroll while revealed. */
+export const NAV_SCRUB_IDLE_MS = 900
+/** Suppress scrub-reveal after programmatic jump scrolls. */
+export const NAV_SCRUB_SUPPRESS_MS = 500
+/** Fixed stack width (px) — used to place the rail fully outside the sidebar. */
+export const NAV_RAIL_WIDTH_PX = 40
+/** Gap (px) between the stack’s right edge and the sidebar’s left edge. */
+export const NAV_RAIL_OUTSIDE_GAP_PX = 10
+
+/** Viewport `left` for a fixed rail whose right edge sits `gap` px left of `panelLeft`. */
+export function navRailViewportLeft(
+  panelLeft: number,
+  widthPx = NAV_RAIL_WIDTH_PX,
+  gapPx = NAV_RAIL_OUTSIDE_GAP_PX,
+): number {
+  return panelLeft - gapPx - widthPx
+}
+
+export interface ScrollSample {
+  top: number
+  t: number
+}
+
+/**
+ * Instantaneous scroll speed in px/ms, or null when the sample gap is
+ * unusable (zero/negative dt or too long — treat as a fresh baseline).
+ */
+export function measureScrollVelocity(
+  prev: ScrollSample,
+  next: ScrollSample,
+  maxDtMs = NAV_SCRUB_SAMPLE_MAX_DT_MS,
+): number | null {
+  const dt = next.t - prev.t
+  if (dt <= 0 || dt > maxDtMs) return null
+  return Math.abs(next.top - prev.top) / dt
+}
+
+export function isScrubVelocity(
+  velocity: number | null,
+  threshold = NAV_SCRUB_VELOCITY_PX_PER_MS,
+): boolean {
+  return velocity != null && velocity >= threshold
+}
+
+/** True when either frame velocity or a short burst of distance looks like scrubbing. */
+export function isScrubGesture(input: {
+  velocity: number | null
+  burstDeltaPx: number
+  velocityThreshold?: number
+  burstThresholdPx?: number
+}): boolean {
+  if (isScrubVelocity(input.velocity, input.velocityThreshold)) return true
+  return input.burstDeltaPx >= (input.burstThresholdPx ?? NAV_SCRUB_BURST_DELTA_PX)
+}
 
 export interface NavTurnMessage {
   id: string
@@ -12,6 +77,8 @@ export interface NavTurnMessage {
   content: string
   timestamp: string
   checkpointId?: string
+  /** Mode when the user sent this turn — drives marker color. */
+  chatMode?: string
 }
 
 export interface NavTurnActivityHint {
@@ -30,6 +97,8 @@ export interface NavTurn {
   status?: NavTurnStatus
   /** First anchored activity for optional Agent Flow jump (M2). */
   activityId?: string
+  /** Mode when this user turn was sent. */
+  chatMode?: string
 }
 
 /** Collapse whitespace and truncate for rail hover / aria labels. */
@@ -85,6 +154,7 @@ export function collectUserTurns(
       timestamp: message.timestamp,
       ...(status ? { status } : {}),
       ...(activityId ? { activityId } : {}),
+      ...(message.chatMode ? { chatMode: message.chatMode } : {}),
     })
   }
   return turns

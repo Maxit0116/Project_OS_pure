@@ -59,4 +59,84 @@
 .actions {
   display: flex;
   gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.help {
+  margin: 0 0 8px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+
+.bugList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bugRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--tech-border, var(--glass-border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--tech-bg-muted, var(--color-bg-muted));
+}
+
+.bugCheck {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.bugCheck input {
+  margin-top: 3px;
+}
+
+.bugStatusRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+}
+
+.bugStatus {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.commentToggle {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.commentInput {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--tech-border, var(--glass-border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--tech-bg-elevated, var(--color-bg-elevated));
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  resize: vertical;
 }

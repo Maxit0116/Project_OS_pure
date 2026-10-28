@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CHAT_MODE_VISUALS,
   CHAT_MODES,
   CYCLE_CHAT_MODES,
-  chatModeHelpKey,
   cycleChatMode,
+  toneClassForChatMode,
 } from './chatModeVisuals'
 
 describe('chatModeVisuals', () => {
@@ -22,9 +23,14 @@ describe('chatModeVisuals', () => {
     expect(cycleChatMode('anchored')).toBe('ask')
   })
 
-  it('maps help keys for every pickable mode', () => {
-    expect(chatModeHelpKey('ask')).toBe('chat.askModeHelp')
-    expect(chatModeHelpKey('change')).toBe('chat.changeModeHelp')
-    expect(chatModeHelpKey('anchored')).toBe('chat.anchoredModeHelp')
+  it('maps modes to ask/plan/agent/debug tones', () => {
+    expect(CHAT_MODE_VISUALS.ask.toneClass).toBe('modeAsk')
+    expect(CHAT_MODE_VISUALS.anchored.toneClass).toBe('modeAsk')
+    expect(CHAT_MODE_VISUALS.plan.toneClass).toBe('modePlan')
+    expect(CHAT_MODE_VISUALS.change.toneClass).toBe('modeAgent')
+    expect(CHAT_MODE_VISUALS.debug.toneClass).toBe('modeDebug')
+    expect(toneClassForChatMode('ask')).toBe('modeAsk')
+    expect(toneClassForChatMode('change')).toBe('modeAgent')
+    expect(toneClassForChatMode(undefined)).toBeNull()
   })
 })

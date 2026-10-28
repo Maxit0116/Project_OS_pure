@@ -5,6 +5,8 @@ interface Props {
   stencilId: string
   category: StencilCategory
   title: string
+  /** Fill parent (live stub); default fixed card height for library preview. */
+  fill?: boolean
 }
 
 /**
@@ -16,10 +18,11 @@ export default function StencilPreviewVisual({
   stencilId,
   category,
   title,
+  fill = false,
 }: Props) {
   return (
     <div
-      className={styles.stage}
+      className={`${styles.stage}${fill ? ` ${styles.stageFill}` : ''}`}
       data-id={stencilId}
       data-category={category}
       aria-hidden

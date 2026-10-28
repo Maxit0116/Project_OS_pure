@@ -69,7 +69,10 @@ export function arrowObstacles(
   card: ScreenRect,
   extra: ScreenRect[] = [],
 ): ScreenRect[] {
-  const rects: ScreenRect[] = [region.captureRect, card]
+  // Full-frame stencil backdrops are not visual obstacles — only stubs + card.
+  const rects: ScreenRect[] = region.hideSelectionChrome
+    ? [card]
+    : [region.captureRect, card]
   for (const placement of region.stencils ?? []) {
     rects.push(stageRectForPlacement(region, placement))
   }

@@ -127,8 +127,9 @@
   position: absolute;
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   align-items: flex-start;
-  gap: 4px;
+  gap: 6px;
   padding: 8px 10px;
   text-align: left;
   border: 1px solid var(--tech-border-strong);
@@ -212,13 +213,52 @@
   cursor: pointer;
 }
 
-.nodeResponsibility {
-  width: 100%;
-  font-size: var(--font-size-xs);
-  color: var(--tech-text-secondary);
-  white-space: nowrap;
+.nodePreview {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--tech-border-strong);
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-primary);
+  box-shadow: var(--tech-shadow-md);
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.nodePreviewTitle {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+  line-height: 1.35;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.nodePreviewLabel {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tech-text-muted);
+}
+
+.nodePreviewBody {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  color: var(--tech-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .nodeMeta {
@@ -392,5 +432,22 @@
 @media (prefers-reduced-motion: reduce) {
   .shield {
     transition: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nodePreview {
+    animation: sessionNodePreviewIn var(--duration-fast, 150ms) var(--ease-out);
+  }
+}
+
+@keyframes sessionNodePreviewIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

@@ -1,3 +1,4 @@
+import type { BugAlignmentItem } from "../contracts/alignment-contract.js";
 import type { HarnessHypothesis } from "../contracts/harness.js";
 import type { HarnessRecord } from "../contracts/harness.js";
 import type {
@@ -61,7 +62,8 @@ export function findHarnessRecordForSession(
   );
   if (byError) return byError;
   if (session.scope.kind === "global") return undefined;
-  return records.find((candidate) => candidate.businessNodeId === session.scope.nodeId);
+  const nodeId = session.scope.nodeId;
+  return records.find((candidate) => candidate.businessNodeId === nodeId);
 }
 
 export function resolveDebugFixFilePath(
@@ -87,15 +89,57 @@ function harnessDescriptionsMatch(left: string, right: string): boolean {
   return normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft);
 }
 
+export function splitBugDescriptions(bugDescription: string): string[] {
+  const text = bugDescription.replace(/\r\n/g, "\n").trim();
+  if (!text) return [];
+
+  const numbered = text
+    .split(/\n+/)
+    .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s+/u, "").trim())
+    .filter((line) => line.length > 0);
+  if (numbered.length >= 2) {
+    return numbered.slice(0, 12).map((line) => line.slice(0, 500));
+  }
+
+  const bySentence = text
+    .split(/(?<=[.!?。！？])\s+|\n{2,}|;\s+|\band\b\s+(?=\w)/iu)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 8);
+  if (bySentence.length >= 2 && bySentence.length <= 8) {
+    return bySentence.slice(0, 12).map((part) => part.slice(0, 500));
+  }
+
+  return [text.slice(0, 500)];
+}
+
+export function buildBugAlignmentItems(
+  sessionId: string,
+  bugDescription: string,
+): BugAlignmentItem[] {
+  return splitBugDescriptions(bugDescription).map((summary, index) => ({
+    id: `${sessionId}_bug_${index + 1}`,
+    summary,
+    selected: true,
+    status: "proposed" as const,
+  }));
+}
+
+export function needsBugAlignment(bugs: BugAlignmentItem[] | undefined): boolean {
+  return (bugs?.length ?? 0) > 1;
+}
+
 export function createInitialDebugSession(
   request: StartDebugSessionRequest,
   harnessRecord: HarnessRecord | null,
   debugLogPort?: number,
 ): DebugSession {
   const now = new Date().toISOString();
+  const sessionId = `debug_${globalThis.crypto.randomUUID()}`;
+  const bugs = buildBugAlignmentItems(sessionId, request.bugDescription);
+  const alignFirst = !harnessRecord && needsBugAlignment(bugs);
   return {
     version: "0.1.0",
-    sessionId: `debug_${globalThis.crypto.randomUUID()}`,
+    sessionId,
     projectId: request.projectId,
     scope: request.scope,
     bugDescription: request.bugDescription,
@@ -116,11 +160,93 @@ export function createInitialDebugSession(
     ...(harnessRecord?.proposedFix ? { proposedFix: harnessRecord.proposedFix } : {}),
     instrumentation: [],
     logEntries: [],
-    phase: harnessRecord ? "instrument" : "hypothesize",
+    phase: alignFirst ? "align" : harnessRecord ? "instrument" : "hypothesize",
     verification: harnessRecord?.verification ?? { status: "not_run" },
+    bugs,
+    bugsAligned: !alignFirst,
     ...(debugLogPort ? { debugLogPort } : {}),
     ...(request.chatSessionId ? { chatSessionId: request.chatSessionId } : {}),
     createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function applyBugAlignmentPatches(
+  session: DebugSession,
+  patches: Array<{
+    id: string;
+    selected: boolean;
+    comment?: string;
+    rejected?: boolean;
+  }>,
+): DebugSession {
+  const bugs = session.bugs ?? buildBugAlignmentItems(session.sessionId, session.bugDescription);
+  const patchById = new Map(patches.map((patch) => [patch.id, patch]));
+  const nextBugs = bugs.map((bug) => {
+    const patch = patchById.get(bug.id);
+    if (!patch) return bug;
+    if (patch.rejected || !patch.selected) {
+      return {
+        ...bug,
+        selected: false,
+        status: "rejected" as const,
+        ...(patch.comment?.trim() ? { comment: patch.comment.trim() } : {}),
+      };
+    }
+    return {
+      ...bug,
+      selected: true,
+      status: "confirmed" as const,
+      ...(patch.comment?.trim() ? { comment: patch.comment.trim() } : {}),
+    };
+  });
+  const confirmed = nextBugs.filter((bug) => bug.status === "confirmed");
+  if (confirmed.length < 1) {
+    throw new Error("Confirm at least one bug to debug.");
+  }
+  const focusedDescription = confirmed.map((bug) => {
+    const note = bug.comment?.trim();
+    return note ? `${bug.summary} (note: ${note})` : bug.summary;
+  }).join("\n");
+  return {
+    ...session,
+    bugs: nextBugs,
+    bugsAligned: true,
+    bugDescription: focusedDescription || session.bugDescription,
+    phase: session.phase === "align" ? "hypothesize" : session.phase,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function markBugItemFixed(
+  session: DebugSession,
+  bugId: string,
+): DebugSession {
+  const bugs = session.bugs ?? [];
+  if (bugs.length === 0) {
+    return {
+      ...session,
+      phase: "complete",
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  const now = new Date().toISOString();
+  const nextBugs = bugs.map((bug) =>
+    bug.id === bugId
+      ? { ...bug, status: "fixed" as const, fixedAt: now }
+      : bug,
+  );
+  const open = nextBugs.filter(
+    (bug) =>
+      bug.selected &&
+      bug.status !== "rejected" &&
+      bug.status !== "abandoned" &&
+      bug.status !== "fixed",
+  );
+  return {
+    ...session,
+    bugs: nextBugs,
+    phase: open.length === 0 ? "complete" : session.phase === "verify" ? "verify" : session.phase,
     updatedAt: now,
   };
 }

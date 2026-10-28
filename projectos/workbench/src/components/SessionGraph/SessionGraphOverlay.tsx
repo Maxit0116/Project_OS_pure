@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type WheelEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 import type { ChatSessionHead, SessionGraphModel } from '@contracts/index'
 import {
   buildSessionGraph,
@@ -60,6 +61,13 @@ import {
   type SessionDragState,
   type SessionDropTarget,
 } from './useSessionGraphDrag'
+import {
+  SESSION_NODE_PREVIEW_DELAY_MS,
+  SESSION_NODE_PREVIEW_HIDE_MS,
+  SESSION_NODE_PREVIEW_MAX_HEIGHT,
+  SESSION_NODE_PREVIEW_WIDTH,
+  resolveSessionNodePreviewPosition,
+} from './sessionNodePreview'
 import WorkingSessionRail from './WorkingSessionRail'
 import styles from './SessionGraphOverlay.module.css'
 
@@ -636,58 +644,159 @@ function SessionNode({
   const task = classifySessionTask(title, responsibility)
   const TaskIcon = TASK_ICON[task]
   const taskLabel = ts(`chat.sessionGraph.task.${task}`)
+  const description = responsibility?.trim() ?? ''
+  const nodeRef = useRef<HTMLDivElement | null>(null)
+  const openTimerRef = useRef<number | null>(null)
+  const hideTimerRef = useRef<number | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewPos, setPreviewPos] = useState({ x: 0, y: 0 })
+
+  const clearOpenTimer = useCallback(() => {
+    if (openTimerRef.current != null) {
+      window.clearTimeout(openTimerRef.current)
+      openTimerRef.current = null
+    }
+  }, [])
+
+  const clearHideTimer = useCallback(() => {
+    if (hideTimerRef.current != null) {
+      window.clearTimeout(hideTimerRef.current)
+      hideTimerRef.current = null
+    }
+  }, [])
+
+  const closePreview = useCallback(() => {
+    clearOpenTimer()
+    clearHideTimer()
+    setPreviewOpen(false)
+  }, [clearHideTimer, clearOpenTimer])
+
+  const openPreview = useCallback(() => {
+    if (!description || lifted) return
+    const nodeEl = nodeRef.current
+    if (!nodeEl) return
+    setPreviewPos(
+      resolveSessionNodePreviewPosition(
+        nodeEl.getBoundingClientRect(),
+        SESSION_NODE_PREVIEW_WIDTH,
+        SESSION_NODE_PREVIEW_MAX_HEIGHT,
+      ),
+    )
+    setPreviewOpen(true)
+  }, [description, lifted])
+
+  const schedulePreviewOpen = useCallback(() => {
+    if (!description || lifted) return
+    clearHideTimer()
+    clearOpenTimer()
+    openTimerRef.current = window.setTimeout(() => {
+      openTimerRef.current = null
+      openPreview()
+    }, SESSION_NODE_PREVIEW_DELAY_MS)
+  }, [clearHideTimer, clearOpenTimer, description, lifted, openPreview])
+
+  const schedulePreviewClose = useCallback(() => {
+    clearOpenTimer()
+    clearHideTimer()
+    hideTimerRef.current = window.setTimeout(() => {
+      hideTimerRef.current = null
+      setPreviewOpen(false)
+    }, SESSION_NODE_PREVIEW_HIDE_MS)
+  }, [clearHideTimer, clearOpenTimer])
+
+  useEffect(() => () => closePreview(), [closePreview])
+
+  useEffect(() => {
+    if (lifted) closePreview()
+  }, [closePreview, lifted])
+
   return (
-    <div
-      className={`${styles.node} ${active ? styles.nodeActive : ''} ${
-        lifted ? styles.nodeLifted : ''
-      }`}
-      style={{ left: x, top: y, width: SESSION_NODE_WIDTH, height: SESSION_NODE_HEIGHT }}
-      data-session-node={head?.id}
-      data-task={task}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-    >
-      <div className={styles.nodeTop}>
-        <span className={styles.taskMark} title={taskLabel}>
-          <TaskIcon size={14} strokeWidth={1.75} aria-hidden />
-          <span className={styles.taskName}>{taskLabel}</span>
-        </span>
-        <button type="button" className={styles.nodeTitle} onClick={onOpen} aria-current={active ? 'true' : undefined}>
-          {title}
-        </button>
-      </div>
-      {responsibility ? <span className={styles.nodeResponsibility}>{responsibility}</span> : null}
-      <div className={styles.nodeMeta}>
-        <span className={styles.status}>
-          <span className={`${styles.statusDot} ${STATUS_CLASS[status]}`} aria-hidden />
-          {ts(`chat.sessionGraph.status.${status}`)}
-        </span>
-        <span className={styles.nodeActions}>
+    <>
+      <div
+        ref={nodeRef}
+        className={`${styles.node} ${active ? styles.nodeActive : ''} ${
+          lifted ? styles.nodeLifted : ''
+        }`}
+        style={{ left: x, top: y, width: SESSION_NODE_WIDTH, height: SESSION_NODE_HEIGHT }}
+        data-session-node={head?.id}
+        data-task={task}
+        onPointerDown={(event) => {
+          closePreview()
+          onPointerDown(event)
+        }}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onMouseEnter={schedulePreviewOpen}
+        onMouseLeave={schedulePreviewClose}
+      >
+        <div className={styles.nodeTop}>
+          <span className={styles.taskMark} title={taskLabel}>
+            <TaskIcon size={14} strokeWidth={1.75} aria-hidden />
+            <span className={styles.taskName}>{taskLabel}</span>
+          </span>
           <button
             type="button"
-            className={styles.iconButton}
-            data-session-drag-ignore=""
-            aria-label={ts('chat.sessionGraph.branch')}
-            title={ts('chat.sessionGraph.branch')}
-            onClick={onBranch}
+            className={styles.nodeTitle}
+            onClick={onOpen}
+            aria-current={active ? 'true' : undefined}
           >
-            <GitBranch size={14} aria-hidden />
+            {title}
           </button>
-          <button
-            type="button"
-            className={styles.iconButton}
-            data-session-drag-ignore=""
-            aria-label={ts('chat.sessionGraph.moveToMisc')}
-            title={ts('chat.sessionGraph.moveToMisc')}
-            onClick={onMisc}
-          >
-            <Archive size={14} aria-hidden />
-          </button>
-        </span>
+        </div>
+        <div className={styles.nodeMeta}>
+          <span className={styles.status}>
+            <span className={`${styles.statusDot} ${STATUS_CLASS[status]}`} aria-hidden />
+            {ts(`chat.sessionGraph.status.${status}`)}
+          </span>
+          <span className={styles.nodeActions}>
+            <button
+              type="button"
+              className={styles.iconButton}
+              data-session-drag-ignore=""
+              aria-label={ts('chat.sessionGraph.branch')}
+              title={ts('chat.sessionGraph.branch')}
+              onClick={onBranch}
+            >
+              <GitBranch size={14} aria-hidden />
+            </button>
+            <button
+              type="button"
+              className={styles.iconButton}
+              data-session-drag-ignore=""
+              aria-label={ts('chat.sessionGraph.moveToMisc')}
+              title={ts('chat.sessionGraph.moveToMisc')}
+              onClick={onMisc}
+            >
+              <Archive size={14} aria-hidden />
+            </button>
+          </span>
+        </div>
       </div>
-    </div>
+      {previewOpen && description
+        ? createPortal(
+            <aside
+              className={styles.nodePreview}
+              style={{
+                left: previewPos.x,
+                top: previewPos.y,
+                width: SESSION_NODE_PREVIEW_WIDTH,
+                maxHeight: SESSION_NODE_PREVIEW_MAX_HEIGHT,
+              }}
+              aria-label={`${ts('chat.sessionGraph.description')}: ${title}`}
+              aria-live="polite"
+              onMouseEnter={clearHideTimer}
+              onMouseLeave={schedulePreviewClose}
+              onWheel={(event) => event.stopPropagation()}
+            >
+              <div className={styles.nodePreviewTitle}>{title}</div>
+              <div className={styles.nodePreviewLabel}>{ts('chat.sessionGraph.description')}</div>
+              <div className={styles.nodePreviewBody}>{description}</div>
+            </aside>,
+            document.body,
+          )
+        : null}
+    </>
   )
 }
 
