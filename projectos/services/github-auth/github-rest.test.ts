@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createPullRequestViaRest,
+  listBranchesViaRest,
   listPullRequestsViaRest,
   parseGithubOwnerRepo,
 } from "./github-rest.js";
@@ -43,6 +44,20 @@ describe("github-rest", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
     const firstUrl = String(fetchImpl.mock.calls.at(0)?.at(0) ?? "");
     expect(firstUrl).toContain("/repos/acme/app/pulls");
+  });
+
+  it("lists branches via REST", async () => {
+    const fetchImpl = vi.fn(async () =>
+      Response.json([{ name: "main" }, { name: "backend" }, { name: "frontend" }]),
+    );
+    const result = await listBranchesViaRest(
+      "acme",
+      "app",
+      "tok",
+      fetchImpl as typeof fetch,
+    );
+    expect(result.available).toBe(true);
+    expect(result.branches).toEqual(["main", "backend", "frontend"]);
   });
 
   it("creates a pull request via REST", async () => {

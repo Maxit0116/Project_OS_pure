@@ -6,6 +6,7 @@ import { z } from "zod";
  */
 export const GithubGraphNodeKindSchema = z.enum([
   "default",
+  "group",
   "branch",
   "pr",
   "worktree",
@@ -20,6 +21,13 @@ export const GithubGraphNodeSchema = z
     name: z.string().min(1).max(240),
     parentId: z.string().min(1).max(280).nullable().optional(),
     current: z.boolean().default(false),
+    /** True when the branch exists only as a remote-tracking / API-known ref. */
+    remote: z.boolean().default(false),
+    /**
+     * Ephemeral UI state while create/push (or delete) is in flight.
+     * Pending nodes render gray until the remote mutation settles.
+     */
+    pending: z.boolean().default(false),
     ahead: z.number().int().nonnegative().optional(),
     behind: z.number().int().nonnegative().optional(),
     prNumber: z.number().int().positive().optional(),

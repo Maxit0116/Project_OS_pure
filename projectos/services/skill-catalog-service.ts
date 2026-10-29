@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -192,6 +193,20 @@ function assertContainedPath(root: string, candidate: string): string {
     throw new SkillInstallError("Skill install path escapes skills root");
   }
   return resolved;
+}
+
+/** Remove a catalog-installed skill directory under `.projectos/skills/<id>/`. */
+export function uninstallProjectSkill(input: {
+  workspaceRoot: string;
+  listingId: string;
+}): void {
+  const id = safeSkillInstallId(input.listingId);
+  const skillsRoot = projectSkillsRoot(input.workspaceRoot);
+  const skillDir = assertContainedPath(skillsRoot, join(skillsRoot, id));
+  if (!existsSync(skillDir)) {
+    throw new SkillInstallError(`Skill '${id}' is not installed`);
+  }
+  rmSync(skillDir, { recursive: true, force: true });
 }
 
 /** Install a catalog listing into `.projectos/skills/<id>/`. */

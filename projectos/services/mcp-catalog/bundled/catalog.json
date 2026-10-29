@@ -1,46 +1,74 @@
 {
   "version": "1",
-  "generatedAt": "2026-10-29T00:00:00.000Z",
+  "generatedAt": "2026-10-29T13:30:52.765Z",
   "listings": [
     {
-      "id": "curated.filesystem",
-      "name": "Filesystem (demo)",
-      "description": "Official-demo style stdio filesystem MCP server via npx.",
+      "id": "curated.playwright",
+      "name": "Playwright MCP",
+      "description": "Official Microsoft Playwright MCP — browser automation via accessibility snapshots (npx @playwright/mcp). Requires Node.js 18+.",
       "trustTier": "curated",
-      "version": "1.0.0",
-      "homepage": "https://modelcontextprotocol.io",
+      "version": "0.0.83",
+      "homepage": "https://github.com/microsoft/playwright-mcp",
       "requiresAuth": false,
       "transport": "stdio",
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-filesystem",
+        "@playwright/mcp@latest"
+      ]
+    },
+    {
+      "id": "curated.chrome-devtools",
+      "name": "Chrome DevTools MCP",
+      "description": "Official Google Chrome DevTools MCP — control and inspect a live Chrome browser for automation, debugging, screenshots, and performance traces. Requires Node.js LTS and Chrome stable.",
+      "trustTier": "curated",
+      "version": "1.12.0",
+      "homepage": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+      "requiresAuth": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest"
+      ]
+    },
+    {
+      "id": "curated.context7",
+      "name": "Context7",
+      "description": "Upstash Context7 remote MCP — up-to-date, version-specific library docs and code examples (resolve-library-id, query-docs). Paste a Context7 API key at install for higher rate limits (context7.com/dashboard).",
+      "trustTier": "curated",
+      "version": "4.4.4",
+      "homepage": "https://context7.com",
+      "requiresAuth": true,
+      "transport": "http",
+      "url": "https://mcp.context7.com/mcp"
+    },
+    {
+      "id": "curated.filesystem",
+      "name": "Filesystem MCP",
+      "description": "Official Model Context Protocol filesystem server — read/write/search within allowed directories. Default allow-list is the workspace root (`.`). Edit args after install to add more absolute paths.",
+      "trustTier": "curated",
+      "version": "2.1.0",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+      "requiresAuth": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem@latest",
         "."
       ]
     },
     {
-      "id": "community.everything",
-      "name": "Everything (community demo)",
-      "description": "Community-tier example listing. Review the command before enabling.",
+      "id": "community.storybook-mcp",
+      "name": "Storybook MCP Addon",
+      "description": "Storybook official MCP addon (@storybook/addon-mcp). In your Storybook project run `npx storybook add @storybook/addon-mcp`, start the Storybook dev server, then enable this listing to connect at http://127.0.0.1:6006/mcp (adjust port if needed). Community: review before enabling.",
       "trustTier": "community",
-      "version": "0.1.0",
+      "version": "10.6.5",
+      "homepage": "https://storybook.js.org/docs/ai/mcp/overview",
       "requiresAuth": false,
-      "transport": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-everything"
-      ]
-    },
-    {
-      "id": "curated.http-echo",
-      "name": "HTTP Echo (placeholder)",
-      "description": "Example http transport listing pointing at loopback for local demos.",
-      "trustTier": "curated",
-      "version": "1.0.0",
-      "requiresAuth": true,
       "transport": "http",
-      "url": "http://127.0.0.1:3921/mcp"
+      "url": "http://127.0.0.1:6006/mcp"
     }
   ]
 }

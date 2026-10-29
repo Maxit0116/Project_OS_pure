@@ -222,8 +222,10 @@ import {
 import {
   InstallSkillFromCatalogInputSchema,
   SKILL_CATALOG_REPORT_ISSUE_URL,
+  UninstallSkillFromCatalogInputSchema,
   type InstallSkillFromCatalogInput,
   type SkillCatalogView,
+  type UninstallSkillFromCatalogInput,
 } from "../contracts/skill-marketplace.js";
 import type { SkillDescriptor } from "../contracts/skills.js";
 import { tmpdir } from "node:os";
@@ -372,6 +374,7 @@ import {
   installProjectSkill,
   listProjectSkills,
   SkillInstallError,
+  uninstallProjectSkill,
 } from "./skill-catalog-service.js";
 import { seedProjectSkills } from "./skill-seed-service.js";
 import {
@@ -1509,12 +1512,38 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
   }
 
+  private async resolveGithubAccessToken(): Promise<string | undefined> {
+    this.syncGitHubAuthMockMode();
+    const accessToken = await this.githubAuthSessionManager.getAccessToken();
+    if (!accessToken || accessToken === "mock-github-token") return undefined;
+    return accessToken;
+  }
+
   async listWorkspaceGitBranches(
     projectId: string,
   ): Promise<import("../contracts/workspace-git.js").WorkspaceGitBranchList> {
     const workspace = this.requireLoadedWorkspace(projectId);
-    const { listGitBranches } = await import("./git-context-service.js");
-    const listed = listGitBranches(workspace.workspaceRoot);
+    const {
+      listGitBranches,
+      fetchGitRemote,
+      mergeRemoteApiBranches,
+      listGithubRemoteBranchNames,
+    } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    // Soft-fetch so Graph / Locator see origin branches that exist on GitHub
+    // but were never pulled into refs/remotes (including single-branch clones).
+    fetchGitRemote(workspace.workspaceRoot, {
+      ...(accessToken ? { accessToken } : {}),
+    });
+    let listed = listGitBranches(workspace.workspaceRoot);
+    if (accessToken) {
+      const remote = await listGithubRemoteBranchNames(workspace.workspaceRoot, {
+        accessToken,
+      });
+      if (remote.available) {
+        listed = mergeRemoteApiBranches(listed, remote.branches);
+      }
+    }
     return {
       defaultBranch: listed.defaultBranch,
       currentBranch: listed.currentBranch,
@@ -1528,7 +1557,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { checkoutGitBranch } = await import("./git-context-service.js");
-    const result = checkoutGitBranch(workspace.workspaceRoot, branch);
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = checkoutGitBranch(workspace.workspaceRoot, branch, {
+      ...(accessToken ? { accessToken } : {}),
+    });
     return {
       ok: result.ok,
       message: result.message,
@@ -1538,13 +1570,94 @@ export class ProjectOSLocalApi implements ProjectOSApi {
 
   async createWorkspaceBranch(
     projectId: string,
-    input: { name: string; from?: string; checkout?: boolean },
+    input: {
+      name: string;
+      from?: string;
+      checkout?: boolean;
+      push?: boolean;
+    },
   ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { createGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
     const result = createGitBranch(workspace.workspaceRoot, input.name, {
       from: input.from,
       checkout: input.checkout,
+      // Graph / hub create should land on GitHub unless explicitly local-only.
+      push: input.push !== false,
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async renameWorkspaceBranch(
+    projectId: string,
+    input: {
+      from: string;
+      to: string;
+      push?: boolean;
+      deleteRemoteOld?: boolean;
+    },
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { renameGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = renameGitBranch(workspace.workspaceRoot, input.from, input.to, {
+      push: input.push !== false,
+      deleteRemoteOld: input.deleteRemoteOld !== false,
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async deleteWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      remote?: boolean;
+      force?: boolean;
+    },
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { deleteGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = deleteGitBranch(workspace.workspaceRoot, input.name, {
+      remote: input.remote !== false,
+      force: input.force !== false,
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async rollbackWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      to?: string;
+      mode?: "hard" | "mixed";
+      push?: boolean;
+    },
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { rollbackGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = rollbackGitBranch(workspace.workspaceRoot, input.name, {
+      to: input.to,
+      mode: input.mode === "mixed" ? "mixed" : "hard",
+      push: input.push !== false,
+      ...(accessToken ? { accessToken } : {}),
     });
     return {
       ok: result.ok,
@@ -1558,7 +1671,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { fetchGitRemote } = await import("./git-context-service.js");
-    const result = fetchGitRemote(workspace.workspaceRoot);
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = fetchGitRemote(workspace.workspaceRoot, {
+      ...(accessToken ? { accessToken } : {}),
+    });
     return { ok: result.ok, message: result.message };
   }
 
@@ -1567,9 +1683,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   ): Promise<import("../contracts/workspace-git.js").WorkspaceGitPullRequestList> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { listGithubPullRequests } = await import("./git-context-service.js");
-    const accessToken = await this.githubAuthSessionManager.getAccessToken();
+    const token = await this.resolveGithubAccessToken();
     return listGithubPullRequests(workspace.workspaceRoot, {
-      ...(accessToken ? { accessToken } : {}),
+      ...(token ? { accessToken: token } : {}),
     });
   }
 
@@ -1584,9 +1700,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   }> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { createGithubPullRequest } = await import("./git-context-service.js");
-    const accessToken = await this.githubAuthSessionManager.getAccessToken();
+    const token = await this.resolveGithubAccessToken();
     return createGithubPullRequest(workspace.workspaceRoot, input, {
-      ...(accessToken ? { accessToken } : {}),
+      ...(token ? { accessToken: token } : {}),
+      pushHead: true,
     });
   }
 
@@ -6781,6 +6898,25 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         workspaceRoot: workspace.workspaceRoot,
         listing,
         ...(parsed.replace === true ? { replace: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof SkillInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async uninstallSkillFromCatalog(
+    projectId: string,
+    input: UninstallSkillFromCatalogInput,
+  ): Promise<void> {
+    const parsed = UninstallSkillFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    try {
+      uninstallProjectSkill({
+        workspaceRoot: workspace.workspaceRoot,
+        listingId: parsed.listingId,
       });
     } catch (error) {
       if (error instanceof SkillInstallError) {

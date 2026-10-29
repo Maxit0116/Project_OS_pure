@@ -39,6 +39,44 @@ async function githubApiFetch(
   return fetchImpl(`https://api.github.com${path}`, { ...init, headers });
 }
 
+export async function listBranchesViaRest(
+  owner: string,
+  repo: string,
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{
+  available: boolean;
+  branches: string[];
+  message?: string;
+}> {
+  const names: string[] = [];
+  let page = 1;
+  while (page <= 10) {
+    const response = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=100&page=${page}`,
+      accessToken,
+      { method: "GET" },
+      fetchImpl,
+    );
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      return {
+        available: false,
+        branches: names,
+        message: `GitHub API branch list failed (${response.status}): ${body.slice(0, 200) || response.statusText}`,
+      };
+    }
+    const raw = (await response.json()) as Array<{ name?: string }>;
+    for (const item of raw) {
+      const name = item.name?.trim();
+      if (name) names.push(name);
+    }
+    if (raw.length < 100) break;
+    page += 1;
+  }
+  return { available: true, branches: names };
+}
+
 export async function listPullRequestsViaRest(
   owner: string,
   repo: string,

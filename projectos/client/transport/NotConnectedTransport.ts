@@ -117,7 +117,47 @@ export class NotConnectedTransport implements ProjectOSApi {
 
   async createWorkspaceBranch(
     _projectId: string,
-    _input: { name: string; from?: string; checkout?: boolean },
+    _input: {
+      name: string
+      from?: string
+      checkout?: boolean
+      push?: boolean
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async renameWorkspaceBranch(
+    _projectId: string,
+    _input: {
+      from: string
+      to: string
+      push?: boolean
+      deleteRemoteOld?: boolean
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async deleteWorkspaceBranch(
+    _projectId: string,
+    _input: {
+      name: string
+      remote?: boolean
+      force?: boolean
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async rollbackWorkspaceBranch(
+    _projectId: string,
+    _input: {
+      name: string
+      to?: string
+      mode?: 'hard' | 'mixed'
+      push?: boolean
+    },
   ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
     return transportNotConnected();
   }
@@ -695,6 +735,13 @@ export class NotConnectedTransport implements ProjectOSApi {
     _projectId: string,
     _input: import("../../contracts/skill-marketplace.js").InstallSkillFromCatalogInput,
   ): Promise<import("../../contracts/skills.js").SkillDescriptor> {
+    return transportNotConnected();
+  }
+
+  async uninstallSkillFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/skill-marketplace.js").UninstallSkillFromCatalogInput,
+  ): Promise<void> {
     return transportNotConnected();
   }
 

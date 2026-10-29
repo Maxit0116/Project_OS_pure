@@ -27,6 +27,7 @@ export {
 export { runLoopbackOAuth } from "./oauth-loopback.js";
 export {
   createPullRequestViaRest,
+  listBranchesViaRest,
   listPullRequestsViaRest,
   parseGithubOwnerRepo,
 } from "./github-rest.js";

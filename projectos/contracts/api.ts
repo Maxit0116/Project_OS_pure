@@ -39,6 +39,7 @@ import type {
 import type {
   InstallSkillFromCatalogInput,
   SkillCatalogView,
+  UninstallSkillFromCatalogInput,
 } from "./skill-marketplace.js";
 import type { SkillDescriptor } from "./skills.js";
 import type {
@@ -153,7 +154,43 @@ export interface ProjectOSApi {
   ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
   createWorkspaceBranch(
     projectId: string,
-    input: { name: string; from?: string; checkout?: boolean },
+    input: {
+      name: string;
+      from?: string;
+      checkout?: boolean;
+      /** Push the new branch to origin (default true). */
+      push?: boolean;
+    },
+  ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
+  renameWorkspaceBranch(
+    projectId: string,
+    input: {
+      from: string;
+      to: string;
+      /** Push renamed branch and delete old remote (default true). */
+      push?: boolean;
+      deleteRemoteOld?: boolean;
+    },
+  ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
+  deleteWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      /** Also delete origin/<name> (default true). */
+      remote?: boolean;
+      force?: boolean;
+    },
+  ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
+  /** Reset a feature branch tip back to another tip (default: default branch). */
+  rollbackWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      to?: string;
+      mode?: "hard" | "mixed";
+      /** Force-push with lease after reset (default true). */
+      push?: boolean;
+    },
   ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
   fetchWorkspaceGit(
     projectId: string,
@@ -413,6 +450,10 @@ export interface ProjectOSApi {
     projectId: string,
     input: InstallSkillFromCatalogInput,
   ): Promise<SkillDescriptor>;
+  uninstallSkillFromCatalog(
+    projectId: string,
+    input: UninstallSkillFromCatalogInput,
+  ): Promise<void>;
   disableSkillCatalogListing(
     projectId: string,
     listingId: string,

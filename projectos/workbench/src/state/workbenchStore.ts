@@ -726,6 +726,8 @@ export interface WorkbenchState {
   listSkillCatalog: (options?: { forceRefresh?: boolean }) => Promise<SkillCatalogView | null>
   refreshSkillCatalog: () => Promise<SkillCatalogView | null>
   installSkillFromCatalog: (input: InstallSkillFromCatalogInput) => Promise<SkillDescriptor | null>
+  uninstallSkillFromCatalog: (listingId: string) => Promise<boolean>
+  uninstallMcpListing: (listingId: string) => Promise<boolean>
   disableSkillCatalogListing: (listingId: string) => Promise<boolean>
   reportSkillCatalogListing: (input: { listingId: string; note?: string }) => Promise<boolean>
   setSettingsOpen: (open: boolean, focusView?: string | null) => void
@@ -4669,6 +4671,54 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         reportSettingsMutationFailure(error, 'Failed to install skill')
       }
       return null
+    }
+  },
+
+  uninstallSkillFromCatalog: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      await client.uninstallSkillFromCatalog(projectId, { listingId })
+      if (get().project?.projectId !== projectId) return false
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.skillMarketUninstalled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to uninstall skill')
+      }
+      return false
+    }
+  },
+
+  uninstallMcpListing: async (listingId) => {
+    const { client, project, settings, pushToast, locale } = get()
+    if (!project || !settings) return false
+    const projectId = project.projectId
+    const targets = (settings.mcpServers ?? []).filter(
+      (server) => server.provenance?.listingId === listingId,
+    )
+    if (targets.length === 0) return false
+    try {
+      let updated = settings
+      for (const server of targets) {
+        updated = await client.deleteMcpServer(projectId, server.id)
+      }
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.mcpMarketUninstalled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to uninstall MCP listing')
+      }
+      return false
     }
   },
 

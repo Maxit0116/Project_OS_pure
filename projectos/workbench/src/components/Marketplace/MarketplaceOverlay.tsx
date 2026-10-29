@@ -15,9 +15,15 @@ import { useWorkbenchStore } from '../../state/workbenchStore'
 import { GraphOverlayFrame } from '../GraphOverlay/GraphOverlayFrame'
 import Button from '../ui/Button'
 import TextInput from '../ui/TextInput'
+import MarketplaceCard, { type MarketplaceCardAction } from './MarketplaceCard'
+import MarketplaceDetail from './MarketplaceDetail'
 import styles from './MarketplaceOverlay.module.css'
 
 type MarketTab = 'mcp' | 'skills'
+
+type DetailSelection =
+  | { kind: 'mcp'; listing: McpCatalogListing }
+  | { kind: 'skills'; listing: SkillCatalogListing }
 
 function mcpPreview(listing: McpCatalogListing): string {
   if (listing.transport === 'stdio') {
@@ -32,6 +38,14 @@ function skillPreview(listing: SkillCatalogListing): string {
   return body.length > 400 ? `${body.slice(0, 400)}…` : body
 }
 
+function skillInstallId(listingId: string): string {
+  return listingId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+}
+
 export default function MarketplaceOverlay() {
   const open = useChatSessionStore((s) => s.marketplaceOpen)
   const setMarketplaceOpen = useChatSessionStore((s) => s.setMarketplaceOpen)
@@ -43,11 +57,13 @@ export default function MarketplaceOverlay() {
   const listMcpCatalog = useWorkbenchStore((s) => s.listMcpCatalog)
   const refreshMcpCatalog = useWorkbenchStore((s) => s.refreshMcpCatalog)
   const installMcpFromCatalog = useWorkbenchStore((s) => s.installMcpFromCatalog)
+  const uninstallMcpListing = useWorkbenchStore((s) => s.uninstallMcpListing)
   const disableMcpCatalogListing = useWorkbenchStore((s) => s.disableMcpCatalogListing)
   const reportMcpCatalogListing = useWorkbenchStore((s) => s.reportMcpCatalogListing)
   const listSkillCatalog = useWorkbenchStore((s) => s.listSkillCatalog)
   const refreshSkillCatalog = useWorkbenchStore((s) => s.refreshSkillCatalog)
   const installSkillFromCatalog = useWorkbenchStore((s) => s.installSkillFromCatalog)
+  const uninstallSkillFromCatalog = useWorkbenchStore((s) => s.uninstallSkillFromCatalog)
   const disableSkillCatalogListing = useWorkbenchStore((s) => s.disableSkillCatalogListing)
   const reportSkillCatalogListing = useWorkbenchStore((s) => s.reportSkillCatalogListing)
   const client = useWorkbenchStore((s) => s.client)
@@ -55,6 +71,7 @@ export default function MarketplaceOverlay() {
   const { ts } = useI18n()
 
   const [tab, setTab] = useState<MarketTab>('mcp')
+  const [detail, setDetail] = useState<DetailSelection | null>(null)
   const [mcpView, setMcpView] = useState<McpCatalogView | null>(null)
   const [skillView, setSkillView] = useState<SkillCatalogView | null>(null)
   const [installedSkillIds, setInstalledSkillIds] = useState<Set<string>>(new Set())
@@ -117,9 +134,55 @@ export default function MarketplaceOverlay() {
 
   useEffect(() => {
     if (!open) return
+    setDetail(null)
     if (tab === 'mcp') void loadMcp(false)
     else void loadSkills(false)
   }, [open, tab, loadMcp, loadSkills])
+
+  const runMcpAction = useCallback(
+    async (listing: McpCatalogListing, action: MarketplaceCardAction) => {
+      setBusyId(listing.id)
+      try {
+        if (action === 'uninstall') {
+          await uninstallMcpListing(listing.id)
+          return
+        }
+        if (action === 'update') {
+          await uninstallMcpListing(listing.id)
+        }
+        await installMcpFromCatalog({
+          listingId: listing.id,
+          ...(authByListing[listing.id]?.trim()
+            ? { authToken: authByListing[listing.id]!.trim() }
+            : {}),
+        })
+      } finally {
+        setBusyId(null)
+      }
+    },
+    [authByListing, installMcpFromCatalog, uninstallMcpListing],
+  )
+
+  const runSkillAction = useCallback(
+    async (listing: SkillCatalogListing, action: MarketplaceCardAction) => {
+      setBusyId(listing.id)
+      try {
+        if (action === 'uninstall') {
+          const ok = await uninstallSkillFromCatalog(listing.id)
+          if (ok) await reloadInstalledSkills()
+          return
+        }
+        const desc = await installSkillFromCatalog({
+          listingId: listing.id,
+          ...(action === 'update' ? { replace: true } : {}),
+        })
+        if (desc) await reloadInstalledSkills()
+      } finally {
+        setBusyId(null)
+      }
+    },
+    [installSkillFromCatalog, reloadInstalledSkills, uninstallSkillFromCatalog],
+  )
 
   if (!open || typeof document === 'undefined') return null
 
@@ -130,173 +193,200 @@ export default function MarketplaceOverlay() {
   const skillCurated = skillListings.filter((l) => l.trustTier === 'curated')
   const skillCommunity = skillListings.filter((l) => l.trustTier === 'community')
 
-  const renderMcpListing = (listing: McpCatalogListing) => {
-    const installed = installedMcpListingIds.has(listing.id)
-    const community = listing.trustTier === 'community'
-    return (
-      <div key={listing.id} className={styles.row}>
-        <div>
-          <div className={styles.rowTitle}>
-            {listing.name}{' '}
-            <span className={styles.badge}>
-              {community
-                ? ts('chat.marketplace.community')
-                : ts('chat.marketplace.curated')}
-            </span>
-            {installed ? (
-              <span className={`${styles.badge} ${styles.badgeInstalled}`}>
-                {ts('chat.marketplace.installed')}
-              </span>
-            ) : null}
-          </div>
-          {listing.description ? (
-            <div className={styles.rowMeta}>{listing.description}</div>
-          ) : null}
-          <div className={styles.rowMeta}>
-            {listing.transport} · v{listing.version}
-          </div>
-          {community ? (
-            <p className={styles.help}>{ts('chat.marketplace.mcpCommunityRisk')}</p>
-          ) : null}
-          <pre className={styles.preview}>{mcpPreview(listing)}</pre>
-          {listing.requiresAuth ? (
-            <div style={{ marginTop: 8 }}>
-              <TextInput
-                label={ts('chat.marketplace.authToken')}
-                type="password"
-                value={authByListing[listing.id] ?? ''}
-                onChange={(e) =>
-                  setAuthByListing((prev) => ({ ...prev, [listing.id]: e.target.value }))
-                }
-                autoComplete="off"
-              />
-            </div>
-          ) : null}
-        </div>
-        <div className={styles.rowActions}>
-          <Button
-            size="sm"
-            disabled={busyId === listing.id || loading}
-            onClick={() => {
-              setBusyId(listing.id)
-              void installMcpFromCatalog({
-                listingId: listing.id,
-                ...(authByListing[listing.id]?.trim()
-                  ? { authToken: authByListing[listing.id]!.trim() }
-                  : {}),
-              }).finally(() => setBusyId(null))
-            }}
-          >
-            {ts('chat.marketplace.install')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={loading}
-            onClick={() => {
-              void disableMcpCatalogListing(listing.id).then((ok) => {
-                if (ok) void loadMcp(false)
-              })
-            }}
-          >
-            {ts('chat.marketplace.hide')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={loading}
-            onClick={() => {
-              void reportMcpCatalogListing({ listingId: listing.id }).then((ok) => {
-                if (ok) void loadMcp(false)
-              })
-            }}
-          >
-            {ts('chat.marketplace.report')}
-          </Button>
-        </div>
-      </div>
-    )
+  const cardLabels = {
+    curatedLabel: ts('chat.marketplace.curated'),
+    communityLabel: ts('chat.marketplace.community'),
+    installedLabel: ts('chat.marketplace.installed'),
+    installLabel: ts('chat.marketplace.install'),
+    updateLabel: ts('chat.marketplace.update'),
+    uninstallLabel: ts('chat.marketplace.uninstall'),
   }
 
-  const renderSkillListing = (listing: SkillCatalogListing) => {
-    const installId = listing.id
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]+/gu, '-')
-      .replace(/^-+|-+$/gu, '')
-    const installed = installedSkillIds.has(installId)
+  const renderMcpGrid = (listings: McpCatalogListing[]) => (
+    <div className={styles.grid}>
+      {listings.map((listing) => {
+        const installed = installedMcpListingIds.has(listing.id)
+        return (
+          <MarketplaceCard
+            key={listing.id}
+            id={listing.id}
+            name={listing.name}
+            description={listing.description}
+            homepage={listing.homepage}
+            iconUrl={listing.iconUrl}
+            installed={installed}
+            community={listing.trustTier === 'community'}
+            busy={busyId === listing.id}
+            disabled={loading}
+            {...cardLabels}
+            onOpen={() => setDetail({ kind: 'mcp', listing })}
+            onAction={(action) => {
+              void runMcpAction(listing, action)
+            }}
+          />
+        )
+      })}
+    </div>
+  )
+
+  const renderSkillGrid = (listings: SkillCatalogListing[]) => (
+    <div className={styles.grid}>
+      {listings.map((listing) => {
+        const installed = installedSkillIds.has(skillInstallId(listing.id))
+        return (
+          <MarketplaceCard
+            key={listing.id}
+            id={listing.id}
+            name={listing.name}
+            description={listing.description}
+            homepage={listing.homepage}
+            iconUrl={listing.iconUrl}
+            installed={installed}
+            community={listing.trustTier === 'community'}
+            busy={busyId === listing.id}
+            disabled={loading}
+            {...cardLabels}
+            onOpen={() => setDetail({ kind: 'skills', listing })}
+            onAction={(action) => {
+              void runSkillAction(listing, action)
+            }}
+          />
+        )
+      })}
+    </div>
+  )
+
+  const renderDetail = () => {
+    if (!detail) return null
+    if (detail.kind === 'mcp') {
+      const listing = detail.listing
+      const installed = installedMcpListingIds.has(listing.id)
+      const community = listing.trustTier === 'community'
+      return (
+        <MarketplaceDetail
+          id={listing.id}
+          name={listing.name}
+          description={listing.description}
+          homepage={listing.homepage}
+          iconUrl={listing.iconUrl}
+          version={listing.version}
+          installed={installed}
+          community={community}
+          busy={busyId === listing.id}
+          disabled={loading}
+          {...cardLabels}
+          backLabel={ts('chat.marketplace.back')}
+          homepageLabel={ts('chat.marketplace.openHomepage')}
+          metaLine={`${listing.transport}`}
+          riskNote={community ? ts('chat.marketplace.mcpCommunityRisk') : undefined}
+          preview={mcpPreview(listing)}
+          onBack={() => setDetail(null)}
+          onAction={(action) => {
+            void runMcpAction(listing, action)
+          }}
+          secondaryActions={
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={loading}
+                onClick={() => {
+                  void disableMcpCatalogListing(listing.id).then((ok) => {
+                    if (ok) {
+                      setDetail(null)
+                      void loadMcp(false)
+                    }
+                  })
+                }}
+              >
+                {ts('chat.marketplace.hide')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={loading}
+                onClick={() => {
+                  void reportMcpCatalogListing({ listingId: listing.id }).then((ok) => {
+                    if (ok) void loadMcp(false)
+                  })
+                }}
+              >
+                {ts('chat.marketplace.report')}
+              </Button>
+            </>
+          }
+        >
+          {listing.requiresAuth ? (
+            <TextInput
+              label={ts('chat.marketplace.authToken')}
+              type="password"
+              value={authByListing[listing.id] ?? ''}
+              onChange={(e) =>
+                setAuthByListing((prev) => ({ ...prev, [listing.id]: e.target.value }))
+              }
+              autoComplete="off"
+            />
+          ) : null}
+        </MarketplaceDetail>
+      )
+    }
+
+    const listing = detail.listing
+    const installed = installedSkillIds.has(skillInstallId(listing.id))
     const community = listing.trustTier === 'community'
     return (
-      <div key={listing.id} className={styles.row}>
-        <div>
-          <div className={styles.rowTitle}>
-            {listing.name}{' '}
-            <span className={styles.badge}>
-              {community
-                ? ts('chat.marketplace.community')
-                : ts('chat.marketplace.curated')}
-            </span>
-            {installed ? (
-              <span className={`${styles.badge} ${styles.badgeInstalled}`}>
-                {ts('chat.marketplace.installed')}
-              </span>
-            ) : null}
-          </div>
-          {listing.description ? (
-            <div className={styles.rowMeta}>{listing.description}</div>
-          ) : null}
-          <div className={styles.rowMeta}>v{listing.version}</div>
-          {community ? (
-            <p className={styles.help}>{ts('chat.marketplace.skillCommunityRisk')}</p>
-          ) : null}
-          <pre className={styles.preview}>{skillPreview(listing)}</pre>
-        </div>
-        <div className={styles.rowActions}>
-          <Button
-            size="sm"
-            disabled={busyId === listing.id || loading}
-            onClick={() => {
-              setBusyId(listing.id)
-              void installSkillFromCatalog({
-                listingId: listing.id,
-                ...(installed ? { replace: true } : {}),
-              })
-                .then((desc) => {
-                  if (desc) void reloadInstalledSkills()
+      <MarketplaceDetail
+        id={listing.id}
+        name={listing.name}
+        description={listing.description}
+        homepage={listing.homepage}
+        iconUrl={listing.iconUrl}
+        version={listing.version}
+        installed={installed}
+        community={community}
+        busy={busyId === listing.id}
+        disabled={loading}
+        {...cardLabels}
+        backLabel={ts('chat.marketplace.back')}
+        homepageLabel={ts('chat.marketplace.openHomepage')}
+        riskNote={community ? ts('chat.marketplace.skillCommunityRisk') : undefined}
+        preview={skillPreview(listing)}
+        onBack={() => setDetail(null)}
+        onAction={(action) => {
+          void runSkillAction(listing, action)
+        }}
+        secondaryActions={
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={loading}
+              onClick={() => {
+                void disableSkillCatalogListing(listing.id).then((ok) => {
+                  if (ok) {
+                    setDetail(null)
+                    void loadSkills(false)
+                  }
                 })
-                .finally(() => setBusyId(null))
-            }}
-          >
-            {installed
-              ? ts('chat.marketplace.replace')
-              : ts('chat.marketplace.install')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={loading}
-            onClick={() => {
-              void disableSkillCatalogListing(listing.id).then((ok) => {
-                if (ok) void loadSkills(false)
-              })
-            }}
-          >
-            {ts('chat.marketplace.hide')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={loading}
-            onClick={() => {
-              void reportSkillCatalogListing({ listingId: listing.id }).then((ok) => {
-                if (ok) void loadSkills(false)
-              })
-            }}
-          >
-            {ts('chat.marketplace.report')}
-          </Button>
-        </div>
-      </div>
+              }}
+            >
+              {ts('chat.marketplace.hide')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={loading}
+              onClick={() => {
+                void reportSkillCatalogListing({ listingId: listing.id }).then((ok) => {
+                  if (ok) void loadSkills(false)
+                })
+              }}
+            >
+              {ts('chat.marketplace.report')}
+            </Button>
+          </>
+        }
+      />
     )
   }
 
@@ -337,92 +427,98 @@ export default function MarketplaceOverlay() {
             </Button>
           </div>
         </header>
-        <div className={styles.tabs} role="tablist" aria-label={ts('chat.marketplace.title')}>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'mcp'}
-            className={`${styles.tab} ${tab === 'mcp' ? styles.tabActive : ''}`}
-            onClick={() => setTab('mcp')}
-          >
-            {ts('chat.marketplace.tabMcp')}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'skills'}
-            className={`${styles.tab} ${tab === 'skills' ? styles.tabActive : ''}`}
-            onClick={() => setTab('skills')}
-          >
-            {ts('chat.marketplace.tabSkills')}
-          </button>
-        </div>
+        {!detail ? (
+          <div className={styles.tabs} role="tablist" aria-label={ts('chat.marketplace.title')}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'mcp'}
+              className={`${styles.tab} ${tab === 'mcp' ? styles.tabActive : ''}`}
+              onClick={() => setTab('mcp')}
+            >
+              {ts('chat.marketplace.tabMcp')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'skills'}
+              className={`${styles.tab} ${tab === 'skills' ? styles.tabActive : ''}`}
+              onClick={() => setTab('skills')}
+            >
+              {ts('chat.marketplace.tabSkills')}
+            </button>
+          </div>
+        ) : null}
         <div className={styles.body}>
-          <p className={styles.help}>
-            {tab === 'mcp'
-              ? ts('chat.marketplace.mcpIntro')
-              : ts('chat.marketplace.skillsIntro')}
-          </p>
-          {tab === 'mcp' && mcpView ? (
-            <p className={styles.help}>
-              {ts('chat.marketplace.source', { source: mcpView.source })}
-            </p>
-          ) : null}
-          {tab === 'skills' && skillView ? (
-            <p className={styles.help}>
-              {ts('chat.marketplace.source', { source: skillView.source })}
-            </p>
-          ) : null}
-          {error ? (
-            <p className={styles.error} role="alert">
-              {error}
-            </p>
-          ) : null}
-          {tab === 'mcp' ? (
-            <>
-              {mcpListings.length === 0 && !loading ? (
-                <p className={styles.empty}>{ts('chat.marketplace.empty')}</p>
-              ) : null}
-              {mcpCurated.length > 0 ? (
-                <>
-                  <h3 className={styles.sectionTitle}>
-                    {ts('chat.marketplace.curatedSection')}
-                  </h3>
-                  <div className={styles.list}>{mcpCurated.map(renderMcpListing)}</div>
-                </>
-              ) : null}
-              {mcpCommunity.length > 0 ? (
-                <>
-                  <h3 className={styles.sectionTitle}>
-                    {ts('chat.marketplace.communitySection')}
-                  </h3>
-                  <div className={styles.list}>{mcpCommunity.map(renderMcpListing)}</div>
-                </>
-              ) : null}
-            </>
+          {detail ? (
+            renderDetail()
           ) : (
             <>
-              {skillListings.length === 0 && !loading ? (
-                <p className={styles.empty}>{ts('chat.marketplace.empty')}</p>
+              <p className={styles.help}>
+                {tab === 'mcp'
+                  ? ts('chat.marketplace.mcpIntro')
+                  : ts('chat.marketplace.skillsIntro')}
+              </p>
+              {tab === 'mcp' && mcpView ? (
+                <p className={styles.help}>
+                  {ts('chat.marketplace.source', { source: mcpView.source })}
+                </p>
               ) : null}
-              {skillCurated.length > 0 ? (
+              {tab === 'skills' && skillView ? (
+                <p className={styles.help}>
+                  {ts('chat.marketplace.source', { source: skillView.source })}
+                </p>
+              ) : null}
+              {error ? (
+                <p className={styles.error} role="alert">
+                  {error}
+                </p>
+              ) : null}
+              {tab === 'mcp' ? (
                 <>
-                  <h3 className={styles.sectionTitle}>
-                    {ts('chat.marketplace.curatedSection')}
-                  </h3>
-                  <div className={styles.list}>{skillCurated.map(renderSkillListing)}</div>
+                  {mcpListings.length === 0 && !loading ? (
+                    <p className={styles.empty}>{ts('chat.marketplace.empty')}</p>
+                  ) : null}
+                  {mcpCurated.length > 0 ? (
+                    <>
+                      <h3 className={styles.sectionTitle}>
+                        {ts('chat.marketplace.curatedSection')}
+                      </h3>
+                      {renderMcpGrid(mcpCurated)}
+                    </>
+                  ) : null}
+                  {mcpCommunity.length > 0 ? (
+                    <>
+                      <h3 className={styles.sectionTitle}>
+                        {ts('chat.marketplace.communitySection')}
+                      </h3>
+                      {renderMcpGrid(mcpCommunity)}
+                    </>
+                  ) : null}
                 </>
-              ) : null}
-              {skillCommunity.length > 0 ? (
+              ) : (
                 <>
-                  <h3 className={styles.sectionTitle}>
-                    {ts('chat.marketplace.communitySection')}
-                  </h3>
-                  <div className={styles.list}>
-                    {skillCommunity.map(renderSkillListing)}
-                  </div>
+                  {skillListings.length === 0 && !loading ? (
+                    <p className={styles.empty}>{ts('chat.marketplace.empty')}</p>
+                  ) : null}
+                  {skillCurated.length > 0 ? (
+                    <>
+                      <h3 className={styles.sectionTitle}>
+                        {ts('chat.marketplace.curatedSection')}
+                      </h3>
+                      {renderSkillGrid(skillCurated)}
+                    </>
+                  ) : null}
+                  {skillCommunity.length > 0 ? (
+                    <>
+                      <h3 className={styles.sectionTitle}>
+                        {ts('chat.marketplace.communitySection')}
+                      </h3>
+                      {renderSkillGrid(skillCommunity)}
+                    </>
+                  ) : null}
                 </>
-              ) : null}
+              )}
             </>
           )}
         </div>

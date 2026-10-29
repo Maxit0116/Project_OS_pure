@@ -10,6 +10,8 @@ export const SkillCatalogListingSchema = z
     trustTier: SkillTrustTierSchema,
     version: z.string().min(1).max(64),
     homepage: z.string().url().max(2_048).optional(),
+    /** Official publisher icon URL (https) or app-relative path. */
+    iconUrl: z.string().min(1).max(2_048).optional(),
     /** Full SKILL.md contents (frontmatter + body). */
     skillMarkdown: z.string().min(1).max(200_000),
     /** Optional companion files relative to the skill directory. */
@@ -83,6 +85,12 @@ export const InstallSkillFromCatalogInputSchema = z
   })
   .strict();
 
+export const UninstallSkillFromCatalogInputSchema = z
+  .object({
+    listingId: z.string().min(1).max(120),
+  })
+  .strict();
+
 export const SKILL_CATALOG_REPORT_ISSUE_URL =
   "https://github.com/project-os/project-os/issues/new?labels=skill-catalog&title=Skill%20catalog%20report";
 
@@ -98,4 +106,7 @@ export type SkillCatalogSourceKind = z.infer<typeof SkillCatalogSourceKindSchema
 export type SkillCatalogView = z.infer<typeof SkillCatalogViewSchema>;
 export type InstallSkillFromCatalogInput = z.infer<
   typeof InstallSkillFromCatalogInputSchema
+>;
+export type UninstallSkillFromCatalogInput = z.infer<
+  typeof UninstallSkillFromCatalogInputSchema
 >;

@@ -141,9 +141,49 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   createWorkspaceBranch(
     projectId: string,
-    input: { name: string; from?: string; checkout?: boolean },
+    input: {
+      name: string;
+      from?: string;
+      checkout?: boolean;
+      push?: boolean;
+    },
   ) {
     return this.transport.createWorkspaceBranch(projectId, input);
+  }
+
+  renameWorkspaceBranch(
+    projectId: string,
+    input: {
+      from: string;
+      to: string;
+      push?: boolean;
+      deleteRemoteOld?: boolean;
+    },
+  ) {
+    return this.transport.renameWorkspaceBranch(projectId, input);
+  }
+
+  deleteWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      remote?: boolean;
+      force?: boolean;
+    },
+  ) {
+    return this.transport.deleteWorkspaceBranch(projectId, input);
+  }
+
+  rollbackWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      to?: string;
+      mode?: "hard" | "mixed";
+      push?: boolean;
+    },
+  ) {
+    return this.transport.rollbackWorkspaceBranch(projectId, input);
   }
 
   fetchWorkspaceGit(projectId: string) {
@@ -688,6 +728,13 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     input: import("../contracts/skill-marketplace.js").InstallSkillFromCatalogInput,
   ): Promise<import("../contracts/skills.js").SkillDescriptor> {
     return this.transport.installSkillFromCatalog(projectId, input);
+  }
+
+  uninstallSkillFromCatalog(
+    projectId: string,
+    input: import("../contracts/skill-marketplace.js").UninstallSkillFromCatalogInput,
+  ): Promise<void> {
+    return this.transport.uninstallSkillFromCatalog(projectId, input);
   }
 
   disableSkillCatalogListing(

@@ -8,18 +8,128 @@ export const GITHUB_NODE_GAP_X = 48
 export const GITHUB_NODE_GAP_Y = 72
 export const GITHUB_LAYOUT_PAD = 48
 
+export type BuildGithubGraphBranch = WorkspaceGitBranch & {
+  /** Client-only: create/push (or delete) still in flight. */
+  pending?: boolean
+}
+
 export interface BuildGithubGraphInput {
   repoLabel: string
   defaultBranch: string | null
   currentBranch: string | null
   remoteUrl?: string
   dirty: boolean
-  branches: readonly WorkspaceGitBranch[]
+  branches: readonly BuildGithubGraphBranch[]
   pullRequests?: readonly WorkspaceGitPullRequest[]
   worktrees?: readonly { id: string; branch?: string | null }[]
+  /**
+   * Explicit parent node id by branch name (create-child intent).
+   * Wins over slash inference when the parent id is already in the tree.
+   */
+  parentByBranchName?: Readonly<Record<string, string>>
 }
 
-/** Partition tree: default root → feature branches; PR / worktree as children. */
+/** Group id for a slash path prefix (e.g. alice/auth → group:alice/auth). */
+export function githubGroupId(path: string): string {
+  return `group:${path}`
+}
+
+/** Path used when composing a child branch under this node. */
+export function parentPathForNode(node: GithubGraphNode): string | null {
+  if (node.kind === 'group') {
+    return node.id.startsWith('group:')
+      ? node.id.slice('group:'.length)
+      : node.name
+  }
+  if (node.kind === 'branch') return node.name
+  if (node.kind === 'default') return null
+  return null
+}
+
+/**
+ * Compose a full ref name from a parent node + user short name.
+ * Short names should not start with `/`; nested segments under the parent are allowed.
+ */
+export function composeChildBranchName(
+  parent: GithubGraphNode,
+  shortName: string,
+): string {
+  const short = shortName
+    .trim()
+    .replace(/^\/+/u, '')
+    .replace(/\/+$/u, '')
+  if (!short) return ''
+  const path = parentPathForNode(parent)
+  if (!path) return short
+  if (short === path || short.startsWith(`${path}/`)) return short
+  return `${path}/${short}`
+}
+
+/** Real git tip for create — never a synthetic group name. */
+export function resolveCreateFromTip(
+  node: GithubGraphNode,
+  defaultBranch: string,
+  branches: readonly { name: string; current?: boolean }[],
+): string {
+  if (node.kind === 'default' || node.kind === 'branch') return node.name
+  if (node.kind === 'group') {
+    const path = parentPathForNode(node) ?? ''
+    const under = branches.filter(
+      (branch) => branch.name === path || branch.name.startsWith(`${path}/`),
+    )
+    const current = under.find((branch) => branch.current)
+    if (current) return current.name
+    under.sort((a, b) => b.name.length - a.name.length)
+    if (under[0]) return under[0].name
+  }
+  return defaultBranch
+}
+
+/**
+ * Ensure intermediate slash-path parents exist under default.
+ * Prefers an existing / known real branch over a synthetic group for the same path.
+ */
+export function ensureBranchPathParent(
+  branchName: string,
+  defaultId: string,
+  nodes: GithubGraphNode[],
+  seen: Set<string>,
+  knownBranchNames: ReadonlySet<string>,
+): string {
+  const segments = branchName.split('/').filter(Boolean)
+  if (segments.length <= 1) return defaultId
+
+  let parentId = defaultId
+  let path = ''
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    const segment = segments[i]!
+    path = path ? `${path}/${segment}` : segment
+    const branchId = `branch:${path}`
+    if (seen.has(branchId) || knownBranchNames.has(path)) {
+      parentId = branchId
+      continue
+    }
+    const id = githubGroupId(path)
+    if (!seen.has(id)) {
+      seen.add(id)
+      nodes.push({
+        id,
+        kind: 'group',
+        name: segment,
+        parentId,
+        current: false,
+      })
+    }
+    parentId = id
+  }
+  return parentId
+}
+
+function pathDepth(name: string): number {
+  return name.split('/').filter(Boolean).length
+}
+
+/** Partition tree: default → path groups / parent branches → feature leaves. */
 export function buildGithubGraphModel(
   input: BuildGithubGraphInput,
 ): GithubGraphModel {
@@ -36,23 +146,47 @@ export function buildGithubGraphModel(
   ]
 
   const seen = new Set<string>([defaultId])
+  const knownBranchNames = new Set(
+    input.branches
+      .map((branch) => branch.name)
+      .filter((name) => name !== defaultBranch),
+  )
+  const overrides = input.parentByBranchName ?? {}
 
-  for (const branch of input.branches) {
+  const ordered = [...input.branches].sort(
+    (a, b) => pathDepth(a.name) - pathDepth(b.name),
+  )
+
+  for (const branch of ordered) {
     if (branch.name === defaultBranch) {
       const root = nodes[0]!
       root.current = branch.current || root.current
+      root.remote = branch.remote
       if (branch.ahead !== undefined) root.ahead = branch.ahead
       if (branch.behind !== undefined) root.behind = branch.behind
       continue
     }
     if (seen.has(branch.id)) continue
+    const overrideParent = overrides[branch.name]
+    const parentId =
+      overrideParent && seen.has(overrideParent)
+        ? overrideParent
+        : ensureBranchPathParent(
+            branch.name,
+            defaultId,
+            nodes,
+            seen,
+            knownBranchNames,
+          )
     seen.add(branch.id)
     nodes.push({
       id: branch.id,
       kind: 'branch',
       name: branch.name,
-      parentId: defaultId,
+      parentId,
       current: branch.current,
+      remote: branch.remote,
+      pending: Boolean(branch.pending),
       ...(branch.ahead !== undefined ? { ahead: branch.ahead } : {}),
       ...(branch.behind !== undefined ? { behind: branch.behind } : {}),
     })
@@ -61,12 +195,20 @@ export function buildGithubGraphModel(
   for (const pr of input.pullRequests ?? []) {
     const headId = `branch:${pr.headRef}`
     if (!seen.has(headId)) {
+      knownBranchNames.add(pr.headRef)
+      const parentId = ensureBranchPathParent(
+        pr.headRef,
+        defaultId,
+        nodes,
+        seen,
+        knownBranchNames,
+      )
       seen.add(headId)
       nodes.push({
         id: headId,
         kind: 'branch',
         name: pr.headRef,
-        parentId: defaultId,
+        parentId,
         current: input.currentBranch === pr.headRef,
       })
     }
@@ -87,12 +229,20 @@ export function buildGithubGraphModel(
       ? `branch:${worktree.branch}`
       : defaultId
     if (worktree.branch && !seen.has(parentId)) {
+      knownBranchNames.add(worktree.branch)
+      const pathParent = ensureBranchPathParent(
+        worktree.branch,
+        defaultId,
+        nodes,
+        seen,
+        knownBranchNames,
+      )
       seen.add(parentId)
       nodes.push({
         id: parentId,
         kind: 'branch',
         name: worktree.branch,
-        parentId: defaultId,
+        parentId: pathParent,
         current: false,
       })
     }
@@ -129,7 +279,7 @@ export interface GithubGraphLayout {
   height: number
 }
 
-/** Top-down tree layout aligned to Session/Loop world coordinates. */
+/** Left-to-right tree layout (depth → x, siblings → y). */
 export function layoutGithubGraphTree(
   model: GithubGraphModel,
 ): GithubGraphLayout {
@@ -151,8 +301,8 @@ export function layoutGithubGraphTree(
     if (children.length === 0) {
       laid.push({
         node,
-        x: GITHUB_LAYOUT_PAD + leafIndex * colPitch,
-        y: GITHUB_LAYOUT_PAD + depth * rowPitch,
+        x: GITHUB_LAYOUT_PAD + depth * colPitch,
+        y: GITHUB_LAYOUT_PAD + leafIndex * rowPitch,
         depth,
       })
       leafIndex += 1
@@ -167,8 +317,8 @@ export function layoutGithubGraphTree(
         : (before + after - 1) / 2
     laid.push({
       node,
-      x: GITHUB_LAYOUT_PAD + mid * colPitch,
-      y: GITHUB_LAYOUT_PAD + depth * rowPitch,
+      x: GITHUB_LAYOUT_PAD + depth * colPitch,
+      y: GITHUB_LAYOUT_PAD + mid * rowPitch,
       depth,
     })
   }

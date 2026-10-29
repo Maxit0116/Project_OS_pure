@@ -45,6 +45,9 @@ export default function GithubBranchLocator({
     setError(null)
     void (async () => {
       try {
+        // Soft refresh remotes when available (LocalApi also fetches on list).
+        await dataSource?.fetchGit?.().catch(() => undefined)
+        if (cancelled) return
         const listed = await dataSource?.listGitBranches?.()
         if (cancelled) return
         setBranches(listed?.branches ?? [])

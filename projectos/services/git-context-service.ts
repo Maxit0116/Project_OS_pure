@@ -250,14 +250,31 @@ function readDiffStats(workspaceRoot: string): ToolResultDiffStats | undefined {
   return { files, additions, deletions };
 }
 
+type TryGitOptions = {
+  /** When set, injects a one-shot GitHub HTTPS Authorization header (never written to git config). */
+  accessToken?: string;
+};
+
 function tryGit(
   cwd: string,
   args: string[],
+  options: TryGitOptions = {},
 ): { ok: true; stdout: string } | { ok: false; message: string } {
   if (!existsSync(cwd)) {
     return { ok: false, message: "Workspace is not a git repository" };
   }
-  const result = spawnSync("git", args, {
+  const gitArgs =
+    options.accessToken && options.accessToken.trim()
+      ? [
+          "-c",
+          `http.https://github.com/.extraheader=AUTHORIZATION: basic ${Buffer.from(
+            `x-access-token:${options.accessToken.trim()}`,
+            "utf8",
+          ).toString("base64")}`,
+          ...args,
+        ]
+      : args;
+  const result = spawnSync("git", gitArgs, {
     cwd,
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
@@ -384,16 +401,113 @@ export function listGitBranches(workspaceRoot: string): ListedGitBranchSet {
   return { defaultBranch, currentBranch, branches };
 }
 
+/** Merge GitHub API branch names into a local listing (remote-only names marked remote). */
+export function mergeRemoteApiBranches(
+  listed: ListedGitBranchSet,
+  apiBranchNames: string[],
+): ListedGitBranchSet {
+  if (apiBranchNames.length === 0) return listed;
+  const byName = new Map(listed.branches.map((branch) => [branch.name, branch]));
+  for (const name of apiBranchNames) {
+    const trimmed = name.trim();
+    if (!trimmed || byName.has(trimmed)) continue;
+    byName.set(trimmed, {
+      name: trimmed,
+      id: `branch:${trimmed}`,
+      current: false,
+      remote: true,
+      upstream: `origin/${trimmed}`,
+    });
+  }
+  const defaultBranch = listed.defaultBranch;
+  const branches = [...byName.values()].sort((a, b) => {
+    if (a.current !== b.current) return a.current ? -1 : 1;
+    if (a.name === defaultBranch) return -1;
+    if (b.name === defaultBranch) return 1;
+    return a.name.localeCompare(b.name);
+  });
+  return {
+    defaultBranch: listed.defaultBranch,
+    currentBranch: listed.currentBranch,
+    branches,
+  };
+}
+
+function resolveBranchStartPoint(
+  workspaceRoot: string,
+  from: string | undefined,
+): string {
+  const requested = from?.trim();
+  if (!requested) {
+    const status = readGitRepositoryStatus(workspaceRoot);
+    return status.branch || "HEAD";
+  }
+  const local = tryGit(workspaceRoot, [
+    "show-ref",
+    "--verify",
+    "--quiet",
+    `refs/heads/${requested}`,
+  ]);
+  if (local.ok) return requested;
+  const remote = tryGit(workspaceRoot, [
+    "show-ref",
+    "--verify",
+    "--quiet",
+    `refs/remotes/origin/${requested}`,
+  ]);
+  if (remote.ok) return `origin/${requested}`;
+  if (requested.startsWith("origin/")) return requested;
+  return requested;
+}
+
 export interface GitMutationResult {
   ok: boolean;
   branch?: string | null;
   message: string;
 }
 
+export type GitAuthOptions = {
+  accessToken?: string;
+};
+
+/** Ensure a single remote-tracking ref exists (used before checkout / branch-from). */
+function ensureRemoteTrackingBranch(
+  workspaceRoot: string,
+  branch: string,
+  options: GitAuthOptions = {},
+): GitMutationResult {
+  const name = branch.trim();
+  const existing = tryGit(workspaceRoot, [
+    "show-ref",
+    "--verify",
+    "--quiet",
+    `refs/remotes/origin/${name}`,
+  ]);
+  if (existing.ok) return { ok: true, branch: name, message: `origin/${name} present.` };
+  const fetched = tryGit(
+    workspaceRoot,
+    [
+      "fetch",
+      "--prune",
+      "origin",
+      `+refs/heads/${name}:refs/remotes/origin/${name}`,
+    ],
+    { accessToken: options.accessToken },
+  );
+  if (!fetched.ok) {
+    return {
+      ok: false,
+      message: `Could not fetch origin/${name}: ${fetched.message}`,
+    };
+  }
+  return { ok: true, branch: name, message: `Fetched origin/${name}.` };
+}
+
 /** Refuse when the working tree is dirty — no auto-stash in v1. */
 export function checkoutGitBranch(
   workspaceRoot: string,
   branch: string,
+  options: GitAuthOptions = {},
 ): GitMutationResult {
   const name = branch.trim();
   if (!name) return { ok: false, message: "Branch name is required." };
@@ -409,25 +523,35 @@ export function checkoutGitBranch(
     };
   }
   const result = tryGit(workspaceRoot, ["checkout", name]);
-  if (!result.ok) {
-    const createTrack = tryGit(workspaceRoot, [
-      "checkout",
-      "-b",
-      name,
-      "--track",
-      `origin/${name}`,
-    ]);
-    if (!createTrack.ok) {
-      return { ok: false, message: result.message };
-    }
+  if (result.ok) {
+    return { ok: true, branch: name, message: `Checked out ${name}.` };
   }
-  return { ok: true, branch: name, message: `Checked out ${name}.` };
+  const ensured = ensureRemoteTrackingBranch(workspaceRoot, name, options);
+  if (!ensured.ok) {
+    return { ok: false, message: result.message };
+  }
+  const createTrack = tryGit(workspaceRoot, [
+    "checkout",
+    "-b",
+    name,
+    "--track",
+    `origin/${name}`,
+  ]);
+  if (!createTrack.ok) {
+    return { ok: false, message: createTrack.message || result.message };
+  }
+  return { ok: true, branch: name, message: `Checked out ${name} (tracking origin/${name}).` };
 }
 
 export function createGitBranch(
   workspaceRoot: string,
   branch: string,
-  options: { from?: string; checkout?: boolean } = {},
+  options: {
+    from?: string;
+    checkout?: boolean;
+    /** Push the new branch to origin after local create (GitHub Graph default). */
+    push?: boolean;
+  } & GitAuthOptions = {},
 ): GitMutationResult {
   const name = branch.trim();
   if (!name) return { ok: false, message: "Branch name is required." };
@@ -438,7 +562,27 @@ export function createGitBranch(
   if (status.error && !status.branch) {
     return { ok: false, message: status.error };
   }
-  const base = options.from?.trim() || status.branch || "HEAD";
+  const from = options.from?.trim();
+  if (from) {
+    const local = tryGit(workspaceRoot, [
+      "show-ref",
+      "--verify",
+      "--quiet",
+      `refs/heads/${from}`,
+    ]);
+    const remote = tryGit(workspaceRoot, [
+      "show-ref",
+      "--verify",
+      "--quiet",
+      `refs/remotes/origin/${from}`,
+    ]);
+    if (!local.ok && !remote.ok) {
+      const ensured = ensureRemoteTrackingBranch(workspaceRoot, from, options);
+      if (!ensured.ok) return ensured;
+    }
+  }
+  const base = resolveBranchStartPoint(workspaceRoot, options.from);
+  let created: GitMutationResult;
   if (options.checkout !== false) {
     if (status.dirty) {
       return {
@@ -449,17 +593,360 @@ export function createGitBranch(
     }
     const result = tryGit(workspaceRoot, ["checkout", "-b", name, base]);
     if (!result.ok) return { ok: false, message: result.message };
-    return { ok: true, branch: name, message: `Created and checked out ${name}.` };
+    created = {
+      ok: true,
+      branch: name,
+      message: `Created and checked out ${name} from ${base}.`,
+    };
+  } else {
+    const result = tryGit(workspaceRoot, ["branch", name, base]);
+    if (!result.ok) return { ok: false, message: result.message };
+    created = {
+      ok: true,
+      branch: name,
+      message: `Created ${name} from ${base}.`,
+    };
   }
-  const result = tryGit(workspaceRoot, ["branch", name, base]);
-  if (!result.ok) return { ok: false, message: result.message };
-  return { ok: true, branch: name, message: `Created ${name}.` };
+
+  if (!options.push) return created;
+
+  const pushed = pushGitBranch(workspaceRoot, name, {
+    accessToken: options.accessToken,
+  });
+  if (!pushed.ok) {
+    return {
+      ok: false,
+      branch: name,
+      message: `Created local branch '${name}', but push to origin failed: ${pushed.message}`,
+    };
+  }
+  return {
+    ok: true,
+    branch: name,
+    message: `${created.message} Pushed to origin.`,
+  };
 }
 
-export function fetchGitRemote(workspaceRoot: string): GitMutationResult {
-  const result = tryGit(workspaceRoot, ["fetch", "--prune", "origin"]);
+/**
+ * Fetch all origin heads into remote-tracking refs.
+ * Uses an explicit refspec so single-branch clones still learn other remotes.
+ * Optional accessToken authenticates HTTPS GitHub remotes without rewriting git config.
+ */
+export function fetchGitRemote(
+  workspaceRoot: string,
+  options: GitAuthOptions = {},
+): GitMutationResult {
+  const auth = { accessToken: options.accessToken };
+  const result = tryGit(
+    workspaceRoot,
+    [
+      "fetch",
+      "--prune",
+      "origin",
+      "+refs/heads/*:refs/remotes/origin/*",
+    ],
+    auth,
+  );
+  if (!result.ok) {
+    const fallback = tryGit(workspaceRoot, ["fetch", "--prune", "origin"], auth);
+    if (!fallback.ok) return { ok: false, message: fallback.message };
+    return {
+      ok: true,
+      message:
+        "Fetched origin (narrow refspec). Some remote branches may still be missing.",
+    };
+  }
+  return { ok: true, message: "Fetched all origin branches." };
+}
+
+/** Push a local branch to origin (sets upstream). Used before Create PR. */
+export function pushGitBranch(
+  workspaceRoot: string,
+  branch: string,
+  options: GitAuthOptions = {},
+): GitMutationResult {
+  const name = branch.trim();
+  if (!name) return { ok: false, message: "Branch name is required." };
+  const local = tryGit(workspaceRoot, [
+    "show-ref",
+    "--verify",
+    "--quiet",
+    `refs/heads/${name}`,
+  ]);
+  if (!local.ok) {
+    return {
+      ok: false,
+      message: `Local branch '${name}' does not exist. Checkout or create it before pushing.`,
+    };
+  }
+  const result = tryGit(
+    workspaceRoot,
+    ["push", "-u", "origin", name],
+    { accessToken: options.accessToken },
+  );
   if (!result.ok) return { ok: false, message: result.message };
-  return { ok: true, message: "Fetched origin." };
+  return { ok: true, branch: name, message: `Pushed ${name} to origin.` };
+}
+
+const BRANCH_NAME_RE = /^[A-Za-z0-9._/\-]+$/;
+
+function ensureLocalBranch(
+  workspaceRoot: string,
+  branch: string,
+  options: GitAuthOptions = {},
+): GitMutationResult {
+  const name = branch.trim();
+  const local = tryGit(workspaceRoot, [
+    "show-ref",
+    "--verify",
+    "--quiet",
+    `refs/heads/${name}`,
+  ]);
+  if (local.ok) return { ok: true, branch: name, message: `Local branch ${name} ready.` };
+  const ensured = ensureRemoteTrackingBranch(workspaceRoot, name, options);
+  if (!ensured.ok) {
+    return {
+      ok: false,
+      message: `Branch '${name}' does not exist locally or on origin.`,
+    };
+  }
+  const created = tryGit(workspaceRoot, [
+    "branch",
+    "--track",
+    name,
+    `origin/${name}`,
+  ]);
+  if (!created.ok) {
+    return { ok: false, message: created.message };
+  }
+  return { ok: true, branch: name, message: `Created local tracking branch ${name}.` };
+}
+
+/** Rename a local branch; optionally retarget origin (push new + delete old). */
+export function renameGitBranch(
+  workspaceRoot: string,
+  fromName: string,
+  toName: string,
+  options: {
+    push?: boolean;
+    deleteRemoteOld?: boolean;
+  } & GitAuthOptions = {},
+): GitMutationResult {
+  const from = fromName.trim();
+  const to = toName.trim();
+  if (!from || !to) {
+    return { ok: false, message: "Current and new branch names are required." };
+  }
+  if (from === to) {
+    return { ok: true, branch: to, message: `Branch already named ${to}.` };
+  }
+  if (!BRANCH_NAME_RE.test(to)) {
+    return { ok: false, message: "Branch name contains invalid characters." };
+  }
+  const defaultBranch = readGitDefaultBranch(workspaceRoot);
+  if (defaultBranch && from === defaultBranch) {
+    return {
+      ok: false,
+      message: "Cannot rename the default branch from the graph.",
+    };
+  }
+  const status = readGitRepositoryStatus(workspaceRoot);
+  if (status.error && !status.branch) {
+    return { ok: false, message: status.error };
+  }
+  const ensured = ensureLocalBranch(workspaceRoot, from, options);
+  if (!ensured.ok) return ensured;
+
+  const renamed = tryGit(workspaceRoot, ["branch", "-m", from, to]);
+  if (!renamed.ok) return { ok: false, message: renamed.message };
+
+  if (options.push === false) {
+    return { ok: true, branch: to, message: `Renamed ${from} → ${to} locally.` };
+  }
+
+  const pushed = pushGitBranch(workspaceRoot, to, {
+    accessToken: options.accessToken,
+  });
+  if (!pushed.ok) {
+    return {
+      ok: false,
+      branch: to,
+      message: `Renamed locally to '${to}', but push failed: ${pushed.message}`,
+    };
+  }
+
+  let remoteNote = "";
+  if (options.deleteRemoteOld !== false) {
+    const deletedRemote = tryGit(
+      workspaceRoot,
+      ["push", "origin", "--delete", from],
+      { accessToken: options.accessToken },
+    );
+    remoteNote = deletedRemote.ok
+      ? ` Removed origin/${from}.`
+      : ` (could not delete origin/${from}: ${deletedRemote.message})`;
+  }
+
+  return {
+    ok: true,
+    branch: to,
+    message: `Renamed ${from} → ${to} and pushed to origin.${remoteNote}`,
+  };
+}
+
+/** Delete a local branch; optionally delete origin/<name>. Will not delete default. */
+export function deleteGitBranch(
+  workspaceRoot: string,
+  branch: string,
+  options: {
+    remote?: boolean;
+    force?: boolean;
+  } & GitAuthOptions = {},
+): GitMutationResult {
+  const name = branch.trim();
+  if (!name) return { ok: false, message: "Branch name is required." };
+  const defaultBranch = readGitDefaultBranch(workspaceRoot) ?? "main";
+  if (name === defaultBranch) {
+    return { ok: false, message: "Cannot delete the default branch." };
+  }
+  const status = readGitRepositoryStatus(workspaceRoot);
+  if (status.error && !status.branch) {
+    return { ok: false, message: status.error };
+  }
+  if (status.branch === name) {
+    if (status.dirty) {
+      return {
+        ok: false,
+        message:
+          "Working tree is dirty. Commit or stash before deleting the current branch.",
+      };
+    }
+    const switched = tryGit(workspaceRoot, ["checkout", defaultBranch]);
+    if (!switched.ok) {
+      return {
+        ok: false,
+        message: `Could not switch to ${defaultBranch} before delete: ${switched.message}`,
+      };
+    }
+  }
+
+  const local = tryGit(workspaceRoot, [
+    "show-ref",
+    "--verify",
+    "--quiet",
+    `refs/heads/${name}`,
+  ]);
+  if (local.ok) {
+    const flag = options.force === false ? "-d" : "-D";
+    const deleted = tryGit(workspaceRoot, ["branch", flag, name]);
+    if (!deleted.ok) return { ok: false, message: deleted.message };
+  }
+
+  if (options.remote === false) {
+    return {
+      ok: true,
+      branch: defaultBranch,
+      message: local.ok
+        ? `Deleted local branch ${name}.`
+        : `No local branch ${name} to delete.`,
+    };
+  }
+
+  const remoteDeleted = tryGit(
+    workspaceRoot,
+    ["push", "origin", "--delete", name],
+    { accessToken: options.accessToken },
+  );
+  if (!remoteDeleted.ok && local.ok) {
+    return {
+      ok: true,
+      branch: defaultBranch,
+      message: `Deleted local ${name}, but remote delete failed: ${remoteDeleted.message}`,
+    };
+  }
+  if (!remoteDeleted.ok && !local.ok) {
+    return { ok: false, message: remoteDeleted.message };
+  }
+  return {
+    ok: true,
+    branch: defaultBranch,
+    message: `Deleted ${name} locally and on origin.`,
+  };
+}
+
+/**
+ * Roll a feature branch tip back to another tip (default: repo default branch).
+ * Optionally force-pushes with --force-with-lease.
+ */
+export function rollbackGitBranch(
+  workspaceRoot: string,
+  branch: string,
+  options: {
+    to?: string;
+    mode?: "hard" | "mixed";
+    push?: boolean;
+  } & GitAuthOptions = {},
+): GitMutationResult {
+  const name = branch.trim();
+  if (!name) return { ok: false, message: "Branch name is required." };
+  const defaultBranch = readGitDefaultBranch(workspaceRoot) ?? "main";
+  if (name === defaultBranch) {
+    return {
+      ok: false,
+      message: "Cannot roll back the default branch from the graph.",
+    };
+  }
+  const status = readGitRepositoryStatus(workspaceRoot);
+  if (status.error && !status.branch) {
+    return { ok: false, message: status.error };
+  }
+  if (status.dirty) {
+    return {
+      ok: false,
+      message:
+        "Working tree is dirty. Commit or stash before rolling back a branch.",
+    };
+  }
+
+  const ensured = ensureLocalBranch(workspaceRoot, name, options);
+  if (!ensured.ok) return ensured;
+
+  if (status.branch !== name) {
+    const checked = tryGit(workspaceRoot, ["checkout", name]);
+    if (!checked.ok) return { ok: false, message: checked.message };
+  }
+
+  const targetRef = options.to?.trim() || defaultBranch;
+  const target = resolveBranchStartPoint(workspaceRoot, targetRef);
+  const modeFlag = options.mode === "mixed" ? "--mixed" : "--hard";
+  const reset = tryGit(workspaceRoot, ["reset", modeFlag, target]);
+  if (!reset.ok) return { ok: false, message: reset.message };
+
+  if (options.push === false) {
+    return {
+      ok: true,
+      branch: name,
+      message: `Reset ${name} to ${target} (${modeFlag.slice(2)}).`,
+    };
+  }
+
+  const pushed = tryGit(
+    workspaceRoot,
+    ["push", "--force-with-lease", "origin", name],
+    { accessToken: options.accessToken },
+  );
+  if (!pushed.ok) {
+    return {
+      ok: false,
+      branch: name,
+      message: `Reset ${name} to ${target} locally, but force-push failed: ${pushed.message}`,
+    };
+  }
+  return {
+    ok: true,
+    branch: name,
+    message: `Reset ${name} to ${target} and force-pushed to origin.`,
+  };
 }
 
 export function githubHttpsUrlFromRemote(remoteUrl: string | undefined): string | undefined {
@@ -583,14 +1070,81 @@ export async function listGithubPullRequests(
   return viaGh;
 }
 
+export async function listGithubRemoteBranchNames(
+  workspaceRoot: string,
+  options: GithubApiOptions = {},
+): Promise<{ available: boolean; branches: string[]; message?: string }> {
+  if (!options.accessToken) {
+    return { available: false, branches: [], message: "GitHub auth required" };
+  }
+  const remoteUrl = readGitRemoteUrl(workspaceRoot);
+  const { parseGithubOwnerRepo, listBranchesViaRest } = await import(
+    "./github-auth/github-rest.js"
+  );
+  const parsed = parseGithubOwnerRepo(remoteUrl);
+  if (!parsed) {
+    return {
+      available: false,
+      branches: [],
+      message: "Could not parse GitHub owner/repo from the git remote.",
+    };
+  }
+  return listBranchesViaRest(
+    parsed.owner,
+    parsed.repo,
+    options.accessToken,
+    options.fetchImpl,
+  );
+}
+
 export async function createGithubPullRequest(
   workspaceRoot: string,
   input: { title: string; head?: string; base?: string; body?: string },
-  options: GithubApiOptions = {},
+  options: GithubApiOptions & { pushHead?: boolean } = {},
 ): Promise<{ ok: boolean; url?: string; number?: number; message: string }> {
+  const status = readGitRepositoryStatus(workspaceRoot);
+  const head = input.head ?? status.branch ?? undefined;
+  const base = input.base ?? readGitDefaultBranch(workspaceRoot) ?? undefined;
+  if (!head || !base) {
+    return {
+      ok: false,
+      message: "PR create requires head and base branch names.",
+    };
+  }
+
+  // Local heads: push first. Remote-only heads: ensure origin ref exists (already on GitHub).
+  if (options.pushHead !== false) {
+    const localHead = tryGit(workspaceRoot, [
+      "show-ref",
+      "--verify",
+      "--quiet",
+      `refs/heads/${head}`,
+    ]);
+    if (localHead.ok) {
+      const pushed = pushGitBranch(workspaceRoot, head, {
+        accessToken: options.accessToken,
+      });
+      if (!pushed.ok) {
+        return {
+          ok: false,
+          message: `Push ${head} before creating a PR: ${pushed.message}`,
+        };
+      }
+    } else {
+      const ensured = ensureRemoteTrackingBranch(workspaceRoot, head, {
+        accessToken: options.accessToken,
+      });
+      if (!ensured.ok) {
+        return {
+          ok: false,
+          message: `Head '${head}' is not local and could not be found on origin: ${ensured.message}`,
+        };
+      }
+    }
+  }
+
   if (options.accessToken) {
     const remoteUrl = readGitRemoteUrl(workspaceRoot);
-    const status = readGitRepositoryStatus(workspaceRoot);
     const {
       parseGithubOwnerRepo,
       createPullRequestViaRest,
@@ -600,15 +1154,6 @@ export async function createGithubPullRequest(
       return {
         ok: false,
         message: "Could not parse GitHub owner/repo from the git remote.",
-      };
-    }
-    const head = input.head ?? status.branch ?? undefined;
-    const base =
-      input.base ?? readGitDefaultBranch(workspaceRoot) ?? undefined;
-    if (!head || !base) {
-      return {
-        ok: false,
-        message: "PR create requires head and base branch names.",
       };
     }
     return createPullRequestViaRest(
@@ -625,9 +1170,7 @@ export async function createGithubPullRequest(
     );
   }
 
-  const args = ["pr", "create", "--title", input.title, "--fill"];
-  if (input.head) args.push("--head", input.head);
-  if (input.base) args.push("--base", input.base);
+  const args = ["pr", "create", "--title", input.title, "--fill", "--head", head, "--base", base];
   if (input.body) args.push("--body", input.body);
   const result = spawnSync("gh", args, {
     cwd: workspaceRoot,

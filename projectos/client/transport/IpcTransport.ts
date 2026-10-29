@@ -268,9 +268,49 @@ export class IpcTransport implements ApiTransport {
 
   createWorkspaceBranch(
     projectId: string,
-    input: { name: string; from?: string; checkout?: boolean },
+    input: {
+      name: string;
+      from?: string;
+      checkout?: boolean;
+      push?: boolean;
+    },
   ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
     return this.invoke("createWorkspaceBranch", projectId, input);
+  }
+
+  renameWorkspaceBranch(
+    projectId: string,
+    input: {
+      from: string;
+      to: string;
+      push?: boolean;
+      deleteRemoteOld?: boolean;
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("renameWorkspaceBranch", projectId, input);
+  }
+
+  deleteWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      remote?: boolean;
+      force?: boolean;
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("deleteWorkspaceBranch", projectId, input);
+  }
+
+  rollbackWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      to?: string;
+      mode?: "hard" | "mixed";
+      push?: boolean;
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("rollbackWorkspaceBranch", projectId, input);
   }
 
   fetchWorkspaceGit(
@@ -854,6 +894,13 @@ export class IpcTransport implements ApiTransport {
     input: import("../../contracts/skill-marketplace.js").InstallSkillFromCatalogInput,
   ): Promise<import("../../contracts/skills.js").SkillDescriptor> {
     return this.invoke("installSkillFromCatalog", projectId, input);
+  }
+
+  uninstallSkillFromCatalog(
+    projectId: string,
+    input: import("../../contracts/skill-marketplace.js").UninstallSkillFromCatalogInput,
+  ): Promise<void> {
+    return this.invoke("uninstallSkillFromCatalog", projectId, input);
   }
 
   disableSkillCatalogListing(

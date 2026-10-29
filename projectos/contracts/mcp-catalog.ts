@@ -13,6 +13,8 @@ export const McpCatalogListingSchema = z
     trustTier: McpTrustTierSchema,
     version: z.string().min(1).max(64),
     homepage: z.string().url().max(2_048).optional(),
+    /** Official publisher icon URL (https) or app-relative path. */
+    iconUrl: z.string().min(1).max(2_048).optional(),
     requiresAuth: z.boolean().default(false),
     transport: CatalogTransportSchema,
     command: z.string().min(1).max(512).optional(),
