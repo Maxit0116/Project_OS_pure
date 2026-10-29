@@ -577,12 +577,59 @@ describe("contracts schema hardening", () => {
     expect(ProjectOSSettingsSchema.safeParse({
       ...validSettings(),
       team: { activePersonId: "person_alice" },
-    }).success).toBe(true);
+    }).success).toBe(false);
     expect(ProjectOSSettingsSchema.safeParse(validSettings()).success).toBe(true);
     expect(ProjectOSSettingsSchema.safeParse({
       ...validSettings(),
-      team: { activePersonId: "person_alice", extra: true },
+      mcpServers: [{
+        id: "docs",
+        name: "Docs",
+        enabled: true,
+        transport: "stdio" as const,
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-everything"],
+      }],
+    }).success).toBe(true);
+    expect(ProjectOSSettingsSchema.safeParse({
+      ...validSettings(),
+      mcpServers: [{
+        id: "bad",
+        name: "Bad",
+        enabled: true,
+        transport: "http" as const,
+      }],
     }).success).toBe(false);
+    expect(ProjectOSSettingsSchema.safeParse({
+      ...validSettings(),
+      mcpServers: [{
+        id: "from_catalog",
+        name: "From catalog",
+        enabled: false,
+        transport: "stdio" as const,
+        command: "npx",
+        provenance: {
+          listingId: "curated.filesystem",
+          catalogVersion: "1",
+          trustTier: "curated" as const,
+          listingVersion: "1.0.0",
+          installedAt: "2026-10-29T00:00:00.000Z",
+          source: "catalog" as const,
+        },
+      }],
+      mcpMarketplace: {
+        catalogUrl: "https://catalog.example.test/mcp/catalog.json",
+        disabledListingIds: ["community.bad"],
+        reports: [{
+          listingId: "community.bad",
+          reportedAt: "2026-10-29T00:00:00.000Z",
+          note: "suspicious",
+        }],
+      },
+      skillMarketplace: {
+        catalogUrl: "https://catalog.example.test/skills/catalog.json",
+        disabledListingIds: ["community.skill"],
+      },
+    }).success).toBe(true);
   });
 
   it("requires finite nonnegative integer model-gateway metrics", () => {

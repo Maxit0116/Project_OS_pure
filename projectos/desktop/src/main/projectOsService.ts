@@ -37,6 +37,9 @@ export function getProjectOsService(): ProjectOSLocalApi {
         await shell.openExternal(url)
       },
       agentMemoryRoot: join(userDataPath, 'agent-memory'),
+      mcpCatalogCacheRoot: join(userDataPath, 'mcp-catalog'),
+      skillCatalogCacheRoot: join(userDataPath, 'skill-catalog'),
+      userDataPath,
     })
   }
   return service

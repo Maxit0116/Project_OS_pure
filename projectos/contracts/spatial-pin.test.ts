@@ -169,6 +169,20 @@ describe("spatial-pin contracts", () => {
           id: "ref_1",
           assetPath: ".projectos/spatial-pins/assets/x.png",
         },
+        {
+          kind: "github",
+          id: "ref_gh",
+          url: "https://github.com/acme/design-system",
+          owner: "acme",
+          repo: "design-system",
+          label: "acme/design-system",
+        },
+        {
+          kind: "url",
+          id: "ref_url",
+          url: "https://docs.example.com/api",
+          label: "docs.example.com",
+        },
       ],
       subagents: [
         { id: "s1", name: "Explorer", brief: "Map files", enabled: true },
@@ -190,9 +204,14 @@ describe("spatial-pin contracts", () => {
     const content = buildSpatialPinUserContent(parsed);
     expect(content).toContain("## Compose hub");
     expect(content).toContain("hub.repo=acme/app @main");
-    expect(content).toContain("hub.folders=app/builder");
+    expect(content).toContain("hub.scopes=app/builder");
     expect(content).toContain("hub.skills=motion");
     expect(content).toContain("hub.research=enabled");
     expect(content).toContain("Explorer");
+    expect(content).toContain("## External references (persistent context)");
+    expect(content).toContain("GitHub reference");
+    expect(content).toContain("https://github.com/acme/design-system");
+    expect(content).toContain("Website reference");
+    expect(content).toContain("https://docs.example.com/api");
   });
 });

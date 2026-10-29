@@ -1,0 +1,132 @@
+.banner {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
+  border: 1px solid var(--tech-border);
+  color: var(--tech-text-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.bannerWarn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
+  border: 1px solid var(--tech-border-strong);
+}
+
+.bannerWarn p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--tech-text-primary);
+}
+
+.ready {
+  margin: 0;
+  font-size: 13px;
+  color: var(--tech-text-secondary);
+}
+
+.link {
+  color: var(--tech-accent);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.avatarFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  flex-shrink: 0;
+}
+
+.profileText {
+  flex: 1;
+  min-width: 0;
+}
+
+.login {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tech-text-primary);
+}
+
+.name {
+  font-size: 12px;
+  color: var(--tech-text-secondary);
+  margin-top: 2px;
+}
+
+.pending {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+}
+
+.signingIn {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tech-text-primary);
+}
+
+.codeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: var(--tech-bg-muted);
+  border: 1px solid var(--tech-border);
+  color: var(--tech-text-primary);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}

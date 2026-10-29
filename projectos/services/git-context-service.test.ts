@@ -5,7 +5,10 @@ import { spawnSync } from "node:child_process";
 
 import { readCapabilityContext } from "./harness/tool-policy.js";
 import {
+  checkoutGitBranch,
+  createGitBranch,
   getWorkingTreeDiff,
+  listGitBranches,
   queryGitReadOnlyStatus,
   readGitRepositoryStatus,
 } from "./git-context-service.js";
@@ -87,5 +90,27 @@ describe("git-context-service", () => {
     expect(result.ok).toBe(false);
     expect(result.summary).toContain("Denied by project permissions");
     expect(result.summary).not.toContain("not a git repository");
+  });
+
+  it("lists branches and refuses dirty checkout", () => {
+    const dir = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-branch-"));
+    try {
+      run(dir, "git", ["init"]);
+      run(dir, "git", ["config", "user.email", "test@example.com"]);
+      run(dir, "git", ["config", "user.name", "Test"]);
+      writeFileSync(join(dir, "a.txt"), "hello\n");
+      run(dir, "git", ["add", "a.txt"]);
+      run(dir, "git", ["commit", "-m", "init"]);
+      const created = createGitBranch(dir, "feat/demo", { checkout: true });
+      expect(created.ok).toBe(true);
+      const listed = listGitBranches(dir);
+      expect(listed.branches.some((b) => b.name === "feat/demo")).toBe(true);
+      writeFileSync(join(dir, "a.txt"), "dirty\n");
+      const blocked = checkoutGitBranch(dir, "main");
+      expect(blocked.ok).toBe(false);
+      expect(blocked.message).toMatch(/dirty/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

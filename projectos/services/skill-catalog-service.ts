@@ -1,6 +1,13 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
+import type { SkillCatalogListing } from "../contracts/skill-marketplace.js";
 import type { SkillContent, SkillDescriptor } from "../contracts/skills.js";
 import { SkillContentSchema, SkillDescriptorSchema } from "../contracts/skills.js";
 
@@ -144,4 +151,86 @@ export function seedBuiltinSkillsIfNeeded(workspaceRoot: string): void {
   const skillsRoot = join(workspaceRoot, ".projectos", "skills");
   if (existsSync(skillsRoot) && readdirSync(skillsRoot).length > 0) return;
   // Seeding handled by project template / skills-seed todo
+}
+
+export class SkillInstallError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SkillInstallError";
+  }
+}
+
+/** Normalize catalog listing id into a single path segment under .projectos/skills. */
+export function safeSkillInstallId(listingId: string): string {
+  const slug = listingId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 80);
+  if (!slug || slug === "." || slug === ".." || slug.includes("..")) {
+    throw new SkillInstallError(`Invalid skill listing id '${listingId}'`);
+  }
+  return slug;
+}
+
+export function projectSkillsRoot(workspaceRoot: string): string {
+  return join(workspaceRoot, ".projectos", "skills");
+}
+
+export function skillExists(workspaceRoot: string, listingId: string): boolean {
+  const id = safeSkillInstallId(listingId);
+  const skillFile = join(projectSkillsRoot(workspaceRoot), id, SKILL_FILE);
+  return existsSync(skillFile);
+}
+
+function assertContainedPath(root: string, candidate: string): string {
+  const resolvedRoot = resolve(root);
+  const resolved = resolve(candidate);
+  const prefix = resolvedRoot.endsWith(sep) ? resolvedRoot : `${resolvedRoot}${sep}`;
+  if (resolved !== resolvedRoot && !resolved.startsWith(prefix)) {
+    throw new SkillInstallError("Skill install path escapes skills root");
+  }
+  return resolved;
+}
+
+/** Install a catalog listing into `.projectos/skills/<id>/`. */
+export function installProjectSkill(input: {
+  workspaceRoot: string;
+  listing: SkillCatalogListing;
+  replace?: boolean;
+}): SkillDescriptor {
+  const id = safeSkillInstallId(input.listing.id);
+  const skillsRoot = projectSkillsRoot(input.workspaceRoot);
+  mkdirSync(skillsRoot, { recursive: true });
+  const skillDir = assertContainedPath(skillsRoot, join(skillsRoot, id));
+  const skillFile = join(skillDir, SKILL_FILE);
+  if (existsSync(skillFile) && input.replace !== true) {
+    throw new SkillInstallError(
+      `Skill '${id}' already exists. Pass replace: true to overwrite.`,
+    );
+  }
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(skillFile, input.listing.skillMarkdown, "utf8");
+  if (input.listing.files) {
+    for (const [rel, contents] of Object.entries(input.listing.files)) {
+      if (
+        !rel.trim() ||
+        rel.includes("\0") ||
+        rel.startsWith("/") ||
+        rel.includes("..") ||
+        rel.includes("\\")
+      ) {
+        throw new SkillInstallError(`Unsafe companion file path '${rel}'`);
+      }
+      const target = assertContainedPath(skillDir, join(skillDir, rel));
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, contents, "utf8");
+    }
+  }
+  const descriptor = toDescriptor(skillFile, skillsRoot, input.workspaceRoot);
+  if (!descriptor) {
+    throw new SkillInstallError(`Installed skill '${id}' failed to parse`);
+  }
+  return descriptor;
 }

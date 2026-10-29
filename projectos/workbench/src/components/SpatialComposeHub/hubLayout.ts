@@ -29,10 +29,65 @@ export const SATELLITE_HEIGHT = 86
 export const SUBAGENT_HEIGHT = 92
 export const RESEARCH_HEIGHT = 110
 export const RESEARCH_WIDTH = 240
+/** Chrome: card padding + header + gaps (excl. list body). */
+export const REFERENCES_CHROME_HEIGHT = 52
+/** Padded list row (label + vertical padding). */
+export const REFERENCES_ROW_HEIGHT = 30
+export const REFERENCES_EMPTY_BODY = 20
+/** Expand until this many rows are fully visible; beyond that, scroll. */
+export const REFERENCES_VISIBLE_ROWS_CAP = 5
+export const REFERENCES_MIN_HEIGHT =
+  REFERENCES_CHROME_HEIGHT + REFERENCES_EMPTY_BODY
+export const REFERENCES_MAX_HEIGHT =
+  REFERENCES_CHROME_HEIGHT +
+  REFERENCES_VISIBLE_ROWS_CAP * REFERENCES_ROW_HEIGHT
+/**
+ * Scope chrome = header + Folders|Map mode row + gap (excl. list body).
+ * Row height matches References so both cards grow the same way.
+ */
+export const SCOPE_MODE_ROW_HEIGHT = 26
+export const SCOPE_CHROME_HEIGHT =
+  REFERENCES_CHROME_HEIGHT + SCOPE_MODE_ROW_HEIGHT
+export const SCOPE_ROW_HEIGHT = REFERENCES_ROW_HEIGHT
+export const SCOPE_EMPTY_BODY = REFERENCES_EMPTY_BODY
+export const SCOPE_VISIBLE_ROWS_CAP = REFERENCES_VISIBLE_ROWS_CAP
+export const SCOPE_MIN_HEIGHT = SCOPE_CHROME_HEIGHT + SCOPE_EMPTY_BODY
+export const SCOPE_MAX_HEIGHT =
+  SCOPE_CHROME_HEIGHT + SCOPE_VISIBLE_ROWS_CAP * SCOPE_ROW_HEIGHT
+/** @deprecated Prefer computeScopeHeight; kept as empty-state default. */
+export const SCOPE_SATELLITE_HEIGHT = SCOPE_MIN_HEIGHT
 export const HUB_GAP = 44
 export const SIDE_STACK_GAP = 12
 /** How strongly hub ports stay near card mid vs satellite mid (0 = all mid, 1 = all sat). */
 export const HUB_FAN_BLEND = 0.22
+
+/** Grow with items until five rows fit; then hold max and scroll. */
+export function computeReferencesHeight(referenceCount: number): number {
+  const visibleRows =
+    referenceCount <= 0
+      ? 0
+      : Math.min(referenceCount, REFERENCES_VISIBLE_ROWS_CAP)
+  const body =
+    visibleRows === 0
+      ? REFERENCES_EMPTY_BODY
+      : visibleRows * REFERENCES_ROW_HEIGHT
+  return Math.min(
+    REFERENCES_MAX_HEIGHT,
+    Math.max(REFERENCES_MIN_HEIGHT, REFERENCES_CHROME_HEIGHT + body),
+  )
+}
+
+/** Same grow-then-scroll behavior as References, plus Folders|Map chrome. */
+export function computeScopeHeight(scopeCount: number): number {
+  const visibleRows =
+    scopeCount <= 0 ? 0 : Math.min(scopeCount, SCOPE_VISIBLE_ROWS_CAP)
+  const body =
+    visibleRows === 0 ? SCOPE_EMPTY_BODY : visibleRows * SCOPE_ROW_HEIGHT
+  return Math.min(
+    SCOPE_MAX_HEIGHT,
+    Math.max(SCOPE_MIN_HEIGHT, SCOPE_CHROME_HEIGHT + body),
+  )
+}
 
 /**
  * Place satellites around a compose card in a star topology.
@@ -45,6 +100,8 @@ export function layoutSatellites(
   options?: {
     satelliteWidth?: number
     satelliteHeight?: number
+    referencesHeight?: number
+    scopeHeight?: number
     subagentHeight?: number
     researchHeight?: number
     researchWidth?: number
@@ -55,6 +112,9 @@ export function layoutSatellites(
 ): SatelliteRect[] {
   const width = options?.satelliteWidth ?? SATELLITE_WIDTH
   const leftHeight = options?.satelliteHeight ?? SATELLITE_HEIGHT
+  const referencesHeight =
+    options?.referencesHeight ?? REFERENCES_MIN_HEIGHT
+  const scopeHeight = options?.scopeHeight ?? SCOPE_MIN_HEIGHT
   const rightHeight = options?.subagentHeight ?? SUBAGENT_HEIGHT
   const researchHeight = options?.researchHeight ?? RESEARCH_HEIGHT
   const researchWidth = options?.researchWidth ?? RESEARCH_WIDTH
@@ -74,16 +134,17 @@ export function layoutSatellites(
   for (const side of ['left', 'right'] as const) {
     const group = bySide[side]
     const height = side === 'left' ? leftHeight : rightHeight
+    const resolveSlotHeight = (slot: SatelliteLayoutSlot): number => {
+      if (side === 'right' && slot.id === 'add-subagent') return 40
+      if (side === 'left' && slot.id === 'scope') return scopeHeight
+      return height
+    }
     const totalH =
-      group.reduce((sum, slot) => {
-        const h =
-          side === 'right' && slot.id === 'add-subagent' ? 40 : height
-        return sum + h
-      }, 0) + Math.max(0, group.length - 1) * stackGap
+      group.reduce((sum, slot) => sum + resolveSlotHeight(slot), 0) +
+      Math.max(0, group.length - 1) * stackGap
     let cursorY = card.y + card.height / 2 - totalH / 2
     group.forEach((slot) => {
-      const slotHeight =
-        side === 'right' && slot.id === 'add-subagent' ? 40 : height
+      const slotHeight = resolveSlotHeight(slot)
       const y = cursorY
       cursorY += slotHeight + stackGap
       const x =
@@ -112,11 +173,16 @@ export function layoutSatellites(
     })
   }
 
-  bySide.bottom.forEach((slot, i) => {
-    const h = researchHeight
-    const w = researchWidth
+  let bottomY = card.y + card.height + gap
+  bySide.bottom.forEach((slot) => {
+    const isReferences = slot.id === 'references'
+    const h = isReferences ? referencesHeight : researchHeight
+    const w = isReferences
+      ? Math.max(card.width, researchWidth)
+      : researchWidth
     const x = card.x + (card.width - w) / 2
-    const y = card.y + card.height + gap + i * (h + stackGap)
+    const y = bottomY
+    bottomY += h + stackGap
     results.push({
       id: slot.id,
       side: 'bottom',

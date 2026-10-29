@@ -37,6 +37,8 @@ import {
   SpatialComposeHub,
   type ComposeHubDataSource,
 } from '../components/SpatialComposeHub'
+import { syncComposeSubagentsToPool } from '../components/AgentFlow/AgentPool/syncComposeSubagents'
+import type { ProjectGraph } from '@contracts/index'
 import type { RepoDesignSystemSnapshot } from '@contracts/repo-design-system'
 import {
   MAX_STENCILS_PER_REGION,
@@ -245,6 +247,10 @@ export function OverlayApp() {
   >({})
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({})
   const [projectId, setProjectId] = useState<string | null>(null)
+
+  useEffect(() => {
+    syncComposeSubagentsToPool(hubByArrow, subagentLinksByArrow)
+  }, [hubByArrow, subagentLinksByArrow])
   const [candidates, setCandidates] = useState<SpatialPinProjectCandidate[]>([])
   const [location, setLocation] = useState<LocationKey | null>(null)
   const [webEnhanceAvailable, setWebEnhanceAvailable] = useState(false)
@@ -400,21 +406,22 @@ export function OverlayApp() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (openMenu) {
-          setOpenMenu(null)
-          return
-        }
-        if (placeDrag || libraryRevealed || libraryOpen) {
-          exitStencilChrome()
-          return
-        }
-        if (activeArrowId) {
-          setActiveArrowId(null)
-          return
-        }
-        void solidifyThenHideRef.current()
+      if (event.key !== 'Escape') return
+      // Scope Map floater owns Escape while open (compose card must stay).
+      if (document.querySelector('[data-scope-map-picker="true"]')) return
+      if (openMenu) {
+        setOpenMenu(null)
+        return
       }
+      if (placeDrag || libraryRevealed || libraryOpen) {
+        exitStencilChrome()
+        return
+      }
+      if (activeArrowId) {
+        setActiveArrowId(null)
+        return
+      }
+      void solidifyThenHideRef.current()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -503,8 +510,15 @@ export function OverlayApp() {
       if (region.snapshotAssetPath) paths.add(region.snapshotAssetPath)
     }
     for (const hub of Object.values(hubByArrow)) {
-      for (const ref of hub.references) {
-        if (ref.kind === 'image') paths.add(ref.assetPath)
+      for (const ref of ensureHub(hub).references) {
+        if (
+          (ref.kind === 'image' ||
+            ref.kind === 'video' ||
+            ref.kind === 'audio') &&
+          ref.assetPath
+        ) {
+          paths.add(ref.assetPath)
+        }
       }
     }
     let cancelled = false
@@ -565,6 +579,61 @@ export function OverlayApp() {
         )) as { files: string[] }
         return result.files ?? []
       },
+      pickReferenceFiles: async (options) => {
+        if (!window.projectOS?.shell?.pickReferenceFiles) return []
+        return window.projectOS.shell.pickReferenceFiles(options)
+      },
+      listMcpServers: async () => {
+        if (!projectId || !window.projectOS) return []
+        const servers = (await window.projectOS.invoke(
+          'listMcpServers',
+          projectId,
+        )) as Array<{
+          id: string
+          name: string
+          enabled: boolean
+          transport: 'stdio' | 'http'
+          toolAllowlist?: string[]
+        }>
+        return (servers ?? []).map((server) => ({
+          id: server.id,
+          name: server.name,
+          enabled: server.enabled,
+          transport: server.transport,
+          toolCount: server.toolAllowlist?.length,
+        }))
+      },
+      setMcpServerEnabled: async (serverId, enabled) => {
+        if (!projectId || !window.projectOS) return null
+        const servers = (await window.projectOS.invoke(
+          'listMcpServers',
+          projectId,
+        )) as Array<{
+          id: string
+          name: string
+          enabled: boolean
+          transport: 'stdio' | 'http'
+          command?: string
+          args?: string[]
+          cwd?: string
+          url?: string
+          toolAllowlist?: string[]
+          authRef?: string
+        }>
+        const current = (servers ?? []).find((server) => server.id === serverId)
+        if (!current) return null
+        const nextConfig = { ...current, enabled }
+        await window.projectOS.invoke('saveMcpServer', projectId, {
+          config: nextConfig,
+        })
+        return {
+          id: nextConfig.id,
+          name: nextConfig.name,
+          enabled: nextConfig.enabled,
+          transport: nextConfig.transport,
+          toolCount: nextConfig.toolAllowlist?.length,
+        }
+      },
       getGitStatus: async () => {
         if (!projectId || !window.projectOS) {
           return { branch: null, dirty: false }
@@ -572,7 +641,57 @@ export function OverlayApp() {
         return (await window.projectOS.invoke(
           'getWorkspaceGitStatus',
           projectId,
-        )) as { branch: string | null; dirty: boolean }
+        )) as {
+          branch: string | null
+          dirty: boolean
+          ahead?: number
+          behind?: number
+          remoteUrl?: string
+          defaultBranch?: string
+        }
+      },
+      listGitBranches: async () => {
+        if (!projectId || !window.projectOS) {
+          return { defaultBranch: null, currentBranch: null, branches: [] }
+        }
+        return (await window.projectOS.invoke(
+          'listWorkspaceGitBranches',
+          projectId,
+        )) as {
+          defaultBranch: string | null
+          currentBranch: string | null
+          branches: Array<{
+            id: string
+            name: string
+            current: boolean
+            remote: boolean
+            ahead?: number
+            behind?: number
+          }>
+        }
+      },
+      fetchGit: async () => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'fetchWorkspaceGit',
+          projectId,
+        )) as { ok: boolean; message: string }
+      },
+      openExternalUrl: (url) => {
+        void window.projectOS?.shell.openExternal(url)
+      },
+      getProjectGraph: async () => {
+        if (!projectId || !window.projectOS) return null
+        const graph = (await window.projectOS.invoke(
+          'getProjectGraph',
+          projectId,
+        )) as ProjectGraph
+        return {
+          nodes: graph.nodes ?? [],
+          edges: graph.edges ?? [],
+        }
       },
       listRepoCandidates: async () =>
         candidates.map((item) => ({
@@ -843,10 +962,18 @@ export function OverlayApp() {
               },
             ]
           : []
+    const inferred = locationRef.current?.inferredPath?.trim()
+    const folders =
+      base.folders.length > 0
+        ? base.folders
+        : inferred
+          ? [inferred]
+          : []
     return {
       ...base,
       repo: base.repo ?? { label: opts.projectLabel, branch: 'main' },
       references,
+      folders,
     }
   }
 

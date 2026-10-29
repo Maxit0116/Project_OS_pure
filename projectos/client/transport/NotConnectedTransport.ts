@@ -102,6 +102,87 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async listWorkspaceGitBranches(
+    _projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitBranchList> {
+    return transportNotConnected();
+  }
+
+  async checkoutWorkspaceBranch(
+    _projectId: string,
+    _branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async createWorkspaceBranch(
+    _projectId: string,
+    _input: { name: string; from?: string; checkout?: boolean },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async fetchWorkspaceGit(
+    _projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async listWorkspacePullRequests(
+    _projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitPullRequestList> {
+    return transportNotConnected();
+  }
+
+  async createWorkspacePullRequest(
+    _projectId: string,
+    _input: { title: string; head?: string; base?: string; body?: string },
+  ): Promise<{ ok: boolean; url?: string; number?: number; message: string }> {
+    return transportNotConnected();
+  }
+
+  async getGitHubAuthStatus(): Promise<
+    import("../../contracts/github-auth.js").GitHubAuthStatus
+  > {
+    return transportNotConnected();
+  }
+
+  async beginGitHubOAuth(): Promise<
+    import("../../contracts/github-auth.js").BeginGitHubOAuthResult
+  > {
+    return transportNotConnected();
+  }
+
+  async cancelGitHubOAuth(): Promise<
+    import("../../contracts/github-auth.js").GitHubAuthStatus
+  > {
+    return transportNotConnected();
+  }
+
+  async disconnectGitHub(): Promise<
+    import("../../contracts/github-auth.js").GitHubAuthStatus
+  > {
+    return transportNotConnected();
+  }
+
+  async getAccountProfile(): Promise<
+    import("../../contracts/github-auth.js").AccountProfile | null
+  > {
+    return transportNotConnected();
+  }
+
+  async saveGitHubOAuthClientId(
+    _clientId: string,
+  ): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {
+    return transportNotConnected();
+  }
+
+  async importGitHubAuthFromGhCli(): Promise<
+    import("../../contracts/github-auth.js").BeginGitHubOAuthResult
+  > {
+    return transportNotConnected();
+  }
+
   async getNodeContext(
     _projectId: string,
     _nodeId: string,
@@ -523,6 +604,111 @@ export class NotConnectedTransport implements ProjectOSApi {
     _projectId: string,
     _profileId: string,
   ): Promise<ModelOption[]> {
+    return transportNotConnected();
+  }
+
+  async listMcpServers(
+    _projectId: string,
+  ): Promise<import("../../contracts/settings.js").McpServerConfig[]> {
+    return transportNotConnected();
+  }
+
+  async saveMcpServer(
+    _projectId: string,
+    _input: {
+      config: import("../../contracts/settings.js").McpServerConfig;
+      authToken?: string;
+    },
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async deleteMcpServer(
+    _projectId: string,
+    _serverId: string,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async testMcpServer(
+    _projectId: string,
+    _serverId: string,
+  ): Promise<ConnectionTestResult> {
+    return transportNotConnected();
+  }
+
+  async refreshMcpTools(
+    _projectId: string,
+    _serverId: string,
+  ): Promise<import("../../contracts/settings.js").McpToolDescriptor[]> {
+    return transportNotConnected();
+  }
+
+  async listMcpCatalog(
+    _projectId: string,
+    _options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/mcp-catalog.js").McpCatalogView> {
+    return transportNotConnected();
+  }
+
+  async refreshMcpCatalog(
+    _projectId: string,
+  ): Promise<import("../../contracts/mcp-catalog.js").McpCatalogView> {
+    return transportNotConnected();
+  }
+
+  async installMcpFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/mcp-catalog.js").InstallMcpFromCatalogInput,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async disableMcpCatalogListing(
+    _projectId: string,
+    _listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async reportMcpCatalogListing(
+    _projectId: string,
+    _input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async listSkillCatalog(
+    _projectId: string,
+    _options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/skill-marketplace.js").SkillCatalogView> {
+    return transportNotConnected();
+  }
+
+  async refreshSkillCatalog(
+    _projectId: string,
+  ): Promise<import("../../contracts/skill-marketplace.js").SkillCatalogView> {
+    return transportNotConnected();
+  }
+
+  async installSkillFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/skill-marketplace.js").InstallSkillFromCatalogInput,
+  ): Promise<import("../../contracts/skills.js").SkillDescriptor> {
+    return transportNotConnected();
+  }
+
+  async disableSkillCatalogListing(
+    _projectId: string,
+    _listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async reportSkillCatalogListing(
+    _projectId: string,
+    _input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
     return transportNotConnected();
   }
 

@@ -22,6 +22,7 @@ import AgentActionRow from './AgentActionRow'
 import AskTraceView from './AskTraceView'
 import PlanTraceView from './PlanTraceView'
 import AgentActivityDetails from './AgentActivityDetails'
+import { AgentPoolPanel } from './AgentPool'
 import { buildActivityLabels, projectAgentActivities } from './projectAgentActivities'
 import RestrictedMarkdown from '../ChatPanel/RestrictedMarkdown'
 import TabBar from '../ui/TabBar'
@@ -104,43 +105,69 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
   const viewTabs = [
     { id: 'timeline', label: ts('agentFlow.timeline') },
     { id: 'graph', label: ts('agentFlow.graph') },
+    { id: 'pool', label: ts('agentFlow.pool.tab') },
   ]
 
-  if (agentFlowSubject === 'ask' && latestAskTrace) {
-    return (
-      <div className={styles.panel}>
-        <div className={styles.header}>
-          <h2>{ts('agentFlow.title')}</h2>
-          <span className={styles.status}>
-            {ts(`agentFlow.status.${latestAskTrace.status}` as 'agentFlow.status.running')}
-          </span>
+  const renderShell = (statusLabel: ReactNode, body: ReactNode, footer?: ReactNode) => (
+    <div className={styles.panel}>
+      <div className={styles.header}>
+        <h2>{ts('agentFlow.title')}</h2>
+        <div className={styles.headerActions}>
+          {typeof statusLabel === 'string' || typeof statusLabel === 'number' ? (
+            <span className={styles.status}>{statusLabel}</span>
+          ) : (
+            statusLabel
+          )}
         </div>
+      </div>
+      <TabBar
+        tabs={viewTabs}
+        activeId={agentFlowViewMode}
+        onChange={(id) => setAgentFlowViewMode(id as 'timeline' | 'graph' | 'pool')}
+        size="sm"
+      />
+      {body}
+      {footer}
+    </div>
+  )
+
+  // Pool is always reachable — even on empty / ask / plan / debug subjects.
+  if (agentFlowViewMode === 'pool') {
+    const poolStatus =
+      agentFlowSubject === 'ask' && latestAskTrace
+        ? ts(`agentFlow.status.${latestAskTrace.status}` as 'agentFlow.status.running')
+        : agentFlowSubject === 'plan' && latestPlanTrace
+          ? ts('plan.title')
+          : agentFlowSubject === 'debug' && debugSession
+            ? ts(`debug.phase.${debugSession.phase}` as 'debug.phase.align')
+            : ts(`agentFlow.status.${status}` as 'agentFlow.status.running')
+    return renderShell(poolStatus, <AgentPoolPanel />)
+  }
+
+  if (agentFlowSubject === 'ask' && latestAskTrace) {
+    return renderShell(
+      ts(`agentFlow.status.${latestAskTrace.status}` as 'agentFlow.status.running'),
+      <>
         <AskTraceView trace={latestAskTrace} />
         {activityDetails}
-      </div>
+      </>,
     )
   }
 
   if (agentFlowSubject === 'plan' && latestPlanTrace) {
-    return (
-      <div className={styles.panel}>
-        <div className={styles.header}>
-          <h2>{ts('agentFlow.title')}</h2>
-          <span className={styles.status}>{ts('plan.title')}</span>
-        </div>
+    return renderShell(
+      ts('plan.title'),
+      <>
         <PlanTraceView trace={latestPlanTrace} />
         {activityDetails}
-      </div>
+      </>,
     )
   }
 
   if (agentFlowSubject === 'debug' && debugSession) {
-    return (
-      <div className={styles.panel}>
-        <div className={styles.header}>
-          <h2>{ts('agentFlow.title')}</h2>
-          <span className={styles.status}>{ts(`debug.phase.${debugSession.phase}`)}</span>
-        </div>
+    return renderShell(
+      ts(`debug.phase.${debugSession.phase}` as 'debug.phase.align'),
+      <>
         <section className={styles.card}>
           <h3>{ts('debug.title')}</h3>
           <p>{debugSession.bugDescription}</p>
@@ -148,17 +175,18 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
           <p>{ts('debug.reproSteps')}: {debugSession.reproSteps.length}</p>
         </section>
         {activityDetails}
-      </div>
+      </>,
     )
   }
 
   if (steps.length === 0 && status === 'idle' && activities.length === 0) {
-    return (
+    return renderShell(
+      ts('agentFlow.status.idle'),
       <EmptyState
         icon={<Workflow size={16} />}
         title={ts('agentFlow.emptyTitle')}
         description={ts('agentFlow.emptyDesc')}
-      />
+      />,
     )
   }
 
@@ -214,34 +242,26 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
     flowActions.some((event) =>
       event.type === 'batch_validation_result' && event.payload.verdict === 'valid')
 
-  return (
-    <div className={styles.panel}>
-      <div className={styles.header}>
-        <h2>{ts('agentFlow.title')}</h2>
-        <div className={styles.headerActions}>
-          <span className={styles.status}>
-            {ts(`agentFlow.status.${status}` as 'agentFlow.status.running')}
-          </span>
-          {status === 'running' || refineLoading ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => void stopAgentRun()}
-            >
-              {ts('chat.stop')}
-            </Button>
-          ) : null}
-        </div>
-      </div>
+  const runStatus = (
+    <>
+      <span className={styles.status}>
+        {ts(`agentFlow.status.${status}` as 'agentFlow.status.running')}
+      </span>
+      {status === 'running' || refineLoading ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={() => void stopAgentRun()}
+        >
+          {ts('chat.stop')}
+        </Button>
+      ) : null}
+    </>
+  )
 
-      <TabBar
-        tabs={viewTabs}
-        activeId={agentFlowViewMode}
-        onChange={(id) => setAgentFlowViewMode(id as 'timeline' | 'graph')}
-        size="sm"
-      />
-
+  const runBody = (
+    <>
       {applyResult?.applied && verificationResult && (
         <AutomaticApplySummary
           applyResult={applyResult}
@@ -249,7 +269,6 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
           onReviewDiff={onReviewDiff}
         />
       )}
-
       {agentFlowViewMode === 'timeline' ? (
         <div className={styles.timeline} ref={timelineRef}>
           {activityDetails}
@@ -286,7 +305,6 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
       ) : (
         <AgentFlowGraph steps={steps} status={status} onSelectStep={setSelectedFlowStepId} />
       )}
-
       {selectedStep && (
         <AgentFlowStepDetail
           step={selectedStep}
@@ -294,7 +312,11 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
           onClose={() => setSelectedFlowStepId(null)}
         />
       )}
+    </>
+  )
 
+  const runFooter = (
+    <>
       {diffReady && !applyResult?.applied && (
         <div className={styles.footer}>
           <Button className={styles.reviewBtnPulse} onClick={onReviewDiff}>
@@ -316,8 +338,10 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
           </Button>
         </div>
       )}
-    </div>
+    </>
   )
+
+  return renderShell(runStatus, runBody, runFooter)
 }
 
 export function AutomaticApplySummary({

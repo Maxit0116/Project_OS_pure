@@ -201,6 +201,11 @@ const api = {
     > {
       return ipcRenderer.invoke('shell:pickImageFile')
     },
+    pickReferenceFiles(options?: {
+      extensions?: string[]
+    }): Promise<Array<{ path: string; name: string; ext: string }>> {
+      return ipcRenderer.invoke('shell:pickReferenceFiles', options ?? {})
+    },
     openExternal(url: string): Promise<void> {
       return ipcRenderer.invoke('shell:openExternal', url)
     },

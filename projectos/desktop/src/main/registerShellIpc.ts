@@ -67,6 +67,68 @@ export function registerShellIpc(): void {
     return readUserPickedImage(result.filePaths[0])
   })
 
+  ipcMain.handle('shell:pickReferenceFiles', async (event, input?: unknown) => {
+    assertTrustedHostRenderer(event)
+    const extensions = parseReferenceExtensions(input)
+    const parent = BrowserWindow.fromWebContents(event.sender)
+    const filters =
+      extensions.length > 0
+        ? [{ name: 'Selected types', extensions }]
+        : [
+            {
+              name: 'Documents',
+              extensions: [
+                'pdf',
+                'txt',
+                'md',
+                'markdown',
+                'doc',
+                'docx',
+                'rtf',
+                'csv',
+                'json',
+              ],
+            },
+            {
+              name: 'Media',
+              extensions: [
+                'png',
+                'jpg',
+                'jpeg',
+                'gif',
+                'webp',
+                'svg',
+                'mp4',
+                'mov',
+                'webm',
+                'mp3',
+                'wav',
+                'm4a',
+              ],
+            },
+            { name: 'All Files', extensions: ['*'] },
+          ]
+    const options = {
+      properties: ['openFile', 'multiSelections'] as Array<
+        'openFile' | 'multiSelections'
+      >,
+      title: 'Add reference files',
+      buttonLabel: 'Add',
+      filters,
+    }
+    const result = parent
+      ? await dialog.showOpenDialog(parent, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) {
+      return []
+    }
+    return result.filePaths.map((absolutePath) => ({
+      path: absolutePath,
+      name: basename(absolutePath),
+      ext: extname(absolutePath).replace(/^\./, '').toLowerCase(),
+    }))
+  })
+
   ipcMain.handle('shell:openExternal', async (event, input: unknown) => {
     assertTrustedHostRenderer(event)
     const url = assertAllowedExternalUrl(input)
@@ -87,6 +149,17 @@ export function registerShellIpc(): void {
     const win = BrowserWindow.fromWebContents(event.sender)
     win?.setTitle(parseWindowTitle(title))
   })
+}
+
+function parseReferenceExtensions(input: unknown): string[] {
+  if (!input || typeof input !== 'object') return []
+  const extensions = (input as { extensions?: unknown }).extensions
+  if (!Array.isArray(extensions)) return []
+  return extensions
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.replace(/^\./, '').toLowerCase())
+    .filter((item) => /^[a-z0-9]{1,12}$/.test(item))
+    .slice(0, 40)
 }
 
 function readUserPickedImage(absolutePath: string):

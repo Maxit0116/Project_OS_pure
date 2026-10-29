@@ -84,7 +84,9 @@ import {
 } from '../../overlay/regionAnchors'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
+import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useSpatialCaptureStore } from '../../state/spatialCaptureStore'
+import { syncComposeSubagentsToPool } from '../AgentFlow/AgentPool/syncComposeSubagents'
 import {
   CAPTURE_ZOOM_MAX,
   CAPTURE_ZOOM_MIN,
@@ -273,6 +275,10 @@ export default function SpatialCaptureCanvas({
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({})
   const [status, setStatus] = useState(IDLE_HINT)
 
+  useEffect(() => {
+    syncComposeSubagentsToPool(hubByArrow, subagentLinksByArrow)
+  }, [hubByArrow, subagentLinksByArrow])
+
   const composeHubStrings: ComposeHubStrings = useMemo(
     () => ({
       ...COMPOSE_HUB_STRINGS_EN,
@@ -280,14 +286,95 @@ export default function SpatialCaptureCanvas({
       collapse: ts('spatialCaptures.composeHub.collapse'),
       repo: ts('spatialCaptures.composeHub.repo'),
       repoEmpty: ts('spatialCaptures.composeHub.repoEmpty'),
+      repoDirty: ts('spatialCaptures.composeHub.repoDirty'),
+      repoClean: ts('spatialCaptures.composeHub.repoClean'),
+      repoLocate: ts('spatialCaptures.composeHub.repoLocate'),
+      repoLocateSearch: ts('spatialCaptures.composeHub.repoLocateSearch'),
+      repoLocateRoot: ts('spatialCaptures.composeHub.repoLocateRoot'),
+      repoLocateLoading: ts('spatialCaptures.composeHub.repoLocateLoading'),
+      repoLocateEmpty: ts('spatialCaptures.composeHub.repoLocateEmpty'),
+      repoLocateError: ts('spatialCaptures.composeHub.repoLocateError'),
+      repoCurrent: ts('spatialCaptures.composeHub.repoCurrent'),
+      repoOpenGithub: ts('spatialCaptures.composeHub.repoOpenGithub'),
+      repoOpenGraph: ts('spatialCaptures.composeHub.repoOpenGraph'),
+      repoFetch: ts('spatialCaptures.composeHub.repoFetch'),
+      referencesTabRepoHint: ts(
+        'spatialCaptures.composeHub.referencesTabRepoHint',
+      ),
       folders: ts('spatialCaptures.composeHub.folders'),
       foldersEmpty: ts('spatialCaptures.composeHub.foldersEmpty'),
       foldersAdd: ts('spatialCaptures.composeHub.foldersAdd'),
+      scope: ts('spatialCaptures.composeHub.scope'),
+      scopeEmpty: ts('spatialCaptures.composeHub.scopeEmpty'),
+      scopeAdd: ts('spatialCaptures.composeHub.scopeAdd'),
+      scopeModeFolders: ts('spatialCaptures.composeHub.scopeModeFolders'),
+      scopeModeMap: ts('spatialCaptures.composeHub.scopeModeMap'),
+      scopeMapTitle: ts('spatialCaptures.composeHub.scopeMapTitle'),
+      scopeMapEmpty: ts('spatialCaptures.composeHub.scopeMapEmpty'),
+      scopeMapLoading: ts('spatialCaptures.composeHub.scopeMapLoading'),
+      scopeMapWeak: ts('spatialCaptures.composeHub.scopeMapWeak'),
+      scopeMapDrill: ts('spatialCaptures.composeHub.scopeMapDrill'),
+      scopeMapDone: ts('spatialCaptures.composeHub.scopeMapDone'),
+      scopeMapHint: ts('spatialCaptures.composeHub.scopeMapHint'),
+      scopeMapSelected: ts('spatialCaptures.composeHub.scopeMapSelected'),
+      scopeMapLevelContext: ts(
+        'spatialCaptures.composeHub.scopeMapLevelContext',
+      ),
+      scopeMapLevelContainer: ts(
+        'spatialCaptures.composeHub.scopeMapLevelContainer',
+      ),
+      scopeMapLevelComponent: ts(
+        'spatialCaptures.composeHub.scopeMapLevelComponent',
+      ),
+      scopeMapLevelCode: ts('spatialCaptures.composeHub.scopeMapLevelCode'),
+      mcp: ts('spatialCaptures.composeHub.mcp'),
+      mcpEmpty: ts('spatialCaptures.composeHub.mcpEmpty'),
+      mcpOpenSettings: ts('spatialCaptures.composeHub.mcpOpenSettings'),
+      mcpEnabled: ts('spatialCaptures.composeHub.mcpEnabled'),
+      mcpDisabled: ts('spatialCaptures.composeHub.mcpDisabled'),
+      mcpPolicyHint: ts('spatialCaptures.composeHub.mcpPolicyHint'),
       skills: ts('spatialCaptures.composeHub.skills'),
       skillsEmpty: ts('spatialCaptures.composeHub.skillsEmpty'),
       skillsAdd: ts('spatialCaptures.composeHub.skillsAdd'),
       references: ts('spatialCaptures.composeHub.references'),
       referencesEmpty: ts('spatialCaptures.composeHub.referencesEmpty'),
+      referencesAdd: ts('spatialCaptures.composeHub.referencesAdd'),
+      referencesAddUrl: ts('spatialCaptures.composeHub.referencesAddUrl'),
+      referencesAddUrlPlaceholder: ts(
+        'spatialCaptures.composeHub.referencesAddUrlPlaceholder',
+      ),
+      referencesAddFile: ts('spatialCaptures.composeHub.referencesAddFile'),
+      referencesAddFiles: ts('spatialCaptures.composeHub.referencesAddFiles'),
+      referencesAddPanel: ts('spatialCaptures.composeHub.referencesAddPanel'),
+      referencesClosePanel: ts(
+        'spatialCaptures.composeHub.referencesClosePanel',
+      ),
+      referencesPicking: ts('spatialCaptures.composeHub.referencesPicking'),
+      referencesTabFiles: ts('spatialCaptures.composeHub.referencesTabFiles'),
+      referencesTabMedia: ts('spatialCaptures.composeHub.referencesTabMedia'),
+      referencesTabLinks: ts('spatialCaptures.composeHub.referencesTabLinks'),
+      referencesTabRepo: ts('spatialCaptures.composeHub.referencesTabRepo'),
+      referencesTypeAll: ts('spatialCaptures.composeHub.referencesTypeAll'),
+      referencesFolderAll: ts('spatialCaptures.composeHub.referencesFolderAll'),
+      referencesFolderUnfiled: ts(
+        'spatialCaptures.composeHub.referencesFolderUnfiled',
+      ),
+      referencesFolderNew: ts('spatialCaptures.composeHub.referencesFolderNew'),
+      referencesFolderPlaceholder: ts(
+        'spatialCaptures.composeHub.referencesFolderPlaceholder',
+      ),
+      referencesFolderEmpty: ts(
+        'spatialCaptures.composeHub.referencesFolderEmpty',
+      ),
+      referencesLibraryEmpty: ts(
+        'spatialCaptures.composeHub.referencesLibraryEmpty',
+      ),
+      referencesGithub: ts('spatialCaptures.composeHub.referencesGithub'),
+      referencesUrl: ts('spatialCaptures.composeHub.referencesUrl'),
+      referencesVideo: ts('spatialCaptures.composeHub.referencesVideo'),
+      referencesAudio: ts('spatialCaptures.composeHub.referencesAudio'),
+      referencesImage: ts('spatialCaptures.composeHub.referencesImage'),
+      referencesFile: ts('spatialCaptures.composeHub.referencesFile'),
       research: ts('spatialCaptures.composeHub.research'),
       researchEmpty: ts('spatialCaptures.composeHub.researchEmpty'),
       researchToggle: ts('spatialCaptures.composeHub.researchToggle'),
@@ -572,21 +659,22 @@ export default function SpatialCaptureCanvas({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (openMenu) {
-          setOpenMenu(null)
-          return
-        }
-        if (placeDrag || libraryRevealed || libraryOpen) {
-          exitStencilChrome()
-          return
-        }
-        if (activeArrowId) {
-          setActiveArrowId(null)
-          return
-        }
-        onExit()
+      if (event.key !== 'Escape') return
+      // Scope Map floater owns Escape while open (compose card must stay).
+      if (document.querySelector('[data-scope-map-picker="true"]')) return
+      if (openMenu) {
+        setOpenMenu(null)
+        return
       }
+      if (placeDrag || libraryRevealed || libraryOpen) {
+        exitStencilChrome()
+        return
+      }
+      if (activeArrowId) {
+        setActiveArrowId(null)
+        return
+      }
+      onExit()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -760,6 +848,13 @@ export default function SpatialCaptureCanvas({
               },
             ]
           : []
+    const inferred = session.location?.inferredPath?.trim()
+    const folders =
+      base.folders.length > 0
+        ? base.folders
+        : inferred
+          ? [inferred]
+          : []
     return {
       ...base,
       repo:
@@ -768,6 +863,7 @@ export default function SpatialCaptureCanvas({
           ? { label: project.displayName || project.projectId, branch: 'main' }
           : undefined),
       references,
+      folders,
     }
   }
 
@@ -779,7 +875,14 @@ export default function SpatialCaptureCanvas({
     }
     for (const hub of Object.values(hubByArrow)) {
       for (const ref of hub.references) {
-        if (ref.kind === 'image') paths.add(ref.assetPath)
+        if (
+          (ref.kind === 'image' ||
+            ref.kind === 'video' ||
+            ref.kind === 'audio') &&
+          ref.assetPath
+        ) {
+          paths.add(ref.assetPath)
+        }
       }
     }
     let cancelled = false
@@ -834,9 +937,68 @@ export default function SpatialCaptureCanvas({
         )
         return result.files
       },
+      pickReferenceFiles: async (options) => {
+        if (!window.projectOS?.shell?.pickReferenceFiles) return []
+        return window.projectOS.shell.pickReferenceFiles(options)
+      },
+      listMcpServers: async () => {
+        if (!client || !project) return []
+        const servers = (await client.listMcpServers(project.projectId)) ?? []
+        return servers.map((server) => ({
+          id: server.id,
+          name: server.name,
+          enabled: server.enabled,
+          transport: server.transport,
+          toolCount: server.toolAllowlist?.length,
+        }))
+      },
+      setMcpServerEnabled: async (serverId, enabled) => {
+        if (!client || !project) return null
+        const servers = await client.listMcpServers(project.projectId)
+        const current = servers.find((server) => server.id === serverId)
+        if (!current) return null
+        const nextConfig = { ...current, enabled }
+        await client.saveMcpServer(project.projectId, { config: nextConfig })
+        return {
+          id: nextConfig.id,
+          name: nextConfig.name,
+          enabled: nextConfig.enabled,
+          transport: nextConfig.transport,
+          toolCount: nextConfig.toolAllowlist?.length,
+        }
+      },
+      openMcpSettings: () => {
+        useWorkbenchStore.getState().setSettingsOpen(true)
+      },
       getGitStatus: async () => {
         if (!client || !project) return { branch: null, dirty: false }
         return client.getWorkspaceGitStatus(project.projectId)
+      },
+      listGitBranches: async () => {
+        if (!client || !project) {
+          return { defaultBranch: null, currentBranch: null, branches: [] }
+        }
+        return client.listWorkspaceGitBranches(project.projectId)
+      },
+      fetchGit: async () => {
+        if (!client || !project) {
+          return { ok: false, message: 'No project' }
+        }
+        return client.fetchWorkspaceGit(project.projectId)
+      },
+      openGithubGraph: () => {
+        useChatSessionStore.getState().setGithubGraphOpen(true)
+      },
+      openExternalUrl: (url) => {
+        void window.projectOS?.shell.openExternal(url)
+      },
+      getProjectGraph: async () => {
+        if (!client || !project) return null
+        const graph = await client.getProjectGraph(project.projectId)
+        return {
+          nodes: graph.nodes,
+          edges: graph.edges,
+        }
       },
       listRepoCandidates: async () =>
         project

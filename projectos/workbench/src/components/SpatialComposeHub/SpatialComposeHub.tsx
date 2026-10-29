@@ -1,10 +1,14 @@
 import {
   Bookmark,
   Bot,
+  ExternalLink,
   Folder,
   GitBranch,
-  Image as ImageIcon,
+  Layers,
+  Link2,
   Plus,
+  Plug,
+  Search,
   Sparkles,
   X,
 } from 'lucide-react'
@@ -20,18 +24,36 @@ import {
 } from 'react'
 import type {
   PinComposerHub,
+  PinComposerHubReference,
+  PinComposerHubScope,
   PinComposerHubSubagentLink,
   ScreenRect,
 } from '@contracts/spatial-pin'
-import { emptyPinComposerHub } from '@contracts/spatial-pin'
+import {
+  createFolderScopeId,
+  emptyPinComposerHub,
+  foldersFromScopes,
+  formatHubScopeToken,
+  normalizeHubScopes,
+} from '@contracts/spatial-pin'
 import { useReducedMotion3d } from '../FunctionMap/hooks/useReducedMotion3d'
 import {
   COMPOSE_HUB_STRINGS_EN,
   type ComposeHubStrings,
 } from './composeHubStrings'
-import type { ComposeHubDataSource } from './hubActions'
+import {
+  deriveFolderScopesFromReferences,
+  mergeFolderScopes,
+} from './deriveHubFolders'
+import type { FunctionalEdge, FunctionalNode } from '@contracts/index'
+import type {
+  ComposeHubDataSource,
+  HubMcpServerOption,
+} from './hubActions'
 import {
   attachPointsForSatellite,
+  computeReferencesHeight,
+  computeScopeHeight,
   inferSatelliteSide,
   layoutSatellites,
   type SatelliteLayoutSlot,
@@ -42,9 +64,12 @@ import {
   clampRectToBounds,
   separateFromOthers,
 } from './satelliteCollision'
+import GithubBranchLocator from './GithubBranchLocator'
+import ReferenceAddPanel from './ReferenceAddPanel'
 import SatelliteCard from './SatelliteCard'
 import SatelliteConnector from './SatelliteConnector'
 import SatellitePicker from './SatellitePicker'
+import ScopeMapPicker from './ScopeMapPicker'
 import styles from './hubMotion.module.css'
 
 export interface SpatialComposeHubProps {
@@ -65,10 +90,51 @@ export interface SpatialComposeHubProps {
   panelProps?: HTMLAttributes<HTMLDivElement>
 }
 
-type PickerKind = 'repo' | 'folders' | 'skills' | 'references' | null
+type PickerKind = 'repo' | 'folders' | 'skills' | null
+type ScopeEntryMode = 'folders' | 'map'
 
 function createSubagentId(): string {
   return `sub_${crypto.randomUUID().slice(0, 8)}`
+}
+
+function referenceKindLabel(
+  kind: PinComposerHubReference['kind'],
+  strings: ComposeHubStrings,
+): string {
+  switch (kind) {
+    case 'github':
+      return strings.referencesGithub
+    case 'url':
+      return strings.referencesUrl
+    case 'video':
+      return strings.referencesVideo
+    case 'audio':
+      return strings.referencesAudio
+    case 'image':
+      return strings.referencesImage
+    case 'file':
+      return strings.referencesFile
+    default:
+      return strings.references
+  }
+}
+
+function referenceDisplayLabel(ref: PinComposerHubReference): string {
+  if (ref.label) return ref.label
+  switch (ref.kind) {
+    case 'file':
+      return ref.path.split('/').pop() ?? ref.path
+    case 'github':
+      return ref.owner && ref.repo
+        ? `${ref.owner}/${ref.repo}`
+        : ref.url
+    case 'url':
+      return ref.url
+    case 'image':
+    case 'video':
+    case 'audio':
+      return ref.url ?? ref.assetPath ?? ref.kind
+  }
 }
 
 function statusLabel(
@@ -109,7 +175,7 @@ function segmentCount(
 export default function SpatialComposeHub({
   card,
   expanded,
-  hub,
+  hub: hubInput,
   onHubChange,
   subagentLinks = [],
   promptText = '',
@@ -123,6 +189,7 @@ export default function SpatialComposeHub({
   panelClassName,
   panelProps,
 }: SpatialComposeHubProps) {
+  const hub = ensureHub(hubInput)
   const reducedMotion = useReducedMotion3d()
   const [positionOverrides, setPositionOverrides] = useState<
     Record<string, { x: number; y: number }>
@@ -145,7 +212,39 @@ export default function SpatialComposeHub({
     Array<{ id: string; label: string; description?: string; selected?: boolean }>
   >([])
   const [folderPath, setFolderPath] = useState('')
+  const [scopeMode, setScopeMode] = useState<ScopeEntryMode>('folders')
+  const [mapPickerOpen, setMapPickerOpen] = useState(false)
+  const [graphNodes, setGraphNodes] = useState<FunctionalNode[]>([])
+  const [graphEdges, setGraphEdges] = useState<FunctionalEdge[]>([])
+  const [graphLoading, setGraphLoading] = useState(false)
   const [researchBusy, setResearchBusy] = useState(false)
+  const [referencePanelOpen, setReferencePanelOpen] = useState(false)
+  const [branchLocatorOpen, setBranchLocatorOpen] = useState(false)
+  const [liveGitStatus, setLiveGitStatus] = useState<{
+    branch: string | null
+    dirty: boolean
+    ahead?: number
+    behind?: number
+    remoteUrl?: string
+  } | null>(null)
+  const [mcpServers, setMcpServers] = useState<HubMcpServerOption[]>([])
+  const [mcpLoading, setMcpLoading] = useState(false)
+
+  const hubScopes = useMemo(
+    () => normalizeHubScopes(hub).scopes,
+    [hub],
+  )
+
+  /** Card body only lists selections for the active Folders | Map mode. */
+  const visibleScopes = useMemo(
+    () =>
+      hubScopes.filter((scope) =>
+        scopeMode === 'folders'
+          ? scope.kind === 'folder'
+          : scope.kind === 'node',
+      ),
+    [hubScopes, scopeMode],
+  )
 
   const linkBySlot = useMemo(() => {
     const map = new Map<string, PinComposerHubSubagentLink>()
@@ -168,9 +267,9 @@ export default function SpatialComposeHub({
     if (!expanded) return []
     const slots: SatelliteLayoutSlot[] = [
       { id: 'repo', side: 'left', index: 0, count: 4 },
-      { id: 'folders', side: 'left', index: 1, count: 4 },
-      { id: 'skills', side: 'left', index: 2, count: 4 },
-      { id: 'references', side: 'left', index: 3, count: 4 },
+      { id: 'scope', side: 'left', index: 1, count: 4 },
+      { id: 'mcp', side: 'left', index: 2, count: 4 },
+      { id: 'skills', side: 'left', index: 3, count: 4 },
     ]
     hub.subagents.forEach((slot, index) => {
       slots.push({
@@ -186,15 +285,41 @@ export default function SpatialComposeHub({
       index: hub.subagents.length,
       count: hub.subagents.length + 1,
     })
+    const bottomCount = hub.researchEnabled ? 2 : 1
+    slots.push({
+      id: 'references',
+      side: 'bottom',
+      index: 0,
+      count: bottomCount,
+    })
     if (hub.researchEnabled) {
-      slots.push({ id: 'research', side: 'bottom', index: 0, count: 1 })
+      slots.push({
+        id: 'research',
+        side: 'bottom',
+        index: 1,
+        count: bottomCount,
+      })
     }
     return slots
   }, [expanded, hub.researchEnabled, hub.subagents])
 
+  const referencesHeight = useMemo(
+    () => computeReferencesHeight(hub.references.length),
+    [hub.references.length],
+  )
+
+  const scopeHeight = useMemo(
+    () => computeScopeHeight(visibleScopes.length),
+    [visibleScopes.length],
+  )
+
   const baseRects = useMemo(
-    () => layoutSatellites(card, layoutSlots),
-    [card, layoutSlots],
+    () =>
+      layoutSatellites(card, layoutSlots, {
+        referencesHeight,
+        scopeHeight,
+      }),
+    [card, layoutSlots, referencesHeight, scopeHeight],
   )
 
   const satRects = useMemo((): SatelliteRect[] => {
@@ -228,10 +353,21 @@ export default function SpatialComposeHub({
     onHubChange({ ...hub, ...partial })
   }
 
+  function patchScopes(scopes: PinComposerHubScope[]) {
+    patch({
+      scopes,
+      folders: foldersFromScopes(scopes),
+    })
+  }
+
   const closePicker = useCallback(() => {
     setPicker(null)
     setPickerItems([])
     setPickerLoading(false)
+  }, [])
+
+  const closeMapPicker = useCallback(() => {
+    setMapPickerOpen(false)
   }, [])
 
   async function openSkillsPicker() {
@@ -257,23 +393,110 @@ export default function SpatialComposeHub({
 
   async function openFoldersPicker(path = '') {
     if (!dataSource?.listDirectories) return
+    setMapPickerOpen(false)
     setPicker('folders')
     setFolderPath(path)
     setPickerLoading(true)
     try {
       const dirs = await dataSource.listDirectories(path)
+      const folderPaths = new Set(
+        hubScopes
+          .filter((scope) => scope.kind === 'folder')
+          .map((scope) => scope.path),
+      )
       setPickerItems(
         dirs.map((dir) => ({
           id: dir.path,
           label: dir.name,
           description: dir.path,
-          selected: hub.folders.includes(dir.path),
+          selected: folderPaths.has(dir.path),
         })),
       )
     } catch {
       setPickerItems([])
     } finally {
       setPickerLoading(false)
+    }
+  }
+
+  async function openMapPicker() {
+    if (!dataSource?.getProjectGraph) return
+    closePicker()
+    setMapPickerOpen(true)
+    setGraphLoading(true)
+    try {
+      const graph = await dataSource.getProjectGraph()
+      setGraphNodes(graph?.nodes ?? [])
+      setGraphEdges(graph?.edges ?? [])
+    } catch {
+      setGraphNodes([])
+      setGraphEdges([])
+    } finally {
+      setGraphLoading(false)
+    }
+  }
+
+  function toggleFolderScope(path: string) {
+    const existing = hubScopes.find(
+      (scope) => scope.kind === 'folder' && scope.path === path,
+    )
+    if (existing) {
+      patchScopes(hubScopes.filter((scope) => scope.id !== existing.id))
+      return
+    }
+    patchScopes([
+      ...hubScopes,
+      {
+        kind: 'folder',
+        id: createFolderScopeId(path),
+        path,
+      },
+    ])
+  }
+
+  function toggleNodeScope(scope: PinComposerHubScope) {
+    if (scope.kind !== 'node') return
+    const existing = hubScopes.find(
+      (item) => item.kind === 'node' && item.nodeId === scope.nodeId,
+    )
+    if (existing) {
+      patchScopes(hubScopes.filter((item) => item.id !== existing.id))
+      return
+    }
+    patchScopes([...hubScopes, scope])
+  }
+
+  function removeScope(scopeId: string) {
+    patchScopes(hubScopes.filter((scope) => scope.id !== scopeId))
+  }
+
+  async function refreshMcpServers() {
+    if (!dataSource?.listMcpServers) {
+      setMcpServers([])
+      return
+    }
+    setMcpLoading(true)
+    try {
+      setMcpServers(await dataSource.listMcpServers())
+    } catch {
+      setMcpServers([])
+    } finally {
+      setMcpLoading(false)
+    }
+  }
+
+  async function toggleMcpServer(server: HubMcpServerOption) {
+    if (!dataSource?.setMcpServerEnabled) return
+    const next = await dataSource.setMcpServerEnabled(
+      server.id,
+      !server.enabled,
+    )
+    if (next) {
+      setMcpServers((prev) =>
+        prev.map((item) => (item.id === next.id ? next : item)),
+      )
+    } else {
+      void refreshMcpServers()
     }
   }
 
@@ -325,28 +548,10 @@ export default function SpatialComposeHub({
     }
   }
 
-  async function openReferencesPicker() {
-    if (!dataSource?.listMentionFiles) return
-    setPicker('references')
-    setPickerLoading(true)
-    try {
-      const query = promptText.trim().slice(0, 40) || ''
-      const files = await dataSource.listMentionFiles(query)
-      setPickerItems(
-        files.slice(0, 40).map((path) => ({
-          id: path,
-          label: path.split('/').pop() ?? path,
-          description: path,
-          selected: hub.references.some(
-            (ref) => ref.kind === 'file' && ref.path === path,
-          ),
-        })),
-      )
-    } catch {
-      setPickerItems([])
-    } finally {
-      setPickerLoading(false)
-    }
+  function removeReference(id: string) {
+    patch({
+      references: hub.references.filter((item) => item.id !== id),
+    })
   }
 
   async function refreshResearchLines() {
@@ -397,6 +602,86 @@ export default function SpatialComposeHub({
     hub.skillIds.join('|'),
     promptText,
   ])
+
+  useEffect(() => {
+    if (!expanded) {
+      setReferencePanelOpen(false)
+      setBranchLocatorOpen(false)
+    }
+  }, [expanded])
+
+  useEffect(() => {
+    if (!expanded || !dataSource?.getGitStatus) return
+    let cancelled = false
+    void dataSource.getGitStatus().then((git) => {
+      if (cancelled) return
+      setLiveGitStatus({
+        branch: git.branch,
+        dirty: git.dirty,
+        ...(git.ahead !== undefined ? { ahead: git.ahead } : {}),
+        ...(git.behind !== undefined ? { behind: git.behind } : {}),
+        ...(git.remoteUrl ? { remoteUrl: git.remoteUrl } : {}),
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [expanded, hub.repo?.label, hub.repo?.branch, dataSource])
+
+  useEffect(() => {
+    if (!expanded) return
+    void refreshMcpServers()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, dataSource?.listMcpServers])
+
+  useEffect(() => {
+    const normalized = normalizeHubScopes(hub)
+    const derived = deriveFolderScopesFromReferences(hub.references)
+    const folderOnly = normalized.scopes.filter(
+      (scope) => scope.kind === 'folder',
+    )
+    const nodeScopes = normalized.scopes.filter(
+      (scope) => scope.kind === 'node',
+    )
+    const explicitFolderPaths = folderOnly.map((scope) => scope.path)
+    const mergedPaths = mergeFolderScopes(explicitFolderPaths, derived)
+    const nextFolderScopes = mergedPaths.map((path) => {
+      const existing = folderOnly.find((scope) => scope.path === path)
+      return (
+        existing ?? {
+          kind: 'folder' as const,
+          id: createFolderScopeId(path),
+          path,
+        }
+      )
+    })
+    const nextScopes = [...nextFolderScopes, ...nodeScopes]
+    const nextFolders = foldersFromScopes(nextScopes)
+    const sameScopes =
+      nextScopes.length === normalized.scopes.length &&
+      nextScopes.every((scope, index) => {
+        const prev = normalized.scopes[index]
+        if (!prev || prev.kind !== scope.kind || prev.id !== scope.id) {
+          return false
+        }
+        if (scope.kind === 'folder' && prev.kind === 'folder') {
+          return scope.path === prev.path
+        }
+        if (scope.kind === 'node' && prev.kind === 'node') {
+          return scope.nodeId === prev.nodeId
+        }
+        return false
+      })
+    const sameFolders =
+      nextFolders.length === hub.folders.length &&
+      nextFolders.every((path, index) => path === hub.folders[index])
+    if (sameScopes && sameFolders && hub.scopes.length === nextScopes.length) {
+      return
+    }
+    onHubChange({ ...hub, scopes: nextScopes, folders: nextFolders })
+    // Only re-run when references change; avoid loops on scopes writes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hub.references])
 
   useEffect(() => {
     if (!expanded || !dataSource?.getGitStatus || !hub.repo) return
@@ -503,10 +788,7 @@ export default function SpatialComposeHub({
         void openFoldersPicker(id)
         return
       }
-      const next = hub.folders.includes(id)
-        ? hub.folders.filter((item) => item !== id)
-        : [...hub.folders, id]
-      patch({ folders: next })
+      toggleFolderScope(id)
       setPickerItems((prev) =>
         prev.map((item) =>
           item.id === id ? { ...item, selected: !item.selected } : item,
@@ -529,33 +811,6 @@ export default function SpatialComposeHub({
       closePicker()
       return
     }
-    if (picker === 'references') {
-      const existing = hub.references.find(
-        (ref) => ref.kind === 'file' && ref.path === id,
-      )
-      if (existing) {
-        patch({
-          references: hub.references.filter((ref) => ref.id !== existing.id),
-        })
-      } else {
-        patch({
-          references: [
-            ...hub.references,
-            {
-              kind: 'file' as const,
-              id: `ref_file_${crypto.randomUUID().slice(0, 8)}`,
-              path: id,
-              label: id.split('/').pop() ?? id,
-            },
-          ],
-        })
-      }
-      setPickerItems((prev) =>
-        prev.map((item) =>
-          item.id === id ? { ...item, selected: !item.selected } : item,
-        ),
-      )
-    }
   }
 
   const panel = wrapPanel ? (
@@ -574,9 +829,34 @@ export default function SpatialComposeHub({
     children
   )
 
+  const pickerAnchorId =
+    picker === 'folders' ? 'scope' : picker === null ? null : picker
   const pickerAnchor =
-    (picker && rectById.get(picker)) ||
-    (picker === 'folders' ? rectById.get('folders') : null)
+    (pickerAnchorId && rectById.get(pickerAnchorId)) || null
+  const pickerObstacles = useMemo(() => {
+    if (!pickerAnchorId) return []
+    const obstacles = satRects
+      .filter((rect) => rect.id !== pickerAnchorId)
+      .map((rect) => ({
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      }))
+    obstacles.push({
+      x: card.x,
+      y: card.y,
+      width: card.width,
+      height: card.height,
+    })
+    return obstacles
+  }, [satRects, pickerAnchorId, card])
+  const pickerPreferredSide =
+    pickerAnchor?.side === 'right'
+      ? ('left' as const)
+      : pickerAnchor?.side === 'bottom'
+        ? ('above' as const)
+        : ('right' as const)
 
   return (
     <>
@@ -611,17 +891,30 @@ export default function SpatialComposeHub({
                 beginDrag(event, rectById.get('repo')!)
               }
               actions={
-                dataSource?.listRepoCandidates || dataSource?.getGitStatus ? (
-                  <button
-                    type="button"
-                    className={styles.iconBtn}
-                    aria-label={strings.repo}
-                    title={strings.repo}
-                    onClick={() => void openRepoPicker()}
-                  >
-                    <Plus size={13} strokeWidth={2} aria-hidden />
-                  </button>
-                ) : null
+                <div className={styles.repoActions}>
+                  {dataSource?.listGitBranches ? (
+                    <button
+                      type="button"
+                      className={styles.iconBtn}
+                      aria-label={strings.repoLocate}
+                      title={strings.repoLocate}
+                      onClick={() => setBranchLocatorOpen((open) => !open)}
+                    >
+                      <Search size={13} strokeWidth={2} aria-hidden />
+                    </button>
+                  ) : null}
+                  {dataSource?.listRepoCandidates || dataSource?.getGitStatus ? (
+                    <button
+                      type="button"
+                      className={styles.iconBtn}
+                      aria-label={strings.repo}
+                      title={strings.repo}
+                      onClick={() => void openRepoPicker()}
+                    >
+                      <Plus size={13} strokeWidth={2} aria-hidden />
+                    </button>
+                  ) : null}
+                </div>
               }
             >
               {hub.repo?.label ? (
@@ -634,11 +927,75 @@ export default function SpatialComposeHub({
                     {hub.repo.label}
                   </button>
                   {hub.repo.branch ? (
-                    <span className={styles.branchPill}>
+                    <button
+                      type="button"
+                      className={styles.branchPill}
+                      onClick={() =>
+                        dataSource?.listGitBranches
+                          ? setBranchLocatorOpen(true)
+                          : undefined
+                      }
+                    >
                       <GitBranch size={10} strokeWidth={2} aria-hidden />
                       {hub.repo.branch}
-                    </span>
+                    </button>
                   ) : null}
+                  {liveGitStatus ? (
+                    <div className={styles.repoStatusLine}>
+                      <span>
+                        {liveGitStatus.dirty
+                          ? strings.repoDirty
+                          : strings.repoClean}
+                      </span>
+                      {liveGitStatus.ahead !== undefined ||
+                      liveGitStatus.behind !== undefined ? (
+                        <span>
+                          ↑{liveGitStatus.ahead ?? 0} ↓
+                          {liveGitStatus.behind ?? 0}
+                        </span>
+                      ) : null}
+                      {hub.repo.prNumber ? (
+                        <span>PR #{hub.repo.prNumber}</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div className={styles.repoActionRow}>
+                    {liveGitStatus?.remoteUrl || dataSource?.openExternalUrl ? (
+                      <button
+                        type="button"
+                        className={styles.repoActionBtn}
+                        onClick={() => {
+                          const url = liveGitStatus?.remoteUrl
+                          if (!url) return
+                          const https = url
+                            .replace(/^git@github\.com:/i, 'https://github.com/')
+                            .replace(/\.git$/i, '')
+                          dataSource?.openExternalUrl?.(https)
+                        }}
+                      >
+                        <ExternalLink size={11} strokeWidth={2} aria-hidden />
+                        {strings.repoOpenGithub}
+                      </button>
+                    ) : null}
+                    {dataSource?.openGithubGraph ? (
+                      <button
+                        type="button"
+                        className={styles.repoActionBtn}
+                        onClick={() => dataSource.openGithubGraph?.()}
+                      >
+                        {strings.repoOpenGraph}
+                      </button>
+                    ) : null}
+                    {dataSource?.fetchGit ? (
+                      <button
+                        type="button"
+                        className={styles.repoActionBtn}
+                        onClick={() => void dataSource.fetchGit?.()}
+                      >
+                        {strings.repoFetch}
+                      </button>
+                    ) : null}
+                  </div>
                 </>
               ) : (
                 <button
@@ -652,58 +1009,164 @@ export default function SpatialComposeHub({
             </SatelliteCard>
           ) : null}
 
-          {rectById.get('folders') ? (
+          {branchLocatorOpen && rectById.get('repo') ? (
+            <GithubBranchLocator
+              open={branchLocatorOpen}
+              anchorRect={rectById.get('repo')!}
+              hub={hub}
+              onHubChange={onHubChange}
+              strings={strings}
+              dataSource={dataSource}
+              onClose={() => setBranchLocatorOpen(false)}
+            />
+          ) : null}
+
+          {rectById.get('scope') ? (
             <SatelliteCard
-              side={rectById.get('folders')!.side}
-              title={strings.folders}
+              side={rectById.get('scope')!.side}
+              title={strings.scope}
               tone="folder"
-              icon={Folder}
+              icon={Layers}
               delayMs={50}
               reducedMotion={reducedMotion}
-              rect={rectById.get('folders')!}
-              dragging={draggingId === 'folders'}
+              rect={rectById.get('scope')!}
+              dragging={draggingId === 'scope'}
               onDragHandlePointerDown={(event) =>
-                beginDrag(event, rectById.get('folders')!)
+                beginDrag(event, rectById.get('scope')!)
               }
               actions={
-                <button
-                  type="button"
-                  className={styles.iconBtn}
-                  aria-label={strings.foldersAdd}
-                  title={strings.foldersAdd}
-                  onClick={() => void openFoldersPicker(folderPath || '')}
-                >
-                  <Plus size={13} strokeWidth={2} aria-hidden />
-                </button>
+                (scopeMode === 'folders' && dataSource?.listDirectories) ||
+                (scopeMode === 'map' && dataSource?.getProjectGraph) ? (
+                  <button
+                    type="button"
+                    className={styles.iconBtn}
+                    aria-label={strings.scopeAdd}
+                    title={strings.scopeAdd}
+                    onClick={() => {
+                      if (scopeMode === 'map') void openMapPicker()
+                      else void openFoldersPicker(folderPath || '')
+                    }}
+                  >
+                    <Plus size={13} strokeWidth={2} aria-hidden />
+                  </button>
+                ) : null
               }
             >
-              {hub.folders.length === 0 ? (
+              <div className={styles.scopeModeRow} role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={scopeMode === 'folders'}
+                  className={`${styles.scopeModeBtn}${scopeMode === 'folders' ? ` ${styles.scopeModeBtnActive}` : ''}`}
+                  onClick={() => {
+                    setScopeMode('folders')
+                    setMapPickerOpen(false)
+                  }}
+                >
+                  {strings.scopeModeFolders}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={scopeMode === 'map'}
+                  className={`${styles.scopeModeBtn}${scopeMode === 'map' ? ` ${styles.scopeModeBtnActive}` : ''}`}
+                  onClick={() => {
+                    setScopeMode('map')
+                    closePicker()
+                  }}
+                >
+                  {strings.scopeModeMap}
+                </button>
+              </div>
+              {visibleScopes.length === 0 ? (
+                <span className={styles.emptyHint}>{strings.scopeEmpty}</span>
+              ) : (
+                <div className={styles.scopeListScroll}>
+                  {visibleScopes.map((scope, scopeIndex) => (
+                    <button
+                      key={scope.id}
+                      type="button"
+                      className={styles.rowItem}
+                      title={`Remove ${formatHubScopeToken(scope)}`}
+                      onClick={() => removeScope(scope.id)}
+                    >
+                      <span className={styles.rowIcon}>
+                        {scope.kind === 'folder' ? (
+                          <Folder size={12} strokeWidth={2} aria-hidden />
+                        ) : (
+                          <Layers size={12} strokeWidth={2} aria-hidden />
+                        )}
+                      </span>
+                      <span className={styles.rowLabel}>
+                        {formatHubScopeToken(scope)}
+                      </span>
+                      <span className={styles.rowBadge}>{scopeIndex + 1}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </SatelliteCard>
+          ) : null}
+
+          {rectById.get('mcp') ? (
+            <SatelliteCard
+              side={rectById.get('mcp')!.side}
+              title={strings.mcp}
+              tone="mcp"
+              icon={Plug}
+              delayMs={100}
+              reducedMotion={reducedMotion}
+              rect={rectById.get('mcp')!}
+              dragging={draggingId === 'mcp'}
+              onDragHandlePointerDown={(event) =>
+                beginDrag(event, rectById.get('mcp')!)
+              }
+              actions={
+                dataSource?.openMcpSettings ? (
+                  <button
+                    type="button"
+                    className={styles.iconBtn}
+                    aria-label={strings.mcpOpenSettings}
+                    title={strings.mcpOpenSettings}
+                    onClick={() => dataSource.openMcpSettings?.()}
+                  >
+                    <Plus size={13} strokeWidth={2} aria-hidden />
+                  </button>
+                ) : null
+              }
+            >
+              {mcpLoading ? (
+                <span className={styles.emptyHint}>…</span>
+              ) : mcpServers.length === 0 ? (
                 <button
                   type="button"
                   className={styles.emptyHint}
-                  onClick={() => void openFoldersPicker('')}
+                  onClick={() => dataSource?.openMcpSettings?.()}
                 >
-                  {strings.foldersEmpty}
+                  {strings.mcpEmpty}
+                  {dataSource?.openMcpSettings
+                    ? ` · ${strings.mcpOpenSettings}`
+                    : ''}
                 </button>
               ) : (
                 <div className={styles.rowList}>
-                  {hub.folders.slice(0, 3).map((folder, folderIndex) => (
+                  {mcpServers.slice(0, 4).map((server) => (
                     <button
-                      key={folder}
+                      key={server.id}
                       type="button"
-                      className={styles.rowItem}
-                      title={`Remove ${folder}`}
-                      onClick={() =>
-                        patch({
-                          folders: hub.folders.filter((item) => item !== folder),
-                        })
-                      }
+                      className={`${styles.mcpRow}${server.enabled ? '' : ` ${styles.mcpRowOff}`}`}
+                      title={strings.mcpPolicyHint}
+                      onClick={() => void toggleMcpServer(server)}
                     >
                       <span className={styles.rowIcon}>
-                        <Folder size={12} strokeWidth={2} aria-hidden />
+                        <Plug size={12} strokeWidth={2} aria-hidden />
                       </span>
-                      <span className={styles.rowLabel}>{folder}</span>
-                      <span className={styles.rowBadge}>{folderIndex + 1}</span>
+                      <span className={styles.rowLabel}>{server.name}</span>
+                      <span className={styles.mcpStatus}>
+                        {server.enabled
+                          ? strings.mcpEnabled
+                          : strings.mcpDisabled}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -717,7 +1180,7 @@ export default function SpatialComposeHub({
               title={strings.skills}
               tone="skill"
               icon={Sparkles}
-              delayMs={100}
+              delayMs={150}
               reducedMotion={reducedMotion}
               rect={rectById.get('skills')!}
               dragging={draggingId === 'skills'}
@@ -776,7 +1239,7 @@ export default function SpatialComposeHub({
               side={rectById.get('references')!.side}
               title={strings.references}
               tone="reference"
-              icon={ImageIcon}
+              icon={Link2}
               delayMs={150}
               reducedMotion={reducedMotion}
               rect={rectById.get('references')!}
@@ -785,77 +1248,88 @@ export default function SpatialComposeHub({
                 beginDrag(event, rectById.get('references')!)
               }
               actions={
-                dataSource?.listMentionFiles ? (
-                  <button
-                    type="button"
-                    className={styles.iconBtn}
-                    aria-label={strings.references}
-                    onClick={() => void openReferencesPicker()}
-                  >
-                    <Plus size={13} strokeWidth={2} aria-hidden />
-                  </button>
-                ) : null
-              }
-            >
-              {hub.references.length === 0 ? (
                 <button
                   type="button"
-                  className={styles.emptyHint}
-                  onClick={() => void openReferencesPicker()}
+                  className={styles.iconBtn}
+                  aria-label={strings.referencesAddPanel}
+                  title={strings.referencesAddPanel}
+                  onClick={() => setReferencePanelOpen((open) => !open)}
                 >
-                  {strings.referencesEmpty}
+                  <Plus size={13} strokeWidth={2} aria-hidden />
                 </button>
-              ) : (
-                <div className={styles.thumbRow}>
-                  {hub.references.slice(0, 3).map((ref) => {
-                    if (ref.kind === 'image') {
-                      const src = assetResolver?.(ref.assetPath)
-                      return src ? (
-                        <img
-                          key={ref.id}
-                          className={styles.thumb}
-                          src={src}
-                          alt={ref.label ?? ref.assetPath}
-                        />
-                      ) : (
+              }
+            >
+              <div className={styles.refComposer}>
+                {hub.references.length === 0 ? (
+                  <button
+                    type="button"
+                    className={styles.emptyHint}
+                    onClick={() => setReferencePanelOpen(true)}
+                  >
+                    {strings.referencesEmpty}
+                  </button>
+                ) : (
+                  <div className={styles.refListScroll}>
+                    {hub.references.map((ref) => {
+                      if (ref.kind === 'image') {
+                        const src = ref.assetPath
+                          ? assetResolver?.(ref.assetPath)
+                          : ref.url
+                        if (src) {
+                          return (
+                            <button
+                              key={ref.id}
+                              type="button"
+                              className={styles.rowItem}
+                              title="Remove"
+                              onClick={() => removeReference(ref.id)}
+                            >
+                              <img
+                                className={styles.thumb}
+                                src={src}
+                                alt={referenceDisplayLabel(ref)}
+                              />
+                              <span className={styles.rowLabel}>
+                                {referenceDisplayLabel(ref)}
+                              </span>
+                            </button>
+                          )
+                        }
+                      }
+                      return (
                         <button
                           key={ref.id}
                           type="button"
-                          className={styles.thumbPlaceholder}
+                          className={styles.rowItem}
                           title="Remove"
-                          onClick={() =>
-                            patch({
-                              references: hub.references.filter(
-                                (item) => item.id !== ref.id,
-                              ),
-                            })
-                          }
+                          onClick={() => removeReference(ref.id)}
                         >
-                          {ref.label?.slice(0, 4) ?? 'img'}
+                          <span className={styles.refKindBadge}>
+                            {referenceKindLabel(ref.kind, strings)}
+                          </span>
+                          <span className={styles.rowLabel}>
+                            {referenceDisplayLabel(ref)}
+                          </span>
                         </button>
                       )
-                    }
-                    return (
-                      <button
-                        key={ref.id}
-                        type="button"
-                        className={styles.chip}
-                        title="Remove"
-                        onClick={() =>
-                          patch({
-                            references: hub.references.filter(
-                              (item) => item.id !== ref.id,
-                            ),
-                          })
-                        }
-                      >
-                        {ref.label ?? ref.path.split('/').pop() ?? ref.path}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
+                    })}
+                  </div>
+                )}
+              </div>
             </SatelliteCard>
+          ) : null}
+
+          {referencePanelOpen && rectById.get('references') ? (
+            <ReferenceAddPanel
+              open={referencePanelOpen}
+              anchorRect={rectById.get('references')!}
+              hub={hub}
+              onHubChange={onHubChange}
+              strings={strings}
+              dataSource={dataSource}
+              onClose={() => setReferencePanelOpen(false)}
+              onRemoveReference={removeReference}
+            />
           ) : null}
 
           {hub.subagents.map((slot, index) => {
@@ -1061,14 +1535,14 @@ export default function SpatialComposeHub({
                 picker === 'skills'
                   ? strings.skills
                   : picker === 'folders'
-                    ? strings.folders
-                    : picker === 'repo'
-                      ? strings.repo
-                      : strings.references
+                    ? strings.scopeModeFolders
+                    : strings.repo
               }
               items={pickerItems}
               loading={pickerLoading}
               anchorRect={pickerAnchor}
+              obstacleRects={pickerObstacles}
+              preferredSide={pickerPreferredSide}
               onClose={closePicker}
               onSelect={(id, meta) => void handlePickerSelect(id, meta)}
               allowDrill={picker === 'folders'}
@@ -1090,6 +1564,17 @@ export default function SpatialComposeHub({
               }
             />
           ) : null}
+
+          <ScopeMapPicker
+            open={mapPickerOpen}
+            nodes={graphNodes}
+            edges={graphEdges}
+            loading={graphLoading}
+            selectedScopes={hubScopes}
+            strings={strings}
+            onClose={closeMapPicker}
+            onToggleNode={toggleNodeScope}
+          />
         </div>
       ) : null}
     </>
@@ -1118,5 +1603,16 @@ export function ResearchToggle({
 }
 
 export function ensureHub(value: PinComposerHub | undefined): PinComposerHub {
-  return value ?? emptyPinComposerHub()
+  const defaults = emptyPinComposerHub()
+  if (!value) return defaults
+  return normalizeHubScopes({
+    ...defaults,
+    ...value,
+    folders: value.folders ?? defaults.folders,
+    scopes: value.scopes ?? defaults.scopes,
+    skillIds: value.skillIds ?? defaults.skillIds,
+    references: value.references ?? defaults.references,
+    referenceFolders: value.referenceFolders ?? defaults.referenceFolders,
+    subagents: value.subagents ?? defaults.subagents,
+  })
 }

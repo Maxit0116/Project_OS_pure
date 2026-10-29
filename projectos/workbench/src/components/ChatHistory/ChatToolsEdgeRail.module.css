@@ -5,7 +5,8 @@
   right: 0;
   z-index: 24;
   width: 14px;
-  min-height: 168px;
+  /* Session + Loop + GitHub + Agent Flow + History */
+  min-height: 208px;
   display: flex;
   align-items: center;
   justify-content: flex-end;

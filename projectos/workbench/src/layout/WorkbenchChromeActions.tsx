@@ -1,4 +1,5 @@
-import { Crosshair, MessageSquare, PanelLeft, Settings, Terminal } from 'lucide-react'
+import { useEffect } from 'react'
+import { Crosshair, GitBranch, MessageSquare, PanelLeft, Settings, Terminal } from 'lucide-react'
 import { isDesktopApp } from '../data/clientMode'
 import { useWorkbenchStore } from '../state/workbenchStore'
 import { useBottomDockStore } from '../state/bottomDockStore'
@@ -16,12 +17,27 @@ export default function WorkbenchChromeActions({ onOpenSettings, compact = false
   const rightPanelOpen = useWorkbenchStore((s) => s.rightPanelOpen)
   const setLeftPanelOpen = useWorkbenchStore((s) => s.setLeftPanelOpen)
   const setRightPanelOpen = useWorkbenchStore((s) => s.setRightPanelOpen)
+  const setSettingsOpen = useWorkbenchStore((s) => s.setSettingsOpen)
+  const githubAuthStatus = useWorkbenchStore((s) => s.githubAuthStatus)
+  const refreshGitHubAuthStatus = useWorkbenchStore((s) => s.refreshGitHubAuthStatus)
   const bottomDockOpen = useBottomDockStore((s) => s.open)
   const togglePanel = useBottomDockStore((s) => s.togglePanel)
   const { ts } = useI18n()
 
+  useEffect(() => {
+    void refreshGitHubAuthStatus()
+  }, [refreshGitHubAuthStatus])
+
   const iconSize = compact ? 14 : 16
   const showSpatialPin = isDesktopApp()
+  const signedIn = Boolean(githubAuthStatus?.connected && githubAuthStatus.login)
+  const accountLabel = signedIn
+    ? ts('settings.teamGithub.chromeAccount')
+    : ts('settings.teamGithub.chromeSignIn')
+
+  const openGitHubSettings = () => {
+    setSettingsOpen(true, 'teamGithub')
+  }
 
   return (
     <div className={`${styles.actions} ${compact ? styles.compact : ''}`}>
@@ -68,6 +84,29 @@ export default function WorkbenchChromeActions({ onOpenSettings, compact = false
           <MessageSquare size={iconSize} strokeWidth={1.75} aria-hidden />
         </button>
       </div>
+      <button
+        type="button"
+        className={`${styles.accountBtn} ${signedIn ? styles.accountBtnSignedIn : ''}`}
+        onClick={openGitHubSettings}
+        title={
+          signedIn
+            ? ts('settings.teamGithub.connectedAs', { login: githubAuthStatus?.login ?? '' })
+            : accountLabel
+        }
+        aria-label={accountLabel}
+      >
+        {signedIn && githubAuthStatus?.avatarUrl ? (
+          <img
+            className={styles.accountAvatar}
+            src={githubAuthStatus.avatarUrl}
+            alt=""
+            width={compact ? 16 : 18}
+            height={compact ? 16 : 18}
+          />
+        ) : (
+          <GitBranch size={iconSize} strokeWidth={1.75} aria-hidden />
+        )}
+      </button>
       <button
         type="button"
         className={styles.settingsBtn}

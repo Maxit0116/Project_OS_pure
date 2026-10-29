@@ -1,0 +1,46 @@
+{
+  "version": "1",
+  "generatedAt": "2026-10-29T00:00:00.000Z",
+  "listings": [
+    {
+      "id": "curated.filesystem",
+      "name": "Filesystem (demo)",
+      "description": "Official-demo style stdio filesystem MCP server via npx.",
+      "trustTier": "curated",
+      "version": "1.0.0",
+      "homepage": "https://modelcontextprotocol.io",
+      "requiresAuth": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "."
+      ]
+    },
+    {
+      "id": "community.everything",
+      "name": "Everything (community demo)",
+      "description": "Community-tier example listing. Review the command before enabling.",
+      "trustTier": "community",
+      "version": "0.1.0",
+      "requiresAuth": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ]
+    },
+    {
+      "id": "curated.http-echo",
+      "name": "HTTP Echo (placeholder)",
+      "description": "Example http transport listing pointing at loopback for local demos.",
+      "trustTier": "curated",
+      "version": "1.0.0",
+      "requiresAuth": true,
+      "transport": "http",
+      "url": "http://127.0.0.1:3921/mcp"
+    }
+  ]
+}

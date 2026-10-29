@@ -153,11 +153,19 @@ import type {
 } from "../contracts/agent-worktree.js";
 import { filePathsFromContextBundle, projectRuleLoadOptions } from "./harness/rules.js";
 import { loadInstructionMaterials } from "./harness/walk-instructions.js";
+import { loadToolPermissionDocument } from "./harness/permissions.js";
 import {
   assertToolAllowed,
+  readCapabilityContext,
   writeCapabilityContext,
 } from "./harness/tool-policy.js";
 import { applyDiffToToolResult } from "./harness/tool-result.js";
+import type { GroundedAnswerMcpOptions } from "./grounded-answer-service.js";
+import {
+  buildMcpToolCatalog,
+  executeMcpToolCall,
+  listServerToolDescriptors,
+} from "./mcp/index.js";
 import {
   CreatePlanRequestSchema,
   ImplementationPlanSchema,
@@ -174,12 +182,51 @@ import {
   type StartDebugSessionRequest,
   type SubmitDebugReproRequest,
 } from "../contracts/debug-session.js";
-import type {
-  ConnectionTestResult,
-  ModelOption,
-  ProjectOSSettings,
-  SettingsPatch,
+import {
+  McpServerConfigSchema,
+  type ConnectionTestResult,
+  type McpServerConfig,
+  type McpToolDescriptor,
+  type ModelOption,
+  type ProjectOSSettings,
+  type SettingsPatch,
 } from "../contracts/settings.js";
+import { McpSessionManager } from "./mcp/index.js";
+import { GitHubAuthSessionManager } from "./github-auth/session-manager.js";
+import type {
+  AccountProfile,
+  BeginGitHubOAuthResult,
+  GitHubAuthStatus,
+} from "../contracts/github-auth.js";
+import {
+  filterInstallableListings,
+  findCatalogListing,
+  listingToMcpServerConfig,
+  McpCatalogClient,
+  withCatalogReport,
+  withDisabledListing,
+} from "./mcp-catalog/index.js";
+import {
+  filterInstallableSkillListings,
+  findSkillCatalogListing,
+  SkillCatalogClient,
+  withDisabledSkillListing,
+  withSkillCatalogReport,
+} from "./skill-marketplace/index.js";
+import {
+  InstallMcpFromCatalogInputSchema,
+  MCP_CATALOG_REPORT_ISSUE_URL,
+  type InstallMcpFromCatalogInput,
+  type McpCatalogView,
+} from "../contracts/mcp-catalog.js";
+import {
+  InstallSkillFromCatalogInputSchema,
+  SKILL_CATALOG_REPORT_ISSUE_URL,
+  type InstallSkillFromCatalogInput,
+  type SkillCatalogView,
+} from "../contracts/skill-marketplace.js";
+import type { SkillDescriptor } from "../contracts/skills.js";
+import { tmpdir } from "node:os";
 import type { ProjectOSProject } from "../contracts/project.js";
 import {
   ProjectDescriptionSchema,
@@ -251,6 +298,7 @@ import {
   type LoadedProjectOSWorkspace,
   ProjectOSWorkspaceStore,
   InMemorySecretStore,
+  createMcpAuthRef,
   type SecretStore,
 } from "../persistence/index.js";
 import {
@@ -321,7 +369,9 @@ import {
 } from "./explicit-context-assembler.js";
 import {
   getProjectSkill,
+  installProjectSkill,
   listProjectSkills,
+  SkillInstallError,
 } from "./skill-catalog-service.js";
 import { seedProjectSkills } from "./skill-seed-service.js";
 import {
@@ -400,6 +450,23 @@ export interface ProjectOSLocalApiOptions {
   agentMemoryRoot?: string;
   /** Tests use 0. Production waits so an in-progress follow-up is not summarized. */
   memoryProposalDelayMs?: number;
+  /** Tests inject a fake MCP session manager; production creates a real one. */
+  mcpSessionManager?: McpSessionManager;
+  /** Directory for MCP catalog disk cache. Defaults under agentMemoryRoot/auditDirectory/tmpdir. */
+  mcpCatalogCacheRoot?: string;
+  /** Tests inject a fake catalog client. */
+  mcpCatalogClient?: McpCatalogClient;
+  /** Directory for skill catalog disk cache. */
+  skillCatalogCacheRoot?: string;
+  /** Tests inject a fake skill catalog client. */
+  skillCatalogClient?: SkillCatalogClient;
+  /**
+   * User-data root for GitHub account profile JSON (not secrets).
+   * Desktop sets this to Electron userData; tests may use a temp dir.
+   */
+  userDataPath?: string;
+  /** Tests inject a fake GitHub auth session manager. */
+  githubAuthSessionManager?: GitHubAuthSessionManager;
 }
 
 export interface VerificationRunnerDependency {
@@ -644,6 +711,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   protected readonly chatTitleService: ChatTitleService;
   protected readonly codeFileUnderstandingService: CodeFileUnderstandingService;
   private readonly groundedAnswerService: GroundedAnswerService;
+  private readonly mcpSessionManager: McpSessionManager;
+  private readonly mcpCatalogClient: McpCatalogClient;
+  private readonly skillCatalogClient: SkillCatalogClient;
+  private readonly githubAuthSessionManager: GitHubAuthSessionManager;
   private readonly planService: PlanService;
   private readonly debugHypothesisService: DebugHypothesisService;
   private readonly localContextAssembler: LocalContextAssemblerDependency;
@@ -717,6 +788,40 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       this.modelGateway,
     );
     this.groundedAnswerService = new GroundedAnswerService(this.modelGateway);
+    this.mcpSessionManager = options.mcpSessionManager ?? new McpSessionManager();
+    this.mcpCatalogClient =
+      options.mcpCatalogClient ??
+      new McpCatalogClient({
+        cacheRoot:
+          options.mcpCatalogCacheRoot ??
+          options.agentMemoryRoot ??
+          options.auditDirectory ??
+          join(tmpdir(), "projectos-mcp-catalog"),
+      });
+    this.skillCatalogClient =
+      options.skillCatalogClient ??
+      new SkillCatalogClient({
+        cacheRoot:
+          options.skillCatalogCacheRoot ??
+          options.mcpCatalogCacheRoot ??
+          options.agentMemoryRoot ??
+          options.auditDirectory ??
+          join(tmpdir(), "projectos-skill-catalog"),
+      });
+    const githubUserDataPath =
+      options.userDataPath ??
+      options.agentMemoryRoot ??
+      options.auditDirectory ??
+      join(tmpdir(), "projectos-github-auth");
+    this.githubAuthSessionManager =
+      options.githubAuthSessionManager ??
+      new GitHubAuthSessionManager({
+        secretStore: this.secretStore,
+        userDataPath: githubUserDataPath,
+        ...(options.openExternalUrl
+          ? { openExternalUrl: options.openExternalUrl }
+          : {}),
+      });
     this.planService = new PlanService(this.modelGateway);
     this.debugHypothesisService = new DebugHypothesisService(this.modelGateway);
     this.localContextAssembler = options.localContextAssembler ?? new LocalContextAssembler();
@@ -1385,12 +1490,143 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     projectId: string,
   ): Promise<import("../contracts/workspace-git.js").WorkspaceGitStatus> {
     const workspace = this.requireLoadedWorkspace(projectId);
-    const { readGitRepositoryStatus } = await import("./git-context-service.js");
+    const {
+      readGitRepositoryStatus,
+      readGitRemoteUrl,
+      readGitDefaultBranch,
+    } = await import("./git-context-service.js");
     const status = readGitRepositoryStatus(workspace.workspaceRoot);
+    const remoteUrl = readGitRemoteUrl(workspace.workspaceRoot);
+    const defaultBranch = readGitDefaultBranch(workspace.workspaceRoot);
     return {
       branch: status.branch,
       dirty: status.dirty,
+      ...(status.ahead !== undefined ? { ahead: status.ahead } : {}),
+      ...(status.behind !== undefined ? { behind: status.behind } : {}),
+      ...(remoteUrl ? { remoteUrl } : {}),
+      ...(defaultBranch ? { defaultBranch } : {}),
+      ...(status.error ? { error: status.error } : {}),
     };
+  }
+
+  async listWorkspaceGitBranches(
+    projectId: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitBranchList> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listGitBranches } = await import("./git-context-service.js");
+    const listed = listGitBranches(workspace.workspaceRoot);
+    return {
+      defaultBranch: listed.defaultBranch,
+      currentBranch: listed.currentBranch,
+      branches: listed.branches,
+    };
+  }
+
+  async checkoutWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { checkoutGitBranch } = await import("./git-context-service.js");
+    const result = checkoutGitBranch(workspace.workspaceRoot, branch);
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async createWorkspaceBranch(
+    projectId: string,
+    input: { name: string; from?: string; checkout?: boolean },
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { createGitBranch } = await import("./git-context-service.js");
+    const result = createGitBranch(workspace.workspaceRoot, input.name, {
+      from: input.from,
+      checkout: input.checkout,
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async fetchWorkspaceGit(
+    projectId: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { fetchGitRemote } = await import("./git-context-service.js");
+    const result = fetchGitRemote(workspace.workspaceRoot);
+    return { ok: result.ok, message: result.message };
+  }
+
+  async listWorkspacePullRequests(
+    projectId: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitPullRequestList> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listGithubPullRequests } = await import("./git-context-service.js");
+    const accessToken = await this.githubAuthSessionManager.getAccessToken();
+    return listGithubPullRequests(workspace.workspaceRoot, {
+      ...(accessToken ? { accessToken } : {}),
+    });
+  }
+
+  async createWorkspacePullRequest(
+    projectId: string,
+    input: { title: string; head?: string; base?: string; body?: string },
+  ): Promise<{
+    ok: boolean;
+    url?: string;
+    number?: number;
+    message: string;
+  }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { createGithubPullRequest } = await import("./git-context-service.js");
+    const accessToken = await this.githubAuthSessionManager.getAccessToken();
+    return createGithubPullRequest(workspace.workspaceRoot, input, {
+      ...(accessToken ? { accessToken } : {}),
+    });
+  }
+
+  private syncGitHubAuthMockMode(): void {
+    const workspace = [...this.workspacesByProjectId.values()][0];
+    const presentationMode = workspace
+      ? this.settingsService.getSettings(workspace).presentationMode
+      : false;
+    this.githubAuthSessionManager.setMockMode(Boolean(presentationMode));
+  }
+
+  async getGitHubAuthStatus(): Promise<GitHubAuthStatus> {
+    this.syncGitHubAuthMockMode();
+    return this.githubAuthSessionManager.getStatus();
+  }
+
+  async beginGitHubOAuth(): Promise<BeginGitHubOAuthResult> {
+    this.syncGitHubAuthMockMode();
+    return this.githubAuthSessionManager.beginOAuth();
+  }
+
+  async cancelGitHubOAuth(): Promise<GitHubAuthStatus> {
+    return this.githubAuthSessionManager.cancelOAuth();
+  }
+
+  async disconnectGitHub(): Promise<GitHubAuthStatus> {
+    return this.githubAuthSessionManager.disconnect();
+  }
+
+  async getAccountProfile(): Promise<AccountProfile | null> {
+    return this.githubAuthSessionManager.getAccountProfile();
+  }
+
+  async saveGitHubOAuthClientId(clientId: string): Promise<GitHubAuthStatus> {
+    return this.githubAuthSessionManager.saveClientId(clientId);
+  }
+
+  async importGitHubAuthFromGhCli(): Promise<BeginGitHubOAuthResult> {
+    this.syncGitHubAuthMockMode();
+    return this.githubAuthSessionManager.importFromGhCli();
   }
 
   async getNodeContext(
@@ -1894,6 +2130,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ],
     });
     const instructionAppendix = assembled.instructions;
+    const mcp = await this.buildAskMcpOptions(workspace);
     const result = await this.groundedAnswerService.answer({
       projectId: parsedRequest.projectId,
       question: parsedRequest.question,
@@ -1908,7 +2145,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ...(parsedRequest.images?.length
         ? { images: parsedRequest.images }
         : {}),
+      ...(mcp ? { mcp } : {}),
     });
+    const usedMcp = (result.mcpToolCalls?.length ?? 0) > 0;
     const contextSummary = summarizeLocalContext(augmented.bundle);
     const parsed = AgentAnswerResultSchema.parse({
       id: `answer_${globalThis.crypto.randomUUID()}`,
@@ -1923,6 +2162,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         bundleHash: augmented.attachmentSummary.bundleHash,
       },
       ...(result.reasoning ? { reasoning: result.reasoning } : {}),
+      ...(result.mcpToolCalls?.length
+        ? { mcpToolCalls: result.mcpToolCalls }
+        : {}),
       ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
       ...(exploration ? { explorationTrace: exploration.trace } : {}),
       ...(retrieval.summary.searched ? { retrievalSummary: retrieval.summary } : {}),
@@ -1954,12 +2196,78 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         runStatus: "complete",
         userPrompt: parsedRequest.question,
         understood: "",
-        usedMcp: false,
+        usedMcp,
         verificationFailed: false,
         rolledBack: false,
       });
     }
     return parsed;
+  }
+
+  private async buildAskMcpOptions(
+    workspace: LoadedProjectOSWorkspace,
+  ): Promise<GroundedAnswerMcpOptions | undefined> {
+    const servers = (workspace.settings.mcpServers ?? []).filter((server) => server.enabled);
+    if (servers.length === 0) return undefined;
+    const permissionRules = loadToolPermissionDocument(workspace.workspaceRoot).rules;
+    const toolsByServerId = new Map<string, Awaited<ReturnType<typeof listServerToolDescriptors>>>();
+    for (const server of servers) {
+      try {
+        const client = await this.mcpSessionManager.getClient({
+          projectId: workspace.project.projectId,
+          config: server,
+          workspaceRoot: workspace.workspaceRoot,
+          secretStore: this.secretStore,
+        });
+        toolsByServerId.set(server.id, await listServerToolDescriptors(client));
+      } catch {
+        // Honest: a failed server simply contributes no tools for this Ask turn.
+      }
+    }
+    const catalog = buildMcpToolCatalog({
+      servers,
+      toolsByServerId,
+      permissionRules,
+    });
+    if (catalog.length === 0) return undefined;
+    const serverById = new Map(servers.map((server) => [server.id, server]));
+    return {
+      tools: catalog.map((entry) => entry.modelTool),
+      toolPolicy: {
+        context: readCapabilityContext({
+          mode: "ask",
+          allowedReadPaths: [],
+        }),
+        rules: permissionRules,
+        workspaceRoot: workspace.workspaceRoot,
+      },
+      executeTool: async (call, signal) => {
+        const listed = catalog.find((entry) => entry.qualifiedName === call.name);
+        const serverId = listed?.serverId;
+        if (!serverId || !serverById.has(serverId)) {
+          return {
+            isError: true,
+            content: `MCP tool '${call.name}' is not in the Ask catalog`,
+          };
+        }
+        return executeMcpToolCall({
+          call,
+          signal,
+          getClient: async (id) => {
+            const config = serverById.get(id);
+            if (!config) {
+              throw new Error(`MCP server '${id}' is not configured`);
+            }
+            return this.mcpSessionManager.getClient({
+              projectId: workspace.project.projectId,
+              config,
+              workspaceRoot: workspace.workspaceRoot,
+              secretStore: this.secretStore,
+            });
+          },
+        });
+      },
+    };
   }
 
   async listSkills(projectId: string): Promise<ListSkillsResult> {
@@ -6234,6 +6542,294 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const profile = requireModelProfile(workspace.settings, profileId);
     const models = await this.modelGateway.listModels(profile);
     return models.map((model) => ({ id: model.id, name: model.name }));
+  }
+
+  async listMcpServers(projectId: string): Promise<McpServerConfig[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return cloneJson(workspace.settings.mcpServers ?? []);
+  }
+
+  async saveMcpServer(
+    projectId: string,
+    input: { config: McpServerConfig; authToken?: string },
+  ): Promise<ProjectOSSettings> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const config = McpServerConfigSchema.parse(input.config);
+    const authToken = input.authToken?.trim();
+    const authRef = config.authRef || createMcpAuthRef(config.id);
+    const previous = (workspace.settings.mcpServers ?? []).find(
+      (server) => server.id === config.id,
+    );
+    const nextConfig: McpServerConfig = {
+      ...config,
+      ...(authToken || previous?.authRef || config.authRef
+        ? { authRef: authToken ? authRef : (config.authRef ?? previous?.authRef) }
+        : {}),
+    };
+    if (authToken) {
+      await this.secretStore.set(authRef, authToken);
+      nextConfig.authRef = authRef;
+    }
+    const mcpServers = previous
+      ? (workspace.settings.mcpServers ?? []).map((server) =>
+          server.id === config.id ? nextConfig : server,
+        )
+      : [...(workspace.settings.mcpServers ?? []), nextConfig];
+    try {
+      const updated = await this.updateSettings(projectId, { mcpServers });
+      await this.mcpSessionManager.disposeServer(projectId, config.id);
+      return updated;
+    } catch (error) {
+      if (authToken && !previous?.authRef) {
+        await this.secretStore.delete(authRef).catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
+  async deleteMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<ProjectOSSettings> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const existing = (workspace.settings.mcpServers ?? []).find(
+      (server) => server.id === serverId,
+    );
+    const mcpServers = (workspace.settings.mcpServers ?? []).filter(
+      (server) => server.id !== serverId,
+    );
+    const updated = await this.updateSettings(projectId, { mcpServers });
+    await this.mcpSessionManager.disposeServer(projectId, serverId);
+    if (existing?.authRef) {
+      await this.secretStore.delete(existing.authRef).catch(() => undefined);
+    }
+    return updated;
+  }
+
+  async testMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<ConnectionTestResult> {
+    const started = Date.now();
+    try {
+      const tools = await this.refreshMcpTools(projectId, serverId);
+      return {
+        ok: true,
+        latencyMs: Date.now() - started,
+        message: `Connected (${tools.length} tool${tools.length === 1 ? "" : "s"})`,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        latencyMs: Date.now() - started,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async refreshMcpTools(
+    projectId: string,
+    serverId: string,
+  ): Promise<McpToolDescriptor[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const config = (workspace.settings.mcpServers ?? []).find(
+      (server) => server.id === serverId,
+    );
+    if (!config) {
+      throw new ProjectOSError(
+        "invalid_settings",
+        `MCP server '${serverId}' is not configured`,
+      );
+    }
+    const client = await this.mcpSessionManager.getClient({
+      projectId,
+      config,
+      workspaceRoot: workspace.workspaceRoot,
+      secretStore: this.secretStore,
+    });
+    return listServerToolDescriptors(client);
+  }
+
+  async listMcpCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<McpCatalogView> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const catalogUrl = workspace.settings.mcpMarketplace?.catalogUrl;
+    const view = await this.mcpCatalogClient.getCatalog({
+      ...(catalogUrl ? { catalogUrl } : {}),
+      ...(options?.forceRefresh ? { forceRefresh: true } : {}),
+    });
+    const listings = filterInstallableListings(
+      view.document,
+      workspace.settings.mcpMarketplace,
+    );
+    return {
+      ...view,
+      document: {
+        ...view.document,
+        listings,
+      },
+    };
+  }
+
+  async refreshMcpCatalog(projectId: string): Promise<McpCatalogView> {
+    return this.listMcpCatalog(projectId, { forceRefresh: true });
+  }
+
+  async installMcpFromCatalog(
+    projectId: string,
+    input: InstallMcpFromCatalogInput,
+  ): Promise<ProjectOSSettings> {
+    const parsed = InstallMcpFromCatalogInputSchema.parse(input);
+    const view = await this.listMcpCatalog(projectId);
+    const listing = findCatalogListing(view.document, parsed.listingId);
+    const config = listingToMcpServerConfig({
+      listing,
+      catalogVersion: view.document.version,
+      overrides: {
+        ...(parsed.cwd ? { cwd: parsed.cwd } : {}),
+        ...(typeof parsed.enabled === "boolean"
+          ? { enabled: parsed.enabled }
+          : {}),
+      },
+    });
+    return this.saveMcpServer(projectId, {
+      config,
+      ...(parsed.authToken?.trim()
+        ? { authToken: parsed.authToken.trim() }
+        : {}),
+    });
+  }
+
+  async disableMcpCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const id = String(listingId ?? "").trim();
+    if (!id) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const mcpMarketplace = withDisabledListing(
+      workspace.settings.mcpMarketplace,
+      id,
+    );
+    return this.updateSettings(projectId, { mcpMarketplace });
+  }
+
+  async reportMcpCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const listingId = String(input.listingId ?? "").trim();
+    if (!listingId) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const mcpMarketplace = withCatalogReport(workspace.settings.mcpMarketplace, {
+      listingId,
+      reportedAt: new Date().toISOString(),
+      ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+    });
+    const updated = await this.updateSettings(projectId, { mcpMarketplace });
+    if (this.openExternalUrl) {
+      await this.openExternalUrl(MCP_CATALOG_REPORT_ISSUE_URL).catch(() => undefined);
+    }
+    return updated;
+  }
+
+  async listSkillCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<SkillCatalogView> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const catalogUrl = workspace.settings.skillMarketplace?.catalogUrl;
+    const view = await this.skillCatalogClient.getCatalog({
+      ...(catalogUrl ? { catalogUrl } : {}),
+      ...(options?.forceRefresh ? { forceRefresh: true } : {}),
+    });
+    const listings = filterInstallableSkillListings(
+      view.document,
+      workspace.settings.skillMarketplace,
+    );
+    return {
+      ...view,
+      document: {
+        ...view.document,
+        listings,
+      },
+    };
+  }
+
+  async refreshSkillCatalog(projectId: string): Promise<SkillCatalogView> {
+    return this.listSkillCatalog(projectId, { forceRefresh: true });
+  }
+
+  async installSkillFromCatalog(
+    projectId: string,
+    input: InstallSkillFromCatalogInput,
+  ): Promise<SkillDescriptor> {
+    const parsed = InstallSkillFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const view = await this.listSkillCatalog(projectId);
+    const listing = findSkillCatalogListing(view.document, parsed.listingId);
+    try {
+      return installProjectSkill({
+        workspaceRoot: workspace.workspaceRoot,
+        listing,
+        ...(parsed.replace === true ? { replace: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof SkillInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async disableSkillCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const id = String(listingId ?? "").trim();
+    if (!id) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const skillMarketplace = withDisabledSkillListing(
+      workspace.settings.skillMarketplace,
+      id,
+    );
+    return this.updateSettings(projectId, { skillMarketplace });
+  }
+
+  async reportSkillCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const listingId = String(input.listingId ?? "").trim();
+    if (!listingId) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const skillMarketplace = withSkillCatalogReport(
+      workspace.settings.skillMarketplace,
+      {
+        listingId,
+        reportedAt: new Date().toISOString(),
+        ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+      },
+    );
+    const updated = await this.updateSettings(projectId, { skillMarketplace });
+    if (this.openExternalUrl) {
+      await this.openExternalUrl(SKILL_CATALOG_REPORT_ISSUE_URL).catch(() => undefined);
+    }
+    return updated;
   }
 
   async transcribeAudio(

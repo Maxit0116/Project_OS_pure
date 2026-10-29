@@ -7,6 +7,7 @@ export type SatelliteTone =
   | 'neutral'
   | 'repo'
   | 'folder'
+  | 'mcp'
   | 'skill'
   | 'reference'
   | 'agent'
@@ -38,6 +39,7 @@ const TONE: Record<SatelliteTone, string> = {
   neutral: styles.toneNeutral,
   repo: styles.toneRepo,
   folder: styles.toneFolder,
+  mcp: styles.toneMcp,
   skill: styles.toneSkill,
   reference: styles.toneReference,
   agent: styles.toneAgent,

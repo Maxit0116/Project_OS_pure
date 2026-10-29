@@ -134,6 +134,18 @@ export const AgentAnswerReasoningSchema = z
   })
   .strict();
 
+/** Ask-path MCP tool call summary (no result body; Agent Flow / chat activity). */
+export const AskMcpToolCallSchema = z
+  .object({
+    serverId: z.string().min(1),
+    toolName: z.string().min(1),
+    callId: z.string().min(1),
+    status: z.enum(["completed", "failed", "rejected"]),
+    durationMs: z.number().int().nonnegative(),
+    error: z.string().max(2_048).optional(),
+  })
+  .strict();
+
 export const AgentAnswerResultSchema = z
   .object({
     id: z.string().min(1),
@@ -146,6 +158,7 @@ export const AgentAnswerResultSchema = z
     contextSummary: ContextAssembledPayloadSchema,
     reasoning: AgentAnswerReasoningSchema.optional(),
     explorationTrace: AskExplorationTraceSchema.optional(),
+    mcpToolCalls: z.array(AskMcpToolCallSchema).max(64).optional(),
     retrievalSummary: RetrievalSummarySchema.optional(),
     responseLanguage: AgentResponseLanguageSchema,
     memoryWrite: MemoryWriteNoticeSchema.optional(),
@@ -183,5 +196,6 @@ export type AgentResponseLanguage = z.infer<
 >;
 export type AgentAnswerReasoning = z.infer<typeof AgentAnswerReasoningSchema>;
 export type AgentAnswerResult = z.infer<typeof AgentAnswerResultSchema>;
+export type AskMcpToolCall = z.infer<typeof AskMcpToolCallSchema>;
 export type AskExplorationTrace = z.infer<typeof AskExplorationTraceSchema>;
 export type AskExplorationHit = z.infer<typeof AskExplorationHitSchema>;

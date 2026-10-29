@@ -33,7 +33,14 @@ const TITLE_SUMMARIZE_DEBOUNCE_MS = 1500
 const CANVAS_OVERLAY_KEY = 'projectos_canvas_overlay'
 const SESSION_GRAPH_OPEN_KEY = 'projectos_session_graph_open'
 
-export type CanvasOverlay = 'none' | 'session' | 'loop' | 'spatial' | 'agent-flow'
+export type CanvasOverlay =
+  | 'none'
+  | 'session'
+  | 'loop'
+  | 'spatial'
+  | 'agent-flow'
+  | 'github'
+  | 'marketplace'
 
 /** Suppresses auto-open while a run id is not known yet (Ask / Plan still starting). */
 const AGENT_FLOW_DISMISS_IDLE = '__agent_flow_idle__'
@@ -47,6 +54,8 @@ function readCanvasOverlay(): CanvasOverlay {
       raw === 'loop' ||
       raw === 'spatial' ||
       raw === 'agent-flow' ||
+      raw === 'github' ||
+      raw === 'marketplace' ||
       raw === 'none'
     ) {
       return raw
@@ -82,6 +91,8 @@ interface ChatSessionStore {
   loopGraphOpen: boolean
   spatialCaptureOpen: boolean
   agentFlowOpen: boolean
+  githubGraphOpen: boolean
+  marketplaceOpen: boolean
   /** Run id the user hid for this round. Auto-open skips that id until a new present. */
   agentFlowDismissedRunId: string | null
   inheritedDigest: SessionContextDigest | null
@@ -100,6 +111,10 @@ interface ChatSessionStore {
   toggleSpatialCapture: () => void
   setAgentFlowOpen: (open: boolean) => void
   toggleAgentFlow: () => void
+  setGithubGraphOpen: (open: boolean) => void
+  toggleGithubGraph: () => void
+  setMarketplaceOpen: (open: boolean) => void
+  toggleMarketplace: () => void
   /** User or command asked to see Agent Flow. Clears a previous dismiss. */
   presentAgentFlow: () => void
   /** Live run start. Stays closed when the user already dismissed this run. */
@@ -242,6 +257,8 @@ function overlayState(overlay: CanvasOverlay) {
     loopGraphOpen: overlay === 'loop',
     spatialCaptureOpen: overlay === 'spatial',
     agentFlowOpen: overlay === 'agent-flow',
+    githubGraphOpen: overlay === 'github',
+    marketplaceOpen: overlay === 'marketplace',
   }
 }
 
@@ -303,6 +320,32 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
 
   toggleLoopGraph: () => {
     const overlay: CanvasOverlay = get().canvasOverlay === 'loop' ? 'none' : 'loop'
+    writeCanvasOverlay(overlay)
+    set(overlayState(overlay))
+  },
+
+  setGithubGraphOpen: (open) => {
+    const overlay: CanvasOverlay = open ? 'github' : 'none'
+    writeCanvasOverlay(overlay)
+    set(overlayState(overlay))
+  },
+
+  toggleGithubGraph: () => {
+    const overlay: CanvasOverlay =
+      get().canvasOverlay === 'github' ? 'none' : 'github'
+    writeCanvasOverlay(overlay)
+    set(overlayState(overlay))
+  },
+
+  setMarketplaceOpen: (open) => {
+    const overlay: CanvasOverlay = open ? 'marketplace' : 'none'
+    writeCanvasOverlay(overlay)
+    set(overlayState(overlay))
+  },
+
+  toggleMarketplace: () => {
+    const overlay: CanvasOverlay =
+      get().canvasOverlay === 'marketplace' ? 'none' : 'marketplace'
     writeCanvasOverlay(overlay)
     set(overlayState(overlay))
   },

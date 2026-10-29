@@ -26,6 +26,7 @@
 | Session | [`Session-State-Dev-Plan.md`](Session-State-Dev-Plan.md) S-0–S-2 | 半截运行是 `interrupted`；已写入的不会因继续而再写一遍 |
 | Security | [`Security-Governance-Dev-Plan.md`](Security-Governance-Dev-Plan.md) SEC-0–SEC-3 | 审批与拒绝写入审计；无账号系统 |
 | Observability 与 Model Gateway | [`Observability-Model-Gateway-Dev-Plan.md`](Observability-Model-Gateway-Dev-Plan.md) O-0、O-1、GW-0、GW-1 | `requestId`、token 合计、失败落点、预算超时 |
+| MCP | [`../MCP-Dev-Plan.md`](../MCP-Dev-Plan.md) MCP-0–MCP-5；市场 [`../MCP-Marketplace-Dev-Plan.md`](../MCP-Marketplace-Dev-Plan.md) MMP-0–7；Skills [`../Skills-Marketplace-Dev-Plan.md`](../Skills-Marketplace-Dev-Plan.md) | 有界 Tools（stdio/http）；Ask 经 `completeWithTools`；不开 Route ②；目录安装默认 disabled 且不自动 allow；Skills 写 `.projectos/skills` |
 
 ## 1. 已经够用、不要重做的部分
 

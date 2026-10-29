@@ -1,0 +1,109 @@
+.card {
+  background: var(--tech-bg-elevated, var(--color-bg-elevated));
+  border: 1px solid var(--tech-accent, var(--color-accent));
+  border-left-width: 3px;
+  border-radius: 6px;
+  padding: 14px;
+  margin-top: 4px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--tech-accent, var(--color-accent));
+}
+
+.badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--tech-bg-muted, var(--color-bg-muted));
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section {
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  margin: 0 0 6px;
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+}
+
+.body {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--tech-text-primary, var(--color-text-primary));
+  line-height: 1.45;
+}
+
+.criteria {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.criterion {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+  color: var(--tech-text-primary, var(--color-text-primary));
+  cursor: pointer;
+}
+
+.criterion input {
+  margin-top: 3px;
+}
+
+.feedbackLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+  margin-bottom: 12px;
+}
+
+.feedback {
+  resize: vertical;
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid var(--tech-border, var(--color-border));
+  border-radius: 6px;
+  background: var(--tech-bg-muted, var(--color-bg-muted));
+  color: var(--tech-text-primary, var(--color-text-primary));
+  font: inherit;
+}
+
+.feedback:focus-visible {
+  box-shadow: var(--tech-shadow-focus);
+  outline: none;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

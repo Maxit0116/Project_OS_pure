@@ -4,6 +4,7 @@ import type {
   AgentConversationScope,
   AgentTransientTrace,
   AskExplorationTrace,
+  AskMcpToolCall,
   RetrievalSummary,
 } from '@contracts/index'
 
@@ -26,6 +27,7 @@ export interface ActivityMessageSource {
   timestamp: string
   explorationTrace?: AskExplorationTrace
   retrievalSummary?: RetrievalSummary
+  mcpToolCalls?: AskMcpToolCall[]
 }
 
 export interface ActivityAskResult {
@@ -44,6 +46,7 @@ export interface ActivityAskResult {
   reasoning?: { content: string; truncated: boolean }
   explorationTrace?: AskExplorationTrace
   retrievalSummary?: RetrievalSummary
+  mcpToolCalls?: AskMcpToolCall[]
 }
 
 export type ActivityAskTrace =
@@ -83,6 +86,37 @@ function fileName(path: string): string {
 
 function clock(messages: ActivityMessageSource[]): string {
   return messages[messages.length - 1]?.timestamp || FALLBACK_TIME
+}
+
+function appendAskMcpCalls(
+  activities: AgentActivity[],
+  labels: ActivityLabels,
+  sourceId: string,
+  startedAt: string,
+  calls: AskMcpToolCall[],
+  anchorMessageId?: string,
+): void {
+  for (const call of calls) {
+    activities.push({
+      id: `msg:${sourceId}:mcp:${call.callId}`,
+      runId: sourceId,
+      ...(anchorMessageId ? { anchorMessageId } : {}),
+      mode: 'ask',
+      kind: 'mcp',
+      status: call.status === 'failed' || call.status === 'rejected' ? 'error' : 'complete',
+      summary: labels.mcp(call.toolName, call.status),
+      startedAt,
+      completedAt: startedAt,
+      detail: {
+        kind: 'mcp',
+        serverId: call.serverId,
+        toolName: call.toolName,
+        status: call.status,
+        durationMs: call.durationMs,
+        ...(call.error ? { error: call.error } : {}),
+      },
+    })
+  }
 }
 
 function appendExploration(
@@ -251,20 +285,21 @@ function projectFlowActivities(
   for (const event of input.flowActions) {
     const at = event.timestamp || startedAt
     switch (event.type) {
-      case 'context_assembled':
+      case 'context_assembled': {
+        const files = event.payload.files ?? []
         activities.push({
           id: event.eventId,
           runId: event.runId,
           mode,
           kind: 'context',
           status: 'complete',
-          summary: labels.context(event.payload.files.length),
+          summary: labels.context(files.length),
           startedAt: at,
           completedAt: at,
           detail: {
             kind: 'context',
             bundleHash: event.payload.bundleHash,
-            files: event.payload.files.map((file) => ({
+            files: files.map((file) => ({
               path: file.path,
               disposition: file.disposition,
               ...(file.byteLength !== undefined ? { byteLength: file.byteLength } : {}),
@@ -276,6 +311,7 @@ function projectFlowActivities(
           },
         })
         break
+      }
       case 'file_read':
         activities.push({
           id: event.eventId,
@@ -312,13 +348,13 @@ function projectFlowActivities(
           detail: {
             kind: 'planning',
             objective: event.payload.objective,
-            anchors: event.payload.anchors,
-            acceptanceCriteria: event.payload.acceptanceCriteria,
+            anchors: event.payload.anchors ?? [],
+            acceptanceCriteria: event.payload.acceptanceCriteria ?? [],
           },
         })
         break
       case 'diff_proposed':
-        for (const file of event.payload.files) {
+        for (const file of event.payload.files ?? []) {
           activities.push({
             id: `${event.eventId}:${file.path}`,
             runId: event.runId,
@@ -404,6 +440,8 @@ export function projectAgentActivities(
   const anchoredExplore = new Set<string>()
   const anchoredRetrieval = new Set<string>()
 
+  const anchoredMcp = new Set<string>()
+
   for (const message of input.messages) {
     if (message.explorationTrace) {
       appendExploration(
@@ -429,6 +467,17 @@ export function projectAgentActivities(
         activities.push(retrieval)
         anchoredRetrieval.add(message.id)
       }
+    }
+    if (message.mcpToolCalls?.length) {
+      appendAskMcpCalls(
+        activities,
+        labels,
+        message.id,
+        message.timestamp || startedAt,
+        message.mcpToolCalls,
+        message.id,
+      )
+      anchoredMcp.add(message.id)
     }
   }
 
@@ -507,6 +556,16 @@ export function projectAgentActivities(
         result.createdAt,
         result.explorationTrace,
         'ask',
+        result.id,
+      )
+    }
+    if (result.mcpToolCalls?.length && !anchoredMcp.has(result.id)) {
+      appendAskMcpCalls(
+        activities,
+        labels,
+        result.id,
+        result.createdAt,
+        result.mcpToolCalls,
         result.id,
       )
     }

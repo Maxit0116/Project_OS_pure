@@ -63,7 +63,23 @@ From [`backend/Backend-Dev-Plan.md`](backend/Backend-Dev-Plan.md) §6. Check onl
 - [ ] `.projectos/permissions.json`: Deny > Ask > Allow for `mcp_tool` / `shell`. Settings → Agent harness edits this file.
 - [ ] Gateway `completeWithTools` with deny: `executeTool` never runs; `onPolicyDecision` fires (`tool_policy_decision` when wired to a run).
 - [ ] Agent Flow shows `tool_policy_decision` / `mcp_tool_call` metadata when those events are emitted.
+- [ ] Settings → MCP: add stdio server, Test succeeds and lists tools; `enabled: false` contributes no Ask tools.
+- [ ] Settings → MCP Marketplace: catalog loads (remote/cache/bundled); Install writes disabled server with provenance; community stays disabled even if enable requested; Hide/Report remove listing locally; install does **not** write `permissions.json`.
+- [ ] Chat tools rail → Marketplace overlay: MCP and Skills tabs browse catalogs; MCP install disabled+provenance; Skill install lands under `.projectos/skills` and appears in `listSkills`; Replace required to overwrite; no auto permissions / mode switch.
+- [ ] Ask with `mcp:server:*` allow: answer may include `mcpToolCalls`; activity row visible; memory proposal skipped when `usedMcp`.
+- [ ] Ask without allow: no real `callTool`; HTTP MCP to metadata / private LAN rejected.
 - [ ] Soft sandbox: unknown binary / network → `ask`; protected paths not written; `runHarnessShell` is the only shell entry for verification. `softOnly: true` remains a known limitation until OS isolation (no Seatbelt, Landlock, container, CPU, or memory quota). SB-1 adds process-group cleanup and a per-workspace concurrency cap; it does not turn this into OS isolation, and it is not an ignored vulnerability.
+
+## GitHub Auth (desktop)
+
+From [`GitHub-Auth-Dev-Plan.md`](GitHub-Auth-Dev-Plan.md). Local Device Flow identity + API token; not cloud `/v1/me`.
+
+- [ ] Settings → Team / GitHub: with `PROJECTOS_GITHUB_CLIENT_ID` set (or baked-in), Sign in opens browser Device Flow; after approve, avatar / `@{login}` appear.
+- [ ] Top-bar GitHub account control opens Settings → Team / GitHub; signed-in shows avatar.
+- [ ] Token lives only in SecretStore (`github_auth:default`); `github-account.json` has profile fields only (no token).
+- [ ] With app token and a GitHub remote, PR list/create works without `gh` CLI; without token, falls back to `gh` or honest failure.
+- [ ] Sign out clears status, secret, and profile; presentation mode can mock sign-in without network.
+- [ ] Opening a workspace does **not** require GitHub login (local-first).
 
 ## H4 — Model variants + worktree
 
@@ -93,4 +109,5 @@ From [`backend/Backend-Dev-Plan.md`](backend/Backend-Dev-Plan.md) §6. Check onl
 - `docs/features/backend/Backend-Dev-Plan.md`
 - `docs/features/Agent-Harness-Dev-Plan.md`
 - `docs/features/Agent-Harness-Tool-Registry.md`
+- `docs/features/GitHub-Auth-Dev-Plan.md`
 - `projectos/services/harness/README.md`

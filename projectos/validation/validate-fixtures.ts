@@ -32,7 +32,10 @@ import {
   PromptRefinementSchema,
 } from "../contracts/prompt-refinement.js";
 import { ProjectOSProjectSchema } from "../contracts/project.js";
-import { ProjectOSSettingsSchema } from "../contracts/settings.js";
+import {
+  ProjectOSSettingsSchema,
+  migrateLegacyMcpExternalAgents,
+} from "../contracts/settings.js";
 import { SemanticTreeSchema } from "../contracts/semantic-tree.js";
 import type { SemanticTreeNode } from "../contracts/semantic-tree.js";
 import { composeProjectGraph } from "../services/graph-provenance.js";
@@ -200,7 +203,9 @@ export function validateWorkspaceFixtureData(
   const project = parseArtifact(ProjectOSProjectSchema, data.project, "project.json", errors);
   parseArtifact(
     ProjectOSSettingsSchema,
-    data.settings,
+    data.settings === undefined
+      ? undefined
+      : migrateLegacyMcpExternalAgents(data.settings),
     "settings.json",
     errors,
   );

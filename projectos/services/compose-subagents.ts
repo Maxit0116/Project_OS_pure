@@ -1,6 +1,8 @@
-import type {
-  PinComposerHub,
-  PinComposerHubSubagentLink,
+import {
+  formatHubScopeToken,
+  normalizeHubScopes,
+  type PinComposerHub,
+  type PinComposerHubSubagentLink,
 } from "../contracts/spatial-pin.js";
 
 export interface ComposeSubagentAskResult {
@@ -32,18 +34,23 @@ export function buildComposeSubagentQuestion(input: {
   if (input.slotBrief.trim()) {
     contextLines.push(`Your brief:\n${input.slotBrief.trim()}`);
   }
-  if (input.hub.repo) {
+  const hub = normalizeHubScopes(input.hub);
+  if (hub.repo) {
     contextLines.push(
-      `Repository: ${input.hub.repo.label}${input.hub.repo.branch ? ` @ ${input.hub.repo.branch}` : ""}`,
+      `Working repository (hub.repo — writable partition): ${hub.repo.label}${hub.repo.branch ? ` @ ${hub.repo.branch}` : ""}${hub.repo.prNumber ? ` PR #${hub.repo.prNumber}` : ""}${hub.repo.worktreeId ? ` worktree=${hub.repo.worktreeId}` : ""}. External github references are read-only context, not this checkout.`,
     );
   }
-  if (input.hub.folders.length > 0) {
-    contextLines.push(`Folders in scope: ${input.hub.folders.join(", ")}`);
+  if (hub.scopes.length > 0) {
+    contextLines.push(
+      `Change scope: ${hub.scopes.map((scope) => formatHubScopeToken(scope)).join(", ")}`,
+    );
+  } else if (hub.folders.length > 0) {
+    contextLines.push(`Folders in scope: ${hub.folders.join(", ")}`);
   }
-  if (input.hub.skillIds.length > 0) {
-    contextLines.push(`Skills: ${input.hub.skillIds.join(", ")}`);
+  if (hub.skillIds.length > 0) {
+    contextLines.push(`Skills: ${hub.skillIds.join(", ")}`);
   }
-  if (input.hub.researchEnabled) {
+  if (hub.researchEnabled) {
     contextLines.push("Research mode is enabled — prefer evidence from the repo.");
   }
   contextLines.push(`Parent task:\n${input.parentPrompt.trim()}`);

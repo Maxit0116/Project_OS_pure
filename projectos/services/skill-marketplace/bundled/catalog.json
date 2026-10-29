@@ -1,0 +1,22 @@
+{
+  "version": "1",
+  "generatedAt": "2026-10-29T00:00:00.000Z",
+  "listings": [
+    {
+      "id": "curated.ask-mode",
+      "name": "Ask Mode",
+      "description": "Switch the chat composer to Ask mode for read-only grounded Q&A.",
+      "trustTier": "curated",
+      "version": "1.0.0",
+      "skillMarkdown": "---\nname: ask-mode\ndescription: Switch the chat composer to Ask mode for read-only grounded Q&A.\ndisable-model-invocation: true\n---\n\n# Ask Mode\n\nSwitch the user to **Ask** mode. Do not propose diffs or file edits.\n"
+    },
+    {
+      "id": "community.create-skill",
+      "name": "Create Skill",
+      "description": "Community-tier helper for authoring a new skill. Review before enabling.",
+      "trustTier": "community",
+      "version": "0.1.0",
+      "skillMarkdown": "---\nname: create-skill\ndescription: Guides the user through creating a new Project OS skill under .projectos/skills/.\ndisable-model-invocation: true\n---\n\n# Create Skill\n\n1. Ask what workflow the skill should encode.\n2. Create `.projectos/skills/<skill-name>/SKILL.md` with YAML frontmatter (`name`, `description`).\n3. Keep the body under 500 lines and link detailed references in sibling files.\n"
+    }
+  ]
+}

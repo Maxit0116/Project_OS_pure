@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { layoutSatellites, satelliteConnectorPath } from './hubLayout'
+import {
+  computeReferencesHeight,
+  computeScopeHeight,
+  layoutSatellites,
+  REFERENCES_MAX_HEIGHT,
+  REFERENCES_MIN_HEIGHT,
+  SCOPE_MAX_HEIGHT,
+  SCOPE_MIN_HEIGHT,
+  satelliteConnectorPath,
+} from './hubLayout'
 
 describe('hubLayout', () => {
   const card = { x: 400, y: 200, width: 320, height: 140 }
@@ -39,6 +48,51 @@ describe('hubLayout', () => {
     expect(research).toBeDefined()
     expect(research!.y).toBeGreaterThan(card.y + card.height)
     expect(research!.hubPoint.x).toBe(card.x + card.width / 2)
+  })
+
+  it('places references under the card and stacks research below it', () => {
+    const rects = layoutSatellites(
+      card,
+      [
+        { id: 'references', side: 'bottom', index: 0, count: 2 },
+        { id: 'research', side: 'bottom', index: 1, count: 2 },
+      ],
+      { referencesHeight: 140 },
+    )
+    const references = rects.find((r) => r.id === 'references')!
+    const research = rects.find((r) => r.id === 'research')!
+    expect(references.y).toBeGreaterThan(card.y + card.height)
+    expect(references.width).toBe(card.width)
+    expect(references.height).toBe(140)
+    expect(research.y).toBeGreaterThan(references.y + references.height)
+  })
+
+  it('grows references height until five rows, then caps for scroll', () => {
+    expect(computeReferencesHeight(0)).toBe(REFERENCES_MIN_HEIGHT)
+    expect(computeReferencesHeight(2)).toBeGreaterThan(REFERENCES_MIN_HEIGHT)
+    expect(computeReferencesHeight(4)).toBeLessThan(REFERENCES_MAX_HEIGHT)
+    expect(computeReferencesHeight(5)).toBe(REFERENCES_MAX_HEIGHT)
+    expect(computeReferencesHeight(40)).toBe(REFERENCES_MAX_HEIGHT)
+  })
+
+  it('grows scope height until five rows, then caps for scroll', () => {
+    expect(computeScopeHeight(0)).toBe(SCOPE_MIN_HEIGHT)
+    expect(computeScopeHeight(2)).toBeGreaterThan(SCOPE_MIN_HEIGHT)
+    expect(computeScopeHeight(4)).toBeLessThan(SCOPE_MAX_HEIGHT)
+    expect(computeScopeHeight(5)).toBe(SCOPE_MAX_HEIGHT)
+    expect(computeScopeHeight(40)).toBe(SCOPE_MAX_HEIGHT)
+  })
+
+  it('sizes the scope satellite from scopeHeight option', () => {
+    const rects = layoutSatellites(
+      card,
+      [
+        { id: 'repo', side: 'left', index: 0, count: 2 },
+        { id: 'scope', side: 'left', index: 1, count: 2 },
+      ],
+      { scopeHeight: 200 },
+    )
+    expect(rects.find((r) => r.id === 'scope')!.height).toBe(200)
   })
 
   it('builds a cubic connector with horizontal pull (not a flat line)', () => {

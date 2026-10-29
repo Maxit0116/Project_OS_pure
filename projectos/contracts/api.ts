@@ -33,7 +33,18 @@ import type {
   PromptRefinement,
 } from "./prompt-refinement.js";
 import type {
+  InstallMcpFromCatalogInput,
+  McpCatalogView,
+} from "./mcp-catalog.js";
+import type {
+  InstallSkillFromCatalogInput,
+  SkillCatalogView,
+} from "./skill-marketplace.js";
+import type { SkillDescriptor } from "./skills.js";
+import type {
   ConnectionTestResult,
+  McpServerConfig,
+  McpToolDescriptor,
   ModelOption,
   ProjectOSSettings,
   SettingsPatch,
@@ -129,10 +140,53 @@ export interface ProjectOSApi {
     projectId: string,
     relativePath: string,
   ): Promise<WorkspaceDirectoryEntry[]>;
-  /** Current branch + dirty flag for compose hub / status chrome. */
+  /** Current branch + dirty / ahead-behind for compose hub / status chrome. */
   getWorkspaceGitStatus(
     projectId: string,
   ): Promise<import("./workspace-git.js").WorkspaceGitStatus>;
+  listWorkspaceGitBranches(
+    projectId: string,
+  ): Promise<import("./workspace-git.js").WorkspaceGitBranchList>;
+  checkoutWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
+  createWorkspaceBranch(
+    projectId: string,
+    input: { name: string; from?: string; checkout?: boolean },
+  ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
+  fetchWorkspaceGit(
+    projectId: string,
+  ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
+  listWorkspacePullRequests(
+    projectId: string,
+  ): Promise<import("./workspace-git.js").WorkspaceGitPullRequestList>;
+  createWorkspacePullRequest(
+    projectId: string,
+    input: { title: string; head?: string; base?: string; body?: string },
+  ): Promise<{ ok: boolean; url?: string; number?: number; message: string }>;
+  /** Desktop GitHub OAuth status (local identity; no cloud session). */
+  getGitHubAuthStatus(): Promise<import("./github-auth.js").GitHubAuthStatus>;
+  /**
+   * Start Device Flow (default) or loopback OAuth.
+   * Returns pending device codes while background poll continues, or connected if already done.
+   */
+  beginGitHubOAuth(): Promise<import("./github-auth.js").BeginGitHubOAuthResult>;
+  cancelGitHubOAuth(): Promise<import("./github-auth.js").GitHubAuthStatus>;
+  disconnectGitHub(): Promise<import("./github-auth.js").GitHubAuthStatus>;
+  /**
+   * Local account profile imported from GitHub `/user`.
+   * Future cloud `/v1/me` may merge here; this phase is local_github only.
+   */
+  getAccountProfile(): Promise<import("./github-auth.js").AccountProfile | null>;
+  /** Persist OAuth App Client ID under userData (public; not a secret). */
+  saveGitHubOAuthClientId(
+    clientId: string,
+  ): Promise<import("./github-auth.js").GitHubAuthStatus>;
+  /** Import identity + token from an authenticated local `gh` CLI session. */
+  importGitHubAuthFromGhCli(): Promise<
+    import("./github-auth.js").BeginGitHubOAuthResult
+  >;
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload>;
   getFileContext(projectId: string, path: string): Promise<ContextPayload>;
   getFileContent(projectId: string, path: string): Promise<string>;
@@ -316,6 +370,57 @@ export interface ProjectOSApi {
     projectId: string,
     profileId: string,
   ): Promise<ModelOption[]>;
+  listMcpServers(projectId: string): Promise<McpServerConfig[]>;
+  saveMcpServer(
+    projectId: string,
+    input: { config: McpServerConfig; authToken?: string },
+  ): Promise<ProjectOSSettings>;
+  deleteMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<ProjectOSSettings>;
+  testMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<ConnectionTestResult>;
+  refreshMcpTools(
+    projectId: string,
+    serverId: string,
+  ): Promise<McpToolDescriptor[]>;
+  listMcpCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<McpCatalogView>;
+  refreshMcpCatalog(projectId: string): Promise<McpCatalogView>;
+  installMcpFromCatalog(
+    projectId: string,
+    input: InstallMcpFromCatalogInput,
+  ): Promise<ProjectOSSettings>;
+  disableMcpCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings>;
+  reportMcpCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings>;
+  listSkillCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<SkillCatalogView>;
+  refreshSkillCatalog(projectId: string): Promise<SkillCatalogView>;
+  installSkillFromCatalog(
+    projectId: string,
+    input: InstallSkillFromCatalogInput,
+  ): Promise<SkillDescriptor>;
+  disableSkillCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings>;
+  reportSkillCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings>;
   setSecret(ref: string, value: string): Promise<void>;
   deleteSecret(ref: string): Promise<void>;
   consumeFallbackNotice(projectId: string): Promise<string | undefined>;

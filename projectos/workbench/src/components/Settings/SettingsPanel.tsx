@@ -20,6 +20,8 @@ import NotificationSettingsSection from './NotificationSettingsSection'
 import ProjectDescriptionSection from './ProjectDescriptionSection'
 import SpatialPinSettingsSection from './SpatialPinSettingsSection'
 import HarnessSettingsSection from './HarnessSettingsSection'
+import McpServersSection from './McpServersSection'
+import TeamGithubSection from './TeamGithubSection'
 import { trapDialogTab } from './settingsDialogFocus'
 import styles from './SettingsPanel.module.css'
 
@@ -32,8 +34,25 @@ type SettingsView =
   | 'project'
   | 'models'
   | 'agents'
+  | 'mcp'
+  | 'teamGithub'
   | 'spatialPin'
   | 'harness'
+
+const SETTINGS_VIEWS = new Set<SettingsView>([
+  'hub',
+  'language',
+  'theme',
+  'notifications',
+  'general',
+  'project',
+  'models',
+  'agents',
+  'mcp',
+  'teamGithub',
+  'spatialPin',
+  'harness',
+])
 
 interface Props {
   onClose: () => void
@@ -44,6 +63,9 @@ export default function SettingsPanel({ onClose }: Props) {
   const locale = useWorkbenchStore((s) => s.locale)
   const themePreference = useWorkbenchStore((s) => s.themePreference)
   const notifyOnDiffReady = useWorkbenchStore((s) => s.notifyOnDiffReady)
+  const githubAuthStatus = useWorkbenchStore((s) => s.githubAuthStatus)
+  const settingsFocusView = useWorkbenchStore((s) => s.settingsFocusView)
+  const clearSettingsFocusView = useWorkbenchStore((s) => s.clearSettingsFocusView)
   const { ts } = useI18n()
   const [view, setView] = useState<SettingsView>('hub')
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -51,6 +73,14 @@ export default function SettingsPanel({ onClose }: Props) {
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
   const dialogMounted = Boolean(settings)
+
+  useEffect(() => {
+    if (!settingsFocusView) return
+    if (SETTINGS_VIEWS.has(settingsFocusView as SettingsView)) {
+      setView(settingsFocusView as SettingsView)
+    }
+    clearSettingsFocusView()
+  }, [settingsFocusView, clearSettingsFocusView])
 
   useEffect(() => {
     if (!dialogMounted) return
@@ -104,6 +134,18 @@ export default function SettingsPanel({ onClose }: Props) {
     { id: 'general', label: ts('settings.tabs.general'), summary: settings.presentationMode ? ts('settings.realDemoSummaryDemo') : ts('settings.realDemoSummaryReal') },
     { id: 'models', label: ts('settings.tabs.models'), summary: ts('settings.modelsSummary', { count: settings.modelProfiles.length }) },
     { id: 'agents', label: ts('settings.tabs.agents'), summary: ts('settings.agentsSummary', { count: settings.agentProfiles.length }) },
+    {
+      id: 'mcp',
+      label: ts('settings.tabs.mcp'),
+      summary: ts('settings.mcp.summary', { count: settings.mcpServers?.length ?? 0 }),
+    },
+    {
+      id: 'teamGithub',
+      label: ts('settings.tabs.teamGithub'),
+      summary: githubAuthStatus?.connected && githubAuthStatus.login
+        ? ts('settings.teamGithub.summaryConnected', { login: githubAuthStatus.login })
+        : ts('settings.teamGithub.summaryNotConnected'),
+    },
     {
       id: 'spatialPin',
       label: ts('settings.tabs.spatialPin'),
@@ -168,6 +210,8 @@ export default function SettingsPanel({ onClose }: Props) {
             {view === 'project' && <ProjectDescriptionSection />}
             {view === 'models' && <ModelProfilesSection />}
             {view === 'agents' && <AgentProfilesSection />}
+            {view === 'mcp' && <McpServersSection />}
+            {view === 'teamGithub' && <TeamGithubSection />}
             {view === 'spatialPin' && <SpatialPinSettingsSection />}
             {view === 'harness' && <HarnessSettingsSection />}
           </div>

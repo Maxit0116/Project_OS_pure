@@ -131,6 +131,64 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.getWorkspaceGitStatus(projectId);
   }
 
+  listWorkspaceGitBranches(projectId: string) {
+    return this.transport.listWorkspaceGitBranches(projectId);
+  }
+
+  checkoutWorkspaceBranch(projectId: string, branch: string) {
+    return this.transport.checkoutWorkspaceBranch(projectId, branch);
+  }
+
+  createWorkspaceBranch(
+    projectId: string,
+    input: { name: string; from?: string; checkout?: boolean },
+  ) {
+    return this.transport.createWorkspaceBranch(projectId, input);
+  }
+
+  fetchWorkspaceGit(projectId: string) {
+    return this.transport.fetchWorkspaceGit(projectId);
+  }
+
+  listWorkspacePullRequests(projectId: string) {
+    return this.transport.listWorkspacePullRequests(projectId);
+  }
+
+  createWorkspacePullRequest(
+    projectId: string,
+    input: { title: string; head?: string; base?: string; body?: string },
+  ) {
+    return this.transport.createWorkspacePullRequest(projectId, input);
+  }
+
+  getGitHubAuthStatus() {
+    return this.transport.getGitHubAuthStatus();
+  }
+
+  beginGitHubOAuth() {
+    return this.transport.beginGitHubOAuth();
+  }
+
+  cancelGitHubOAuth() {
+    return this.transport.cancelGitHubOAuth();
+  }
+
+  disconnectGitHub() {
+    return this.transport.disconnectGitHub();
+  }
+
+  getAccountProfile() {
+    return this.transport.getAccountProfile();
+  }
+
+  saveGitHubOAuthClientId(clientId: string) {
+    return this.transport.saveGitHubOAuthClientId(clientId);
+  }
+
+  importGitHubAuthFromGhCli() {
+    return this.transport.importGitHubAuthFromGhCli();
+  }
+
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload> {
     return this.transport.getNodeContext(projectId, nodeId);
   }
@@ -539,6 +597,111 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     profileId: string,
   ): Promise<import("../contracts/settings.js").ModelOption[]> {
     return this.transport.listAvailableModels(projectId, profileId);
+  }
+
+  listMcpServers(
+    projectId: string,
+  ): Promise<import("../contracts/settings.js").McpServerConfig[]> {
+    return this.transport.listMcpServers(projectId);
+  }
+
+  saveMcpServer(
+    projectId: string,
+    input: {
+      config: import("../contracts/settings.js").McpServerConfig;
+      authToken?: string;
+    },
+  ): Promise<import("../contracts/settings.js").ProjectOSSettings> {
+    return this.transport.saveMcpServer(projectId, input);
+  }
+
+  deleteMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<import("../contracts/settings.js").ProjectOSSettings> {
+    return this.transport.deleteMcpServer(projectId, serverId);
+  }
+
+  testMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<import("../contracts/settings.js").ConnectionTestResult> {
+    return this.transport.testMcpServer(projectId, serverId);
+  }
+
+  refreshMcpTools(
+    projectId: string,
+    serverId: string,
+  ): Promise<import("../contracts/settings.js").McpToolDescriptor[]> {
+    return this.transport.refreshMcpTools(projectId, serverId);
+  }
+
+  listMcpCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../contracts/mcp-catalog.js").McpCatalogView> {
+    return this.transport.listMcpCatalog(projectId, options);
+  }
+
+  refreshMcpCatalog(
+    projectId: string,
+  ): Promise<import("../contracts/mcp-catalog.js").McpCatalogView> {
+    return this.transport.refreshMcpCatalog(projectId);
+  }
+
+  installMcpFromCatalog(
+    projectId: string,
+    input: import("../contracts/mcp-catalog.js").InstallMcpFromCatalogInput,
+  ): Promise<import("../contracts/settings.js").ProjectOSSettings> {
+    return this.transport.installMcpFromCatalog(projectId, input);
+  }
+
+  disableMcpCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<import("../contracts/settings.js").ProjectOSSettings> {
+    return this.transport.disableMcpCatalogListing(projectId, listingId);
+  }
+
+  reportMcpCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<import("../contracts/settings.js").ProjectOSSettings> {
+    return this.transport.reportMcpCatalogListing(projectId, input);
+  }
+
+  listSkillCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../contracts/skill-marketplace.js").SkillCatalogView> {
+    return this.transport.listSkillCatalog(projectId, options);
+  }
+
+  refreshSkillCatalog(
+    projectId: string,
+  ): Promise<import("../contracts/skill-marketplace.js").SkillCatalogView> {
+    return this.transport.refreshSkillCatalog(projectId);
+  }
+
+  installSkillFromCatalog(
+    projectId: string,
+    input: import("../contracts/skill-marketplace.js").InstallSkillFromCatalogInput,
+  ): Promise<import("../contracts/skills.js").SkillDescriptor> {
+    return this.transport.installSkillFromCatalog(projectId, input);
+  }
+
+  disableSkillCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<import("../contracts/settings.js").ProjectOSSettings> {
+    return this.transport.disableSkillCatalogListing(projectId, listingId);
+  }
+
+  reportSkillCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<import("../contracts/settings.js").ProjectOSSettings> {
+    return this.transport.reportSkillCatalogListing(projectId, input);
   }
 
   setSecret(ref: string, value: string): Promise<void> {

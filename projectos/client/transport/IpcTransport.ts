@@ -253,6 +253,77 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("getWorkspaceGitStatus", projectId);
   }
 
+  listWorkspaceGitBranches(
+    projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitBranchList> {
+    return this.invoke("listWorkspaceGitBranches", projectId);
+  }
+
+  checkoutWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("checkoutWorkspaceBranch", projectId, branch);
+  }
+
+  createWorkspaceBranch(
+    projectId: string,
+    input: { name: string; from?: string; checkout?: boolean },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("createWorkspaceBranch", projectId, input);
+  }
+
+  fetchWorkspaceGit(
+    projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("fetchWorkspaceGit", projectId);
+  }
+
+  listWorkspacePullRequests(
+    projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitPullRequestList> {
+    return this.invoke("listWorkspacePullRequests", projectId);
+  }
+
+  createWorkspacePullRequest(
+    projectId: string,
+    input: { title: string; head?: string; base?: string; body?: string },
+  ): Promise<{ ok: boolean; url?: string; number?: number; message: string }> {
+    return this.invoke("createWorkspacePullRequest", projectId, input);
+  }
+
+  getGitHubAuthStatus(): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {
+    return this.invoke("getGitHubAuthStatus");
+  }
+
+  beginGitHubOAuth(): Promise<import("../../contracts/github-auth.js").BeginGitHubOAuthResult> {
+    return this.invoke("beginGitHubOAuth");
+  }
+
+  cancelGitHubOAuth(): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {
+    return this.invoke("cancelGitHubOAuth");
+  }
+
+  disconnectGitHub(): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {
+    return this.invoke("disconnectGitHub");
+  }
+
+  getAccountProfile(): Promise<import("../../contracts/github-auth.js").AccountProfile | null> {
+    return this.invoke("getAccountProfile");
+  }
+
+  saveGitHubOAuthClientId(
+    clientId: string,
+  ): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {
+    return this.invoke("saveGitHubOAuthClientId", clientId);
+  }
+
+  importGitHubAuthFromGhCli(): Promise<
+    import("../../contracts/github-auth.js").BeginGitHubOAuthResult
+  > {
+    return this.invoke("importGitHubAuthFromGhCli");
+  }
+
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload> {
     return this.invoke("getNodeContext", projectId, nodeId);
   }
@@ -694,6 +765,109 @@ export class IpcTransport implements ApiTransport {
     profileId: string,
   ): Promise<ModelOption[]> {
     return this.invoke("listAvailableModels", projectId, profileId);
+  }
+
+  listMcpServers(projectId: string): Promise<import("../../contracts/settings.js").McpServerConfig[]> {
+    return this.invoke("listMcpServers", projectId);
+  }
+
+  saveMcpServer(
+    projectId: string,
+    input: {
+      config: import("../../contracts/settings.js").McpServerConfig;
+      authToken?: string;
+    },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("saveMcpServer", projectId, input);
+  }
+
+  deleteMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("deleteMcpServer", projectId, serverId);
+  }
+
+  testMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<ConnectionTestResult> {
+    return this.invoke("testMcpServer", projectId, serverId);
+  }
+
+  refreshMcpTools(
+    projectId: string,
+    serverId: string,
+  ): Promise<import("../../contracts/settings.js").McpToolDescriptor[]> {
+    return this.invoke("refreshMcpTools", projectId, serverId);
+  }
+
+  listMcpCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/mcp-catalog.js").McpCatalogView> {
+    return this.invoke("listMcpCatalog", projectId, options ?? {});
+  }
+
+  refreshMcpCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/mcp-catalog.js").McpCatalogView> {
+    return this.invoke("refreshMcpCatalog", projectId);
+  }
+
+  installMcpFromCatalog(
+    projectId: string,
+    input: import("../../contracts/mcp-catalog.js").InstallMcpFromCatalogInput,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("installMcpFromCatalog", projectId, input);
+  }
+
+  disableMcpCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableMcpCatalogListing", projectId, listingId);
+  }
+
+  reportMcpCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportMcpCatalogListing", projectId, input);
+  }
+
+  listSkillCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/skill-marketplace.js").SkillCatalogView> {
+    return this.invoke("listSkillCatalog", projectId, options ?? {});
+  }
+
+  refreshSkillCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/skill-marketplace.js").SkillCatalogView> {
+    return this.invoke("refreshSkillCatalog", projectId);
+  }
+
+  installSkillFromCatalog(
+    projectId: string,
+    input: import("../../contracts/skill-marketplace.js").InstallSkillFromCatalogInput,
+  ): Promise<import("../../contracts/skills.js").SkillDescriptor> {
+    return this.invoke("installSkillFromCatalog", projectId, input);
+  }
+
+  disableSkillCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableSkillCatalogListing", projectId, listingId);
+  }
+
+  reportSkillCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportSkillCatalogListing", projectId, input);
   }
 
   setSecret(ref: string, value: string): Promise<void> {

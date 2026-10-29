@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import { ArchitectureLevelSchema } from "./graph.js";
+import {
+  formatHubReferenceContextLines,
+  formatHubReferenceToken,
+} from "./hub-references.js";
 import {
   StencilGenerationScopeSchema,
   buildSpatialPinUserContentWithStencils,
@@ -167,24 +172,111 @@ export const PinComposerHubRepoSchema = z
   .object({
     label: z.string().min(1).max(240),
     branch: z.string().min(1).max(240).optional(),
+    /** PR / fork baseline when known. */
+    baseBranch: z.string().min(1).max(240).optional(),
+    /** Linked open PR number when known. */
+    prNumber: z.number().int().positive().optional(),
+    /** Github Graph / locator node id (`branch:…`, `pr:…`, …). */
+    nodeId: z.string().min(1).max(280).optional(),
+    /** Agent worktree id when this compose binds an isolated checkout. */
+    worktreeId: z.string().min(1).max(120).optional(),
   })
   .strict();
 
-export const PinComposerHubReferenceSchema = z.discriminatedUnion("kind", [
+const HubReferenceLabelSchema = z.string().min(1).max(240).optional();
+const HubReferenceFolderIdSchema = z.string().min(1).max(80).optional();
+
+/** User-created folders for Links / Repo reference library organization. */
+export const PinComposerHubReferenceFolderSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1).max(120),
+    category: z.enum(["links", "repo"]),
+  })
+  .strict();
+
+/**
+ * Compose-hub references stay in agent context for the whole run:
+ * workspace files/media, remote media URLs, websites, and GitHub repos.
+ */
+const HubMediaSourceRefine =
+  (kind: "image" | "video" | "audio") =>
+  (
+    value: { assetPath?: string; url?: string },
+    ctx: z.RefinementCtx,
+  ): void => {
+    if (!value.assetPath && !value.url) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${kind} reference requires assetPath or url`,
+      });
+    }
+  };
+
+/** Use z.union (not discriminatedUnion) so media variants can .superRefine. */
+export const PinComposerHubReferenceSchema = z.union([
   z
     .object({
       kind: z.literal("image"),
       id: z.string().min(1),
-      assetPath: z.string().min(1).max(1024),
-      label: z.string().min(1).max(240).optional(),
+      /** Workspace-relative asset (capture snapshot, etc.). */
+      assetPath: z.string().min(1).max(1024).optional(),
+      /** Remote image URL when not a local asset. */
+      url: z.string().min(1).max(2048).optional(),
+      label: HubReferenceLabelSchema,
     })
-    .strict(),
+    .strict()
+    .superRefine(HubMediaSourceRefine("image")),
+  z
+    .object({
+      kind: z.literal("video"),
+      id: z.string().min(1),
+      assetPath: z.string().min(1).max(1024).optional(),
+      url: z.string().min(1).max(2048).optional(),
+      label: HubReferenceLabelSchema,
+    })
+    .strict()
+    .superRefine(HubMediaSourceRefine("video")),
+  z
+    .object({
+      kind: z.literal("audio"),
+      id: z.string().min(1),
+      assetPath: z.string().min(1).max(1024).optional(),
+      url: z.string().min(1).max(2048).optional(),
+      label: HubReferenceLabelSchema,
+    })
+    .strict()
+    .superRefine(HubMediaSourceRefine("audio")),
   z
     .object({
       kind: z.literal("file"),
       id: z.string().min(1),
       path: z.string().min(1).max(4096),
-      label: z.string().min(1).max(240).optional(),
+      label: HubReferenceLabelSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("url"),
+      id: z.string().min(1),
+      url: z.string().min(1).max(2048),
+      label: HubReferenceLabelSchema,
+      /** Optional Links-library folder. */
+      folderId: HubReferenceFolderIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("github"),
+      id: z.string().min(1),
+      url: z.string().min(1).max(2048),
+      owner: z.string().min(1).max(200).optional(),
+      repo: z.string().min(1).max(200).optional(),
+      /** Branch / tag / commit when known. */
+      ref: z.string().min(1).max(200).optional(),
+      label: HubReferenceLabelSchema,
+      /** Optional Repo-library folder. */
+      folderId: HubReferenceFolderIdSchema,
     })
     .strict(),
 ]);
@@ -215,14 +307,51 @@ export const PinComposerHubSubagentLinkSchema = z
   })
   .strict();
 
+/**
+ * Compose change-scope entry: either a workspace folder path or a C4 node
+ * (resolved to paths via linkedFiles when picked).
+ */
+export const PinComposerHubScopeSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("folder"),
+      id: z.string().min(1),
+      path: z.string().min(1).max(4096),
+      label: z.string().max(200).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("node"),
+      id: z.string().min(1),
+      nodeId: z.string().min(1),
+      label: z.string().min(1).max(200),
+      level: ArchitectureLevelSchema.optional(),
+      /** Snapshot of resolved paths/dirs at pick time (may be empty). */
+      paths: z.array(z.string().min(1).max(4096)).max(200).default([]),
+    })
+    .strict(),
+]);
+
 /** Spatial compose hub: left context, research toggle, configurable subagent slots. */
 export const PinComposerHubSchema = z
   .object({
     researchEnabled: z.boolean().default(false),
     repo: PinComposerHubRepoSchema.optional(),
+    /**
+     * Legacy path-only scopes. Kept in sync with `scopes` folder/node paths
+     * for research lines and older prompt consumers.
+     */
     folders: z.array(z.string().min(1).max(4096)).max(40).default([]),
+    /** Primary change-scope list (folders + C4 nodes). */
+    scopes: z.array(PinComposerHubScopeSchema).max(40).default([]),
     skillIds: z.array(z.string().min(1)).max(40).default([]),
     references: z.array(PinComposerHubReferenceSchema).max(40).default([]),
+    /** Organize Links / Repo references into named folders. */
+    referenceFolders: z
+      .array(PinComposerHubReferenceFolderSchema)
+      .max(40)
+      .default([]),
     subagents: z.array(PinComposerHubSubagentSchema).max(12).default([]),
   })
   .strict();
@@ -394,6 +523,9 @@ export type PinComposerHubRepo = z.infer<typeof PinComposerHubRepoSchema>;
 export type PinComposerHubReference = z.infer<
   typeof PinComposerHubReferenceSchema
 >;
+export type PinComposerHubReferenceFolder = z.infer<
+  typeof PinComposerHubReferenceFolderSchema
+>;
 export type PinComposerHubSubagent = z.infer<
   typeof PinComposerHubSubagentSchema
 >;
@@ -403,6 +535,7 @@ export type PinComposerHubSubagentStatus = z.infer<
 export type PinComposerHubSubagentLink = z.infer<
   typeof PinComposerHubSubagentLinkSchema
 >;
+export type PinComposerHubScope = z.infer<typeof PinComposerHubScopeSchema>;
 export type PinComposerHub = z.infer<typeof PinComposerHubSchema>;
 export type PinComposer = z.infer<typeof PinComposerSchema>;
 export type PinLinks = z.infer<typeof PinLinksSchema>;
@@ -618,33 +751,181 @@ export function emptyPinComposerHub(): PinComposerHub {
   return {
     researchEnabled: false,
     folders: [],
+    scopes: [],
     skillIds: [],
     references: [],
+    referenceFolders: [],
     subagents: [],
+  };
+}
+
+/** Stable id for a folder-path scope entry. */
+export function createFolderScopeId(path: string): string {
+  return `folder_${path.replace(/[^a-zA-Z0-9._/-]+/g, "_").slice(0, 80)}`;
+}
+
+/** Stable id for a C4-node scope entry. */
+export function createNodeScopeId(nodeId: string): string {
+  return `node_${nodeId}`;
+}
+
+/** Display label for a scope chip / prompt token. */
+export function formatHubScopeToken(scope: PinComposerHubScope): string {
+  if (scope.kind === "folder") {
+    return scope.label?.trim() || scope.path;
+  }
+  return scope.label.trim() || scope.nodeId;
+}
+
+/** Flatten scopes into legacy path list (folder paths + resolved node paths). */
+export function foldersFromScopes(
+  scopes: readonly PinComposerHubScope[],
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const scope of scopes) {
+    if (scope.kind === "folder") {
+      if (seen.has(scope.path)) continue;
+      seen.add(scope.path);
+      out.push(scope.path);
+      continue;
+    }
+    for (const path of scope.paths) {
+      if (seen.has(path)) continue;
+      seen.add(path);
+      out.push(path);
+    }
+  }
+  return out;
+}
+
+/** Hydrate folder-kind scopes from a legacy folders array. */
+export function scopesFromFolders(
+  folders: readonly string[],
+): PinComposerHubScope[] {
+  return folders.map((path) => ({
+    kind: "folder" as const,
+    id: createFolderScopeId(path),
+    path,
+  }));
+}
+
+/**
+ * Prefer explicit scopes; if empty but folders exist, hydrate from folders.
+ * Always keep `folders` aligned with flattened scope paths.
+ */
+export function normalizeHubScopes(hub: PinComposerHub): PinComposerHub {
+  const scopes =
+    hub.scopes.length > 0
+      ? hub.scopes
+      : scopesFromFolders(hub.folders);
+  const folders = foldersFromScopes(scopes);
+  return { ...hub, scopes, folders };
+}
+
+/** Minimal graph node shape for resolving C4 scope paths. */
+export interface HubScopeGraphNode {
+  id: string;
+  parentId?: string | null;
+  children?: readonly string[];
+  linkedFiles?: readonly { path: string }[];
+}
+
+function parentDirOfLinkedPath(filePath: string): string | null {
+  const normalized = filePath.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!normalized || normalized === ".") return null;
+  const slash = normalized.lastIndexOf("/");
+  if (slash <= 0) return null;
+  return normalized.slice(0, slash);
+}
+
+/**
+ * Collect unique parent directories (fallback: file paths) from a node and
+ * its descendants' linkedFiles. `weak` when nothing resolved.
+ */
+export function resolveNodeScopePaths(
+  nodes: readonly HubScopeGraphNode[],
+  nodeId: string,
+): { paths: string[]; fileCount: number; weak: boolean } {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const root = byId.get(nodeId);
+  if (!root) return { paths: [], fileCount: 0, weak: true };
+
+  const queue = [nodeId];
+  const visited = new Set<string>();
+  const filePaths: string[] = [];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    const node = byId.get(id);
+    if (!node) continue;
+    for (const file of node.linkedFiles ?? []) {
+      if (file.path) filePaths.push(file.path);
+    }
+    for (const childId of node.children ?? []) {
+      if (!visited.has(childId)) queue.push(childId);
+    }
+  }
+
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  for (const filePath of filePaths) {
+    const folder = parentDirOfLinkedPath(filePath) ?? filePath;
+    if (seen.has(folder)) continue;
+    seen.add(folder);
+    paths.push(folder);
+  }
+  return {
+    paths,
+    fileCount: filePaths.length,
+    weak: filePaths.length === 0,
   };
 }
 
 export function formatPinComposerHubLines(hub: PinComposerHub): string[] {
   const lines: string[] = [];
-  if (hub.repo) {
+  const normalized = normalizeHubScopes(hub);
+  if (normalized.repo) {
+    const repoParts = [
+      `hub.repo=${normalized.repo.label}${normalized.repo.branch ? ` @${normalized.repo.branch}` : ""}`,
+    ];
+    if (normalized.repo.baseBranch) {
+      repoParts.push(`base=${normalized.repo.baseBranch}`);
+    }
+    if (normalized.repo.prNumber) {
+      repoParts.push(`pr=#${normalized.repo.prNumber}`);
+    }
+    if (normalized.repo.worktreeId) {
+      repoParts.push(`worktree=${normalized.repo.worktreeId}`);
+    }
     lines.push(
-      `hub.repo=${hub.repo.label}${hub.repo.branch ? ` @${hub.repo.branch}` : ""}`,
+      `${repoParts[0]}${repoParts.length > 1 ? ` (${repoParts.slice(1).join(", ")})` : ""}`,
+    );
+    lines.push(
+      "hub.repo is the user's working project partition for this task (writable workspace). Do not treat hub.references github entries as the checkout target.",
     );
   }
-  if (hub.folders.length > 0) {
-    lines.push(`hub.folders=${hub.folders.join(", ")}`);
+  if (normalized.scopes.length > 0) {
+    lines.push(
+      `hub.scopes=${normalized.scopes
+        .map((scope) =>
+          scope.kind === "node"
+            ? `node:${formatHubScopeToken(scope)}`
+            : formatHubScopeToken(scope),
+        )
+        .join(", ")}`,
+    );
+  } else if (normalized.folders.length > 0) {
+    lines.push(`hub.folders=${normalized.folders.join(", ")}`);
   }
-  if (hub.skillIds.length > 0) {
-    lines.push(`hub.skills=${hub.skillIds.join(", ")}`);
+  if (normalized.skillIds.length > 0) {
+    lines.push(`hub.skills=${normalized.skillIds.join(", ")}`);
   }
   if (hub.references.length > 0) {
     lines.push(
       `hub.references=${hub.references
-        .map((item) =>
-          item.kind === "image"
-            ? `image:${item.assetPath}`
-            : `file:${item.path}`,
-        )
+        .map((item) => formatHubReferenceToken(item))
         .join(", ")}`,
     );
   }
@@ -683,8 +964,21 @@ export function buildSpatialPinUserContent(
       : {}),
     ...(options?.codegenHints ? { codegenHints: options.codegenHints } : {}),
   });
-  if (hubLines.length === 0) return base;
-  return `${base}\n\n## Compose hub\n${hubLines.map((line) => `- ${line}`).join("\n")}`;
+  const referenceContext = pin.composer.hub?.references?.length
+    ? formatHubReferenceContextLines(pin.composer.hub.references)
+    : [];
+  const sections: string[] = [base];
+  if (hubLines.length > 0) {
+    sections.push(
+      `## Compose hub\n${hubLines.map((line) => `- ${line}`).join("\n")}`,
+    );
+  }
+  if (referenceContext.length > 0) {
+    sections.push(
+      `## External references (persistent context)\n${referenceContext.join("\n")}`,
+    );
+  }
+  return sections.join("\n\n");
 }
 
 /** Build a persisted arrow stroke from region-relative head/tail. */

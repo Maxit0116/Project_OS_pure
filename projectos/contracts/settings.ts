@@ -3,6 +3,11 @@ import { z } from "zod";
 import { AgentFlowStepKindSchema } from "./events.js";
 import { ProjectOSVersionSchema } from "./project.js";
 import { ExecCommandSchema } from "./exec-command.js";
+import {
+  McpMarketplacePrefsSchema,
+  McpServerProvenanceSchema,
+} from "./mcp-catalog.js";
+import { SkillMarketplacePrefsSchema } from "./skill-marketplace.js";
 export const ExecutionModeSchema = z.enum([
   "auto",
   "fixture",
@@ -46,6 +51,7 @@ export const PROVIDER_PRESETS = {
 export const PROJECT_OS_SETTINGS_LIMITS = {
   modelProfiles: 256,
   agentProfiles: 256,
+  mcpServers: 64,
 } as const;
 
 const HttpEndpointSchema = z.string().min(1).max(2_048).superRefine((endpoint, ctx) => {
@@ -64,6 +70,55 @@ const HttpEndpointSchema = z.string().min(1).max(2_048).superRefine((endpoint, c
     });
   }
 });
+
+export const McpTransportSchema = z.enum(["stdio", "http"]);
+
+export const McpServerConfigSchema = z
+  .object({
+    id: z.string().min(1).max(80),
+    name: z.string().min(1).max(120),
+    enabled: z.boolean(),
+    transport: McpTransportSchema,
+    /** stdio: executable to spawn */
+    command: z.string().min(1).max(512).optional(),
+    args: z.array(z.string().max(512)).max(64).optional(),
+    env: z.record(z.string().max(4_096)).optional(),
+    cwd: z.string().min(1).max(1_024).optional(),
+    /** http: MCP endpoint URL */
+    url: HttpEndpointSchema.optional(),
+    headers: z.record(z.string().max(2_048)).optional(),
+    authRef: z.string().min(1).max(200).optional(),
+    /** Optional per-server tool name allowlist (bare tool names, not mcp: prefix). */
+    toolAllowlist: z.array(z.string().min(1).max(200)).max(256).optional(),
+    /** Set when installed from the MCP catalog / marketplace. */
+    provenance: McpServerProvenanceSchema.optional(),
+  })
+  .strict()
+  .superRefine((server, ctx) => {
+    if (server.transport === "stdio") {
+      if (!server.command?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["command"],
+          message: "stdio MCP servers require a command",
+        });
+      }
+    } else if (!server.url?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["url"],
+        message: "http MCP servers require a url",
+      });
+    }
+  });
+
+export const McpToolDescriptorSchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().max(4_096).optional(),
+    inputSchema: z.record(z.unknown()).optional(),
+  })
+  .strict();
 
 export const ModelProfileSchema = z
   .object({
@@ -118,6 +173,12 @@ export const ProjectOSSettingsSchema = z
     agentProfiles: z
       .array(AgentProfileSchema)
       .max(PROJECT_OS_SETTINGS_LIMITS.agentProfiles),
+    mcpServers: z
+      .array(McpServerConfigSchema)
+      .max(PROJECT_OS_SETTINGS_LIMITS.mcpServers)
+      .optional(),
+    mcpMarketplace: McpMarketplacePrefsSchema.optional(),
+    skillMarketplace: SkillMarketplacePrefsSchema.optional(),
     verification: z.object({
       commands: z.array(ExecCommandSchema).max(10),
     }).strict().optional(),
@@ -159,6 +220,9 @@ export type ModelProvider = z.infer<typeof ModelProviderSchema>;
 export type ModelProfile = z.infer<typeof ModelProfileSchema>;
 export type AgentProfileKind = z.infer<typeof AgentProfileKindSchema>;
 export type AgentProfile = z.infer<typeof AgentProfileSchema>;
+export type McpTransport = z.infer<typeof McpTransportSchema>;
+export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
+export type McpToolDescriptor = z.infer<typeof McpToolDescriptorSchema>;
 export type ProjectOSSettings = z.infer<typeof ProjectOSSettingsSchema>;
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
 export type ConnectionTestResult = z.infer<typeof ConnectionTestResultSchema>;
@@ -283,13 +347,26 @@ export function createDefaultSettings(
   });
 }
 
-/** Drops team, MCP, and external-agent fields from older settings files. */
+/**
+ * Drops team / external-agent fields from older settings files.
+ * Keeps `mcpServers` when entries validate; drops malformed entries.
+ */
 export function migrateLegacyMcpExternalAgents(input: unknown): unknown {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input;
   const candidate = { ...(input as Record<string, unknown>) };
   delete candidate.externalAgents;
-  delete candidate.mcpServers;
   delete candidate.team;
+  if (Array.isArray(candidate.mcpServers)) {
+    const migrated: McpServerConfig[] = [];
+    for (const entry of candidate.mcpServers) {
+      const parsed = McpServerConfigSchema.safeParse(normalizeLegacyMcpServer(entry));
+      if (parsed.success) migrated.push(parsed.data);
+    }
+    if (migrated.length > 0) candidate.mcpServers = migrated;
+    else delete candidate.mcpServers;
+  } else {
+    delete candidate.mcpServers;
+  }
   if (candidate.execution && typeof candidate.execution === "object" && !Array.isArray(candidate.execution)) {
     const execution = { ...(candidate.execution as Record<string, unknown>) };
     if (execution.mode === "external") execution.mode = "auto";
@@ -305,4 +382,15 @@ export function migrateLegacyMcpExternalAgents(input: unknown): unknown {
     );
   }
   return candidate;
+}
+
+function normalizeLegacyMcpServer(entry: unknown): unknown {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+  const server = { ...(entry as Record<string, unknown>) };
+  if (typeof server.enabled !== "boolean") server.enabled = false;
+  if (typeof server.name !== "string" || !server.name.trim()) {
+    server.name = typeof server.id === "string" && server.id.trim() ? server.id : "MCP Server";
+  }
+  if (server.transport === "sse") server.transport = "http";
+  return server;
 }

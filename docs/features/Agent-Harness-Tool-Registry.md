@@ -18,7 +18,7 @@
 | `apply_diff` | apply 事务 | implemented（基础设施） | 同上 | 与 generate 共用写 ACL |
 | `run_verification` | verification runner | implemented | 需 writeCapability | 命令白名单 + 另有 approval 流 |
 | `shell` | `runHarnessShell` + VerificationRunner | implemented (soft v0) | Policy allow/ask + soft classify | 未知二进制/网络 → ask；保护路径 → deny；无 OS Seatbelt |
-| `mcp_tool` | `model-gateway` MCP loop | implemented | deny by default；`.projectos/permissions.json` allow 后放行 | `completeWithTools({ toolPolicy })` 门控 |
+| `mcp_tool` | `services/mcp` + `model-gateway` MCP loop | implemented | deny by default；`.projectos/permissions.json` allow 后放行 | Ask 有界路径经 `GroundedAnswerService` → `completeWithTools`；Runtime 见 [`MCP-Dev-Plan.md`](MCP-Dev-Plan.md)。目录/市场安装见 [`MCP-Marketplace-Dev-Plan.md`](MCP-Marketplace-Dev-Plan.md) / [`Skills-Marketplace-Dev-Plan.md`](Skills-Marketplace-Dev-Plan.md)——**catalog install ≠ policy allow**；Skills 安装只写 `.projectos/skills` |
 | `fetch` | — | deferred | deny unless permissions allow | 网络闸；可与 sandbox.networkAccess 对齐 |
 
 ## Orchestrator 内建阶段（非开放工具，但是 harness 可见操作）

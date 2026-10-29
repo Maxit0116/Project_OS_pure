@@ -12,6 +12,7 @@
 }
 
 .compact .spatialPinBtn,
+.compact .accountBtn,
 .compact .settingsBtn {
   width: 28px;
   height: 28px;
@@ -47,6 +48,7 @@
 }
 
 .spatialPinBtn,
+.accountBtn,
 .settingsBtn {
   display: flex;
   align-items: center;
@@ -63,13 +65,31 @@
 }
 
 .spatialPinBtn:hover,
+.accountBtn:hover,
 .settingsBtn:hover {
   color: var(--color-text-primary);
 }
 
+.accountBtnSignedIn {
+  color: var(--color-text-primary);
+}
+
+.accountAvatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.compact .accountAvatar {
+  width: 16px;
+  height: 16px;
+}
+
 .panelToggle:focus-visible,
 .spatialPinBtn:focus-visible,
+.accountBtn:focus-visible,
 .settingsBtn:focus-visible {
   outline: none;
-  box-shadow: var(--glass-focus-ring);
+  box-shadow: var(--tech-shadow-focus, var(--glass-focus-ring));
 }

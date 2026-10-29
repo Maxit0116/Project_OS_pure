@@ -1,5 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import styles from './hubMotion.module.css'
+import {
+  PICKER_HEIGHT,
+  PICKER_WIDTH,
+  placeSatellitePicker,
+  type PickerRect,
+  type PickerSide,
+} from './placeSatellitePicker'
 
 export interface SatellitePickerItem {
   id: string
@@ -14,7 +21,10 @@ interface Props {
   items: SatellitePickerItem[]
   loading?: boolean
   emptyLabel?: string
-  anchorRect: { x: number; y: number; width: number; height: number }
+  anchorRect: PickerRect
+  /** Other hub cards / compose card to avoid overlapping. */
+  obstacleRects?: readonly PickerRect[]
+  preferredSide?: PickerSide
   onClose: () => void
   onSelect: (id: string, meta?: { drill?: boolean }) => void
   /** Breadcrumb / path nav for folder picker. */
@@ -31,6 +41,8 @@ export default function SatellitePicker({
   loading = false,
   emptyLabel = 'Nothing found',
   anchorRect,
+  obstacleRects = [],
+  preferredSide = 'right',
   onClose,
   onSelect,
   pathLabel,
@@ -56,16 +68,28 @@ export default function SatellitePicker({
     }
   }, [open, onClose])
 
-  if (!open) return null
+  const placement = useMemo(() => {
+    if (!open) return { x: 0, y: 0, side: preferredSide as PickerSide }
+    return placeSatellitePicker({
+      anchor: anchorRect,
+      obstacles: obstacleRects,
+      preferredSide,
+      pickerSize: { width: PICKER_WIDTH, height: PICKER_HEIGHT },
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      },
+    })
+  }, [open, anchorRect, obstacleRects, preferredSide])
 
-  const left = Math.max(8, anchorRect.x + anchorRect.width + 10)
-  const top = Math.max(8, anchorRect.y)
+  if (!open) return null
 
   return (
     <div
       ref={ref}
       className={styles.picker}
-      style={{ left, top }}
+      style={{ left: placement.x, top: placement.y }}
+      data-picker-side={placement.side}
       role="listbox"
       aria-label={title}
     >

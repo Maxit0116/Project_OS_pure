@@ -4,6 +4,7 @@ import type { AgentContextBundle } from "../contracts/local-context.js";
 import type {
   ModelGatewayRequest,
   ModelGatewayResponse,
+  ModelToolCall,
 } from "../contracts/model-gateway.js";
 import type { ModelProfile } from "../contracts/settings.js";
 import { InMemorySecretStore } from "../persistence/secret-store.js";
@@ -13,7 +14,12 @@ import {
   REASONING_MAX_BYTES,
   REASONING_MAX_CHARACTERS,
 } from "./grounded-answer-service.js";
-import { ModelGateway } from "./model-gateway/index.js";
+import { readCapabilityContext } from "./harness/tool-policy.js";
+import {
+  ModelGateway,
+  type ModelToolExecutionResult,
+  type ModelToolLoopOptions,
+} from "./model-gateway/index.js";
 
 const profile: ModelProfile = {
   id: "answer-model",
@@ -169,23 +175,104 @@ describe("GroundedAnswerService", () => {
       validation: "mismatch_after_retry",
     });
   });
+
+  it("uses completeWithTools when MCP tools are provided and records mcpToolCalls", async () => {
+    const gateway = new QueuedGateway([
+      response({ output: "根据工具结果：找到了。" }),
+    ]);
+    const executeTool = async (
+      call: ModelToolCall,
+    ): Promise<ModelToolExecutionResult> => {
+      expect(call.name).toBe("mcp:docs:search");
+      return { content: "found" };
+    };
+    gateway.completeWithToolsImpl = async (_profile, request, options) => {
+      gateway.requests.push(request);
+      expect(options.tools).toHaveLength(1);
+      const call: ModelToolCall = {
+        id: "call_1",
+        name: "mcp:docs:search",
+        arguments: "{}",
+      };
+      const result = await options.executeTool(call);
+      options.onToolCall?.({ call, result, durationMs: 5 });
+      const next = gateway.shiftResponse();
+      return next;
+    };
+
+    const result = await new GroundedAnswerService(gateway).answer({
+      projectId: "project-test",
+      question: "查一下文档",
+      localContext,
+      profile,
+      thinkingDepth: "medium",
+      responseLanguage: chinese,
+      mcp: {
+        tools: [{
+          type: "function",
+          function: {
+            name: "mcp:docs:search",
+            parameters: { type: "object", properties: {} },
+          },
+        }],
+        executeTool,
+        toolPolicy: {
+          context: readCapabilityContext({ mode: "ask", allowedReadPaths: [] }),
+          rules: [{ effect: "allow", tool: "mcp_tool", match: "mcp:docs:*" }],
+        },
+      },
+    });
+
+    expect(result.answer).toContain("找到了");
+    expect(result.mcpToolCalls).toEqual([
+      expect.objectContaining({
+        serverId: "docs",
+        toolName: "search",
+        callId: "call_1",
+        status: "completed",
+        durationMs: 5,
+      }),
+    ]);
+    expect(gateway.completeCalls).toBe(0);
+    expect(gateway.completeWithToolsCalls).toBe(1);
+  });
 });
 
 class QueuedGateway extends ModelGateway {
   readonly requests: ModelGatewayRequest[] = [];
+  completeCalls = 0;
+  completeWithToolsCalls = 0;
+  completeWithToolsImpl?: ModelGateway["completeWithTools"];
 
   constructor(private readonly responses: ModelGatewayResponse[]) {
     super({ secretStore: new InMemorySecretStore() });
+  }
+
+  shiftResponse(): ModelGatewayResponse {
+    const next = this.responses.shift();
+    if (!next) throw new Error("Missing queued model response");
+    return next;
   }
 
   override async complete(
     _profile: ModelProfile,
     request: ModelGatewayRequest,
   ): Promise<ModelGatewayResponse> {
+    this.completeCalls += 1;
     this.requests.push(request);
-    const next = this.responses.shift();
-    if (!next) throw new Error("Missing queued model response");
-    return next;
+    return this.shiftResponse();
+  }
+
+  override async completeWithTools(
+    profile: ModelProfile,
+    request: ModelGatewayRequest,
+    options: ModelToolLoopOptions,
+  ): Promise<ModelGatewayResponse> {
+    this.completeWithToolsCalls += 1;
+    if (this.completeWithToolsImpl) {
+      return this.completeWithToolsImpl(profile, request, options);
+    }
+    return super.completeWithTools(profile, request, options);
   }
 }
 

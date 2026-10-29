@@ -58,6 +58,9 @@ export interface ProjectOSBridge {
       | { error: "invalid_type" | "too_large" | "failed" }
       | null
     >;
+    pickReferenceFiles(options?: {
+      extensions?: string[];
+    }): Promise<Array<{ path: string; name: string; ext: string }>>;
     openExternal(url: string): Promise<void>;
   };
   window: {

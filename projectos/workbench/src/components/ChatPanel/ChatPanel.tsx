@@ -11,6 +11,8 @@ import PendingChangesDrawer from '../PendingChangesDrawer/PendingChangesDrawer'
 import { useI18n } from '../../i18n'
 import PromptRefinementCard from './PromptRefinementCard'
 import PlanReviewCard from './PlanReviewCard'
+import AgentPoolAcceptanceCard from './AgentPoolAcceptanceCard'
+import { useAgentPoolStore } from '../AgentFlow/AgentPool/agentPoolStore'
 import DebugSessionPanel from './DebugSessionPanel'
 import { cycleChatMode } from './ChatModeSelector'
 import ChatMessageContent from './ChatMessageContent'
@@ -53,6 +55,7 @@ export default function ChatPanel() {
   const sendPrompt = useWorkbenchStore((s) => s.sendPrompt)
   const pendingRefinement = useWorkbenchStore((s) => s.pendingRefinement)
   const pendingPlan = useWorkbenchStore((s) => s.pendingPlan)
+  const reviewingPoolTask = useAgentPoolStore((s) => s.reviewingTaskSnapshot)
   const planConfirmed = useWorkbenchStore((s) => s.planConfirmed)
   const debugSession = useWorkbenchStore((s) => s.debugSession)
   const refinementConfirmed = useWorkbenchStore((s) => s.refinementConfirmed)
@@ -385,6 +388,11 @@ export default function ChatPanel() {
             onRevise={handleRevise}
           />
         )}
+        {reviewingPoolTask &&
+        (!reviewingPoolTask.chatSessionId ||
+          reviewingPoolTask.chatSessionId === activeSessionId) ? (
+          <AgentPoolAcceptanceCard task={reviewingPoolTask} />
+        ) : null}
         {planActivityRows.map((activity) => (
           <AgentActivitySummaryRow
             key={activity.id}

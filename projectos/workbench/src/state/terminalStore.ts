@@ -344,8 +344,11 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     if (isDesktopApp() && window.projectOS?.terminal) {
       await Promise.all(
         Object.values(state.tabs).map(async (tab) => {
-          if (tab.ptyId) {
+          if (!tab.ptyId) return
+          try {
             await window.projectOS!.terminal.kill(tab.ptyId)
+          } catch (error) {
+            console.warn('[terminalStore] failed to kill PTY during workspace switch', error)
           }
         }),
       )

@@ -27,6 +27,13 @@ import type {
   ProjectOSSettings,
   PromptRefinement,
   MemoryWriteNotice,
+  McpServerConfig,
+  McpToolDescriptor,
+  McpCatalogView,
+  InstallMcpFromCatalogInput,
+  SkillCatalogView,
+  InstallSkillFromCatalogInput,
+  SkillDescriptor,
   SemanticTree,
   ThinkingDepth,
   WorkspaceDirectoryEntry,
@@ -41,8 +48,6 @@ import type {
   FeaturesLayout,
   FeaturesStaleness,
   ExternalAgentConfig,
-  McpServerConfig,
-  McpToolDescriptor,
   TeamSnapshot,
   RelatedKnowledge,
   DailyBrief,
@@ -55,11 +60,14 @@ import type {
   UpsertTeamPersonInput,
   TeamMeeting,
   TeamBrainAnswer,
-  GitHubAuthStatus,
   GitSyncStatus,
   GitSyncSettingsPatch,
   GitCommitInput,
 } from './removedApiStubTypes'
+import type {
+  GitHubAuthStatus,
+  GitHubDeviceAuthPending,
+} from '@contracts/index'
 import { buildPromptComposerFields, emptyComposerDraft } from '@contracts/index'
 import type { MapWorkGroupMutationInput, UpdateMapWorkGroupPatch, WorkGroupSelectionItem } from '@contracts/index'
 import { FileOwnershipErrorDetailsSchema, MAP_ARTIFACT_DEFAULT_SIZES, emptyNoteDocument } from '@contracts/index'
@@ -208,7 +216,7 @@ export type MapLayerMode = 'architecture' | 'story'
 export type StoryViewLevel = 'overview' | 'features' | 'steps'
 export type RightPanelTab = 'chat' | 'harness'
 export type CodeSubTab = 'editor' | 'diff'
-export type AgentFlowViewMode = 'timeline' | 'graph'
+export type AgentFlowViewMode = 'timeline' | 'graph' | 'pool'
 export type TreeViewMode = 'semantic' | 'directory'
 
 export interface DirectoryListing {
@@ -266,6 +274,7 @@ export interface ChatMessage {
   invokedSkillId?: string
   explorationTrace?: import('@contracts/index').AskExplorationTrace
   retrievalSummary?: import('@contracts/index').RetrievalSummary
+  mcpToolCalls?: import('@contracts/index').AskMcpToolCall[]
   checkpointId?: string
   /** Mode active when this user turn was sent (nav rail color / history). */
   chatMode?: ChatMode
@@ -493,6 +502,8 @@ export interface WorkbenchState {
 
   settings: ProjectOSSettings | null
   settingsOpen: boolean
+  /** When opening Settings, jump to this hub view once (e.g. teamGithub). */
+  settingsFocusView: string | null
   selectedModelProfileId: string | null
   mapContent: MapContentDocument | null
   features: FeaturesFile | null
@@ -524,11 +535,8 @@ export interface WorkbenchState {
   decisionModalOpen: boolean
   rosterModalOpen: boolean
   meetingImportOpen: boolean
-  githubDeviceAuthPending: {
-    userCode: string
-    verificationUri: string
-    authorizeUrl: string
-  } | null
+  githubDeviceAuthPending: GitHubDeviceAuthPending | null
+  githubAuthPollTimer: ReturnType<typeof setInterval> | null
   handoffOverwriteHandoffId: string | null
   chatAnchor: AnchorRef | null
   lastAnchoredAnswer: TeamBrainAnswer | null
@@ -705,11 +713,23 @@ export interface WorkbenchState {
   saveAgentProfile: (profile: AgentProfile) => Promise<boolean>
   saveExternalAgent: (config: ExternalAgentConfig, authToken?: string) => Promise<boolean>
   saveMcpServer: (config: McpServerConfig, authToken?: string) => Promise<boolean>
+  deleteMcpServer: (serverId: string) => Promise<boolean>
   testModelConnection: (profileId: string) => Promise<void>
   testExternalAgent: (agentId: string) => Promise<void>
   testMcpServer: (serverId: string) => Promise<void>
   refreshMcpTools: (serverId: string) => Promise<McpToolDescriptor[]>
-  setSettingsOpen: (open: boolean) => void
+  listMcpCatalog: (options?: { forceRefresh?: boolean }) => Promise<McpCatalogView | null>
+  refreshMcpCatalog: () => Promise<McpCatalogView | null>
+  installMcpFromCatalog: (input: InstallMcpFromCatalogInput) => Promise<boolean>
+  disableMcpCatalogListing: (listingId: string) => Promise<boolean>
+  reportMcpCatalogListing: (input: { listingId: string; note?: string }) => Promise<boolean>
+  listSkillCatalog: (options?: { forceRefresh?: boolean }) => Promise<SkillCatalogView | null>
+  refreshSkillCatalog: () => Promise<SkillCatalogView | null>
+  installSkillFromCatalog: (input: InstallSkillFromCatalogInput) => Promise<SkillDescriptor | null>
+  disableSkillCatalogListing: (listingId: string) => Promise<boolean>
+  reportSkillCatalogListing: (input: { listingId: string; note?: string }) => Promise<boolean>
+  setSettingsOpen: (open: boolean, focusView?: string | null) => void
+  clearSettingsFocusView: () => void
   setSelectedModelProfileId: (profileId: string | null) => void
   selectChatModel: (profileId: string) => Promise<void>
   setThinkingDepth: (depth: ThinkingDepth) => Promise<void>
@@ -737,16 +757,13 @@ export interface WorkbenchState {
   setDecisionModalOpen: (open: boolean) => void
   setRosterModalOpen: (open: boolean) => void
   setMeetingImportOpen: (open: boolean) => void
-  setGitHubDeviceAuthPending: (
-    pending: {
-      userCode: string
-      verificationUri: string
-      authorizeUrl: string
-    } | null,
-  ) => void
+  setGitHubDeviceAuthPending: (pending: GitHubDeviceAuthPending | null) => void
   refreshGitHubAuthStatus: () => Promise<void>
   refreshGitSyncStatus: () => Promise<void>
   connectGitHub: () => Promise<void>
+  importGitHubFromGhCli: () => Promise<void>
+  saveGitHubOAuthClientId: (clientId: string) => Promise<void>
+  cancelGitHubOAuth: () => Promise<void>
   disconnectGitHub: () => Promise<void>
   gitPull: () => Promise<void>
   gitPush: () => Promise<void>
@@ -1265,6 +1282,7 @@ const initialTransientState = {
   rosterModalOpen: false,
   meetingImportOpen: false,
   githubDeviceAuthPending: null,
+  githubAuthPollTimer: null,
   handoffOverwriteHandoffId: null as string | null,
   chatAnchor: null as AnchorRef | null,
   lastAnchoredAnswer: null as TeamBrainAnswer | null,
@@ -1488,6 +1506,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   projectDescription: null,
   projectDescriptionSaving: false,
   settingsOpen: false,
+  settingsFocusView: null,
   selectedModelProfileId: null,
   mapContent: null,
   features: null,
@@ -2703,6 +2722,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
               format: 'markdown' as const,
               ...(answer.explorationTrace
                 ? { explorationTrace: answer.explorationTrace }
+                : {}),
+              ...(answer.mcpToolCalls?.length
+                ? { mcpToolCalls: answer.mcpToolCalls }
                 : {}),
               ...(answer.retrievalSummary?.searched
                 ? { retrievalSummary: answer.retrievalSummary }
@@ -4431,7 +4453,44 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
   saveExternalAgent: async () => false,
 
-  saveMcpServer: async () => false,
+  saveMcpServer: async (config, authToken) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.saveMcpServer(projectId, {
+        config,
+        ...(authToken?.trim() ? { authToken: authToken.trim() } : {}),
+      })
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({ type: 'success', message: getStoreMessage(locale, 'settings.mcpSaved') })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to save MCP server')
+      }
+      return false
+    }
+  },
+
+  deleteMcpServer: async (serverId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.deleteMcpServer(projectId, serverId)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({ type: 'success', message: getStoreMessage(locale, 'settings.mcpDeleted') })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to delete MCP server')
+      }
+      return false
+    }
+  },
 
   testModelConnection: async (profileId) => {
     const { client, project, pushToast, locale } = get()
@@ -4457,13 +4516,210 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     /* external agents removed in pure workbench */
   },
 
-  testMcpServer: async (_serverId) => {
-    /* MCP removed in pure workbench */
+  testMcpServer: async (serverId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return
+    const projectId = project.projectId
+    try {
+      const result = await client.testMcpServer(projectId, serverId)
+      if (get().project?.projectId !== projectId) return
+      pushToast({
+        type: result.ok ? 'success' : 'warning',
+        message: result.ok
+          ? getStoreMessage(locale, 'settings.mcpConnectionOk', { ms: result.latencyMs })
+          : result.message ?? getStoreMessage(locale, 'settings.mcpConnectionFailed'),
+      })
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, getStoreMessage(locale, 'settings.mcpConnectionFailed'))
+      }
+    }
   },
 
-  refreshMcpTools: async (_serverId) => [],
+  refreshMcpTools: async (serverId) => {
+    const { client, project } = get()
+    if (!project) return []
+    return client.refreshMcpTools(project.projectId, serverId)
+  },
 
-  setSettingsOpen: (open) => set({ settingsOpen: open }),
+  listMcpCatalog: async (options) => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      return await client.listMcpCatalog(projectId, options)
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to load MCP catalog')
+      }
+      return null
+    }
+  },
+
+  refreshMcpCatalog: async () => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      return await client.refreshMcpCatalog(projectId)
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to refresh MCP catalog')
+      }
+      return null
+    }
+  },
+
+  installMcpFromCatalog: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.installMcpFromCatalog(projectId, input)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({ type: 'success', message: getStoreMessage(locale, 'settings.mcpMarketInstalled') })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install MCP listing')
+      }
+      return false
+    }
+  },
+
+  disableMcpCatalogListing: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.disableMcpCatalogListing(projectId, listingId)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({ type: 'success', message: getStoreMessage(locale, 'settings.mcpMarketDisabled') })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to disable MCP listing')
+      }
+      return false
+    }
+  },
+
+  reportMcpCatalogListing: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.reportMcpCatalogListing(projectId, input)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({ type: 'success', message: getStoreMessage(locale, 'settings.mcpMarketReported') })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to report MCP listing')
+      }
+      return false
+    }
+  },
+
+  listSkillCatalog: async (options) => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      return await client.listSkillCatalog(projectId, options)
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to load skill catalog')
+      }
+      return null
+    }
+  },
+
+  refreshSkillCatalog: async () => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      return await client.refreshSkillCatalog(projectId)
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to refresh skill catalog')
+      }
+      return null
+    }
+  },
+
+  installSkillFromCatalog: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const descriptor = await client.installSkillFromCatalog(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.skillMarketInstalled'),
+      })
+      return descriptor
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install skill')
+      }
+      return null
+    }
+  },
+
+  disableSkillCatalogListing: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.disableSkillCatalogListing(projectId, listingId)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.skillMarketDisabled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to disable skill listing')
+      }
+      return false
+    }
+  },
+
+  reportSkillCatalogListing: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.reportSkillCatalogListing(projectId, input)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.skillMarketReported'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to report skill listing')
+      }
+      return false
+    }
+  },
+
+  setSettingsOpen: (open, focusView) =>
+    set({
+      settingsOpen: open,
+      ...(focusView !== undefined ? { settingsFocusView: focusView } : open ? {} : { settingsFocusView: null }),
+    }),
+  clearSettingsFocusView: () => set({ settingsFocusView: null }),
   setSelectedModelProfileId: (profileId) => set({ selectedModelProfileId: profileId }),
 
   selectChatModel: async (profileId) => {
@@ -4610,7 +4866,24 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   setPublishBriefConfirm: (confirm) => set({ publishBriefConfirm: confirm }),
 
   refreshGitHubAuthStatus: async () => {
-    set({ githubAuthStatus: { connected: false } })
+    const { client } = get()
+    try {
+      const status = await client.getGitHubAuthStatus()
+      const pending = get().githubDeviceAuthPending
+      if (status.connected) {
+        const timer = get().githubAuthPollTimer
+        if (timer) clearInterval(timer)
+        set({
+          githubAuthStatus: status,
+          githubDeviceAuthPending: null,
+          githubAuthPollTimer: null,
+        })
+        return
+      }
+      set({ githubAuthStatus: status, ...(pending ? {} : {}) })
+    } catch {
+      set({ githubAuthStatus: { connected: false, oauthConfigured: false } })
+    }
   },
 
   refreshGitSyncStatus: async () => {
@@ -4618,11 +4891,83 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   connectGitHub: async () => {
-    set({ githubDeviceAuthPending: null })
+    const { client, githubAuthPollTimer } = get()
+    if (githubAuthPollTimer) clearInterval(githubAuthPollTimer)
+    try {
+      const result = await client.beginGitHubOAuth()
+      if (result.kind === 'connected') {
+        set({
+          githubAuthStatus: result.status,
+          githubDeviceAuthPending: null,
+          githubAuthPollTimer: null,
+        })
+        return
+      }
+      set({
+        githubAuthStatus: result.status,
+        githubDeviceAuthPending: result.pending,
+      })
+      const timer = setInterval(() => {
+        void get().refreshGitHubAuthStatus()
+      }, Math.max(2, result.pending.intervalSeconds) * 1000)
+      set({ githubAuthPollTimer: timer })
+    } catch (error) {
+      set({ githubDeviceAuthPending: null, githubAuthPollTimer: null })
+      const message =
+        error instanceof Error ? error.message : 'GitHub sign-in failed'
+      get().pushToast({ type: 'error', message })
+      throw error
+    }
+  },
+
+  importGitHubFromGhCli: async () => {
+    const { client, githubAuthPollTimer } = get()
+    if (githubAuthPollTimer) clearInterval(githubAuthPollTimer)
+    try {
+      const result = await client.importGitHubAuthFromGhCli()
+      if (result.kind === 'connected') {
+        set({
+          githubAuthStatus: result.status,
+          githubDeviceAuthPending: null,
+          githubAuthPollTimer: null,
+        })
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'GitHub CLI import failed'
+      get().pushToast({ type: 'error', message })
+      throw error
+    }
+  },
+
+  saveGitHubOAuthClientId: async (clientId) => {
+    const { client } = get()
+    const status = await client.saveGitHubOAuthClientId(clientId.trim())
+    set({ githubAuthStatus: status })
+  },
+
+  cancelGitHubOAuth: async () => {
+    const { client, githubAuthPollTimer } = get()
+    if (githubAuthPollTimer) clearInterval(githubAuthPollTimer)
+    set({ githubDeviceAuthPending: null, githubAuthPollTimer: null })
+    try {
+      const status = await client.cancelGitHubOAuth()
+      set({ githubAuthStatus: status })
+    } catch {
+      set({ githubAuthStatus: { connected: false } })
+    }
   },
 
   disconnectGitHub: async () => {
-    set({ githubAuthStatus: { connected: false } })
+    const { client, githubAuthPollTimer } = get()
+    if (githubAuthPollTimer) clearInterval(githubAuthPollTimer)
+    set({ githubDeviceAuthPending: null, githubAuthPollTimer: null })
+    try {
+      const status = await client.disconnectGitHub()
+      set({ githubAuthStatus: status })
+    } catch {
+      set({ githubAuthStatus: { connected: false } })
+    }
   },
 
   gitPull: async () => {

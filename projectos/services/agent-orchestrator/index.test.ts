@@ -1229,6 +1229,33 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     expect(audit).not.toContain("Denied");
   });
 
+  it("records mcp_tool_call action events for future Agent-run wiring", () => {
+    const { orchestrator, workspace } = createModelOrchestrator(
+      [{ output: "{}" }],
+      [],
+      sampleWorkspaceRoot,
+      [{ output: validFileEditPlanOutput() }],
+      "memory",
+      [{ output: validProposalValidationOutput() }],
+    );
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+    });
+    const secret = `sk-${"b".repeat(24)}`;
+    orchestrator.recordMcpToolCall(workspace, state.run.runId, {
+      serverId: "docs",
+      toolName: "search",
+      callId: "call_1",
+      status: "failed",
+      durationMs: 12,
+      error: `upstream ${secret}`,
+    });
+    const serialized = JSON.stringify(state.events);
+    expect(serialized).toContain("\"type\":\"mcp_tool_call\"");
+    expect(serialized).toContain("\"toolName\":\"search\"");
+    expect(serialized).not.toContain(secret);
+  });
+
   it("stops before the repair generation when the model-call budget is already spent", async () => {
     let verifyCalls = 0;
     const automaticLeafExecution: AutomaticLeafExecutionDependency = {

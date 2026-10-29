@@ -22,8 +22,6 @@ export type FeaturesLayout = Record<string, unknown>
 export type FeaturesStaleness = Record<string, unknown>
 
 export type ExternalAgentConfig = { id: string; authRef?: string }
-export type McpServerConfig = { id: string; transport: string; authRef?: string }
-export type McpToolDescriptor = { name: string }
 
 export type TeamSnapshot = {
   collab: Array<{ nodeId: string; ownerPersonId?: string; collabStatus?: string }>
@@ -46,7 +44,6 @@ export type AnchorRef = { kind: 'node'; id: string } | { kind: string; id: strin
 export type TeamBrainAnswer = { answer: string; recorded?: boolean }
 export type TeamMeeting = { id: string }
 
-export type GitHubAuthStatus = { connected: boolean; login?: string; authMode?: string }
 export type GitSyncStatus = { lastError?: string | null }
 
 export type GitSyncSettingsPatch = Record<string, unknown>

@@ -6152,6 +6152,41 @@ export class AgentOrchestrator {
     );
   }
 
+  /** Emit a run-scoped MCP tool call for Agent Flow (future Change/locate wiring). */
+  recordMcpToolCall(
+    workspace: LoadedProjectOSWorkspace,
+    runId: string,
+    payload: {
+      serverId: string;
+      toolName: string;
+      callId: string;
+      status: "completed" | "failed" | "rejected";
+      durationMs: number;
+      resultBytes?: number;
+      error?: string;
+    },
+  ): void {
+    const state = this.runs.get(runId);
+    if (!state) return;
+    this.emit(
+      workspace,
+      state,
+      createActionEvent(runId, "mcp_tool_call", {
+        serverId: payload.serverId,
+        toolName: payload.toolName,
+        callId: payload.callId,
+        status: payload.status,
+        durationMs: payload.durationMs,
+        ...(payload.resultBytes !== undefined
+          ? { resultBytes: payload.resultBytes }
+          : {}),
+        ...(payload.error
+          ? { error: redactAuditText(payload.error).slice(0, 2_048) }
+          : {}),
+      }),
+    );
+  }
+
   noteVerificationApproval(runId: string, approvalId: string): void {
     const state = this.runs.get(runId);
     if (!state) return;

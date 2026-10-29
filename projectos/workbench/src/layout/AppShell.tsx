@@ -18,6 +18,8 @@ import { useKeepAwakeSync } from '../hooks/useKeepAwakeSync'
 import WorkbenchSidePanels from './WorkbenchSidePanels'
 import SessionGraphOverlay from '../components/SessionGraph/SessionGraphOverlay'
 import LoopGraphOverlay from '../components/LoopGraph/LoopGraphOverlay'
+import GithubGraphOverlay from '../components/GithubGraph/GithubGraphOverlay'
+import MarketplaceOverlay from '../components/Marketplace/MarketplaceOverlay'
 import AgentFlowOverlay from '../components/AgentFlow/AgentFlowOverlay'
 import SpatialCaptureOverlay from '../components/SpatialCaptures/SpatialCaptureOverlay'
 import EdgeRails from './EdgeRails'
@@ -151,6 +153,8 @@ export default function AppShell() {
 
           <SessionGraphOverlay />
           <LoopGraphOverlay />
+          <GithubGraphOverlay />
+          <MarketplaceOverlay />
           <AgentFlowOverlay />
           <SpatialCaptureOverlay />
           <EdgeRails
