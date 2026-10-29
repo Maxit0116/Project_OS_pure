@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { Package, RefreshCw, X } from 'lucide-react'
 import { sessionGraphShieldCssInsets } from '@contracts/index'
 import type {
@@ -81,8 +80,8 @@ export default function MarketplaceOverlay() {
   const [authByListing, setAuthByListing] = useState<Record<string, string>>({})
 
   const shield = sessionGraphShieldCssInsets({
-    leftPanelOpen,
-    rightPanelOpen,
+    leftOpen: leftPanelOpen,
+    rightOpen: rightPanelOpen,
     terminalOpen,
   })
 
@@ -184,7 +183,7 @@ export default function MarketplaceOverlay() {
     [installSkillFromCatalog, reloadInstalledSkills, uninstallSkillFromCatalog],
   )
 
-  if (!open || typeof document === 'undefined') return null
+  if (!open) return null
 
   const mcpListings = mcpView?.document.listings ?? []
   const skillListings = skillView?.document.listings ?? []
@@ -390,7 +389,7 @@ export default function MarketplaceOverlay() {
     )
   }
 
-  return createPortal(
+  return (
     <GraphOverlayFrame
       shield={shield}
       resizing={panelResizing}
@@ -523,8 +522,7 @@ export default function MarketplaceOverlay() {
           )}
         </div>
       </div>
-    </GraphOverlayFrame>,
-    document.body,
+    </GraphOverlayFrame>
   )
 }
 
