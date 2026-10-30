@@ -259,6 +259,55 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("listWorkspaceGitBranches", projectId);
   }
 
+  listWorkspaceGitCommits(
+    projectId: string,
+    input: { limit?: number; tips?: string[] } = {},
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCommitList> {
+    return this.invoke("listWorkspaceGitCommits", projectId, input);
+  }
+
+  getWorkspaceGitCommit(
+    projectId: string,
+    sha: string,
+    input: { includePatch?: boolean } = {},
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCommitDetail> {
+    return this.invoke("getWorkspaceGitCommit", projectId, sha, input);
+  }
+
+  getGithubGraphStore(
+    projectId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return this.invoke("getGithubGraphStore", projectId);
+  }
+
+  upsertGithubGraphFeature(
+    projectId: string,
+    feature: import("../../contracts/github-domain.js").GithubFeature,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return this.invoke("upsertGithubGraphFeature", projectId, feature);
+  }
+
+  deleteGithubGraphFeature(
+    projectId: string,
+    featureId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return this.invoke("deleteGithubGraphFeature", projectId, featureId);
+  }
+
+  upsertGithubGraphRelation(
+    projectId: string,
+    relation: import("../../contracts/github-domain.js").GithubRelation,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return this.invoke("upsertGithubGraphRelation", projectId, relation);
+  }
+
+  removeGithubGraphRelation(
+    projectId: string,
+    relationId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return this.invoke("removeGithubGraphRelation", projectId, relationId);
+  }
+
   checkoutWorkspaceBranch(
     projectId: string,
     branch: string,
@@ -319,6 +368,27 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("fetchWorkspaceGit", projectId);
   }
 
+  pushWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("pushWorkspaceBranch", projectId, branch);
+  }
+
+  pullWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("pullWorkspaceBranch", projectId, branch);
+  }
+
+  revertWorkspaceCommit(
+    projectId: string,
+    input: { sha: string; push?: boolean },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("revertWorkspaceCommit", projectId, input);
+  }
+
   listWorkspacePullRequests(
     projectId: string,
   ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitPullRequestList> {
@@ -330,6 +400,49 @@ export class IpcTransport implements ApiTransport {
     input: { title: string; head?: string; base?: string; body?: string },
   ): Promise<{ ok: boolean; url?: string; number?: number; message: string }> {
     return this.invoke("createWorkspacePullRequest", projectId, input);
+  }
+
+  mergeWorkspacePullRequest(
+    projectId: string,
+    input: {
+      number: number;
+      mergeMethod?: "merge" | "squash" | "rebase";
+    },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    return this.invoke("mergeWorkspacePullRequest", projectId, input);
+  }
+
+  closeWorkspacePullRequest(
+    projectId: string,
+    input: { number: number },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    return this.invoke("closeWorkspacePullRequest", projectId, input);
+  }
+
+  listWorkspaceIssues(
+    projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitIssueList> {
+    return this.invoke("listWorkspaceIssues", projectId);
+  }
+
+  createWorkspaceIssue(
+    projectId: string,
+    input: { title: string; body?: string },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitIssueMutationResult
+  > {
+    return this.invoke("createWorkspaceIssue", projectId, input);
+  }
+
+  listWorkspaceCommitCheckRuns(
+    projectId: string,
+    sha: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCheckRunList> {
+    return this.invoke("listWorkspaceCommitCheckRuns", projectId, sha);
   }
 
   getGitHubAuthStatus(): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {

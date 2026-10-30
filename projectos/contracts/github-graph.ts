@@ -1,12 +1,14 @@
 import { z } from "zod";
 
 /**
- * Workbench GitHub Graph partition tree — not a commit Network Graph.
+ * Workbench GitHub Graph partition-tree *view projection*.
+ * Domain entities / dual-mode nav live in `github-domain.ts` + `github-graph-nav.ts`.
  * Nodes hang under the default branch (or synthetic root) via parentId.
  */
 export const GithubGraphNodeKindSchema = z.enum([
   "default",
   "group",
+  "feature",
   "branch",
   "pr",
   "worktree",

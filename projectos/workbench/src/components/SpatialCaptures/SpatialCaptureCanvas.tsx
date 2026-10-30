@@ -33,6 +33,7 @@ import {
   ResearchToggle,
   SpatialComposeHub,
   COMPOSE_HUB_STRINGS_EN,
+  createWorkbenchComposeHubDataSource,
   type ComposeHubDataSource,
   type ComposeHubStrings,
 } from '../SpatialComposeHub'
@@ -84,7 +85,6 @@ import {
 } from '../../overlay/regionAnchors'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
-import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useSpatialCaptureStore } from '../../state/spatialCaptureStore'
 import { syncComposeSubagentsToPool } from '../AgentFlow/AgentPool/syncComposeSubagents'
 import {
@@ -329,13 +329,20 @@ export default function SpatialCaptureCanvas({
       scopeMapLevelCode: ts('spatialCaptures.composeHub.scopeMapLevelCode'),
       mcp: ts('spatialCaptures.composeHub.mcp'),
       mcpEmpty: ts('spatialCaptures.composeHub.mcpEmpty'),
+      mcpLibraryEmpty: ts('spatialCaptures.composeHub.mcpLibraryEmpty'),
+      mcpAdd: ts('spatialCaptures.composeHub.mcpAdd'),
       mcpOpenSettings: ts('spatialCaptures.composeHub.mcpOpenSettings'),
+      mcpOpenMarketplace: ts('spatialCaptures.composeHub.mcpOpenMarketplace'),
       mcpEnabled: ts('spatialCaptures.composeHub.mcpEnabled'),
       mcpDisabled: ts('spatialCaptures.composeHub.mcpDisabled'),
       mcpPolicyHint: ts('spatialCaptures.composeHub.mcpPolicyHint'),
       skills: ts('spatialCaptures.composeHub.skills'),
       skillsEmpty: ts('spatialCaptures.composeHub.skillsEmpty'),
+      skillsLibraryEmpty: ts('spatialCaptures.composeHub.skillsLibraryEmpty'),
       skillsAdd: ts('spatialCaptures.composeHub.skillsAdd'),
+      skillsOpenMarketplace: ts(
+        'spatialCaptures.composeHub.skillsOpenMarketplace',
+      ),
       references: ts('spatialCaptures.composeHub.references'),
       referencesEmpty: ts('spatialCaptures.composeHub.referencesEmpty'),
       referencesAdd: ts('spatialCaptures.composeHub.referencesAdd'),
@@ -908,110 +915,15 @@ export default function SpatialCaptureCanvas({
     }
   }, [client, project, regions, hubByArrow, assetUrls])
 
-  const hubDataSource = useMemo((): ComposeHubDataSource => {
-    return {
-      listSkills: async () => {
-        if (!client || !project) return []
-        const result = await client.listSkills(project.projectId)
-        return result.skills.map((skill) => ({
-          id: skill.id,
-          name: skill.name,
-          description: skill.description,
-        }))
-      },
-      listDirectories: async (relativePath) => {
-        if (!client || !project) return []
-        const entries = await client.listWorkspaceDirectory(
-          project.projectId,
-          relativePath,
-        )
-        return entries
-          .filter((entry) => entry.kind === 'directory')
-          .map((entry) => ({ name: entry.name, path: entry.path }))
-      },
-      listMentionFiles: async (query) => {
-        if (!client || !project) return []
-        const result = await client.getComposerMentions(
-          project.projectId,
-          query,
-        )
-        return result.files
-      },
-      pickReferenceFiles: async (options) => {
-        if (!window.projectOS?.shell?.pickReferenceFiles) return []
-        return window.projectOS.shell.pickReferenceFiles(options)
-      },
-      listMcpServers: async () => {
-        if (!client || !project) return []
-        const servers = (await client.listMcpServers(project.projectId)) ?? []
-        return servers.map((server) => ({
-          id: server.id,
-          name: server.name,
-          enabled: server.enabled,
-          transport: server.transport,
-          toolCount: server.toolAllowlist?.length,
-        }))
-      },
-      setMcpServerEnabled: async (serverId, enabled) => {
-        if (!client || !project) return null
-        const servers = await client.listMcpServers(project.projectId)
-        const current = servers.find((server) => server.id === serverId)
-        if (!current) return null
-        const nextConfig = { ...current, enabled }
-        await client.saveMcpServer(project.projectId, { config: nextConfig })
-        return {
-          id: nextConfig.id,
-          name: nextConfig.name,
-          enabled: nextConfig.enabled,
-          transport: nextConfig.transport,
-          toolCount: nextConfig.toolAllowlist?.length,
-        }
-      },
-      openMcpSettings: () => {
-        useWorkbenchStore.getState().setSettingsOpen(true)
-      },
-      getGitStatus: async () => {
-        if (!client || !project) return { branch: null, dirty: false }
-        return client.getWorkspaceGitStatus(project.projectId)
-      },
-      listGitBranches: async () => {
-        if (!client || !project) {
-          return { defaultBranch: null, currentBranch: null, branches: [] }
-        }
-        return client.listWorkspaceGitBranches(project.projectId)
-      },
-      fetchGit: async () => {
-        if (!client || !project) {
-          return { ok: false, message: 'No project' }
-        }
-        return client.fetchWorkspaceGit(project.projectId)
-      },
-      openGithubGraph: () => {
-        useChatSessionStore.getState().setGithubGraphOpen(true)
-      },
-      openExternalUrl: (url) => {
-        void window.projectOS?.shell.openExternal(url)
-      },
-      getProjectGraph: async () => {
-        if (!client || !project) return null
-        const graph = await client.getProjectGraph(project.projectId)
-        return {
-          nodes: graph.nodes,
-          edges: graph.edges,
-        }
-      },
-      listRepoCandidates: async () =>
-        project
-          ? [
-              {
-                projectId: project.projectId,
-                displayName: project.displayName || project.projectId,
-              },
-            ]
-          : [],
-      resolveAssetUrl: (assetPath) => assetUrls[assetPath],
-    }
-  }, [client, project, assetUrls])
+  const hubDataSource = useMemo(
+    (): ComposeHubDataSource =>
+      createWorkbenchComposeHubDataSource({
+        client,
+        project,
+        resolveAssetUrl: (assetPath) => assetUrls[assetPath],
+      }),
+    [client, project, assetUrls],
+  )
 
   function ensureBriefState(arrowId: string, region: OverlayRegion) {
     setStencilBriefByArrow((prev) => {

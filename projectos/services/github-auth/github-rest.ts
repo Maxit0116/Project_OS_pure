@@ -168,3 +168,244 @@ export async function createPullRequestViaRest(
     message: json.html_url ? `Created ${json.html_url}` : "Pull request created.",
   };
 }
+
+export async function mergePullRequestViaRest(
+  owner: string,
+  repo: string,
+  accessToken: string,
+  number: number,
+  input: {
+    mergeMethod?: "merge" | "squash" | "rebase";
+    commitTitle?: string;
+    commitMessage?: string;
+  } = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: boolean; sha?: string; message: string }> {
+  const response = await githubApiFetch(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${number}/merge`,
+    accessToken,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        merge_method: input.mergeMethod ?? "squash",
+        ...(input.commitTitle ? { commit_title: input.commitTitle } : {}),
+        ...(input.commitMessage ? { commit_message: input.commitMessage } : {}),
+      }),
+    },
+    fetchImpl,
+  );
+  const json = (await response.json().catch(() => ({}))) as {
+    merged?: boolean;
+    sha?: string;
+    message?: string;
+  };
+  if (!response.ok) {
+    return {
+      ok: false,
+      message: `GitHub API PR merge failed (${response.status}): ${json.message || response.statusText}`,
+    };
+  }
+  return {
+    ok: true,
+    ...(json.sha ? { sha: json.sha } : {}),
+    message: json.message || `Merged PR #${number}.`,
+  };
+}
+
+export async function updatePullRequestViaRest(
+  owner: string,
+  repo: string,
+  accessToken: string,
+  number: number,
+  input: { state?: "open" | "closed"; title?: string; body?: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: boolean; url?: string; message: string }> {
+  const response = await githubApiFetch(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${number}`,
+    accessToken,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(input.state ? { state: input.state } : {}),
+        ...(input.title ? { title: input.title } : {}),
+        ...(input.body ? { body: input.body } : {}),
+      }),
+    },
+    fetchImpl,
+  );
+  const json = (await response.json().catch(() => ({}))) as {
+    html_url?: string;
+    message?: string;
+  };
+  if (!response.ok) {
+    return {
+      ok: false,
+      message: `GitHub API PR update failed (${response.status}): ${json.message || response.statusText}`,
+    };
+  }
+  return {
+    ok: true,
+    ...(json.html_url ? { url: json.html_url } : {}),
+    message:
+      input.state === "closed"
+        ? `Closed PR #${number}.`
+        : `Updated PR #${number}.`,
+  };
+}
+
+export interface RestListedIssue {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed";
+}
+
+export async function listIssuesViaRest(
+  owner: string,
+  repo: string,
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{
+  available: boolean;
+  issues: RestListedIssue[];
+  message?: string;
+}> {
+  const response = await githubApiFetch(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?state=open&per_page=50`,
+    accessToken,
+    { method: "GET" },
+    fetchImpl,
+  );
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    return {
+      available: false,
+      issues: [],
+      message: `GitHub API issue list failed (${response.status}): ${body.slice(0, 200) || response.statusText}`,
+    };
+  }
+  const raw = (await response.json()) as Array<{
+    number: number;
+    title: string;
+    html_url: string;
+    state?: string;
+    pull_request?: unknown;
+  }>;
+  // Issues endpoint includes PRs — drop those.
+  const issues = raw
+    .filter((item) => !item.pull_request)
+    .map((item) => ({
+      number: item.number,
+      title: item.title,
+      url: item.html_url,
+      state: (item.state === "closed" ? "closed" : "open") as "open" | "closed",
+    }));
+  return { available: true, issues };
+}
+
+export async function createIssueViaRest(
+  owner: string,
+  repo: string,
+  accessToken: string,
+  input: { title: string; body?: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{
+  ok: boolean;
+  number?: number;
+  url?: string;
+  message: string;
+}> {
+  const response = await githubApiFetch(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues`,
+    accessToken,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: input.title,
+        ...(input.body ? { body: input.body } : {}),
+      }),
+    },
+    fetchImpl,
+  );
+  const json = (await response.json().catch(() => ({}))) as {
+    number?: number;
+    html_url?: string;
+    message?: string;
+  };
+  if (!response.ok) {
+    return {
+      ok: false,
+      message: `GitHub API issue create failed (${response.status}): ${json.message || response.statusText}`,
+    };
+  }
+  return {
+    ok: true,
+    ...(typeof json.number === "number" ? { number: json.number } : {}),
+    ...(json.html_url ? { url: json.html_url } : {}),
+    message: json.html_url
+      ? `Created issue ${json.html_url}`
+      : "Issue created.",
+  };
+}
+
+export interface RestCheckRunSummary {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+  htmlUrl?: string;
+}
+
+export async function listCommitCheckRunsViaRest(
+  owner: string,
+  repo: string,
+  accessToken: string,
+  sha: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{
+  available: boolean;
+  checkRuns: RestCheckRunSummary[];
+  message?: string;
+}> {
+  const response = await githubApiFetch(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(sha)}/check-runs?per_page=50`,
+    accessToken,
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/vnd.github+json",
+      },
+    },
+    fetchImpl,
+  );
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    return {
+      available: false,
+      checkRuns: [],
+      message: `GitHub API check-runs failed (${response.status}): ${body.slice(0, 200) || response.statusText}`,
+    };
+  }
+  const json = (await response.json()) as {
+    check_runs?: Array<{
+      id: number;
+      name: string;
+      status: string;
+      conclusion: string | null;
+      html_url?: string;
+    }>;
+  };
+  return {
+    available: true,
+    checkRuns: (json.check_runs ?? []).map((run) => ({
+      id: run.id,
+      name: run.name,
+      status: run.status,
+      conclusion: run.conclusion,
+      ...(run.html_url ? { htmlUrl: run.html_url } : {}),
+    })),
+  };
+}

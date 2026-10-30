@@ -30,6 +30,7 @@ import { useWorkbenchStore, type ChatMode } from './workbenchStore'
 
 const PERSIST_DEBOUNCE_MS = 500
 const TITLE_SUMMARIZE_DEBOUNCE_MS = 1500
+/** Legacy keys — overlays must not auto-restore; clear on boot / project open. */
 const CANVAS_OVERLAY_KEY = 'projectos_canvas_overlay'
 const SESSION_GRAPH_OPEN_KEY = 'projectos_session_graph_open'
 
@@ -45,37 +46,22 @@ export type CanvasOverlay =
 /** Suppresses auto-open while a run id is not known yet (Ask / Plan still starting). */
 const AGENT_FLOW_DISMISS_IDLE = '__agent_flow_idle__'
 
-function readCanvasOverlay(): CanvasOverlay {
-  if (typeof localStorage === 'undefined') return 'none'
-  try {
-    const raw = localStorage.getItem(CANVAS_OVERLAY_KEY)
-    if (
-      raw === 'session' ||
-      raw === 'loop' ||
-      raw === 'spatial' ||
-      raw === 'agent-flow' ||
-      raw === 'github' ||
-      raw === 'marketplace' ||
-      raw === 'none'
-    ) {
-      return raw
-    }
-    // Migrate legacy session-graph-only preference.
-    return localStorage.getItem(SESSION_GRAPH_OPEN_KEY) === 'true' ? 'session' : 'none'
-  } catch {
-    return 'none'
-  }
-}
-
-function writeCanvasOverlay(overlay: CanvasOverlay): void {
+/**
+ * Center GraphOverlayFrame panels are session-ephemeral: C4 is the default
+ * center surface until the user (or an in-session run) opens an overlay.
+ * Never restore a previous overlay from localStorage on boot / project open.
+ */
+function clearPersistedCanvasOverlay(): void {
   if (typeof localStorage === 'undefined') return
   try {
-    localStorage.setItem(CANVAS_OVERLAY_KEY, overlay)
-    localStorage.setItem(SESSION_GRAPH_OPEN_KEY, overlay === 'session' ? 'true' : 'false')
+    localStorage.removeItem(CANVAS_OVERLAY_KEY)
+    localStorage.removeItem(SESSION_GRAPH_OPEN_KEY)
   } catch {
     /* ignore quota and private-mode failures */
   }
 }
+
+clearPersistedCanvasOverlay()
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 let titleSummarizeTimer: ReturnType<typeof setTimeout> | null = null
@@ -244,8 +230,10 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
     verificationResult: null,
     refineLoading: false,
   })
+  // Restore run evidence into the store, but do not open the Agent Flow overlay.
+  // Project open / session hydrate must land on Function Map (C4); overlays open
+  // only via explicit user action or a newly started in-session run.
   if (hydrated.activeRunId) {
-    useChatSessionStore.getState().presentAgentFlow()
     void restoreRunFlow(hydrated.activeRunId)
   }
 }
@@ -267,7 +255,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   pinnedIds: [],
   activeSessionId: null,
   historyOpen: false,
-  ...overlayState(readCanvasOverlay()),
+  ...overlayState('none'),
   agentFlowDismissedRunId: null,
   inheritedDigest: null,
   loading: false,
@@ -281,6 +269,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       clearTimeout(titleSummarizeTimer)
       titleSummarizeTimer = null
     }
+    clearPersistedCanvasOverlay()
     set({
       heads: [],
       pinnedIds: [],
@@ -288,6 +277,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       historyOpen: false,
       inheritedDigest: null,
       loading: false,
+      ...overlayState('none'),
     })
   },
 
@@ -296,71 +286,47 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   toggleHistory: () => set((state) => ({ historyOpen: !state.historyOpen })),
 
   setCanvasOverlay: (overlay) => {
-    writeCanvasOverlay(overlay)
     set(overlayState(overlay))
   },
 
   setSessionGraphOpen: (open) => {
-    const overlay: CanvasOverlay = open ? 'session' : 'none'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    set(overlayState(open ? 'session' : 'none'))
   },
 
   toggleSessionGraph: () => {
-    const overlay: CanvasOverlay = get().canvasOverlay === 'session' ? 'none' : 'session'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    set(overlayState(get().canvasOverlay === 'session' ? 'none' : 'session'))
   },
 
   setLoopGraphOpen: (open) => {
-    const overlay: CanvasOverlay = open ? 'loop' : 'none'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    set(overlayState(open ? 'loop' : 'none'))
   },
 
   toggleLoopGraph: () => {
-    const overlay: CanvasOverlay = get().canvasOverlay === 'loop' ? 'none' : 'loop'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    set(overlayState(get().canvasOverlay === 'loop' ? 'none' : 'loop'))
   },
 
   setGithubGraphOpen: (open) => {
-    const overlay: CanvasOverlay = open ? 'github' : 'none'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    set(overlayState(open ? 'github' : 'none'))
   },
 
   toggleGithubGraph: () => {
-    const overlay: CanvasOverlay =
-      get().canvasOverlay === 'github' ? 'none' : 'github'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    set(overlayState(get().canvasOverlay === 'github' ? 'none' : 'github'))
   },
 
   setMarketplaceOpen: (open) => {
-    const overlay: CanvasOverlay = open ? 'marketplace' : 'none'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    set(overlayState(open ? 'marketplace' : 'none'))
   },
 
   toggleMarketplace: () => {
-    const overlay: CanvasOverlay =
-      get().canvasOverlay === 'marketplace' ? 'none' : 'marketplace'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    set(overlayState(get().canvasOverlay === 'marketplace' ? 'none' : 'marketplace'))
   },
 
   setSpatialCaptureOpen: (open) => {
-    const overlay: CanvasOverlay = open ? 'spatial' : 'none'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    set(overlayState(open ? 'spatial' : 'none'))
   },
 
   toggleSpatialCapture: () => {
-    const overlay: CanvasOverlay =
-      get().canvasOverlay === 'spatial' ? 'none' : 'spatial'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    set(overlayState(get().canvasOverlay === 'spatial' ? 'none' : 'spatial'))
   },
 
   setAgentFlowOpen: (open) => {
@@ -374,7 +340,6 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   presentAgentFlow: () => {
-    writeCanvasOverlay('agent-flow')
     set({ ...overlayState('agent-flow'), agentFlowDismissedRunId: null })
   },
 
@@ -382,7 +347,6 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     const dismissed = get().agentFlowDismissedRunId
     if (runId && dismissed === runId) return
     if (!runId && dismissed === AGENT_FLOW_DISMISS_IDLE) return
-    writeCanvasOverlay('agent-flow')
     set(overlayState('agent-flow'))
   },
 
@@ -391,7 +355,6 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     const workbench = useWorkbenchStore.getState()
     const busy = workbench.flowStatus === 'running' || workbench.refineLoading
     const token = busy ? (workbench.activeRunId ?? AGENT_FLOW_DISMISS_IDLE) : null
-    writeCanvasOverlay('none')
     set({
       ...overlayState('none'),
       ...(token ? { agentFlowDismissedRunId: token } : {}),
@@ -402,7 +365,9 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     const { client, project, locale } = useWorkbenchStore.getState()
     if (!client || !project) return
 
-    set({ loading: true })
+    // Project open always lands on C4; overlays only after explicit user/run open.
+    clearPersistedCanvasOverlay()
+    set({ loading: true, ...overlayState('none') })
     try {
       let index = await client.getChatSessionIndex(project.projectId)
       let heads = index.heads
@@ -459,9 +424,14 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         const record = await client.getChatSession(project.projectId, activeId)
         if (record) applySessionToWorkbench(record)
       }
+
+      // Hard guarantee: opening a project never leaves a center overlay up.
+      clearPersistedCanvasOverlay()
+      set({ ...overlayState('none') })
     } catch (error) {
       console.error('[chatSessionStore] failed to load sessions', error)
-      set({ loading: false })
+      clearPersistedCanvasOverlay()
+      set({ loading: false, ...overlayState('none') })
     }
   },
 

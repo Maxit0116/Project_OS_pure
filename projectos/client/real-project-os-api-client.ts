@@ -135,6 +135,47 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.listWorkspaceGitBranches(projectId);
   }
 
+  listWorkspaceGitCommits(
+    projectId: string,
+    input: { limit?: number; tips?: string[] } = {},
+  ) {
+    return this.transport.listWorkspaceGitCommits(projectId, input);
+  }
+
+  getWorkspaceGitCommit(
+    projectId: string,
+    sha: string,
+    input: { includePatch?: boolean } = {},
+  ) {
+    return this.transport.getWorkspaceGitCommit(projectId, sha, input);
+  }
+
+  getGithubGraphStore(projectId: string) {
+    return this.transport.getGithubGraphStore(projectId);
+  }
+
+  upsertGithubGraphFeature(
+    projectId: string,
+    feature: import("../contracts/github-domain.js").GithubFeature,
+  ) {
+    return this.transport.upsertGithubGraphFeature(projectId, feature);
+  }
+
+  deleteGithubGraphFeature(projectId: string, featureId: string) {
+    return this.transport.deleteGithubGraphFeature(projectId, featureId);
+  }
+
+  upsertGithubGraphRelation(
+    projectId: string,
+    relation: import("../contracts/github-domain.js").GithubRelation,
+  ) {
+    return this.transport.upsertGithubGraphRelation(projectId, relation);
+  }
+
+  removeGithubGraphRelation(projectId: string, relationId: string) {
+    return this.transport.removeGithubGraphRelation(projectId, relationId);
+  }
+
   checkoutWorkspaceBranch(projectId: string, branch: string) {
     return this.transport.checkoutWorkspaceBranch(projectId, branch);
   }
@@ -190,6 +231,21 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.fetchWorkspaceGit(projectId);
   }
 
+  pushWorkspaceBranch(projectId: string, branch: string) {
+    return this.transport.pushWorkspaceBranch(projectId, branch);
+  }
+
+  pullWorkspaceBranch(projectId: string, branch: string) {
+    return this.transport.pullWorkspaceBranch(projectId, branch);
+  }
+
+  revertWorkspaceCommit(
+    projectId: string,
+    input: { sha: string; push?: boolean },
+  ) {
+    return this.transport.revertWorkspaceCommit(projectId, input);
+  }
+
   listWorkspacePullRequests(projectId: string) {
     return this.transport.listWorkspacePullRequests(projectId);
   }
@@ -199,6 +255,35 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     input: { title: string; head?: string; base?: string; body?: string },
   ) {
     return this.transport.createWorkspacePullRequest(projectId, input);
+  }
+
+  mergeWorkspacePullRequest(
+    projectId: string,
+    input: {
+      number: number;
+      mergeMethod?: "merge" | "squash" | "rebase";
+    },
+  ) {
+    return this.transport.mergeWorkspacePullRequest(projectId, input);
+  }
+
+  closeWorkspacePullRequest(projectId: string, input: { number: number }) {
+    return this.transport.closeWorkspacePullRequest(projectId, input);
+  }
+
+  listWorkspaceIssues(projectId: string) {
+    return this.transport.listWorkspaceIssues(projectId);
+  }
+
+  createWorkspaceIssue(
+    projectId: string,
+    input: { title: string; body?: string },
+  ) {
+    return this.transport.createWorkspaceIssue(projectId, input);
+  }
+
+  listWorkspaceCommitCheckRuns(projectId: string, sha: string) {
+    return this.transport.listWorkspaceCommitCheckRuns(projectId, sha);
   }
 
   getGitHubAuthStatus() {

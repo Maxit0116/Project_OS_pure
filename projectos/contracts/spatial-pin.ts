@@ -346,6 +346,8 @@ export const PinComposerHubSchema = z
     /** Primary change-scope list (folders + C4 nodes). */
     scopes: z.array(PinComposerHubScopeSchema).max(40).default([]),
     skillIds: z.array(z.string().min(1)).max(40).default([]),
+    /** MCP servers selected from the project library for this compose. */
+    mcpServerIds: z.array(z.string().min(1)).max(40).default([]),
     references: z.array(PinComposerHubReferenceSchema).max(40).default([]),
     /** Organize Links / Repo references into named folders. */
     referenceFolders: z
@@ -753,6 +755,7 @@ export function emptyPinComposerHub(): PinComposerHub {
     folders: [],
     scopes: [],
     skillIds: [],
+    mcpServerIds: [],
     references: [],
     referenceFolders: [],
     subagents: [],
@@ -921,6 +924,9 @@ export function formatPinComposerHubLines(hub: PinComposerHub): string[] {
   }
   if (normalized.skillIds.length > 0) {
     lines.push(`hub.skills=${normalized.skillIds.join(", ")}`);
+  }
+  if ((normalized.mcpServerIds ?? []).length > 0) {
+    lines.push(`hub.mcp=${normalized.mcpServerIds.join(", ")}`);
   }
   if (hub.references.length > 0) {
     lines.push(

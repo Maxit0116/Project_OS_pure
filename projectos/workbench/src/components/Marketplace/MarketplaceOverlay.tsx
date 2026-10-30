@@ -16,6 +16,10 @@ import Button from '../ui/Button'
 import TextInput from '../ui/TextInput'
 import MarketplaceCard, { type MarketplaceCardAction } from './MarketplaceCard'
 import MarketplaceDetail from './MarketplaceDetail'
+import {
+  buildMcpDetailModel,
+  buildSkillDetailModel,
+} from './marketplaceDetailModel'
 import styles from './MarketplaceOverlay.module.css'
 
 type MarketTab = 'mcp' | 'skills'
@@ -23,19 +27,6 @@ type MarketTab = 'mcp' | 'skills'
 type DetailSelection =
   | { kind: 'mcp'; listing: McpCatalogListing }
   | { kind: 'skills'; listing: SkillCatalogListing }
-
-function mcpPreview(listing: McpCatalogListing): string {
-  if (listing.transport === 'stdio') {
-    const args = listing.args?.length ? ` ${listing.args.join(' ')}` : ''
-    return `${listing.command ?? ''}${args}`.trim()
-  }
-  return listing.url ?? ''
-}
-
-function skillPreview(listing: SkillCatalogListing): string {
-  const body = listing.skillMarkdown.trim()
-  return body.length > 400 ? `${body.slice(0, 400)}…` : body
-}
 
 function skillInstallId(listingId: string): string {
   return listingId
@@ -201,6 +192,19 @@ export default function MarketplaceOverlay() {
     uninstallLabel: ts('chat.marketplace.uninstall'),
   }
 
+  const detailSectionLabels = {
+    overviewTitle: ts('chat.marketplace.detailOverview'),
+    factsTitle: ts('chat.marketplace.detailFacts'),
+    setupTitle: ts('chat.marketplace.detailSetup'),
+    credentialsTitle: ts('chat.marketplace.detailCredentials'),
+    envTitle: ts('chat.marketplace.detailEnv'),
+    headersTitle: ts('chat.marketplace.detailHeaders'),
+    toolsTitle: ts('chat.marketplace.detailTools'),
+    filesTitle: ts('chat.marketplace.detailFiles'),
+    frontmatterTitle: ts('chat.marketplace.detailFrontmatter'),
+    riskTitle: ts('chat.marketplace.detailRisk'),
+  }
+
   const renderMcpGrid = (listings: McpCatalogListing[]) => (
     <div className={styles.grid}>
       {listings.map((listing) => {
@@ -261,11 +265,29 @@ export default function MarketplaceOverlay() {
       const listing = detail.listing
       const installed = installedMcpListingIds.has(listing.id)
       const community = listing.trustTier === 'community'
+      const model = buildMcpDetailModel(listing, {
+        listingId: ts('chat.marketplace.detailListingId'),
+        version: ts('chat.marketplace.detailVersion'),
+        trust: ts('chat.marketplace.detailTrust'),
+        transport: ts('chat.marketplace.detailTransport'),
+        authRequired: ts('chat.marketplace.detailAuthRequired'),
+        yes: ts('chat.marketplace.detailYes'),
+        no: ts('chat.marketplace.detailNo'),
+        curated: ts('chat.marketplace.curated'),
+        community: ts('chat.marketplace.community'),
+        installConfig: ts('chat.marketplace.detailInstallConfig'),
+        documentation: ts('chat.marketplace.detailDocumentation'),
+        cwd: ts('chat.marketplace.detailCwd'),
+        gettingStartedDisabled: ts('chat.marketplace.detailMcpStepDisabled'),
+        gettingStartedPermissions: ts('chat.marketplace.detailMcpStepPermissions'),
+        gettingStartedAuth: ts('chat.marketplace.detailMcpStepAuth'),
+        communityRisk: ts('chat.marketplace.mcpCommunityRisk'),
+        authTokenHint: ts('chat.marketplace.detailAuthTokenHint'),
+      })
       return (
         <MarketplaceDetail
           id={listing.id}
           name={listing.name}
-          description={listing.description}
           homepage={listing.homepage}
           iconUrl={listing.iconUrl}
           version={listing.version}
@@ -274,11 +296,10 @@ export default function MarketplaceOverlay() {
           busy={busyId === listing.id}
           disabled={loading}
           {...cardLabels}
+          {...detailSectionLabels}
           backLabel={ts('chat.marketplace.back')}
           homepageLabel={ts('chat.marketplace.openHomepage')}
-          metaLine={`${listing.transport}`}
-          riskNote={community ? ts('chat.marketplace.mcpCommunityRisk') : undefined}
-          preview={mcpPreview(listing)}
+          model={model}
           onBack={() => setDetail(null)}
           onAction={(action) => {
             void runMcpAction(listing, action)
@@ -333,11 +354,24 @@ export default function MarketplaceOverlay() {
     const listing = detail.listing
     const installed = installedSkillIds.has(skillInstallId(listing.id))
     const community = listing.trustTier === 'community'
+    const model = buildSkillDetailModel(listing, {
+      listingId: ts('chat.marketplace.detailListingId'),
+      installId: ts('chat.marketplace.detailInstallId'),
+      version: ts('chat.marketplace.detailVersion'),
+      trust: ts('chat.marketplace.detailTrust'),
+      curated: ts('chat.marketplace.curated'),
+      community: ts('chat.marketplace.community'),
+      installPath: ts('chat.marketplace.detailInstallPath'),
+      installConfig: ts('chat.marketplace.detailInstallConfig'),
+      documentation: ts('chat.marketplace.detailDocumentation'),
+      gettingStartedPath: ts('chat.marketplace.detailSkillStepPath'),
+      gettingStartedInvoke: ts('chat.marketplace.detailSkillStepInvoke'),
+      communityRisk: ts('chat.marketplace.skillCommunityRisk'),
+    })
     return (
       <MarketplaceDetail
         id={listing.id}
         name={listing.name}
-        description={listing.description}
         homepage={listing.homepage}
         iconUrl={listing.iconUrl}
         version={listing.version}
@@ -346,10 +380,10 @@ export default function MarketplaceOverlay() {
         busy={busyId === listing.id}
         disabled={loading}
         {...cardLabels}
+        {...detailSectionLabels}
         backLabel={ts('chat.marketplace.back')}
         homepageLabel={ts('chat.marketplace.openHomepage')}
-        riskNote={community ? ts('chat.marketplace.skillCommunityRisk') : undefined}
-        preview={skillPreview(listing)}
+        model={model}
         onBack={() => setDetail(null)}
         onAction={(action) => {
           void runSkillAction(listing, action)

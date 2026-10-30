@@ -50,6 +50,9 @@ export function buildComposeSubagentQuestion(input: {
   if (hub.skillIds.length > 0) {
     contextLines.push(`Skills: ${hub.skillIds.join(", ")}`);
   }
+  if ((hub.mcpServerIds ?? []).length > 0) {
+    contextLines.push(`MCP servers: ${(hub.mcpServerIds ?? []).join(", ")}`);
+  }
   if (hub.researchEnabled) {
     contextLines.push("Research mode is enabled — prefer evidence from the repo.");
   }

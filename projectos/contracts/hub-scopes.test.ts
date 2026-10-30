@@ -99,4 +99,14 @@ describe("hub scopes", () => {
       true,
     );
   });
+
+  it("embeds hub.mcp selections in prompt lines", () => {
+    const lines = formatPinComposerHubLines({
+      ...emptyPinComposerHub(),
+      mcpServerIds: ["mcp_playwright_ab12"],
+    });
+    expect(lines.some((line) => line.includes("hub.mcp=mcp_playwright_ab12"))).toBe(
+      true,
+    );
+  });
 });

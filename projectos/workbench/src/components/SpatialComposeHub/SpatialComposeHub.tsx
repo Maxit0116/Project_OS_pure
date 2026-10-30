@@ -49,6 +49,7 @@ import type { FunctionalEdge, FunctionalNode } from '@contracts/index'
 import type {
   ComposeHubDataSource,
   HubMcpServerOption,
+  HubSkillOption,
 } from './hubActions'
 import {
   attachPointsForSatellite,
@@ -90,7 +91,7 @@ export interface SpatialComposeHubProps {
   panelProps?: HTMLAttributes<HTMLDivElement>
 }
 
-type PickerKind = 'repo' | 'folders' | 'skills' | null
+type PickerKind = 'repo' | 'folders' | 'skills' | 'mcp' | null
 type ScopeEntryMode = 'folders' | 'map'
 
 function createSubagentId(): string {
@@ -229,6 +230,7 @@ export default function SpatialComposeHub({
   } | null>(null)
   const [mcpServers, setMcpServers] = useState<HubMcpServerOption[]>([])
   const [mcpLoading, setMcpLoading] = useState(false)
+  const [skillLibrary, setSkillLibrary] = useState<HubSkillOption[]>([])
 
   const hubScopes = useMemo(
     () => normalizeHubScopes(hub).scopes,
@@ -370,18 +372,61 @@ export default function SpatialComposeHub({
     setMapPickerOpen(false)
   }, [])
 
+  async function refreshSkillLibrary() {
+    if (!dataSource?.listSkills) {
+      setSkillLibrary([])
+      return
+    }
+    try {
+      setSkillLibrary(await dataSource.listSkills())
+    } catch {
+      setSkillLibrary([])
+    }
+  }
+
   async function openSkillsPicker() {
     if (!dataSource?.listSkills) return
     setPicker('skills')
     setPickerLoading(true)
     try {
       const skills = await dataSource.listSkills()
+      setSkillLibrary(skills)
       setPickerItems(
         skills.map((skill) => ({
           id: skill.id,
           label: skill.name || skill.id,
           description: skill.description,
           selected: hub.skillIds.includes(skill.id),
+        })),
+      )
+    } catch {
+      setPickerItems([])
+    } finally {
+      setPickerLoading(false)
+    }
+  }
+
+  async function openMcpPicker() {
+    if (!dataSource?.listMcpServers) return
+    setPicker('mcp')
+    setPickerLoading(true)
+    try {
+      const servers = await dataSource.listMcpServers()
+      setMcpServers(servers)
+      setPickerItems(
+        servers.map((server) => ({
+          id: server.id,
+          label: server.name || server.id,
+          description: [
+            server.transport,
+            server.enabled ? strings.mcpEnabled : strings.mcpDisabled,
+            server.toolCount !== undefined
+              ? `${server.toolCount} tools`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          selected: hub.mcpServerIds.includes(server.id),
         })),
       )
     } catch {
@@ -485,18 +530,19 @@ export default function SpatialComposeHub({
     }
   }
 
-  async function toggleMcpServer(server: HubMcpServerOption) {
-    if (!dataSource?.setMcpServerEnabled) return
-    const next = await dataSource.setMcpServerEnabled(
-      server.id,
-      !server.enabled,
-    )
-    if (next) {
-      setMcpServers((prev) =>
-        prev.map((item) => (item.id === next.id ? next : item)),
-      )
-    } else {
-      void refreshMcpServers()
+  async function loadMcpServerIntoHub(serverId: string, selected: boolean) {
+    if (selected && dataSource?.setMcpServerEnabled) {
+      const server = mcpServers.find((item) => item.id === serverId)
+      if (server && !server.enabled) {
+        const next = await dataSource.setMcpServerEnabled(serverId, true)
+        if (next) {
+          setMcpServers((prev) =>
+            prev.map((item) => (item.id === next.id ? next : item)),
+          )
+        } else {
+          void refreshMcpServers()
+        }
+      }
     }
   }
 
@@ -631,8 +677,9 @@ export default function SpatialComposeHub({
   useEffect(() => {
     if (!expanded) return
     void refreshMcpServers()
+    void refreshSkillLibrary()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded, dataSource?.listMcpServers])
+  }, [expanded, dataSource?.listMcpServers, dataSource?.listSkills])
 
   useEffect(() => {
     const normalized = normalizeHubScopes(hub)
@@ -781,6 +828,20 @@ export default function SpatialComposeHub({
           item.id === id ? { ...item, selected: !item.selected } : item,
         ),
       )
+      return
+    }
+    if (picker === 'mcp') {
+      const selecting = !hub.mcpServerIds.includes(id)
+      const next = selecting
+        ? [...hub.mcpServerIds, id]
+        : hub.mcpServerIds.filter((item) => item !== id)
+      patch({ mcpServerIds: next })
+      setPickerItems((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, selected: selecting } : item,
+        ),
+      )
+      await loadMcpServerIntoHub(id, selecting)
       return
     }
     if (picker === 'folders') {
@@ -1122,53 +1183,67 @@ export default function SpatialComposeHub({
                 beginDrag(event, rectById.get('mcp')!)
               }
               actions={
-                dataSource?.openMcpSettings ? (
-                  <button
-                    type="button"
-                    className={styles.iconBtn}
-                    aria-label={strings.mcpOpenSettings}
-                    title={strings.mcpOpenSettings}
-                    onClick={() => dataSource.openMcpSettings?.()}
-                  >
-                    <Plus size={13} strokeWidth={2} aria-hidden />
-                  </button>
-                ) : null
+                <button
+                  type="button"
+                  className={styles.iconBtn}
+                  aria-label={strings.mcpAdd}
+                  title={strings.mcpAdd}
+                  onClick={() => void openMcpPicker()}
+                >
+                  <Plus size={13} strokeWidth={2} aria-hidden />
+                </button>
               }
             >
               {mcpLoading ? (
                 <span className={styles.emptyHint}>…</span>
-              ) : mcpServers.length === 0 ? (
+              ) : hub.mcpServerIds.length === 0 ? (
                 <button
                   type="button"
                   className={styles.emptyHint}
-                  onClick={() => dataSource?.openMcpSettings?.()}
+                  onClick={() => {
+                    if (mcpServers.length === 0 && dataSource?.openMarketplace) {
+                      dataSource.openMarketplace('mcp')
+                      return
+                    }
+                    void openMcpPicker()
+                  }}
                 >
-                  {strings.mcpEmpty}
-                  {dataSource?.openMcpSettings
-                    ? ` · ${strings.mcpOpenSettings}`
-                    : ''}
+                  {mcpServers.length === 0
+                    ? strings.mcpLibraryEmpty
+                    : strings.mcpEmpty}
                 </button>
               ) : (
                 <div className={styles.rowList}>
-                  {mcpServers.slice(0, 4).map((server) => (
-                    <button
-                      key={server.id}
-                      type="button"
-                      className={`${styles.mcpRow}${server.enabled ? '' : ` ${styles.mcpRowOff}`}`}
-                      title={strings.mcpPolicyHint}
-                      onClick={() => void toggleMcpServer(server)}
-                    >
-                      <span className={styles.rowIcon}>
-                        <Plug size={12} strokeWidth={2} aria-hidden />
-                      </span>
-                      <span className={styles.rowLabel}>{server.name}</span>
-                      <span className={styles.mcpStatus}>
-                        {server.enabled
-                          ? strings.mcpEnabled
-                          : strings.mcpDisabled}
-                      </span>
-                    </button>
-                  ))}
+                  {hub.mcpServerIds.slice(0, 4).map((serverId) => {
+                    const server = mcpServers.find((item) => item.id === serverId)
+                    return (
+                      <button
+                        key={serverId}
+                        type="button"
+                        className={`${styles.mcpRow}${server && !server.enabled ? ` ${styles.mcpRowOff}` : ''}`}
+                        title={strings.mcpPolicyHint}
+                        onClick={() =>
+                          patch({
+                            mcpServerIds: hub.mcpServerIds.filter(
+                              (id) => id !== serverId,
+                            ),
+                          })
+                        }
+                      >
+                        <span className={styles.rowIcon}>
+                          <Plug size={12} strokeWidth={2} aria-hidden />
+                        </span>
+                        <span className={styles.rowLabel}>
+                          {server?.name ?? serverId}
+                        </span>
+                        <span className={styles.mcpStatus}>
+                          {server?.enabled
+                            ? strings.mcpEnabled
+                            : strings.mcpDisabled}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </SatelliteCard>
@@ -1203,32 +1278,46 @@ export default function SpatialComposeHub({
                 <button
                   type="button"
                   className={styles.emptyHint}
-                  onClick={() => void openSkillsPicker()}
+                  onClick={() => {
+                    if (
+                      skillLibrary.length === 0 &&
+                      dataSource?.openMarketplace
+                    ) {
+                      dataSource.openMarketplace('skills')
+                      return
+                    }
+                    void openSkillsPicker()
+                  }}
                 >
-                  {strings.skillsEmpty}
+                  {skillLibrary.length === 0
+                    ? strings.skillsLibraryEmpty
+                    : strings.skillsEmpty}
                 </button>
               ) : (
                 <div className={styles.rowList}>
-                  {hub.skillIds.slice(0, 3).map((skillId) => (
-                    <button
-                      key={skillId}
-                      type="button"
-                      className={`${styles.rowItem}${slashSkills.has(skillId) ? ` ${styles.rowActive}` : ''}`}
-                      title={`Remove ${skillId}`}
-                      onClick={() =>
-                        patch({
-                          skillIds: hub.skillIds.filter((id) => id !== skillId),
-                        })
-                      }
-                    >
-                      <span className={styles.rowIcon}>
-                        <Sparkles size={12} strokeWidth={2} aria-hidden />
-                      </span>
-                      <span className={styles.rowLabel}>
-                        {skillId.replace(/-/g, ' ')} skill
-                      </span>
-                    </button>
-                  ))}
+                  {hub.skillIds.slice(0, 3).map((skillId) => {
+                    const skill = skillLibrary.find((item) => item.id === skillId)
+                    return (
+                      <button
+                        key={skillId}
+                        type="button"
+                        className={`${styles.rowItem}${slashSkills.has(skillId) ? ` ${styles.rowActive}` : ''}`}
+                        title={`Remove ${skill?.name ?? skillId}`}
+                        onClick={() =>
+                          patch({
+                            skillIds: hub.skillIds.filter((id) => id !== skillId),
+                          })
+                        }
+                      >
+                        <span className={styles.rowIcon}>
+                          <Sparkles size={12} strokeWidth={2} aria-hidden />
+                        </span>
+                        <span className={styles.rowLabel}>
+                          {skill?.name ?? skillId}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </SatelliteCard>
@@ -1534,12 +1623,21 @@ export default function SpatialComposeHub({
               title={
                 picker === 'skills'
                   ? strings.skills
-                  : picker === 'folders'
-                    ? strings.scopeModeFolders
-                    : strings.repo
+                  : picker === 'mcp'
+                    ? strings.mcp
+                    : picker === 'folders'
+                      ? strings.scopeModeFolders
+                      : strings.repo
               }
               items={pickerItems}
               loading={pickerLoading}
+              emptyLabel={
+                picker === 'skills'
+                  ? strings.skillsLibraryEmpty
+                  : picker === 'mcp'
+                    ? strings.mcpLibraryEmpty
+                    : undefined
+              }
               anchorRect={pickerAnchor}
               obstacleRects={pickerObstacles}
               preferredSide={pickerPreferredSide}
@@ -1611,6 +1709,7 @@ export function ensureHub(value: PinComposerHub | undefined): PinComposerHub {
     folders: value.folders ?? defaults.folders,
     scopes: value.scopes ?? defaults.scopes,
     skillIds: value.skillIds ?? defaults.skillIds,
+    mcpServerIds: value.mcpServerIds ?? defaults.mcpServerIds,
     references: value.references ?? defaults.references,
     referenceFolders: value.referenceFolders ?? defaults.referenceFolders,
     subagents: value.subagents ?? defaults.subagents,

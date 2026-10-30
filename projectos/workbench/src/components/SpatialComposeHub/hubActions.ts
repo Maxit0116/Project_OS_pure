@@ -87,6 +87,8 @@ export interface ComposeHubDataSource {
   ) => Promise<HubMcpServerOption | null>
   /** Open Settings → MCP (Capture/Workbench). Overlay may omit. */
   openMcpSettings?: () => void
+  /** Open Marketplace overlay to install into the project skill/MCP library. */
+  openMarketplace?: (tab?: 'mcp' | 'skills') => void
   /** Project function graph for Scope → Map picker. */
   getProjectGraph?: () => Promise<HubProjectGraphSlice | null>
   getGitStatus?: () => Promise<HubGitStatus>

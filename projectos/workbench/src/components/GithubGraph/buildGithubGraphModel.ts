@@ -118,6 +118,8 @@ export function ensureBranchPathParent(
         name: segment,
         parentId,
         current: false,
+        remote: false,
+        pending: false,
       })
     }
     parentId = id
@@ -142,6 +144,8 @@ export function buildGithubGraphModel(
       name: defaultBranch,
       parentId: null,
       current: input.currentBranch === defaultBranch,
+      remote: false,
+      pending: false,
     },
   ]
 
@@ -210,6 +214,8 @@ export function buildGithubGraphModel(
         name: pr.headRef,
         parentId,
         current: input.currentBranch === pr.headRef,
+        remote: false,
+        pending: false,
       })
     }
     const prId = `pr:${pr.number}`
@@ -219,6 +225,8 @@ export function buildGithubGraphModel(
       name: `#${pr.number} ${pr.title}`,
       parentId: headId,
       current: false,
+      remote: false,
+      pending: false,
       prNumber: pr.number,
       prUrl: pr.url,
     })
@@ -244,6 +252,8 @@ export function buildGithubGraphModel(
         name: worktree.branch,
         parentId: pathParent,
         current: false,
+        remote: false,
+        pending: false,
       })
     }
     nodes.push({
@@ -252,6 +262,8 @@ export function buildGithubGraphModel(
       name: worktree.id,
       parentId: seen.has(parentId) ? parentId : defaultId,
       current: false,
+      remote: false,
+      pending: false,
       worktreeId: worktree.id,
     })
   }

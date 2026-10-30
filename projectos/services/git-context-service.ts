@@ -949,6 +949,366 @@ export function rollbackGitBranch(
   };
 }
 
+/** Fast-forward pull of a branch from origin (no merge commit). */
+export function pullGitBranch(
+  workspaceRoot: string,
+  branch: string,
+  options: GitAuthOptions = {},
+): GitMutationResult {
+  const name = branch.trim();
+  if (!name) return { ok: false, message: "Branch name is required." };
+  const status = readGitRepositoryStatus(workspaceRoot);
+  if (status.error && !status.branch) {
+    return { ok: false, message: status.error };
+  }
+  if (status.dirty) {
+    return {
+      ok: false,
+      message:
+        "Working tree is dirty. Commit or stash before pulling.",
+    };
+  }
+  const ensured = ensureLocalBranch(workspaceRoot, name, options);
+  if (!ensured.ok) return ensured;
+  if (status.branch !== name) {
+    const checked = tryGit(workspaceRoot, ["checkout", name]);
+    if (!checked.ok) return { ok: false, message: checked.message };
+  }
+  const fetched = fetchGitRemote(workspaceRoot, options);
+  if (!fetched.ok) return fetched;
+  const pulled = tryGit(
+    workspaceRoot,
+    ["pull", "--ff-only", "origin", name],
+    { accessToken: options.accessToken },
+  );
+  if (!pulled.ok) {
+    return {
+      ok: false,
+      branch: name,
+      message: pulled.message,
+    };
+  }
+  return {
+    ok: true,
+    branch: name,
+    message: `Pulled ${name} from origin (ff-only).`,
+  };
+}
+
+/**
+ * Safe history rewrite alternative: create a new revert commit and push.
+ * Does not force-push.
+ */
+export function revertGitCommit(
+  workspaceRoot: string,
+  sha: string,
+  options: { push?: boolean; noEdit?: boolean } & GitAuthOptions = {},
+): GitMutationResult {
+  const name = sha.trim();
+  if (!name) return { ok: false, message: "Commit sha is required." };
+  const status = readGitRepositoryStatus(workspaceRoot);
+  if (status.error && !status.branch) {
+    return { ok: false, message: status.error };
+  }
+  if (status.dirty) {
+    return {
+      ok: false,
+      message:
+        "Working tree is dirty. Commit or stash before reverting.",
+    };
+  }
+  if (!status.branch) {
+    return { ok: false, message: "Detached HEAD — checkout a branch first." };
+  }
+  const args = ["revert", "--no-edit", name];
+  const reverted = tryGit(workspaceRoot, args);
+  if (!reverted.ok) {
+    tryGit(workspaceRoot, ["revert", "--abort"]);
+    return {
+      ok: false,
+      branch: status.branch,
+      message: `Revert failed (often conflicts): ${reverted.message}`,
+    };
+  }
+  if (options.push === false) {
+    return {
+      ok: true,
+      branch: status.branch,
+      message: `Reverted ${name.slice(0, 12)} on ${status.branch}.`,
+    };
+  }
+  const pushed = pushGitBranch(workspaceRoot, status.branch, {
+    accessToken: options.accessToken,
+  });
+  if (!pushed.ok) {
+    return {
+      ok: false,
+      branch: status.branch,
+      message: `Reverted locally, but push failed: ${pushed.message}`,
+    };
+  }
+  return {
+    ok: true,
+    branch: status.branch,
+    message: `Reverted ${name.slice(0, 12)} and pushed ${status.branch}.`,
+  };
+}
+
+/** Default tip-first window — matches contracts GITHUB_HISTORY_COMMIT_CAP. */
+export const DEFAULT_GIT_COMMIT_LIST_LIMIT = 200;
+
+export interface ListedGitCommit {
+  sha: string;
+  parentShas: string[];
+  message: string;
+  authorName?: string;
+  authoredAt?: string;
+}
+
+export interface ListedGitCommitSet {
+  commits: ListedGitCommit[];
+  truncated: boolean;
+  tips: string[];
+}
+
+/**
+ * Tip-first commit ancestry via `git rev-list --parents`.
+ * Parents are authoritative git metadata — never invented.
+ */
+export function listGitCommits(
+  workspaceRoot: string,
+  options: {
+    limit?: number;
+    /** Branch / tip names; default: HEAD. */
+    tips?: string[];
+  } = {},
+): ListedGitCommitSet {
+  const status = readGitRepositoryStatus(workspaceRoot);
+  if (status.error && !status.branch) {
+    return { commits: [], truncated: false, tips: [] };
+  }
+  const limit = Math.max(
+    1,
+    Math.min(5_000, options.limit ?? DEFAULT_GIT_COMMIT_LIST_LIMIT),
+  );
+  const tips =
+    options.tips && options.tips.length > 0
+      ? options.tips.map((tip) => tip.trim()).filter(Boolean)
+      : [status.branch || "HEAD"];
+  // Fetch one extra row to detect truncation.
+  const result = tryGit(workspaceRoot, [
+    "rev-list",
+    `--max-count=${limit + 1}`,
+    "--parents",
+    ...tips,
+  ]);
+  if (!result.ok) {
+    return { commits: [], truncated: false, tips };
+  }
+  const lines = result.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const truncated = lines.length > limit;
+  const shaRows = (truncated ? lines.slice(0, limit) : lines).map((line) => {
+    const parts = line.split(/\s+/u).filter(Boolean);
+    const sha = parts[0] ?? "";
+    const parentShas = parts.slice(1);
+    return { sha, parentShas };
+  });
+
+  const commits: ListedGitCommit[] = [];
+  for (const row of shaRows) {
+    if (!row.sha) continue;
+    const meta = tryGit(workspaceRoot, [
+      "show",
+      "-s",
+      "--format=%an%n%aI%n%B",
+      row.sha,
+    ]);
+    if (!meta.ok) {
+      commits.push({
+        sha: row.sha,
+        parentShas: row.parentShas,
+        message: "(unavailable)",
+      });
+      continue;
+    }
+    const metaLines = meta.stdout.replace(/\n$/u, "").split("\n");
+    const authorName = metaLines[0]?.trim() || undefined;
+    const authoredAt = metaLines[1]?.trim() || undefined;
+    const message = metaLines.slice(2).join("\n").trim() || "(empty)";
+    commits.push({
+      sha: row.sha,
+      parentShas: row.parentShas,
+      message,
+      ...(authorName ? { authorName } : {}),
+      ...(authoredAt ? { authoredAt } : {}),
+    });
+  }
+
+  return { commits, truncated, tips };
+}
+
+export interface GitCommitFileChange {
+  path: string;
+  status: string;
+  additions?: number;
+  deletions?: number;
+  previousPath?: string;
+}
+
+export interface GitCommitDetailResult {
+  ok: boolean;
+  message: string;
+  commit?: ListedGitCommit;
+  files?: GitCommitFileChange[];
+  patch?: string;
+  patchTruncated?: boolean;
+}
+
+const COMMIT_PATCH_MAX_CHARS = 100_000;
+
+/** Resolve one commit with file summary (+ truncated patch). */
+export function getGitCommitShow(
+  workspaceRoot: string,
+  sha: string,
+  options: { includePatch?: boolean; maxPatchChars?: number } = {},
+): GitCommitDetailResult {
+  const name = sha.trim();
+  if (!name) return { ok: false, message: "Commit sha is required." };
+  const status = readGitRepositoryStatus(workspaceRoot);
+  if (status.error && !status.branch) {
+    return { ok: false, message: status.error };
+  }
+
+  const meta = tryGit(workspaceRoot, [
+    "show",
+    "-s",
+    "--format=%H%n%P%n%an%n%aI%n%B",
+    name,
+  ]);
+  if (!meta.ok) return { ok: false, message: meta.message };
+  const metaLines = meta.stdout.replace(/\n$/u, "").split("\n");
+  const fullSha = metaLines[0]?.trim() ?? name;
+  const parentShas = (metaLines[1]?.trim() ?? "")
+    .split(/\s+/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const authorName = metaLines[2]?.trim() || undefined;
+  const authoredAt = metaLines[3]?.trim() || undefined;
+  const message = metaLines.slice(4).join("\n").trim() || "(empty)";
+
+  const files: GitCommitFileChange[] = [];
+  const nameStatus = tryGit(workspaceRoot, [
+    "diff-tree",
+    "--no-commit-id",
+    "--name-status",
+    "-r",
+    "-M",
+    fullSha,
+  ]);
+  const stats = tryGit(workspaceRoot, [
+    "diff-tree",
+    "--no-commit-id",
+    "--numstat",
+    "-r",
+    "-M",
+    fullSha,
+  ]);
+  const statusByPath = new Map<string, { status: string; previousPath?: string }>();
+  if (nameStatus.ok) {
+    for (const line of nameStatus.stdout.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split(/\t/u);
+      const code = parts[0] ?? "M";
+      if (code.startsWith("R") && parts.length >= 3) {
+        statusByPath.set(parts[2]!, {
+          status: "renamed",
+          previousPath: parts[1],
+        });
+      } else if (code.startsWith("C") && parts.length >= 3) {
+        statusByPath.set(parts[2]!, {
+          status: "copied",
+          previousPath: parts[1],
+        });
+      } else if (parts[1]) {
+        const map: Record<string, string> = {
+          A: "added",
+          M: "modified",
+          D: "deleted",
+          T: "typechange",
+        };
+        statusByPath.set(parts[1], {
+          status: map[code[0] ?? ""] ?? code,
+        });
+      }
+    }
+  }
+  if (stats.ok) {
+    for (const line of stats.stdout.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split(/\t/u);
+      if (parts.length < 3) continue;
+      const additions =
+        parts[0] === "-" ? undefined : Number.parseInt(parts[0]!, 10);
+      const deletions =
+        parts[1] === "-" ? undefined : Number.parseInt(parts[1]!, 10);
+      const path = parts[2]!;
+      const mapped = statusByPath.get(path) ?? { status: "modified" };
+      files.push({
+        path,
+        status: mapped.status,
+        ...(Number.isFinite(additions) ? { additions } : {}),
+        ...(Number.isFinite(deletions) ? { deletions } : {}),
+        ...(mapped.previousPath ? { previousPath: mapped.previousPath } : {}),
+      });
+      statusByPath.delete(path);
+    }
+  }
+  for (const [path, mapped] of statusByPath) {
+    files.push({
+      path,
+      status: mapped.status,
+      ...(mapped.previousPath ? { previousPath: mapped.previousPath } : {}),
+    });
+  }
+
+  let patch: string | undefined;
+  let patchTruncated = false;
+  if (options.includePatch !== false) {
+    const maxChars = options.maxPatchChars ?? COMMIT_PATCH_MAX_CHARS;
+    const patchResult = tryGit(workspaceRoot, [
+      "show",
+      "--format=",
+      "--patch",
+      "--no-color",
+      fullSha,
+    ]);
+    if (patchResult.ok) {
+      const truncated = truncateDiff(patchResult.stdout, maxChars);
+      patch = truncated.diff;
+      patchTruncated = truncated.disposition === "truncated";
+    }
+  }
+
+  return {
+    ok: true,
+    message: `Loaded commit ${fullSha.slice(0, 12)}.`,
+    commit: {
+      sha: fullSha,
+      parentShas,
+      message,
+      ...(authorName ? { authorName } : {}),
+      ...(authoredAt ? { authoredAt } : {}),
+    },
+    files,
+    ...(patch !== undefined ? { patch, patchTruncated } : {}),
+  };
+}
+
 export function githubHttpsUrlFromRemote(remoteUrl: string | undefined): string | undefined {
   if (!remoteUrl) return undefined;
   const trimmed = remoteUrl.trim().replace(/\.git$/i, "");
@@ -1195,4 +1555,189 @@ export async function createGithubPullRequest(
     url: urlMatch?.[0],
     message: output || "Pull request created.",
   };
+}
+
+export async function mergeGithubPullRequest(
+  workspaceRoot: string,
+  number: number,
+  options: GithubApiOptions & {
+    mergeMethod?: "merge" | "squash" | "rebase";
+  } = {},
+): Promise<{ ok: boolean; sha?: string; message: string }> {
+  if (!options.accessToken) {
+    return {
+      ok: false,
+      message: "Sign in with GitHub to merge pull requests.",
+    };
+  }
+  const remoteUrl = readGitRemoteUrl(workspaceRoot);
+  const { parseGithubOwnerRepo, mergePullRequestViaRest } = await import(
+    "./github-auth/github-rest.js"
+  );
+  const parsed = parseGithubOwnerRepo(remoteUrl);
+  if (!parsed) {
+    return {
+      ok: false,
+      message: "Could not parse GitHub owner/repo from the git remote.",
+    };
+  }
+  return mergePullRequestViaRest(
+    parsed.owner,
+    parsed.repo,
+    options.accessToken,
+    number,
+    { mergeMethod: options.mergeMethod ?? "squash" },
+    options.fetchImpl,
+  );
+}
+
+export async function closeGithubPullRequest(
+  workspaceRoot: string,
+  number: number,
+  options: GithubApiOptions = {},
+): Promise<{ ok: boolean; url?: string; message: string }> {
+  if (!options.accessToken) {
+    return {
+      ok: false,
+      message: "Sign in with GitHub to close pull requests.",
+    };
+  }
+  const remoteUrl = readGitRemoteUrl(workspaceRoot);
+  const { parseGithubOwnerRepo, updatePullRequestViaRest } = await import(
+    "./github-auth/github-rest.js"
+  );
+  const parsed = parseGithubOwnerRepo(remoteUrl);
+  if (!parsed) {
+    return {
+      ok: false,
+      message: "Could not parse GitHub owner/repo from the git remote.",
+    };
+  }
+  return updatePullRequestViaRest(
+    parsed.owner,
+    parsed.repo,
+    options.accessToken,
+    number,
+    { state: "closed" },
+    options.fetchImpl,
+  );
+}
+
+export async function listGithubIssues(
+  workspaceRoot: string,
+  options: GithubApiOptions = {},
+): Promise<{
+  available: boolean;
+  issues: Array<{
+    number: number;
+    title: string;
+    url: string;
+    state: "open" | "closed";
+  }>;
+  message?: string;
+}> {
+  if (!options.accessToken) {
+    return {
+      available: false,
+      issues: [],
+      message: "Sign in with GitHub to list issues.",
+    };
+  }
+  const remoteUrl = readGitRemoteUrl(workspaceRoot);
+  const { parseGithubOwnerRepo, listIssuesViaRest } = await import(
+    "./github-auth/github-rest.js"
+  );
+  const parsed = parseGithubOwnerRepo(remoteUrl);
+  if (!parsed) {
+    return {
+      available: false,
+      issues: [],
+      message: "Could not parse GitHub owner/repo from the git remote.",
+    };
+  }
+  return listIssuesViaRest(
+    parsed.owner,
+    parsed.repo,
+    options.accessToken,
+    options.fetchImpl,
+  );
+}
+
+export async function createGithubIssue(
+  workspaceRoot: string,
+  input: { title: string; body?: string },
+  options: GithubApiOptions = {},
+): Promise<{
+  ok: boolean;
+  number?: number;
+  url?: string;
+  message: string;
+}> {
+  if (!options.accessToken) {
+    return {
+      ok: false,
+      message: "Sign in with GitHub to create issues.",
+    };
+  }
+  const remoteUrl = readGitRemoteUrl(workspaceRoot);
+  const { parseGithubOwnerRepo, createIssueViaRest } = await import(
+    "./github-auth/github-rest.js"
+  );
+  const parsed = parseGithubOwnerRepo(remoteUrl);
+  if (!parsed) {
+    return {
+      ok: false,
+      message: "Could not parse GitHub owner/repo from the git remote.",
+    };
+  }
+  return createIssueViaRest(
+    parsed.owner,
+    parsed.repo,
+    options.accessToken,
+    input,
+    options.fetchImpl,
+  );
+}
+
+export async function listGithubCommitCheckRuns(
+  workspaceRoot: string,
+  sha: string,
+  options: GithubApiOptions = {},
+): Promise<{
+  available: boolean;
+  checkRuns: Array<{
+    id: number;
+    name: string;
+    status: string;
+    conclusion: string | null;
+    htmlUrl?: string;
+  }>;
+  message?: string;
+}> {
+  if (!options.accessToken) {
+    return {
+      available: false,
+      checkRuns: [],
+      message: "Sign in with GitHub to load CI checks.",
+    };
+  }
+  const remoteUrl = readGitRemoteUrl(workspaceRoot);
+  const { parseGithubOwnerRepo, listCommitCheckRunsViaRest } = await import(
+    "./github-auth/github-rest.js"
+  );
+  const parsed = parseGithubOwnerRepo(remoteUrl);
+  if (!parsed) {
+    return {
+      available: false,
+      checkRuns: [],
+      message: "Could not parse GitHub owner/repo from the git remote.",
+    };
+  }
+  return listCommitCheckRunsViaRest(
+    parsed.owner,
+    parsed.repo,
+    options.accessToken,
+    sha,
+    options.fetchImpl,
+  );
 }

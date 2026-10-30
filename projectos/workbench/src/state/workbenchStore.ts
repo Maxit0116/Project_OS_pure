@@ -68,7 +68,13 @@ import type {
   GitHubAuthStatus,
   GitHubDeviceAuthPending,
 } from '@contracts/index'
-import { buildPromptComposerFields, emptyComposerDraft } from '@contracts/index'
+import {
+  buildPromptComposerFields,
+  emptyComposerDraft,
+  emptyPinComposerHub,
+  type PinComposerHub,
+} from '@contracts/index'
+import { appendComposerHubToPrompt } from '../components/SpatialComposeHub/composerHubPrompt'
 import type { MapWorkGroupMutationInput, UpdateMapWorkGroupPatch, WorkGroupSelectionItem } from '@contracts/index'
 import { FileOwnershipErrorDetailsSchema, MAP_ARTIFACT_DEFAULT_SIZES, emptyNoteDocument } from '@contracts/index'
 import { getActiveStackMember, getStackMembers, syncStackGeometry } from '@contracts/index'
@@ -455,6 +461,8 @@ export interface WorkbenchState {
   planConfirmed: boolean
   debugSession: import('@contracts/index').DebugSession | null
   composerDraft: ComposerDraft
+  /** Chat sidebar Compose Hub (Stage Dock) — same shape as spatial pin hub. */
+  composerHub: PinComposerHub
   chatMode: ChatMode
   /** Pinned skill body injected every turn until cleared (Custom Mode). */
   activeCustomModeSkillId: string | null
@@ -616,6 +624,7 @@ export interface WorkbenchState {
   setRightPanelTab: (tab: RightPanelTab) => void
   setChatInput: (value: string) => void
   setComposerDraft: (draft: ComposerDraft) => void
+  setComposerHub: (hub: PinComposerHub) => void
   /**
    * Switch chat mode. Default preference (`chatModeSwitch: 'same_session'`) flips
    * mode in the current chat (Cursor-like multi-mode thread). Opt into
@@ -1224,6 +1233,7 @@ const initialTransientState = {
   planConfirmed: false,
   debugSession: null as import('@contracts/index').DebugSession | null,
   composerDraft: emptyComposerDraft(),
+  composerHub: emptyPinComposerHub(),
   chatMode: 'ask' as ChatMode,
   activeCustomModeSkillId: null as string | null,
   customModePreviousChatMode: null as ChatMode | null,
@@ -2233,6 +2243,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     set({ composerDraft: draft })
     scheduleChatSessionPersist()
   },
+  setComposerHub: (hub) => {
+    set({ composerHub: hub })
+  },
   setChatMode: async (mode, options) => {
     const state = get()
     if (state.chatMode === mode) return
@@ -2583,10 +2596,14 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       selectedNodeId,
       selectedFilePath,
       pushToast,
+      composerHub,
     } = state
     if (!project || !rawPrompt.trim() || !canSubmitAgentPrompt(state)) {
       return
     }
+
+    const visiblePrompt = rawPrompt.trim()
+    const agentPrompt = appendComposerHubToPrompt(visiblePrompt, composerHub)
 
     const effectiveSkillId =
       draft.invokedSkillId ?? get().activeCustomModeSkillId ?? undefined
@@ -2598,7 +2615,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const buildUserMessage = (): ChatMessage => ({
       id: msgId(),
       role: 'user',
-      content: rawPrompt.trim(),
+      content: visiblePrompt,
       timestamp: new Date().toISOString(),
       chatMode,
       ...(draft.attachments.length > 0 ? { attachments: draft.attachments } : {}),
@@ -2632,7 +2649,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         const answer = await client.askAgent({
           projectId: project.projectId,
           scope: askScope,
-          question: rawPrompt.trim(),
+          question: agentPrompt,
           language: { mode: 'auto' },
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
@@ -2701,7 +2718,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         const answer = await client.askAgent({
           projectId: project.projectId,
           scope: askScope,
-          question: rawPrompt.trim(),
+          question: agentPrompt,
           language: { mode: 'auto' },
           exploration: { maxRounds: 2 },
           ...chatSessionRequestFields(),
@@ -2745,7 +2762,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         }))
         get().maybeNotifyAgentComplete({
           kind: 'ask',
-          summary: truncateDiffReadySummary(rawPrompt.trim()),
+          summary: truncateDiffReadySummary(visiblePrompt),
           completedAt: Date.now(),
         })
         notifyMemoryWrite(pushToast, get().locale, answer.memoryWrite)
@@ -2831,7 +2848,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         const plan = withPlanQuestionOptions(await client.createPlan({
           projectId: project.projectId,
           scope: planScope,
-          objective: rawPrompt.trim(),
+          objective: agentPrompt,
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
         }))
@@ -2923,7 +2940,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         const session = await client.startDebugSession({
           projectId: project.projectId,
           scope: debugScope,
-          bugDescription: rawPrompt.trim(),
+          bugDescription: agentPrompt,
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
         })
@@ -2984,7 +3001,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         projectId: project.projectId,
         nodeId: selectedNodeId ?? undefined,
         filePath: selectedFilePath ?? undefined,
-        rawPrompt: rawPrompt.trim(),
+        rawPrompt: agentPrompt,
         ...chatSessionRequestFields(),
         ...composerFieldsWithMode,
       })

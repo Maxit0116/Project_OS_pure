@@ -3,8 +3,10 @@ import type { ComposerDraft } from '@contracts/index'
 import { useAutoResizeTextarea } from '../../../hooks/useAutoResizeTextarea'
 import { useI18n } from '../../../i18n'
 import { useWorkbenchStore, type ChatMode } from '../../../state/workbenchStore'
+import type { ComposerStageSlot } from '../../SpatialComposeHub/composerHubPrompt'
 import AttachmentChips from './AttachmentChips'
 import ComposerControlBar from './ComposerControlBar'
+import ComposerStageDock from './ComposerStageDock'
 import ComposerTriggerMenu from './ComposerTriggerMenu'
 import ContextUsageCard from './ContextUsageCard'
 import { CONTEXT_USAGE_CARD_ID, buildContextUsageMetrics } from './contextUsageMetrics'
@@ -74,6 +76,7 @@ export default function PromptComposer({
   const [trigger, setTrigger] = useState<ReturnType<typeof detectComposerTrigger>>(null)
   const [usageOpen, setUsageOpen] = useState(false)
   const [usageDetailed, setUsageDetailed] = useState(true)
+  const [stageSlot, setStageSlot] = useState<ComposerStageSlot | null>(null)
   const composerRef = useRef<HTMLDivElement>(null)
   const latestContextAssembly = useWorkbenchStore((s) => s.latestContextAssembly)
   const usageMetrics = useMemo(
@@ -185,7 +188,12 @@ export default function PromptComposer({
   }
 
   return (
-    <div className={styles.stack}>
+    <div className={styles.stack} data-composer-root>
+      <ComposerStageDock
+        openSlot={stageSlot}
+        onOpenSlotChange={setStageSlot}
+        onStageOpen={() => setUsageOpen(false)}
+      />
       <ContextUsageCard
         assembly={latestContextAssembly}
         open={usageOpen}
@@ -240,7 +248,10 @@ export default function PromptComposer({
           voice={voice}
           usageMetrics={usageMetrics}
           usageOpen={usageOpen}
-          onUsageToggle={() => setUsageOpen((value) => !value)}
+          onUsageToggle={() => {
+            setStageSlot(null)
+            setUsageOpen((value) => !value)
+          }}
         />
       </div>
     </div>

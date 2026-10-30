@@ -1,6 +1,6 @@
 # GitHub Graph：Feature Tree + Git History Hybrid
 
-**状态**：Planning（未开工）。  
+**状态**：M1 in progress（T0/T1/T2/T3/T4/T5/T7/T8 已落地初版；Feature 持久化与详情面板后续）。  
 **范围**：将现有 Workbench「分区树」GitHub Graph 升级为 **双模式混合图**——Feature Tree（工作逻辑结构）与 Git History（真实 commit 拓扑），共用一层领域模型与稳定身份，经类型化关系连接；同步策略与 AI-agent 扩展点一并规划。  
 **产品定位一句话**：Feature Tree 回答「我们在建什么」；Git History 回答「代码怎么演化」；二者是同一项目的两种投影，不是两套互不相干的数据副本。
 

@@ -148,6 +148,35 @@ export interface ProjectOSApi {
   listWorkspaceGitBranches(
     projectId: string,
   ): Promise<import("./workspace-git.js").WorkspaceGitBranchList>;
+  listWorkspaceGitCommits(
+    projectId: string,
+    input?: { limit?: number; tips?: string[] },
+  ): Promise<import("./workspace-git.js").WorkspaceGitCommitList>;
+  getWorkspaceGitCommit(
+    projectId: string,
+    sha: string,
+    input?: { includePatch?: boolean },
+  ): Promise<import("./workspace-git.js").WorkspaceGitCommitDetail>;
+  /** Project OS Feature Tree store under `.projectos/github-graph/features.json`. */
+  getGithubGraphStore(
+    projectId: string,
+  ): Promise<import("./github-graph-store.js").GithubGraphStoreDocument>;
+  upsertGithubGraphFeature(
+    projectId: string,
+    feature: import("./github-domain.js").GithubFeature,
+  ): Promise<import("./github-graph-store.js").GithubGraphStoreDocument>;
+  deleteGithubGraphFeature(
+    projectId: string,
+    featureId: string,
+  ): Promise<import("./github-graph-store.js").GithubGraphStoreDocument>;
+  upsertGithubGraphRelation(
+    projectId: string,
+    relation: import("./github-domain.js").GithubRelation,
+  ): Promise<import("./github-graph-store.js").GithubGraphStoreDocument>;
+  removeGithubGraphRelation(
+    projectId: string,
+    relationId: string,
+  ): Promise<import("./github-graph-store.js").GithubGraphStoreDocument>;
   checkoutWorkspaceBranch(
     projectId: string,
     branch: string,
@@ -192,6 +221,21 @@ export interface ProjectOSApi {
       push?: boolean;
     },
   ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
+  /** Push a local branch to origin (sets upstream). */
+  pushWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
+  /** Fast-forward pull a branch from origin. */
+  pullWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
+  /** Create a revert commit for sha and optionally push (no force). */
+  revertWorkspaceCommit(
+    projectId: string,
+    input: { sha: string; push?: boolean },
+  ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
   fetchWorkspaceGit(
     projectId: string,
   ): Promise<import("./workspace-git.js").WorkspaceGitMutationResult>;
@@ -202,6 +246,32 @@ export interface ProjectOSApi {
     projectId: string,
     input: { title: string; head?: string; base?: string; body?: string },
   ): Promise<{ ok: boolean; url?: string; number?: number; message: string }>;
+  mergeWorkspacePullRequest(
+    projectId: string,
+    input: {
+      number: number;
+      mergeMethod?: "merge" | "squash" | "rebase";
+    },
+  ): Promise<
+    import("./workspace-git.js").WorkspaceGitPullRequestMutationResult
+  >;
+  closeWorkspacePullRequest(
+    projectId: string,
+    input: { number: number },
+  ): Promise<
+    import("./workspace-git.js").WorkspaceGitPullRequestMutationResult
+  >;
+  listWorkspaceIssues(
+    projectId: string,
+  ): Promise<import("./workspace-git.js").WorkspaceGitIssueList>;
+  createWorkspaceIssue(
+    projectId: string,
+    input: { title: string; body?: string },
+  ): Promise<import("./workspace-git.js").WorkspaceGitIssueMutationResult>;
+  listWorkspaceCommitCheckRuns(
+    projectId: string,
+    sha: string,
+  ): Promise<import("./workspace-git.js").WorkspaceGitCheckRunList>;
   /** Desktop GitHub OAuth status (local identity; no cloud session). */
   getGitHubAuthStatus(): Promise<import("./github-auth.js").GitHubAuthStatus>;
   /**

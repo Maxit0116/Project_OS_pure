@@ -1551,6 +1551,91 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
   }
 
+  async listWorkspaceGitCommits(
+    projectId: string,
+    input: { limit?: number; tips?: string[] } = {},
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitCommitList> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listGitCommits, DEFAULT_GIT_COMMIT_LIST_LIMIT } = await import(
+      "./git-context-service.js"
+    );
+    const listed = listGitCommits(workspace.workspaceRoot, {
+      limit: input.limit ?? DEFAULT_GIT_COMMIT_LIST_LIMIT,
+      tips: input.tips,
+    });
+    return {
+      commits: listed.commits,
+      truncated: listed.truncated,
+      tips: listed.tips,
+    };
+  }
+
+  async getWorkspaceGitCommit(
+    projectId: string,
+    sha: string,
+    input: { includePatch?: boolean } = {},
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitCommitDetail> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getGitCommitShow } = await import("./git-context-service.js");
+    const detail = getGitCommitShow(workspace.workspaceRoot, sha, {
+      includePatch: input.includePatch,
+    });
+    return {
+      ok: detail.ok,
+      message: detail.message,
+      ...(detail.commit ? { commit: detail.commit } : {}),
+      ...(detail.files ? { files: detail.files } : {}),
+      ...(detail.patch !== undefined ? { patch: detail.patch } : {}),
+      ...(detail.patchTruncated !== undefined
+        ? { patchTruncated: detail.patchTruncated }
+        : {}),
+    };
+  }
+
+  async getGithubGraphStore(
+    projectId: string,
+  ): Promise<import("../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { loadGithubGraphStore } = await import("./github-graph-store.js");
+    return loadGithubGraphStore(workspace.workspaceRoot);
+  }
+
+  async upsertGithubGraphFeature(
+    projectId: string,
+    feature: import("../contracts/github-domain.js").GithubFeature,
+  ): Promise<import("../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { upsertGithubGraphFeature } = await import("./github-graph-store.js");
+    return upsertGithubGraphFeature(workspace.workspaceRoot, feature);
+  }
+
+  async deleteGithubGraphFeature(
+    projectId: string,
+    featureId: string,
+  ): Promise<import("../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { deleteGithubGraphFeature } = await import("./github-graph-store.js");
+    return deleteGithubGraphFeature(workspace.workspaceRoot, featureId);
+  }
+
+  async upsertGithubGraphRelation(
+    projectId: string,
+    relation: import("../contracts/github-domain.js").GithubRelation,
+  ): Promise<import("../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { upsertGithubGraphRelation } = await import("./github-graph-store.js");
+    return upsertGithubGraphRelation(workspace.workspaceRoot, relation);
+  }
+
+  async removeGithubGraphRelation(
+    projectId: string,
+    relationId: string,
+  ): Promise<import("../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { removeGithubGraphRelation } = await import("./github-graph-store.js");
+    return removeGithubGraphRelation(workspace.workspaceRoot, relationId);
+  }
+
   async checkoutWorkspaceBranch(
     projectId: string,
     branch: string,
@@ -1678,6 +1763,58 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return { ok: result.ok, message: result.message };
   }
 
+  async pushWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { pushGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = pushGitBranch(workspace.workspaceRoot, branch, {
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async pullWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { pullGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = pullGitBranch(workspace.workspaceRoot, branch, {
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async revertWorkspaceCommit(
+    projectId: string,
+    input: { sha: string; push?: boolean },
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { revertGitCommit } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = revertGitCommit(workspace.workspaceRoot, input.sha, {
+      push: input.push !== false,
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
   async listWorkspacePullRequests(
     projectId: string,
   ): Promise<import("../contracts/workspace-git.js").WorkspaceGitPullRequestList> {
@@ -1704,6 +1841,97 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return createGithubPullRequest(workspace.workspaceRoot, input, {
       ...(token ? { accessToken: token } : {}),
       pushHead: true,
+    });
+  }
+
+  async mergeWorkspacePullRequest(
+    projectId: string,
+    input: {
+      number: number;
+      mergeMethod?: "merge" | "squash" | "rebase";
+    },
+  ): Promise<
+    import("../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { mergeGithubPullRequest } = await import("./git-context-service.js");
+    const token = await this.resolveGithubAccessToken();
+    const result = await mergeGithubPullRequest(
+      workspace.workspaceRoot,
+      input.number,
+      {
+        ...(token ? { accessToken: token } : {}),
+        mergeMethod: input.mergeMethod ?? "squash",
+      },
+    );
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.sha ? { sha: result.sha } : {}),
+      number: input.number,
+    };
+  }
+
+  async closeWorkspacePullRequest(
+    projectId: string,
+    input: { number: number },
+  ): Promise<
+    import("../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { closeGithubPullRequest } = await import("./git-context-service.js");
+    const token = await this.resolveGithubAccessToken();
+    const result = await closeGithubPullRequest(
+      workspace.workspaceRoot,
+      input.number,
+      {
+        ...(token ? { accessToken: token } : {}),
+      },
+    );
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.url ? { url: result.url } : {}),
+      number: input.number,
+    };
+  }
+
+  async listWorkspaceIssues(
+    projectId: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitIssueList> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listGithubIssues } = await import("./git-context-service.js");
+    const token = await this.resolveGithubAccessToken();
+    return listGithubIssues(workspace.workspaceRoot, {
+      ...(token ? { accessToken: token } : {}),
+    });
+  }
+
+  async createWorkspaceIssue(
+    projectId: string,
+    input: { title: string; body?: string },
+  ): Promise<
+    import("../contracts/workspace-git.js").WorkspaceGitIssueMutationResult
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { createGithubIssue } = await import("./git-context-service.js");
+    const token = await this.resolveGithubAccessToken();
+    return createGithubIssue(workspace.workspaceRoot, input, {
+      ...(token ? { accessToken: token } : {}),
+    });
+  }
+
+  async listWorkspaceCommitCheckRuns(
+    projectId: string,
+    sha: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitCheckRunList> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listGithubCommitCheckRuns } = await import(
+      "./git-context-service.js"
+    );
+    const token = await this.resolveGithubAccessToken();
+    return listGithubCommitCheckRuns(workspace.workspaceRoot, sha, {
+      ...(token ? { accessToken: token } : {}),
     });
   }
 

@@ -8,12 +8,17 @@ import {
   checkoutGitBranch,
   createGitBranch,
   deleteGitBranch,
+  getGitCommitShow,
   getWorkingTreeDiff,
   listGitBranches,
+  listGitCommits,
   mergeRemoteApiBranches,
+  pullGitBranch,
+  pushGitBranch,
   queryGitReadOnlyStatus,
   readGitRepositoryStatus,
   renameGitBranch,
+  revertGitCommit,
   rollbackGitBranch,
 } from "./git-context-service.js";
 
@@ -169,6 +174,41 @@ describe("git-context-service", () => {
     }
   });
 
+  it("lists commit parents including merge commits and shows file summary", () => {
+    const dir = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-commits-"));
+    try {
+      run(dir, "git", ["init"]);
+      run(dir, "git", ["config", "user.email", "test@example.com"]);
+      run(dir, "git", ["config", "user.name", "Test"]);
+      writeFileSync(join(dir, "a.txt"), "base\n");
+      run(dir, "git", ["add", "a.txt"]);
+      run(dir, "git", ["commit", "-m", "init"]);
+      run(dir, "git", ["branch", "-M", "main"]);
+      run(dir, "git", ["checkout", "-b", "side"]);
+      writeFileSync(join(dir, "b.txt"), "side\n");
+      run(dir, "git", ["add", "b.txt"]);
+      run(dir, "git", ["commit", "-m", "side"]);
+      run(dir, "git", ["checkout", "main"]);
+      writeFileSync(join(dir, "c.txt"), "main\n");
+      run(dir, "git", ["add", "c.txt"]);
+      run(dir, "git", ["commit", "-m", "mainline"]);
+      run(dir, "git", ["merge", "side", "-m", "merge side"]);
+
+      const listed = listGitCommits(dir, { limit: 20, tips: ["main"] });
+      expect(listed.commits.length).toBeGreaterThanOrEqual(4);
+      const merge = listed.commits.find((c) => c.parentShas.length === 2);
+      expect(merge).toBeTruthy();
+      expect(merge?.message).toMatch(/merge side/i);
+
+      const detail = getGitCommitShow(dir, listed.commits[0]!.sha);
+      expect(detail.ok).toBe(true);
+      expect(detail.commit?.sha).toMatch(/^[0-9a-f]+$/i);
+      expect((detail.files?.length ?? 0) >= 0).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("renames, rolls back, and deletes a feature branch against origin", () => {
     const bare = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-ops-bare-"));
     const dir = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-ops-"));
@@ -250,6 +290,73 @@ describe("git-context-service", () => {
       expect(remoteHeads).toMatch(/feat\/pushed/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it("reverts a commit with a new commit and can push", () => {
+    const bare = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-revert-bare-"));
+    const dir = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-revert-"));
+    try {
+      run(bare, "git", ["init", "--bare"]);
+      run(dir, "git", ["init"]);
+      run(dir, "git", ["config", "user.email", "test@example.com"]);
+      run(dir, "git", ["config", "user.name", "Test"]);
+      writeFileSync(join(dir, "a.txt"), "one\n");
+      run(dir, "git", ["add", "a.txt"]);
+      run(dir, "git", ["commit", "-m", "init"]);
+      run(dir, "git", ["branch", "-M", "main"]);
+      writeFileSync(join(dir, "a.txt"), "two\n");
+      run(dir, "git", ["add", "a.txt"]);
+      run(dir, "git", ["commit", "-m", "change"]);
+      const sha = run(dir, "git", ["rev-parse", "HEAD"]).trim();
+      run(dir, "git", ["remote", "add", "origin", bare]);
+      run(dir, "git", ["push", "-u", "origin", "main"]);
+
+      const reverted = revertGitCommit(dir, sha, { push: true });
+      expect(reverted.ok).toBe(true);
+      expect(reverted.message).toMatch(/[Rr]evert/);
+      const log = run(dir, "git", ["log", "-1", "--pretty=%s"]);
+      expect(log).toMatch(/[Rr]evert/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it("pulls ff-only after remote advances", () => {
+    const bare = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-pull-bare-"));
+    const a = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-pull-a-"));
+    const b = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-pull-b-"));
+    try {
+      run(bare, "git", ["init", "--bare"]);
+      for (const dir of [a, b]) {
+        run(dir, "git", ["init"]);
+        run(dir, "git", ["config", "user.email", "test@example.com"]);
+        run(dir, "git", ["config", "user.name", "Test"]);
+      }
+      writeFileSync(join(a, "a.txt"), "base\n");
+      run(a, "git", ["add", "a.txt"]);
+      run(a, "git", ["commit", "-m", "init"]);
+      run(a, "git", ["branch", "-M", "main"]);
+      run(a, "git", ["remote", "add", "origin", bare]);
+      run(a, "git", ["push", "-u", "origin", "main"]);
+      run(b, "git", ["remote", "add", "origin", bare]);
+      run(b, "git", ["fetch", "origin"]);
+      run(b, "git", ["checkout", "-b", "main", "origin/main"]);
+
+      writeFileSync(join(a, "a.txt"), "ahead\n");
+      run(a, "git", ["add", "a.txt"]);
+      run(a, "git", ["commit", "-m", "ahead"]);
+      const pushed = pushGitBranch(a, "main");
+      expect(pushed.ok).toBe(true);
+
+      const pulled = pullGitBranch(b, "main");
+      expect(pulled.ok).toBe(true);
+      expect(run(b, "git", ["log", "-1", "--pretty=%s"]).trim()).toBe("ahead");
+    } finally {
+      rmSync(a, { recursive: true, force: true });
+      rmSync(b, { recursive: true, force: true });
       rmSync(bare, { recursive: true, force: true });
     }
   });

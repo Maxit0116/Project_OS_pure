@@ -38,13 +38,18 @@ export interface ComposeHubStrings {
   scopeMapLevelCode: string
   mcp: string
   mcpEmpty: string
+  mcpLibraryEmpty: string
+  mcpAdd: string
   mcpOpenSettings: string
+  mcpOpenMarketplace: string
   mcpEnabled: string
   mcpDisabled: string
   mcpPolicyHint: string
   skills: string
   skillsEmpty: string
+  skillsLibraryEmpty: string
   skillsAdd: string
+  skillsOpenMarketplace: string
   references: string
   referencesEmpty: string
   referencesAdd: string
@@ -127,14 +132,19 @@ export const COMPOSE_HUB_STRINGS_EN: ComposeHubStrings = {
   scopeMapLevelComponent: 'Component',
   scopeMapLevelCode: 'Code',
   mcp: 'MCP',
-  mcpEmpty: 'No MCP servers',
+  mcpEmpty: 'No MCP loaded',
+  mcpLibraryEmpty: 'Library empty — install from Marketplace',
+  mcpAdd: 'Load MCP from library',
   mcpOpenSettings: 'Open Settings',
+  mcpOpenMarketplace: 'Open Marketplace',
   mcpEnabled: 'On',
   mcpDisabled: 'Off',
   mcpPolicyHint: 'Allow mcp:server:* in permissions',
   skills: 'Skills',
-  skillsEmpty: 'No skills',
-  skillsAdd: 'Add skill id',
+  skillsEmpty: 'No skills loaded',
+  skillsLibraryEmpty: 'Library empty — install from Marketplace',
+  skillsAdd: 'Load skill from library',
+  skillsOpenMarketplace: 'Open Marketplace',
   references: 'References',
   referencesEmpty: 'No references',
   referencesAdd: 'Add',

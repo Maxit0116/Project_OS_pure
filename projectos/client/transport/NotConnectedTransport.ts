@@ -108,6 +108,55 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async listWorkspaceGitCommits(
+    _projectId: string,
+    _input: { limit?: number; tips?: string[] } = {},
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCommitList> {
+    return transportNotConnected();
+  }
+
+  async getWorkspaceGitCommit(
+    _projectId: string,
+    _sha: string,
+    _input: { includePatch?: boolean } = {},
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCommitDetail> {
+    return transportNotConnected();
+  }
+
+  async getGithubGraphStore(
+    _projectId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return transportNotConnected();
+  }
+
+  async upsertGithubGraphFeature(
+    _projectId: string,
+    _feature: import("../../contracts/github-domain.js").GithubFeature,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return transportNotConnected();
+  }
+
+  async deleteGithubGraphFeature(
+    _projectId: string,
+    _featureId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return transportNotConnected();
+  }
+
+  async upsertGithubGraphRelation(
+    _projectId: string,
+    _relation: import("../../contracts/github-domain.js").GithubRelation,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return transportNotConnected();
+  }
+
+  async removeGithubGraphRelation(
+    _projectId: string,
+    _relationId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return transportNotConnected();
+  }
+
   async checkoutWorkspaceBranch(
     _projectId: string,
     _branch: string,
@@ -168,6 +217,27 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async pushWorkspaceBranch(
+    _projectId: string,
+    _branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async pullWorkspaceBranch(
+    _projectId: string,
+    _branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async revertWorkspaceCommit(
+    _projectId: string,
+    _input: { sha: string; push?: boolean },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
   async listWorkspacePullRequests(
     _projectId: string,
   ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitPullRequestList> {
@@ -178,6 +248,49 @@ export class NotConnectedTransport implements ProjectOSApi {
     _projectId: string,
     _input: { title: string; head?: string; base?: string; body?: string },
   ): Promise<{ ok: boolean; url?: string; number?: number; message: string }> {
+    return transportNotConnected();
+  }
+
+  async mergeWorkspacePullRequest(
+    _projectId: string,
+    _input: {
+      number: number
+      mergeMethod?: 'merge' | 'squash' | 'rebase'
+    },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    return transportNotConnected();
+  }
+
+  async closeWorkspacePullRequest(
+    _projectId: string,
+    _input: { number: number },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    return transportNotConnected();
+  }
+
+  async listWorkspaceIssues(
+    _projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitIssueList> {
+    return transportNotConnected();
+  }
+
+  async createWorkspaceIssue(
+    _projectId: string,
+    _input: { title: string; body?: string },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitIssueMutationResult
+  > {
+    return transportNotConnected();
+  }
+
+  async listWorkspaceCommitCheckRuns(
+    _projectId: string,
+    _sha: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCheckRunList> {
     return transportNotConnected();
   }
 
