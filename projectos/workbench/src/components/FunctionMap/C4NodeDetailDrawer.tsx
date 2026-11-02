@@ -17,6 +17,9 @@ import {
 import { useI18n } from '../../i18n'
 import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
+import Button from '../ui/Button'
+import Chip from '../ui/Chip'
+import TabBar from '../ui/TabBar'
 import { isTrivialCodeDescription } from './codeFileDescription'
 import {
   buildNodeUnderstanding,
@@ -35,9 +38,12 @@ interface Props {
   fileRelations: FileRelation[]
   durableGraph: ProjectGraph | null
   onClose: () => void
+  /** `sidebar` fills the Function Map left panel; `overlay` is the legacy floating card. */
+  layout?: 'overlay' | 'sidebar'
 }
 
-type DetailTab = 'overview' | 'diff' | 'activity' | 'relations' | 'controls'
+/** Inspect = static node facts; Live = run-time activity + diffs. Controls sit in a sticky footer. */
+type DetailTab = 'inspect' | 'live'
 
 function confidenceLabel(confidence: number): string {
   return `${Math.round(Math.max(0, Math.min(1, confidence)) * 100)}%`
@@ -49,6 +55,14 @@ function riskClass(risk: ChangeRiskLevel): string {
   return styles.riskLow
 }
 
+function activityStatusClass(
+  status: string,
+): string {
+  if (status === 'error') return styles.statusError
+  if (status === 'running') return styles.statusRunning
+  return styles.statusComplete
+}
+
 export default function C4NodeDetailDrawer({
   node,
   layerNodes,
@@ -57,6 +71,7 @@ export default function C4NodeDetailDrawer({
   fileRelations,
   durableGraph,
   onClose,
+  layout = 'overlay',
 }: Props) {
   const { ts } = useI18n()
   const client = useWorkbenchStore((s) => s.client)
@@ -80,15 +95,77 @@ export default function C4NodeDetailDrawer({
     useState<CodeFileUnderstandingEntry | null>(null)
   const [llmLoading, setLlmLoading] = useState(false)
   const [llmError, setLlmError] = useState<string | null>(null)
-  const [tab, setTab] = useState<DetailTab>('overview')
+  const [tab, setTab] = useState<DetailTab>('inspect')
   const [instruction, setInstruction] = useState('')
 
   const isCodeNode = node ? isCodeElementNode(node) : false
   const filePath = node && isCodeNode ? codeNodeFilePath(node) : null
 
+  const liveActivities = useMemo(
+    () => (node ? listNodeActivities(executionOverlay, node.id) : []),
+    [executionOverlay, node],
+  )
+  const editedPaths = useMemo(
+    () => (node ? listEditedPathsForNode(executionOverlay, node.id) : []),
+    [executionOverlay, node],
+  )
+  const touchedPaths = useMemo(
+    () => (node ? listTouchedPathsForNode(executionOverlay, node.id) : []),
+    [executionOverlay, node],
+  )
+  const taskIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const activity of liveActivities) {
+      if (activity.taskId) ids.add(activity.taskId)
+    }
+    return [...ids]
+  }, [liveActivities])
+  const needsApproval = useMemo(
+    () =>
+      liveActivities.some(
+        (activity) =>
+          activity.kind === 'needs_approval' && activity.status === 'running',
+      ) || verificationCommandApproval?.status === 'approval_required',
+    [liveActivities, verificationCommandApproval],
+  )
+  const liveSignalCount = liveActivities.length + editedPaths.length
+  const verificationNarrative = useMemo(() => {
+    const evidence = verificationResult?.evidence
+    if (evidence) {
+      const firstCommand = evidence.commands[0]
+      return {
+        runId: evidence.runId,
+        status: evidence.status,
+        reason: evidence.reason,
+        evidenceId: evidence.evidenceId,
+        summary: firstCommand?.summary,
+        command: firstCommand
+          ? `${firstCommand.tool}${firstCommand.ok ? '' : ' (failed)'}`.slice(0, 120)
+          : undefined,
+        suggestedTests: evidence.suggestedTests,
+        acceptanceCriteria: evidence.acceptanceCriteria ?? [],
+        unexpectedPaths: evidence.unexpectedPaths,
+      }
+    }
+    const narrative = executionOverlay?.verificationNarrative
+    if (!narrative) return null
+    return {
+      ...narrative,
+      suggestedTests: [] as string[],
+      acceptanceCriteria: [] as string[],
+      unexpectedPaths: [] as string[],
+    }
+  }, [executionOverlay?.verificationNarrative, verificationResult?.evidence])
+
   useEffect(() => {
-    setTab('overview')
     setInstruction('')
+    const hasLive =
+      Boolean(node) &&
+      (listNodeActivities(executionOverlay, node!.id).length > 0 ||
+        listEditedPathsForNode(executionOverlay, node!.id).length > 0)
+    setTab(hasLive ? 'live' : 'inspect')
+    // Only re-pick default tab when the selected node changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: node id gate
   }, [node?.id])
 
   useEffect(() => {
@@ -123,61 +200,6 @@ export default function C4NodeDetailDrawer({
       cancelled = true
     }
   }, [client, filePath, isCodeNode, node, project, ts])
-
-  const liveActivities = useMemo(
-    () => (node ? listNodeActivities(executionOverlay, node.id) : []),
-    [executionOverlay, node],
-  )
-  const editedPaths = useMemo(
-    () => (node ? listEditedPathsForNode(executionOverlay, node.id) : []),
-    [executionOverlay, node],
-  )
-  const touchedPaths = useMemo(
-    () => (node ? listTouchedPathsForNode(executionOverlay, node.id) : []),
-    [executionOverlay, node],
-  )
-  const taskIds = useMemo(() => {
-    const ids = new Set<string>()
-    for (const activity of liveActivities) {
-      if (activity.taskId) ids.add(activity.taskId)
-    }
-    return [...ids]
-  }, [liveActivities])
-  const needsApproval = useMemo(
-    () =>
-      liveActivities.some(
-        (activity) =>
-          activity.kind === 'needs_approval' && activity.status === 'running',
-      ) || verificationCommandApproval?.status === 'approval_required',
-    [liveActivities, verificationCommandApproval],
-  )
-  const verificationNarrative = useMemo(() => {
-    const evidence = verificationResult?.evidence
-    if (evidence) {
-      const firstCommand = evidence.commands[0]
-      return {
-        runId: evidence.runId,
-        status: evidence.status,
-        reason: evidence.reason,
-        evidenceId: evidence.evidenceId,
-        summary: firstCommand?.summary,
-        command: firstCommand
-          ? `${firstCommand.tool}${firstCommand.ok ? '' : ' (failed)'}`.slice(0, 120)
-          : undefined,
-        suggestedTests: evidence.suggestedTests,
-        acceptanceCriteria: evidence.acceptanceCriteria ?? [],
-        unexpectedPaths: evidence.unexpectedPaths,
-      }
-    }
-    const narrative = executionOverlay?.verificationNarrative
-    if (!narrative) return null
-    return {
-      ...narrative,
-      suggestedTests: [] as string[],
-      acceptanceCriteria: [] as string[],
-      unexpectedPaths: [] as string[],
-    }
-  }, [executionOverlay?.verificationNarrative, verificationResult?.evidence])
 
   if (!node) return null
 
@@ -219,37 +241,28 @@ export default function C4NodeDetailDrawer({
     useChatSessionStore.getState().presentAgentFlow()
   }
 
-  const tabs: Array<{ id: DetailTab; label: string }> = [
-    { id: 'overview', label: ts('map.c4Detail.tabs.overview') },
-    { id: 'diff', label: ts('map.c4Detail.tabs.diff') },
-    { id: 'activity', label: ts('map.c4Detail.tabs.activity') },
-    { id: 'relations', label: ts('map.c4Detail.tabs.relations') },
-    { id: 'controls', label: ts('map.c4Detail.tabs.controls') },
-  ]
+  const metaLine = [node.elementType, node.level, node.technology]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <aside
-      className={styles.drawer}
+      className={`${styles.drawer} ${layout === 'sidebar' ? styles.drawerSidebar : ''}`}
       aria-label={ts('map.c4Detail.title')}
       data-testid="c4-node-detail-drawer"
+      data-layout={layout}
     >
       <header className={styles.header}>
         <div className={styles.heading}>
           <h2 className={styles.title}>{title}</h2>
-          <p className={styles.meta}>
-            {[node.elementType, node.level, node.technology]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
+          {metaLine ? <p className={styles.meta}>{metaLine}</p> : null}
           {understanding.stereotype || understanding.fileType ? (
             <div className={styles.chips}>
               {understanding.stereotype ? (
-                <span className={styles.chip}>{understanding.stereotype}</span>
+                <Chip asButton={false}>{understanding.stereotype}</Chip>
               ) : null}
               {understanding.fileType ? (
-                <span className={styles.chip}>
-                  {ts(`map.fileTypes.${understanding.fileType}`)}
-                </span>
+                <Chip asButton={false}>{ts(`map.fileTypes.${understanding.fileType}`)}</Chip>
               ) : null}
             </div>
           ) : null}
@@ -264,137 +277,33 @@ export default function C4NodeDetailDrawer({
         </button>
       </header>
 
-      <div className={styles.tabs} role="tablist" aria-label={ts('map.c4Detail.tabsLabel')}>
-        {tabs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            className={`${styles.tab} ${tab === item.id ? styles.tabActive : ''} tech-focus`}
-            onClick={() => setTab(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
+      <div className={styles.tabRail}>
+        <TabBar
+          size="sm"
+          chrome="nested"
+          activeId={tab}
+          onChange={(id) => setTab(id as DetailTab)}
+          tabs={[
+            { id: 'inspect', label: ts('map.c4Detail.tabs.inspect') },
+            {
+              id: 'live',
+              label: ts('map.c4Detail.tabs.live'),
+              badge:
+                liveSignalCount > 0 ? (
+                  <span className={styles.tabBadge}>{liveSignalCount}</span>
+                ) : undefined,
+            },
+          ]}
+        />
       </div>
 
       <div className={styles.body}>
-        {tab === 'overview' ? (
+        {tab === 'inspect' ? (
           <>
             {understanding.filePath ? (
               <section className={styles.section}>
                 <h3 className={styles.sectionTitle}>{ts('map.c4Detail.path')}</h3>
-                <p className={`${styles.text} ${styles.path}`}>{understanding.filePath}</p>
-              </section>
-            ) : null}
-
-            {liveActivities.length > 0 ? (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>{ts('map.liveGraph.currentActivity')}</h3>
-                <ul className={styles.list}>
-                  {liveActivities
-                    .slice()
-                    .reverse()
-                    .slice(0, 4)
-                    .map((activity) => (
-                      <li key={activity.id}>
-                        {activity.agentId
-                          ? `${ts('map.liveGraph.agentLabel', { agent: activity.agentId })} · `
-                          : ''}
-                        {ts(`map.liveGraph.kind.${activity.kind}`)} · {activity.label} ·{' '}
-                        {ts(`map.liveGraph.status.${activity.status === 'error' ? 'error' : activity.status === 'running' ? 'running' : 'complete'}`)}
-                      </li>
-                    ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {verificationNarrative ? (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>{ts('map.liveGraph.verificationTitle')}</h3>
-                <p className={styles.text}>
-                  {ts(
-                    `map.liveGraph.status.${
-                      verificationNarrative.status === 'failed'
-                        ? 'error'
-                        : verificationNarrative.status === 'passed'
-                          ? 'complete'
-                          : 'running'
-                    }`,
-                  )}
-                  {verificationNarrative.reason
-                    ? ` · ${ts('map.liveGraph.verificationReason', {
-                        reason: verificationNarrative.reason,
-                      })}`
-                    : ''}
-                </p>
-                {verificationNarrative.command ? (
-                  <p className={styles.text}>
-                    {ts('map.liveGraph.verificationCommand', {
-                      command: verificationNarrative.command,
-                    })}
-                  </p>
-                ) : null}
-                {verificationNarrative.summary ? (
-                  <p className={styles.text}>{verificationNarrative.summary}</p>
-                ) : null}
-                {verificationNarrative.suggestedTests.length > 0 ? (
-                  <>
-                    <h4 className={styles.sectionTitle}>{ts('map.liveGraph.verificationSuggested')}</h4>
-                    <ul className={styles.list}>
-                      {verificationNarrative.suggestedTests.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </>
-                ) : null}
-                {verificationNarrative.acceptanceCriteria.length > 0 ? (
-                  <>
-                    <h4 className={styles.sectionTitle}>{ts('map.liveGraph.verificationCriteria')}</h4>
-                    <ul className={styles.list}>
-                      {verificationNarrative.acceptanceCriteria.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </>
-                ) : null}
-                {verificationNarrative.unexpectedPaths.length > 0 ? (
-                  <>
-                    <h4 className={styles.sectionTitle}>{ts('map.liveGraph.verificationUnexpected')}</h4>
-                    <ul className={styles.list}>
-                      {verificationNarrative.unexpectedPaths.map((item) => (
-                        <li key={item} className={styles.path}>
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                ) : null}
-              </section>
-            ) : null}
-
-            {taskIds.length > 0 ? (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>{ts('map.liveGraph.focusTask')}</h3>
-                <div className={styles.actionRow}>
-                  {taskIds.map((taskId) => (
-                    <button
-                      key={taskId}
-                      type="button"
-                      className={`${styles.actionButton} tech-focus`}
-                      onClick={() =>
-                        setLiveGraphFocusTask(
-                          liveGraphFocusTaskId === taskId ? null : taskId,
-                        )
-                      }
-                    >
-                      {liveGraphFocusTaskId === taskId
-                        ? ts('map.liveGraph.clearFocus')
-                        : ts('map.liveGraph.focusTaskNamed', { task: taskId })}
-                    </button>
-                  ))}
-                </div>
+                <p className={styles.pathBlock}>{understanding.filePath}</p>
               </section>
             ) : null}
 
@@ -438,35 +347,108 @@ export default function C4NodeDetailDrawer({
             ) : null}
 
             <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>{ts('map.c4Detail.changeRisk')}</h3>
-              <p className={`${styles.text} ${riskClass(understanding.changeRisk)}`}>
-                {ts(`map.c4Detail.risk.${understanding.changeRisk}`)}
-                {' · '}
-                {ts('map.c4Detail.impactSummary', {
-                  dependents: String(understanding.impactDependentCount),
-                  dependencies: String(understanding.impactDependencyCount),
-                })}
-              </p>
+              <div className={styles.factGrid}>
+                <div className={styles.fact}>
+                  <span className={styles.factLabel}>{ts('map.c4Detail.changeRisk')}</span>
+                  <p className={`${styles.factValue} ${riskClass(understanding.changeRisk)}`}>
+                    {ts(`map.c4Detail.risk.${understanding.changeRisk}`)}
+                  </p>
+                  <p className={styles.factHint}>
+                    {ts('map.c4Detail.impactSummary', {
+                      dependents: String(understanding.impactDependentCount),
+                      dependencies: String(understanding.impactDependencyCount),
+                    })}
+                  </p>
+                </div>
+                <div className={styles.fact}>
+                  <span className={styles.factLabel}>{ts('map.c4Detail.confidence')}</span>
+                  <p className={styles.factValue}>{confidenceLabel(node.confidence)}</p>
+                  {node.sourceKind ? (
+                    <p className={styles.factHint}>{node.sourceKind}</p>
+                  ) : null}
+                </div>
+              </div>
             </section>
 
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>{ts('map.c4Detail.confidence')}</h3>
-              <p className={styles.text}>{confidenceLabel(node.confidence)}</p>
-            </section>
-
-            {node.sourceKind ? (
+            {understanding.usedBy.length > 0 ? (
               <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>{ts('map.c4Detail.sourceKind')}</h3>
-                <p className={styles.text}>{node.sourceKind}</p>
+                <h3 className={styles.sectionTitle}>{usedByTitle}</h3>
+                <ul className={styles.softList}>
+                  {understanding.usedBy.map((item) => (
+                    <li key={`used-${item.id}`} className={styles.softItem}>
+                      {item.label}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            {understanding.dependsOn.length > 0 ? (
+              <section className={styles.section}>
+                <h3 className={styles.sectionTitle}>{dependsOnTitle}</h3>
+                <ul className={styles.softList}>
+                  {understanding.dependsOn.map((item) => (
+                    <li key={`dep-${item.id}`} className={styles.softItem}>
+                      {item.label}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            {touchedPaths.length > 0 ? (
+              <section className={styles.section}>
+                <h3 className={styles.sectionTitle}>{ts('map.c4Detail.taskTouched')}</h3>
+                <ul className={styles.softList}>
+                  {touchedPaths.map((path) => (
+                    <li
+                      key={path}
+                      className={`${styles.softItem} ${styles.softItemMono}`}
+                    >
+                      {path}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            {!understanding.isCodeNode && understanding.impactViews.length > 0 ? (
+              <section className={styles.section}>
+                <h3 className={styles.sectionTitle}>{ts('map.c4Detail.impactViews')}</h3>
+                <ul className={styles.softList}>
+                  {understanding.impactViews.map((viewKey) => (
+                    <li key={viewKey} className={styles.softItem}>
+                      {viewKey}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            {!understanding.isCodeNode && linked.length > 0 ? (
+              <section className={styles.section}>
+                <h3 className={styles.sectionTitle}>{ts('map.c4Detail.linkedFiles')}</h3>
+                <ul className={styles.softList}>
+                  {linked.map((file) => (
+                    <li
+                      key={file.path}
+                      className={`${styles.softItem} ${styles.softItemMono}`}
+                    >
+                      {file.path}
+                    </li>
+                  ))}
+                </ul>
               </section>
             ) : null}
 
             {node.owners && node.owners.length > 0 ? (
               <section className={styles.section}>
                 <h3 className={styles.sectionTitle}>{ts('map.c4Detail.owners')}</h3>
-                <ul className={styles.list}>
+                <ul className={styles.softList}>
                   {node.owners.map((owner) => (
-                    <li key={owner}>{owner}</li>
+                    <li key={owner} className={styles.softItem}>
+                      {owner}
+                    </li>
                   ))}
                 </ul>
               </section>
@@ -482,9 +464,11 @@ export default function C4NodeDetailDrawer({
             {node.openQuestions && node.openQuestions.length > 0 ? (
               <section className={styles.section}>
                 <h3 className={styles.sectionTitle}>{ts('map.c4Detail.openQuestions')}</h3>
-                <ul className={styles.list}>
+                <ul className={styles.softList}>
                   {node.openQuestions.map((question) => (
-                    <li key={question}>{question}</li>
+                    <li key={question} className={styles.softItem}>
+                      {question}
+                    </li>
                   ))}
                 </ul>
               </section>
@@ -492,250 +476,267 @@ export default function C4NodeDetailDrawer({
           </>
         ) : null}
 
-        {tab === 'diff' ? (
-          <section className={styles.section}>
-            <h3 className={styles.sectionTitle}>{ts('map.c4Detail.diffTitle')}</h3>
-            {editedPaths.length === 0 ? (
-              <p className={styles.empty}>{ts('map.c4Detail.diffEmpty')}</p>
-            ) : (
-              <ul className={styles.actionList}>
-                {editedPaths.map((path) => (
-                  <li key={path}>
-                    <span className={styles.path}>{path}</span>
-                    <button
-                      type="button"
-                      className={`${styles.actionButton} tech-focus`}
-                      onClick={() => void navigateToDiffReviewFile(path)}
-                    >
-                      {ts('map.c4Detail.openDiff')}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {understanding.filePath && editedPaths.length === 0 ? (
-              <button
-                type="button"
-                className={`${styles.actionButton} tech-focus`}
-                onClick={() => void navigateToDiffReviewFile(understanding.filePath!)}
-              >
-                {ts('map.c4Detail.openDiff')}
-              </button>
-            ) : null}
-          </section>
-        ) : null}
+        {tab === 'live' ? (
+          <>
+            <section className={styles.section}>
+              <h3 className={styles.sectionTitle}>{ts('map.c4Detail.activityTitle')}</h3>
+              {liveActivities.length === 0 ? (
+                <p className={styles.empty}>{ts('map.c4Detail.activityEmpty')}</p>
+              ) : (
+                <ul className={styles.actionList}>
+                  {liveActivities.map((activity) => (
+                    <li key={activity.id} className={styles.actionCard}>
+                      <div className={styles.activityMeta}>
+                        <div className={styles.activityTitle}>
+                          <span
+                            className={`${styles.statusDot} ${activityStatusClass(activity.status)}`}
+                            aria-hidden
+                          />
+                          <span className={styles.activityTitleText}>
+                            {activity.agentId
+                              ? `${ts('map.liveGraph.agentLabel', { agent: activity.agentId })} · `
+                              : ''}
+                            {ts(`map.liveGraph.kind.${activity.kind}`)} · {activity.label}
+                          </span>
+                        </div>
+                        <span className={styles.activitySub}>
+                          {ts(
+                            `map.liveGraph.status.${
+                              activity.status === 'error'
+                                ? 'error'
+                                : activity.status === 'running'
+                                  ? 'running'
+                                  : 'complete'
+                            }`,
+                          )}
+                          {activity.taskId ? ` · ${activity.taskId}` : ''}
+                          {activity.runId ? ` · ${activity.runId.slice(0, 8)}` : ''}
+                        </span>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() =>
+                          openActivityInAgentFlow(agentFlowActivityIdsForLive(activity))
+                        }
+                      >
+                        {ts('map.c4Detail.openInAgentFlow')}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
 
-        {tab === 'activity' ? (
-          <section className={styles.section}>
-            <h3 className={styles.sectionTitle}>{ts('map.c4Detail.activityTitle')}</h3>
-            {liveActivities.length === 0 ? (
-              <p className={styles.empty}>{ts('map.c4Detail.activityEmpty')}</p>
-            ) : (
-              <ul className={styles.actionList}>
-                {liveActivities.map((activity) => (
-                  <li key={activity.id}>
-                    <div className={styles.activityMeta}>
-                      <strong>
-                        {activity.agentId
-                          ? `${ts('map.liveGraph.agentLabel', { agent: activity.agentId })} · `
-                          : ''}
-                        {ts(`map.liveGraph.kind.${activity.kind}`)} · {activity.label}
-                      </strong>
-                      <span>
-                        {ts(
-                          `map.liveGraph.status.${
-                            activity.status === 'error'
-                              ? 'error'
-                              : activity.status === 'running'
-                                ? 'running'
-                                : 'complete'
-                          }`,
-                        )}
-                        {activity.taskId ? ` · ${activity.taskId}` : ''}
-                        {activity.runId ? ` · ${activity.runId.slice(0, 8)}` : ''}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className={`${styles.actionButton} tech-focus`}
+            {verificationNarrative ? (
+              <section className={styles.section}>
+                <h3 className={styles.sectionTitle}>{ts('map.liveGraph.verificationTitle')}</h3>
+                <div className={styles.actionCard}>
+                  <p className={styles.text}>
+                    {ts(
+                      `map.liveGraph.status.${
+                        verificationNarrative.status === 'failed'
+                          ? 'error'
+                          : verificationNarrative.status === 'passed'
+                            ? 'complete'
+                            : 'running'
+                      }`,
+                    )}
+                    {verificationNarrative.reason
+                      ? ` · ${ts('map.liveGraph.verificationReason', {
+                          reason: verificationNarrative.reason,
+                        })}`
+                      : ''}
+                  </p>
+                  {verificationNarrative.command ? (
+                    <p className={`${styles.text} ${styles.path}`}>
+                      {ts('map.liveGraph.verificationCommand', {
+                        command: verificationNarrative.command,
+                      })}
+                    </p>
+                  ) : null}
+                  {verificationNarrative.summary ? (
+                    <p className={styles.text}>{verificationNarrative.summary}</p>
+                  ) : null}
+                </div>
+                {verificationNarrative.suggestedTests.length > 0 ? (
+                  <>
+                    <h4 className={styles.sectionTitle}>{ts('map.liveGraph.verificationSuggested')}</h4>
+                    <ul className={styles.softList}>
+                      {verificationNarrative.suggestedTests.map((item) => (
+                        <li key={item} className={styles.softItem}>
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+                {verificationNarrative.acceptanceCriteria.length > 0 ? (
+                  <>
+                    <h4 className={styles.sectionTitle}>{ts('map.liveGraph.verificationCriteria')}</h4>
+                    <ul className={styles.softList}>
+                      {verificationNarrative.acceptanceCriteria.map((item) => (
+                        <li key={item} className={styles.softItem}>
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+                {verificationNarrative.unexpectedPaths.length > 0 ? (
+                  <>
+                    <h4 className={styles.sectionTitle}>{ts('map.liveGraph.verificationUnexpected')}</h4>
+                    <ul className={styles.softList}>
+                      {verificationNarrative.unexpectedPaths.map((item) => (
+                        <li
+                          key={item}
+                          className={`${styles.softItem} ${styles.softItemMono}`}
+                        >
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+              </section>
+            ) : null}
+
+            {taskIds.length > 0 ? (
+              <section className={styles.section}>
+                <h3 className={styles.sectionTitle}>{ts('map.liveGraph.focusTask')}</h3>
+                <div className={styles.actionRow}>
+                  {taskIds.map((taskId) => (
+                    <Button
+                      key={taskId}
+                      variant={liveGraphFocusTaskId === taskId ? 'primary' : 'secondary'}
+                      size="sm"
                       onClick={() =>
-                        openActivityInAgentFlow(agentFlowActivityIdsForLive(activity))
+                        setLiveGraphFocusTask(
+                          liveGraphFocusTaskId === taskId ? null : taskId,
+                        )
                       }
                     >
-                      {ts('map.c4Detail.openInAgentFlow')}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        ) : null}
-
-        {tab === 'relations' ? (
-          <>
-            {understanding.usedBy.length > 0 ? (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>{usedByTitle}</h3>
-                <ul className={styles.list}>
-                  {understanding.usedBy.map((item) => (
-                    <li key={`used-${item.id}`}>{item.label}</li>
+                      {liveGraphFocusTaskId === taskId
+                        ? ts('map.liveGraph.clearFocus')
+                        : ts('map.liveGraph.focusTaskNamed', { task: taskId })}
+                    </Button>
                   ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {understanding.dependsOn.length > 0 ? (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>{dependsOnTitle}</h3>
-                <ul className={styles.list}>
-                  {understanding.dependsOn.map((item) => (
-                    <li key={`dep-${item.id}`}>{item.label}</li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {touchedPaths.length > 0 ? (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>{ts('map.c4Detail.taskTouched')}</h3>
-                <ul className={styles.list}>
-                  {touchedPaths.map((path) => (
-                    <li key={path} className={styles.path}>
-                      {path}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {!understanding.isCodeNode && understanding.impactViews.length > 0 ? (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>{ts('map.c4Detail.impactViews')}</h3>
-                <ul className={styles.list}>
-                  {understanding.impactViews.map((viewKey) => (
-                    <li key={viewKey}>{viewKey}</li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {!understanding.isCodeNode && linked.length > 0 ? (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>{ts('map.c4Detail.linkedFiles')}</h3>
-                <ul className={styles.list}>
-                  {linked.map((file) => (
-                    <li key={file.path} className={styles.path}>
-                      {file.path}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {understanding.usedBy.length === 0 &&
-            understanding.dependsOn.length === 0 &&
-            touchedPaths.length === 0 &&
-            linked.length === 0 ? (
-              <p className={styles.empty}>{ts('map.c4Detail.relationsEmpty')}</p>
-            ) : null}
-          </>
-        ) : null}
-
-        {tab === 'controls' ? (
-          <>
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>{ts('map.liveGraph.controlsContext')}</h3>
-              <p className={styles.empty}>{ts('map.liveGraph.controlsContextHint')}</p>
-              <div className={styles.actionRow}>
-                <button
-                  type="button"
-                  className={`${styles.actionButton} tech-focus`}
-                  onClick={() => addGraphContextFromNode(node.id)}
-                >
-                  {ts('map.liveGraph.addContext')}
-                </button>
-              </div>
-            </section>
-
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>{ts('map.liveGraph.controlsInstruction')}</h3>
-              <textarea
-                className={styles.instructionInput}
-                rows={3}
-                value={instruction}
-                onChange={(event) => setInstruction(event.target.value)}
-                placeholder={ts('map.liveGraph.instructionPlaceholder')}
-                aria-label={ts('map.liveGraph.controlsInstruction')}
-              />
-              <div className={styles.actionRow}>
-                <button
-                  type="button"
-                  className={`${styles.actionButton} tech-focus`}
-                  disabled={!instruction.trim()}
-                  onClick={() => {
-                    sendGraphInstructionFromNode(node.id, instruction)
-                    setInstruction('')
-                  }}
-                >
-                  {ts('map.liveGraph.sendInstruction')}
-                </button>
-              </div>
-            </section>
-
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>{ts('map.liveGraph.controlsRun')}</h3>
-              <div className={styles.actionRow}>
-                {flowStatus === 'running' ? (
-                  <button
-                    type="button"
-                    className={`${styles.actionButton} tech-focus`}
-                    onClick={() => void pauseAgentFromGraph()}
-                  >
-                    {ts('map.liveGraph.pause')}
-                  </button>
-                ) : null}
-                {liveGraphPausedRunId ? (
-                  <button
-                    type="button"
-                    className={`${styles.actionButton} tech-focus`}
-                    onClick={() => void resumeAgentFromGraph()}
-                  >
-                    {ts('map.liveGraph.resume')}
-                  </button>
-                ) : null}
-                {flowStatus !== 'running' && !liveGraphPausedRunId ? (
-                  <p className={styles.empty}>{ts('map.liveGraph.noActiveRun')}</p>
-                ) : null}
-              </div>
-            </section>
-
-            {needsApproval ? (
-              <section className={styles.section} data-testid="live-graph-approval">
-                <h3 className={styles.sectionTitle}>{ts('map.liveGraph.controlsApproval')}</h3>
-                <p className={styles.empty}>{ts('map.liveGraph.approvalHint')}</p>
-                <div className={styles.actionRow}>
-                  <button
-                    type="button"
-                    className={`${styles.actionButton} tech-focus`}
-                    onClick={() => void approveFromGraph()}
-                    disabled={verificationCommandApproval?.status !== 'approval_required'}
-                  >
-                    {ts('map.liveGraph.approve')}
-                  </button>
-                  <button
-                    type="button"
-                    className={`${styles.actionButton} tech-focus`}
-                    onClick={() => rejectFromGraph()}
-                    disabled={verificationCommandApproval?.status !== 'approval_required'}
-                  >
-                    {ts('map.liveGraph.reject')}
-                  </button>
                 </div>
               </section>
             ) : null}
+
+            <section className={styles.section}>
+              <h3 className={styles.sectionTitle}>{ts('map.c4Detail.diffTitle')}</h3>
+              {editedPaths.length === 0 ? (
+                <p className={styles.empty}>{ts('map.c4Detail.diffEmpty')}</p>
+              ) : (
+                <ul className={styles.actionList}>
+                  {editedPaths.map((path) => (
+                    <li key={path} className={styles.actionCard}>
+                      <div className={styles.diffRow}>
+                        <span className={styles.diffPath}>{path}</span>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => void navigateToDiffReviewFile(path)}
+                        >
+                          {ts('map.c4Detail.openDiff')}
+                        </Button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {understanding.filePath && editedPaths.length === 0 ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void navigateToDiffReviewFile(understanding.filePath!)}
+                >
+                  {ts('map.c4Detail.openDiff')}
+                </Button>
+              ) : null}
+            </section>
           </>
         ) : null}
       </div>
+
+      <footer className={styles.controls} aria-label={ts('map.c4Detail.controlsLabel')}>
+        {needsApproval ? (
+          <div className={styles.approvalBanner} data-testid="live-graph-approval">
+            <p className={styles.approvalTitle}>{ts('map.liveGraph.controlsApproval')}</p>
+            <div className={styles.actionRowStretch}>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => void approveFromGraph()}
+                disabled={verificationCommandApproval?.status !== 'approval_required'}
+              >
+                {ts('map.liveGraph.approve')}
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => rejectFromGraph()}
+                disabled={verificationCommandApproval?.status !== 'approval_required'}
+              >
+                {ts('map.liveGraph.reject')}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className={styles.composer}>
+          <textarea
+            className={styles.instructionInput}
+            rows={2}
+            value={instruction}
+            onChange={(event) => setInstruction(event.target.value)}
+            placeholder={ts('map.liveGraph.instructionPlaceholder')}
+            aria-label={ts('map.liveGraph.controlsInstruction')}
+          />
+          <div className={styles.composerActions}>
+            <div className={styles.actionRow}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => addGraphContextFromNode(node.id)}
+              >
+                {ts('map.liveGraph.addContext')}
+              </Button>
+              {flowStatus === 'running' ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void pauseAgentFromGraph()}
+                >
+                  {ts('map.liveGraph.pause')}
+                </Button>
+              ) : null}
+              {liveGraphPausedRunId ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void resumeAgentFromGraph()}
+                >
+                  {ts('map.liveGraph.resume')}
+                </Button>
+              ) : null}
+            </div>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!instruction.trim()}
+              onClick={() => {
+                sendGraphInstructionFromNode(node.id, instruction)
+                setInstruction('')
+              }}
+            >
+              {ts('map.liveGraph.sendInstruction')}
+            </Button>
+          </div>
+        </div>
+      </footer>
     </aside>
   )
 }

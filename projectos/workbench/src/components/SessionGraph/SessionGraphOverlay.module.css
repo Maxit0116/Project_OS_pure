@@ -310,27 +310,89 @@
   line-height: 1.5;
 }
 
-.misc {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--tech-border);
+.miscRoot {
+  --misc-chip-row: 32px;
+  --misc-row-gap: 6px;
+  --misc-panel-pad-y: 8px;
+  --misc-collapsed-height: 44px;
+  --misc-list-max-height: calc(5 * var(--misc-chip-row) + 4 * var(--misc-row-gap));
+  position: relative;
   flex-shrink: 0;
-  min-height: 44px;
+  z-index: 6;
+}
+
+.miscSpacer {
+  height: var(--misc-collapsed-height);
+  pointer-events: none;
+}
+
+.miscPanel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 7;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  height: var(--misc-collapsed-height);
+  padding: var(--misc-panel-pad-y) 12px;
+  border-top: 1px solid var(--tech-border);
+  background: var(--tech-bg-side-panel);
+  overflow: hidden;
+  box-shadow: 0 0 0 transparent;
+  transition:
+    height var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out),
+    border-color var(--duration-normal) var(--ease-out);
+}
+
+.miscPanelExpanded {
+  border-top-color: var(--tech-border-strong);
+  box-shadow: var(--tech-shadow-md);
 }
 
 .miscLabel {
   flex-shrink: 0;
+  height: var(--misc-chip-row);
+  display: inline-flex;
+  align-items: center;
   font-size: var(--font-size-xs);
   color: var(--tech-text-secondary);
 }
 
 .miscList {
   display: flex;
-  gap: 6px;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: center;
+  gap: var(--misc-row-gap);
   min-width: 0;
+  flex: 1;
+  max-height: var(--misc-chip-row);
+  overflow-x: hidden;
+  overflow-y: hidden;
+  transition: max-height var(--duration-normal) var(--ease-out);
+}
+
+.miscPanelExpanded .miscList {
+  max-height: var(--misc-list-max-height);
+  overflow-y: auto;
+}
+
+.miscMeasure {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  gap: var(--misc-row-gap);
+  visibility: hidden;
+  pointer-events: none;
+  height: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .miscChip {
@@ -346,6 +408,10 @@
   cursor: pointer;
   touch-action: none;
   user-select: none;
+}
+
+.miscChipOverflow {
+  display: none;
 }
 
 .miscChipActive {
@@ -368,6 +434,43 @@
   height: 22px;
   padding: 0;
   font-size: 12px;
+}
+
+.miscMore {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--tech-border);
+  border-radius: 999px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  opacity: 1;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.miscMoreHidden {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .miscPanel,
+  .miscList,
+  .miscMore {
+    transition: none;
+  }
 }
 
 .canvasDropTarget {

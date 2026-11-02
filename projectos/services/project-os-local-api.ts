@@ -227,6 +227,12 @@ import {
   type SkillCatalogView,
   type UninstallSkillFromCatalogInput,
 } from "../contracts/skill-marketplace.js";
+import {
+  InstallFromGitUrlInputSchema,
+  type InstallFromGitUrlInput,
+  type InstallFromGitUrlResult,
+} from "../contracts/marketplace-git-install.js";
+import { installFromGitUrl } from "./marketplace-git-install/index.js";
 import type { SkillDescriptor } from "../contracts/skills.js";
 import { tmpdir } from "node:os";
 import type { ProjectOSProject } from "../contracts/project.js";
@@ -5660,6 +5666,141 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
   }
 
+  async listSpatialCaptureFolders(
+    projectId: string,
+  ): Promise<
+    import("../contracts/spatial-capture-session.js").SpatialCaptureFolder[]
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listSpatialCaptureFolders } = await import(
+      "./spatial-capture-session-service.js"
+    );
+    return listSpatialCaptureFolders(workspace.workspaceRoot);
+  }
+
+  async placeSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+    placement: import("../contracts/spatial-capture-session.js").SpatialCapturePlacement,
+  ): Promise<
+    import("../contracts/spatial-capture-session.js").SpatialCaptureSession
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      placeSpatialCaptureSession,
+      SpatialCaptureSessionError,
+    } = await import("./spatial-capture-session-service.js");
+    try {
+      return placeSpatialCaptureSession(
+        workspace.workspaceRoot,
+        sessionId,
+        placement,
+      );
+    } catch (error) {
+      if (error instanceof SpatialCaptureSessionError) {
+        throw new ProjectOSError("spatial_pin_invalid", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async renameSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    name: string,
+  ): Promise<
+    import("../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      renameSpatialCaptureFolder,
+      SpatialCaptureSessionError,
+    } = await import("./spatial-capture-session-service.js");
+    try {
+      return renameSpatialCaptureFolder(
+        workspace.workspaceRoot,
+        folderId,
+        name,
+      );
+    } catch (error) {
+      if (error instanceof SpatialCaptureSessionError) {
+        throw new ProjectOSError("spatial_pin_invalid", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async deleteSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    options?: import("../contracts/spatial-capture-session.js").DeleteSpatialCaptureFolderOptions,
+  ): Promise<boolean> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      deleteSpatialCaptureFolder,
+      SpatialCaptureSessionError,
+    } = await import("./spatial-capture-session-service.js");
+    try {
+      return deleteSpatialCaptureFolder(
+        workspace.workspaceRoot,
+        folderId,
+        options ?? { cascade: false },
+      );
+    } catch (error) {
+      if (error instanceof SpatialCaptureSessionError && error.code === "running") {
+        throw new ProjectOSError("spatial_pin_invalid", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async mergeSpatialCaptureFolders(
+    projectId: string,
+    sourceFolderId: string,
+    targetFolderId: string,
+    options?: import("../contracts/spatial-capture-session.js").MergeSpatialCaptureFoldersOptions,
+  ): Promise<
+    import("../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      mergeSpatialCaptureFolders,
+      SpatialCaptureSessionError,
+    } = await import("./spatial-capture-session-service.js");
+    try {
+      return mergeSpatialCaptureFolders(
+        workspace.workspaceRoot,
+        sourceFolderId,
+        targetFolderId,
+        options ?? {},
+      );
+    } catch (error) {
+      if (error instanceof SpatialCaptureSessionError) {
+        throw new ProjectOSError("spatial_pin_invalid", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async suggestCaptureVersionTitle(
+    projectId: string,
+    target: { folderId: string } | { folderName: string },
+  ): Promise<string> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      suggestCaptureVersionTitle,
+      SpatialCaptureSessionError,
+    } = await import("./spatial-capture-session-service.js");
+    try {
+      return suggestCaptureVersionTitle(workspace.workspaceRoot, target);
+    } catch (error) {
+      if (error instanceof SpatialCaptureSessionError) {
+        throw new ProjectOSError("spatial_pin_invalid", error.message);
+      }
+      throw error;
+    }
+  }
+
   async saveSpatialCaptureBackdrop(
     projectId: string,
     sessionId: string,
@@ -7194,6 +7335,23 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       await this.openExternalUrl(SKILL_CATALOG_REPORT_ISSUE_URL).catch(() => undefined);
     }
     return updated;
+  }
+
+  async installFromGitUrl(
+    projectId: string,
+    input: InstallFromGitUrlInput,
+  ): Promise<InstallFromGitUrlResult> {
+    const parsed = InstallFromGitUrlInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    this.syncGitHubAuthMockMode();
+    const accessToken = await this.githubAuthSessionManager.getAccessToken();
+    return installFromGitUrl(parsed, {
+      workspaceRoot: workspace.workspaceRoot,
+      settings: workspace.settings,
+      ...(accessToken ? { accessToken } : {}),
+      saveMcpServer: async ({ config }) =>
+        this.saveMcpServer(projectId, { config }),
+    });
   }
 
   async transcribeAudio(

@@ -44,6 +44,37 @@
   flex-shrink: 0;
 }
 
+.gitUrlBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--tech-border);
+  flex-shrink: 0;
+}
+
+.gitUrlInput {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+  font-size: var(--font-size-xs);
+  padding: 7px 10px;
+  outline: none;
+}
+
+.gitUrlInput:focus-visible {
+  box-shadow: var(--tech-shadow-focus);
+  border-color: var(--tech-border-strong);
+}
+
+.gitUrlInput:disabled {
+  opacity: 0.6;
+}
+
 .tabs {
   display: flex;
   gap: 4px;

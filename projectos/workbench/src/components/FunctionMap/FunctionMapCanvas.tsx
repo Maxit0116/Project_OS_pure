@@ -146,7 +146,6 @@ import {
   sanitizeLayerBandsForNodes,
 } from './mergeFullLayerBands'
 import { EDGE_COLORS, formatC4EdgeLabel } from './edgePresentation'
-import C4NodeDetailDrawer from './C4NodeDetailDrawer'
 import {
   openCodeNodeFile,
   openCodeNodeInEditor,
@@ -4393,21 +4392,6 @@ function FunctionMapCanvasInner({ bleed }: Props) {
           onCancel={cancelMapArtifactRename}
         />
       )}
-      {useC4Visuals && selectedNodeId ? (
-        <C4NodeDetailDrawer
-          node={
-            nodes.find((candidate) => candidate.id === selectedNodeId) ??
-            graphNodes.find((candidate) => candidate.id === selectedNodeId) ??
-            null
-          }
-          layerNodes={nodes}
-          layerEdges={edges}
-          fileIndex={fileIndex}
-          fileRelations={fileRelations}
-          durableGraph={durableGraph}
-          onClose={onClearSelection}
-        />
-      ) : null}
     </div>
   )
 }

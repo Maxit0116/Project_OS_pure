@@ -1,0 +1,38 @@
+.itemTitle {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.itemTitleText {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+
+.itemTitleTextScrollable {
+  transform: translateX(0);
+  transition-property: transform;
+  transition-timing-function: ease-out;
+  will-change: transform;
+}
+
+.itemTitleTextScrolling {
+  width: auto;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  transition-timing-function: linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .itemTitleTextScrollable {
+    transition: none;
+    will-change: auto;
+  }
+}

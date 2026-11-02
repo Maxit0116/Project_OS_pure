@@ -57,6 +57,11 @@ const en = {
     toggleTree: 'Open file tree',
     toggleChat: 'Open chat',
     toggleTerminal: 'Open terminal',
+    stageRail: {
+      label: 'Workbench stage tools',
+      views: 'Center views',
+      graphs: 'Graph overlays',
+    },
   },
   demo: {
     googleLogin: 'Google Login Scenario',
@@ -78,12 +83,47 @@ const en = {
   },
   spatialCaptures: {
     title: 'Spatial Captures',
-    emptyTitle: 'No captures yet',
+    emptyTitle: 'No capture folders yet',
     emptyDesc:
-      'Use Spatial Pin (⌘⇧P) to frame the desktop. Esc asks whether to save finished regions here.',
+      'Use Spatial Pin (⌘⇧P) to frame the desktop. Esc lets you name the capture and save it to Misc or a folder. Folders appear here once they have two or more captures; unfiled ones live in the Misc sidebar.',
     open: 'Open',
     delete: 'Delete',
     regions: '{count} regions',
+    versions: '{count} versions',
+    openFolder: 'Open',
+    dissolveFolder: 'Move to Misc',
+    deleteFolderCascade: 'Delete all',
+    cardContextMenu: 'Capture card actions',
+    deleteFolderConfirm:
+      'Delete this folder and every capture workspace inside it? This cannot be undone.',
+    backToFolders: 'Folders',
+    miscTitle: 'Misc',
+    miscCount: 'Unfiled',
+    miscHint:
+      'Drag a capture onto a workspace folder to file it, onto another Misc capture to merge, or onto empty workspace to start a folder. Folders need two captures to appear in the gallery.',
+    miscEmpty: 'No unfiled captures',
+    miscCountLabel: 'Unfiled',
+    merge: 'Merge',
+    mergePickHint: 'Pick another Misc capture to form a folder',
+    addToFolder: 'Add to folder…',
+    folderNamePlaceholder: 'Folder name',
+    folderNameRequired: 'Enter a folder name first',
+    folderUntitled: 'Capture folder',
+    dragMergeMiscTitle: 'Name the new folder',
+    dragMergeMiscHint:
+      'These two Misc captures will form a folder. You can keep their current titles.',
+    dragNewFolderTitle: 'Create folder',
+    dragNewFolderHint:
+      'The folder stays in Misc until a second capture joins it.',
+    dragMergeFoldersTitle: 'Merge folders',
+    dragMergeFoldersHint:
+      'All captures move into one folder. Pick a name to keep or type a new one.',
+    dragKeepName: 'Keep “{name}”',
+    dragUseName: 'Use “{name}”',
+    dragKeepTitles: 'Keep original capture titles',
+    dragSingletonHint:
+      'Folder created. Add another capture for it to appear in the workspace gallery.',
+    dragEmptyHint: 'Drop a Misc capture here to create a folder.',
     running: '{count} running',
     activityWorking: 'Working',
     activityWorkingCount: '{count} working',
@@ -241,7 +281,20 @@ const en = {
     untitledTab: 'New Tab',
     homeTab: 'New Tab',
     emptyTitle: 'Browser',
-    emptyDesc: 'Enter a localhost URL above, or click + in the tab bar to open a new tab.',
+    emptyDesc: 'Enter a localhost URL above, or open a new page from the Browser sidebar.',
+    htmlDocUntitled: 'Untitled document',
+    sidebar: {
+      title: 'Browser',
+      pages: 'Pages',
+      docs: 'HTML Docs',
+      pagesList: 'Browser pages',
+      docsList: 'HTML documents',
+      docsEmptyTitle: 'HTML documents',
+      docsEmpty:
+        'Agent-generated HTML docs appear here. Create one to preview rich documents instead of Markdown.',
+      newDoc: 'New HTML doc',
+      closeDoc: 'Close document',
+    },
   },
   designPreview: {
     eyebrow: 'Visual workspace',
@@ -1182,6 +1235,24 @@ const en = {
         'Install writes SKILL.md (and companion files) under .projectos/skills/<id>/.',
       detailSkillStepInvoke:
         'The agent can load the skill when a task matches its description; it does not switch chat modes automatically.',
+      gitUrlPlaceholder: 'Paste a GitHub or git URL to install…',
+      gitUrlInstall: 'Install from URL',
+      gitUrlInstalling: 'Installing…',
+      gitUrlConfirm:
+        'Install this untrusted community {kind} from the URL?\n\n{url}\n\nIt will be installed as community-tier (MCP stays disabled until you enable it).',
+      gitUrlKindMcp: 'MCP server',
+      gitUrlKindSkill: 'skill',
+      gitUrlConflictConfirm:
+        '“{name}” is already installed. Replace it with the version from this URL?',
+      gitUrlFailed: 'Automatic install failed: {message}',
+      gitUrlAgentFallbackConfirm:
+        'Hand this URL to the chat agent to finish installing?',
+      gitUrlAgentPromptMcp:
+        'The marketplace automatic installer could not install this MCP from the git URL below.\n\nURL: {url}\nError: {message}\n\nPlease inspect the repository, figure out the correct MCP launch config (stdio npx/command or http URL), and install it into this project’s MCP settings as a disabled community server. Do not enable tools in permissions.json unless I ask.',
+      gitUrlAgentPromptSkill:
+        'The marketplace automatic installer could not install this skill from the git URL below.\n\nURL: {url}\nError: {message}\n\nPlease fetch the repository, locate SKILL.md (and companion files), and install it under .projectos/skills/<id>/ for this project. Ask me before overwriting an existing skill with the same id.',
+      gitUrlEmpty: 'Paste a GitHub or git URL first.',
+      gitUrlSuccess: 'Installed from git URL.',
     },
     sessionGraph: {
       title: 'Session graph',
@@ -1202,6 +1273,7 @@ const en = {
       removeFolder: 'Remove folder',
       graphCount: '{count} sessions',
       miscDropHint: 'Drop here to move into Misc',
+      miscMore: '+{count}',
       inherited: 'Inherited context',
       decisions: 'Decided',
       openQuestions: 'Open',
@@ -1736,6 +1808,7 @@ const en = {
     directoryLoading: 'Reading folder…',
     directoryError: 'Could not read this folder.',
     folderEmpty: 'Empty folder',
+    unavailableForTab: 'The file tree is available in Code / Diff.',
   },
   outline: {
     title: 'Outline',
@@ -1814,15 +1887,20 @@ const en = {
     exportFailed: 'Export failed',
     c4Detail: {
       title: 'Architecture node details',
+      emptySelection: 'Select a node on the Function Map to inspect its details here.',
+      emptyGraph: 'Open a project with a Function Map to see node details.',
       close: 'Close details',
       tabsLabel: 'Node detail sections',
       tabs: {
+        inspect: 'Inspect',
+        live: 'Live',
         overview: 'Overview',
         diff: 'Diff',
         activity: 'Activity',
         relations: 'Relations',
         controls: 'Controls',
       },
+      controlsLabel: 'Node actions',
       description: 'Description',
       descriptionEmpty:
         'No description yet. Open a code-layer file node to generate OS-level understanding.',

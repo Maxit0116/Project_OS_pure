@@ -1072,8 +1072,11 @@ export interface ListedGitCommitSet {
 }
 
 /**
- * Tip-first commit ancestry via `git rev-list --parents`.
+ * Tip-first commit ancestry via a single `git log` (parents + metadata).
  * Parents are authoritative git metadata — never invented.
+ *
+ * Uses one spawnSync instead of N× `git show` so Electron's main process
+ * stays responsive while GitHub Graph loads.
  */
 export function listGitCommits(
   workspaceRoot: string,
@@ -1095,52 +1098,37 @@ export function listGitCommits(
     options.tips && options.tips.length > 0
       ? options.tips.map((tip) => tip.trim()).filter(Boolean)
       : [status.branch || "HEAD"];
+  // Field sep \x1f / record sep \x1e — one process for sha, parents, author, date, body.
   // Fetch one extra row to detect truncation.
   const result = tryGit(workspaceRoot, [
-    "rev-list",
+    "log",
     `--max-count=${limit + 1}`,
-    "--parents",
+    "--pretty=format:%H%x1f%P%x1f%an%x1f%aI%x1f%B%x1e",
     ...tips,
   ]);
   if (!result.ok) {
     return { commits: [], truncated: false, tips };
   }
-  const lines = result.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const truncated = lines.length > limit;
-  const shaRows = (truncated ? lines.slice(0, limit) : lines).map((line) => {
-    const parts = line.split(/\s+/u).filter(Boolean);
-    const sha = parts[0] ?? "";
-    const parentShas = parts.slice(1);
-    return { sha, parentShas };
-  });
-
+  const records = result.stdout
+    .split("\x1e")
+    .map((record) => record.replace(/^\n/u, "").replace(/\n$/u, ""))
+    .filter((record) => record.length > 0);
+  const truncated = records.length > limit;
   const commits: ListedGitCommit[] = [];
-  for (const row of shaRows) {
-    if (!row.sha) continue;
-    const meta = tryGit(workspaceRoot, [
-      "show",
-      "-s",
-      "--format=%an%n%aI%n%B",
-      row.sha,
-    ]);
-    if (!meta.ok) {
-      commits.push({
-        sha: row.sha,
-        parentShas: row.parentShas,
-        message: "(unavailable)",
-      });
-      continue;
-    }
-    const metaLines = meta.stdout.replace(/\n$/u, "").split("\n");
-    const authorName = metaLines[0]?.trim() || undefined;
-    const authoredAt = metaLines[1]?.trim() || undefined;
-    const message = metaLines.slice(2).join("\n").trim() || "(empty)";
+  for (const record of truncated ? records.slice(0, limit) : records) {
+    const fields = record.split("\x1f");
+    const sha = fields[0]?.trim() ?? "";
+    if (!sha) continue;
+    const parentShas = (fields[1] ?? "")
+      .trim()
+      .split(/\s+/u)
+      .filter(Boolean);
+    const authorName = fields[2]?.trim() || undefined;
+    const authoredAt = fields[3]?.trim() || undefined;
+    const message = fields.slice(4).join("\x1f").trim() || "(empty)";
     commits.push({
-      sha: row.sha,
-      parentShas: row.parentShas,
+      sha,
+      parentShas,
       message,
       ...(authorName ? { authorName } : {}),
       ...(authoredAt ? { authoredAt } : {}),

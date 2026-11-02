@@ -89,6 +89,11 @@ export function placeSatellitePicker(input: {
   obstacles?: readonly PickerRect[]
   /** Prefer this side first (e.g. left-stack satellites → 'right'). */
   preferredSide?: PickerSide
+  /**
+   * Restrict candidate sides (e.g. Chat Stage Dock → left/right only,
+   * matching Reference side panels and avoiding a far “above” fallback).
+   */
+  allowedSides?: readonly PickerSide[]
   pickerSize?: { width: number; height: number }
   viewport?: { width: number; height: number }
   gap?: number
@@ -105,12 +110,11 @@ export function placeSatellitePicker(input: {
   // Avoid covering the anchor card itself after viewport clamping.
   const obstacles = [...(input.obstacles ?? []), input.anchor]
   const preferred = input.preferredSide ?? 'right'
+  const allowed = input.allowedSides ?? (['right', 'left', 'below', 'above'] as const)
   const order: PickerSide[] = [
     preferred,
-    ...(['right', 'left', 'below', 'above'] as const).filter(
-      (side) => side !== preferred,
-    ),
-  ]
+    ...allowed.filter((side) => side !== preferred),
+  ].filter((side, index, all) => allowed.includes(side) && all.indexOf(side) === index)
 
   let best: { x: number; y: number; side: PickerSide; score: number } | null =
     null

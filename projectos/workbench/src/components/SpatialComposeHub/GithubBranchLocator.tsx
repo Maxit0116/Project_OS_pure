@@ -109,17 +109,24 @@ export default function GithubBranchLocator({
 
   if (!open) return null
 
-  const left =
-    anchorRect.side === 'left'
-      ? Math.max(8, anchorRect.x - 8)
-      : Math.max(8, anchorRect.x + anchorRect.width + 8)
+  // Side-dock beside the GitHub card (same placement as ReferenceAddPanel).
+  const PANEL_WIDTH = 320
+  const GAP = 12
+  const preferRight = anchorRect.x + anchorRect.width + GAP
+  const viewportWidth =
+    typeof window !== 'undefined' ? window.innerWidth : preferRight + PANEL_WIDTH
+  const fitsRight = preferRight + PANEL_WIDTH <= viewportWidth - 8
+  const left = fitsRight
+    ? preferRight
+    : Math.max(8, anchorRect.x - GAP - PANEL_WIDTH)
+  const top = Math.max(8, anchorRect.y)
 
   return (
     <div
       className={styles.panel}
       style={{
         left,
-        top: Math.max(8, anchorRect.y),
+        top,
       }}
       role="dialog"
       aria-label={strings.repoLocate}

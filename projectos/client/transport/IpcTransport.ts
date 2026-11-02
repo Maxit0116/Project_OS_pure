@@ -1030,6 +1030,13 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("reportSkillCatalogListing", projectId, input);
   }
 
+  installFromGitUrl(
+    projectId: string,
+    input: import("../../contracts/marketplace-git-install.js").InstallFromGitUrlInput,
+  ): Promise<import("../../contracts/marketplace-git-install.js").InstallFromGitUrlResult> {
+    return this.invoke("installFromGitUrl", projectId, input);
+  }
+
   setSecret(ref: string, value: string): Promise<void> {
     return this.invoke("setSecret", ref, value);
   }
@@ -1155,6 +1162,83 @@ export class IpcTransport implements ApiTransport {
     sessionId: string,
   ): Promise<boolean> {
     return this.invoke("deleteSpatialCaptureSession", projectId, sessionId);
+  }
+
+  listSpatialCaptureFolders(
+    projectId: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder[]
+  > {
+    return this.invoke("listSpatialCaptureFolders", projectId);
+  }
+
+  placeSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+    placement: import("../../contracts/spatial-capture-session.js").SpatialCapturePlacement,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureSession
+  > {
+    return this.invoke(
+      "placeSpatialCaptureSession",
+      projectId,
+      sessionId,
+      placement,
+    );
+  }
+
+  renameSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    name: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    return this.invoke(
+      "renameSpatialCaptureFolder",
+      projectId,
+      folderId,
+      name,
+    );
+  }
+
+  deleteSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    options: import("../../contracts/spatial-capture-session.js").DeleteSpatialCaptureFolderOptions = {
+      cascade: false,
+    },
+  ): Promise<boolean> {
+    return this.invoke(
+      "deleteSpatialCaptureFolder",
+      projectId,
+      folderId,
+      options,
+    );
+  }
+
+  mergeSpatialCaptureFolders(
+    projectId: string,
+    sourceFolderId: string,
+    targetFolderId: string,
+    options: import("../../contracts/spatial-capture-session.js").MergeSpatialCaptureFoldersOptions = {},
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    return this.invoke(
+      "mergeSpatialCaptureFolders",
+      projectId,
+      sourceFolderId,
+      targetFolderId,
+      options,
+    );
+  }
+
+  suggestCaptureVersionTitle(
+    projectId: string,
+    target: { folderId: string } | { folderName: string },
+  ): Promise<string> {
+    return this.invoke("suggestCaptureVersionTitle", projectId, target);
   }
 
   saveSpatialCaptureBackdrop(

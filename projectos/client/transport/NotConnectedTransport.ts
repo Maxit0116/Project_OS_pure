@@ -872,6 +872,13 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async installFromGitUrl(
+    _projectId: string,
+    _input: import("../../contracts/marketplace-git-install.js").InstallFromGitUrlInput,
+  ): Promise<import("../../contracts/marketplace-git-install.js").InstallFromGitUrlResult> {
+    return transportNotConnected();
+  }
+
   async setSecret(_ref: string, _value: string): Promise<void> {
     return transportNotConnected();
   }
@@ -1002,6 +1009,60 @@ export class NotConnectedTransport implements ProjectOSApi {
     _projectId: string,
     _sessionId: string,
   ): Promise<boolean> {
+    return transportNotConnected();
+  }
+
+  async listSpatialCaptureFolders(
+    _projectId: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder[]
+  > {
+    return transportNotConnected();
+  }
+
+  async placeSpatialCaptureSession(
+    _projectId: string,
+    _sessionId: string,
+    _placement: import("../../contracts/spatial-capture-session.js").SpatialCapturePlacement,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureSession
+  > {
+    return transportNotConnected();
+  }
+
+  async renameSpatialCaptureFolder(
+    _projectId: string,
+    _folderId: string,
+    _name: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    return transportNotConnected();
+  }
+
+  async deleteSpatialCaptureFolder(
+    _projectId: string,
+    _folderId: string,
+    _options?: import("../../contracts/spatial-capture-session.js").DeleteSpatialCaptureFolderOptions,
+  ): Promise<boolean> {
+    return transportNotConnected();
+  }
+
+  async mergeSpatialCaptureFolders(
+    _projectId: string,
+    _sourceFolderId: string,
+    _targetFolderId: string,
+    _options?: import("../../contracts/spatial-capture-session.js").MergeSpatialCaptureFoldersOptions,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    return transportNotConnected();
+  }
+
+  async suggestCaptureVersionTitle(
+    _projectId: string,
+    _target: { folderId: string } | { folderName: string },
+  ): Promise<string> {
     return transportNotConnected();
   }
 

@@ -62,11 +62,12 @@
   overflow: visible;
 }
 
-/* Zero-size anchor at the sidebar’s left edge — used for fixed-position sync. */
+/* Zero-size anchor at the sidebar’s right edge — used for fixed-position sync. */
 .navRailHost {
   position: absolute;
   top: 0;
-  left: 0;
+  right: 0;
+  left: auto;
   width: 0;
   height: 100%;
   z-index: 30;

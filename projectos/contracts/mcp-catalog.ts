@@ -59,7 +59,10 @@ export const McpServerProvenanceSchema = z
     trustTier: McpTrustTierSchema,
     listingVersion: z.string().min(1).max(64),
     installedAt: z.string().min(1).max(64),
-    source: z.enum(["catalog", "manual"]).default("catalog"),
+    source: z.enum(["catalog", "manual", "git-url"]).default("catalog"),
+    /** Present when source is git-url. */
+    gitUrl: z.string().url().max(2_048).optional(),
+    gitCommit: z.string().min(1).max(64).optional(),
   })
   .strict();
 

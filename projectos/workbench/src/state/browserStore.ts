@@ -33,14 +33,34 @@ export interface BrowserTab {
   canGoForward: boolean
 }
 
+/** Agent-generated (or user-created) HTML document shown in the Browser Docs rail. */
+export interface BrowserHtmlDoc {
+  id: string
+  title: string
+  html: string
+  createdAt: string
+  updatedAt: string
+  /** Optional source hint — e.g. session / agent run id. */
+  source?: string
+}
+
+export type BrowserSidebarMode = 'pages' | 'docs'
+
 interface BrowserStore {
   tabs: BrowserTab[]
   activeTabId: string
   inputUrl: string
   controller: BrowserWebviewController | null
 
-  getActiveTab: () => BrowserTab | undefined
+  /** Left-rail mode: URL tabs vs HTML docs. */
+  sidebarMode: BrowserSidebarMode
+  htmlDocs: BrowserHtmlDoc[]
+  activeHtmlDocId: string | null
 
+  getActiveTab: () => BrowserTab | undefined
+  getActiveHtmlDoc: () => BrowserHtmlDoc | undefined
+
+  setSidebarMode: (mode: BrowserSidebarMode) => void
   setInputUrl: (value: string) => void
   registerController: (controller: BrowserWebviewController | null) => void
   navigate: (rawUrl?: string) => boolean
@@ -60,10 +80,24 @@ interface BrowserStore {
   reorderTab: (tabId: string, toIndex: number) => void
   openOrSwitchTab: (url: string) => void
   setTabTitle: (tabId: string, title: string) => void
+
+  createHtmlDoc: (input?: { title?: string; html?: string; source?: string }) => string
+  upsertHtmlDoc: (input: {
+    id?: string
+    title: string
+    html: string
+    source?: string
+  }) => string
+  closeHtmlDoc: (docId: string) => void
+  switchHtmlDoc: (docId: string) => void
 }
 
 const initialUrl = loadPersistedBrowserUrl()
 const initialHomeTab = createHomeBrowserTab()
+
+function newHtmlDocId(): string {
+  return `htmldoc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+}
 
 function tabInputUrl(tab: BrowserTab | undefined, tabs: BrowserTab[]): string {
   if (!tab) return ''
@@ -79,11 +113,22 @@ export const useBrowserStore = create<BrowserStore>((set, get) => ({
   activeTabId: initialHomeTab.id,
   inputUrl: tabInputUrl(initialHomeTab, [initialHomeTab]),
   controller: null,
+  sidebarMode: 'pages',
+  htmlDocs: [],
+  activeHtmlDocId: null,
 
   getActiveTab: () => {
     const { tabs, activeTabId } = get()
     return tabs.find((t) => t.id === activeTabId)
   },
+
+  getActiveHtmlDoc: () => {
+    const { htmlDocs, activeHtmlDocId } = get()
+    if (!activeHtmlDocId) return undefined
+    return htmlDocs.find((doc) => doc.id === activeHtmlDocId)
+  },
+
+  setSidebarMode: (mode) => set({ sidebarMode: mode }),
 
   setInputUrl: (value) => set({ inputUrl: value }),
 
@@ -331,6 +376,85 @@ export const useBrowserStore = create<BrowserStore>((set, get) => ({
         t.id === tabId && !t.isHome ? { ...t, title } : t,
       ),
     }))
+  },
+
+  createHtmlDoc: (input) => {
+    const now = new Date().toISOString()
+    const locale = useWorkbenchStore.getState().locale
+    const doc: BrowserHtmlDoc = {
+      id: newHtmlDocId(),
+      title: input?.title?.trim() || getStoreMessage(locale, 'browser.htmlDocUntitled'),
+      html:
+        input?.html ??
+        `<!doctype html><html><head><meta charset="utf-8"><title>${
+          input?.title?.trim() || 'Document'
+        }</title></head><body><article><h1>${
+          input?.title?.trim() || 'Document'
+        }</h1><p></p></article></body></html>`,
+      createdAt: now,
+      updatedAt: now,
+      ...(input?.source ? { source: input.source } : {}),
+    }
+    set((state) => ({
+      htmlDocs: [...state.htmlDocs, doc],
+      activeHtmlDocId: doc.id,
+      sidebarMode: 'docs',
+    }))
+    return doc.id
+  },
+
+  upsertHtmlDoc: (input) => {
+    const now = new Date().toISOString()
+    const existingId = input.id
+    const existing = existingId
+      ? get().htmlDocs.find((doc) => doc.id === existingId)
+      : undefined
+
+    if (existing) {
+      set((state) => ({
+        htmlDocs: state.htmlDocs.map((doc) =>
+          doc.id === existing.id
+            ? {
+                ...doc,
+                title: input.title.trim() || doc.title,
+                html: input.html,
+                updatedAt: now,
+                ...(input.source !== undefined ? { source: input.source } : {}),
+              }
+            : doc,
+        ),
+        activeHtmlDocId: existing.id,
+        sidebarMode: 'docs',
+      }))
+      return existing.id
+    }
+
+    return get().createHtmlDoc({
+      title: input.title,
+      html: input.html,
+      source: input.source,
+    })
+  },
+
+  closeHtmlDoc: (docId) => {
+    const { htmlDocs, activeHtmlDocId } = get()
+    const idx = htmlDocs.findIndex((doc) => doc.id === docId)
+    if (idx < 0) return
+    const nextDocs = htmlDocs.filter((doc) => doc.id !== docId)
+    let nextActive = activeHtmlDocId
+    if (activeHtmlDocId === docId) {
+      nextActive =
+        nextDocs.length === 0
+          ? null
+          : nextDocs[Math.min(idx, nextDocs.length - 1)]?.id ?? null
+    }
+    set({ htmlDocs: nextDocs, activeHtmlDocId: nextActive })
+  },
+
+  switchHtmlDoc: (docId) => {
+    const doc = get().htmlDocs.find((item) => item.id === docId)
+    if (!doc) return
+    set({ activeHtmlDocId: docId, sidebarMode: 'docs' })
   },
 }))
 

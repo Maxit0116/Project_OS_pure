@@ -20,9 +20,9 @@ export const NAV_SCRUB_BURST_DELTA_PX = 28
 export const NAV_SCRUB_IDLE_MS = 900
 /** Suppress scrub-reveal after programmatic jump scrolls. */
 export const NAV_SCRUB_SUPPRESS_MS = 500
-/** Fixed stack width (px) — used to place the rail fully outside the sidebar. */
+/** Fixed stack width (px) — used to place the rail on the chat sidebar edge. */
 export const NAV_RAIL_WIDTH_PX = 40
-/** Gap (px) between the stack’s right edge and the sidebar’s left edge. */
+/** Gap (px) between the stack’s right edge and the sidebar’s left edge (legacy left exterior). */
 export const NAV_RAIL_OUTSIDE_GAP_PX = 10
 
 /** Viewport `left` for a fixed rail whose right edge sits `gap` px left of `panelLeft`. */
@@ -32,6 +32,17 @@ export function navRailViewportLeft(
   gapPx = NAV_RAIL_OUTSIDE_GAP_PX,
 ): number {
   return panelLeft - gapPx - widthPx
+}
+
+/**
+ * Viewport `left` for a fixed rail flush with the chat sidebar’s right edge
+ * (replaces the former tools edge-rail slot).
+ */
+export function navRailViewportRightEdge(
+  panelRight: number,
+  widthPx = NAV_RAIL_WIDTH_PX,
+): number {
+  return panelRight - widthPx
 }
 
 export interface ScrollSample {

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -68,6 +69,7 @@ import {
   SESSION_NODE_PREVIEW_WIDTH,
   resolveSessionNodePreviewPosition,
 } from './sessionNodePreview'
+import { computeMiscFitCount } from './miscFitCount'
 import WorkingSessionRail from './WorkingSessionRail'
 import styles from './SessionGraphOverlay.module.css'
 
@@ -570,6 +572,8 @@ export default function SessionGraphOverlay() {
           items={model.misc}
           activeSessionId={activeSessionId}
           dropActive={sessionDrag?.target?.kind === 'misc'}
+          dragActive={Boolean(sessionDrag)}
+          dragFromMisc={sessionDrag?.source === 'misc'}
           onOpen={(sessionId) => void switchSession(sessionId)}
           onPromote={(sessionId) => {
             void placeSessionOnGraph(
@@ -800,10 +804,21 @@ function SessionNode({
   )
 }
 
+/** Match WorkingSessionRail Stage Manager hover cadence. */
+const MISC_EXPAND_DELAY_MS = 350
+const MISC_COLLAPSE_DELAY_MS = 180
+const MISC_COLLAPSED_HEIGHT_PX = 44
+const MISC_CHIP_ROW_PX = 32
+const MISC_ROW_GAP_PX = 6
+const MISC_PANEL_PAD_Y_PX = 8
+const MISC_LIST_MAX_HEIGHT_PX = 5 * MISC_CHIP_ROW_PX + 4 * MISC_ROW_GAP_PX
+
 function MiscTray({
   items,
   activeSessionId,
   dropActive,
+  dragActive,
+  dragFromMisc,
   onOpen,
   onPromote,
   onPointerDown,
@@ -813,6 +828,8 @@ function MiscTray({
   items: ChatSessionHead[]
   activeSessionId: string | null
   dropActive: boolean
+  dragActive: boolean
+  dragFromMisc: boolean
   onOpen: (sessionId: string) => void
   onPromote: (sessionId: string) => void
   onPointerDown: (
@@ -824,44 +841,259 @@ function MiscTray({
   onPointerUp: (event: ReactPointerEvent) => void
 }) {
   const { ts } = useI18n()
+  const canExpand = items.length > 0
+  const [expanded, setExpanded] = useState(false)
+  const [pointerInside, setPointerInside] = useState(false)
+  const [fitCount, setFitCount] = useState(items.length)
+  /** Clip overflow chips only after collapse height finishes — keeps exit as smooth as the rail. */
+  const [clipOverflow, setClipOverflow] = useState(true)
+  const [panelHeight, setPanelHeight] = useState(MISC_COLLAPSED_HEIGHT_PX)
+  const expandTimerRef = useRef<number | null>(null)
+  const collapseTimerRef = useRef<number | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const measureRef = useRef<HTMLDivElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+
+  const showFlyout = expanded && canExpand
+
+  const clearExpandTimer = useCallback(() => {
+    if (expandTimerRef.current != null) {
+      window.clearTimeout(expandTimerRef.current)
+      expandTimerRef.current = null
+    }
+  }, [])
+
+  const clearCollapseTimer = useCallback(() => {
+    if (collapseTimerRef.current != null) {
+      window.clearTimeout(collapseTimerRef.current)
+      collapseTimerRef.current = null
+    }
+  }, [])
+
+  const requestExpand = useCallback(() => {
+    if (!canExpand) return
+    clearCollapseTimer()
+    if (expanded) return
+    clearExpandTimer()
+    expandTimerRef.current = window.setTimeout(() => {
+      expandTimerRef.current = null
+      setClipOverflow(false)
+      setExpanded(true)
+    }, MISC_EXPAND_DELAY_MS)
+  }, [canExpand, clearCollapseTimer, clearExpandTimer, expanded])
+
+  const requestCollapse = useCallback(() => {
+    if (dragActive) return
+    clearExpandTimer()
+    clearCollapseTimer()
+    collapseTimerRef.current = window.setTimeout(() => {
+      collapseTimerRef.current = null
+      setExpanded(false)
+    }, MISC_COLLAPSE_DELAY_MS)
+  }, [clearCollapseTimer, clearExpandTimer, dragActive])
+
+  useEffect(() => {
+    if (!canExpand) {
+      clearExpandTimer()
+      clearCollapseTimer()
+      setExpanded(false)
+      setClipOverflow(true)
+      setPanelHeight(MISC_COLLAPSED_HEIGHT_PX)
+      return
+    }
+    if (dragActive && (dragFromMisc || dropActive || expanded)) {
+      clearExpandTimer()
+      clearCollapseTimer()
+      setClipOverflow(false)
+      setExpanded(true)
+      return
+    }
+    if (!dragActive && !pointerInside && expanded) {
+      requestCollapse()
+    }
+  }, [
+    canExpand,
+    clearCollapseTimer,
+    clearExpandTimer,
+    dragActive,
+    dragFromMisc,
+    dropActive,
+    expanded,
+    pointerInside,
+    requestCollapse,
+  ])
+
+  useEffect(() => {
+    return () => {
+      clearExpandTimer()
+      clearCollapseTimer()
+    }
+  }, [clearCollapseTimer, clearExpandTimer])
+
+  useLayoutEffect(() => {
+    if (showFlyout) {
+      const list = listRef.current
+      if (!list) return
+      const listHeight = Math.min(list.scrollHeight, MISC_LIST_MAX_HEIGHT_PX)
+      const next = Math.max(
+        MISC_COLLAPSED_HEIGHT_PX,
+        MISC_PANEL_PAD_Y_PX * 2 + listHeight,
+      )
+      setPanelHeight(next)
+      return
+    }
+    setPanelHeight(MISC_COLLAPSED_HEIGHT_PX)
+  }, [showFlyout, items])
+
+  // If height transition is skipped (reduced motion) or transitionend is missed, still clip.
+  useEffect(() => {
+    if (showFlyout || clipOverflow) return undefined
+    const reduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduced) {
+      setClipOverflow(true)
+      return undefined
+    }
+    const timer = window.setTimeout(() => setClipOverflow(true), 220)
+    return () => window.clearTimeout(timer)
+  }, [showFlyout, clipOverflow])
+
+  useLayoutEffect(() => {
+    if (showFlyout || items.length === 0) {
+      setFitCount(items.length)
+      return
+    }
+    const list = listRef.current
+    const measure = measureRef.current
+    if (!list || !measure) return
+
+    const update = () => {
+      const available = list.clientWidth
+      const chipEls = measure.querySelectorAll<HTMLElement>('[data-misc-measure-chip]')
+      const moreEl = measure.querySelector<HTMLElement>('[data-misc-measure-more]')
+      const chipWidths = Array.from(chipEls).map((el) => el.getBoundingClientRect().width)
+      const moreWidth = moreEl?.getBoundingClientRect().width ?? 36
+      setFitCount(computeMiscFitCount(chipWidths, moreWidth, available))
+    }
+
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [showFlyout, items, clipOverflow])
+
+  const hiddenCount = clipOverflow ? Math.max(0, items.length - fitCount) : 0
+
   return (
     <div
-      className={`${styles.misc} ${dropActive ? styles.miscDropTarget : ''}`}
-      data-session-graph-drop="misc"
+      className={styles.miscRoot}
+      onPointerEnter={() => {
+        setPointerInside(true)
+        requestExpand()
+      }}
+      onPointerLeave={() => {
+        setPointerInside(false)
+        requestCollapse()
+      }}
+      onFocusCapture={() => {
+        if (canExpand) requestExpand()
+      }}
+      onBlurCapture={(event) => {
+        const next = event.relatedTarget as Node | null
+        if (next && event.currentTarget.contains(next)) return
+        setPointerInside(false)
+        requestCollapse()
+      }}
     >
-      <span className={styles.miscLabel}>{ts('chat.sessionGraph.misc')}</span>
-      <div className={styles.miscList}>
-        {items.length === 0 ? (
-          <span className={styles.miscHint}>{ts('chat.sessionGraph.miscDropHint')}</span>
-        ) : (
-          items.map((item) => {
-            const title = item.title.trim() || ts('chat.history.untitled')
-            return (
-              <div
-                key={item.id}
-                className={`${styles.miscChip} ${item.id === activeSessionId ? styles.miscChipActive : ''}`}
-                onPointerDown={(event) => onPointerDown(event, item.id, title)}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerCancel={onPointerUp}
+      <div className={styles.miscSpacer} aria-hidden />
+
+      <div
+        ref={panelRef}
+        className={`${styles.miscPanel} ${showFlyout ? styles.miscPanelExpanded : ''} ${
+          dropActive ? styles.miscDropTarget : ''
+        }`}
+        style={{ height: panelHeight }}
+        data-session-graph-drop="misc"
+        aria-expanded={showFlyout}
+        role="region"
+        aria-label={ts('chat.sessionGraph.misc')}
+        onTransitionEnd={(event) => {
+          if (event.propertyName !== 'height') return
+          if (event.target !== panelRef.current) return
+          if (!showFlyout) setClipOverflow(true)
+        }}
+      >
+        <span className={styles.miscLabel}>{ts('chat.sessionGraph.misc')}</span>
+        <div className={styles.miscList} ref={listRef}>
+          {items.length === 0 ? (
+            <span className={styles.miscHint}>{ts('chat.sessionGraph.miscDropHint')}</span>
+          ) : (
+            <>
+              {items.map((item, index) => {
+                const title = item.title.trim() || ts('chat.history.untitled')
+                const overflow = clipOverflow && index >= fitCount
+                return (
+                  <div
+                    key={item.id}
+                    className={`${styles.miscChip} ${
+                      item.id === activeSessionId ? styles.miscChipActive : ''
+                    } ${overflow ? styles.miscChipOverflow : ''}`}
+                    onPointerDown={(event) => onPointerDown(event, item.id, title)}
+                    onPointerMove={onPointerMove}
+                    onPointerUp={onPointerUp}
+                    onPointerCancel={onPointerUp}
+                  >
+                    <button
+                      type="button"
+                      className={styles.miscTitle}
+                      onClick={() => onOpen(item.id)}
+                      tabIndex={overflow ? -1 : undefined}
+                    >
+                      {title}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.miscButton}
+                      data-session-drag-ignore=""
+                      aria-label={ts('chat.sessionGraph.moveToGraph')}
+                      title={ts('chat.sessionGraph.moveToGraph')}
+                      tabIndex={overflow ? -1 : undefined}
+                      onClick={() => onPromote(item.id)}
+                    >
+                      +
+                    </button>
+                  </div>
+                )
+              })}
+              <span
+                className={`${styles.miscMore} ${hiddenCount > 0 ? '' : styles.miscMoreHidden}`}
+                aria-hidden
               >
-                <button type="button" className={styles.miscTitle} onClick={() => onOpen(item.id)}>
-                  {title}
-                </button>
-                <button
-                  type="button"
-                  className={styles.miscButton}
-                  data-session-drag-ignore=""
-                  aria-label={ts('chat.sessionGraph.moveToGraph')}
-                  title={ts('chat.sessionGraph.moveToGraph')}
-                  onClick={() => onPromote(item.id)}
-                >
-                  +
-                </button>
-              </div>
-            )
-          })
-        )}
+                {ts('chat.sessionGraph.miscMore', {
+                  count: hiddenCount > 0 ? hiddenCount : 0,
+                })}
+              </span>
+            </>
+          )}
+        </div>
+
+        {items.length > 0 && clipOverflow ? (
+          <div className={styles.miscMeasure} ref={measureRef} aria-hidden>
+            {items.map((item) => {
+              const title = item.title.trim() || ts('chat.history.untitled')
+              return (
+                <div key={item.id} className={styles.miscChip} data-misc-measure-chip="">
+                  <span className={styles.miscTitle}>{title}</span>
+                  <span className={styles.miscButton}>+</span>
+                </div>
+              )
+            })}
+            <span className={styles.miscMore} data-misc-measure-more="">
+              {ts('chat.sessionGraph.miscMore', { count: 99 })}
+            </span>
+          </div>
+        ) : null}
       </div>
     </div>
   )

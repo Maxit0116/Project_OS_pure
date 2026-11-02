@@ -1,13 +1,15 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import ChatToolsEdgeRail from './ChatToolsEdgeRail'
+import WorkbenchStageRail from './WorkbenchStageRail'
 
-describe('ChatToolsEdgeRail', () => {
-  it('renders a collapsed right-edge host with the chat tool toolbar', () => {
-    const html = renderToStaticMarkup(<ChatToolsEdgeRail />)
-    expect(html).toContain('data-chat-tools-edge-rail')
+describe('WorkbenchStageRail', () => {
+  it('renders a collapsed horizontal stage toolbar with views and graphs', () => {
+    const html = renderToStaticMarkup(<WorkbenchStageRail />)
+    expect(html).toContain('data-workbench-stage-rail')
     expect(html).toContain('data-revealed="false"')
     expect(html).toContain('role="toolbar"')
+    expect(html).toContain('role="separator"')
+    expect(html).toContain('aria-label="功能地图"')
     expect(html).toContain('aria-label="会话图"')
     expect(html).toContain('aria-label="Loop 图"')
     expect(html).toContain('aria-label="GitHub 图"')
@@ -15,6 +17,6 @@ describe('ChatToolsEdgeRail', () => {
     expect(html).toContain('aria-label="扩展市场"')
     expect(html).toContain('data-chat-tool="marketplace"')
     expect(html).toContain('aria-label="Agent 流程"')
-    expect(html).toContain('aria-label="聊天记录"')
+    expect(html).not.toContain('aria-label="聊天记录"')
   })
 })

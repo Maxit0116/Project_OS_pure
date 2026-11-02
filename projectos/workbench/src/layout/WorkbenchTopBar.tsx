@@ -1,8 +1,6 @@
-import { isDesktopApp, isMacElectronShell } from '../data/clientMode'
+import { isMacElectronShell } from '../data/clientMode'
 import { useWorkbenchStore } from '../state/workbenchStore'
 import { useI18n } from '../i18n'
-import TabBar from '../components/ui/TabBar'
-import FunctionMapToolbar from '../components/FunctionMap/FunctionMapToolbar'
 import FunctionMapLevelNavigator from '../components/FunctionMap/FunctionMapLevelNavigator'
 import WorkbenchChromeActions from './WorkbenchChromeActions'
 import styles from './AppShell.module.css'
@@ -19,8 +17,6 @@ export default function WorkbenchTopBar({
   const projectName = useWorkbenchStore((s) => s.project?.displayName)
   const graph = useWorkbenchStore((s) => s.graph)
   const centerTab = useWorkbenchStore((s) => s.centerTab)
-  const setCenterTab = useWorkbenchStore((s) => s.setCenterTab)
-  const diffReady = useWorkbenchStore((s) => s.diffReady)
   const selectedNodeId = useWorkbenchStore((s) => s.selectedNodeId)
   const selectedFilePath = useWorkbenchStore((s) => s.selectedFilePath)
   const globalAgentActive = useWorkbenchStore((s) => s.globalAgentActive)
@@ -31,19 +27,13 @@ export default function WorkbenchTopBar({
     : null
   const fileName = selectedFilePath?.split('/').pop()
 
-  const centerTabs = [
-    { id: 'function-map', label: ts('centerTabs.functionMap') },
-    { id: 'spatial-captures', label: ts('centerTabs.spatialCaptures') },
-    { id: 'code', label: ts('centerTabs.codeDiff'), dot: diffReady },
-    ...(isDesktopApp()
-      ? [
-          { id: 'browser', label: ts('centerTabs.browser') },
-        ]
-      : []),
-  ]
+  // Mac: level navigator + settings live on DesktopTitleBar; stage rail is separate.
+  if (isMacDesktop) {
+    return null
+  }
 
-  const showMapToolbar = centerTab === 'function-map' && !!graph
-  const showMapLevelNavigator = showMapToolbar && !isMacDesktop
+  const showMapLevelNavigator = centerTab === 'function-map' && !!graph
+  const showContext = globalAgentActive || projectName || nodeName || fileName
 
   return (
     <header className={`${styles.topBar} glass-slide-down`}>
@@ -52,26 +42,8 @@ export default function WorkbenchTopBar({
           <FunctionMapLevelNavigator />
         </div>
       )}
-      <div className={styles.topBarPrimary}>
-        <TabBar
-          tabs={centerTabs}
-          activeId={centerTab}
-          onChange={(id) => setCenterTab(id as typeof centerTab)}
-          size="sm"
-          chrome="nested"
-        />
 
-        {showMapToolbar && (
-          <>
-            <span className={styles.topBarDivider} aria-hidden />
-            <div className={styles.mapChrome}>
-              <FunctionMapToolbar variant="inline" />
-            </div>
-          </>
-        )}
-      </div>
-
-      {!isMacDesktop && (globalAgentActive || projectName || nodeName || fileName) && (
+      {showContext && (
         <div className={styles.topBarContextCentered}>
           {globalAgentActive && (
             <span className={styles.projectName}>{ts('context.scopeGlobal')}</span>
@@ -91,12 +63,9 @@ export default function WorkbenchTopBar({
 
       <div className={styles.spacer} />
 
-      {!isMacDesktop && (
-        <div className={styles.actions}>
-          <WorkbenchChromeActions onOpenSettings={onOpenSettings} />
-        </div>
-      )}
-
+      <div className={styles.actions}>
+        <WorkbenchChromeActions onOpenSettings={onOpenSettings} />
+      </div>
     </header>
   )
 }

@@ -16,6 +16,7 @@ import {
   NAV_SCRUB_BURST_DELTA_PX,
   NAV_SCRUB_VELOCITY_PX_PER_MS,
   navRailViewportLeft,
+  navRailViewportRightEdge,
   previewSourceForUserContent,
   resolveTurnStatus,
   shouldShowConversationNav,
@@ -193,6 +194,12 @@ describe('navRailViewportLeft', () => {
     expect(navRailViewportLeft(1000)).toBe(
       1000 - NAV_RAIL_OUTSIDE_GAP_PX - NAV_RAIL_WIDTH_PX,
     )
+  })
+})
+
+describe('navRailViewportRightEdge', () => {
+  it('places the rail flush with the sidebar right edge', () => {
+    expect(navRailViewportRightEdge(1000)).toBe(1000 - NAV_RAIL_WIDTH_PX)
   })
 })
 

@@ -836,6 +836,13 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.reportSkillCatalogListing(projectId, input);
   }
 
+  installFromGitUrl(
+    projectId: string,
+    input: import("../contracts/marketplace-git-install.js").InstallFromGitUrlInput,
+  ): Promise<import("../contracts/marketplace-git-install.js").InstallFromGitUrlResult> {
+    return this.transport.installFromGitUrl(projectId, input);
+  }
+
   setSecret(ref: string, value: string): Promise<void> {
     return this.transport.setSecret(ref, value);
   }
@@ -945,6 +952,69 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   deleteSpatialCaptureSession(projectId: string, sessionId: string) {
     return this.transport.deleteSpatialCaptureSession(projectId, sessionId);
+  }
+
+  listSpatialCaptureFolders(projectId: string) {
+    return this.transport.listSpatialCaptureFolders(projectId);
+  }
+
+  placeSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+    placement: import("../contracts/spatial-capture-session.js").SpatialCapturePlacement,
+  ) {
+    return this.transport.placeSpatialCaptureSession(
+      projectId,
+      sessionId,
+      placement,
+    );
+  }
+
+  renameSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    name: string,
+  ) {
+    return this.transport.renameSpatialCaptureFolder(
+      projectId,
+      folderId,
+      name,
+    );
+  }
+
+  deleteSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    options: import("../contracts/spatial-capture-session.js").DeleteSpatialCaptureFolderOptions = {
+      cascade: false,
+    },
+  ) {
+    return this.transport.deleteSpatialCaptureFolder(
+      projectId,
+      folderId,
+      options,
+    );
+  }
+
+  mergeSpatialCaptureFolders(
+    projectId: string,
+    sourceFolderId: string,
+    targetFolderId: string,
+    options: import("../contracts/spatial-capture-session.js").MergeSpatialCaptureFoldersOptions = {},
+  ) {
+    return this.transport.mergeSpatialCaptureFolders(
+      projectId,
+      sourceFolderId,
+      targetFolderId,
+      options,
+    );
+  }
+
+  suggestCaptureVersionTitle(
+    projectId: string,
+    target: { folderId: string } | { folderName: string },
+  ) {
+    return this.transport.suggestCaptureVersionTitle(projectId, target);
   }
 
   saveSpatialCaptureBackdrop(

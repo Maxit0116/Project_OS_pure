@@ -74,7 +74,9 @@ import {
   type ResizeHandle,
 } from '../components/SpatialCaptures/stencils/regionDrag'
 import stencilPlacementStyles from '../components/SpatialCaptures/SpatialCaptureOverlay.module.css'
+import type { SpatialCapturePlacement } from '@contracts/spatial-capture-session'
 import ComposeArrowPath from './ComposeArrowPath'
+import OverlaySavePlacementDialog from './OverlaySavePlacementDialog'
 import { routeComposeArrowCurve } from './composeArrowCurve'
 import {
   applyRunEventToCompactFlow,
@@ -1314,12 +1316,24 @@ export function OverlayApp() {
     }
   }
 
-  async function solidifyThenHide(): Promise<void> {
+  async function solidifyThenHide(
+    placement?: SpatialCapturePlacement,
+  ): Promise<void> {
     if (solidifyingRef.current) return
     solidifyingRef.current = true
     setSavePromptOpen(false)
     try {
       await solidifyCaptureSession()
+      const pid = projectIdRef.current
+      const sessionId = captureSessionIdRef.current
+      if (placement && pid && sessionId && window.projectOS) {
+        await window.projectOS.invoke(
+          'placeSpatialCaptureSession',
+          pid,
+          sessionId,
+          placement,
+        )
+      }
     } catch {
       /* still dismiss — never block Esc on flush failure */
     }
@@ -2275,39 +2289,12 @@ export function OverlayApp() {
         </div>
       ) : null}
 
-      {savePromptOpen ? (
-        <div
-          className="overlay-save-prompt"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="overlay-save-prompt-title"
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <div className="overlay-save-prompt-card">
-            <h2 id="overlay-save-prompt-title">Save to Spatial Captures?</h2>
-            <p>
-              Finished regions (selection, arrow, and compose card) can be kept.
-              A selection by itself is discarded.
-            </p>
-            <div className="overlay-save-prompt-actions">
-              <button
-                type="button"
-                className="overlay-save-prompt-btn"
-                onClick={() => void hideOverlayOnly()}
-              >
-                Don&apos;t save
-              </button>
-              <button
-                type="button"
-                className="overlay-save-prompt-btn overlay-save-prompt-btn-primary"
-                onClick={() => void solidifyThenHide()}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <OverlaySavePlacementDialog
+        open={savePromptOpen}
+        projectId={projectId}
+        onCancel={() => void hideOverlayOnly()}
+        onConfirm={(placement) => void solidifyThenHide(placement)}
+      />
 
       {regions.length === 0 && !draftRect ? (
         <div className="overlay-hint">

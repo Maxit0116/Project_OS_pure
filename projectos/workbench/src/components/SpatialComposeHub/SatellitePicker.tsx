@@ -25,6 +25,8 @@ interface Props {
   /** Other hub cards / compose card to avoid overlapping. */
   obstacleRects?: readonly PickerRect[]
   preferredSide?: PickerSide
+  /** Limit placement sides (Chat Stage Dock uses left/right only). */
+  allowedSides?: readonly PickerSide[]
   onClose: () => void
   onSelect: (id: string, meta?: { drill?: boolean }) => void
   /** Breadcrumb / path nav for folder picker. */
@@ -43,6 +45,7 @@ export default function SatellitePicker({
   anchorRect,
   obstacleRects = [],
   preferredSide = 'right',
+  allowedSides,
   onClose,
   onSelect,
   pathLabel,
@@ -74,13 +77,14 @@ export default function SatellitePicker({
       anchor: anchorRect,
       obstacles: obstacleRects,
       preferredSide,
+      ...(allowedSides ? { allowedSides } : {}),
       pickerSize: { width: PICKER_WIDTH, height: PICKER_HEIGHT },
       viewport: {
         width: window.innerWidth,
         height: window.innerHeight,
       },
     })
-  }, [open, anchorRect, obstacleRects, preferredSide])
+  }, [open, anchorRect, obstacleRects, preferredSide, allowedSides])
 
   if (!open) return null
 

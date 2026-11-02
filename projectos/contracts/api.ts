@@ -41,6 +41,10 @@ import type {
   SkillCatalogView,
   UninstallSkillFromCatalogInput,
 } from "./skill-marketplace.js";
+import type {
+  InstallFromGitUrlInput,
+  InstallFromGitUrlResult,
+} from "./marketplace-git-install.js";
 import type { SkillDescriptor } from "./skills.js";
 import type {
   ConnectionTestResult,
@@ -532,6 +536,11 @@ export interface ProjectOSApi {
     projectId: string,
     input: { listingId: string; note?: string },
   ): Promise<ProjectOSSettings>;
+  /** Install an MCP or skill from a GitHub / git URL (deterministic; may suggest agent fallback). */
+  installFromGitUrl(
+    projectId: string,
+    input: InstallFromGitUrlInput,
+  ): Promise<InstallFromGitUrlResult>;
   setSecret(ref: string, value: string): Promise<void>;
   deleteSecret(ref: string): Promise<void>;
   consumeFallbackNotice(projectId: string): Promise<string | undefined>;
@@ -614,6 +623,38 @@ export interface ProjectOSApi {
     projectId: string,
     sessionId: string,
   ): Promise<boolean>;
+  listSpatialCaptureFolders(
+    projectId: string,
+  ): Promise<
+    import("./spatial-capture-session.js").SpatialCaptureFolder[]
+  >;
+  placeSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+    placement: import("./spatial-capture-session.js").SpatialCapturePlacement,
+  ): Promise<SpatialCaptureSession>;
+  renameSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    name: string,
+  ): Promise<import("./spatial-capture-session.js").SpatialCaptureFolder>;
+  deleteSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    options?: import("./spatial-capture-session.js").DeleteSpatialCaptureFolderOptions,
+  ): Promise<boolean>;
+  mergeSpatialCaptureFolders(
+    projectId: string,
+    sourceFolderId: string,
+    targetFolderId: string,
+    options?: import("./spatial-capture-session.js").MergeSpatialCaptureFoldersOptions,
+  ): Promise<import("./spatial-capture-session.js").SpatialCaptureFolder>;
+  suggestCaptureVersionTitle(
+    projectId: string,
+    target:
+      | { folderId: string }
+      | { folderName: string },
+  ): Promise<string>;
   saveSpatialCaptureBackdrop(
     projectId: string,
     sessionId: string,

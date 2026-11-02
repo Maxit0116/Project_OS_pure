@@ -1,7 +1,6 @@
 import { type AnimationEvent, useEffect, useState, useRef } from 'react'
 import { resolveClientMode } from '../data/clientMode'
 import ChatHistoryActions from '../components/ChatHistory/ChatHistoryActions'
-import ChatToolsEdgeRail from '../components/ChatHistory/ChatToolsEdgeRail'
 import ChatSessionTitle from '../components/ChatSessionTitle/ChatSessionTitle'
 import ChatContextHeader from '../components/ChatContextHeader/ChatContextHeader'
 import ChatPanel from '../components/ChatPanel/ChatPanel'
@@ -114,7 +113,6 @@ export default function RightPanel({
             </div>
           )}
         </div>
-        {rightPanelTab === 'chat' ? <ChatToolsEdgeRail /> : null}
       </aside>
     </ConversationNavHostContext.Provider>
   )

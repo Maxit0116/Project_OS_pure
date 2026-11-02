@@ -1,0 +1,108 @@
+/*
+ * Zero-height flex sentinel: never compresses graph / sidebars.
+ * The hit strip + button stack float centered and overlay content.
+ */
+.host {
+  position: relative;
+  z-index: var(--z-workbench-stage-rail, 80);
+  flex: 0 0 0;
+  height: 0;
+  width: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.float {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  height: 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: auto;
+}
+
+.host.revealed .float {
+  height: auto;
+  overflow: visible;
+}
+
+.stack {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  padding: 4px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  border: 1px solid var(--tech-border);
+  border-top: none;
+  background: var(--tech-bg-side-panel, var(--color-bg-side-panel));
+  box-shadow: var(--tech-shadow-md, none);
+  transform: translateY(calc(-100% + 3px));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--duration-normal) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out);
+}
+
+.host.revealed .stack {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.separator {
+  flex-shrink: 0;
+  padding: 0 4px;
+  color: var(--tech-text-muted, var(--color-text-muted));
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  user-select: none;
+}
+
+.pressed {
+  color: var(--tech-text-primary) !important;
+  background: var(--tech-bg-muted) !important;
+}
+
+.codeBtn,
+.agentFlowButton {
+  position: relative;
+}
+
+.liveDot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--tech-accent);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stack {
+    transition: none;
+  }
+}

@@ -82,7 +82,6 @@ export function buildMcpDetailModel(
     trust: string
     transport: string
     authRequired: string
-    authNotRequired: string
     yes: string
     no: string
     curated: string

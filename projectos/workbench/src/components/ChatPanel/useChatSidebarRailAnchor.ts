@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState, type RefObject } from 'react'
 import { useWorkbenchStore } from '../../state/workbenchStore'
-import { navRailViewportLeft } from './conversationNavTurns'
+import { navRailViewportRightEdge } from './conversationNavTurns'
 
 export interface RailAnchorPoint {
   left: number
@@ -8,7 +8,8 @@ export interface RailAnchorPoint {
 }
 
 /**
- * Keep a fixed-position rail glued to the AI Chat sidebar’s left exterior.
+ * Keep a fixed-position rail glued to the AI Chat sidebar’s right edge
+ * (former ChatToolsEdgeRail slot).
  *
  * Font zoom (⌘⇧+) and panel resize often skip `window.resize` / ResizeObserver,
  * so we also sample `getBoundingClientRect` every animation frame while active.
@@ -59,7 +60,7 @@ export function useChatSidebarRailAnchor(
       if (cancelled) return
       const rect = panel.getBoundingClientRect()
       apply({
-        left: navRailViewportLeft(rect.left),
+        left: navRailViewportRightEdge(rect.right),
         top: rect.top + rect.height / 2,
       })
     }

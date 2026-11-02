@@ -190,7 +190,8 @@ export default function ComposerStageDock({
   }, [floatOpen, hovering, focusWithin, scheduleCollapse])
 
   const measureAnchor = useCallback(() => {
-    setAnchorRect(toSatelliteRect(panelRef.current ?? dockRef.current, 'right'))
+    // Prefer left of the card in the right sidebar (matches Reference side panel).
+    setAnchorRect(toSatelliteRect(panelRef.current ?? dockRef.current, 'left'))
   }, [])
 
   useEffect(() => {
@@ -757,7 +758,8 @@ export default function ComposerStageDock({
                       : undefined
                 }
                 anchorRect={anchorRect}
-                preferredSide="above"
+                preferredSide="left"
+                allowedSides={['left', 'right']}
                 onClose={ctrl.closePicker}
                 onSelect={(id, meta) => void ctrl.handlePickerSelect(id, meta)}
                 allowDrill={ctrl.picker === 'folders'}

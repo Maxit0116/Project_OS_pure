@@ -251,7 +251,7 @@ export default function ConversationNavRail({
         aria-labelledby={labelId}
         aria-hidden={revealed ? undefined : true}
         data-conversation-nav-rail=""
-        data-nav-side="left-exterior"
+        data-nav-side="right-edge"
         data-revealed={revealed ? 'true' : 'false'}
         onPointerEnter={() => setRailHovering(true)}
         onPointerLeave={() => setRailHovering(false)}

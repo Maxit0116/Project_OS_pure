@@ -9,7 +9,9 @@ import {
   emptyComposerDraft,
   extractSubtreeToNewGraph,
   mergeSessionGraphs,
+  orderSessionIdsForDeletion,
   placeChatSessionOnGraph,
+  shouldDisposeEmptySessionRecord,
 } from '@contracts/index'
 import { create } from 'zustand'
 import { resolveClientMode } from '../data/clientMode'
@@ -65,6 +67,56 @@ clearPersistedCanvasOverlay()
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 let titleSummarizeTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Silent GC for empty shells — no toast; caller must ensure session is not active. */
+async function tryDeleteDisposableEmptySession(
+  sessionId: string,
+  heads: ChatSessionHead[],
+  pinnedIds: string[],
+): Promise<boolean> {
+  const { client, project } = useWorkbenchStore.getState()
+  if (!client || !project) return false
+
+  const record = await client.getChatSession(project.projectId, sessionId)
+  if (!record) return false
+  if (!shouldDisposeEmptySessionRecord(record, heads, pinnedIds)) return false
+  return client.deleteChatSession(project.projectId, sessionId)
+}
+
+/** Scope B / multi-pass prune of non-retained empty sessions via the API client. */
+async function pruneDisposableEmptySessionsViaClient(
+  retainSessionId: string | null,
+): Promise<void> {
+  const { client, project } = useWorkbenchStore.getState()
+  if (!client || !project) return
+
+  for (;;) {
+    const index = await client.getChatSessionIndex(project.projectId)
+    const candidates: string[] = []
+    for (const head of index.heads) {
+      if (retainSessionId && head.id === retainSessionId) continue
+      const record = await client.getChatSession(project.projectId, head.id)
+      if (!record) continue
+      if (
+        shouldDisposeEmptySessionRecord(
+          record,
+          index.heads,
+          index.pinnedIds,
+        )
+      ) {
+        candidates.push(head.id)
+      }
+    }
+    if (candidates.length === 0) break
+
+    let passDeleted = 0
+    for (const id of orderSessionIdsForDeletion(candidates, index.heads)) {
+      const deleted = await client.deleteChatSession(project.projectId, id)
+      if (deleted) passDeleted += 1
+    }
+    if (passDeleted === 0) break
+  }
+}
 
 interface ChatSessionStore {
   heads: ChatSessionHead[]
@@ -408,10 +460,44 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         index = { ...index, lastActiveId: welcomeRecord.head.id }
       }
 
-      const activeId =
+      let activeId =
         index.lastActiveId && heads.some((head) => head.id === index.lastActiveId)
           ? index.lastActiveId
           : heads[0]?.id ?? null
+
+      // Scope B: clear leftover empty shells (and expired deferred ones) before hydrate.
+      await pruneDisposableEmptySessionsViaClient(activeId)
+      index = await client.getChatSessionIndex(project.projectId)
+      heads = index.heads
+      if (activeId && !heads.some((head) => head.id === activeId)) {
+        activeId = heads[0]?.id ?? null
+        if (activeId) {
+          await client.setLastActiveChatSession(project.projectId, activeId)
+        }
+      }
+
+      if (heads.length === 0) {
+        const welcomeRecord: ChatSessionRecord = {
+          version: '0.2.0',
+          head: {
+            id: `chat_${crypto.randomUUID()}`,
+            title: '',
+            createdAt: new Date().toISOString(),
+            lastUpdatedAt: new Date().toISOString(),
+            chatMode: 'ask',
+            isArchived: false,
+            status: 'idle',
+            classification: 'misc',
+            classificationSource: 'auto',
+          },
+          messages: buildWelcomeMessages(locale),
+        }
+        await client.upsertChatSession(project.projectId, welcomeRecord)
+        index = await client.getChatSessionIndex(project.projectId)
+        heads = index.heads
+        activeId = welcomeRecord.head.id
+        await client.setLastActiveChatSession(project.projectId, activeId)
+      }
 
       set({
         heads,
@@ -497,6 +583,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       return
     }
 
+    const leavingId = get().activeSessionId
     await get().persistActiveSession()
 
     const { client, project } = useWorkbenchStore.getState()
@@ -508,13 +595,25 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     applySessionToWorkbench(record)
     await client.setLastActiveChatSession(project.projectId, sessionId)
 
-    const index = await client.getChatSessionIndex(project.projectId)
+    let index = await client.getChatSessionIndex(project.projectId)
     set({
       activeSessionId: sessionId,
       heads: index.heads,
       pinnedIds: index.pinnedIds,
       historyOpen: false,
     })
+
+    if (leavingId && leavingId !== sessionId) {
+      const deleted = await tryDeleteDisposableEmptySession(
+        leavingId,
+        index.heads,
+        index.pinnedIds,
+      )
+      if (deleted) {
+        index = await client.getChatSessionIndex(project.projectId)
+        set({ heads: index.heads, pinnedIds: index.pinnedIds })
+      }
+    }
   },
 
   createSession: async (options = {}) => {
@@ -525,6 +624,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       activate = true,
       title = '',
     } = options
+    const leavingId = get().activeSessionId
     await get().persistActiveSession()
 
     const { client, project, locale } = useWorkbenchStore.getState()
@@ -551,17 +651,29 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
 
     await client.upsertChatSession(project.projectId, record)
 
-    const index = await client.getChatSessionIndex(project.projectId)
+    let index = await client.getChatSessionIndex(project.projectId)
     set({
       heads: index.heads,
       pinnedIds: index.pinnedIds,
-      activeSessionId: sessionId,
+      activeSessionId: activate ? sessionId : get().activeSessionId,
       historyOpen: false,
     })
 
     if (activate) {
       applySessionToWorkbench(record)
       await client.setLastActiveChatSession(project.projectId, sessionId)
+
+      if (leavingId && leavingId !== sessionId) {
+        const deleted = await tryDeleteDisposableEmptySession(
+          leavingId,
+          index.heads,
+          index.pinnedIds,
+        )
+        if (deleted) {
+          index = await client.getChatSessionIndex(project.projectId)
+          set({ heads: index.heads, pinnedIds: index.pinnedIds })
+        }
+      }
     }
 
     return sessionId

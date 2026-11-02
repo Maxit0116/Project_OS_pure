@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import styles from './ChatHistoryMenu.module.css'
+import styles from './ChatHistoryScrollingTitle.module.css'
 import { measureScrollingTextOverflow } from './measureScrollingTextOverflow'
 
 const SCROLL_DELAY_MS = 400

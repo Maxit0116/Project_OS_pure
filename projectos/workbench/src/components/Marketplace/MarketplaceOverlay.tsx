@@ -3,9 +3,7 @@ import { Package, RefreshCw, X } from 'lucide-react'
 import { sessionGraphShieldCssInsets } from '@contracts/index'
 import type {
   McpCatalogListing,
-  McpCatalogView,
   SkillCatalogListing,
-  SkillCatalogView,
 } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useBottomDockStore } from '../../state/bottomDockStore'
@@ -23,6 +21,19 @@ import {
 import styles from './MarketplaceOverlay.module.css'
 
 type MarketTab = 'mcp' | 'skills'
+
+function buildAgentInstallPrompt(input: {
+  kind: MarketTab
+  url: string
+  message: string
+  ts: (key: string, vars?: Record<string, string | number>) => string
+}): string {
+  const key =
+    input.kind === 'mcp'
+      ? 'chat.marketplace.gitUrlAgentPromptMcp'
+      : 'chat.marketplace.gitUrlAgentPromptSkill'
+  return input.ts(key, { url: input.url, message: input.message })
+}
 
 type DetailSelection =
   | { kind: 'mcp'; listing: McpCatalogListing }
@@ -44,31 +55,39 @@ export default function MarketplaceOverlay() {
   const panelResizing = useWorkbenchStore((s) => s.panelResizing)
   const terminalOpen = useBottomDockStore((s) => s.open)
   const settings = useWorkbenchStore((s) => s.settings)
-  const listMcpCatalog = useWorkbenchStore((s) => s.listMcpCatalog)
+  const mcpView = useWorkbenchStore((s) => s.mcpCatalogView)
+  const skillView = useWorkbenchStore((s) => s.skillCatalogView)
+  const installedSkillIds = useWorkbenchStore((s) => s.installedMarketplaceSkillIds)
+  const catalogStatus = useWorkbenchStore((s) => s.marketplaceCatalogStatus)
+  const prefetchMarketplaceCatalogs = useWorkbenchStore((s) => s.prefetchMarketplaceCatalogs)
   const refreshMcpCatalog = useWorkbenchStore((s) => s.refreshMcpCatalog)
   const installMcpFromCatalog = useWorkbenchStore((s) => s.installMcpFromCatalog)
   const uninstallMcpListing = useWorkbenchStore((s) => s.uninstallMcpListing)
   const disableMcpCatalogListing = useWorkbenchStore((s) => s.disableMcpCatalogListing)
   const reportMcpCatalogListing = useWorkbenchStore((s) => s.reportMcpCatalogListing)
-  const listSkillCatalog = useWorkbenchStore((s) => s.listSkillCatalog)
   const refreshSkillCatalog = useWorkbenchStore((s) => s.refreshSkillCatalog)
   const installSkillFromCatalog = useWorkbenchStore((s) => s.installSkillFromCatalog)
   const uninstallSkillFromCatalog = useWorkbenchStore((s) => s.uninstallSkillFromCatalog)
   const disableSkillCatalogListing = useWorkbenchStore((s) => s.disableSkillCatalogListing)
   const reportSkillCatalogListing = useWorkbenchStore((s) => s.reportSkillCatalogListing)
-  const client = useWorkbenchStore((s) => s.client)
-  const project = useWorkbenchStore((s) => s.project)
+  const listMcpCatalog = useWorkbenchStore((s) => s.listMcpCatalog)
+  const listSkillCatalog = useWorkbenchStore((s) => s.listSkillCatalog)
+  const refreshInstalledMarketplaceSkills = useWorkbenchStore(
+    (s) => s.refreshInstalledMarketplaceSkills,
+  )
+  const installFromGitUrl = useWorkbenchStore((s) => s.installFromGitUrl)
+  const sendPrompt = useWorkbenchStore((s) => s.sendPrompt)
+  const setRightPanelOpen = useWorkbenchStore((s) => s.setRightPanelOpen)
   const { ts } = useI18n()
 
   const [tab, setTab] = useState<MarketTab>('mcp')
   const [detail, setDetail] = useState<DetailSelection | null>(null)
-  const [mcpView, setMcpView] = useState<McpCatalogView | null>(null)
-  const [skillView, setSkillView] = useState<SkillCatalogView | null>(null)
-  const [installedSkillIds, setInstalledSkillIds] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [authByListing, setAuthByListing] = useState<Record<string, string>>({})
+  const [manualRefreshing, setManualRefreshing] = useState(false)
+  const [gitUrl, setGitUrl] = useState('')
+  const [gitInstalling, setGitInstalling] = useState(false)
 
   const shield = sessionGraphShieldCssInsets({
     leftOpen: leftPanelOpen,
@@ -84,50 +103,120 @@ export default function MarketplaceOverlay() {
     return ids
   }, [settings?.mcpServers])
 
-  const reloadInstalledSkills = useCallback(async () => {
-    if (!client || !project) {
-      setInstalledSkillIds(new Set())
-      return
-    }
-    try {
-      const result = await client.listSkills(project.projectId)
-      setInstalledSkillIds(new Set(result.skills.map((s) => s.id)))
-    } catch {
-      setInstalledSkillIds(new Set())
-    }
-  }, [client, project])
+  const installedSkillIdSet = useMemo(
+    () => new Set(installedSkillIds),
+    [installedSkillIds],
+  )
+
+  const activeView = tab === 'mcp' ? mcpView : skillView
+  const loading =
+    manualRefreshing ||
+    (catalogStatus === 'loading' && !activeView) ||
+    (catalogStatus === 'idle' && !activeView)
+
+  // Ensure catalogs are warm whenever the overlay opens (usually already prefetched).
+  useEffect(() => {
+    if (!open) return
+    setDetail(null)
+    setError(null)
+    void prefetchMarketplaceCatalogs().then(() => {
+      const state = useWorkbenchStore.getState()
+      const view = tab === 'mcp' ? state.mcpCatalogView : state.skillCatalogView
+      if (!view && state.marketplaceCatalogStatus === 'error') {
+        setError(ts('chat.marketplace.loadFailed'))
+      }
+    })
+  }, [open, prefetchMarketplaceCatalogs, tab, ts])
 
   const loadMcp = useCallback(
     async (force = false) => {
-      setLoading(true)
       setError(null)
+      if (force) setManualRefreshing(true)
       const view = force ? await refreshMcpCatalog() : await listMcpCatalog()
-      setMcpView(view)
       if (!view) setError(ts('chat.marketplace.loadFailed'))
-      setLoading(false)
+      setManualRefreshing(false)
     },
     [listMcpCatalog, refreshMcpCatalog, ts],
   )
 
   const loadSkills = useCallback(
     async (force = false) => {
-      setLoading(true)
       setError(null)
+      if (force) setManualRefreshing(true)
       const view = force ? await refreshSkillCatalog() : await listSkillCatalog()
-      setSkillView(view)
-      await reloadInstalledSkills()
+      await refreshInstalledMarketplaceSkills()
       if (!view) setError(ts('chat.marketplace.loadFailed'))
-      setLoading(false)
+      setManualRefreshing(false)
     },
-    [listSkillCatalog, refreshSkillCatalog, reloadInstalledSkills, ts],
+    [listSkillCatalog, refreshInstalledMarketplaceSkills, refreshSkillCatalog, ts],
   )
 
-  useEffect(() => {
-    if (!open) return
-    setDetail(null)
-    if (tab === 'mcp') void loadMcp(false)
-    else void loadSkills(false)
-  }, [open, tab, loadMcp, loadSkills])
+  const handOffGitInstallToAgent = useCallback(
+    async (url: string, message: string) => {
+      const ok = window.confirm(ts('chat.marketplace.gitUrlAgentFallbackConfirm'))
+      if (!ok) {
+        setError(ts('chat.marketplace.gitUrlFailed', { message }))
+        return
+      }
+      const prompt = buildAgentInstallPrompt({ kind: tab, url, message, ts })
+      setMarketplaceOpen(false)
+      setRightPanelOpen(true)
+      await sendPrompt(prompt)
+    },
+    [sendPrompt, setMarketplaceOpen, setRightPanelOpen, tab, ts],
+  )
+
+  const runGitUrlInstall = useCallback(async () => {
+    const url = gitUrl.trim()
+    if (!url) {
+      setError(ts('chat.marketplace.gitUrlEmpty'))
+      return
+    }
+    const kindLabel =
+      tab === 'mcp'
+        ? ts('chat.marketplace.gitUrlKindMcp')
+        : ts('chat.marketplace.gitUrlKindSkill')
+    const confirmed = window.confirm(
+      ts('chat.marketplace.gitUrlConfirm', { kind: kindLabel, url }),
+    )
+    if (!confirmed) return
+
+    setGitInstalling(true)
+    setError(null)
+    try {
+      let result = await installFromGitUrl({ url, kind: tab })
+      if (result?.status === 'conflict') {
+        const replaceOk = window.confirm(
+          ts('chat.marketplace.gitUrlConflictConfirm', { name: result.existingName }),
+        )
+        if (!replaceOk) return
+        result = await installFromGitUrl({ url, kind: tab, replace: true })
+      }
+      if (!result) {
+        setError(ts('chat.marketplace.gitUrlFailed', { message: 'Unknown error' }))
+        return
+      }
+      if (result.status === 'failed') {
+        await handOffGitInstallToAgent(url, result.message)
+        return
+      }
+      if (result.status === 'conflict') {
+        setError(result.message)
+        return
+      }
+      setGitUrl('')
+      if (tab === 'skills') await refreshInstalledMarketplaceSkills()
+    } finally {
+      setGitInstalling(false)
+    }
+  }, [
+    gitUrl,
+    handOffGitInstallToAgent,
+    installFromGitUrl,
+    refreshInstalledMarketplaceSkills,
+    tab,
+    ts,
+  ])
 
   const runMcpAction = useCallback(
     async (listing: McpCatalogListing, action: MarketplaceCardAction) => {
@@ -158,20 +247,18 @@ export default function MarketplaceOverlay() {
       setBusyId(listing.id)
       try {
         if (action === 'uninstall') {
-          const ok = await uninstallSkillFromCatalog(listing.id)
-          if (ok) await reloadInstalledSkills()
+          await uninstallSkillFromCatalog(listing.id)
           return
         }
-        const desc = await installSkillFromCatalog({
+        await installSkillFromCatalog({
           listingId: listing.id,
           ...(action === 'update' ? { replace: true } : {}),
         })
-        if (desc) await reloadInstalledSkills()
       } finally {
         setBusyId(null)
       }
     },
-    [installSkillFromCatalog, reloadInstalledSkills, uninstallSkillFromCatalog],
+    [installSkillFromCatalog, uninstallSkillFromCatalog],
   )
 
   if (!open) return null
@@ -235,7 +322,7 @@ export default function MarketplaceOverlay() {
   const renderSkillGrid = (listings: SkillCatalogListing[]) => (
     <div className={styles.grid}>
       {listings.map((listing) => {
-        const installed = installedSkillIds.has(skillInstallId(listing.id))
+        const installed = installedSkillIdSet.has(skillInstallId(listing.id))
         return (
           <MarketplaceCard
             key={listing.id}
@@ -352,7 +439,7 @@ export default function MarketplaceOverlay() {
     }
 
     const listing = detail.listing
-    const installed = installedSkillIds.has(skillInstallId(listing.id))
+    const installed = installedSkillIdSet.has(skillInstallId(listing.id))
     const community = listing.trustTier === 'community'
     const model = buildSkillDetailModel(listing, {
       listingId: ts('chat.marketplace.detailListingId'),
@@ -461,26 +548,57 @@ export default function MarketplaceOverlay() {
           </div>
         </header>
         {!detail ? (
-          <div className={styles.tabs} role="tablist" aria-label={ts('chat.marketplace.title')}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === 'mcp'}
-              className={`${styles.tab} ${tab === 'mcp' ? styles.tabActive : ''}`}
-              onClick={() => setTab('mcp')}
-            >
-              {ts('chat.marketplace.tabMcp')}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === 'skills'}
-              className={`${styles.tab} ${tab === 'skills' ? styles.tabActive : ''}`}
-              onClick={() => setTab('skills')}
-            >
-              {ts('chat.marketplace.tabSkills')}
-            </button>
-          </div>
+          <>
+            <div className={styles.gitUrlBar}>
+              <input
+                className={styles.gitUrlInput}
+                type="url"
+                value={gitUrl}
+                disabled={gitInstalling || loading}
+                placeholder={ts('chat.marketplace.gitUrlPlaceholder')}
+                aria-label={ts('chat.marketplace.gitUrlPlaceholder')}
+                onChange={(e) => setGitUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void runGitUrlInstall()
+                  }
+                }}
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={gitInstalling || loading || !gitUrl.trim()}
+                onClick={() => {
+                  void runGitUrlInstall()
+                }}
+              >
+                {gitInstalling
+                  ? ts('chat.marketplace.gitUrlInstalling')
+                  : ts('chat.marketplace.gitUrlInstall')}
+              </Button>
+            </div>
+            <div className={styles.tabs} role="tablist" aria-label={ts('chat.marketplace.title')}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'mcp'}
+                className={`${styles.tab} ${tab === 'mcp' ? styles.tabActive : ''}`}
+                onClick={() => setTab('mcp')}
+              >
+                {ts('chat.marketplace.tabMcp')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'skills'}
+                className={`${styles.tab} ${tab === 'skills' ? styles.tabActive : ''}`}
+                onClick={() => setTab('skills')}
+              >
+                {ts('chat.marketplace.tabSkills')}
+              </button>
+            </div>
+          </>
         ) : null}
         <div className={styles.body}>
           {detail ? (

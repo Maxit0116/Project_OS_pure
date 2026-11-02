@@ -4,6 +4,7 @@ import { useI18n } from '../i18n'
 import { usePanelPresence } from '../hooks/usePanelPresence'
 import ThreeZoneLayout from './ThreeZoneLayout'
 import WorkbenchTopBar from './WorkbenchTopBar'
+import WorkbenchStageRail from './WorkbenchStageRail'
 import DesktopTitleBar from './DesktopTitleBar'
 import WelcomeScreen from '../components/WelcomeScreen'
 import ToastContainer from '../components/ui/ToastContainer'
@@ -22,6 +23,9 @@ import GithubGraphOverlay from '../components/GithubGraph/GithubGraphOverlay'
 import MarketplaceOverlay from '../components/Marketplace/MarketplaceOverlay'
 import AgentFlowOverlay from '../components/AgentFlow/AgentFlowOverlay'
 import SpatialCaptureOverlay from '../components/SpatialCaptures/SpatialCaptureOverlay'
+import { CaptureFolderDnDProvider } from '../components/SpatialCaptures/CaptureFolderDnDContext'
+import ChatHistoryDrawer from '../components/ChatHistory/ChatHistoryDrawer'
+import { useChatSessionStore } from '../state/chatSessionStore'
 import EdgeRails from './EdgeRails'
 import { FunctionMapBleedRoot } from '../components/FunctionMap/FunctionMapBleedLayer'
 import { preloadLocalWhisper } from '../components/ChatPanel/voice/localWhisperTranscribe'
@@ -42,6 +46,8 @@ export default function AppShell() {
   const settingsOpen = useWorkbenchStore((s) => s.settingsOpen)
   const setSettingsOpen = useWorkbenchStore((s) => s.setSettingsOpen)
   const bottomDockOpen = useBottomDockStore((s) => s.open)
+  const historyOpen = useChatSessionStore((s) => s.historyOpen)
+  const setHistoryOpen = useChatSessionStore((s) => s.setHistoryOpen)
   const leftPanelOpen = useWorkbenchStore((s) => s.leftPanelOpen)
   const rightPanelOpen = useWorkbenchStore((s) => s.rightPanelOpen)
   const leftPanelWidth = useWorkbenchStore((s) => s.leftPanelWidth)
@@ -130,6 +136,7 @@ export default function AppShell() {
       >
         <DesktopTitleBar variant="workbench" onOpenSettings={() => setSettingsOpen(true)} />
         <WorkbenchTopBar onOpenSettings={() => setSettingsOpen(true)} />
+        <WorkbenchStageRail />
 
         {error && (
           <div className={styles.errorBar} role="alert">
@@ -141,34 +148,37 @@ export default function AppShell() {
         )}
 
         <div className={workbenchBodyClassName} style={workbenchBodyStyle}>
-          <main className={styles.main}>
-            <ThreeZoneLayout
-              narrow={narrow}
-              canvasBleed={mapBleedActive}
-              graphBleed={mapBleedActive}
-              mapBleed={mapBleedActive}
-              bottomDockOpen={bottomDockOpen}
-            />
-          </main>
+          <CaptureFolderDnDProvider>
+            <main className={styles.main}>
+              <ThreeZoneLayout
+                narrow={narrow}
+                canvasBleed={mapBleedActive}
+                graphBleed={mapBleedActive}
+                mapBleed={mapBleedActive}
+                bottomDockOpen={bottomDockOpen}
+              />
+            </main>
 
-          <SessionGraphOverlay />
-          <LoopGraphOverlay />
-          <GithubGraphOverlay />
-          <MarketplaceOverlay />
-          <AgentFlowOverlay />
-          <SpatialCaptureOverlay />
-          <EdgeRails
-            leftMounted={leftPresence.mounted}
-            rightMounted={rightPresence.mounted}
-            terminalDocked={bottomDockOpen}
-          />
-          <WorkbenchSidePanels
-            left={leftPresence}
-            right={rightPresence}
-            bottomDockOpen={bottomDockOpen}
-            centerSideInset={centerSideInset}
-          />
-          <BottomDockPanel centerSideInset={centerSideInset} presence={bottomDockPresence} />
+            <SessionGraphOverlay />
+            <LoopGraphOverlay />
+            <GithubGraphOverlay />
+            <MarketplaceOverlay />
+            <AgentFlowOverlay />
+            <SpatialCaptureOverlay />
+            <ChatHistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />
+            <EdgeRails
+              leftMounted={leftPresence.mounted}
+              rightMounted={rightPresence.mounted}
+              terminalDocked={bottomDockOpen}
+            />
+            <WorkbenchSidePanels
+              left={leftPresence}
+              right={rightPresence}
+              bottomDockOpen={bottomDockOpen}
+              centerSideInset={centerSideInset}
+            />
+            <BottomDockPanel centerSideInset={centerSideInset} presence={bottomDockPresence} />
+          </CaptureFolderDnDProvider>
         </div>
 
         <ToastContainer />

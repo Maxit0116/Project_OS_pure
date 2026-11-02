@@ -33,6 +33,8 @@ import type {
   InstallMcpFromCatalogInput,
   SkillCatalogView,
   InstallSkillFromCatalogInput,
+  InstallFromGitUrlInput,
+  InstallFromGitUrlResult,
   SkillDescriptor,
   SemanticTree,
   ThinkingDepth,
@@ -512,6 +514,14 @@ export interface WorkbenchState {
   settingsOpen: boolean
   /** When opening Settings, jump to this hub view once (e.g. teamGithub). */
   settingsFocusView: string | null
+  /** Cached MCP marketplace catalog — prefetched when a workspace becomes ready. */
+  mcpCatalogView: McpCatalogView | null
+  /** Cached skill marketplace catalog — prefetched when a workspace becomes ready. */
+  skillCatalogView: SkillCatalogView | null
+  /** Installed skill ids used by Marketplace install/uninstall badges. */
+  installedMarketplaceSkillIds: string[]
+  /** Marketplace catalog prefetch / refresh lifecycle. */
+  marketplaceCatalogStatus: 'idle' | 'loading' | 'ready' | 'error'
   selectedModelProfileId: string | null
   mapContent: MapContentDocument | null
   features: FeaturesFile | null
@@ -739,6 +749,11 @@ export interface WorkbenchState {
   uninstallMcpListing: (listingId: string) => Promise<boolean>
   disableSkillCatalogListing: (listingId: string) => Promise<boolean>
   reportSkillCatalogListing: (input: { listingId: string; note?: string }) => Promise<boolean>
+  /** Warm MCP + skill catalogs in the background after a project opens. */
+  prefetchMarketplaceCatalogs: () => Promise<void>
+  refreshInstalledMarketplaceSkills: () => Promise<void>
+  /** Install MCP or skill from a GitHub / git URL (deterministic installer). */
+  installFromGitUrl: (input: InstallFromGitUrlInput) => Promise<InstallFromGitUrlResult | null>
   setSettingsOpen: (open: boolean, focusView?: string | null) => void
   clearSettingsFocusView: () => void
   setSelectedModelProfileId: (profileId: string | null) => void
@@ -1204,6 +1219,8 @@ async function loadWorkspaceIntoStore(
   await useChatSessionStore.getState().loadForWorkspace()
   await useTerminalStore.getState().syncMapSessions(mapContent.artifacts)
   await useDiagnosticsStore.getState().init(project.workspaceRoot)
+  // Fire-and-forget: marketplace catalogs are ready when the user opens the overlay.
+  void get().prefetchMarketplaceCatalogs()
 }
 
 const initialTransientState = {
@@ -1300,7 +1317,15 @@ const initialTransientState = {
   lastAnchoredAnswer: null as TeamBrainAnswer | null,
   meetingDraft: null as TeamMeeting | null,
   publishBriefConfirm: false,
+  mcpCatalogView: null as McpCatalogView | null,
+  skillCatalogView: null as SkillCatalogView | null,
+  installedMarketplaceSkillIds: [] as string[],
+  marketplaceCatalogStatus: 'idle' as const,
 }
+
+/** Dedup concurrent marketplace prefetches for the same workspace open. */
+let marketplacePrefetchInflight: Promise<void> | null = null
+let marketplacePrefetchProjectId: string | null = null
 
 const pendingStructureRefineFiles: string[] = []
 let structureRefineTimer: ReturnType<typeof setTimeout> | null = null
@@ -2092,6 +2117,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     set({
       centerTab: tab,
       ...(onDiffView ? { diffReadyBanner: null } : {}),
+      // Browser owns a vertical tab/docs rail — open left sidebar when entering.
+      ...(tab === 'browser' ? { leftPanelOpen: true } : {}),
     })
   },
   setMapLayer: (layer) => {
@@ -4566,7 +4593,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     if (!project) return null
     const projectId = project.projectId
     try {
-      return await client.listMcpCatalog(projectId, options)
+      const view = await client.listMcpCatalog(projectId, options)
+      if (get().project?.projectId === projectId) {
+        set((s) => ({
+          mcpCatalogView: view,
+          marketplaceCatalogStatus:
+            s.marketplaceCatalogStatus === 'loading' ? s.marketplaceCatalogStatus : 'ready',
+        }))
+      }
+      return view
     } catch (error) {
       if (get().project?.projectId === projectId) {
         reportSettingsMutationFailure(error, 'Failed to load MCP catalog')
@@ -4579,11 +4614,21 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const { client, project } = get()
     if (!project) return null
     const projectId = project.projectId
+    set({ marketplaceCatalogStatus: 'loading' })
     try {
-      return await client.refreshMcpCatalog(projectId)
+      const view = await client.refreshMcpCatalog(projectId)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        mcpCatalogView: view,
+        marketplaceCatalogStatus: s.skillCatalogView || view ? 'ready' : 'error',
+      }))
+      return view
     } catch (error) {
       if (get().project?.projectId === projectId) {
         reportSettingsMutationFailure(error, 'Failed to refresh MCP catalog')
+        set((s) => ({
+          marketplaceCatalogStatus: s.mcpCatalogView || s.skillCatalogView ? 'ready' : 'error',
+        }))
       }
       return null
     }
@@ -4648,7 +4693,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     if (!project) return null
     const projectId = project.projectId
     try {
-      return await client.listSkillCatalog(projectId, options)
+      const view = await client.listSkillCatalog(projectId, options)
+      if (get().project?.projectId === projectId) {
+        set((s) => ({
+          skillCatalogView: view,
+          marketplaceCatalogStatus:
+            s.marketplaceCatalogStatus === 'loading' ? s.marketplaceCatalogStatus : 'ready',
+        }))
+      }
+      return view
     } catch (error) {
       if (get().project?.projectId === projectId) {
         reportSettingsMutationFailure(error, 'Failed to load skill catalog')
@@ -4661,11 +4714,21 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const { client, project } = get()
     if (!project) return null
     const projectId = project.projectId
+    set({ marketplaceCatalogStatus: 'loading' })
     try {
-      return await client.refreshSkillCatalog(projectId)
+      const view = await client.refreshSkillCatalog(projectId)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        skillCatalogView: view,
+        marketplaceCatalogStatus: s.mcpCatalogView || view ? 'ready' : 'error',
+      }))
+      return view
     } catch (error) {
       if (get().project?.projectId === projectId) {
         reportSettingsMutationFailure(error, 'Failed to refresh skill catalog')
+        set((s) => ({
+          marketplaceCatalogStatus: s.mcpCatalogView || s.skillCatalogView ? 'ready' : 'error',
+        }))
       }
       return null
     }
@@ -4678,6 +4741,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     try {
       const descriptor = await client.installSkillFromCatalog(projectId, input)
       if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        installedMarketplaceSkillIds: s.installedMarketplaceSkillIds.includes(descriptor.id)
+          ? s.installedMarketplaceSkillIds
+          : [...s.installedMarketplaceSkillIds, descriptor.id],
+      }))
       pushToast({
         type: 'success',
         message: getStoreMessage(locale, 'settings.skillMarketInstalled'),
@@ -4698,6 +4766,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     try {
       await client.uninstallSkillFromCatalog(projectId, { listingId })
       if (get().project?.projectId !== projectId) return false
+      const normalized = listingId
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/gu, '-')
+        .replace(/^-+|-+$/gu, '')
+      set((s) => ({
+        installedMarketplaceSkillIds: s.installedMarketplaceSkillIds.filter(
+          (id) => id !== listingId && id !== normalized,
+        ),
+      }))
       pushToast({
         type: 'success',
         message: getStoreMessage(locale, 'settings.skillMarketUninstalled'),
@@ -4778,6 +4856,122 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         reportSettingsMutationFailure(error, 'Failed to report skill listing')
       }
       return false
+    }
+  },
+
+  prefetchMarketplaceCatalogs: async () => {
+    const { client, project } = get()
+    if (!project) return
+    const projectId = project.projectId
+    if (
+      marketplacePrefetchInflight &&
+      marketplacePrefetchProjectId === projectId
+    ) {
+      await marketplacePrefetchInflight
+      return
+    }
+    // Already warm for this project — skip unless catalogs were cleared.
+    if (
+      get().marketplaceCatalogStatus === 'ready' &&
+      get().project?.projectId === projectId &&
+      (get().mcpCatalogView || get().skillCatalogView)
+    ) {
+      return
+    }
+
+    set({ marketplaceCatalogStatus: 'loading' })
+    marketplacePrefetchProjectId = projectId
+    marketplacePrefetchInflight = (async () => {
+      try {
+        const [mcpResult, skillResult, installedResult] = await Promise.allSettled([
+          client.listMcpCatalog(projectId),
+          client.listSkillCatalog(projectId),
+          client.listSkills(projectId),
+        ])
+        if (get().project?.projectId !== projectId) return
+
+        const mcpView = mcpResult.status === 'fulfilled' ? mcpResult.value : null
+        const skillView = skillResult.status === 'fulfilled' ? skillResult.value : null
+        const installedIds =
+          installedResult.status === 'fulfilled'
+            ? installedResult.value.skills.map((s) => s.id)
+            : get().installedMarketplaceSkillIds
+
+        set({
+          mcpCatalogView: mcpView,
+          skillCatalogView: skillView,
+          installedMarketplaceSkillIds: installedIds,
+          marketplaceCatalogStatus: mcpView || skillView ? 'ready' : 'error',
+        })
+      } catch {
+        if (get().project?.projectId === projectId) {
+          set((s) => ({
+            marketplaceCatalogStatus: s.mcpCatalogView || s.skillCatalogView ? 'ready' : 'error',
+          }))
+        }
+      } finally {
+        if (marketplacePrefetchProjectId === projectId) {
+          marketplacePrefetchInflight = null
+          marketplacePrefetchProjectId = null
+        }
+      }
+    })()
+    await marketplacePrefetchInflight
+  },
+
+  refreshInstalledMarketplaceSkills: async () => {
+    const { client, project } = get()
+    if (!project) {
+      set({ installedMarketplaceSkillIds: [] })
+      return
+    }
+    const projectId = project.projectId
+    try {
+      const result = await client.listSkills(projectId)
+      if (get().project?.projectId !== projectId) return
+      set({ installedMarketplaceSkillIds: result.skills.map((s) => s.id) })
+    } catch {
+      if (get().project?.projectId === projectId) {
+        set({ installedMarketplaceSkillIds: [] })
+      }
+    }
+  },
+
+  installFromGitUrl: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const result = await client.installFromGitUrl(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      if (result.status === 'installed' && result.kind === 'mcp') {
+        set({ settings: result.settings, error: null })
+        pushToast({
+          type: 'success',
+          message: getStoreMessage(locale, 'settings.mcpMarketInstalled'),
+        })
+      } else if (result.status === 'installed' && result.kind === 'skills') {
+        set((s) => ({
+          installedMarketplaceSkillIds: s.installedMarketplaceSkillIds.includes(result.skill.id)
+            ? s.installedMarketplaceSkillIds
+            : [...s.installedMarketplaceSkillIds, result.skill.id],
+        }))
+        pushToast({
+          type: 'success',
+          message: getStoreMessage(locale, 'settings.skillMarketInstalled'),
+        })
+      }
+      return result
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install from git URL')
+      }
+      return {
+        status: 'failed' as const,
+        kind: input.kind,
+        message: error instanceof Error ? error.message : 'Failed to install from git URL',
+        agentFallbackSuggested: true as const,
+      }
     }
   },
 

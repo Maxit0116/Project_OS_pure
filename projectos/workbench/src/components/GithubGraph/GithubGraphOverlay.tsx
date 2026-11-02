@@ -236,6 +236,11 @@ export default function GithubGraphOverlay() {
   )
   const modelInputRef = useRef(modelInput)
   modelInputRef.current = modelInput
+  const loadedProjectIdRef = useRef<string | null>(null)
+  const inflightReloadRef = useRef<{
+    key: string
+    promise: Promise<void>
+  } | null>(null)
 
   useEffect(() => {
     const timers = leaveTimers.current
@@ -246,100 +251,170 @@ export default function GithubGraphOverlay() {
   }, [])
 
   const reload = useCallback(
-    async (opts?: { fetchFirst?: boolean; soft?: boolean }) => {
+    async (opts?: {
+      fetchFirst?: boolean
+      soft?: boolean
+      /** Skip commit history (partition tree only). Default false. */
+      skipCommits?: boolean
+    }) => {
       if (!client || !project) {
         setModelInput(null)
+        loadedProjectIdRef.current = null
         return
       }
+      const projectId = project.projectId
       const soft = Boolean(opts?.soft && modelInputRef.current)
+      const skipCommits = Boolean(opts?.skipCommits)
+      const coalesceKey = `${projectId}:${skipCommits ? 'partition' : 'full'}:${opts?.fetchFirst ? 'fetch' : 'local'}`
+
+      // Coalesce concurrent identical reloads (prefetch + open race).
+      const inflight = inflightReloadRef.current
+      if (!opts?.fetchFirst && inflight && inflight.key === coalesceKey) {
+        await inflight.promise
+        return
+      }
+
       if (!soft) setInitialLoading(true)
       if (!soft) setMessage(null)
-      try {
-        if (opts?.fetchFirst) {
-          const fetched = await client.fetchWorkspaceGit(project.projectId)
-          if (!fetched.ok) setMessage(fetched.message)
-        }
-        const [status, branches, prs, worktrees, commits, store, auth] =
-          await Promise.all([
-            client.getWorkspaceGitStatus(project.projectId),
-            client.listWorkspaceGitBranches(project.projectId),
-            client.listWorkspacePullRequests(project.projectId).catch(() => ({
-              available: false,
-              pullRequests: [],
-            })),
-            client.listAgentWorktrees(project.projectId).catch(() => []),
-            client
-              .listWorkspaceGitCommits(project.projectId, {
-                limit: GITHUB_HISTORY_COMMIT_CAP,
-              })
-              .catch(() => ({ commits: [], truncated: false, tips: [] })),
-            client.getGithubGraphStore(project.projectId).catch(() => null),
-            client.getGitHubAuthStatus().catch(() => ({ connected: false })),
-          ])
-        setGithubConnected(Boolean(auth.connected))
 
-        setModelInput((prev) => {
-          const pendingById = new Map(
-            (prev?.branches ?? [])
-              .filter((branch) => branch.pending)
-              .map((branch) => [branch.id, branch]),
+      const run = async () => {
+        try {
+          if (opts?.fetchFirst) {
+            const fetched = await client.fetchWorkspaceGit(projectId)
+            if (!fetched.ok) setMessage(fetched.message)
+          }
+
+          // Phase 1 — partition tree inputs (no commit DAG). Unblocks the UI fast.
+          const [status, branches, prs, worktrees, store, auth] =
+            await Promise.all([
+              client.getWorkspaceGitStatus(projectId),
+              client.listWorkspaceGitBranches(projectId),
+              client.listWorkspacePullRequests(projectId).catch(() => ({
+                available: false,
+                pullRequests: [],
+              })),
+              client.listAgentWorktrees(projectId).catch(() => []),
+              client.getGithubGraphStore(projectId).catch(() => null),
+              client.getGitHubAuthStatus().catch(() => ({ connected: false })),
+            ])
+          setGithubConnected(Boolean(auth.connected))
+
+          setModelInput((prev) => {
+            const sameProject = loadedProjectIdRef.current === projectId
+            const pendingById = new Map(
+              (sameProject ? (prev?.branches ?? []) : [])
+                .filter((branch) => branch.pending)
+                .map((branch) => [branch.id, branch]),
+            )
+            const nextBranches: BuildGithubGraphBranch[] = branches.branches.map(
+              (branch) => {
+                const pending = pendingById.get(branch.id)
+                if (pending) {
+                  pendingById.delete(branch.id)
+                  return { ...branch, pending: true }
+                }
+                return branch
+              },
+            )
+            for (const leftover of pendingById.values()) {
+              nextBranches.push(leftover)
+            }
+            const nextStore = store ?? {
+              features:
+                (sameProject ? prev?.features : null) ??
+                EMPTY_GITHUB_GRAPH_STORE.features,
+              relations:
+                (sameProject ? prev?.relations : null) ??
+                EMPTY_GITHUB_GRAPH_STORE.relations,
+            }
+            return {
+              repoLabel: project.displayName || project.projectId,
+              defaultBranch:
+                branches.defaultBranch ?? status.defaultBranch ?? null,
+              currentBranch: branches.currentBranch ?? status.branch,
+              ...(status.remoteUrl ? { remoteUrl: status.remoteUrl } : {}),
+              dirty: status.dirty,
+              branches: nextBranches,
+              pullRequests: prs.pullRequests.map((pr) => ({
+                ...pr,
+                state: 'open' as const,
+              })),
+              worktrees: worktrees.map((wt) => ({
+                id: wt.id,
+                branch: wt.branch,
+              })),
+              parentByBranchName: {
+                ...(sameProject ? (prev?.parentByBranchName ?? {}) : {}),
+              },
+              // Keep prior commits while phase 2 runs so history mode doesn't flash empty.
+              commits: sameProject && prev ? prev.commits : [],
+              commitsTruncated: sameProject && prev ? prev.commitsTruncated : false,
+              features: nextStore.features,
+              relations: nextStore.relations,
+            }
+          })
+          loadedProjectIdRef.current = projectId
+          // Partition tree is ready — clear the blocking loading state before history fetch.
+          if (!soft) setInitialLoading(false)
+
+          if (skipCommits) return
+
+          // Phase 2 — commit history (batched on the server; must not block partition).
+          const commits = await client
+            .listWorkspaceGitCommits(projectId, {
+              limit: GITHUB_HISTORY_COMMIT_CAP,
+            })
+            .catch(() => ({ commits: [], truncated: false, tips: [] }))
+          if (loadedProjectIdRef.current !== projectId) return
+          setModelInput((prev) => {
+            if (!prev || loadedProjectIdRef.current !== projectId) return prev
+            return {
+              ...prev,
+              commits: commits.commits,
+              commitsTruncated: commits.truncated,
+            }
+          })
+        } catch (error) {
+          setMessage(
+            error instanceof Error
+              ? error.message
+              : ts('chat.githubGraph.empty'),
           )
-          const nextBranches: BuildGithubGraphBranch[] = branches.branches.map(
-            (branch) => {
-              const pending = pendingById.get(branch.id)
-              if (pending) {
-                pendingById.delete(branch.id)
-                return { ...branch, pending: true }
-              }
-              return branch
-            },
-          )
-          for (const leftover of pendingById.values()) {
-            nextBranches.push(leftover)
-          }
-          const nextStore = store ?? {
-            features: prev?.features ?? EMPTY_GITHUB_GRAPH_STORE.features,
-            relations: prev?.relations ?? EMPTY_GITHUB_GRAPH_STORE.relations,
-          }
-          return {
-            repoLabel: project.displayName || project.projectId,
-            defaultBranch:
-              branches.defaultBranch ?? status.defaultBranch ?? null,
-            currentBranch: branches.currentBranch ?? status.branch,
-            ...(status.remoteUrl ? { remoteUrl: status.remoteUrl } : {}),
-            dirty: status.dirty,
-            branches: nextBranches,
-            pullRequests: prs.pullRequests.map((pr) => ({
-              ...pr,
-              state: 'open' as const,
-            })),
-            worktrees: worktrees.map((wt) => ({
-              id: wt.id,
-              branch: wt.branch,
-            })),
-            parentByBranchName: { ...(prev?.parentByBranchName ?? {}) },
-            commits: commits.commits,
-            commitsTruncated: commits.truncated,
-            features: nextStore.features,
-            relations: nextStore.relations,
-          }
-        })
-      } catch (error) {
-        setMessage(
-          error instanceof Error ? error.message : ts('chat.githubGraph.empty'),
-        )
-        if (!soft) setModelInput(null)
+          if (!soft) setModelInput(null)
+        } finally {
+          if (!soft) setInitialLoading(false)
+        }
+      }
+
+      const promise = run()
+      inflightReloadRef.current = { key: coalesceKey, promise }
+      try {
+        await promise
       } finally {
-        if (!soft) setInitialLoading(false)
+        if (inflightReloadRef.current?.promise === promise) {
+          inflightReloadRef.current = null
+        }
       }
     },
     [client, project, ts],
   )
 
+  // Prefetch partition tree as soon as the project is ready (not when the overlay opens).
   useEffect(() => {
-    if (!open) return
-    void reload()
-  }, [open, reload])
+    if (!client || !project) {
+      setModelInput(null)
+      loadedProjectIdRef.current = null
+      setInitialLoading(false)
+      return
+    }
+    void reload({ soft: loadedProjectIdRef.current === project.projectId })
+  }, [client, project, reload])
+
+  // Opening: soft-refresh when cached so the tree paints immediately.
+  useEffect(() => {
+    if (!open || !client || !project) return
+    void reload({ soft: loadedProjectIdRef.current === project.projectId })
+  }, [open, client, project, reload])
 
   const model = useMemo(
     () =>
@@ -391,10 +466,13 @@ export default function GithubGraphOverlay() {
   const showingFeatureProjection = activeMode === 'feature-tree'
   const layout = showingFeatureProjection ? featureLayout : partitionLayout
   const treeModel = showingFeatureProjection ? featureProjection : model
+  // Defer DAG layout until history mode — partition open must stay cheap.
   const historyLayout = useMemo(
     () =>
-      domainModel ? layoutGithubCommitDag(domainModel.commits) : null,
-    [domainModel],
+      activeMode === 'git-history' && domainModel
+        ? layoutGithubCommitDag(domainModel.commits)
+        : null,
+    [activeMode, domainModel],
   )
   const featureCount = domainModel?.features.length ?? 0
 

@@ -11,8 +11,8 @@
 }
 
 /*
- * Fixed to the viewport. Inline `left`/`top` place the stack fully outside the
- * AI Chat sidebar’s left edge (never inside the chat column).
+ * Fixed to the viewport. Inline `left`/`top` place the stack on the AI Chat
+ * sidebar’s right edge (former tools edge-rail slot).
  */
 .rail {
   position: fixed;
@@ -21,7 +21,7 @@
   width: 40px;
   max-height: min(42vh, 320px);
   box-sizing: border-box;
-  /* Tucked 6px toward the sidebar while hidden; settles at the computed left. */
+  /* Tucked 6px toward the window edge while hidden; settles at the computed left. */
   transform: translateY(-50%) translateX(6px);
   opacity: 0;
   pointer-events: none;

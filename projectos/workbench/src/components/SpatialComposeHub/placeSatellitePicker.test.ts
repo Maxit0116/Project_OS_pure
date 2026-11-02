@@ -41,4 +41,17 @@ describe('placeSatellitePicker', () => {
     expect(placed.side).toBe('below')
     expect(placed.y).toBeGreaterThanOrEqual(310)
   })
+
+  it('stays on left/right when allowedSides excludes above/below', () => {
+    const placed = placeSatellitePicker({
+      anchor: { x: 900, y: 400, width: 260, height: 180 },
+      obstacles: [],
+      preferredSide: 'left',
+      allowedSides: ['left', 'right'],
+      viewport,
+    })
+    expect(placed.side).toBe('left')
+    expect(placed.x + 220).toBeLessThanOrEqual(900)
+    expect(placed.y).toBe(400)
+  })
 })

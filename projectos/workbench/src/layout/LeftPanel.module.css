@@ -115,6 +115,18 @@
   min-height: 0;
 }
 
+.sidebarUnavailable {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg) var(--space-md);
+  text-align: center;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--tech-text-secondary);
+}
+
 @media (prefers-reduced-transparency: reduce) {
   .panelBleed {
     background: var(--tech-bg-chrome);

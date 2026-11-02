@@ -341,9 +341,13 @@
 
   --z-workbench-chrome: 20;
   --z-workbench-side-panel: 20;
+  /* Above GraphOverlayFrame (12); below terminal; chat history drawer left of chat. */
+  --z-chat-history-drawer: 50;
   --z-workbench-terminal: 55;
   /* Above session / loop / agent-flow overlays; scrub rail floats over the center. */
   --z-conversation-nav: 70;
+  /* Floating stage-front tools — overlays chrome / panels without consuming layout. */
+  --z-workbench-stage-rail: 80;
 
   /* Chat mode brand colors (selected chip + turn markers). Agent has no tint. */
   --chat-mode-ask: var(--color-success);

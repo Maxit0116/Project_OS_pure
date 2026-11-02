@@ -309,9 +309,11 @@
 
 .shellChromeBleed .topBar,
 .shellChromeBleed :global([data-desktop-title-bar]),
+.shellChromeBleed :global([data-workbench-stage-rail]),
 .shellChromeBleed [data-terminal-dock],
 .shellChromeBleed :global([data-edge-rail]),
-.shellChromeBleed :global([data-workbench-side-panel-content]) {
+.shellChromeBleed :global([data-workbench-side-panel-content]),
+.shellChromeBleed :global([data-chat-history-drawer-shield]) {
   pointer-events: auto;
 }
 

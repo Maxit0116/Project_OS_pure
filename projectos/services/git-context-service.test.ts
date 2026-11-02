@@ -209,6 +209,34 @@ describe("git-context-service", () => {
     }
   });
 
+  it("lists multiline commit bodies in a single git log pass", () => {
+    const dir = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-log-batch-"));
+    try {
+      run(dir, "git", ["init"]);
+      run(dir, "git", ["config", "user.email", "test@example.com"]);
+      run(dir, "git", ["config", "user.name", "Test"]);
+      writeFileSync(join(dir, "a.txt"), "one\n");
+      run(dir, "git", ["add", "a.txt"]);
+      run(dir, "git", [
+        "commit",
+        "-m",
+        "subject line",
+        "-m",
+        "body paragraph one\n\nbody paragraph two",
+      ]);
+      run(dir, "git", ["branch", "-M", "main"]);
+
+      const listed = listGitCommits(dir, { limit: 5, tips: ["main"] });
+      expect(listed.commits).toHaveLength(1);
+      expect(listed.commits[0]?.message).toContain("subject line");
+      expect(listed.commits[0]?.message).toContain("body paragraph two");
+      expect(listed.commits[0]?.authorName).toBe("Test");
+      expect(listed.commits[0]?.authoredAt).toBeTruthy();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("renames, rolls back, and deletes a feature branch against origin", () => {
     const bare = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-ops-bare-"));
     const dir = mkdtempSync(join(process.cwd(), ".tmp-projectos-git-ops-"));
