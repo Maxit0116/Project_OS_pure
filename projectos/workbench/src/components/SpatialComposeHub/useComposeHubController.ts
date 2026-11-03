@@ -130,7 +130,9 @@ export function useComposeHubController({
     ahead?: number
     behind?: number
     remoteUrl?: string
+    defaultBranch?: string
   } | null>(null)
+  const [gitStatusTick, setGitStatusTick] = useState(0)
   const [mcpServers, setMcpServers] = useState<HubMcpServerOption[]>([])
   const [mcpLoading, setMcpLoading] = useState(false)
   const [skillLibrary, setSkillLibrary] = useState<HubSkillOption[]>([])
@@ -532,12 +534,13 @@ export function useComposeHubController({
         ...(git.ahead !== undefined ? { ahead: git.ahead } : {}),
         ...(git.behind !== undefined ? { behind: git.behind } : {}),
         ...(git.remoteUrl ? { remoteUrl: git.remoteUrl } : {}),
+        ...(git.defaultBranch ? { defaultBranch: git.defaultBranch } : {}),
       })
     })
     return () => {
       cancelled = true
     }
-  }, [active, hub.repo?.label, hub.repo?.branch, dataSource])
+  }, [active, hub.repo?.label, hub.repo?.branch, dataSource, gitStatusTick])
 
   useEffect(() => {
     if (!active) return
@@ -594,22 +597,25 @@ export function useComposeHubController({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hub.references])
 
+  // Only seed hub.repo.branch when missing — never overwrite a locator
+  // pending-checkout target that intentionally differs from the workspace HEAD.
   useEffect(() => {
     if (!active || !dataSource?.getGitStatus || !hub.repo) return
+    if (hub.repo.branch) return
     let cancelled = false
     void dataSource.getGitStatus().then((git) => {
-      if (cancelled || !git.branch) return
-      if (hub.repo?.branch === git.branch) return
+      if (cancelled || !git.branch || !hub.repo) return
+      if (hub.repo.branch) return
       onHubChange({
         ...hub,
-        repo: { label: hub.repo!.label, branch: git.branch },
+        repo: { label: hub.repo.label, branch: git.branch },
       })
     })
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, hub.repo?.label, dataSource])
+  }, [active, hub.repo?.label, hub.repo?.branch, dataSource])
 
   return {
     hub,
@@ -643,6 +649,7 @@ export function useComposeHubController({
     branchLocatorOpen,
     setBranchLocatorOpen,
     liveGitStatus,
+    refreshLiveGitStatus: () => setGitStatusTick((n) => n + 1),
     mcpServers,
     mcpLoading,
     skillLibrary,

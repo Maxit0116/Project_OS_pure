@@ -54,17 +54,33 @@
 .searchInput {
   width: 100%;
   appearance: none;
+  -webkit-appearance: none;
   border: 1px solid var(--tech-border);
   border-radius: 6px;
-  background: var(--tech-bg-muted);
+  background-color: var(--tech-bg-muted);
+  background-image: none;
   color: var(--tech-text-primary);
+  caret-color: var(--tech-text-primary);
   font-size: var(--font-size-xs);
   padding: 7px 52px 7px 30px;
   outline: none;
+  box-shadow: none;
 }
 
 .searchInput::placeholder {
   color: var(--tech-text-muted);
+  opacity: 1;
+}
+
+.searchInput:hover:not(:disabled) {
+  border-color: var(--tech-border-strong);
+}
+
+.searchInput:focus,
+.searchInput:focus-visible {
+  outline: none;
+  border-color: var(--tech-border-strong);
+  box-shadow: var(--tech-shadow-focus);
 }
 
 .searchInput:focus-visible {
@@ -337,6 +353,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   font-size: 12px;
   color: var(--tech-text-secondary);
 }
@@ -441,10 +458,7 @@
   color: var(--tech-text-muted);
 }
 
-.toggleInput {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--tech-accent);
+.toggleRow :global(button[role='switch']) {
   flex-shrink: 0;
 }
 
@@ -464,14 +478,21 @@
 .textarea,
 .inlineSelect {
   appearance: none;
+  -webkit-appearance: none;
   border: 1px solid var(--tech-border);
   border-radius: 6px;
-  background: var(--tech-bg-muted);
+  background-color: var(--tech-bg-muted);
+  background-image: none;
   color: var(--tech-text-primary);
+  caret-color: var(--tech-text-primary);
   font: inherit;
   font-size: var(--font-size-xs);
-  padding: 6px 10px;
+  padding: 7px 10px;
   outline: none;
+  box-shadow: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .select,
@@ -489,9 +510,21 @@
 
 .textarea {
   width: 100%;
-  resize: vertical;
+  resize: none;
+  overflow-y: auto;
   min-height: 96px;
+  max-height: 240px;
   max-width: none;
+  line-height: 1.45;
+}
+
+.textarea::placeholder {
+  color: var(--tech-text-muted);
+  opacity: 1;
+}
+
+.textarea:hover:not(:disabled) {
+  border-color: var(--tech-border-strong);
 }
 
 .optionGroup {
@@ -533,14 +566,41 @@
 }
 
 .toolChip {
+  appearance: none;
+  -webkit-appearance: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin: 0;
   padding: 6px 10px;
   border-radius: 6px;
   border: 1px solid var(--tech-border);
+  background: var(--tech-bg-muted);
+  font: inherit;
   font-size: 12px;
   color: var(--tech-text-secondary);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.toolChip:hover {
+  border-color: var(--tech-border-strong);
+  color: var(--tech-text-primary);
+}
+
+.toolChip:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.toolChipOn {
+  border-color: var(--tech-accent);
+  background: var(--tech-accent-subtle);
+  color: var(--tech-text-primary);
 }
 
 .settingRowStackedPad {

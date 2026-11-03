@@ -2,28 +2,28 @@
 .dock {
   position: relative;
   z-index: 6;
-  height: 14px;
+  height: 22px;
   margin: 0 0 2px;
   flex-shrink: 0;
 }
 
 .hotZone {
   position: absolute;
-  /* Reach slightly into the message list so the hover target is easy to hit. */
-  top: -10px;
+  /* Reach further into the message list so the hover target is easy to hit. */
+  top: -20px;
   right: 0;
   bottom: 0;
   left: 0;
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding-bottom: 5px;
+  padding-bottom: 8px;
   cursor: default;
 }
 
 .peep {
-  width: 28px;
-  height: 3px;
+  width: 36px;
+  height: 4px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--tech-text-muted) 45%, transparent);
   transition:
@@ -35,7 +35,7 @@
 
 .dock:hover .peep,
 .dockRevealed .peep {
-  width: 40px;
+  width: 48px;
   opacity: 0.9;
   background: color-mix(in srgb, var(--tech-accent) 55%, var(--tech-text-muted));
 }
@@ -74,27 +74,32 @@
   padding-bottom: 2px;
   pointer-events: auto;
   transform-origin: bottom center;
-  animation: stageReveal 220ms var(--ease-out) both;
+  opacity: 1;
+  transform: translateY(0) scaleY(1);
+  visibility: visible;
+  /* Match top WorkbenchStageRail tuck timing so leave → hide feels the same. */
+  transition:
+    transform var(--duration-normal) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out),
+    visibility 0s linear 0s;
 }
 
 .stagePopupHidden {
-  display: none;
-}
-
-@keyframes stageReveal {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scaleY(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scaleY(1);
-  }
+  opacity: 0;
+  transform: translateY(8px) scaleY(0.96);
+  pointer-events: none;
+  visibility: hidden;
+  /* Defer visibility until opacity/transform finish — same “sticky then tuck” feel as top rail. */
+  transition:
+    transform var(--duration-normal) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out),
+    visibility 0s linear var(--duration-normal);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .stagePopup {
-    animation: none;
+  .stagePopup,
+  .stagePopupHidden {
+    transition: none;
   }
 
   .peep {

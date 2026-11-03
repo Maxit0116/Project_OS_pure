@@ -265,20 +265,41 @@
 }
 
 .stencilBriefInput {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
   width: 100%;
-  resize: vertical;
+  box-sizing: border-box;
+  resize: none;
+  overflow-y: auto;
   min-height: 52px;
+  max-height: 140px;
   border-radius: 6px;
   border: 1px solid var(--tech-border, rgba(255, 255, 255, 0.08));
-  background: var(--tech-bg-muted, #272f42);
+  background-color: var(--tech-bg-muted, #222222);
+  background-image: none;
   color: var(--tech-text-primary, #f8fafc);
+  caret-color: var(--tech-text-primary, #f8fafc);
   font-size: 11px;
   line-height: 1.4;
-  padding: 6px 8px;
+  padding: 7px 9px;
   font-family: inherit;
+  outline: none;
+  box-shadow: none;
 }
 
+.stencilBriefInput::placeholder {
+  color: var(--tech-text-muted);
+  opacity: 1;
+}
+
+.stencilBriefInput:hover:not(:disabled) {
+  border-color: var(--tech-border-strong);
+}
+
+.stencilBriefInput:focus,
 .stencilBriefInput:focus-visible {
+  border-color: var(--tech-border-strong);
   box-shadow: var(--tech-shadow-focus);
   outline: none;
 }

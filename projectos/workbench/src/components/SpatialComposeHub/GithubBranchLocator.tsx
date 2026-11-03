@@ -142,6 +142,7 @@ export default function GithubBranchLocator({
           <X size={14} strokeWidth={2} aria-hidden />
         </button>
       </div>
+      <p className={styles.hint}>{strings.repoLocateCheckoutHint}</p>
       <label className={styles.header}>
         <Search size={12} strokeWidth={2} aria-hidden />
         <input

@@ -3,6 +3,8 @@ import type { AgentActionEvent, AgentDelegationEvent, AgentFlowStep } from '@con
 import {
   agentPoolAxisRangeMs,
   buildHistoryEntryFromTask,
+  historyEntryFromIndexEntry,
+  mergeHistoryWithIndexEntries,
   projectAgentPool,
   projectAgentPoolSpans,
   resetAgentPoolSyntheticOrigins,
@@ -201,6 +203,7 @@ describe('projectAgentPool', () => {
   it('builds history entries from the current task snapshot', () => {
     const task: AgentPoolTask = {
       taskId: 'task-1',
+      definitionId: 'def_task_task-1',
       title: 'Edit file',
       modelLabel: 'Fable',
       modelId: null,
@@ -222,8 +225,13 @@ describe('projectAgentPool', () => {
           startMs: 0,
         },
       ],
+      majorActions: [],
+      traceSpans: [],
+      trace: null,
       originMs: Date.parse('2026-02-01T00:00:00.000Z'),
+      poolRunId: 'pool_x',
       loopSpecId: null,
+      acceptance: 'pending',
     }
     const entry = buildHistoryEntryFromTask(task, '2026-02-01T00:00:05.000Z')
     expect(entry.runId).toBe('run-9')
@@ -233,8 +241,8 @@ describe('projectAgentPool', () => {
     expect(entry.spans[0]?.status).toBe('complete')
   })
 
-  it('projects action spans onto a shared relative clock', () => {
-    const { spans, originMs } = projectAgentPoolSpans({
+  it('projects Major Action bars onto a shared relative clock', () => {
+    const { spans, originMs, trace } = projectAgentPoolSpans({
       title: 'Root',
       status: 'running',
       steps: [],
@@ -242,12 +250,99 @@ describe('projectAgentPool', () => {
       currentAction: 'Reading src/a.ts',
     })
     expect(originMs).toBe(Date.parse('2026-01-01T00:00:01.000Z'))
-    expect(spans.some((span) => span.kind === 'action' && span.endMs === 80)).toBe(true)
-    expect(spans.some((span) => span.id === 'span:active' && span.endMs == null)).toBe(true)
+    expect(spans.some((span) => span.kind === 'major')).toBe(true)
+    expect(trace.spans.some((span) => span.kind === 'file')).toBe(true)
+    expect(spans.some((span) => span.kind === 'agent' && span.endMs == null)).toBe(true)
     expect(agentPoolAxisRangeMs(spans, 1500)).toBeGreaterThanOrEqual(2000)
+  })
+
+  it('assigns stable definition ids and shared pool origin across lanes', () => {
+    const rows = projectAgentPool({
+      activeRunId: 'run-root',
+      flowStatus: 'running',
+      steps: [step({ id: 's1', label: 'Delegate', status: 'running' })],
+      flowActions: [fileRead('src/a.ts')],
+      flowDelegationEvents: [delegated('task-a', 'child-a', 'src/a.ts')],
+      delegatedRunTraces: {
+        'child-a': {
+          taskId: 'task-a',
+          filePath: 'src/a.ts',
+          events: [fileRead('src/a.ts')],
+        },
+      },
+      modelLabel: 'Fable 5.1',
+      modelId: null,
+      chatSessionId: 'chat-1',
+      poolRunId: 'pool_shared',
+      overlay: emptyOverlay,
+    })
+    expect(rows.every((row) => row.poolRunId === 'pool_shared')).toBe(true)
+    expect(rows.every((row) => row.originMs === rows[0]?.originMs)).toBe(true)
+    expect(rows[0]?.definitionId).toBe('def_root_chat-1')
+    expect(rows.find((row) => row.taskId === 'task-a')?.definitionId).toBe('def_task_task-a')
   })
 
   it('summarizes action events for the life-line label', () => {
     expect(summarizeActionEvent(fileRead('a.ts'))).toContain('a.ts')
+  })
+
+  it('merges disk index history without dropping local span cards', () => {
+    const local = [
+      buildHistoryEntryFromTask(
+        {
+          taskId: 'root:run-2',
+          definitionId: 'def_root_chat-1',
+          title: 'Pass 1',
+          modelLabel: 'Fable',
+          modelId: null,
+          status: 'complete',
+          currentAction: 'Done',
+          runId: 'run-1',
+          chatSessionId: 'chat-1',
+          source: 'root',
+          history: [],
+          requirementSummary: 'x',
+          acceptanceCriteria: [],
+          flowSteps: [{ id: 's1', label: 'Edit', status: 'complete' }],
+          spans: [
+            {
+              id: 'span:agent',
+              kind: 'agent',
+              label: 'Pass 1',
+              status: 'complete',
+              startMs: 0,
+              endMs: 1000,
+            },
+          ],
+          majorActions: [],
+          traceSpans: [],
+          trace: null,
+          originMs: Date.parse('2026-02-01T00:00:00.000Z'),
+          poolRunId: 'pool_x',
+          loopSpecId: null,
+          acceptance: 'rejected',
+        },
+        '2026-02-01T00:00:01.000Z',
+      ),
+    ]
+    const disk = [
+      historyEntryFromIndexEntry({
+        runId: 'run-1',
+        title: 'Pass 1 (index)',
+        startedAt: '2026-02-01T00:00:00.000Z',
+        endedAt: '2026-02-01T00:00:01.000Z',
+        acceptance: 'rejected',
+      }),
+      historyEntryFromIndexEntry({
+        runId: 'run-0',
+        title: 'Older pass',
+        startedAt: '2026-01-31T00:00:00.000Z',
+        endedAt: '2026-01-31T00:01:00.000Z',
+      }),
+    ]
+    const merged = mergeHistoryWithIndexEntries(local, disk, 'run-2')
+    expect(merged.map((entry) => entry.runId)).toEqual(['run-0', 'run-1'])
+    expect(merged.find((entry) => entry.runId === 'run-1')?.spans.length).toBeGreaterThan(0)
+    expect(merged.find((entry) => entry.runId === 'run-0')?.title).toBe('Older pass')
   })
 })

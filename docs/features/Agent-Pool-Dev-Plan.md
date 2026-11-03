@@ -1,18 +1,23 @@
 # Agent Pool：多 Agent 态势与验收闭环
 
-**状态**：M0–M4 implemented（可迭代）。  
+**状态**：M0–M4 implemented（基线）。  
 **范围**：Agent Flow 第三个 tab「Agent Pool」——以任务 identity 为行、叠放 history；行内迷你 waterfall 在共享时钟上生长；用户点 Done 后在 Chat 弹出验收卡；通过离池，不通过续跑。  
+
+**v1.0 升级权威文档**：[`Agent-Pool-Trace-Waterfall-Dev-Plan.md`](./Agent-Pool-Trace-Waterfall-Dev-Plan.md)  
+（Stable Definition / independent PoolRun / JSONL Trace Projection / shared-axis Waterfall / durable History & acceptance。本文件保留为 M0–M4 已落地基线，不与升级计划竞争。）
+
 **权威交叉引用**：
-- 本仓库 Cursor plan：`Agent Pool Dev Plan`
 - `docs/features/Agent-Flow-Activity-Dev-Plan.md` — Timeline / Graph 深读
 - 契约：`projectos/contracts/events.ts`（delegation、actions、steps）
 - Compose：`projectos/services/compose-subagents.ts`、`SpatialComposeHub`
 - 参考交互：Kobra Trace Waterfall（`spans` + `now` 共享时钟）
 
-**锁定决策**：
+**锁定决策（M0–M4）**：
 - 一行 = **任务 identity** + 可选 **叠放 history**
 - **Done 由用户点击** → Chat 验收卡 → 通过离池 / 继续则 push history
 - 行内可视化 = **迷你 span 轴**（不是完整 Timeline）；深读仍 Jump → Graph / Timeline
+
+> v1.0 将把「任务 identity」升级为稳定 `AgentDefinition`，并把迷你 waterfall 升级为 Major Action 共享时间轴 + Inline Expand + Inspector；详见 Trace Waterfall DevPlan。
 
 ---
 
@@ -58,9 +63,11 @@ compose hub slots → agentPoolStore.composeSubagents
 
 ---
 
-## 明确不做（本轮）
+## 明确不做（M0–M4 本轮）
 
 - Pool 内嵌完整 Session / Loop 图
 - 把 Timeline 整页搬进行内（无 zoom / 最慢路径分析）
 - 品牌级 model SVG（现为色相字母 chip）
 - Cost / Tokens 仪表盘（契约未提供池级计费时不做）
+
+v1.0 范围与延期项以 [`Agent-Pool-Trace-Waterfall-Dev-Plan.md`](./Agent-Pool-Trace-Waterfall-Dev-Plan.md) §11 / §17 为准。

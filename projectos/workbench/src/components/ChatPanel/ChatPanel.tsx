@@ -525,46 +525,6 @@ export default function ChatPanel() {
             onMarkBugFixed={(bugId) => void markBugFixed(bugId)}
           />
         )}
-        {chatMode === 'debug' && debugSession && !refineLoading && flowStatus !== 'running' ? (
-          <div className={styles.debugChatCta}>
-            {debugSession.phase === 'hypothesize' ? (
-              <button
-                type="button"
-                className={styles.debugCtaButton}
-                onClick={() => void submitDebugRepro()}
-              >
-                {ts('debug.chatCtaContinue')}
-              </button>
-            ) : null}
-            {debugSession.phase === 'reproduce' ? (
-              <button
-                type="button"
-                className={styles.debugCtaButton}
-                onClick={() => void submitDebugRepro()}
-              >
-                {ts('debug.chatCtaReproduce')}
-              </button>
-            ) : null}
-            {debugSession.phase === 'fix' ? (
-              <button
-                type="button"
-                className={styles.debugCtaButton}
-                onClick={() => void confirmDebugFix()}
-              >
-                {ts('debug.chatCtaApplyFix')}
-              </button>
-            ) : null}
-            {debugSession.phase === 'verify' ? (
-              <button
-                type="button"
-                className={styles.debugCtaButton}
-                onClick={() => void markDebugFixed()}
-              >
-                {ts('debug.chatCtaMarkFixed')}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
         {runActivityRows.map((activity) => (
           <AgentActivitySummaryRow
             key={activity.id}

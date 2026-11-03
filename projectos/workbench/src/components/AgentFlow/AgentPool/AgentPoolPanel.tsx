@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { modelProfileLabel } from '@contracts/index'
 import { Layers } from 'lucide-react'
 import { useI18n } from '../../../i18n'
@@ -31,9 +31,26 @@ export default function AgentPoolPanel() {
   const reviewingTaskId = useAgentPoolStore((s) => s.reviewingTaskId)
   const continuingTaskIds = useAgentPoolStore((s) => s.continuingTaskIds)
   const historyByTaskId = useAgentPoolStore((s) => s.historyByTaskId)
-  const expandedTaskId = useAgentPoolStore((s) => s.expandedTaskId)
-  const historyExpandedTaskId = useAgentPoolStore((s) => s.historyExpandedTaskId)
+  const acceptanceByTaskId = useAgentPoolStore((s) => s.acceptanceByTaskId)
+  const expandedTaskIds = useAgentPoolStore((s) => s.expandedTaskIds)
+  const historyExpandedTaskIds = useAgentPoolStore((s) => s.historyExpandedTaskIds)
   const composeSubagents = useAgentPoolStore((s) => s.composeSubagents)
+  const activePoolRunId = useAgentPoolStore((s) => s.activePoolRunId)
+  const ensureDiskPoolRun = useAgentPoolStore((s) => s.ensureDiskPoolRun)
+  const hydrateTaskHistoryFromDisk = useAgentPoolStore(
+    (s) => s.hydrateTaskHistoryFromDisk,
+  )
+
+  useEffect(() => {
+    void ensureDiskPoolRun({
+      rootRunId: activeRunId,
+      sessionId: chatSessionId,
+      definitionId: chatSessionId
+        ? `def_root_${chatSessionId}`
+        : 'def_root_workspace',
+      title: 'Agent run',
+    })
+  }, [activeRunId, chatSessionId, ensureDiskPoolRun])
 
   const selectedModel = settings?.modelProfiles.find(
     (profile) => profile.id === selectedModelProfileId,
@@ -54,11 +71,13 @@ export default function AgentPoolPanel() {
         modelLabel,
         modelId: selectedModelProfileId,
         chatSessionId,
+        poolRunId: activePoolRunId,
         overlay: agentPoolOverlayFromStore({
           removedTaskIds,
           reviewingTaskId,
           continuingTaskIds,
           historyByTaskId,
+          acceptanceByTaskId,
         }),
         workingSessions: heads.map((head) => ({
           id: head.id,
@@ -77,16 +96,41 @@ export default function AgentPoolPanel() {
       modelLabel,
       selectedModelProfileId,
       chatSessionId,
+      activePoolRunId,
       removedTaskIds,
       reviewingTaskId,
       continuingTaskIds,
       historyByTaskId,
+      acceptanceByTaskId,
       heads,
       composeSubagents,
     ],
   )
 
   const nowMs = useAgentPoolNow(tasks)
+  const poolOriginMs = tasks[0]?.originMs ?? Date.now()
+
+  const historyHydrationKey = useMemo(
+    () =>
+      tasks
+        .map((task) => `${task.taskId}|${task.definitionId}|${task.runId ?? ''}`)
+        .sort()
+        .join(';'),
+    [tasks],
+  )
+
+  useEffect(() => {
+    for (const task of tasks) {
+      if (!task.definitionId) continue
+      void hydrateTaskHistoryFromDisk({
+        taskId: task.taskId,
+        definitionId: task.definitionId,
+        activeRunId: task.runId,
+      })
+    }
+    // Re-hydrate when lane identity / definition / active run changes — not on every span tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by historyHydrationKey
+  }, [historyHydrationKey, hydrateTaskHistoryFromDisk])
 
   const summary = useMemo(() => {
     let running = 0
@@ -122,6 +166,11 @@ export default function AgentPoolPanel() {
             {ts('agentFlow.pool.summaryErrors', { count: summary.errors })}
           </span>
         ) : null}
+        {activePoolRunId ? (
+          <span className={styles.poolRun} title={activePoolRunId}>
+            {ts('agentFlow.pool.poolRunLabel')}
+          </span>
+        ) : null}
       </div>
       <div className={styles.list}>
         {tasks.map((task) => (
@@ -129,19 +178,14 @@ export default function AgentPoolPanel() {
             key={task.taskId}
             task={task}
             nowMs={nowMs}
-            expanded={expandedTaskId === task.taskId}
-            historyExpanded={historyExpandedTaskId === task.taskId}
+            poolOriginMs={poolOriginMs}
+            expanded={expandedTaskIds.includes(task.taskId)}
+            historyExpanded={historyExpandedTaskIds.includes(task.taskId)}
             onToggleExpand={() => {
-              const store = useAgentPoolStore.getState()
-              store.setExpandedTaskId(
-                store.expandedTaskId === task.taskId ? null : task.taskId,
-              )
+              useAgentPoolStore.getState().toggleExpandedTaskId(task.taskId)
             }}
             onToggleHistory={() => {
-              const store = useAgentPoolStore.getState()
-              store.setHistoryExpandedTaskId(
-                store.historyExpandedTaskId === task.taskId ? null : task.taskId,
-              )
+              useAgentPoolStore.getState().toggleHistoryExpandedTaskId(task.taskId)
             }}
             onDone={() => {
               useAgentPoolStore.getState().startReview(task)

@@ -4,7 +4,18 @@ import type {
   AgentFlowStep,
   AgentRunEvent,
   PinComposerHubSubagentLink,
+  TraceMajorAction,
+  TraceSpanView,
+  TraceTimingQuality,
 } from '@contracts/index'
+import {
+  projectAgentPoolTrace,
+  resolvePoolOriginMs,
+  stableDefinitionId,
+  summarizeTraceAction,
+  type AgentPoolTraceBar,
+  type AgentPoolTraceProjection,
+} from './projectAgentPoolTrace'
 
 export type AgentPoolTaskStatus =
   | 'running'
@@ -17,13 +28,24 @@ export type AgentPoolTaskStatus =
 export type AgentPoolTaskSource = 'root' | 'delegation' | 'session' | 'compose'
 
 /** Span kinds for the pool mini-waterfall (Kobra-style shared clock). */
-export type AgentPoolSpanKind = 'agent' | 'step' | 'model' | 'tool' | 'action'
+export type AgentPoolSpanKind =
+  | 'agent'
+  | 'step'
+  | 'model'
+  | 'tool'
+  | 'action'
+  | 'major'
+  | 'file'
+  | 'apply'
+  | 'verify'
+  | 'wait'
+  | 'other'
 
 export type AgentPoolSpanStatus = 'running' | 'complete' | 'error'
 
 /**
  * One bar on the row timeline. Running spans omit `endMs` and grow to panel `now`.
- * Times are milliseconds relative to the task's `originMs`.
+ * Times are milliseconds relative to the shared Pool `originMs` / `poolOriginMs`.
  */
 export interface AgentPoolSpan {
   id: string
@@ -33,6 +55,8 @@ export interface AgentPoolSpan {
   status: AgentPoolSpanStatus
   startMs: number
   endMs?: number
+  timingQuality?: TraceTimingQuality
+  level?: 1 | 2 | 3
 }
 
 export interface AgentPoolFlowStep {
@@ -50,10 +74,15 @@ export interface AgentPoolHistoryEntry {
   flowSteps: AgentPoolFlowStep[]
   spans: AgentPoolSpan[]
   originMs: number
+  majorActions?: TraceMajorAction[]
+  traceSpans?: TraceSpanView[]
+  acceptance?: 'accepted' | 'rejected' | 'pending' | 'none'
 }
 
 export interface AgentPoolTask {
   taskId: string
+  /** Stable AgentDefinition id (not mutable display config). */
+  definitionId: string
   title: string
   modelLabel: string
   modelId: string | null
@@ -66,11 +95,16 @@ export interface AgentPoolTask {
   requirementSummary: string
   acceptanceCriteria: string[]
   flowSteps: AgentPoolFlowStep[]
-  /** Live mini-waterfall spans for this task identity. */
+  /** Compact / expanded bars (Major Actions by default). */
   spans: AgentPoolSpan[]
-  /** Epoch ms for span relative clock (shared with panel `now`). */
+  majorActions: TraceMajorAction[]
+  traceSpans: TraceSpanView[]
+  trace: AgentPoolTraceProjection | null
+  /** Shared PoolRun time origin (epoch ms). */
   originMs: number
+  poolRunId: string | null
   loopSpecId: string | null
+  acceptance: 'accepted' | 'rejected' | 'pending' | 'none'
 }
 
 export interface DelegatedRunTraceLike {
@@ -98,6 +132,7 @@ export interface AgentPoolOverlayState {
   reviewingTaskIds: ReadonlySet<string>
   continuingTaskIds: ReadonlySet<string>
   historyByTaskId: Readonly<Record<string, AgentPoolHistoryEntry[]>>
+  acceptanceByTaskId?: Readonly<Record<string, AgentPoolTask['acceptance']>>
 }
 
 export interface ProjectAgentPoolInput {
@@ -113,6 +148,10 @@ export interface ProjectAgentPoolInput {
   overlay: AgentPoolOverlayState
   workingSessions?: WorkingSessionLike[]
   composeSubagents?: ComposeSubagentLike[]
+  /** Independent PoolRun id from store; created outside projection. */
+  poolRunId?: string | null
+  /** Shared axis origin; when omitted, derived from earliest evidence. */
+  poolOriginMs?: number
 }
 
 function isActionEvent(event: AgentRunEvent): event is AgentActionEvent {
@@ -160,34 +199,7 @@ function collectRunSteps(events: AgentRunEvent[]): AgentFlowStep[] {
 }
 
 export function summarizeActionEvent(event: AgentActionEvent): string {
-  switch (event.type) {
-    case 'file_read':
-      return `Reading ${event.payload.path}`
-    case 'model_request':
-      return `Model · ${event.payload.model}`
-    case 'diff_proposed':
-      return event.payload.files[0]
-        ? `Proposed ${event.payload.files[0].operation} · ${event.payload.files[0].path}`
-        : 'Proposed diff'
-    case 'edit_plan_created':
-      return event.payload.objective
-    case 'mcp_tool_call':
-      return `${event.payload.toolName} · ${event.payload.status}`
-    case 'verification_result':
-      return event.payload.command
-        ? `Verify · ${event.payload.command}`
-        : `Verify · ${event.payload.status}`
-    case 'decision_summary':
-      return event.payload.summary
-    case 'apply_result':
-      return `Apply · ${event.payload.outcome}`
-    case 'context_assembled':
-      return `Context · ${event.payload.files.length} files`
-    case 'context_attached':
-      return `Attached · ${event.payload.autoFiles.length} files`
-    default:
-      return event.type.replace(/_/g, ' ')
-  }
+  return summarizeTraceAction(event)
 }
 
 export function extractAcceptanceCriteria(actions: AgentActionEvent[]): string[] {
@@ -262,11 +274,7 @@ function mapDelegatedStatus(
     if (completed.payload.status === 'awaiting_review') return 'awaiting_user_done'
     return 'complete'
   }
-  const started = events.some(
-    (event) =>
-      event.type === 'child_run_started' && event.payload.childRunId === childRunId,
-  )
-  return started ? 'running' : 'running'
+  return 'running'
 }
 
 function toFlowSteps(steps: AgentFlowStep[]): AgentPoolFlowStep[] {
@@ -277,8 +285,6 @@ function toFlowSteps(steps: AgentFlowStep[]): AgentPoolFlowStep[] {
   }))
 }
 
-const SYNTHETIC_STEP_MS = 1000
-const POINT_ACTION_MS = 80
 /** Minimum axis length so a brand-new run still shows a readable track. */
 export const AGENT_POOL_MIN_RANGE_MS = 2_000
 
@@ -307,54 +313,18 @@ function isLivePoolStatus(status: AgentPoolTaskStatus): boolean {
   return status === 'running' || status === 'continuing'
 }
 
-function mapStepToSpanStatus(status: string): AgentPoolSpanStatus {
-  if (status === 'error') return 'error'
-  if (status === 'complete' || status === 'skipped' || status === 'warning') return 'complete'
-  return 'running'
-}
-
-function actionDurationMs(event: AgentActionEvent): number | null {
-  if (event.type === 'model_request' || event.type === 'mcp_tool_call') {
-    const duration = event.payload.durationMs
-    return typeof duration === 'number' && Number.isFinite(duration) ? duration : null
+function barToSpan(bar: AgentPoolTraceBar): AgentPoolSpan {
+  return {
+    id: bar.id,
+    parentId: bar.parentId,
+    kind: bar.kind === 'major' ? 'major' : (bar.kind as AgentPoolSpanKind),
+    label: bar.label,
+    status: bar.status,
+    startMs: bar.startMs,
+    endMs: bar.endMs,
+    timingQuality: bar.timingQuality,
+    level: bar.level,
   }
-  return null
-}
-
-function actionSpanKind(event: AgentActionEvent): AgentPoolSpanKind {
-  if (event.type === 'model_request') return 'model'
-  if (event.type === 'mcp_tool_call') return 'tool'
-  return 'action'
-}
-
-function actionSpanStatus(event: AgentActionEvent): AgentPoolSpanStatus {
-  if (event.type === 'model_request') {
-    return event.payload.status === 'failed' ? 'error' : 'complete'
-  }
-  if (event.type === 'mcp_tool_call') {
-    return event.payload.status === 'failed' || event.payload.status === 'rejected'
-      ? 'error'
-      : 'complete'
-  }
-  if (event.type === 'file_read') {
-    return event.payload.status === 'failed' ? 'error' : 'complete'
-  }
-  if (event.type === 'verification_result') {
-    return event.payload.status === 'failed' ? 'error' : 'complete'
-  }
-  if (event.type === 'apply_result') {
-    return event.payload.outcome === 'rejected' ||
-      event.payload.outcome === 'recovery_required'
-      ? 'error'
-      : 'complete'
-  }
-  return 'complete'
-}
-
-function agentSpanStatus(taskStatus: AgentPoolTaskStatus): AgentPoolSpanStatus {
-  if (taskStatus === 'error') return 'error'
-  if (isLivePoolStatus(taskStatus)) return 'running'
-  return 'complete'
 }
 
 function sealRunningSpans(spans: AgentPoolSpan[], endMs: number): AgentPoolSpan[] {
@@ -370,8 +340,8 @@ function sealRunningSpans(spans: AgentPoolSpan[], endMs: number): AgentPoolSpan[
 }
 
 /**
- * Project steps + action events onto a shared relative clock.
- * Running leaf/agent spans omit `endMs` so the UI can grow them to `now`.
+ * Project steps + action events onto the shared Pool clock.
+ * Default bars are Major Actions (L1), not every low-level span.
  */
 export function projectAgentPoolSpans(input: {
   title: string
@@ -379,13 +349,12 @@ export function projectAgentPoolSpans(input: {
   steps: AgentFlowStep[]
   actions: AgentActionEvent[]
   currentAction: string
-  /** Task identity — stabilizes synthetic origins across re-projections. */
   taskId?: string
-  /** Optional absolute origin; defaults to earliest action timestamp or sticky now. */
   originMs?: number
-}): { spans: AgentPoolSpan[]; originMs: number } {
-  const { title, status, steps, actions, currentAction } = input
-  const actionTimes = actions
+  agentRunId?: string
+  events?: AgentRunEvent[]
+}): { spans: AgentPoolSpan[]; originMs: number; trace: AgentPoolTraceProjection } {
+  const actionTimes = input.actions
     .map((event) => parseEventMs(event.timestamp))
     .filter((value): value is number => value != null)
   const originMs =
@@ -395,87 +364,57 @@ export function projectAgentPoolSpans(input: {
       : input.taskId
         ? stableSyntheticOrigin(input.taskId)
         : Date.now())
-  const live = isLivePoolStatus(status)
-  const agentId = 'span:agent'
-  const childSpans: AgentPoolSpan[] = []
+  const live = isLivePoolStatus(input.status)
+  const agentRunId = input.agentRunId ?? input.taskId ?? 'run:unknown'
+  const trace = projectAgentPoolTrace({
+    agentRunId,
+    steps: input.steps,
+    actions: input.actions,
+    events: input.events,
+    poolOriginMs: originMs,
+    live,
+  })
 
-  if (actions.length > 0) {
-    for (const event of actions) {
-      const at = parseEventMs(event.timestamp)
-      if (at == null) continue
-      const atRel = Math.max(0, at - originMs)
-      const duration = actionDurationMs(event) ?? POINT_ACTION_MS
-      // Keep a visible bar when the first event lands exactly on the origin.
-      const endMs = Math.max(atRel, duration)
-      const startMs = Math.max(0, endMs - duration)
-      childSpans.push({
-        id: `span:action:${event.eventId}`,
-        parentId: agentId,
-        kind: actionSpanKind(event),
-        label: summarizeActionEvent(event),
-        status: actionSpanStatus(event),
-        startMs,
-        endMs,
-      })
-    }
-    if (live) {
-      const lastEnd = childSpans.reduce(
-        (max, span) => Math.max(max, span.endMs ?? span.startMs),
-        0,
-      )
-      childSpans.push({
-        id: 'span:active',
-        parentId: agentId,
-        kind: 'step',
-        label: currentAction || 'Working…',
-        status: 'running',
-        startMs: lastEnd,
-      })
-    }
-  } else if (steps.length > 0) {
-    let cursor = 0
-    for (const step of steps) {
-      const spanStatus = mapStepToSpanStatus(step.status)
-      const done = spanStatus !== 'running'
-      childSpans.push({
-        id: `span:step:${step.id}`,
-        parentId: agentId,
-        kind: 'step',
-        label: step.label,
-        status: spanStatus,
-        startMs: cursor,
-        endMs: done ? cursor + SYNTHETIC_STEP_MS : undefined,
-      })
-      if (done) cursor += SYNTHETIC_STEP_MS
-    }
-  } else if (live) {
-    childSpans.push({
-      id: 'span:active',
-      parentId: agentId,
-      kind: 'step',
-      label: currentAction || 'Working…',
-      status: 'running',
-      startMs: 0,
-    })
+  const compact = trace.compactBars.map(barToSpan)
+  const agentBar: AgentPoolSpan = {
+    id: 'span:agent',
+    kind: 'agent',
+    label: input.title,
+    status: input.status === 'error' ? 'error' : live ? 'running' : 'complete',
+    startMs: 0,
+    endMs: live
+      ? undefined
+      : Math.max(
+          POINT_FALLBACK,
+          ...compact.map((span) => span.endMs ?? span.startMs),
+        ),
+    timingQuality: 'derived',
+    level: 1,
   }
 
-  const covered = childSpans.reduce(
-    (max, span) => Math.max(max, span.endMs ?? span.startMs),
-    0,
-  )
-  const spans: AgentPoolSpan[] = [
-    {
-      id: agentId,
-      kind: 'agent',
-      label: title,
-      status: agentSpanStatus(status),
-      startMs: 0,
-      endMs: live ? undefined : Math.max(covered, POINT_ACTION_MS),
-    },
-    ...childSpans,
-  ]
-  return { spans, originMs }
+  const spans =
+    compact.length > 0
+      ? [agentBar, ...compact]
+      : live
+        ? [
+            agentBar,
+            {
+              id: 'span:active',
+              parentId: agentBar.id,
+              kind: 'step' as const,
+              label: input.currentAction || 'Working…',
+              status: 'running' as const,
+              startMs: 0,
+              timingQuality: 'incomplete' as const,
+              level: 1 as const,
+            },
+          ]
+        : [agentBar]
+
+  return { spans, originMs, trace }
 }
+
+const POINT_FALLBACK = 80
 
 /** Axis length for layout: at least min range, and at least the furthest tip / now. */
 export function agentPoolAxisRangeMs(
@@ -504,10 +443,28 @@ function applyOverlay(
   let status = task.status
   if (overlay.reviewingTaskIds.has(task.taskId)) status = 'reviewing'
   else if (overlay.continuingTaskIds.has(task.taskId)) status = 'continuing'
-  return { ...task, history, status }
+  const acceptance = overlay.acceptanceByTaskId?.[task.taskId] ?? task.acceptance
+  return { ...task, history, status, acceptance }
 }
 
-function buildRootTask(input: ProjectAgentPoolInput): AgentPoolTask | null {
+function earliestAbs(actions: AgentActionEvent[], events?: AgentRunEvent[]): number | null {
+  const times: number[] = []
+  for (const event of actions) {
+    const at = parseEventMs(event.timestamp)
+    if (at != null) times.push(at)
+  }
+  for (const event of events ?? []) {
+    const at = parseEventMs(event.timestamp)
+    if (at != null) times.push(at)
+  }
+  return times.length > 0 ? Math.min(...times) : null
+}
+
+function buildRootTask(
+  input: ProjectAgentPoolInput,
+  poolOriginMs: number,
+  poolRunId: string | null,
+): AgentPoolTask | null {
   const {
     activeRunId,
     flowStatus,
@@ -529,16 +486,23 @@ function buildRootTask(input: ProjectAgentPoolInput): AgentPoolTask | null {
     steps,
     flowStatus === 'running' ? 'Working…' : 'Idle',
   )
-  const { spans, originMs } = projectAgentPoolSpans({
+  const { spans, originMs, trace } = projectAgentPoolSpans({
     title,
     status,
     steps,
     actions: flowActions,
     currentAction,
     taskId,
+    originMs: poolOriginMs,
+    agentRunId: activeRunId ?? taskId,
   })
   return {
     taskId,
+    definitionId: stableDefinitionId({
+      source: 'root',
+      taskId,
+      chatSessionId,
+    }),
     title,
     modelLabel,
     modelId,
@@ -555,12 +519,21 @@ function buildRootTask(input: ProjectAgentPoolInput): AgentPoolTask | null {
         : [`Confirm ${title} meets the requirement`],
     flowSteps: toFlowSteps(steps),
     spans,
+    majorActions: trace.majorActions,
+    traceSpans: trace.spans,
+    trace,
     originMs,
+    poolRunId,
     loopSpecId: null,
+    acceptance: status === 'awaiting_user_done' || status === 'complete' ? 'pending' : 'none',
   }
 }
 
-function buildDelegationTasks(input: ProjectAgentPoolInput): AgentPoolTask[] {
+function buildDelegationTasks(
+  input: ProjectAgentPoolInput,
+  poolOriginMs: number,
+  poolRunId: string | null,
+): AgentPoolTask[] {
   const delegated = input.flowDelegationEvents.filter(
     (event): event is Extract<AgentDelegationEvent, { type: 'task_delegated' }> =>
       event.type === 'task_delegated',
@@ -575,23 +548,27 @@ function buildDelegationTasks(input: ProjectAgentPoolInput): AgentPoolTask[] {
       'filePath' in event.payload && event.payload.filePath
         ? event.payload.filePath
         : event.payload.nodeId
-    const trace = input.delegatedRunTraces[childRunId]
-    const childEvents = trace?.events ?? []
+    const traceEvents = input.delegatedRunTraces[childRunId]
+    const childEvents = traceEvents?.events ?? []
     const childActions = childEvents.filter(isActionEvent)
     const childSteps = collectRunSteps(childEvents)
     const acceptanceCriteria = extractAcceptanceCriteria(childActions)
     const status = mapDelegatedStatus(input.flowDelegationEvents, childRunId)
     const currentAction = latestActionLabel(childActions, childSteps, 'Delegated')
-    const { spans, originMs } = projectAgentPoolSpans({
+    const { spans, originMs, trace } = projectAgentPoolSpans({
       title,
       status,
       steps: childSteps,
       actions: childActions,
       currentAction,
       taskId,
+      originMs: poolOriginMs,
+      agentRunId: childRunId,
+      events: childEvents,
     })
     rows.push({
       taskId,
+      definitionId: stableDefinitionId({ source: 'delegation', taskId }),
       title,
       modelLabel: input.modelLabel,
       modelId: input.modelId,
@@ -608,8 +585,13 @@ function buildDelegationTasks(input: ProjectAgentPoolInput): AgentPoolTask[] {
           : [`Confirm ${title} meets the requirement`],
       flowSteps: toFlowSteps(childSteps),
       spans,
+      majorActions: trace.majorActions,
+      traceSpans: trace.spans,
+      trace,
       originMs,
+      poolRunId,
       loopSpecId: null,
+      acceptance: status === 'awaiting_user_done' || status === 'complete' ? 'pending' : 'none',
     })
   }
   return rows
@@ -620,6 +602,8 @@ function buildSessionTasks(
   activeSessionId: string | null,
   modelLabel: string,
   modelId: string | null,
+  poolOriginMs: number,
+  poolRunId: string | null,
 ): AgentPoolTask[] {
   if (!sessions?.length) return []
   return sessions
@@ -632,16 +616,19 @@ function buildSessionTasks(
       const currentAction =
         session.status === 'awaiting_review' ? 'Needs review' : 'Working in another session'
       const taskId = `session:${session.id}`
-      const { spans, originMs } = projectAgentPoolSpans({
+      const { spans, originMs, trace } = projectAgentPoolSpans({
         title,
         status,
         steps: [],
         actions: [],
         currentAction,
         taskId,
+        originMs: poolOriginMs,
+        agentRunId: taskId,
       })
       return {
         taskId,
+        definitionId: stableDefinitionId({ source: 'session', taskId }),
         title,
         modelLabel,
         modelId,
@@ -655,8 +642,13 @@ function buildSessionTasks(
         acceptanceCriteria: ['Confirm this session task meets the requirement'],
         flowSteps: [],
         spans,
+        majorActions: trace.majorActions,
+        traceSpans: trace.spans,
+        trace,
         originMs,
+        poolRunId,
         loopSpecId: null,
+        acceptance: status === 'awaiting_user_done' ? 'pending' : 'none',
       }
     })
 }
@@ -666,6 +658,8 @@ function buildComposeTasks(
   modelLabel: string,
   modelId: string | null,
   chatSessionId: string | null,
+  poolOriginMs: number,
+  poolRunId: string | null,
 ): AgentPoolTask[] {
   if (!composeSubagents?.length) return []
   return composeSubagents
@@ -693,16 +687,19 @@ function buildComposeTasks(
                 ? 'Failed'
                 : 'Ready')
       const taskId = `compose:${slot.slotId}`
-      const { spans, originMs } = projectAgentPoolSpans({
+      const { spans, originMs, trace } = projectAgentPoolSpans({
         title: slot.name,
         status: poolStatus,
         steps: [],
         actions: [],
         currentAction,
         taskId,
+        originMs: poolOriginMs,
+        agentRunId: slot.link?.runId ?? taskId,
       })
       return {
         taskId,
+        definitionId: stableDefinitionId({ source: 'compose', taskId }),
         title: slot.name,
         modelLabel,
         modelId,
@@ -720,21 +717,38 @@ function buildComposeTasks(
         ],
         flowSteps: [],
         spans,
+        majorActions: trace.majorActions,
+        traceSpans: trace.spans,
+        trace,
         originMs,
+        poolRunId,
         loopSpecId: null,
+        acceptance: poolStatus === 'awaiting_user_done' ? 'pending' : 'none',
       }
     })
 }
 
+function collectOriginCandidates(input: ProjectAgentPoolInput): Array<number | null> {
+  const candidates: Array<number | null> = [earliestAbs(input.flowActions)]
+  for (const trace of Object.values(input.delegatedRunTraces)) {
+    candidates.push(earliestAbs(trace.events.filter(isActionEvent), trace.events))
+  }
+  return candidates
+}
+
 /** Project live run / session / compose state into Agent Pool rows. */
 export function projectAgentPool(input: ProjectAgentPoolInput): AgentPoolTask[] {
-  const delegationTasks = buildDelegationTasks(input)
-  const root = buildRootTask(input)
+  const poolOriginMs =
+    input.poolOriginMs ??
+    resolvePoolOriginMs(collectOriginCandidates(input), Date.now())
+  const poolRunId = input.poolRunId ?? null
+
+  const delegationTasks = buildDelegationTasks(input, poolOriginMs, poolRunId)
+  const root = buildRootTask(input, poolOriginMs, poolRunId)
   const live: AgentPoolTask[] = []
   if (root && delegationTasks.length === 0) {
     live.push(root)
   } else if (root && delegationTasks.length > 0) {
-    // Keep root as the plan umbrella only when it still has useful progress signal.
     live.push(root, ...delegationTasks)
   } else {
     live.push(...delegationTasks)
@@ -746,6 +760,8 @@ export function projectAgentPool(input: ProjectAgentPoolInput): AgentPoolTask[] 
       input.chatSessionId,
       input.modelLabel,
       input.modelId,
+      poolOriginMs,
+      poolRunId,
     ),
   )
   live.push(
@@ -754,6 +770,8 @@ export function projectAgentPool(input: ProjectAgentPoolInput): AgentPoolTask[] 
       input.modelLabel,
       input.modelId,
       input.chatSessionId,
+      poolOriginMs,
+      poolRunId,
     ),
   )
 
@@ -768,7 +786,10 @@ export function projectAgentPool(input: ProjectAgentPoolInput): AgentPoolTask[] 
   return merged
 }
 
-export function buildHistoryEntryFromTask(task: AgentPoolTask, now = new Date().toISOString()): AgentPoolHistoryEntry {
+export function buildHistoryEntryFromTask(
+  task: AgentPoolTask,
+  now = new Date().toISOString(),
+): AgentPoolHistoryEntry {
   const completedAtMs = Date.parse(now)
   const relativeEnd = Number.isFinite(completedAtMs)
     ? Math.max(0, completedAtMs - task.originMs)
@@ -782,5 +803,66 @@ export function buildHistoryEntryFromTask(task: AgentPoolTask, now = new Date().
     flowSteps: task.flowSteps,
     spans: sealRunningSpans(task.spans, relativeEnd),
     originMs: task.originMs,
+    majorActions: task.majorActions,
+    traceSpans: task.traceSpans,
+    acceptance: task.acceptance,
   }
 }
+
+/** Thin durable History card from disk index (spans filled when selected / local). */
+export function historyEntryFromIndexEntry(entry: {
+  runId: string
+  title: string
+  startedAt: string
+  endedAt?: string
+  acceptance?: AgentPoolHistoryEntry['acceptance']
+  status?: string
+}): AgentPoolHistoryEntry {
+  const completedAt = entry.endedAt ?? entry.startedAt
+  const originMs = Date.parse(entry.startedAt)
+  return {
+    id: `index:${entry.runId}`,
+    runId: entry.runId,
+    title: entry.title,
+    currentAction: entry.title,
+    completedAt,
+    flowSteps: [],
+    spans: [],
+    originMs: Number.isFinite(originMs) ? originMs : Date.now(),
+    majorActions: [],
+    traceSpans: [],
+    acceptance: entry.acceptance ?? 'none',
+  }
+}
+
+/**
+ * Merge local (rich) history with disk index entries. Prefer local cards that
+ * already carry spans; append missing durable runs chronologically.
+ */
+export function mergeHistoryWithIndexEntries(
+  local: AgentPoolHistoryEntry[],
+  disk: AgentPoolHistoryEntry[],
+  activeRunId: string | null,
+): AgentPoolHistoryEntry[] {
+  const byRunId = new Map<string, AgentPoolHistoryEntry>()
+  for (const entry of disk) {
+    if (!entry.runId || entry.runId === activeRunId) continue
+    byRunId.set(entry.runId, entry)
+  }
+  for (const entry of local) {
+    if (!entry.runId) {
+      byRunId.set(entry.id, entry)
+      continue
+    }
+    if (entry.runId === activeRunId) continue
+    const existing = byRunId.get(entry.runId)
+    if (!existing || entry.spans.length > 0 || (existing.spans.length === 0 && entry.flowSteps.length > 0)) {
+      byRunId.set(entry.runId, entry)
+    }
+  }
+  return [...byRunId.values()].sort(
+    (a, b) => Date.parse(a.completedAt) - Date.parse(b.completedAt),
+  )
+}
+
+export { createPoolRunId, barsForMajorAction } from './projectAgentPoolTrace'

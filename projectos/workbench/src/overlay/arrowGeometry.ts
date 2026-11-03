@@ -9,12 +9,12 @@ import {
 
 /** Distinct arrow colors cycling by 1-based index. */
 export const ARROW_COLOR_PALETTE = [
-  '#4c7dff',
+  '#ececec',
   '#ff5c5c',
   '#34c759',
   '#ff9f0a',
   '#bf5af2',
-  '#5ac8fa',
+  '#a1a1aa',
   '#ff375f',
   '#af52de',
 ] as const

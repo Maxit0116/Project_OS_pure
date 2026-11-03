@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  IntentNodeRoleSchema,
   LoopCompileResultSchema,
   suggestIntentEdgeKind,
   suggestIntentNodeRole,
+  withArchitectureDefaults,
   type IntentGraph,
   type IntentGraphNode,
   type LoopAssumption,
@@ -27,6 +27,41 @@ function inferEdgeKind(
   return suggestIntentEdgeKind(edge, [...nodesById.values()]);
 }
 
+function compileSpecNode(node: IntentGraphNode): LoopSpecNode {
+  const arch = withArchitectureDefaults(node);
+  const role = inferRole(node);
+  const isTestAction =
+    arch.type === "action" && arch.actionIntegration === "test";
+  const isVerify = role === "verify" || isTestAction;
+  return {
+    id: node.id,
+    role,
+    type: arch.type,
+    ...(arch.agentRole ? { agentRole: arch.agentRole } : {}),
+    ...(arch.humanMode ? { humanMode: arch.humanMode } : {}),
+    ...(arch.actionIntegration
+      ? { actionIntegration: arch.actionIntegration }
+      : {}),
+    ...(arch.actionOperation ? { actionOperation: arch.actionOperation } : {}),
+    ...(arch.logicKind ? { logicKind: arch.logicKind } : {}),
+    ...(typeof arch.maxIterations === "number"
+      ? { maxIterations: arch.maxIterations }
+      : {}),
+    ...(arch.repairMode ? { repairMode: true } : {}),
+    goal: node.prompt.trim() || node.title,
+    constraints: [],
+    inputs: [],
+    outputs: [],
+    acceptance: [
+      {
+        id: `acc_${node.id}`,
+        description: isVerify ? `Verify: ${node.title}` : `Complete: ${node.title}`,
+        kind: isVerify ? "machine" : "human",
+      },
+    ],
+  };
+}
+
 /** Deterministic heuristic compiler used by MVP and mock path (no live LLM required). */
 export function compileIntentGraphHeuristic(
   draft: IntentGraph,
@@ -45,31 +80,14 @@ export function compileIntentGraphHeuristic(
   }
 
   const nodes: LoopSpecNode[] = draft.nodes.map((node) => {
-    const role = inferRole(node);
-    if (!node.role || node.role === "unknown") {
+    const compiled = compileSpecNode(node);
+    if (!node.role || node.role === "unknown" || !node.type) {
       assumptions.push({
         id: `assume_${randomUUID()}`,
-        text: `Inferred role "${role}" for node "${node.title}".`,
+        text: `Inferred architecture type="${compiled.type}" role="${compiled.role}" for node "${node.title}".`,
       });
     }
-    return {
-      id: node.id,
-      role,
-      goal: node.prompt.trim() || node.title,
-      constraints: [],
-      inputs: [],
-      outputs: [],
-      acceptance: [
-        {
-          id: `acc_${node.id}`,
-          description:
-            role === "verify"
-              ? `Verify: ${node.title}`
-              : `Complete: ${node.title}`,
-          kind: role === "verify" ? "machine" : "human",
-        },
-      ],
-    };
+    return compiled;
   });
 
   const edges: LoopSpecEdge[] = draft.edges.map((edge) => {
@@ -90,6 +108,10 @@ export function compileIntentGraphHeuristic(
       to: edge.target,
       kind,
       when: edge.prompt?.trim() || undefined,
+      ...(edge.branchKey ? { branchKey: edge.branchKey } : {}),
+      ...(kind === "conditional" && !edge.branchKey
+        ? { branchKey: "default" }
+        : {}),
       carry: kind === "feedback" ? ["latest_failure_summary"] : undefined,
     };
   });
@@ -106,6 +128,13 @@ export function compileIntentGraphHeuristic(
     options: ["Confirm as written", "Pause for human on first failure", "Disable feedback"],
   }));
 
+  const hasGithubPr = nodes.some(
+    (node) =>
+      node.type === "action" &&
+      node.actionIntegration === "github" &&
+      node.actionOperation === "create_pr",
+  );
+
   const specDraft: LoopSpec = {
     version: `spec_${randomUUID()}`,
     graphRevision: draft.revision,
@@ -117,6 +146,8 @@ export function compileIntentGraphHeuristic(
             {
               id: "placeholder",
               role: "implement",
+              type: "agent",
+              agentRole: "coder",
               goal: goal,
               constraints: [],
               inputs: [],
@@ -149,6 +180,16 @@ export function compileIntentGraphHeuristic(
         scope: "workspace",
         requiresApproval: true,
       },
+      ...(hasGithubPr
+        ? [
+            {
+              id: "perm_create_pr",
+              action: "github.create_pr",
+              scope: "repository",
+              requiresApproval: true,
+            },
+          ]
+        : []),
     ],
     openQuestions,
     assumptions,
@@ -158,7 +199,6 @@ export function compileIntentGraphHeuristic(
 
   // Soft-validate; still return for Review even if topology is incomplete.
   void validateLoopSpecTopology(specDraft);
-  void IntentNodeRoleSchema;
 
   return LoopCompileResultSchema.parse({
     specDraft,

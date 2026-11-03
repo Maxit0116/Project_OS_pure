@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Eye, GitBranch, Plus, Trash2 } from 'lucide-react'
+import { ClipboardList, GitBranch, Plus, Trash2 } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useRovingMenuFocus } from '../FunctionMap/useRovingMenuFocus'
 import styles from './LoopGraphContextMenu.module.css'
@@ -36,7 +36,7 @@ interface Props {
   onClose: () => void
   onCreateNode: (world: { x: number; y: number }) => void
   onConnectFrom: (nodeId: string) => void
-  onViewDescription: (nodeId: string) => void
+  onOpenDuty: (nodeId: string) => void
   onDeleteNode: (nodeId: string) => void
   onDeleteEdge: (edgeId: string) => void
 }
@@ -46,7 +46,7 @@ export default function LoopGraphContextMenu({
   onClose,
   onCreateNode,
   onConnectFrom,
-  onViewDescription,
+  onOpenDuty,
   onDeleteNode,
   onDeleteEdge,
 }: Props) {
@@ -141,18 +141,18 @@ export default function LoopGraphContextMenu({
             role="menuitem"
             className={styles.menuItem}
             onClick={() => {
-              onViewDescription(menu.nodeId)
+              onOpenDuty(menu.nodeId)
               onClose()
             }}
           >
-            <Eye className={styles.menuItemIcon} size={14} aria-hidden />
-            {ts('chat.loopGraph.viewDescription')}
+            <ClipboardList className={styles.menuItemIcon} size={14} aria-hidden />
+            {ts('chat.loopGraph.openDuty')}
           </button>
           <div className={styles.separator} role="separator" />
           <button
             type="button"
             role="menuitem"
-            className={styles.menuItem}
+            className={`${styles.menuItem} ${styles.menuItemDanger}`}
             onClick={() => {
               onDeleteNode(menu.nodeId)
               onClose()
@@ -168,7 +168,7 @@ export default function LoopGraphContextMenu({
         <button
           type="button"
           role="menuitem"
-          className={styles.menuItem}
+          className={`${styles.menuItem} ${styles.menuItemDanger}`}
           onClick={() => {
             onDeleteEdge(menu.edgeId)
             onClose()

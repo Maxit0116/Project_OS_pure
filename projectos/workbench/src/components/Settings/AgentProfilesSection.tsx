@@ -129,16 +129,21 @@ export default function AgentProfilesSection() {
             />
           </label>
           <div className={styles.toolList}>
-            {toolOptions.map((tool) => (
-              <label key={tool} className={styles.toolChip}>
-                <input
-                  type="checkbox"
-                  checked={enabledTools.includes(tool)}
-                  onChange={() => toggleTool(tool)}
-                />
-                {tool}
-              </label>
-            ))}
+            {toolOptions.map((tool) => {
+              const selected = enabledTools.includes(tool)
+              return (
+                <button
+                  key={tool}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={selected}
+                  className={`${styles.toolChip}${selected ? ` ${styles.toolChipOn}` : ''}`}
+                  onClick={() => toggleTool(tool)}
+                >
+                  {tool}
+                </button>
+              )
+            })}
           </div>
         </div>
         <div className={styles.formActions}>

@@ -24,7 +24,7 @@ Use `--tech-*` tokens for every surface, border, text color, and shadow. Never h
 | Border | `--tech-border` | `rgba(255,255,255,0.08)` |
 | Border (strong) | `--tech-border-strong` | `rgba(255,255,255,0.16)` |
 | Primary text | `--tech-text-primary` | `rgba(255,255,255,0.92)` |
-| Accent | `--tech-accent` | `#4c7dff` |
+| Accent | `--tech-accent` | `#ececec` (near-white; light: `#111113`) |
 
 Full list in `projectos/workbench/src/styles/tokens.css`.
 

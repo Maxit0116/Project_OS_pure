@@ -86,7 +86,7 @@
 }
 
 .toneRepo {
-  --sat-accent: #6ea8ff;
+  --sat-accent: #d4d4d8;
 }
 
 .toneFolder {
@@ -106,11 +106,11 @@
 }
 
 .toneAgent {
-  --sat-accent: #4c7dff;
+  --sat-accent: #ececec;
 }
 
 .toneResearch {
-  --sat-accent: #9db7ff;
+  --sat-accent: #a1a1aa;
 }
 
 .toneResearch::before,
@@ -1051,7 +1051,7 @@
 .ghostBtn:hover {
   border-color: var(--tech-accent);
   color: var(--tech-text-primary);
-  background: rgba(76, 125, 255, 0.1);
+  background: var(--tech-accent-subtle);
 }
 
 .field {
@@ -1140,8 +1140,8 @@
 
 .hubToggleOn {
   border-color: var(--tech-accent);
-  background: rgba(76, 125, 255, 0.18);
-  color: #9db7ff;
+  background: var(--tech-accent-subtle);
+  color: var(--tech-accent);
 }
 
 .dragHandle {
@@ -1265,7 +1265,7 @@
 }
 
 .pickerItemSelected {
-  background: rgba(76, 125, 255, 0.16);
+  background: var(--tech-accent-subtle);
 }
 
 .pickerItemLabel {

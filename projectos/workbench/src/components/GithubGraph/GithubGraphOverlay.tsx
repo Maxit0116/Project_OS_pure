@@ -38,6 +38,7 @@ import {
   type WorkspaceGitCommitDetail,
 } from '@contracts/index'
 import { GraphOverlayFrame } from '../GraphOverlay/GraphOverlayFrame'
+import Checkbox from '../ui/Checkbox'
 import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useBottomDockStore } from '../../state/bottomDockStore'
@@ -415,6 +416,59 @@ export default function GithubGraphOverlay() {
     if (!open || !client || !project) return
     void reload({ soft: loadedProjectIdRef.current === project.projectId })
   }, [open, client, project, reload])
+
+  const githubGraphRefreshNonce = useChatSessionStore(
+    (s) => s.githubGraphRefreshNonce,
+  )
+  const githubGraphFocusBranch = useChatSessionStore(
+    (s) => s.githubGraphFocusBranch,
+  )
+  const githubGraphFocusPrNumber = useChatSessionStore(
+    (s) => s.githubGraphFocusPrNumber,
+  )
+  const clearGithubGraphFocus = useChatSessionStore(
+    (s) => s.clearGithubGraphFocus,
+  )
+  const lastHandledRefreshNonce = useRef(0)
+
+  // Compose Hub / Stage Dock mutations bump nonce → soft reload + optional focus.
+  useEffect(() => {
+    if (!open || !client || !project) return
+    if (githubGraphRefreshNonce === 0) return
+    if (githubGraphRefreshNonce === lastHandledRefreshNonce.current) return
+    lastHandledRefreshNonce.current = githubGraphRefreshNonce
+    void (async () => {
+      await reload({ soft: true })
+      if (githubGraphFocusPrNumber) {
+        setSelectedId(`pr:${githubGraphFocusPrNumber}`)
+        setNav((current) =>
+          reduceGithubGraphNav(current, {
+            type: 'select-entity',
+            id: `pr:${githubGraphFocusPrNumber}`,
+          }),
+        )
+      } else if (githubGraphFocusBranch) {
+        const id = `branch:${githubGraphFocusBranch}`
+        setSelectedId(id)
+        setNav((current) =>
+          reduceGithubGraphNav(current, {
+            type: 'focus-branch',
+            ref: githubGraphFocusBranch,
+          }),
+        )
+      }
+      clearGithubGraphFocus()
+    })()
+  }, [
+    open,
+    client,
+    project,
+    githubGraphRefreshNonce,
+    githubGraphFocusBranch,
+    githubGraphFocusPrNumber,
+    reload,
+    clearGithubGraphFocus,
+  ])
 
   const model = useMemo(
     () =>
@@ -2508,17 +2562,13 @@ export default function GithubGraphOverlay() {
                           }
                         }}
                       />
-                      <label className={styles.checkRow}>
-                        <input
-                          type="checkbox"
-                          checked={linkIssueOnCreate}
-                          disabled={mutating || githubConnected === false}
-                          onChange={(event) =>
-                            setLinkIssueOnCreate(event.target.checked)
-                          }
-                        />
-                        <span>{ts('chat.githubGraph.linkGithubIssue')}</span>
-                      </label>
+                      <Checkbox
+                        className={styles.checkRow}
+                        checked={linkIssueOnCreate}
+                        disabled={mutating || githubConnected === false}
+                        onCheckedChange={setLinkIssueOnCreate}
+                        label={ts('chat.githubGraph.linkGithubIssue')}
+                      />
                       <div className={styles.createPopoverActions}>
                         <button
                           type="button"

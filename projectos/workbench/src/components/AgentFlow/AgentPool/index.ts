@@ -5,9 +5,17 @@ export {
   projectAgentPool,
   projectAgentPoolSpans,
   buildHistoryEntryFromTask,
+  historyEntryFromIndexEntry,
+  mergeHistoryWithIndexEntries,
   agentPoolAxisRangeMs,
   taskNeedsLiveClock,
+  createPoolRunId,
+  barsForMajorAction,
   type AgentPoolTask,
   type AgentPoolHistoryEntry,
   type AgentPoolSpan,
 } from './projectAgentPool'
+export {
+  projectAgentPoolTrace,
+  stableDefinitionId,
+} from './projectAgentPoolTrace'

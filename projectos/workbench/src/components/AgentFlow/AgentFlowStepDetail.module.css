@@ -88,13 +88,39 @@
 }
 
 .correctionInput {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
   width: 100%;
-  padding: 8px;
+  box-sizing: border-box;
+  padding: 8px 10px;
   font-size: var(--font-size-sm);
   font-family: inherit;
-  color: var(--color-text-primary);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
+  line-height: 1.45;
+  color: var(--tech-text-primary, var(--color-text-primary));
+  caret-color: var(--tech-text-primary, var(--color-text-primary));
+  background-color: var(--tech-bg-muted, var(--color-bg-muted));
+  background-image: none;
+  border: 1px solid var(--tech-border, var(--glass-border));
+  border-radius: 6px;
   resize: none;
+  overflow-y: auto;
+  outline: none;
+  box-shadow: none;
+}
+
+.correctionInput::placeholder {
+  color: var(--tech-text-muted, var(--color-text-muted));
+  opacity: 1;
+}
+
+.correctionInput:hover:not(:disabled) {
+  border-color: var(--tech-border-strong);
+}
+
+.correctionInput:focus,
+.correctionInput:focus-visible {
+  outline: none;
+  border-color: var(--tech-border-strong);
+  box-shadow: var(--tech-shadow-focus);
 }

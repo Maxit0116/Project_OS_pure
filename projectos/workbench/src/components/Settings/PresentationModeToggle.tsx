@@ -1,3 +1,4 @@
+import Switch from '../ui/Switch'
 import styles from './SettingsPanel.module.css'
 
 interface Props {
@@ -14,17 +15,14 @@ export default function PresentationModeToggle({
   description,
 }: Props) {
   return (
-    <label className={styles.toggleRow}>
-      <div>
-        <div className={styles.toggleLabel}>{label}</div>
-        {description ? <div className={styles.toggleDesc}>{description}</div> : null}
-      </div>
-      <input
-        type="checkbox"
+    <div className={styles.toggleRow}>
+      <Switch
         checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className={styles.toggleInput}
+        onCheckedChange={onChange}
+        label={label}
+        description={description}
+        aria-label={label}
       />
-    </label>
+    </div>
   )
 }

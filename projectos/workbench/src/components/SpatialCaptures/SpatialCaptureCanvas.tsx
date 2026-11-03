@@ -298,6 +298,29 @@ export default function SpatialCaptureCanvas({
       repoOpenGithub: ts('spatialCaptures.composeHub.repoOpenGithub'),
       repoOpenGraph: ts('spatialCaptures.composeHub.repoOpenGraph'),
       repoFetch: ts('spatialCaptures.composeHub.repoFetch'),
+      repoPull: ts('spatialCaptures.composeHub.repoPull'),
+      repoPush: ts('spatialCaptures.composeHub.repoPush'),
+      repoCheckout: ts('spatialCaptures.composeHub.repoCheckout'),
+      repoCheckoutPending: ts('spatialCaptures.composeHub.repoCheckoutPending'),
+      repoNewBranch: ts('spatialCaptures.composeHub.repoNewBranch'),
+      repoNewBranchPlaceholder: ts(
+        'spatialCaptures.composeHub.repoNewBranchPlaceholder',
+      ),
+      repoCreateBranch: ts('spatialCaptures.composeHub.repoCreateBranch'),
+      repoCreatePr: ts('spatialCaptures.composeHub.repoCreatePr'),
+      repoViewPr: ts('spatialCaptures.composeHub.repoViewPr'),
+      repoPrTitlePlaceholder: ts(
+        'spatialCaptures.composeHub.repoPrTitlePlaceholder',
+      ),
+      repoAskAgent: ts('spatialCaptures.composeHub.repoAskAgent'),
+      repoAskAgentStarted: ts('spatialCaptures.composeHub.repoAskAgentStarted'),
+      repoConnectGithub: ts('spatialCaptures.composeHub.repoConnectGithub'),
+      repoDirtyBlocked: ts('spatialCaptures.composeHub.repoDirtyBlocked'),
+      repoOpFailed: ts('spatialCaptures.composeHub.repoOpFailed'),
+      repoCancel: ts('spatialCaptures.composeHub.repoCancel'),
+      repoLocateCheckoutHint: ts(
+        'spatialCaptures.composeHub.repoLocateCheckoutHint',
+      ),
       referencesTabRepoHint: ts(
         'spatialCaptures.composeHub.referencesTabRepoHint',
       ),
@@ -1515,7 +1538,7 @@ export default function SpatialCaptureCanvas({
       const stroke: AnnotationStroke = {
         id: strokeId,
         kind: 'pen',
-        color: '#4c7dff',
+        color: '#ececec',
         width: 2,
         points: [rel],
       }

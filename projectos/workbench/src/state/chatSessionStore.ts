@@ -132,6 +132,13 @@ interface ChatSessionStore {
   agentFlowOpen: boolean
   githubGraphOpen: boolean
   marketplaceOpen: boolean
+  /**
+   * Bumped by Compose Hub / Stage Dock git mutations so an open GitHub Graph
+   * soft-reloads. Optional focus fields apply on the next reload.
+   */
+  githubGraphRefreshNonce: number
+  githubGraphFocusBranch: string | null
+  githubGraphFocusPrNumber: number | null
   /** Run id the user hid for this round. Auto-open skips that id until a new present. */
   agentFlowDismissedRunId: string | null
   inheritedDigest: SessionContextDigest | null
@@ -154,6 +161,11 @@ interface ChatSessionStore {
   toggleAgentFlow: () => void
   setGithubGraphOpen: (open: boolean) => void
   toggleGithubGraph: () => void
+  requestGithubGraphRefresh: (focus?: {
+    branch?: string | null
+    prNumber?: number | null
+  }) => void
+  clearGithubGraphFocus: () => void
   setMarketplaceOpen: (open: boolean) => void
   toggleMarketplace: () => void
   /** User or command asked to see Agent Flow. Clears a previous dismiss. */
@@ -336,6 +348,9 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   activeSessionId: null,
   historyOpen: false,
   ...overlayState('none'),
+  githubGraphRefreshNonce: 0,
+  githubGraphFocusBranch: null,
+  githubGraphFocusPrNumber: null,
   agentFlowDismissedRunId: null,
   inheritedDigest: null,
   loading: false,
@@ -402,6 +417,24 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
 
   toggleGithubGraph: () => {
     setCanvasOverlayState(set, get().canvasOverlay === 'github' ? 'none' : 'github')
+  },
+
+  requestGithubGraphRefresh: (focus) => {
+    set((state) => ({
+      githubGraphRefreshNonce: state.githubGraphRefreshNonce + 1,
+      githubGraphFocusBranch:
+        focus && 'branch' in focus
+          ? (focus.branch ?? null)
+          : state.githubGraphFocusBranch,
+      githubGraphFocusPrNumber:
+        focus && 'prNumber' in focus
+          ? (focus.prNumber ?? null)
+          : state.githubGraphFocusPrNumber,
+    }))
+  },
+
+  clearGithubGraphFocus: () => {
+    set({ githubGraphFocusBranch: null, githubGraphFocusPrNumber: null })
   },
 
   setMarketplaceOpen: (open) => {

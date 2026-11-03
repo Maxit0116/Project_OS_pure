@@ -15,6 +15,23 @@ export interface ComposeHubStrings {
   repoOpenGithub: string
   repoOpenGraph: string
   repoFetch: string
+  repoPull: string
+  repoPush: string
+  repoCheckout: string
+  repoCheckoutPending: string
+  repoNewBranch: string
+  repoNewBranchPlaceholder: string
+  repoCreateBranch: string
+  repoCreatePr: string
+  repoViewPr: string
+  repoPrTitlePlaceholder: string
+  repoAskAgent: string
+  repoAskAgentStarted: string
+  repoConnectGithub: string
+  repoDirtyBlocked: string
+  repoOpFailed: string
+  repoCancel: string
+  repoLocateCheckoutHint: string
   referencesTabRepoHint: string
   folders: string
   foldersEmpty: string
@@ -110,6 +127,23 @@ export const COMPOSE_HUB_STRINGS_EN: ComposeHubStrings = {
   repoOpenGithub: 'Open on GitHub',
   repoOpenGraph: 'Open GitHub Graph',
   repoFetch: 'Fetch',
+  repoPull: 'Pull',
+  repoPush: 'Push',
+  repoCheckout: 'Checkout',
+  repoCheckoutPending: 'Checkout {branch}?',
+  repoNewBranch: 'New branch',
+  repoNewBranchPlaceholder: 'feature/…',
+  repoCreateBranch: 'Create',
+  repoCreatePr: 'Create PR',
+  repoViewPr: 'View PR',
+  repoPrTitlePlaceholder: 'PR title',
+  repoAskAgent: 'Ask Agent',
+  repoAskAgentStarted: 'Agent is cleaning the working tree…',
+  repoConnectGithub: 'Connect GitHub',
+  repoDirtyBlocked: 'Working tree is dirty — commit or stash before continuing.',
+  repoOpFailed: '{detail}',
+  repoCancel: 'Cancel',
+  repoLocateCheckoutHint: 'Select a branch, then Checkout on the GitHub card',
   referencesTabRepoHint: 'Reference repos for the agent (not your working checkout)',
   folders: 'Folders',
   foldersEmpty: 'No folders',

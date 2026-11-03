@@ -1,0 +1,65 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--tech-text-secondary);
+}
+
+.textarea {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--tech-border);
+  /* background-color beats Electron/WebKit UA white on <textarea> */
+  background-color: var(--tech-bg-muted);
+  background-image: none;
+  color: var(--tech-text-primary);
+  caret-color: var(--tech-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  outline: none;
+  box-shadow: none;
+  resize: none;
+  overflow-y: auto;
+  transition:
+    border-color var(--duration-fast, 150ms) var(--ease-out, ease),
+    background-color var(--duration-fast, 150ms) var(--ease-out, ease),
+    box-shadow var(--duration-fast, 150ms) var(--ease-out, ease);
+}
+
+.textarea::placeholder {
+  color: var(--tech-text-muted);
+  opacity: 1;
+}
+
+.textarea:hover:not(:disabled):not(:read-only) {
+  border-color: var(--tech-border-strong);
+}
+
+.textarea:focus,
+.textarea:focus-visible {
+  outline: none;
+  border-color: var(--tech-border-strong);
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.textarea:disabled,
+.textarea:read-only {
+  opacity: 0.55;
+  cursor: not-allowed;
+  color: var(--tech-text-secondary);
+}

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import type { BugAlignmentItem, DebugSession } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import Button from '../ui/Button'
+import Checkbox from '../ui/Checkbox'
 import HypothesisCard from '../DebugHarness/HypothesisCard'
+import toneStyles from './composer/chatModeTone.module.css'
 import styles from './DebugSessionPanel.module.css'
 
 interface Props {
@@ -69,7 +71,7 @@ export default function DebugSessionPanel({
   const bugs = session.bugs ?? []
 
   return (
-    <div className={styles.panel}>
+    <div className={`${styles.panel} ${toneStyles.modeDebug}`} data-mode-tone="debug">
       <div className={styles.header}>
         <h3>{ts('debug.title')}</h3>
         <span className={styles.phase}>{ts(`debug.phase.${session.phase}`)}</span>
@@ -95,24 +97,22 @@ export default function DebugSessionPanel({
               const draft = bugDrafts[bug.id]
               return (
                 <li key={bug.id} className={styles.bugRow}>
-                  <label className={styles.bugCheck}>
-                    <input
-                      type="checkbox"
-                      checked={draft?.selected ?? bug.selected}
-                      disabled={fixInProgress}
-                      onChange={(event) =>
-                        setBugDrafts((current) => ({
-                          ...current,
-                          [bug.id]: {
-                            selected: event.target.checked,
-                            comment: current[bug.id]?.comment ?? '',
-                            commentOpen: current[bug.id]?.commentOpen ?? false,
-                          },
-                        }))
-                      }
-                    />
-                    <span>{bug.summary}</span>
-                  </label>
+                  <Checkbox
+                    className={styles.bugCheck}
+                    checked={draft?.selected ?? bug.selected}
+                    disabled={fixInProgress}
+                    onCheckedChange={(selected) =>
+                      setBugDrafts((current) => ({
+                        ...current,
+                        [bug.id]: {
+                          selected,
+                          comment: current[bug.id]?.comment ?? '',
+                          commentOpen: current[bug.id]?.commentOpen ?? false,
+                        },
+                      }))
+                    }
+                    label={bug.summary}
+                  />
                   <button
                     type="button"
                     className={styles.commentToggle}
@@ -155,6 +155,7 @@ export default function DebugSessionPanel({
           </ul>
           <div className={styles.actions}>
             <Button
+              variant="mode"
               disabled={fixInProgress || !bugs.some((bug) => bugDrafts[bug.id]?.selected)}
               onClick={() =>
                 onConfirmBugAlignment(
@@ -246,18 +247,24 @@ export default function DebugSessionPanel({
 
           <div className={styles.actions}>
             {session.phase === 'hypothesize' && (
-              <Button onClick={onReproduced}>{ts('debug.continueToReproduce')}</Button>
+              <Button variant="mode" onClick={onReproduced}>
+                {ts('debug.continueToReproduce')}
+              </Button>
             )}
             {session.phase === 'reproduce' && (
-              <Button onClick={onReproduced}>{ts('debug.reproduced')}</Button>
+              <Button variant="mode" onClick={onReproduced}>
+                {ts('debug.reproduced')}
+              </Button>
             )}
             {session.phase === 'fix' && (
-              <Button onClick={onConfirmFix} disabled={fixInProgress}>
+              <Button variant="mode" onClick={onConfirmFix} disabled={fixInProgress}>
                 {ts('debug.applyFix')}
               </Button>
             )}
             {session.phase === 'verify' && (
-              <Button onClick={onMarkFixed}>{ts('debug.markFixed')}</Button>
+              <Button variant="mode" onClick={onMarkFixed}>
+                {ts('debug.markFixed')}
+              </Button>
             )}
           </div>
         </>

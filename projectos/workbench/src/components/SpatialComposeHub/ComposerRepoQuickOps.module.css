@@ -1,0 +1,177 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.identityRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.repoPath {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--tech-text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.authChip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid var(--tech-border);
+  border-radius: 999px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-muted);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.authChipConnected {
+  color: var(--tech-text-secondary);
+}
+
+.branchPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  padding: 2px 8px;
+  border: 1px solid var(--tech-border);
+  border-radius: 999px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.statusLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--tech-text-muted);
+}
+
+.actionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.actionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.actionBtn:hover:not(:disabled) {
+  color: var(--tech-text-primary);
+  border-color: var(--tech-border-strong);
+}
+
+.actionBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.actionBtnPrimary {
+  color: var(--tech-text-primary);
+  border-color: color-mix(in srgb, var(--tech-accent) 40%, var(--tech-border));
+  background: color-mix(in srgb, var(--tech-accent) 10%, var(--tech-bg-muted));
+}
+
+.actionBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.formRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-primary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.input:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.footer {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  font-size: 10px;
+  color: var(--tech-text-muted);
+  cursor: pointer;
+}
+
+.footer:hover {
+  color: var(--tech-text-secondary);
+}
+
+.emptyHint {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--tech-text-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.pendingRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pendingHint {
+  font-size: 11px;
+  color: var(--tech-text-muted);
+}

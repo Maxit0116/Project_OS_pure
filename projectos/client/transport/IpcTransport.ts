@@ -779,6 +779,46 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("getAgentRunEvents", runId);
   }
 
+  getAgentRunEventSnapshot(
+    runId: string,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunEventSnapshot> {
+    return this.invoke("getAgentRunEventSnapshot", runId) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentRunEventSnapshot
+    >;
+  }
+
+  ensureAgentPoolRun(
+    request: import("../../contracts/agent-pool-trace.js").EnsureAgentPoolRunRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentPoolRun> {
+    return this.invoke("ensureAgentPoolRun", request) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentPoolRun
+    >;
+  }
+
+  getAgentPoolRun(
+    poolRunId: string,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentPoolRun> {
+    return this.invoke("getAgentPoolRun", poolRunId) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentPoolRun
+    >;
+  }
+
+  listAgentRunsByDefinition(
+    request: import("../../contracts/agent-pool-trace.js").ListAgentRunsByDefinitionRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry[]> {
+    return this.invoke("listAgentRunsByDefinition", request) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry[]
+    >;
+  }
+
+  setAgentRunAcceptance(
+    request: import("../../contracts/agent-pool-trace.js").SetAgentRunAcceptanceRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry> {
+    return this.invoke("setAgentRunAcceptance", request) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry
+    >;
+  }
+
   streamAgentRun(
     runId: string,
     cb: (event: AgentRunEvent) => void,

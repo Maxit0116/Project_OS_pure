@@ -122,7 +122,7 @@
 }
 
 .previewCategory[data-category='base'] {
-  border-color: color-mix(in srgb, #38bdf8 40%, var(--tech-border));
+  border-color: color-mix(in srgb, var(--tech-accent) 40%, var(--tech-border));
 }
 
 .previewCategory[data-category='motion'] {
@@ -361,7 +361,7 @@
 }
 
 .thumb[data-category='base'] {
-  border-color: color-mix(in srgb, #38bdf8 40%, var(--tech-border));
+  border-color: color-mix(in srgb, var(--tech-accent) 40%, var(--tech-border));
 }
 
 .thumb[data-category='motion'] {

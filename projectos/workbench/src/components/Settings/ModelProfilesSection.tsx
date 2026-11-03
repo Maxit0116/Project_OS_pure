@@ -231,17 +231,19 @@ export default function ModelProfilesSection() {
             />
           )}
           {editingId && settings.modelProfiles.find((profile) => profile.id === editingId)?.apiKeyRef && (
-            <label className={styles.toolChip}>
-              <input
-                type="checkbox"
-                checked={removeCredential}
-                onChange={(event) => {
-                  setRemoveCredential(event.target.checked)
-                  if (event.target.checked) setApiKey('')
-                }}
-              />
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={removeCredential}
+              className={`${styles.toolChip}${removeCredential ? ` ${styles.toolChipOn}` : ''}`}
+              onClick={() => {
+                const next = !removeCredential
+                setRemoveCredential(next)
+                if (next) setApiKey('')
+              }}
+            >
               {ts('settings.removeCredential')}
-            </label>
+            </button>
           )}
         </div>
         <div className={styles.formActions}>

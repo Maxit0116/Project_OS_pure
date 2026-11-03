@@ -1,5 +1,42 @@
 import { z } from "zod";
 
+import {
+  isConditionNode,
+  isLoopLogicNode,
+  isMergeNode,
+  withArchitectureDefaults,
+  type LoopActionIntegration,
+  type LoopAgentRole,
+  type LoopHumanMode,
+  type LoopLogicKind,
+  type LoopNodeType,
+} from "./loop-node-architecture.js";
+
+export {
+  LOOP_ACTION_INTEGRATIONS,
+  LOOP_AGENT_ROLES,
+  LOOP_GITHUB_OPERATIONS,
+  LOOP_HUMAN_MODES,
+  LOOP_LOGIC_KINDS,
+  LOOP_NODE_TYPES,
+  architectureFromLegacyRole,
+  isConditionNode,
+  isLoopLogicNode,
+  isMergeNode,
+  legacyRoleFromArchitecture,
+  resolveNodeArchitecture,
+  withArchitectureDefaults,
+  type LegacyIntentNodeRole,
+  type LoopActionIntegration,
+  type LoopAgentRole,
+  type LoopArchitectureMapping,
+  type LoopGitHubOperation,
+  type LoopHumanMode,
+  type LoopLogicKind,
+  type LoopNodeArchitectureFields,
+  type LoopNodeType,
+} from "./loop-node-architecture.js";
+
 export const LOOP_GRAPH_VERSION = "0.1.0" as const;
 
 export const LoopGraphVersionSchema = z.literal(LOOP_GRAPH_VERSION);
@@ -12,9 +49,55 @@ export const IntentNodeRoleSchema = z.enum([
   "unknown",
 ]);
 
-export const IntentEdgeKindSchema = z.enum(["depends", "feedback"]);
+export const LoopNodeTypeSchema = z.enum(["agent", "action", "logic", "human"]);
+
+export const LoopAgentRoleSchema = z.enum([
+  "planner",
+  "coder",
+  "reviewer",
+  "researcher",
+  "tester",
+  "debugger",
+  "architect",
+  "documenter",
+]);
+
+export const LoopHumanModeSchema = z.enum([
+  "approval",
+  "review",
+  "input",
+  "decision",
+  "takeover",
+]);
+
+export const LoopActionIntegrationSchema = z.enum(["github", "test", "terminal"]);
+
+export const LoopLogicKindSchema = z.enum([
+  "condition",
+  "loop",
+  "merge",
+  "exit",
+  "retry",
+  "wait",
+]);
+
+export const IntentEdgeKindSchema = z.enum(["depends", "feedback", "conditional"]);
 
 export const IntentEdgePortSchema = z.enum(["n", "e", "s", "w"]);
+
+/** Shared optional architecture fields for Intent + Spec nodes. */
+export const LoopNodeArchitectureFieldsSchema = z
+  .object({
+    type: LoopNodeTypeSchema.optional(),
+    agentRole: LoopAgentRoleSchema.optional(),
+    humanMode: LoopHumanModeSchema.optional(),
+    actionIntegration: LoopActionIntegrationSchema.optional(),
+    actionOperation: z.string().trim().min(1).max(80).optional(),
+    logicKind: LoopLogicKindSchema.optional(),
+    maxIterations: z.number().int().positive().max(50).optional(),
+    repairMode: z.boolean().optional(),
+  })
+  .strict();
 
 export const AcceptanceKindSchema = z.enum(["machine", "human"]);
 
@@ -51,6 +134,14 @@ export const IntentGraphNodeSchema = z
     title: z.string().trim().min(1).max(120),
     prompt: z.string().trim().max(4000),
     role: IntentNodeRoleSchema.optional(),
+    type: LoopNodeTypeSchema.optional(),
+    agentRole: LoopAgentRoleSchema.optional(),
+    humanMode: LoopHumanModeSchema.optional(),
+    actionIntegration: LoopActionIntegrationSchema.optional(),
+    actionOperation: z.string().trim().min(1).max(80).optional(),
+    logicKind: LoopLogicKindSchema.optional(),
+    maxIterations: z.number().int().positive().max(50).optional(),
+    repairMode: z.boolean().optional(),
     position: IntentGraphPositionSchema,
     authoringSessionId: z.string().min(1).optional(),
   })
@@ -63,6 +154,8 @@ export const IntentGraphEdgeSchema = z
     target: z.string().min(1),
     prompt: z.string().trim().max(2000).optional(),
     kind: IntentEdgeKindSchema.optional(),
+    /** Named branch for conditional edges (e.g. true / false / pass). */
+    branchKey: z.string().trim().min(1).max(80).optional(),
     sourcePort: IntentEdgePortSchema.optional(),
     targetPort: IntentEdgePortSchema.optional(),
     authoringSessionId: z.string().min(1).optional(),
@@ -90,6 +183,14 @@ export const LoopSpecNodeSchema = z
   .object({
     id: z.string().min(1),
     role: IntentNodeRoleSchema,
+    type: LoopNodeTypeSchema.optional(),
+    agentRole: LoopAgentRoleSchema.optional(),
+    humanMode: LoopHumanModeSchema.optional(),
+    actionIntegration: LoopActionIntegrationSchema.optional(),
+    actionOperation: z.string().trim().min(1).max(80).optional(),
+    logicKind: LoopLogicKindSchema.optional(),
+    maxIterations: z.number().int().positive().max(50).optional(),
+    repairMode: z.boolean().optional(),
     goal: z.string().trim().min(1).max(1000),
     constraints: z.array(z.string().trim().min(1).max(500)).max(20),
     inputs: z.array(z.string().trim().min(1).max(240)).max(20),
@@ -105,6 +206,7 @@ export const LoopSpecEdgeSchema = z
     to: z.string().min(1),
     kind: IntentEdgeKindSchema,
     when: z.string().trim().max(500).optional(),
+    branchKey: z.string().trim().min(1).max(80).optional(),
     carry: z.array(z.string().trim().min(1).max(240)).max(10).optional(),
   })
   .strict();
@@ -208,6 +310,23 @@ export const LoopInstanceEventSchema = z
   })
   .strict();
 
+export const LoopInstanceArtifactSchema = z
+  .object({
+    id: z.string().min(1),
+    nodeId: z.string().min(1),
+    kind: z.enum([
+      "dev_plan",
+      "change_set",
+      "test_report",
+      "review_result",
+      "github_op_result",
+      "human_decision",
+    ]),
+    createdAt: z.string().min(1),
+    data: z.unknown(),
+  })
+  .strict();
+
 export const LoopInstanceSchema = z
   .object({
     id: z.string().min(1),
@@ -216,12 +335,30 @@ export const LoopInstanceSchema = z
     cursorNodeId: z.string().min(1).nullable(),
     round: z.number().int().nonnegative(),
     attemptCounts: z.record(z.string(), z.number().int().nonnegative()),
+    /** Logic Loop node iteration counters (separate from feedback round). */
+    loopIterations: z
+      .record(z.string(), z.number().int().nonnegative())
+      .optional(),
     hitlQuestionIds: z.array(z.string().min(1)).optional(),
     /** Functional-graph node that owns the leaf file. Loop copy cannot set this. */
     featureNodeId: z.string().min(1).optional(),
     /** Run attached to the current implement or fix node. */
     activeRunId: z.string().min(1).optional(),
     activeRunNodeId: z.string().min(1).optional(),
+    /** Artifacts produced by completed nodes (DevPlan, TestReport, …). */
+    artifacts: z.array(LoopInstanceArtifactSchema).max(100).optional(),
+    /** Payload approved/edited by Human Approval for the next Action. */
+    pendingActionPayload: z.record(z.string(), z.unknown()).optional(),
+    /** GitHub Action queued for async settle (REST create_pr, etc.). */
+    pendingGithubOp: z
+      .object({
+        nodeId: z.string().min(1),
+        operation: z.string().trim().min(1).max(80),
+        payload: z.record(z.string(), z.unknown()),
+        queuedAt: z.string().min(1),
+      })
+      .strict()
+      .optional(),
     events: z.array(LoopInstanceEventSchema).max(LOOP_INSTANCE_EVENT_LIMIT),
     startedAt: z.string().min(1),
     updatedAt: z.string().min(1),
@@ -373,6 +510,8 @@ export const LoopHitlAnswerSchema = z
   .object({
     questionId: z.string().min(1),
     answer: z.string().trim().min(1).max(1000),
+    /** Approval Edit: Action must execute this payload, not the Agent draft. */
+    editedPayload: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 
@@ -399,8 +538,14 @@ export type IntentGraphEdge = z.infer<typeof IntentGraphEdgeSchema>;
 export type LoopSpec = z.infer<typeof LoopSpecSchema>;
 export type LoopSpecNode = z.infer<typeof LoopSpecNodeSchema>;
 export type LoopSpecEdge = z.infer<typeof LoopSpecEdgeSchema>;
+export type LoopNodeTypeParsed = z.infer<typeof LoopNodeTypeSchema>;
+export type LoopAgentRoleParsed = z.infer<typeof LoopAgentRoleSchema>;
+export type LoopHumanModeParsed = z.infer<typeof LoopHumanModeSchema>;
+export type LoopActionIntegrationParsed = z.infer<typeof LoopActionIntegrationSchema>;
+export type LoopLogicKindParsed = z.infer<typeof LoopLogicKindSchema>;
 export type LoopInstance = z.infer<typeof LoopInstanceSchema>;
 export type LoopInstanceEvent = z.infer<typeof LoopInstanceEventSchema>;
+export type LoopInstanceArtifact = z.infer<typeof LoopInstanceArtifactSchema>;
 export type LoopGraphHead = z.infer<typeof LoopGraphHeadSchema>;
 export type LoopGraphIndex = z.infer<typeof LoopGraphIndexSchema>;
 export type LoopGraphDocument = z.infer<typeof LoopGraphDocumentSchema>;
@@ -467,14 +612,86 @@ export function summarizeGoalContextForGraphPrompt(context: LoopGoalContext): st
   return parts.join("\n").slice(0, 4000);
 }
 
-/** Fill authoring fields missing on older on-disk documents before strict parse. */
+function enrichIntentNodeArchitecture(
+  node: Record<string, unknown>,
+): Record<string, unknown> {
+  const role =
+    typeof node.role === "string" ? (node.role as IntentNodeRole) : undefined;
+  const enriched = withArchitectureDefaults({
+    role,
+    type: node.type as LoopNodeType | undefined,
+    agentRole: node.agentRole as LoopAgentRole | undefined,
+    humanMode: node.humanMode as LoopHumanMode | undefined,
+    actionIntegration: node.actionIntegration as LoopActionIntegration | undefined,
+    actionOperation:
+      typeof node.actionOperation === "string" ? node.actionOperation : undefined,
+    logicKind: node.logicKind as LoopLogicKind | undefined,
+    maxIterations:
+      typeof node.maxIterations === "number" ? node.maxIterations : undefined,
+    repairMode: typeof node.repairMode === "boolean" ? node.repairMode : undefined,
+  });
+  return { ...node, ...enriched };
+}
+
+function enrichSpecNodeArchitecture(
+  node: Record<string, unknown>,
+): Record<string, unknown> {
+  return enrichIntentNodeArchitecture(node);
+}
+
+function enrichDraftArchitecture(draft: unknown): unknown {
+  if (!draft || typeof draft !== "object" || Array.isArray(draft)) return draft;
+  const d = draft as Record<string, unknown>;
+  const nodes = Array.isArray(d.nodes)
+    ? d.nodes.map((node) =>
+        node && typeof node === "object" && !Array.isArray(node)
+          ? enrichIntentNodeArchitecture(node as Record<string, unknown>)
+          : node,
+      )
+    : d.nodes;
+  return { ...d, nodes };
+}
+
+function enrichSpecArchitecture(spec: unknown): unknown {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return spec;
+  const s = spec as Record<string, unknown>;
+  const nodes = Array.isArray(s.nodes)
+    ? s.nodes.map((node) =>
+        node && typeof node === "object" && !Array.isArray(node)
+          ? enrichSpecNodeArchitecture(node as Record<string, unknown>)
+          : node,
+      )
+    : s.nodes;
+  return { ...s, nodes };
+}
+
+/** Fill authoring + architecture fields missing on older on-disk documents. */
 export function normalizeLoopGraphDocument(raw: unknown): LoopGraphDocument {
   const base =
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)
       : {};
+  const draft = enrichDraftArchitecture(base.draft);
+  const approvedSpecs = Array.isArray(base.approvedSpecs)
+    ? base.approvedSpecs.map(enrichSpecArchitecture)
+    : base.approvedSpecs;
+  const pendingCompile =
+    base.pendingCompile &&
+    typeof base.pendingCompile === "object" &&
+    !Array.isArray(base.pendingCompile)
+      ? {
+          ...(base.pendingCompile as Record<string, unknown>),
+          specDraft: enrichSpecArchitecture(
+            (base.pendingCompile as Record<string, unknown>).specDraft,
+          ),
+        }
+      : base.pendingCompile;
+
   return LoopGraphDocumentSchema.parse({
     ...base,
+    draft,
+    approvedSpecs,
+    pendingCompile,
     composerMode: base.composerMode ?? "ask",
     authoringThread: Array.isArray(base.authoringThread) ? base.authoringThread : [],
     authoringTrace:
@@ -538,23 +755,32 @@ export function isIntentGraphReadyForCompile(draft: IntentGraph): boolean {
 
 /** Lightweight role hint for Draw-mode edge kind suggestion (no LLM). */
 export function suggestIntentNodeRole(node: IntentGraphNode): IntentNodeRole {
+  if (node.type) {
+    return withArchitectureDefaults(node).role;
+  }
   if (node.role && node.role !== "unknown") return node.role;
   const text = `${node.title}\n${node.prompt}`.toLowerCase();
+  if (/planner|devplan|规划/.test(text)) return "implement";
+  if (/reviewer|code review|审查/.test(text)) return "implement";
   if (/verify|test|验收|验证|check/.test(text)) return "verify";
   if (/fix|repair|修复|重试/.test(text)) return "fix";
-  if (/decide|choose|确认|选择/.test(text)) return "decide";
-  if (/implement|build|实现|开发|add|做/.test(text)) return "implement";
+  if (/approv|decide|choose|确认|选择|human/.test(text)) return "decide";
+  if (/condition|branch|if\b/.test(text)) return "unknown";
+  if (/implement|build|coder|实现|开发|add|做/.test(text)) return "implement";
   return "implement";
 }
 
 export function suggestIntentEdgeKind(
-  edge: Pick<IntentGraphEdge, "kind" | "source" | "target">,
+  edge: Pick<IntentGraphEdge, "kind" | "source" | "target" | "branchKey">,
   nodes: IntentGraphNode[],
 ): IntentEdgeKind {
   if (edge.kind) return edge.kind;
   const source = nodes.find((node) => node.id === edge.source);
   const target = nodes.find((node) => node.id === edge.target);
   if (!source || !target) return "depends";
+  if (isConditionNode(source) || edge.branchKey) {
+    return "conditional";
+  }
   const sourceRole = suggestIntentNodeRole(source);
   const targetRole = suggestIntentNodeRole(target);
   if (
@@ -562,6 +788,16 @@ export function suggestIntentEdgeKind(
     (targetRole === "implement" || targetRole === "fix")
   ) {
     return "feedback";
+  }
+  const sourceArch = withArchitectureDefaults(source);
+  const targetArch = withArchitectureDefaults(target);
+  if (
+    (sourceArch.type === "action" && sourceArch.actionIntegration === "test") ||
+    sourceArch.type === "human"
+  ) {
+    if (targetArch.type === "agent" && targetArch.agentRole === "coder") {
+      return "feedback";
+    }
   }
   return "depends";
 }
@@ -610,10 +846,14 @@ export interface LoopTopologyIssue {
   message: string;
 }
 
-/** Approve only linear depends-chain + at most one feedback edge + stop_policy. */
+/**
+ * Approve topology: linear depends by default; Condition may fan out via
+ * `conditional` edges; Merge may fan in; Loop nodes require maxIterations.
+ */
 export function validateLoopSpecTopology(spec: LoopSpec): LoopTopologyIssue[] {
   const issues: LoopTopologyIssue[] = [];
   const nodeIds = new Set(spec.nodes.map((node) => node.id));
+  const nodesById = new Map(spec.nodes.map((node) => [node.id, node]));
 
   if (!spec.stopPolicy?.maxRounds || spec.stopPolicy.maxRounds < 1) {
     issues.push({ path: "stopPolicy.maxRounds", message: "stop_policy.maxRounds is required" });
@@ -630,12 +870,53 @@ export function validateLoopSpecTopology(spec: LoopSpec): LoopTopologyIssue[] {
 
   const depends = spec.edges.filter((edge) => edge.kind === "depends");
   const feedback = spec.edges.filter((edge) => edge.kind === "feedback");
+  const conditional = spec.edges.filter((edge) => edge.kind === "conditional");
 
   if (feedback.length > 1) {
     issues.push({
       path: "edges",
       message: "At most one feedback edge is allowed in MVP",
     });
+  }
+
+  for (const node of spec.nodes) {
+    if (isLoopLogicNode(node) && !(node.maxIterations && node.maxIterations >= 1)) {
+      issues.push({
+        path: `nodes.${node.id}.maxIterations`,
+        message: `Loop node "${node.id}" requires maxIterations ≥ 1`,
+      });
+    }
+  }
+
+  for (const edge of conditional) {
+    const fromNode = nodesById.get(edge.from);
+    if (fromNode && !isConditionNode(fromNode)) {
+      issues.push({
+        path: `edges.${edge.id}`,
+        message: "Conditional edges must start from a Condition logic node",
+      });
+    }
+    if (!edge.branchKey?.trim()) {
+      issues.push({
+        path: `edges.${edge.id}.branchKey`,
+        message: "Conditional edges require a branchKey",
+      });
+    }
+  }
+
+  const conditionOut = new Map<string, number>();
+  for (const edge of conditional) {
+    conditionOut.set(edge.from, (conditionOut.get(edge.from) ?? 0) + 1);
+  }
+  for (const node of spec.nodes) {
+    if (!isConditionNode(node)) continue;
+    const outs = conditionOut.get(node.id) ?? 0;
+    if (outs < 2) {
+      issues.push({
+        path: `nodes.${node.id}`,
+        message: "Condition node requires at least two conditional outgoing edges",
+      });
+    }
   }
 
   const outgoing = new Map<string, string[]>();
@@ -659,6 +940,8 @@ export function validateLoopSpecTopology(spec: LoopSpec): LoopTopologyIssue[] {
   }
   for (const [id, count] of incoming) {
     if (count > 1) {
+      const node = nodesById.get(id);
+      if (node && isMergeNode(node)) continue;
       issues.push({
         path: `nodes.${id}`,
         message: "Depends edges must form a single linear chain (indegree ≤ 1)",
@@ -666,11 +949,17 @@ export function validateLoopSpecTopology(spec: LoopSpec): LoopTopologyIssue[] {
     }
   }
 
-  const entries = spec.nodes.filter((node) => (incoming.get(node.id) ?? 0) === 0);
+  // Entry = no depends/conditional inbound.
+  const inboundAny = new Map<string, number>();
+  for (const node of spec.nodes) inboundAny.set(node.id, 0);
+  for (const edge of [...depends, ...conditional]) {
+    inboundAny.set(edge.to, (inboundAny.get(edge.to) ?? 0) + 1);
+  }
+  const entries = spec.nodes.filter((node) => (inboundAny.get(node.id) ?? 0) === 0);
   if (spec.nodes.length > 0 && entries.length !== 1) {
     issues.push({
       path: "nodes",
-      message: "Depends chain must have exactly one entry node",
+      message: "Graph must have exactly one entry node",
     });
   }
 
@@ -678,17 +967,35 @@ export function validateLoopSpecTopology(spec: LoopSpec): LoopTopologyIssue[] {
     const edge = feedback[0]!;
     const fromNode = spec.nodes.find((node) => node.id === edge.from);
     const toNode = spec.nodes.find((node) => node.id === edge.to);
-    if (fromNode && fromNode.role !== "verify" && fromNode.role !== "decide") {
-      issues.push({
-        path: `edges.${edge.id}`,
-        message: "Feedback edge should start from a verify or decide node",
-      });
+    if (fromNode) {
+      const fromArch = withArchitectureDefaults(fromNode);
+      const okFrom =
+        fromNode.role === "verify" ||
+        fromNode.role === "decide" ||
+        (fromArch.type === "action" && fromArch.actionIntegration === "test") ||
+        fromArch.type === "human" ||
+        (fromArch.type === "agent" && fromArch.agentRole === "reviewer");
+      if (!okFrom) {
+        issues.push({
+          path: `edges.${edge.id}`,
+          message:
+            "Feedback edge should start from verify/test, human, reviewer, or decide",
+        });
+      }
     }
-    if (toNode && toNode.role !== "implement" && toNode.role !== "fix") {
-      issues.push({
-        path: `edges.${edge.id}`,
-        message: "Feedback edge should target an implement or fix node",
-      });
+    if (toNode) {
+      const toArch = withArchitectureDefaults(toNode);
+      const okTo =
+        toNode.role === "implement" ||
+        toNode.role === "fix" ||
+        (toArch.type === "agent" &&
+          (toArch.agentRole === "coder" || toArch.agentRole === "planner"));
+      if (!okTo) {
+        issues.push({
+          path: `edges.${edge.id}`,
+          message: "Feedback edge should target an implement/fix/coder/planner node",
+        });
+      }
     }
   }
 

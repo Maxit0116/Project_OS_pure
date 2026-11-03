@@ -211,7 +211,7 @@ interface ActiveLayerFocusTransition extends LayerFocusTransition {
 const ARTIFACT_LINK_EDGE_COLOR = 'var(--color-violet)'
 
 const LIVE_EXEC_EDGE_COLORS: Record<LiveExecutionEdge['kind'], string> = {
-  read_context: '#3b82f6',
+  read_context: '#a1a1aa',
   edit_create: '#f59e0b',
   impact: '#a78bfa',
   delegation: '#14b8a6',

@@ -81,6 +81,20 @@ From [`GitHub-Auth-Dev-Plan.md`](GitHub-Auth-Dev-Plan.md). Local Device Flow ide
 - [ ] Sign out clears status, secret, and profile; presentation mode can mock sign-in without network.
 - [ ] Opening a workspace does **not** require GitHub login (local-first).
 
+## GitHub Card Quick Ops (composer Stage Dock)
+
+From [`GitHub-Card-Quick-Ops-Dev-Plan.md`](GitHub-Card-Quick-Ops-Dev-Plan.md). Mid-vibe GitHub console above the prompt.
+
+- [ ] Hover Stage Dock → GitHub card shows current project repo, branch, dirty/ahead/behind, auth chip.
+- [ ] Fetch / Pull / Push / New branch / Checkout / Create or View PR work without opening Graph; each success/failure shows a toast.
+- [ ] Dirty tree: Push hidden; Ask Agent starts recovery; no auto-stash. After clean, pending op can retry.
+- [ ] Locator selects a target branch; Checkout CTA appears until workspace matches; Checkout mutates then updates hub.
+- [ ] Unauthenticated: Fetch/Checkout OK; Push / Create PR prompts Connect GitHub.
+- [ ] Open Graph from card focuses current branch/PR; if Graph already open, card mutations soft-reload it.
+- [ ] Spatial Capture Compose Hub repo satellite shows the same L1 actions.
+- [ ] Desktop Overlay GitHub satellite: Fetch/Pull/Push/Checkout/PR work; toast appears in main Workbench; Ask Agent lands in Chat; Open Graph opens in main and hides Overlay.
+- [ ] References → Repo entries remain non-mutating (agent context only).
+
 ## H4 — Model variants + worktree
 
 - [ ] `.projectos/model-harness.json` `systemDelta` applied for matching model id.

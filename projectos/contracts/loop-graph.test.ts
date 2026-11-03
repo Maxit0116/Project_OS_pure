@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   IntentGraphSchema,
   LoopSpecSchema,
+  architectureFromLegacyRole,
   createEmptyLoopDocument,
   getIntentGraphCompileIssues,
   headFromLoopDocument,
@@ -13,7 +14,9 @@ import {
   suggestIntentEdgeKind,
   trimLoopInstanceEvents,
   validateLoopSpecTopology,
+  withArchitectureDefaults,
 } from "./loop-graph.js";
+import { getLoopGraphPreset } from "./loop-presets.js";
 
 function sampleSpec(overrides: Record<string, unknown> = {}) {
   return LoopSpecSchema.parse({
@@ -297,6 +300,167 @@ describe("loop-graph contracts", () => {
     expect(issues.some((issue) => issue.message.includes("At most one feedback"))).toBe(
       true,
     );
+  });
+
+  it("maps legacy roles to architecture fields on normalize", () => {
+    expect(architectureFromLegacyRole("implement")).toMatchObject({
+      type: "agent",
+      agentRole: "coder",
+    });
+    expect(architectureFromLegacyRole("verify")).toMatchObject({
+      type: "action",
+      actionIntegration: "test",
+    });
+    expect(architectureFromLegacyRole("decide")).toMatchObject({
+      type: "human",
+      humanMode: "approval",
+    });
+
+    const doc = normalizeLoopGraphDocument({
+      version: "0.1.0",
+      id: "loop_arch",
+      projectId: "proj_1",
+      title: "Arch",
+      draft: {
+        revision: 1,
+        graphPrompt: "goal",
+        nodes: [
+          {
+            id: "n1",
+            title: "Implement",
+            prompt: "Build it",
+            role: "implement",
+            position: { x: 0, y: 0 },
+          },
+        ],
+        edges: [],
+      },
+      approvedSpecs: [sampleSpec()],
+      instances: [],
+      linkedSessionIds: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(doc.draft.nodes[0]).toMatchObject({
+      type: "agent",
+      agentRole: "coder",
+      role: "implement",
+    });
+    expect(doc.approvedSpecs[0]?.nodes[0]).toMatchObject({
+      type: "agent",
+      agentRole: "coder",
+    });
+  });
+
+  it("allows Condition fan-out via conditional edges", () => {
+    const branched = sampleSpec({
+      nodes: [
+        {
+          id: "n_test",
+          role: "verify",
+          type: "action",
+          actionIntegration: "test",
+          actionOperation: "run",
+          goal: "Run tests",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_cond",
+          role: "unknown",
+          type: "logic",
+          logicKind: "condition",
+          goal: "Branch on test result",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_review",
+          role: "implement",
+          type: "agent",
+          agentRole: "reviewer",
+          goal: "Review",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_coder",
+          role: "implement",
+          type: "agent",
+          agentRole: "coder",
+          goal: "Fix",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n_test", to: "n_cond", kind: "depends" },
+        {
+          id: "e2",
+          from: "n_cond",
+          to: "n_review",
+          kind: "conditional",
+          branchKey: "pass",
+        },
+        {
+          id: "e3",
+          from: "n_cond",
+          to: "n_coder",
+          kind: "conditional",
+          branchKey: "fail",
+        },
+      ],
+    });
+    expect(validateLoopSpecTopology(branched)).toEqual([]);
+  });
+
+  it("requires maxIterations on Loop logic nodes", () => {
+    const loopSpec = sampleSpec({
+      nodes: [
+        {
+          id: "n_loop",
+          role: "unknown",
+          type: "logic",
+          logicKind: "loop",
+          goal: "Retry",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+      ],
+      edges: [],
+    });
+    const issues = validateLoopSpecTopology(loopSpec);
+    expect(issues.some((issue) => issue.path.includes("maxIterations"))).toBe(true);
+  });
+
+  it("ships a Feature Development preset with architecture seeds", () => {
+    const preset = getLoopGraphPreset("feature_development");
+    expect(preset).toBeTruthy();
+    expect(preset!.draft.nodes.some((node) => node.agentRole === "planner")).toBe(true);
+    expect(
+      preset!.draft.nodes.some(
+        (node) => node.type === "action" && node.actionOperation === "create_pr",
+      ),
+    ).toBe(true);
+    expect(
+      preset!.draft.edges.filter((edge) => edge.kind === "conditional"),
+    ).toHaveLength(2);
+    expect(
+      withArchitectureDefaults({
+        type: "human",
+        humanMode: "review",
+      }).role,
+    ).toBe("decide");
   });
 
   it("keeps the started event when trimming the instance log", () => {

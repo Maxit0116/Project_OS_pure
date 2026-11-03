@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useI18n } from '../../i18n'
 import Button from '../ui/Button'
+import Checkbox from '../ui/Checkbox'
 import { useAgentPoolStore } from '../AgentFlow/AgentPool/agentPoolStore'
+import toneStyles from './composer/chatModeTone.module.css'
 import type { AgentPoolTask } from '../AgentFlow/AgentPool/projectAgentPool'
 import styles from './AgentPoolAcceptanceCard.module.css'
 
@@ -22,8 +24,9 @@ export default function AgentPoolAcceptanceCard({ task }: Props) {
 
   return (
     <section
-      className={styles.card}
+      className={`${styles.card} ${toneStyles.modeAgent}`}
       data-agent-pool-acceptance={task.taskId}
+      data-mode-tone="change"
       aria-label={ts('agentFlow.pool.acceptanceTitle')}
     >
       <header className={styles.header}>
@@ -41,19 +44,17 @@ export default function AgentPoolAcceptanceCard({ task }: Props) {
         <ul className={styles.criteria}>
           {task.acceptanceCriteria.map((criterion, index) => (
             <li key={`${criterion}-${index}`}>
-              <label className={styles.criterion}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(checked[`${index}`])}
-                  onChange={(event) => {
-                    setChecked((prev) => ({
-                      ...prev,
-                      [`${index}`]: event.target.checked,
-                    }))
-                  }}
-                />
-                <span>{criterion}</span>
-              </label>
+              <Checkbox
+                className={styles.criterion}
+                checked={Boolean(checked[`${index}`])}
+                onCheckedChange={(next) => {
+                  setChecked((prev) => ({
+                    ...prev,
+                    [`${index}`]: next,
+                  }))
+                }}
+                label={criterion}
+              />
             </li>
           ))}
         </ul>
@@ -72,7 +73,7 @@ export default function AgentPoolAcceptanceCard({ task }: Props) {
 
       <div className={styles.actions}>
         <Button
-          variant="primary"
+          variant="mode"
           disabled={!allChecked}
           onClick={() => useAgentPoolStore.getState().acceptTask(task.taskId)}
         >

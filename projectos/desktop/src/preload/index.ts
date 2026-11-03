@@ -488,6 +488,58 @@ const api = {
         },
       }
     },
+    notifyGithubCardHost(payload: {
+      kind: 'toast' | 'askAgent' | 'refreshGithubGraph' | 'openGithubGraph'
+      type?: 'info' | 'success' | 'warning' | 'error'
+      message?: string
+      prompt?: string
+      branch?: string | null
+      prNumber?: number | null
+    }): void {
+      ipcRenderer.send('spatial-pin:githubCardHost', payload)
+    },
+    onGithubCardHost(
+      listener: (payload: {
+        kind: 'toast' | 'askAgent' | 'refreshGithubGraph' | 'openGithubGraph'
+        type?: 'info' | 'success' | 'warning' | 'error'
+        message?: string
+        prompt?: string
+        branch?: string | null
+        prNumber?: number | null
+      }) => void,
+    ): Disposable {
+      const handler = (
+        _event: unknown,
+        payload: {
+          kind?: 'toast' | 'askAgent' | 'refreshGithubGraph' | 'openGithubGraph'
+          type?: 'info' | 'success' | 'warning' | 'error'
+          message?: string
+          prompt?: string
+          branch?: string | null
+          prNumber?: number | null
+        },
+      ) => {
+        if (!payload?.kind) return
+        listener({
+          kind: payload.kind,
+          ...(payload.type ? { type: payload.type } : {}),
+          ...(payload.message !== undefined
+            ? { message: payload.message }
+            : {}),
+          ...(payload.prompt !== undefined ? { prompt: payload.prompt } : {}),
+          ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
+          ...(payload.prNumber !== undefined
+            ? { prNumber: payload.prNumber }
+            : {}),
+        })
+      }
+      ipcRenderer.on('spatial-pin:githubCardHost', handler)
+      return {
+        dispose() {
+          ipcRenderer.off('spatial-pin:githubCardHost', handler)
+        },
+      }
+    },
     onBeginCapture(
       listener: (payload: {
         displayBounds: { x: number; y: number; width: number; height: number }

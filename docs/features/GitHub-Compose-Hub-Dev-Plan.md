@@ -4,6 +4,7 @@
 **范围**：Compose Hub 的 GitHub 卫星（当前项目本仓 HUD + 定位器）与 Workbench 中间浮窗 GitHub Graph（Sessions / Loops 同壳）；Overlay / Spatial Captures 仅多级浏览或搜索选中节点。  
 **权威交叉引用**：
 - 本仓库 Cursor plan：`GitHub Compose Hub`
+- [`GitHub-Card-Quick-Ops-Dev-Plan.md`](./GitHub-Card-Quick-Ops-Dev-Plan.md) — **现行**：Composer Stage Dock / Hub 本仓 Fetch·Pull·Push·Checkout·PR 快捷操作（取代下文「Push/Pull 非 Compose 主路径」）
 - [`GitHub-Graph-Feature-Tree-Git-History-Dev-Plan.md`](./GitHub-Graph-Feature-Tree-Git-History-Dev-Plan.md) — Feature Tree + Git History hybrid（进行中）
 - [`Tools-Integrations-Dev-Plan.md`](./backend/Tools-Integrations-Dev-Plan.md) — Git 只读 status；本计划用户发起的 workspace 写操作为 IPC，不是开放 agent 工具
 - [`Agent-Harness-Dev-Plan.md`](./Agent-Harness-Dev-Plan.md) / worktree — graph 上挂 agent worktree 节点
@@ -18,7 +19,7 @@
 - Dirty checkout（v1）= **拒绝**，不自动 stash
 - PR（M3）= 优先 `gh`；否则打开 GitHub compare URL
 - Graph 内用户确认后允许：rename / delete / **hard reset + force-with-lease**（高级危险路径，须与未来 safe revert 分文案）
-- Push / Pull / Commit 通用 IPC 仍非本 Compose Hub 主路径（由 Graph / 终端驱动）
+- ~~Push / Pull / Commit 通用 IPC 仍非本 Compose Hub 主路径（由 Graph / 终端驱动）~~ → **已由 [`GitHub-Card-Quick-Ops-Dev-Plan.md`](./GitHub-Card-Quick-Ops-Dev-Plan.md) 取代**：card 承接 L0/L1；Commit 仍走 Ask Agent；L3 危险操作仍在 Graph
 
 ---
 

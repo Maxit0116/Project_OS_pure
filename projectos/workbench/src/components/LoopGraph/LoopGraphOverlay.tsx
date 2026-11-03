@@ -14,11 +14,19 @@ import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useLoopGraphStore, type LoopPhase } from '../../state/loopGraphStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { GraphOverlayFrame } from '../GraphOverlay/GraphOverlayFrame'
+import Checkbox from '../ui/Checkbox'
 import LoopGoalComposer from './LoopGoalComposer'
 import LoopGraphContextMenu, {
   type LoopGraphContextMenuState,
 } from './LoopGraphContextMenu'
+import LoopGraphPalette from './LoopGraphPalette'
+import LoopNodeDutyCard from './LoopNodeDutyCard'
 import LoopGraphRail from './LoopGraphRail'
+import {
+  decodePaletteDragPayload,
+  LOOP_PALETTE_MIME,
+  visualForIntentNode,
+} from './loopNodeVisuals'
 import {
   createLoopRailFolder,
   emptyLoopGraphRailLayout,
@@ -75,6 +83,7 @@ export default function LoopGraphOverlay() {
   const setConnectingFrom = useLoopGraphStore((s) => s.setConnectingFrom)
   const setPendingDelete = useLoopGraphStore((s) => s.setPendingDelete)
   const beginAuthorNode = useLoopGraphStore((s) => s.beginAuthorNode)
+  const beginAuthorNodeFromPalette = useLoopGraphStore((s) => s.beginAuthorNodeFromPalette)
   const beginAuthorEdge = useLoopGraphStore((s) => s.beginAuthorEdge)
   const refineAuthoringTarget = useLoopGraphStore((s) => s.refineAuthoringTarget)
   const removeAuthoringTarget = useLoopGraphStore((s) => s.removeAuthoringTarget)
@@ -100,6 +109,8 @@ export default function LoopGraphOverlay() {
   const [acceptedAssumptions, setAcceptedAssumptions] = useState<Record<string, boolean>>({})
   const [confirmedCycles, setConfirmedCycles] = useState<Record<string, boolean>>({})
   const [contextMenu, setContextMenu] = useState<LoopGraphContextMenuState | null>(null)
+  const [dutyCardNodeId, setDutyCardNodeId] = useState<string | null>(null)
+  const [paletteDropActive, setPaletteDropActive] = useState(false)
   const [pointerWorld, setPointerWorld] = useState<{ x: number; y: number } | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
@@ -166,6 +177,13 @@ export default function LoopGraphOverlay() {
     clear()
   }, [project?.projectId, clear])
 
+  useEffect(() => {
+    if (!dutyCardNodeId || !document) return
+    if (!document.draft.nodes.some((node) => node.id === dutyCardNodeId)) {
+      setDutyCardNodeId(null)
+    }
+  }, [document, dutyCardNodeId])
+
   const activeInstance = useMemo(() => {
     const instances = document?.instances ?? []
     return (
@@ -219,6 +237,22 @@ export default function LoopGraphOverlay() {
       x: (clientX - rect.left - viewport.x) / viewport.scale,
       y: (clientY - rect.top - viewport.y) / viewport.scale,
     }
+  }
+
+  const placeFromPalette = async (
+    paletteItemId: string,
+    position: { x: number; y: number },
+  ) => {
+    const id = await beginAuthorNodeFromPalette(paletteItemId, {
+      x: Math.max(16, position.x - NODE_W / 2),
+      y: Math.max(16, position.y - NODE_H / 2),
+    })
+    if (id) setSelectedNodeId(id)
+  }
+
+  const openDutyCard = (nodeId: string) => {
+    setSelectedNodeId(nodeId)
+    setDutyCardNodeId(nodeId)
   }
 
   const addNodeAt = (position: { x: number; y: number }) => {
@@ -505,19 +539,18 @@ export default function LoopGraphOverlay() {
                     <p>{ts('chat.loopGraph.noAssumptions')}</p>
                   ) : (
                     compileResult.assumptions.map((item) => (
-                      <div key={item.id} className={styles.assumptionRow}>
-                        <input
-                          type="checkbox"
-                          checked={acceptedAssumptions[item.id] ?? false}
-                          onChange={(event) =>
-                            setAcceptedAssumptions((current) => ({
-                              ...current,
-                              [item.id]: event.target.checked,
-                            }))
-                          }
-                        />
-                        <label>{item.text}</label>
-                      </div>
+                      <Checkbox
+                        key={item.id}
+                        className={styles.assumptionRow}
+                        checked={acceptedAssumptions[item.id] ?? false}
+                        onCheckedChange={(next) =>
+                          setAcceptedAssumptions((current) => ({
+                            ...current,
+                            [item.id]: next,
+                          }))
+                        }
+                        label={item.text}
+                      />
                     ))
                   )}
                 </div>
@@ -527,21 +560,18 @@ export default function LoopGraphOverlay() {
                     <p>{ts('chat.loopGraph.noCycles')}</p>
                   ) : (
                     compileResult.cycleGates.map((gate) => (
-                      <div key={gate.edgeId} className={styles.cycleRow}>
-                        <input
-                          type="checkbox"
-                          checked={confirmedCycles[gate.edgeId] ?? false}
-                          onChange={(event) =>
-                            setConfirmedCycles((current) => ({
-                              ...current,
-                              [gate.edgeId]: event.target.checked,
-                            }))
-                          }
-                        />
-                        <label>
-                          {gate.triggerWhen} · max {gate.maxRounds}
-                        </label>
-                      </div>
+                      <Checkbox
+                        key={gate.edgeId}
+                        className={styles.cycleRow}
+                        checked={confirmedCycles[gate.edgeId] ?? false}
+                        onCheckedChange={(next) =>
+                          setConfirmedCycles((current) => ({
+                            ...current,
+                            [gate.edgeId]: next,
+                          }))
+                        }
+                        label={`${gate.triggerWhen} · max ${gate.maxRounds}`}
+                      />
                     ))
                   )}
                 </div>
@@ -577,14 +607,77 @@ export default function LoopGraphOverlay() {
                 ref={canvasRef}
                 className={`${styles.canvas} ${dragging ? styles.canvasDragging : ''} ${
                   connectingFromId ? styles.canvasConnecting : ''
-                }`}
+                } ${paletteDropActive ? styles.canvasDropTarget : ''}`}
                 onWheel={onWheel}
+                onDragOver={(event) => {
+                  if (phase !== 'draw') return
+                  const types = Array.from(event.dataTransfer.types)
+                  if (
+                    !types.includes(LOOP_PALETTE_MIME) &&
+                    !types.includes('text/plain')
+                  ) {
+                    return
+                  }
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'copy'
+                  setPaletteDropActive(true)
+                }}
+                onDragLeave={(event) => {
+                  if (event.currentTarget === event.target) {
+                    setPaletteDropActive(false)
+                  }
+                }}
+                onDrop={(event) => {
+                  if (phase !== 'draw') return
+                  event.preventDefault()
+                  setPaletteDropActive(false)
+                  const raw =
+                    event.dataTransfer.getData(LOOP_PALETTE_MIME) ||
+                    event.dataTransfer.getData('text/plain')
+                  const paletteItemId =
+                    decodePaletteDragPayload(raw) ||
+                    (raw.startsWith('{') ? null : raw.trim() || null)
+                  if (!paletteItemId) return
+                  const world = clientToWorld(event.clientX, event.clientY)
+                  void placeFromPalette(paletteItemId, world)
+                }}
                 onContextMenu={(event) => {
                   if (phase !== 'draw' || !document) return
                   event.preventDefault()
-                  const target = event.target as HTMLElement
-                  if (target.closest('[data-loop-node]') || target.closest('[data-loop-edge]')) {
-                    return
+                  // Right-click may be retargeted to the canvas after pointer capture
+                  // from a prior node pointerdown — resolve the hit under the cursor.
+                  const hitFromTarget =
+                    event.target instanceof Element
+                      ? event.target.closest('[data-loop-node], [data-loop-edge]')
+                      : null
+                  const hitFromPoint = globalThis.document
+                    .elementFromPoint(event.clientX, event.clientY)
+                    ?.closest('[data-loop-node], [data-loop-edge]')
+                  const hit = hitFromTarget ?? hitFromPoint ?? null
+                  if (hit) {
+                    const nodeId = hit.getAttribute('data-loop-node')
+                    const edgeId = hit.getAttribute('data-loop-edge')
+                    if (nodeId) {
+                      setSelectedNodeId(nodeId)
+                      setContextMenu({
+                        kind: 'node',
+                        x: event.clientX,
+                        y: event.clientY,
+                        nodeId,
+                        restoreFocusTo: event.currentTarget,
+                      })
+                      return
+                    }
+                    if (edgeId) {
+                      setContextMenu({
+                        kind: 'edge',
+                        x: event.clientX,
+                        y: event.clientY,
+                        edgeId,
+                        restoreFocusTo: event.currentTarget,
+                      })
+                      return
+                    }
                   }
                   const world = clientToWorld(event.clientX, event.clientY)
                   setContextMenu({
@@ -597,6 +690,7 @@ export default function LoopGraphOverlay() {
                   })
                 }}
                 onPointerDown={(event) => {
+                  if (event.button !== 0) return
                   if ((event.target as HTMLElement).closest('[data-loop-node]')) return
                   if ((event.target as HTMLElement).closest('[data-loop-edge]')) return
                   if (connectingFromId && event.button === 0) {
@@ -645,6 +739,7 @@ export default function LoopGraphOverlay() {
                 ) : draft.nodes.length === 0 ? (
                   <p className={styles.empty}>{ts('chat.loopGraph.canvasEmpty')}</p>
                 ) : (
+                  <>
                   <div
                     className={styles.world}
                     style={{
@@ -667,9 +762,13 @@ export default function LoopGraphOverlay() {
                         })
                         const incomplete = !edge.prompt?.trim() || !edge.kind
                         const feedback = edge.kind === 'feedback'
+                        const conditional = edge.kind === 'conditional'
                         const label =
-                          truncateEdgeLabel(edge.prompt ?? '') ||
-                          ts('chat.loopGraph.edgeLabelPending')
+                          truncateEdgeLabel(
+                            edge.branchKey
+                              ? `${edge.branchKey}: ${edge.prompt ?? ''}`
+                              : (edge.prompt ?? ''),
+                          ) || ts('chat.loopGraph.edgeLabelPending')
                         return (
                           <g key={edge.id} data-loop-edge={edge.id}>
                             <path
@@ -691,7 +790,9 @@ export default function LoopGraphOverlay() {
                             <path
                               className={`${styles.edge} ${
                                 feedback ? styles.edgeFeedback : ''
-                              } ${incomplete ? styles.edgeIncomplete : ''}`}
+                              } ${conditional ? styles.edgeConditional : ''} ${
+                                incomplete ? styles.edgeIncomplete : ''
+                              }`}
                               d={routed.d}
                               pointerEvents="none"
                             />
@@ -732,10 +833,22 @@ export default function LoopGraphOverlay() {
                         activeInstance?.status === 'awaiting_hitl' && isCursor
                       const incomplete = !node.prompt.trim()
                       const expanded = Boolean(expandedNodeIds[node.id])
+                      const visual = visualForIntentNode(node)
+                      const NodeIcon = visual.Icon
+                      const categoryClass =
+                        visual.categoryClass === 'catAgent'
+                          ? styles.catAgent
+                          : visual.categoryClass === 'catAction'
+                            ? styles.catAction
+                            : visual.categoryClass === 'catLogic'
+                              ? styles.catLogic
+                              : visual.categoryClass === 'catHuman'
+                                ? styles.catHuman
+                                : styles.catDraft
                       return (
                         <div
                           key={node.id}
-                          className={`${styles.node} ${
+                          className={`${styles.node} ${categoryClass} ${
                             selectedNodeId === node.id ? styles.nodeActive : ''
                           } ${connectingFromId === node.id ? styles.nodeConnecting : ''} ${
                             incomplete ? styles.nodeIncomplete : ''
@@ -744,10 +857,17 @@ export default function LoopGraphOverlay() {
                           }`}
                           style={{ left: node.position.x, top: node.position.y }}
                           data-loop-node={node.id}
+                          aria-label={`${visual.shortLabel}: ${node.title || ts('chat.loopGraph.untitledNode')}`}
+                          onDoubleClick={(event) => {
+                            event.stopPropagation()
+                            openDutyCard(node.id)
+                          }}
                           onContextMenu={(event) => {
                             if (phase !== 'draw') return
                             event.preventDefault()
                             event.stopPropagation()
+                            // Cancel any accidental drag started before contextmenu.
+                            nodeDragRef.current = null
                             setSelectedNodeId(node.id)
                             setContextMenu({
                               kind: 'node',
@@ -758,6 +878,9 @@ export default function LoopGraphOverlay() {
                             })
                           }}
                           onPointerDown={(event) => {
+                            // Ignore right/middle click so contextmenu is not stolen by
+                            // pointer capture on the canvas (which only showed "Add node").
+                            if (event.button !== 0) return
                             event.stopPropagation()
                             setSelectedNodeId(node.id)
                             const clickWorld = clientToWorld(event.clientX, event.clientY)
@@ -830,14 +953,21 @@ export default function LoopGraphOverlay() {
                               )
                             })}
                           <div className={styles.nodeTop}>
+                            <span
+                              className={`${styles.nodeIcon} ${categoryClass}`}
+                              title={visual.shortLabel}
+                              aria-hidden
+                            >
+                              <NodeIcon size={15} strokeWidth={1.75} />
+                            </span>
+                            <span className={styles.nodeTitle}>
+                              {node.title || visual.shortLabel}
+                            </span>
                             {incomplete ? (
                               <span className={styles.incompleteMark}>
                                 {ts('chat.loopGraph.incomplete')}
                               </span>
-                            ) : (
-                              <span className={styles.roleMark}>{node.role ?? 'auto'}</span>
-                            )}
-                            <span className={styles.nodeTitle}>{node.title}</span>
+                            ) : null}
                             <button
                               type="button"
                               className={`${styles.chevronButton} ${
@@ -869,6 +999,49 @@ export default function LoopGraphOverlay() {
                       )
                     })}
                   </div>
+                  {(() => {
+                    const dutyNode = dutyCardNodeId
+                      ? draft.nodes.find((item) => item.id === dutyCardNodeId)
+                      : null
+                    if (!dutyNode) return null
+                    const canvasEl = canvasRef.current
+                    const canvasW = canvasEl?.clientWidth ?? 800
+                    const canvasH = canvasEl?.clientHeight ?? 600
+                    const cardW = 300
+                    const cardH = 420
+                    let left =
+                      viewport.x + (dutyNode.position.x + NODE_W) * viewport.scale + 12
+                    let top = viewport.y + dutyNode.position.y * viewport.scale
+                    if (left + cardW > canvasW - 8) {
+                      left =
+                        viewport.x + dutyNode.position.x * viewport.scale - cardW - 12
+                    }
+                    left = Math.max(8, Math.min(left, canvasW - cardW - 8))
+                    top = Math.max(
+                      8,
+                      Math.min(top, canvasH - Math.min(cardH, 280) - 8),
+                    )
+                    return (
+                      <LoopNodeDutyCard
+                        node={dutyNode}
+                        specNode={
+                          document?.approvedSpecs
+                            .at(-1)
+                            ?.nodes.find((item) => item.id === dutyNode.id) ?? null
+                        }
+                        activeInstance={activeInstance}
+                        readOnly={phase !== 'draw'}
+                        left={left}
+                        top={top}
+                        onClose={() => setDutyCardNodeId(null)}
+                        onChange={(patch) => {
+                          if (phase !== 'draw') return
+                          updateNode(dutyNode.id, patch)
+                        }}
+                      />
+                    )
+                  })()}
+                  </>
                 )}
               </div>
             )}
@@ -881,6 +1054,93 @@ export default function LoopGraphOverlay() {
                   {ts('chat.loopGraph.instanceStatus')}: {activeInstance.status} · round{' '}
                   {activeInstance.round}
                 </div>
+                {activeInstance.status === 'awaiting_hitl' ? (
+                  <div className={styles.hitlActions}>
+                    {(activeInstance.hitlQuestionIds ?? ['continue']).map((questionId) => {
+                      const isApproval = questionId.includes('approval')
+                      const isReview = questionId.includes('review')
+                      return (
+                        <div key={questionId} className={styles.hitlGroup}>
+                          <div className={styles.runEvent}>{questionId}</div>
+                          {isApproval ? (
+                            <>
+                              <button
+                                type="button"
+                                className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                                onClick={() =>
+                                  void resolveHitl([
+                                    {
+                                      questionId,
+                                      answer: 'approve',
+                                      editedPayload: { approved: true },
+                                    },
+                                  ])
+                                }
+                              >
+                                {ts('chat.loopGraph.hitlApprove')}
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.actionButton}
+                                onClick={() =>
+                                  void resolveHitl([{ questionId, answer: 'reject' }])
+                                }
+                              >
+                                {ts('chat.loopGraph.hitlReject')}
+                              </button>
+                            </>
+                          ) : null}
+                          {isReview ? (
+                            <>
+                              <button
+                                type="button"
+                                className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                                onClick={() =>
+                                  void resolveHitl([{ questionId, answer: 'accept' }])
+                                }
+                              >
+                                {ts('chat.loopGraph.hitlAccept')}
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.actionButton}
+                                onClick={() =>
+                                  void resolveHitl([
+                                    { questionId, answer: 'request_changes' },
+                                  ])
+                                }
+                              >
+                                {ts('chat.loopGraph.hitlRequestChanges')}
+                              </button>
+                            </>
+                          ) : null}
+                          {!isApproval && !isReview ? (
+                            <>
+                              <button
+                                type="button"
+                                className={styles.actionButton}
+                                onClick={() =>
+                                  void resolveHitl([{ questionId, answer: 'stop' }])
+                                }
+                              >
+                                {ts('chat.loopGraph.hitlStop')}
+                              </button>
+                              <button
+                                type="button"
+                                className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                                onClick={() =>
+                                  void resolveHitl([{ questionId, answer: 'continue' }])
+                                }
+                              >
+                                {ts('chat.loopGraph.hitlContinue')}
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : null}
                 {activeInstance.events.slice(-8).map((event) => (
                   <div key={event.id} className={styles.runEvent}>
                     {event.at.slice(11, 19)} · {event.type}
@@ -890,6 +1150,19 @@ export default function LoopGraphOverlay() {
               </div>
             ) : null}
           </div>
+          {phase === 'draw' ? (
+            <LoopGraphPalette
+              onPlaced={(nodeId) => setSelectedNodeId(nodeId)}
+              resolveClickPosition={() => {
+                const rect = canvasRef.current?.getBoundingClientRect()
+                if (!rect) return { x: 80, y: 80 }
+                return {
+                  x: (rect.width / 2 - viewport.x) / viewport.scale,
+                  y: (rect.height / 2 - viewport.y) / viewport.scale,
+                }
+              }}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -898,9 +1171,7 @@ export default function LoopGraphOverlay() {
         onClose={() => setContextMenu(null)}
         onCreateNode={addNodeAt}
         onConnectFrom={(nodeId) => startConnectFrom(nodeId)}
-        onViewDescription={(nodeId) =>
-          setExpandedNodeIds((current) => ({ ...current, [nodeId]: true }))
-        }
+        onOpenDuty={openDutyCard}
         onDeleteNode={(nodeId) => setPendingDelete({ type: 'node', id: nodeId })}
         onDeleteEdge={(edgeId) => setPendingDelete({ type: 'edge', id: edgeId })}
       />

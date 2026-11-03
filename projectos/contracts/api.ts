@@ -439,6 +439,21 @@ export interface ProjectOSApi {
   continueAgentRun(runId: string): Promise<AgentRun>;
   getAgentRun(runId: string): Promise<AgentRun>;
   getAgentRunEvents(runId: string): Promise<AgentRunEvent[]>;
+  /**
+   * Snapshot + watermark for Agent Pool reconnect.
+   * Prefer this over getAgentRunEvents when starting a live subscription.
+   */
+  getAgentRunEventSnapshot(runId: string): Promise<import("./agent-pool-trace.js").AgentRunEventSnapshot>;
+  ensureAgentPoolRun(
+    request: import("./agent-pool-trace.js").EnsureAgentPoolRunRequest,
+  ): Promise<import("./agent-pool-trace.js").AgentPoolRun>;
+  getAgentPoolRun(poolRunId: string): Promise<import("./agent-pool-trace.js").AgentPoolRun>;
+  listAgentRunsByDefinition(
+    request: import("./agent-pool-trace.js").ListAgentRunsByDefinitionRequest,
+  ): Promise<import("./agent-pool-trace.js").AgentRunIndexEntry[]>;
+  setAgentRunAcceptance(
+    request: import("./agent-pool-trace.js").SetAgentRunAcceptanceRequest,
+  ): Promise<import("./agent-pool-trace.js").AgentRunIndexEntry>;
   streamAgentRun(
     runId: string,
     cb: (event: AgentRunEvent) => void,

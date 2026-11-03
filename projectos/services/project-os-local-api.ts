@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+
 import type { AgentRun } from "../contracts/agent-run.js";
 import type { CreateFileContextBundle } from "../contracts/create-file-context.js";
 import type {
@@ -86,6 +88,16 @@ import {
 import { ToolResultSchema, type ToolResult } from "../contracts/tool-result.js";
 import type { AgentRunEvent, AgentTransientTrace } from "../contracts/events.js";
 import {
+  ensureAgentPoolRun as ensureAgentPoolRunOnDisk,
+  listAgentRunsByDefinition as listAgentRunsByDefinitionOnDisk,
+  readAgentPoolRun as readAgentPoolRunOnDisk,
+  safeUpdateIndexFromEvent,
+  setAgentRunAcceptance as setAgentRunAcceptanceOnDisk,
+  upsertAgentDefinition,
+  upsertAgentRunIndexEntry,
+  watermarkFromEvents,
+} from "./agent-pool-index.js";
+import {
   LocalContextBundleSchema,
   NodeContextBundleSchema,
   GlobalContextBundleSchema,
@@ -127,6 +139,10 @@ import {
   resolveLoopLeafWriteScope,
   type LoopExecutionHooks,
 } from "./loop-execution.js";
+import {
+  evaluateTerminalPolicyDecision,
+  isHighRiskTerminalCommand,
+} from "./loop-terminal-action.js";
 import {
   memoryProposalSkipReason,
   memoryProposalSystemPrompt,
@@ -737,6 +753,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly memoryProposalDelayMs: number;
   private readonly memoryProposalTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly orchestrator: AgentOrchestrator;
+  /** Agent Pool index context keyed by runId (definition / pool / session). */
+  private readonly agentPoolRunContextByRunId = new Map<
+    string,
+    {
+      definitionId: string;
+      poolRunId: string;
+      sessionId: string | null;
+      title: string;
+    }
+  >();
   private readonly workspacesByProjectId = new Map<
     string,
     LoadedProjectOSWorkspace
@@ -937,6 +963,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       loadMemoryIndexMarkdown: (workspace) => this.currentMemoryInjection(workspace),
       onRootRunCompleted: (workspace, snapshot) => {
         this.scheduleMemoryProposal(workspace, snapshot);
+      },
+      onEventPersisted: (workspace, event, run) => {
+        const context = this.agentPoolRunContextByRunId.get(run.runId);
+        if (!context) return;
+        safeUpdateIndexFromEvent(workspace.projectOSRoot, event, run, context);
       },
       ...(options.runEventPersistence
         ? { eventPersistence: options.runEventPersistence }
@@ -3771,6 +3802,50 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             workspace: projectWorkspace,
             runId: runState.run.runId,
           });
+          try {
+            const sessionId = stored.chatSessionId ?? null;
+            const definitionId = sessionId
+              ? `def_root_${sessionId}`
+              : `def_root_${projectWorkspace.project.projectId}`;
+            const pool = ensureAgentPoolRunOnDisk({
+              projectOSRoot: projectWorkspace.projectOSRoot,
+              projectId: projectWorkspace.project.projectId,
+              rootRunId: runState.run.runId,
+              sessionId,
+              triggerSource: "chat",
+            });
+            const title =
+              refinement.understood?.trim().slice(0, 80) || runState.run.runId;
+            upsertAgentDefinition(projectWorkspace.projectOSRoot, {
+              definitionId,
+              projectId: projectWorkspace.project.projectId,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              config: {
+                displayName: title,
+              },
+            });
+            this.bindAgentPoolRunContext(runState.run.runId, {
+              definitionId,
+              poolRunId: pool.poolRunId,
+              sessionId,
+              title,
+            });
+            upsertAgentRunIndexEntry(projectWorkspace.projectOSRoot, {
+              runId: runState.run.runId,
+              definitionId,
+              poolRunId: pool.poolRunId,
+              rootRunId: runState.run.rootRunId ?? runState.run.runId,
+              parentRunId: runState.run.parentRunId ?? null,
+              sessionId,
+              status: runState.run.status,
+              startedAt: runState.run.startedAt,
+              title,
+              acceptance: "none",
+            });
+          } catch (error) {
+            console.error("[projectos] chat agent pool bind failed", error);
+          }
           this.maybeStartPendingOrchestratorRun(runState.run.runId);
           return {
             ...cloneJson(runState.run),
@@ -3921,6 +3996,147 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       "run_not_found",
       `Agent run '${runId}' has not been registered`,
     );
+  }
+
+  async getAgentRunEventSnapshot(
+    runId: string,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentRunEventSnapshot> {
+    const events = await this.getAgentRunEvents(runId);
+    const mark = watermarkFromEvents(events);
+    return {
+      runId,
+      events,
+      watermark: mark.watermark,
+      watermarkEventId: mark.watermarkEventId,
+    };
+  }
+
+  async ensureAgentPoolRun(
+    request: import("../contracts/agent-pool-trace.js").EnsureAgentPoolRunRequest,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentPoolRun> {
+    const workspace = this.requireActiveWorkspace();
+    const pool = ensureAgentPoolRunOnDisk({
+      projectOSRoot: workspace.projectOSRoot,
+      projectId: workspace.project.projectId,
+      rootRunId: request.rootRunId,
+      sessionId: request.sessionId,
+      loopInstanceId: request.loopInstanceId,
+      loopSpecId: request.loopSpecId,
+      triggerSource: request.triggerSource,
+      existingPoolRunId: request.existingPoolRunId,
+    });
+    if (request.definitionId) {
+      const now = new Date().toISOString();
+      upsertAgentDefinition(workspace.projectOSRoot, {
+        definitionId: request.definitionId,
+        projectId: workspace.project.projectId,
+        createdAt: now,
+        updatedAt: now,
+        config: {
+          displayName: request.title ?? request.definitionId,
+        },
+      });
+    }
+    if (request.rootRunId) {
+      const definitionId =
+        request.definitionId ?? `def_root_${request.sessionId ?? "workspace"}`;
+      this.bindAgentPoolRunContext(request.rootRunId, {
+        definitionId,
+        poolRunId: pool.poolRunId,
+        sessionId: request.sessionId ?? null,
+        title: request.title ?? request.rootRunId,
+      });
+      try {
+        const run = await this.getAgentRun(request.rootRunId);
+        upsertAgentRunIndexEntry(workspace.projectOSRoot, {
+          runId: run.runId,
+          definitionId,
+          poolRunId: pool.poolRunId,
+          rootRunId: run.rootRunId ?? run.runId,
+          parentRunId: run.parentRunId ?? null,
+          sessionId: request.sessionId ?? null,
+          loopInstanceId: request.loopInstanceId ?? null,
+          status: run.status,
+          startedAt: run.startedAt,
+          ...(run.completedAt ? { endedAt: run.completedAt } : {}),
+          title: request.title ?? run.runId,
+          acceptance:
+            run.status === "awaiting_review" || run.status === "complete"
+              ? "pending"
+              : "none",
+        });
+      } catch {
+        // Run may not exist yet — context bind is enough for later emits.
+      }
+    }
+    return pool;
+  }
+
+  async getAgentPoolRun(
+    poolRunId: string,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentPoolRun> {
+    const workspace = this.requireActiveWorkspace();
+    const pool = readAgentPoolRunOnDisk(workspace.projectOSRoot, poolRunId);
+    if (!pool) {
+      throw new ProjectOSError(
+        "run_not_found",
+        `Agent pool run '${poolRunId}' was not found`,
+      );
+    }
+    return pool;
+  }
+
+  async listAgentRunsByDefinition(
+    request: import("../contracts/agent-pool-trace.js").ListAgentRunsByDefinitionRequest,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentRunIndexEntry[]> {
+    const workspace = this.requireActiveWorkspace();
+    return listAgentRunsByDefinitionOnDisk(workspace.projectOSRoot, request.definitionId, {
+      limit: request.limit,
+      offset: request.offset,
+    });
+  }
+
+  async setAgentRunAcceptance(
+    request: import("../contracts/agent-pool-trace.js").SetAgentRunAcceptanceRequest,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentRunIndexEntry> {
+    const workspace = this.requireActiveWorkspace();
+    const entry = setAgentRunAcceptanceOnDisk(
+      workspace.projectOSRoot,
+      request.runId,
+      request.acceptance,
+    );
+    if (!entry) {
+      throw new ProjectOSError(
+        "run_not_found",
+        `Agent run '${request.runId}' has no index entry`,
+      );
+    }
+    return entry;
+  }
+
+  private bindAgentPoolRunContext(
+    runId: string,
+    context: {
+      definitionId: string;
+      poolRunId: string;
+      sessionId: string | null;
+      title: string;
+    },
+  ): void {
+    this.agentPoolRunContextByRunId.set(runId, context);
+  }
+
+  private requireActiveWorkspace(): LoadedProjectOSWorkspace {
+    const first = this.workspacesByProjectId.values().next().value as
+      | LoadedProjectOSWorkspace
+      | undefined;
+    if (!first) {
+      throw new ProjectOSError(
+        "project_not_loaded",
+        "No workspace is loaded",
+      );
+    }
+    return first;
   }
 
   streamAgentRun(
@@ -6469,12 +6685,89 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
   }
 
+  private async settlePendingGithubOp(
+    workspace: LoadedProjectOSWorkspace,
+    _loopId: string,
+    document: import("../contracts/loop-graph.js").LoopGraphDocument,
+    instanceId: string,
+    completePendingGithubOp: typeof import("./loop-runtime-service.js").completePendingGithubOp,
+    upsertLoopGraph: typeof import("./loop-graph-service.js").upsertLoopGraph,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const instance = document.instances.find((item) => item.id === instanceId);
+    const pending = instance?.pendingGithubOp;
+    if (!pending) return document;
+
+    const payload = pending.payload;
+    let result: import("./loop-execution.js").LoopGithubOperationResult;
+
+    if (pending.operation === "create_pr") {
+      const { createGithubPullRequest } = await import("./git-context-service.js");
+      const token = await this.resolveGithubAccessToken();
+      const title =
+        typeof payload.title === "string" && payload.title.trim()
+          ? payload.title.trim()
+          : "Loop Graph pull request";
+      const remote = await createGithubPullRequest(
+        workspace.workspaceRoot,
+        {
+          title,
+          ...(typeof payload.head === "string" ? { head: payload.head } : {}),
+          ...(typeof payload.base === "string" ? { base: payload.base } : {}),
+          ...(typeof payload.body === "string" ? { body: payload.body } : {}),
+        },
+        {
+          ...(token ? { accessToken: token } : {}),
+          pushHead: true,
+        },
+      );
+      result = {
+        ok: remote.ok,
+        message: remote.message,
+        ...(remote.url ? { url: remote.url } : {}),
+        ...(typeof remote.number === "number" ? { number: remote.number } : {}),
+        refs: Object.fromEntries(
+          Object.entries(payload).map(([key, value]) => [key, String(value)]),
+        ),
+      };
+    } else if (pending.operation === "create_branch") {
+      const { createGitBranch } = await import("./git-context-service.js");
+      const token = await this.resolveGithubAccessToken();
+      const branch =
+        (typeof payload.branch === "string" && payload.branch.trim()) ||
+        (typeof payload.name === "string" && payload.name.trim()) ||
+        "";
+      const created = createGitBranch(workspace.workspaceRoot, branch, {
+        ...(typeof payload.from === "string" ? { from: payload.from } : {}),
+        push: true,
+        ...(token ? { accessToken: token } : {}),
+      });
+      result = {
+        ok: created.ok,
+        message: created.message,
+        refs: { branch, ...(typeof payload.from === "string" ? { from: payload.from } : {}) },
+      };
+    } else {
+      result = {
+        ok: false,
+        message: `Unsupported deferred GitHub operation: ${pending.operation}`,
+      };
+    }
+
+    return upsertLoopGraph(
+      workspace.workspaceRoot,
+      completePendingGithubOp(document, instanceId, result),
+    );
+  }
+
   private async settleLoopRuns(
     workspace: LoadedProjectOSWorkspace,
     loopId: string,
     document: import("../contracts/loop-graph.js").LoopGraphDocument,
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
-    const { advanceLoopInstance } = await import("./loop-runtime-service.js");
+    const { advanceLoopInstance, completePendingGithubOp } = await import(
+      "./loop-runtime-service.js"
+    );
+    const { upsertLoopGraph } = await import("./loop-graph-service.js");
     let current = document;
     for (let attempt = 0; attempt < 6; attempt += 1) {
       const instance = [...current.instances].reverse().find((item) =>
@@ -6483,6 +6776,19 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         item.status === "awaiting_review",
       );
       if (!instance) return current;
+
+      if (instance.pendingGithubOp) {
+        current = await this.settlePendingGithubOp(
+          workspace,
+          loopId,
+          current,
+          instance.id,
+          completePendingGithubOp,
+          upsertLoopGraph,
+        );
+        continue;
+      }
+
       const hooks = this.loopExecutionHooks(workspace, instance.featureNodeId);
       if (!instance.activeRunId) {
         if (instance.status === "awaiting_review") return current;
@@ -6558,6 +6864,115 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
     return {
       leaf,
+      executeGithubOperation: (input) => {
+        const payloadRefs = Object.fromEntries(
+          Object.entries(input.payload).map(([key, value]) => [key, String(value)]),
+        );
+        // Sync stepper cannot await REST; queue create_pr/create_branch for settleLoopRuns.
+        if (
+          input.operation === "create_pr" ||
+          input.operation === "create_branch"
+        ) {
+          return {
+            ok: true,
+            deferred: true,
+            message: `GitHub ${input.operation} queued for settle`,
+            refs: payloadRefs,
+          };
+        }
+        return {
+          ok: true,
+          simulated: true,
+          message: `GitHub ${input.operation} simulated after approval`,
+          refs: payloadRefs,
+        };
+      },
+      executeTerminalCommand: (input) => {
+        const commandLine = [input.command, ...input.args].join(" ");
+        if (isHighRiskTerminalCommand(commandLine) && !input.approved) {
+          return {
+            ok: false,
+            exitCode: null,
+            blocked: true,
+            message: "High-risk terminal command blocked without approval",
+          };
+        }
+
+        const policy = writeCapabilityContext({
+          allowedWritePaths: leaf ? [leaf.filePath] : [],
+        });
+        const loaded = loadToolPermissionDocument(workspace.workspaceRoot).rules;
+        const permissionRules =
+          loaded.length > 0
+            ? loaded
+            : [{ effect: "allow" as const, tool: "shell" as const }];
+        const decision = evaluateTerminalPolicyDecision({
+          command: {
+            command: input.command,
+            args: input.args,
+            timeoutMs: input.timeoutMs,
+          },
+          policy,
+          permissionRules,
+        });
+        if (decision === "deny") {
+          return {
+            ok: false,
+            exitCode: null,
+            policyDenied: true,
+            message: "Terminal policy_denied",
+          };
+        }
+        if (decision === "ask" && !input.approved) {
+          return {
+            ok: false,
+            exitCode: null,
+            blocked: true,
+            message: "Terminal requires approval (policy ask)",
+          };
+        }
+
+        const spawned = spawnSync(input.command, input.args, {
+          cwd: input.cwd ?? workspace.workspaceRoot,
+          encoding: "utf8",
+          timeout: input.timeoutMs,
+          maxBuffer: 2 * 1024 * 1024,
+        });
+        const timedOut =
+          Boolean(spawned.error) &&
+          (spawned.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+        if (timedOut) {
+          return {
+            ok: false,
+            exitCode: null,
+            timedOut: true,
+            blocked: true,
+            message: "Terminal timed out (blocked)",
+            stdout: spawned.stdout?.slice(0, 4000),
+            stderr: spawned.stderr?.slice(0, 4000),
+          };
+        }
+        if (spawned.error) {
+          return {
+            ok: false,
+            exitCode: spawned.status,
+            message: spawned.error.message,
+            stdout: spawned.stdout?.slice(0, 4000),
+            stderr: spawned.stderr?.slice(0, 4000),
+          };
+        }
+        const exitCode = spawned.status;
+        const ok = exitCode === 0;
+        return {
+          ok,
+          exitCode,
+          stdout: spawned.stdout?.slice(0, 4000),
+          stderr: spawned.stderr?.slice(0, 4000),
+          message: ok
+            ? `Terminal ok: ${commandLine.slice(0, 160)}`
+            : `Terminal exit ${exitCode}: ${(spawned.stderr || spawned.stdout || "").slice(0, 240)}`,
+        };
+      },
       readRun: (runId) => {
         const state = this.orchestrator.getRun(runId);
         if (state) {
@@ -6632,6 +7047,22 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             userPrompt: input.goal.slice(0, 4000),
           },
         );
+        try {
+          const pool = ensureAgentPoolRunOnDisk({
+            projectOSRoot: workspace.projectOSRoot,
+            projectId: workspace.project.projectId,
+            rootRunId: state.run.runId,
+            triggerSource: "loop",
+          });
+          this.bindAgentPoolRunContext(state.run.runId, {
+            definitionId: `def_loop_${input.featureNodeId}`,
+            poolRunId: pool.poolRunId,
+            sessionId: null,
+            title: input.filePath || input.featureNodeId,
+          });
+        } catch (error) {
+          console.error("[projectos] loop agent pool bind failed", error);
+        }
         return {
           runId: state.run.runId,
           status: state.run.status,

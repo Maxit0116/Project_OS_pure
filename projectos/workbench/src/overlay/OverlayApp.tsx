@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   Bug,
@@ -37,6 +37,7 @@ import {
   SpatialComposeHub,
   type ComposeHubDataSource,
 } from '../components/SpatialComposeHub'
+import { createOverlayComposerRepoOpsHost } from '../components/SpatialComposeHub/composerRepoOpsHost'
 import { syncComposeSubagentsToPool } from '../components/AgentFlow/AgentPool/syncComposeSubagents'
 import type { ProjectGraph } from '@contracts/index'
 import type { RepoDesignSystemSnapshot } from '@contracts/repo-design-system'
@@ -249,6 +250,43 @@ export function OverlayApp() {
   >({})
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({})
   const [projectId, setProjectId] = useState<string | null>(null)
+  const [githubConnected, setGithubConnected] = useState(false)
+  const [githubLogin, setGithubLogin] = useState<string | null>(null)
+
+  const refreshGithubAuth = useCallback(async () => {
+    if (!window.projectOS?.invoke) {
+      setGithubConnected(false)
+      setGithubLogin(null)
+      return
+    }
+    try {
+      const status = (await window.projectOS.invoke(
+        'getGitHubAuthStatus',
+      )) as { connected?: boolean; login?: string }
+      setGithubConnected(Boolean(status?.connected))
+      setGithubLogin(status?.login?.trim() ? status.login : null)
+    } catch {
+      setGithubConnected(false)
+      setGithubLogin(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshGithubAuth()
+    const timer = window.setInterval(() => {
+      void refreshGithubAuth()
+    }, 15_000)
+    return () => window.clearInterval(timer)
+  }, [refreshGithubAuth])
+
+  const repoOpsHost = useMemo(
+    () =>
+      createOverlayComposerRepoOpsHost({
+        githubConnected,
+        refreshGithubAuth,
+      }),
+    [githubConnected, refreshGithubAuth],
+  )
 
   useEffect(() => {
     syncComposeSubagentsToPool(hubByArrow, subagentLinksByArrow)
@@ -672,6 +710,51 @@ export function OverlayApp() {
           }>
         }
       },
+      checkoutBranch: async (branch) => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'checkoutWorkspaceBranch',
+          projectId,
+          branch,
+        )) as { ok: boolean; message: string; branch?: string | null }
+      },
+      createBranch: async (input) => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'createWorkspaceBranch',
+          projectId,
+          {
+            name: input.name,
+            ...(input.from ? { from: input.from } : {}),
+            checkout: input.checkout !== false,
+            push: false,
+          },
+        )) as { ok: boolean; message: string; branch?: string | null }
+      },
+      pushBranch: async (branch) => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'pushWorkspaceBranch',
+          projectId,
+          branch,
+        )) as { ok: boolean; message: string; branch?: string | null }
+      },
+      pullBranch: async (branch) => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'pullWorkspaceBranch',
+          projectId,
+          branch,
+        )) as { ok: boolean; message: string; branch?: string | null }
+      },
       fetchGit: async () => {
         if (!projectId || !window.projectOS) {
           return { ok: false, message: 'No project' }
@@ -680,6 +763,48 @@ export function OverlayApp() {
           'fetchWorkspaceGit',
           projectId,
         )) as { ok: boolean; message: string }
+      },
+      listPullRequests: async () => {
+        if (!projectId || !window.projectOS) {
+          return { available: false, pullRequests: [], message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'listWorkspacePullRequests',
+          projectId,
+        )) as {
+          available: boolean
+          pullRequests: Array<{
+            number: number
+            title: string
+            url: string
+            headRef: string
+            baseRef: string
+          }>
+          message?: string
+        }
+      },
+      createPullRequest: async (input) => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'createWorkspacePullRequest',
+          projectId,
+          input,
+        )) as {
+          ok: boolean
+          url?: string
+          number?: number
+          message: string
+        }
+      },
+      openGithubGraph: (focus) => {
+        window.projectOS?.spatialPin?.notifyGithubCardHost?.({
+          kind: 'openGithubGraph',
+          branch: focus?.branch ?? null,
+          prNumber: focus?.prNumber ?? null,
+        })
+        void window.projectOS?.spatialPin?.hideOverlay?.()
       },
       openExternalUrl: (url) => {
         void window.projectOS?.shell.openExternal(url)
@@ -1454,7 +1579,7 @@ export function OverlayApp() {
       const stroke: AnnotationStroke = {
         id: strokeId,
         kind: 'pen',
-        color: '#4c7dff',
+        color: '#ececec',
         width: 2,
         points: [rel],
       }
@@ -2521,6 +2646,8 @@ export function OverlayApp() {
               }))
             }
             dataSource={hubDataSource}
+            repoOpsHost={repoOpsHost}
+            githubLogin={githubLogin}
             resolveAssetUrl={(path) => assetUrls[path]}
           >
           <div

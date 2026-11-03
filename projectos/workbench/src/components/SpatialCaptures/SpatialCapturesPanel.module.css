@@ -83,7 +83,7 @@
   border-radius: 6px;
   border: 1px solid var(--tech-border-strong);
   background:
-    linear-gradient(135deg, rgba(76, 125, 255, 0.08), transparent 60%),
+    linear-gradient(135deg, var(--tech-accent-subtle), transparent 60%),
     var(--tech-bg-elevated);
   background-size: cover;
   background-position: center;
@@ -177,7 +177,7 @@
   padding: 0;
   cursor: pointer;
   background:
-    linear-gradient(135deg, rgba(76, 125, 255, 0.08), transparent 60%),
+    linear-gradient(135deg, var(--tech-accent-subtle), transparent 60%),
     var(--color-bg-subtle, rgba(0, 0, 0, 0.04));
   background-size: cover;
   background-position: center;

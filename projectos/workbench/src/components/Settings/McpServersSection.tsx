@@ -3,6 +3,7 @@ import type { McpServerConfig, McpToolDescriptor, McpTransport } from '@contract
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
+import Checkbox from '../ui/Checkbox'
 import TextInput from '../ui/TextInput'
 import Select from '../ui/Select'
 import { createSettingsSubmitGuard } from './settingsSubmitGuard'
@@ -178,14 +179,12 @@ export default function McpServersSection() {
       <SettingsGroup label={editingId ? ts('settings.mcp.editTitle') : ts('settings.mcp.addTitle')}>
         <div className={styles.formGrid}>
           <TextInput label={ts('settings.mcp.name')} value={name} onChange={(e) => setName(e.target.value)} />
-          <label className={styles.checkboxRow}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-            />
-            <span>{ts('settings.mcp.enabled')}</span>
-          </label>
+          <Checkbox
+            className={styles.checkboxRow}
+            checked={enabled}
+            onCheckedChange={setEnabled}
+            label={ts('settings.mcp.enabled')}
+          />
           <Select
             label={ts('settings.mcp.transport')}
             value={transport}

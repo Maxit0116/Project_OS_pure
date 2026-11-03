@@ -37,7 +37,7 @@ const ENTRIES: Record<string, IconEntry> = {
   'curated.chrome-devtools': {
     local: [`${ICON_BASE}/chrome.svg`, `${ICON_BASE}/chrome-devtools.png`],
     remote: [githubAvatar('ChromeDevTools')],
-    accent: '#4285F4',
+    accent: '#8E8E93',
   },
   'curated.context7': {
     local: [`${ICON_BASE}/context7.svg`, `${ICON_BASE}/upstash.png`],
@@ -61,11 +61,11 @@ const ENTRIES: Record<string, IconEntry> = {
   // Skills
   'curated.ask-mode': {
     local: [`${ICON_BASE}/ask-mode.svg`],
-    accent: '#38BDF8',
+    accent: '#A1A1AA',
   },
   'community.create-skill': {
     local: [`${ICON_BASE}/create-skill.svg`],
-    accent: '#A5B4FC',
+    accent: '#8E8E93',
   },
   'community.karpathy-guidelines': {
     local: [`${ICON_BASE}/skill-karpathy.png`],
@@ -85,7 +85,7 @@ const ENTRIES: Record<string, IconEntry> = {
   'community.graphify': {
     local: [`${ICON_BASE}/skill-graphify.png`],
     remote: [githubAvatar('Graphify-Labs')],
-    accent: '#06B6D4',
+    accent: '#71717A',
   },
   'community.caveman': {
     local: [`${ICON_BASE}/skill-caveman.png`],
@@ -100,7 +100,7 @@ const ENTRIES: Record<string, IconEntry> = {
   'community.archify': {
     local: [`${ICON_BASE}/skill-archify.png`],
     remote: [githubAvatar('tt-a1i')],
-    accent: '#3B82F6',
+    accent: '#A1A1AA',
   },
   'community.impeccable': {
     local: [`${ICON_BASE}/skill-impeccable.png`],
@@ -110,12 +110,12 @@ const ENTRIES: Record<string, IconEntry> = {
   'community.last30days': {
     local: [`${ICON_BASE}/skill-last30.png`],
     remote: [githubAvatar('mvanhorn')],
-    accent: '#6366F1',
+    accent: '#71717A',
   },
   'community.diagram-design': {
     local: [`${ICON_BASE}/skill-diagram.png`],
     remote: [githubAvatar('cathrynlavery')],
-    accent: '#0EA5E9',
+    accent: '#8E8E93',
   },
 }
 
@@ -169,6 +169,6 @@ export function resolveMarketplaceIcon(input: {
   return {
     candidates: [...new Set(candidates)],
     initials: initialsFromName(input.name),
-    accent: entry?.accent ?? '#4c7dff',
+    accent: entry?.accent ?? '#A1A1AA',
   }
 }

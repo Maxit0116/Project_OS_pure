@@ -1,6 +1,6 @@
 # Loops Graph · Node Architecture 升级 DevPlan
 
-**状态**：Draft（2026-11-03）。**仅文档**；本计划不授权开始实现，直到 NA-0 决策清单关闭。  
+**状态**：Design freeze + implementing（2026-11-03）。NA-D1–D10 已冻结；**NA-0 → NA-5 已落地**（含 Planner/Coder/Reviewer Artifacts、GitHub `create_pr` 经 `pendingGithubOp` + `settleLoopRuns` REST、Terminal 经 Harness 政策、Feature Development E2E、Studio/Planning Condition 交叉修订）。  
 **范围**：在已落地的 Loop 执行底座（Planning P-0–P-3）与 [`Loops-Graph-Workflow-Studio-Dev-Plan.md`](./Loops-Graph-Workflow-Studio-Dev-Plan.md) 可靠性/工作室路线之上，把 Loops Graph 从「角色启发式线性闭环」升级为 **Engineering Workflow Graph**：以工程职责为中心的四类 Node、统一 Node Contract、类型化数据流 Edge、独立 HITL 状态机，以及可复用的 Feature Development 示范 Workflow。  
 **产品定位一句话**：Loops Graph 回答的不是「如何连接工具做自动化」，而是「如何组织 Agent、工具、代码与人类决策，可靠完成一个工程目标」。  
 **对标参考**：[`n8n-io/n8n`](https://github.com/n8n-io/n8n)（数据流、流程控制、错误输出、Human Review、Execution History）——只借鉴机制，不克隆通用 iPaaS 生态。
@@ -8,6 +8,7 @@
 | 文档 | 关系 |
 |------|------|
 | [`Loops-Graph-Workflow-Studio-Dev-Plan.md`](./Loops-Graph-Workflow-Studio-Dev-Plan.md) | **并行权威**：画布 Studio、真 pause/cancel、Fresh·Stale、重规划提案、参数化/事件触发仍归该文档。本计划**接管并取代**其中「MVP 节点语义映射」对 Condition 永久延期、以及 `implement\|verify\|fix\|decide` 作为唯一产品分类的表述。 |
+| [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | **展示层**：图标识读、右侧 Palette、DnD、浮动 Duty/Inspector 卡；不改本计划 Node Contract / Runtime。 |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | **已落地底座**：Spec/Instance 分离、implement→AgentRun、verify→证据、decide→HITL。本计划在其上扩展 Node 类型系统，不重做 P-0–P-3 不变量。 |
 | [`Agent-Harness-Dev-Plan.md`](./Agent-Harness-Dev-Plan.md) | Action / Agent 权限与预算；Human Approval 不得绕过 ToolPolicy。 |
 | [`backend/Verification-Eval-Dev-Plan.md`](./backend/Verification-Eval-Dev-Plan.md) | Test / Validation Action 的通过依据仍是证据，不是 Agent 自述。 |
@@ -719,3 +720,7 @@ NA-5.1 ── NA-5.2
 | 日期 | 变更 |
 |------|------|
 | 2026-11-03 | 初稿：基于 n8n 取舍讨论与四层 Node 原则；锁定 NA-D1–D10 与三粒度结论；制定 NA-0–NA-5 任务切片 |
+| 2026-11-03 | 实现 NA-1–NA-2.2/2.4：`loop-artifacts` / `loop-node-architecture` / 契约扩展 / 拓扑 Condition / Compiler 保留 type / Palette + Feature Development Preset |
+| 2026-11-03 | 实现 NA-2.3 + NA-3：Inspector 四层；Runtime 按 type 分派；Condition/Loop/Exit/Merge；Human Approval/Review/Input；TestReport 产物；Create PR 审批模拟 |
+| 2026-11-03 | 实现 NA-4.1/4.2/4.4（桥）：`loop-agent-roles`；Planner→DevPlan；Coder 绑定 task→ChangeSet；Reviewer 三态；GitHub hook + Feature Dev E2E |
+| 2026-11-03 | 完成 NA-4.4/4.5 + NA-5：`pendingGithubOp` + settle REST `create_pr`；Terminal `evaluateToolCall`/高风险 Approval；E2E 与 Studio §7/§20、Planning 交叉修订 |

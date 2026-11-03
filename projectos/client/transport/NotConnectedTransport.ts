@@ -646,6 +646,36 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async getAgentRunEventSnapshot(
+    _runId: string,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunEventSnapshot> {
+    return transportNotConnected();
+  }
+
+  async ensureAgentPoolRun(
+    _request: import("../../contracts/agent-pool-trace.js").EnsureAgentPoolRunRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentPoolRun> {
+    return transportNotConnected();
+  }
+
+  async getAgentPoolRun(
+    _poolRunId: string,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentPoolRun> {
+    return transportNotConnected();
+  }
+
+  async listAgentRunsByDefinition(
+    _request: import("../../contracts/agent-pool-trace.js").ListAgentRunsByDefinitionRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry[]> {
+    return transportNotConnected();
+  }
+
+  async setAgentRunAcceptance(
+    _request: import("../../contracts/agent-pool-trace.js").SetAgentRunAcceptanceRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry> {
+    return transportNotConnected();
+  }
+
   streamAgentRun(
     _runId: string,
     _cb: (event: AgentRunEvent) => void,

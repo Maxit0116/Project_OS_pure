@@ -613,6 +613,36 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.getAgentRunEvents(runId);
   }
 
+  getAgentRunEventSnapshot(
+    runId: string,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentRunEventSnapshot> {
+    return this.transport.getAgentRunEventSnapshot(runId);
+  }
+
+  ensureAgentPoolRun(
+    request: import("../contracts/agent-pool-trace.js").EnsureAgentPoolRunRequest,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentPoolRun> {
+    return this.transport.ensureAgentPoolRun(request);
+  }
+
+  getAgentPoolRun(
+    poolRunId: string,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentPoolRun> {
+    return this.transport.getAgentPoolRun(poolRunId);
+  }
+
+  listAgentRunsByDefinition(
+    request: import("../contracts/agent-pool-trace.js").ListAgentRunsByDefinitionRequest,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentRunIndexEntry[]> {
+    return this.transport.listAgentRunsByDefinition(request);
+  }
+
+  setAgentRunAcceptance(
+    request: import("../contracts/agent-pool-trace.js").SetAgentRunAcceptanceRequest,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentRunIndexEntry> {
+    return this.transport.setAgentRunAcceptance(request);
+  }
+
   streamAgentRun(
     runId: string,
     cb: (event: AgentRunEvent) => void,

@@ -1,7 +1,6 @@
 import {
   Bookmark,
   Bot,
-  ExternalLink,
   Folder,
   GitBranch,
   Layers,
@@ -65,6 +64,8 @@ import {
   clampRectToBounds,
   separateFromOthers,
 } from './satelliteCollision'
+import type { ComposerRepoOpsHost } from './composerRepoOpsHost'
+import ComposerRepoQuickOps from './ComposerRepoQuickOps'
 import GithubBranchLocator from './GithubBranchLocator'
 import ReferenceAddPanel from './ReferenceAddPanel'
 import SatelliteCard from './SatelliteCard'
@@ -85,6 +86,9 @@ export interface SpatialComposeHubProps {
   researchLines?: readonly string[]
   onResearchLinesChange?: (lines: string[]) => void
   dataSource?: ComposeHubDataSource
+  /** Overlay injects IPC host; Workbench Captures omit (Zustand default). */
+  repoOpsHost?: ComposerRepoOpsHost
+  githubLogin?: string | null
   children?: ReactNode
   wrapPanel?: boolean
   panelClassName?: string
@@ -185,6 +189,8 @@ export default function SpatialComposeHub({
   researchLines = [],
   onResearchLinesChange,
   dataSource,
+  repoOpsHost,
+  githubLogin,
   children,
   wrapPanel = false,
   panelClassName,
@@ -227,7 +233,9 @@ export default function SpatialComposeHub({
     ahead?: number
     behind?: number
     remoteUrl?: string
+    defaultBranch?: string
   } | null>(null)
+  const [gitStatusTick, setGitStatusTick] = useState(0)
   const [mcpServers, setMcpServers] = useState<HubMcpServerOption[]>([])
   const [mcpLoading, setMcpLoading] = useState(false)
   const [skillLibrary, setSkillLibrary] = useState<HubSkillOption[]>([])
@@ -667,12 +675,13 @@ export default function SpatialComposeHub({
         ...(git.ahead !== undefined ? { ahead: git.ahead } : {}),
         ...(git.behind !== undefined ? { behind: git.behind } : {}),
         ...(git.remoteUrl ? { remoteUrl: git.remoteUrl } : {}),
+        ...(git.defaultBranch ? { defaultBranch: git.defaultBranch } : {}),
       })
     })
     return () => {
       cancelled = true
     }
-  }, [expanded, hub.repo?.label, hub.repo?.branch, dataSource])
+  }, [expanded, hub.repo?.label, hub.repo?.branch, dataSource, gitStatusTick])
 
   useEffect(() => {
     if (!expanded) return
@@ -730,22 +739,25 @@ export default function SpatialComposeHub({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hub.references])
 
+  // Only seed hub.repo.branch when missing — never overwrite a locator
+  // pending-checkout target that intentionally differs from the workspace HEAD.
   useEffect(() => {
     if (!expanded || !dataSource?.getGitStatus || !hub.repo) return
+    if (hub.repo.branch) return
     let cancelled = false
     void dataSource.getGitStatus().then((git) => {
-      if (cancelled || !git.branch) return
-      if (hub.repo?.branch === git.branch) return
+      if (cancelled || !git.branch || !hub.repo) return
+      if (hub.repo.branch) return
       onHubChange({
         ...hub,
-        repo: { label: hub.repo!.label, branch: git.branch },
+        repo: { label: hub.repo.label, branch: git.branch },
       })
     })
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded, hub.repo?.label, dataSource])
+  }, [expanded, hub.repo?.label, hub.repo?.branch, dataSource])
 
   function beginDrag(
     event: ReactPointerEvent<HTMLDivElement>,
@@ -978,95 +990,20 @@ export default function SpatialComposeHub({
                 </div>
               }
             >
-              {hub.repo?.label ? (
-                <>
-                  <button
-                    type="button"
-                    className={styles.repoPath}
-                    onClick={() => void openRepoPicker()}
-                  >
-                    {hub.repo.label}
-                  </button>
-                  {hub.repo.branch ? (
-                    <button
-                      type="button"
-                      className={styles.branchPill}
-                      onClick={() =>
-                        dataSource?.listGitBranches
-                          ? setBranchLocatorOpen(true)
-                          : undefined
-                      }
-                    >
-                      <GitBranch size={10} strokeWidth={2} aria-hidden />
-                      {hub.repo.branch}
-                    </button>
-                  ) : null}
-                  {liveGitStatus ? (
-                    <div className={styles.repoStatusLine}>
-                      <span>
-                        {liveGitStatus.dirty
-                          ? strings.repoDirty
-                          : strings.repoClean}
-                      </span>
-                      {liveGitStatus.ahead !== undefined ||
-                      liveGitStatus.behind !== undefined ? (
-                        <span>
-                          ↑{liveGitStatus.ahead ?? 0} ↓
-                          {liveGitStatus.behind ?? 0}
-                        </span>
-                      ) : null}
-                      {hub.repo.prNumber ? (
-                        <span>PR #{hub.repo.prNumber}</span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  <div className={styles.repoActionRow}>
-                    {liveGitStatus?.remoteUrl || dataSource?.openExternalUrl ? (
-                      <button
-                        type="button"
-                        className={styles.repoActionBtn}
-                        onClick={() => {
-                          const url = liveGitStatus?.remoteUrl
-                          if (!url) return
-                          const https = url
-                            .replace(/^git@github\.com:/i, 'https://github.com/')
-                            .replace(/\.git$/i, '')
-                          dataSource?.openExternalUrl?.(https)
-                        }}
-                      >
-                        <ExternalLink size={11} strokeWidth={2} aria-hidden />
-                        {strings.repoOpenGithub}
-                      </button>
-                    ) : null}
-                    {dataSource?.openGithubGraph ? (
-                      <button
-                        type="button"
-                        className={styles.repoActionBtn}
-                        onClick={() => dataSource.openGithubGraph?.()}
-                      >
-                        {strings.repoOpenGraph}
-                      </button>
-                    ) : null}
-                    {dataSource?.fetchGit ? (
-                      <button
-                        type="button"
-                        className={styles.repoActionBtn}
-                        onClick={() => void dataSource.fetchGit?.()}
-                      >
-                        {strings.repoFetch}
-                      </button>
-                    ) : null}
-                  </div>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  className={styles.emptyHint}
-                  onClick={() => void openRepoPicker()}
-                >
-                  {strings.repoEmpty}
-                </button>
-              )}
+              <ComposerRepoQuickOps
+                hub={hub}
+                onHubChange={onHubChange}
+                dataSource={dataSource}
+                strings={strings}
+                liveGitStatus={liveGitStatus}
+                onStatusRefresh={() => setGitStatusTick((n) => n + 1)}
+                onOpenRepoPicker={() => void openRepoPicker()}
+                onOpenBranchLocator={() => {
+                  if (dataSource?.listGitBranches) setBranchLocatorOpen(true)
+                }}
+                host={repoOpsHost}
+                githubLogin={githubLogin}
+              />
             </SatelliteCard>
           ) : null}
 
@@ -1510,22 +1447,23 @@ export default function SpatialComposeHub({
                     })
                   }
                 />
-                <label className={styles.toggleRow}>
-                  <input
-                    type="checkbox"
-                    checked={slot.enabled}
-                    onChange={(event) =>
-                      patch({
-                        subagents: hub.subagents.map((item) =>
-                          item.id === slot.id
-                            ? { ...item, enabled: event.target.checked }
-                            : item,
-                        ),
-                      })
-                    }
-                  />
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={slot.enabled}
+                  className={`${styles.hubToggle}${slot.enabled ? ` ${styles.hubToggleOn}` : ''}`}
+                  onClick={() =>
+                    patch({
+                      subagents: hub.subagents.map((item) =>
+                        item.id === slot.id
+                          ? { ...item, enabled: !item.enabled }
+                          : item,
+                      ),
+                    })
+                  }
+                >
                   {strings.subagentEnabled}
-                </label>
+                </button>
                 {link?.summary ? (
                   <div className={styles.briefLine}>
                     {link.summary.slice(0, 80)}

@@ -333,20 +333,41 @@
 }
 
 .urlInput {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
   width: 100%;
-  padding: 6px 10px;
+  box-sizing: border-box;
+  padding: 7px 10px;
   font-size: var(--font-size-sm);
   font-family: var(--font-mono, ui-monospace, monospace);
-  color: var(--color-text-primary);
-  background: var(--color-bg-base);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
+  color: var(--tech-text-primary, var(--color-text-primary));
+  caret-color: var(--tech-text-primary, var(--color-text-primary));
+  background-color: var(--tech-bg-muted, var(--color-bg-muted));
+  background-image: none;
+  border: 1px solid var(--tech-border, var(--glass-border));
+  border-radius: 6px;
   outline: none;
-  transition: border-color var(--duration-fast) var(--ease-out);
+  box-shadow: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
-.urlInput:focus {
-  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--glass-border));
+.urlInput::placeholder {
+  color: var(--tech-text-muted, var(--color-text-muted));
+  opacity: 1;
+}
+
+.urlInput:hover:not(:disabled) {
+  border-color: var(--tech-border-strong);
+}
+
+.urlInput:focus,
+.urlInput:focus-visible {
+  outline: none;
+  border-color: var(--tech-border-strong);
+  box-shadow: var(--tech-shadow-focus);
 }
 
 .viewport {

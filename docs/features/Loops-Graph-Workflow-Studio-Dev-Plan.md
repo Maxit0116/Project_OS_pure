@@ -8,6 +8,7 @@
 | 文档 | 关系 |
 |------|------|
 | [`Loops-Graph-Node-Architecture-Dev-Plan.md`](./Loops-Graph-Node-Architecture-Dev-Plan.md) | **并行权威（2026-11-03）**：四类 Node（Agent/Action/Logic/Human）、Node Contract、Artifact 数据流、Condition/有限 Loop、Human 模式；接管本文件 §7「Condition 永久延期」与「仅 implement/verify/fix/decide 产品分类」的表述。本文件仍负责 Studio 壳、真 pause/cancel、Fresh·Stale、重规划与触发。 |
+| [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | **UI 落地（2026-11-03）**：图标+短标题节点、右侧可折叠 Palette、Palette→Canvas DnD、整份 Inspector 改为节点旁浮动 Duty 卡；细化本文件 LG-1.1/1.2 的展示层。 |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | **已落地底座**：P-0–P-3（规格冻结、implement=AgentRun、verify=证据、HITL）。本计划在其上扩展产品与可靠性，不重做 P-0–P-3。 |
 | [`backend/Backend-Dev-Plan.md`](./backend/Backend-Dev-Plan.md) | 后端索引；Loop = 工作流定义，Run = 一次执行。 |
 | [`Live-Graph-Agent-Observability-Dev-Plan.md`](./Live-Graph-Agent-Observability-Dev-Plan.md) | C4 上的执行投影；与 Loop 共享诚实事件源。 |
@@ -126,7 +127,7 @@ Project OS 已具备 Loop Graph 的**最小可运行闭环**：意图画布 → 
 | 参数化启动 / 事件触发 | **未实现** | 仅手动 `startLoopInstance` |
 | 并行节点调度 | **未实现（刻意）** | `hasInFlightWork` 拒绝第二 Run；拓扑 outdegree≤1 |
 | 长任务后台调度器（脱离 API 请求） | **部分** | `settleLoopRuns` 在 API 调用内轮询至多 6 次；无独立 worker 循环 |
-| 通用条件分支 / Start·End 节点类型 | **未实现** | 角色为 `implement\|verify\|fix\|decide\|unknown`，非 Start/Condition 类型系统 |
+| 通用条件分支 / Start·End 节点类型 | **部分落地** | 可视化 `logicKind: condition` + 有限 Loop 已由 Node Architecture 落地；通用表达式引擎仍未实现；角色仍含 `implement\|verify\|fix\|decide` 桥接 |
 
 ### 4.3 关键调用链（证据）
 
@@ -298,7 +299,7 @@ LoopInstance (= Workflow Run)
 | Task / Agent | `implement` / `fix` | 内含多轮 Runtime |
 | Verify | `verify` | 只读证据 |
 | Approval | `decide` + permissions.requiresApproval | HITL |
-| Condition | **延期**或弱化为 edge.`when` 字符串（不执行表达式引擎） | 避免通用表达式 |
+| Condition | **已由 Node Architecture 落地**（`logicKind: condition` + 可视化比较；非通用表达式引擎） | 详见 [`Loops-Graph-Node-Architecture-Dev-Plan.md`](./Loops-Graph-Node-Architecture-Dev-Plan.md)；本表旧「永久延期」表述作废 |
 | End / Output | 无出边 depends 节点完成 → instance complete | |
 | Feedback / Retry | `feedback` 边 + stopPolicy | 已有 |
 
@@ -1230,7 +1231,7 @@ flowchart TB
 
 ### 延期
 
-- 通用 Condition 表达式引擎  
+- 通用 Condition **表达式引擎**（mini-language）——**可视化 Condition 节点本身已落地**（Node Architecture NA-3；比较 TestReport / artifact，非脚本表达式）  
 - 参数化/事件触发完整产品化（可先做手动+幂等）  
 - 多 feedback / DAG 并行  
 - 自动应用重规划  
@@ -1262,7 +1263,7 @@ flowchart TB
 | Q5 | 服务端 tick 是否允许在 mock/client 无桌面时运行？ | — | 仅 real LocalApi/桌面 |
 | Q6 | Preset 存放位置 | contracts vs `.projectos/presets` | 先内置 TS 常量，后用户目录 |
 | Q7 | 产品名「Sessions Graph」对外文案 | 改名 Agent Flow / 保留 | UI 用 Agent Flow；文档注明映射 |
-| Q8 | Condition 节点是否进 MVP？ | 是/否 | **否**；用线性+feedback |
+| Q8 | Condition 节点是否进 MVP？ | 是/否 | **是（已落地）**：可视化 Condition + 有限 Loop；通用表达式引擎仍延期。见 Node Architecture DevPlan |
 
 ---
 
@@ -1271,6 +1272,7 @@ flowchart TB
 | 日期 | 变更 |
 |------|------|
 | 2026-10-20 | 初稿。只读调研 Loop/Orchestrator/Harness/Verification/C4/Agent Flow/Session Graph；生成分阶段任务、ADR、测试矩阵。确认**未修改业务源代码**。 |
+| 2026-11-03 | NA-5.2：§7 Condition「永久延期」与 §20/Q8 交叉修订——可视化 Condition 已由 Node Architecture 接管；仅通用表达式引擎仍延期。 |
 
 ---
 

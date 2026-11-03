@@ -14,6 +14,7 @@ import styles from './AgentPoolRow.module.css'
 interface Props {
   task: AgentPoolTask
   nowMs: number
+  poolOriginMs: number
   expanded: boolean
   historyExpanded: boolean
   onToggleExpand: () => void
@@ -24,6 +25,7 @@ interface Props {
 export default function AgentPoolRow({
   task,
   nowMs,
+  poolOriginMs,
   expanded,
   historyExpanded,
   onToggleExpand,
@@ -42,16 +44,30 @@ export default function AgentPoolRow({
     selectedHistory && selectedHistory.spans.length > 0
       ? selectedHistory.spans
       : task.spans
-  const displayOriginMs = selectedHistory?.originMs ?? task.originMs
+  const displayOriginMs = selectedHistory?.originMs ?? poolOriginMs
   const displaySteps = selectedHistory?.flowSteps ?? task.flowSteps
   const displayAction = selectedHistory?.currentAction ?? task.currentAction
+  const displayTask: AgentPoolTask =
+    selectedHistory && selectedHistory.majorActions
+      ? {
+          ...task,
+          majorActions: selectedHistory.majorActions,
+          traceSpans: selectedHistory.traceSpans ?? task.traceSpans,
+          spans: displaySpans,
+          originMs: displayOriginMs,
+          currentAction: displayAction,
+          flowSteps: displaySteps,
+        }
+      : { ...task, originMs: displayOriginMs }
 
   return (
     <article
       className={styles.row}
       data-task-id={task.taskId}
+      data-definition-id={task.definitionId}
       data-status={task.status}
       data-source={task.source}
+      data-mode={selectedHistory ? 'history' : 'live'}
     >
       <div className={styles.main}>
         {stackCount > 0 ? (
@@ -83,6 +99,11 @@ export default function AgentPoolRow({
             <span className={styles.agentTitle}>{task.title}</span>
             <span className={styles.agentStatus}>
               {ts(`agentFlow.pool.status.${task.status}` as 'agentFlow.pool.status.running')}
+              {task.acceptance === 'accepted'
+                ? ` · ${ts('agentFlow.pool.acceptanceAccepted')}`
+                : task.acceptance === 'rejected'
+                  ? ` · ${ts('agentFlow.pool.acceptanceRejected')}`
+                  : ''}
             </span>
           </button>
           <AgentPoolJumpMenu
@@ -116,7 +137,11 @@ export default function AgentPoolRow({
         {showDone ? (
           <Button
             size="sm"
-            variant={task.status === 'awaiting_user_done' || task.status === 'complete' ? 'primary' : 'secondary'}
+            variant={
+              task.status === 'awaiting_user_done' || task.status === 'complete'
+                ? 'primary'
+                : 'secondary'
+            }
             onClick={onDone}
           >
             {ts('agentFlow.pool.done')}
@@ -139,6 +164,7 @@ export default function AgentPoolRow({
 
       {expanded ? (
         <AgentPoolRowExpand
+          task={displayTask}
           steps={displaySteps}
           spans={displaySpans}
           originMs={displayOriginMs}

@@ -20,9 +20,10 @@
   --color-text-secondary: rgba(255, 255, 255, 0.58);
   --color-text-muted: rgba(255, 255, 255, 0.48);
 
-  --color-accent: #4c7dff;
-  --color-accent-strong: #6b93ff;
-  --color-accent-subtle: rgba(76, 125, 255, 0.16);
+  /* Accent = selection / primary action — Cursor-style near-white, not SaaS blue. */
+  --color-accent: #ececec;
+  --color-accent-strong: #ffffff;
+  --color-accent-subtle: rgba(255, 255, 255, 0.12);
   --color-success: #30d158;
   --color-warning: #ffd60a;
   --color-error: #ff453a;
@@ -55,7 +56,7 @@
 
   --scrim: rgba(0, 0, 0, 0.35);
   --scrim-heavy: rgba(0, 0, 0, 0.6);
-  --minimap-mask: rgba(10, 132, 255, 0.1);
+  --minimap-mask: rgba(255, 255, 255, 0.08);
   --color-error-subtle: rgba(255, 69, 58, 0.12);
   --color-error-border: rgba(255, 69, 58, 0.25);
   --color-warning-subtle: rgba(255, 214, 10, 0.08);
@@ -100,11 +101,11 @@
   --map3d-satellite: #94a3b8;
   --map3d-edge-sibling: #475569;
   --map3d-edge-parent: #94a3b8;
-  --map3d-partition-experience: #38bdf8;
-  --map3d-partition-interface: #22d3ee;
-  --map3d-partition-application: #a78bfa;
-  --map3d-partition-infrastructure: #94a3b8;
-  --map3d-partition-data: #34d399;
+  --map3d-partition-experience: #c4c4c8;
+  --map3d-partition-interface: #8e8e93;
+  --map3d-partition-application: #a1a1aa;
+  --map3d-partition-infrastructure: #71717a;
+  --map3d-partition-data: #52525b;
 
   --shadow-panel: none;
 
@@ -133,7 +134,7 @@
   --tech-accent: var(--color-accent);
   --tech-accent-strong: var(--color-accent-strong);
   --tech-accent-subtle: var(--color-accent-subtle);
-  --tech-accent-foreground: #ffffff;
+  --tech-accent-foreground: #141414;
 
   --tech-success: var(--color-success);
   --tech-warning: var(--color-warning);
@@ -142,7 +143,7 @@
   --tech-shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.04);
   --tech-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.28);
   --tech-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.4);
-  --tech-shadow-focus: 0 0 0 2px rgba(76, 125, 255, 0.5);
+  --tech-shadow-focus: 0 0 0 2px rgba(255, 255, 255, 0.4);
 }
 
 [data-theme='light'] {
@@ -163,9 +164,10 @@
   --color-text-secondary: rgba(17, 17, 19, 0.62);
   --color-text-muted: rgba(17, 17, 19, 0.4);
 
-  --color-accent: #2563eb;
-  --color-accent-strong: #1d4ed8;
-  --color-accent-subtle: rgba(37, 99, 235, 0.12);
+  /* Accent = selection / primary action — near-black on light chrome. */
+  --color-accent: #111113;
+  --color-accent-strong: #000000;
+  --color-accent-subtle: rgba(17, 17, 19, 0.08);
   --color-success: #34c759;
   --color-warning: #ff9f0a;
   --color-error: #ff3b30;
@@ -193,7 +195,7 @@
 
   --scrim: rgba(0, 0, 0, 0.2);
   --scrim-heavy: rgba(0, 0, 0, 0.45);
-  --minimap-mask: rgba(0, 122, 255, 0.08);
+  --minimap-mask: rgba(17, 17, 19, 0.06);
   --color-error-subtle: rgba(255, 59, 48, 0.1);
   --color-error-border: rgba(255, 59, 48, 0.2);
   --color-warning-subtle: rgba(255, 159, 10, 0.08);
@@ -267,7 +269,7 @@
   --tech-shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.04);
   --tech-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08);
   --tech-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.12);
-  --tech-shadow-focus: 0 0 0 2px rgba(37, 99, 235, 0.35);
+  --tech-shadow-focus: 0 0 0 2px rgba(17, 17, 19, 0.28);
 }
 
 :root {
@@ -349,9 +351,10 @@
   /* Floating stage-front tools — overlays chrome / panels without consuming layout. */
   --z-workbench-stage-rail: 80;
 
-  /* Chat mode brand colors (selected chip + turn markers). Agent has no tint. */
+  /* Chat mode brand colors (selected chip + turn markers + mode cards). Agent has no tint. */
   --chat-mode-ask: var(--color-success);
-  --chat-mode-plan: var(--color-warning);
+  /* Plan = warm orange (aligned with overlay / mode chip language). */
+  --chat-mode-plan: #ff9f0a;
   --chat-mode-debug: var(--color-error);
 
   /* Overlay side panels + terminal dock layout (runtime sizes set on .workbenchBody) */

@@ -7,6 +7,7 @@ import type {
 } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import Button from '../ui/Button'
+import toneStyles from './composer/chatModeTone.module.css'
 import PlanClarificationQuestionItem from './PlanClarificationQuestionItem'
 import {
   createInitialQuestionDrafts,
@@ -142,7 +143,11 @@ export default function PlanReviewCard({
   }
 
   return (
-    <div className={`${styles.card} fade-slide-up ${confirmed ? styles.confirmed : ''}`} data-tour="plan-review">
+    <div
+      className={`${styles.card} ${toneStyles.modePlan} fade-slide-up ${confirmed ? styles.confirmed : ''}`}
+      data-tour="plan-review"
+      data-mode-tone="plan"
+    >
       <div className={styles.header}>
         <span className={styles.title}>{ts('plan.title')}</span>
         <span className={styles.badge}>{ts(`plan.status.${displayPlan.status}`)}</span>
@@ -171,6 +176,7 @@ export default function PlanReviewCard({
           </div>
           <div className={styles.actions}>
             <Button
+              variant="mode"
               onClick={handleSubmitClarification}
               disabled={!clarificationComplete || submittingClarification}
             >
@@ -286,7 +292,7 @@ export default function PlanReviewCard({
             <div className={styles.actions}>
               {editing ? (
                 <>
-                  <Button onClick={handleSaveEdits} disabled={savingEdits}>
+                  <Button variant="mode" onClick={handleSaveEdits} disabled={savingEdits}>
                     {ts('plan.saveEdits')}
                   </Button>
                   <Button
@@ -299,7 +305,7 @@ export default function PlanReviewCard({
                 </>
               ) : (
                 <>
-                  <Button onClick={onBuild} disabled={!canBuild}>
+                  <Button variant="mode" onClick={onBuild} disabled={!canBuild}>
                     {ts('plan.build')}
                   </Button>
                   <Button variant="secondary" onClick={() => setEditing(true)}>

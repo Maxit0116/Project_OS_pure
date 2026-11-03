@@ -108,6 +108,11 @@ const EventIdentitySchema = z.object({
   eventId: z.string(),
   runId: z.string(),
   timestamp: z.string(),
+  /**
+   * Monotonic per-AgentRun sequence (1-based). Optional for legacy JSONL.
+   * Never compare runSequence across different runIds.
+   */
+  runSequence: z.number().int().positive().optional(),
 });
 
 const DelegationEventIdentitySchema = EventIdentitySchema.extend({

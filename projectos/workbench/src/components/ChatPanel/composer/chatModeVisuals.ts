@@ -49,3 +49,12 @@ export function toneClassForChatMode(
   if (mode === 'debug') return 'modeDebug'
   return null
 }
+
+/** CSS module class keys from `chatModeTone.module.css` (card option + CTA tint). */
+export type ChatModeToneClass = 'modeAsk' | 'modePlan' | 'modeAgent' | 'modeDebug'
+
+export function modeToneClassForChatMode(
+  mode: string | undefined | null,
+): ChatModeToneClass {
+  return toneClassForChatMode(mode) ?? 'modeAgent'
+}

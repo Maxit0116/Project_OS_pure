@@ -688,8 +688,8 @@ export default function C4NodeDetailDrawer({
 
         <div className={styles.composer}>
           <textarea
-            className={styles.instructionInput}
-            rows={2}
+            className={`tech-field ${styles.instructionInput}`}
+            rows={3}
             value={instruction}
             onChange={(event) => setInstruction(event.target.value)}
             placeholder={ts('map.liveGraph.instructionPlaceholder')}

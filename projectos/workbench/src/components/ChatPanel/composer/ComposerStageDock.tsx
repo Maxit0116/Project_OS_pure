@@ -1,6 +1,5 @@
 import {
   Bookmark,
-  ExternalLink,
   Folder,
   GitBranch,
   Layers,
@@ -25,6 +24,7 @@ import type { PinComposerHub } from '@contracts/spatial-pin'
 import { useI18n } from '../../../i18n'
 import { useWorkbenchStore } from '../../../state/workbenchStore'
 import { createWorkbenchComposeHubDataSource } from '../../SpatialComposeHub/createWorkbenchComposeHubDataSource'
+import ComposerRepoQuickOps from '../../SpatialComposeHub/ComposerRepoQuickOps'
 import GithubBranchLocator from '../../SpatialComposeHub/GithubBranchLocator'
 import type { SatelliteRect } from '../../SpatialComposeHub/hubLayout'
 import ReferenceAddPanel from '../../SpatialComposeHub/ReferenceAddPanel'
@@ -42,6 +42,7 @@ import {
   referenceKindLabel,
   useComposeHubController,
 } from '../../SpatialComposeHub/useComposeHubController'
+import { STAGE_MANAGER_COLLAPSE_DELAY_MS } from '../../../layout/stageManagerHover'
 import styles from './ComposerStageDock.module.css'
 
 export const COMPOSER_STAGE_PANEL_ID = 'composer-stage-panel'
@@ -172,7 +173,7 @@ export default function ComposerStageDock({
       setHovering(false)
       setFocusWithin(false)
       onOpenSlotChange(null)
-    }, 160)
+    }, STAGE_MANAGER_COLLAPSE_DELAY_MS)
   }, [clearHideTimer, onOpenSlotChange])
 
   useEffect(() => {
@@ -180,14 +181,21 @@ export default function ComposerStageDock({
   }, [clearHideTimer])
 
   const prevFloatOpenRef = useRef(false)
-  // After a portaled picker closes, collapse if the pointer already left.
+  // After a portaled picker closes, collapse if the pointer already left —
+  // but keep an intentionally open slot (e.g. pending branch checkout after
+  // GithubBranchLocator) so the user can Confirm / Cancel without re-hovering.
   useEffect(() => {
     const wasOpen = prevFloatOpenRef.current
     prevFloatOpenRef.current = floatOpen
     if (wasOpen && !floatOpen && !hovering && !focusWithin) {
+      if (openSlot) {
+        setHovering(false)
+        setFocusWithin(false)
+        return
+      }
       scheduleCollapse()
     }
-  }, [floatOpen, hovering, focusWithin, scheduleCollapse])
+  }, [floatOpen, hovering, focusWithin, openSlot, scheduleCollapse])
 
   const measureAnchor = useCallback(() => {
     // Prefer left of the card in the right sidebar (matches Reference side panel).
@@ -395,94 +403,22 @@ export default function ComposerStageDock({
   function renderPanelBody(slot: ComposerStageSlot): ReactNode {
     switch (slot) {
       case 'repo':
-        return ctrl.hub.repo?.label ? (
-          <>
-            <button
-              type="button"
-              className={styles.repoPath}
-              onClick={() => void ctrl.openRepoPicker()}
-            >
-              {ctrl.hub.repo.label}
-            </button>
-            {ctrl.hub.repo.branch ? (
-              <button
-                type="button"
-                className={styles.branchPill}
-                onClick={() =>
-                  dataSource.listGitBranches
-                    ? ctrl.setBranchLocatorOpen(true)
-                    : undefined
-                }
-              >
-                <GitBranch size={10} strokeWidth={2} aria-hidden />
-                {ctrl.hub.repo.branch}
-              </button>
-            ) : null}
-            {ctrl.liveGitStatus ? (
-              <div className={styles.repoStatusLine}>
-                <span>
-                  {ctrl.liveGitStatus.dirty
-                    ? strings.repoDirty
-                    : strings.repoClean}
-                </span>
-                {ctrl.liveGitStatus.ahead !== undefined ||
-                ctrl.liveGitStatus.behind !== undefined ? (
-                  <span>
-                    ↑{ctrl.liveGitStatus.ahead ?? 0} ↓
-                    {ctrl.liveGitStatus.behind ?? 0}
-                  </span>
-                ) : null}
-                {ctrl.hub.repo.prNumber ? (
-                  <span>PR #{ctrl.hub.repo.prNumber}</span>
-                ) : null}
-              </div>
-            ) : null}
-            <div className={styles.repoActionRow}>
-              {ctrl.liveGitStatus?.remoteUrl || dataSource.openExternalUrl ? (
-                <button
-                  type="button"
-                  className={styles.repoActionBtn}
-                  onClick={() => {
-                    const url = ctrl.liveGitStatus?.remoteUrl
-                    if (!url) return
-                    const https = url
-                      .replace(/^git@github\.com:/i, 'https://github.com/')
-                      .replace(/\.git$/i, '')
-                    dataSource.openExternalUrl?.(https)
-                  }}
-                >
-                  <ExternalLink size={11} strokeWidth={2} aria-hidden />
-                  {strings.repoOpenGithub}
-                </button>
-              ) : null}
-              {dataSource.openGithubGraph ? (
-                <button
-                  type="button"
-                  className={styles.repoActionBtn}
-                  onClick={() => dataSource.openGithubGraph?.()}
-                >
-                  {strings.repoOpenGraph}
-                </button>
-              ) : null}
-              {dataSource.fetchGit ? (
-                <button
-                  type="button"
-                  className={styles.repoActionBtn}
-                  onClick={() => void dataSource.fetchGit?.()}
-                >
-                  {strings.repoFetch}
-                </button>
-              ) : null}
-            </div>
-          </>
-        ) : (
-          <button
-            type="button"
-            className={styles.emptyHint}
-            onClick={() => void ctrl.openRepoPicker()}
-          >
-            {strings.repoEmpty}
-          </button>
+        return (
+          <ComposerRepoQuickOps
+            hub={ctrl.hub}
+            onHubChange={onHubChange}
+            dataSource={dataSource}
+            strings={strings}
+            liveGitStatus={ctrl.liveGitStatus}
+            onStatusRefresh={ctrl.refreshLiveGitStatus}
+            onOpenRepoPicker={() => void ctrl.openRepoPicker()}
+            onOpenBranchLocator={() => {
+              if (dataSource.listGitBranches) {
+                measureAnchor()
+                ctrl.setBranchLocatorOpen(true)
+              }
+            }}
+          />
         )
       case 'scope':
         return (
@@ -823,8 +759,8 @@ export default function ComposerStageDock({
     <div
       ref={dockRef}
       className={`${styles.dock}${revealed ? ` ${styles.dockRevealed}` : ''}`}
-      onMouseEnter={revealStage}
-      onMouseLeave={scheduleCollapse}
+      onPointerEnter={revealStage}
+      onPointerLeave={scheduleCollapse}
       onFocusCapture={() => {
         clearHideTimer()
         setFocusWithin(true)

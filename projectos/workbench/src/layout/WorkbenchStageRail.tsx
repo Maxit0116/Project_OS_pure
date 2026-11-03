@@ -15,10 +15,8 @@ import { useI18n } from '../i18n'
 import { useChatSessionStore } from '../state/chatSessionStore'
 import { useWorkbenchStore } from '../state/workbenchStore'
 import Button from '../components/ui/Button'
+import { STAGE_MANAGER_COLLAPSE_DELAY_MS } from './stageManagerHover'
 import styles from './WorkbenchStageRail.module.css'
-
-/** Grace period after pointer leaves before the rail tucks away. */
-const COLLAPSE_DELAY_MS = 280
 
 /**
  * Stage Manager–style horizontal rail under the top chrome.
@@ -67,7 +65,7 @@ export default function WorkbenchStageRail() {
     hideTimerRef.current = setTimeout(() => {
       hideTimerRef.current = null
       setHovering(false)
-    }, COLLAPSE_DELAY_MS)
+    }, STAGE_MANAGER_COLLAPSE_DELAY_MS)
   }, [clearHideTimer])
 
   useEffect(() => () => clearHideTimer(), [clearHideTimer])

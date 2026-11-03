@@ -88,14 +88,71 @@ export function createWorkbenchComposeHubDataSource(
       }
       return client.listWorkspaceGitBranches(project.projectId)
     },
+    checkoutBranch: async (branch) => {
+      if (!client || !project) {
+        return { ok: false, message: 'No project' }
+      }
+      return client.checkoutWorkspaceBranch(project.projectId, branch)
+    },
+    createBranch: async (input) => {
+      if (!client || !project) {
+        return { ok: false, message: 'No project' }
+      }
+      return client.createWorkspaceBranch(project.projectId, {
+        name: input.name,
+        ...(input.from ? { from: input.from } : {}),
+        checkout: input.checkout !== false,
+        push: false,
+      })
+    },
+    pushBranch: async (branch) => {
+      if (!client || !project) {
+        return { ok: false, message: 'No project' }
+      }
+      return client.pushWorkspaceBranch(project.projectId, branch)
+    },
+    pullBranch: async (branch) => {
+      if (!client || !project) {
+        return { ok: false, message: 'No project' }
+      }
+      return client.pullWorkspaceBranch(project.projectId, branch)
+    },
     fetchGit: async () => {
       if (!client || !project) {
         return { ok: false, message: 'No project' }
       }
       return client.fetchWorkspaceGit(project.projectId)
     },
-    openGithubGraph: () => {
-      useChatSessionStore.getState().setGithubGraphOpen(true)
+    listPullRequests: async () => {
+      if (!client || !project) {
+        return { available: false, pullRequests: [], message: 'No project' }
+      }
+      const listed = await client.listWorkspacePullRequests(project.projectId)
+      return {
+        available: listed.available,
+        pullRequests: listed.pullRequests.map((pr) => ({
+          number: pr.number,
+          title: pr.title,
+          url: pr.url,
+          headRef: pr.headRef,
+          baseRef: pr.baseRef,
+        })),
+        ...(listed.message ? { message: listed.message } : {}),
+      }
+    },
+    createPullRequest: async (input) => {
+      if (!client || !project) {
+        return { ok: false, message: 'No project' }
+      }
+      return client.createWorkspacePullRequest(project.projectId, input)
+    },
+    openGithubGraph: (focus) => {
+      const store = useChatSessionStore.getState()
+      store.setGithubGraphOpen(true)
+      store.requestGithubGraphRefresh({
+        branch: focus?.branch ?? null,
+        prNumber: focus?.prNumber ?? null,
+      })
     },
     openExternalUrl: (url) => {
       void window.projectOS?.shell.openExternal(url)

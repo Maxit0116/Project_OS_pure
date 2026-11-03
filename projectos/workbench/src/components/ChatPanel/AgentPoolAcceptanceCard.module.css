@@ -1,7 +1,6 @@
 .card {
   background: var(--tech-bg-elevated, var(--color-bg-elevated));
-  border: 1px solid var(--tech-accent, var(--color-accent));
-  border-left-width: 3px;
+  border: 2px solid color-mix(in srgb, var(--mode-color, var(--tech-accent, var(--color-accent))) 72%, var(--tech-border, var(--color-border)));
   border-radius: 6px;
   padding: 14px;
   margin-top: 4px;
@@ -21,7 +20,7 @@
   margin: 0;
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-bold);
-  color: var(--tech-accent, var(--color-accent));
+  color: var(--mode-color, var(--tech-accent, var(--color-accent)));
 }
 
 .badge {
@@ -68,13 +67,14 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  width: 100%;
   font-size: var(--font-size-sm);
   color: var(--tech-text-primary, var(--color-text-primary));
   cursor: pointer;
 }
 
-.criterion input {
-  margin-top: 3px;
+.criterion[aria-checked='true'] {
+  color: var(--mode-color, var(--tech-text-primary));
 }
 
 .feedbackLabel {
@@ -87,17 +87,44 @@
 }
 
 .feedback {
-  resize: vertical;
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  overflow-y: auto;
   min-height: 64px;
+  max-height: 160px;
   padding: 8px 10px;
   border: 1px solid var(--tech-border, var(--color-border));
   border-radius: 6px;
-  background: var(--tech-bg-muted, var(--color-bg-muted));
+  background-color: var(--tech-bg-muted, var(--color-bg-muted));
+  background-image: none;
   color: var(--tech-text-primary, var(--color-text-primary));
+  caret-color: var(--tech-text-primary, var(--color-text-primary));
   font: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  outline: none;
+  box-shadow: none;
+  transition:
+    border-color var(--duration-fast, 150ms) var(--ease-out, ease),
+    box-shadow var(--duration-fast, 150ms) var(--ease-out, ease);
 }
 
+.feedback::placeholder {
+  color: var(--tech-text-muted, var(--color-text-muted));
+  opacity: 1;
+}
+
+.feedback:hover:not(:disabled) {
+  border-color: var(--tech-border-strong, var(--color-border));
+}
+
+.feedback:focus,
 .feedback:focus-visible {
+  border-color: var(--tech-border-strong, var(--color-border));
   box-shadow: var(--tech-shadow-focus);
   outline: none;
 }

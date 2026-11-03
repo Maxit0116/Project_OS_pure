@@ -99,6 +99,8 @@ export interface ComposeHubDataSource {
     from?: string
     checkout?: boolean
   }) => Promise<HubGitMutationResult>
+  pushBranch?: (branch: string) => Promise<HubGitMutationResult>
+  pullBranch?: (branch: string) => Promise<HubGitMutationResult>
   fetchGit?: () => Promise<HubGitMutationResult>
   listPullRequests?: () => Promise<{
     available: boolean
@@ -115,9 +117,13 @@ export interface ComposeHubDataSource {
     title: string
     head?: string
     base?: string
-  }) => Promise<{ ok: boolean; url?: string; message: string }>
+    body?: string
+  }) => Promise<{ ok: boolean; url?: string; number?: number; message: string }>
   /** Open full GitHub Graph overlay (Workbench only). */
-  openGithubGraph?: () => void
+  openGithubGraph?: (focus?: {
+    branch?: string | null
+    prNumber?: number | null
+  }) => void
   openExternalUrl?: (url: string) => void
   listRepoCandidates?: () => Promise<HubRepoCandidate[]>
   onSelectRepo?: (projectId: string) => void | Promise<void>

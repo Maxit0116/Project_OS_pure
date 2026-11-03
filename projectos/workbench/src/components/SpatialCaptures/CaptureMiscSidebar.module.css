@@ -100,7 +100,7 @@
   padding: 0;
   cursor: pointer;
   background:
-    linear-gradient(135deg, rgba(76, 125, 255, 0.1), transparent 60%),
+    linear-gradient(135deg, var(--tech-accent-subtle), transparent 60%),
     var(--tech-bg-muted);
   background-size: cover;
   background-position: center;

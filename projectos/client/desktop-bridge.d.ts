@@ -185,6 +185,28 @@ export interface ProjectOSBridge {
     onSessionSolidified(
       listener: (payload: { sessionId: string | null }) => void,
     ): Disposable;
+    /**
+     * Overlay GitHub card → Workbench host actions (toast / Ask Agent / open Graph).
+     * Fire-and-forget; main forwards to non-overlay windows.
+     */
+    notifyGithubCardHost(payload: {
+      kind: 'toast' | 'askAgent' | 'refreshGithubGraph' | 'openGithubGraph'
+      type?: 'info' | 'success' | 'warning' | 'error'
+      message?: string
+      prompt?: string
+      branch?: string | null
+      prNumber?: number | null
+    }): void;
+    onGithubCardHost(
+      listener: (payload: {
+        kind: 'toast' | 'askAgent' | 'refreshGithubGraph' | 'openGithubGraph'
+        type?: 'info' | 'success' | 'warning' | 'error'
+        message?: string
+        prompt?: string
+        branch?: string | null
+        prNumber?: number | null
+      }) => void,
+    ): Disposable;
     onBeginCapture(
       listener: (payload: {
         displayBounds: { x: number; y: number; width: number; height: number };

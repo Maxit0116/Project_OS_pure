@@ -32,12 +32,12 @@
 
 .compactBar[data-kind='step'],
 .rowBar[data-kind='step'] {
-  background: color-mix(in srgb, var(--tech-accent, #4c7dff) 70%, transparent);
+  background: color-mix(in srgb, var(--tech-accent) 70%, transparent);
 }
 
 .compactBar[data-kind='model'],
 .rowBar[data-kind='model'] {
-  background: color-mix(in srgb, var(--tech-accent, #4c7dff) 90%, #fff 10%);
+  background: color-mix(in srgb, var(--tech-accent) 90%, #fff 10%);
 }
 
 .compactBar[data-kind='tool'],
@@ -46,8 +46,33 @@
 }
 
 .compactBar[data-kind='action'],
-.rowBar[data-kind='action'] {
+.rowBar[data-kind='action'],
+.compactBar[data-kind='other'],
+.rowBar[data-kind='other'] {
   background: color-mix(in srgb, var(--tech-text-secondary, #9aa0a6) 70%, transparent);
+}
+
+.compactBar[data-kind='major'],
+.rowBar[data-kind='major'] {
+  background: color-mix(in srgb, var(--tech-accent) 78%, transparent);
+  height: auto;
+  top: 0;
+  bottom: 0;
+}
+
+.compactBar[data-kind='file'],
+.rowBar[data-kind='file'] {
+  background: color-mix(in srgb, var(--tech-text-secondary, #9aa0a6) 55%, #58a6ff 45%);
+}
+
+.compactBar[data-kind='apply'],
+.rowBar[data-kind='apply'] {
+  background: color-mix(in srgb, var(--color-success, #3fb950) 55%, var(--tech-accent));
+}
+
+.compactBar[data-kind='verify'],
+.rowBar[data-kind='verify'] {
+  background: color-mix(in srgb, #d29922 70%, transparent);
 }
 
 .compactBar[data-status='error'],
@@ -57,7 +82,7 @@
 
 .compactBar[data-growing='true'],
 .rowBar[data-growing='true'] {
-  box-shadow: inset -2px 0 0 color-mix(in srgb, var(--tech-accent, #4c7dff) 80%, #fff);
+  box-shadow: inset -2px 0 0 color-mix(in srgb, var(--tech-accent) 80%, #fff);
 }
 
 .playhead {
@@ -98,6 +123,15 @@
 
 .row[data-depth='1'] {
   padding-left: 14px;
+}
+
+.row[data-depth='2'] {
+  padding-left: 24px;
+}
+
+.row[data-timing='derived'] .rowMeta,
+.row[data-timing='incomplete'] .rowMeta {
+  opacity: 0.7;
 }
 
 .row:hover,

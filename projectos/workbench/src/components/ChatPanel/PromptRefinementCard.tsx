@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import type { PromptRefinement } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import Button from '../ui/Button'
+import Checkbox from '../ui/Checkbox'
+import toneStyles from './composer/chatModeTone.module.css'
 import PlanClarificationQuestionItem from './PlanClarificationQuestionItem'
 import {
   buildConfirmAlignmentPayload,
@@ -76,8 +78,9 @@ export default function PromptRefinementCard({
 
   return (
     <div
-      className={`${styles.card} fade-slide-up ${confirmed ? styles.confirmed : ''}`}
+      className={`${styles.card} ${toneStyles.modeAgent} fade-slide-up ${confirmed ? styles.confirmed : ''}`}
       data-testid="alignment-card"
+      data-mode-tone="change"
     >
       <div className={styles.header}>
         <span className={styles.title}>{ts('alignment.title')}</span>
@@ -95,17 +98,13 @@ export default function PromptRefinementCard({
               const itemDraft = draft.items[item.id]
               return (
                 <li key={item.id} className={styles.itemRow}>
-                  <label className={styles.itemCheck}>
-                    <input
-                      type="checkbox"
-                      checked={itemDraft?.selected ?? item.selected}
-                      disabled={confirmed || confirming}
-                      onChange={(event) =>
-                        updateItem(item.id, { selected: event.target.checked })
-                      }
-                    />
-                    <span>{item.text}</span>
-                  </label>
+                  <Checkbox
+                    className={styles.itemCheck}
+                    checked={itemDraft?.selected ?? item.selected}
+                    disabled={confirmed || confirming}
+                    onCheckedChange={(selected) => updateItem(item.id, { selected })}
+                    label={item.text}
+                  />
                   <button
                     type="button"
                     className={styles.commentToggle}
@@ -142,17 +141,13 @@ export default function PromptRefinementCard({
               const itemDraft = draft.items[item.id]
               return (
                 <li key={item.id} className={styles.itemRow}>
-                  <label className={styles.itemCheck}>
-                    <input
-                      type="checkbox"
-                      checked={itemDraft?.selected ?? item.selected}
-                      disabled={confirmed || confirming}
-                      onChange={(event) =>
-                        updateItem(item.id, { selected: event.target.checked })
-                      }
-                    />
-                    <span>{item.text}</span>
-                  </label>
+                  <Checkbox
+                    className={styles.itemCheck}
+                    checked={itemDraft?.selected ?? item.selected}
+                    disabled={confirmed || confirming}
+                    onCheckedChange={(selected) => updateItem(item.id, { selected })}
+                    label={item.text}
+                  />
                   <button
                     type="button"
                     className={styles.commentToggle}
@@ -223,6 +218,7 @@ export default function PromptRefinementCard({
       {!confirmed && (
         <div className={styles.actions}>
           <Button
+            variant="mode"
             onClick={() => {
               if (!confirmGate.ready) return
               onConfirm(confirmGate.request)

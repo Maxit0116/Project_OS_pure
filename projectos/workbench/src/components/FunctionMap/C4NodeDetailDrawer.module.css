@@ -407,33 +407,47 @@
 }
 
 .instructionInput {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
   width: 100%;
+  min-width: 0;
+  margin: 0;
   box-sizing: border-box;
-  resize: vertical;
-  min-height: 44px;
+  resize: none;
+  overflow-y: auto;
+  min-height: 52px;
   max-height: 120px;
   padding: 8px 10px;
   border: 1px solid var(--tech-border);
   border-radius: 6px;
-  background: var(--tech-bg-muted);
+  background-color: var(--tech-bg-muted);
+  background-image: none;
   color: var(--tech-text-primary);
+  caret-color: var(--tech-text-primary);
   font-size: var(--font-size-sm);
-  line-height: 1.4;
+  line-height: 1.45;
   font-family: inherit;
-  transition: border-color var(--duration-fast) var(--ease-out);
+  outline: none;
+  box-shadow: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .instructionInput::placeholder {
   color: var(--tech-text-muted);
+  opacity: 1;
 }
 
-.instructionInput:hover {
+.instructionInput:hover:not(:disabled) {
   border-color: var(--tech-border-strong);
 }
 
+.instructionInput:focus,
 .instructionInput:focus-visible {
   outline: none;
-  border-color: var(--tech-accent);
+  border-color: var(--tech-border-strong);
   box-shadow: var(--tech-shadow-focus);
 }
 

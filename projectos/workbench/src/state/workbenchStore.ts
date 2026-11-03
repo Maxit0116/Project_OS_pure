@@ -1534,7 +1534,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   treeViewMode: 'semantic',
   flashKey: 0,
   leftPanelOpen: true,
-  rightPanelOpen: false,
+  rightPanelOpen: true,
   shouldStartOnboarding: false,
   terminalLines: [] as string[],
   ...loadPanelLayout(),
@@ -3126,9 +3126,19 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       }
 
       const handledRunEventIds = new Set<string>()
+      /** Snapshot watermark — live events with runSequence <= this are ignored (DevPlan §7.4). */
+      let snapshotWatermark: number | null = null
       const applyRunEvent = (event: AgentRunEvent) => {
         if (!isCurrentRunSubscription()) return
         if (handledRunEventIds.has(event.eventId)) return
+        if (
+          typeof event.runSequence === 'number' &&
+          snapshotWatermark != null &&
+          event.runSequence <= snapshotWatermark
+        ) {
+          handledRunEventIds.add(event.eventId)
+          return
+        }
         handledRunEventIds.add(event.eventId)
         try {
           handleRunEvent(event, set, get)
@@ -3266,14 +3276,24 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       const syncFlowFromRun = async () => {
         if (!isCurrentRunSubscription()) return
         try {
-          const events = await client.getAgentRunEvents(run.runId)
+          const snapshot = await client.getAgentRunEventSnapshot(run.runId)
           if (!isCurrentRunSubscription()) return
-          if (events.length === 0) return
-          for (const event of events) {
-            applyRunEvent(event)
+          snapshotWatermark = snapshot.watermark
+          if (snapshot.events.length === 0) return
+          for (const event of snapshot.events) {
+            applyRunEvent(event as AgentRunEvent)
           }
         } catch (error) {
-          console.error('[workbench] failed to sync agent run events', error)
+          // Fallback for older transports / partial mocks.
+          try {
+            const events = await client.getAgentRunEvents(run.runId)
+            if (!isCurrentRunSubscription()) return
+            for (const event of events) {
+              applyRunEvent(event)
+            }
+          } catch (fallbackError) {
+            console.error('[workbench] failed to sync agent run events', error, fallbackError)
+          }
         }
       }
 

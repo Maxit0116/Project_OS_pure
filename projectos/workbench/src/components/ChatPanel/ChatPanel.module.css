@@ -261,27 +261,6 @@
   color: var(--tech-text-primary);
 }
 
-.debugChatCta {
-  display: flex;
-  justify-content: flex-start;
-  margin: 8px 0 4px;
-}
-
-.debugCtaButton {
-  appearance: none;
-  border: 1px solid var(--tech-accent, var(--tech-border));
-  background: var(--tech-accent-soft, var(--tech-bg-muted));
-  color: var(--tech-text-primary);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-}
-
-.debugCtaButton:hover {
-  background: var(--color-hover-overlay);
-}
-
 .explorationHint {
   margin: 4px 0 0;
   font-size: var(--font-size-xs);

@@ -36,9 +36,20 @@ export default function AgentPoolMiniWaterfall({
 
   const rows = useMemo(() => {
     if (compact) {
-      return spans.filter((span) => span.kind !== 'agent')
+      // Default density: Major Actions (and legacy step/action bars), not agent umbrella.
+      return spans.filter(
+        (span) =>
+          span.kind === 'major' ||
+          span.kind === 'step' ||
+          span.kind === 'model' ||
+          span.kind === 'tool' ||
+          span.kind === 'action' ||
+          span.kind === 'file' ||
+          span.kind === 'apply' ||
+          span.kind === 'verify',
+      )
     }
-    return spans
+    return spans.filter((span) => span.kind !== 'agent')
   }, [compact, spans])
 
   if (spans.length === 0) {
@@ -97,21 +108,22 @@ export default function AgentPoolMiniWaterfall({
         const end = spanEnd(span, relativeNow)
         const left = Math.min(100, (start / rangeMs) * 100)
         const width = Math.max(1.5, ((end - start) / rangeMs) * 100)
-        const depth = span.parentId ? 1 : 0
-        const selected = selectedSpanId === span.id
-        return (
-          <button
-            key={span.id}
-            type="button"
-            role="listitem"
-            className={styles.row}
-            data-kind={span.kind}
-            data-status={span.status}
-            data-selected={selected ? 'true' : undefined}
-            data-depth={depth}
-            aria-pressed={selected}
-            onClick={() => onSelectSpan?.(selected ? null : span)}
-          >
+          const depth = span.level != null ? Math.max(0, span.level - 1) : span.parentId ? 1 : 0
+          const selected = selectedSpanId === span.id
+          return (
+            <button
+              key={span.id}
+              type="button"
+              role="listitem"
+              className={styles.row}
+              data-kind={span.kind}
+              data-status={span.status}
+              data-selected={selected ? 'true' : undefined}
+              data-depth={depth}
+              data-timing={span.timingQuality}
+              aria-pressed={selected}
+              onClick={() => onSelectSpan?.(selected ? null : span)}
+            >
             <span className={styles.rowLabel}>{span.label}</span>
             <span className={styles.rowTrack}>
               <span

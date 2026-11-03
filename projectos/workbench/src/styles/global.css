@@ -258,6 +258,67 @@ select,
   box-shadow: var(--tech-shadow-focus);
 }
 
+/* Product-grade text field — Electron/WebKit hardened; use on bare <input>/<textarea>. */
+.tech-field {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--tech-border);
+  background-color: var(--tech-bg-muted);
+  background-image: none;
+  color: var(--tech-text-primary);
+  caret-color: var(--tech-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  outline: none;
+  box-shadow: none;
+  resize: none;
+  overflow-y: auto;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.tech-field::placeholder {
+  color: var(--tech-text-muted);
+  opacity: 1;
+}
+
+.tech-field:hover:not(:disabled):not(:read-only) {
+  border-color: var(--tech-border-strong);
+}
+
+.tech-field:focus,
+.tech-field:focus-visible {
+  outline: none;
+  border-color: var(--tech-border-strong);
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.tech-field:disabled,
+.tech-field:read-only {
+  opacity: 0.55;
+  cursor: not-allowed;
+  color: var(--tech-text-secondary);
+}
+
+.tech-field:-webkit-autofill,
+.tech-field:-webkit-autofill:hover,
+.tech-field:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--tech-text-primary);
+  caret-color: var(--tech-text-primary);
+  box-shadow: 0 0 0 1000px var(--tech-bg-muted) inset;
+  transition: background-color 99999s ease-out;
+}
+
 /* Disable glass effects (for migration) */
 .tech-no-glass {
   background: var(--tech-bg-elevated) !important;

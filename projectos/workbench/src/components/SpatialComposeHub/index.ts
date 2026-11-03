@@ -3,6 +3,17 @@ export { COMPOSE_HUB_STRINGS_EN } from './composeHubStrings'
 export type { ComposeHubStrings } from './composeHubStrings'
 export type { ComposeHubDataSource } from './hubActions'
 export { createWorkbenchComposeHubDataSource } from './createWorkbenchComposeHubDataSource'
+export { default as ComposerRepoQuickOps } from './ComposerRepoQuickOps'
+export {
+  createWorkbenchComposerRepoOpsHost,
+  createOverlayComposerRepoOpsHost,
+  applyGithubCardHostBridgeEvent,
+} from './composerRepoOpsHost'
+export type {
+  ComposerRepoOpsHost,
+  GithubCardHostBridgeEvent,
+} from './composerRepoOpsHost'
+export { resolveRepoSyncButtons, remoteUrlToHttps } from './repoQuickOps'
 export { useComposeHubStrings } from './useComposeHubStrings'
 export {
   appendComposerHubToPrompt,

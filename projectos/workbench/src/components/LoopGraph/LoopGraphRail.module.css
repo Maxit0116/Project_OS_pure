@@ -426,21 +426,29 @@
 }
 
 .renameInput {
+  appearance: none;
+  -webkit-appearance: none;
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
   margin: 0;
-  padding: 4px 6px;
+  padding: 4px 7px;
   border: 1px solid var(--tech-border-strong);
-  border-radius: 4px;
-  background: var(--tech-bg-elevated);
+  border-radius: 6px;
+  background-color: var(--tech-bg-muted);
+  background-image: none;
   color: var(--tech-text-primary);
+  caret-color: var(--tech-text-primary);
   font-size: var(--font-size-sm);
   font-weight: 600;
+  outline: none;
+  box-shadow: none;
 }
 
-.renameInput:focus {
+.renameInput:focus,
+.renameInput:focus-visible {
   outline: none;
+  border-color: var(--tech-border-strong);
   box-shadow: var(--tech-shadow-focus);
 }
 

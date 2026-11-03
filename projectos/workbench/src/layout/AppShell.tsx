@@ -30,6 +30,10 @@ import EdgeRails from './EdgeRails'
 import { FunctionMapBleedRoot } from '../components/FunctionMap/FunctionMapBleedLayer'
 import { preloadLocalWhisper } from '../components/ChatPanel/voice/localWhisperTranscribe'
 import { preloadMonacoEditor } from '../components/CodeEditor/preloadMonacoEditor'
+import {
+  applyGithubCardHostBridgeEvent,
+  type GithubCardHostBridgeEvent,
+} from '../components/SpatialComposeHub/composerRepoOpsHost'
 import styles from './AppShell.module.css'
 
 const PANEL_EXIT_MS = 200
@@ -70,6 +74,16 @@ export default function AppShell() {
       preloadMonacoEditor()
     }
   }, [phase])
+
+  // Overlay GitHub card → Workbench toast / Ask Agent / open Graph.
+  useEffect(() => {
+    const bridge = window.projectOS?.spatialPin
+    if (!bridge?.onGithubCardHost) return
+    const disposable = bridge.onGithubCardHost((payload) => {
+      applyGithubCardHostBridgeEvent(payload as GithubCardHostBridgeEvent)
+    })
+    return () => disposable.dispose()
+  }, [])
 
   const [narrow, setNarrow] = useState(false)
 

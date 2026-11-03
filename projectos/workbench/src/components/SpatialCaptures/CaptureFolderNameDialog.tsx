@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { useI18n } from '../../i18n'
+import Checkbox from '../ui/Checkbox'
 import styles from './CaptureFolderNameDialog.module.css'
 
 export type CaptureNamePromptKind = 'merge_misc' | 'new_folder' | 'merge_folders'
@@ -121,14 +122,12 @@ export default function CaptureFolderNameDialog({
           </div>
         ) : null}
         {prompt.allowKeepTitles ? (
-          <label className={styles.checkRow}>
-            <input
-              type="checkbox"
-              checked={keepTitles}
-              onChange={(event) => setKeepTitles(event.target.checked)}
-            />
-            <span>{ts('spatialCaptures.dragKeepTitles')}</span>
-          </label>
+          <Checkbox
+            className={styles.checkRow}
+            checked={keepTitles}
+            onCheckedChange={setKeepTitles}
+            label={ts('spatialCaptures.dragKeepTitles')}
+          />
         ) : null}
         {error ? <p className={styles.error}>{error}</p> : null}
         <div className={styles.actions}>

@@ -9,12 +9,18 @@ import type {
   LoopGoalClarificationAnswer,
   LoopGraphDocument,
   LoopGraphHead,
+  LoopGraphPreset,
+  LoopPaletteItem,
   LoopSpec,
 } from '@contracts/index'
 import {
+  createNodeFromPaletteItem,
   getIntentGraphCompileIssues,
+  getLoopGraphPreset,
+  getLoopPaletteItem,
   isIntentGraphReadyForCompile,
   suggestIntentEdgeKind,
+  withArchitectureDefaults,
 } from '@contracts/index'
 import { create } from 'zustand'
 import { useChatSessionStore } from './chatSessionStore'
@@ -84,6 +90,11 @@ interface LoopGraphStore {
   dismissGraphEditOffer: () => Promise<void>
   undoDraft: () => Promise<void>
   beginAuthorNode: (position: { x: number; y: number }) => Promise<string | null>
+  beginAuthorNodeFromPalette: (
+    paletteItemId: string,
+    position: { x: number; y: number },
+  ) => Promise<string | null>
+  applyLoopPreset: (presetId: string) => Promise<boolean>
   beginAuthorEdge: (
     source: string,
     target: string,
@@ -538,6 +549,93 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     })
     get().schedulePersist()
     return node.id
+  },
+
+  beginAuthorNodeFromPalette: async (paletteItemId, position) => {
+    const current = get().document
+    if (!current) return null
+    const item: LoopPaletteItem | undefined = getLoopPaletteItem(paletteItemId)
+    if (!item) {
+      set({ error: `Unknown palette item: ${paletteItemId}` })
+      return null
+    }
+    const sessionId = await ensureAuthoringSession()
+    if (!sessionId) return null
+
+    const seeded = createNodeFromPaletteItem(item, {
+      id: newLoopEntityId('node'),
+      position,
+    })
+    const node = withArchitectureDefaults({
+      ...seeded,
+      authoringSessionId: sessionId,
+    })
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: [...current.draft.nodes, node],
+    }
+    const linkedSessionIds = current.linkedSessionIds.includes(sessionId)
+      ? current.linkedSessionIds
+      : [...current.linkedSessionIds, sessionId].slice(0, 20)
+
+    set({
+      document: {
+        ...patchDraftDocument(current, draft),
+        linkedSessionIds,
+      },
+      connectingFromId: null,
+      error: null,
+    })
+    get().schedulePersist()
+    return node.id
+  },
+
+  applyLoopPreset: async (presetId) => {
+    const current = get().document
+    if (!current) return false
+    const preset: LoopGraphPreset | undefined = getLoopGraphPreset(presetId)
+    if (!preset) {
+      set({ error: `Unknown preset: ${presetId}` })
+      return false
+    }
+    const sessionId = await ensureAuthoringSession()
+    if (!sessionId) return false
+
+    const nodes = preset.draft.nodes.map((node) =>
+      withArchitectureDefaults({
+        ...node,
+        authoringSessionId: sessionId,
+      }),
+    )
+    const draft: IntentGraph = {
+      ...preset.draft,
+      revision: current.draft.revision + 1,
+      nodes,
+      edges: preset.draft.edges.map((edge) => ({
+        ...edge,
+        authoringSessionId: sessionId,
+      })),
+    }
+    const linkedSessionIds = current.linkedSessionIds.includes(sessionId)
+      ? current.linkedSessionIds
+      : [...current.linkedSessionIds, sessionId].slice(0, 20)
+
+    set({
+      document: {
+        ...patchDraftDocument(current, draft),
+        linkedSessionIds,
+        title:
+          current.title === 'Untitled loop' || !current.title.trim()
+            ? preset.title
+            : current.title,
+      },
+      connectingFromId: null,
+      error: null,
+      phase: 'draw',
+    })
+    get().schedulePersist()
+    return true
   },
 
   beginAuthorEdge: async (source, target, ports) => {

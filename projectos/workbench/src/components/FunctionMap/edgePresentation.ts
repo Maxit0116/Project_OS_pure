@@ -16,12 +16,12 @@ export const EDGE_COLORS: Record<FunctionalEdgeRelation, string> = {
 
 /** Hex colors for WebGL (dark theme tokens). */
 export const EDGE_COLORS_HEX: Record<FunctionalEdgeRelation, string> = {
-  depends_on: '#0a84ff',
+  depends_on: '#a1a1aa',
   redirects_to: '#ff9f0a',
   data_flows_to: '#30d158',
   imports: '#8e8e93',
   shares_data: '#bf5af2',
-  uses: '#0a84ff',
+  uses: '#a1a1aa',
   calls: '#30d158',
   reads_from: '#bf5af2',
   writes_to: '#ff9f0a',

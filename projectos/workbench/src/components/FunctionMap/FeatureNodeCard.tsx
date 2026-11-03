@@ -66,9 +66,9 @@ export function isPurposeFirstArchitectureLevel(level: string | undefined): bool
   return level === 'context' || level === 'container' || level === 'component'
 }
 
-/** Selection blue. Type is shown by the label, not a per-type color. */
+/** Selection accent — neutral, type is shown by the label. */
 export function featureNodeAccent(_elementType: string | undefined): string {
-  return '#4c7dff'
+  return '#ececec'
 }
 
 /**

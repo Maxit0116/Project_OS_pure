@@ -37,8 +37,8 @@
   border-radius: 2px;
   box-shadow:
     0 0 0 9999px rgba(11, 11, 12, 0.48),
-    inset 0 0 0 1px rgba(76, 125, 255, 0.25);
-  background: rgba(76, 125, 255, 0.04);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.04);
   pointer-events: none;
 }
 
@@ -71,7 +71,7 @@
   pointer-events: none;
   cursor: crosshair;
   /* Multi-region: avoid stacking full-screen punch-out shadows. */
-  box-shadow: inset 0 0 0 1px rgba(76, 125, 255, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
 }
 
 /** Full-screenshot stencil backdrop — capture exists, chrome does not. */
@@ -254,19 +254,36 @@
 .overlay-save-field input,
 .overlay-save-field select {
   appearance: none;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-subtle, rgba(0, 0, 0, 0.2));
-  color: var(--color-text-primary);
-  border-radius: 8px;
+  -webkit-appearance: none;
+  border: 1px solid var(--tech-border, var(--color-border));
+  background-color: var(--tech-bg-muted, var(--color-bg-muted));
+  background-image: none;
+  color: var(--tech-text-primary, var(--color-text-primary));
+  caret-color: var(--tech-text-primary, var(--color-text-primary));
+  border-radius: 6px;
   padding: 7px 10px;
   font: inherit;
   font-size: 12.5px;
+  outline: none;
+  box-shadow: none;
+}
+
+.overlay-save-field input::placeholder {
+  color: var(--tech-text-muted, var(--color-text-muted));
+  opacity: 1;
+}
+
+.overlay-save-field input:hover:not(:disabled),
+.overlay-save-field select:hover:not(:disabled) {
+  border-color: var(--tech-border-strong, var(--color-border));
 }
 
 .overlay-save-field input:focus,
-.overlay-save-field select:focus {
+.overlay-save-field input:focus-visible,
+.overlay-save-field select:focus,
+.overlay-save-field select:focus-visible {
   outline: none;
-  border-color: var(--color-accent);
+  border-color: var(--tech-border-strong, var(--color-border));
   box-shadow: var(--tech-shadow-focus);
 }
 
@@ -732,10 +749,10 @@
 }
 
 .overlay-mode-ask {
-  --mode-color: #4a8fb8;
+  --mode-color: #8e8e93;
 }
 .overlay-mode-change {
-  --mode-color: #4c7dff;
+  --mode-color: #ececec;
 }
 .overlay-mode-plan {
   --mode-color: #bf5af2;
@@ -928,7 +945,7 @@
 }
 
 .overlay-project-select:focus {
-  border-color: rgba(76, 125, 255, 0.45);
+  border-color: rgba(255, 255, 255, 0.35);
   box-shadow: var(--tech-shadow-focus);
 }
 
@@ -1131,21 +1148,27 @@
 }
 
 .overlay-arrow-prompt-input {
+  appearance: none;
+  -webkit-appearance: none;
   flex: 1;
   min-width: 0;
   min-height: 44px;
   max-height: 96px;
   resize: none;
+  overflow-y: auto;
   margin: 0;
-  padding: 4px 6px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-muted);
-  color: var(--color-text-primary);
+  padding: 8px 10px;
+  border: 1px solid var(--tech-border, var(--color-border));
+  border-radius: 6px;
+  background-color: var(--tech-bg-muted, var(--color-bg-muted));
+  background-image: none;
+  color: var(--tech-text-primary, var(--color-text-primary));
+  caret-color: var(--tech-text-primary, var(--color-text-primary));
   font: inherit;
   font-size: 12.5px;
   line-height: 1.4;
   outline: none;
+  box-shadow: none;
 }
 
 .overlay-arrow-prompt-input::placeholder {
