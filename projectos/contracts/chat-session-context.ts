@@ -1,10 +1,13 @@
 import {
   CHAT_SESSION_MAX_COUNT,
+  SESSION_GRAPH_STRIP_MAX_ITEMS,
+  SESSION_GRAPH_STRIP_TITLE_MAX,
   type ChatMessage,
   type ChatSessionClassification,
   type ChatSessionHead,
   type ChatSessionRecord,
   type SessionContextDigest,
+  type SessionGraphStripItem,
 } from "./chat-session.js";
 import {
   CHAT_SESSION_TITLE_MAX,
@@ -32,6 +35,12 @@ export interface SessionGraphNode {
   responsibility?: string;
   status: ChatSessionHead["status"];
   graphId: string;
+  /** Number of curated strip rows (for variable card height). */
+  stripCount: number;
+  messageCount: number;
+  lastUpdatedAt: string;
+  forkMessageId?: string;
+  previewStrip: SessionGraphStripItem[];
 }
 
 export interface SessionGraphModel {
@@ -272,6 +281,165 @@ export function isSubstantiveChat(messages: ChatMessage[]): boolean {
   return joined.replace(/\s+/gu, "").length >= 12;
 }
 
+function isTrivialUserLine(content: string): boolean {
+  return TRIVIAL_LINE.test(content.replace(/\s+/gu, " ").trim());
+}
+
+function firstLine(content: string): string {
+  const line = content
+    .trim()
+    .split(/\r?\n/u)
+    .map((part) => part.trim())
+    .find((part) => part.length > 0);
+  return line ?? "";
+}
+
+/**
+ * Deterministic Session Graph card strip (newest → oldest).
+ * Curated highlights only — never the full transcript.
+ */
+export function buildSessionGraphStrip(
+  record: Pick<
+    ChatSessionRecord,
+    "head" | "messages" | "contextDigest" | "inheritedDigest"
+  >,
+): SessionGraphStripItem[] {
+  const items: SessionGraphStripItem[] = [];
+  const seenTitles = new Set<string>();
+  const push = (
+    partial: Omit<SessionGraphStripItem, "title"> & { title: string },
+  ): void => {
+    const title = clampLine(partial.title, SESSION_GRAPH_STRIP_TITLE_MAX);
+    if (!title || seenTitles.has(title)) return;
+    seenTitles.add(title);
+    items.push({ ...partial, title });
+  };
+
+  const finish = (): SessionGraphStripItem[] =>
+    [...items]
+      .sort((a, b) => b.ts.localeCompare(a.ts))
+      .slice(0, SESSION_GRAPH_STRIP_MAX_ITEMS);
+
+  const messages = record.messages;
+  const userCount = messages.filter((message) => message.role === "user").length;
+  const sparseChild =
+    Boolean(record.head.parentSessionId) && userCount === 0 && messages.length <= 1;
+
+  if (sparseChild) {
+    const inherited = record.inheritedDigest;
+    const responsibility =
+      record.head.responsibility?.trim() || inherited?.responsibility?.trim() || "";
+    if (responsibility) {
+      push({
+        id: `note:inherited:${record.head.id}`,
+        kind: "note",
+        title: responsibility,
+        ts: inherited?.updatedAt ?? record.head.createdAt,
+      });
+    }
+    for (const [index, decision] of (inherited?.decisions ?? []).slice(0, 2).entries()) {
+      push({
+        id: `decision:inherited:${index}`,
+        kind: "decision",
+        title: decision,
+        ts: inherited?.updatedAt ?? record.head.createdAt,
+        ...(inherited?.throughMessageId
+          ? { messageId: inherited.throughMessageId }
+          : {}),
+      });
+    }
+    return finish();
+  }
+
+  const digest = record.contextDigest;
+  const responsibility =
+    record.head.responsibility?.trim() || digest?.responsibility?.trim() || "";
+  if (responsibility) {
+    push({
+      id: `note:responsibility:${record.head.id}`,
+      kind: "note",
+      title: responsibility,
+      ts: digest?.updatedAt ?? record.head.lastUpdatedAt,
+    });
+  }
+
+  for (const [index, decision] of (digest?.decisions ?? []).slice(0, 2).entries()) {
+    push({
+      id: `decision:${index}:${digest?.throughMessageId ?? record.head.id}`,
+      kind: "decision",
+      title: decision,
+      ts: digest?.updatedAt ?? record.head.lastUpdatedAt,
+      ...(digest?.throughMessageId ? { messageId: digest.throughMessageId } : {}),
+    });
+  }
+
+  const question = digest?.openQuestions?.[0];
+  if (question) {
+    push({
+      id: `question:0:${digest?.throughMessageId ?? record.head.id}`,
+      kind: "question",
+      title: question,
+      ts: digest?.updatedAt ?? record.head.lastUpdatedAt,
+      ...(digest?.throughMessageId ? { messageId: digest.throughMessageId } : {}),
+    });
+  }
+
+  const latestUser = [...messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.role === "user" &&
+        message.content.trim().length > 0 &&
+        !isTrivialUserLine(message.content),
+    );
+  if (latestUser) {
+    push({
+      id: `intent:${latestUser.id}`,
+      kind: "intent",
+      title: firstLine(latestUser.content),
+      ts: latestUser.timestamp,
+      messageId: latestUser.id,
+    });
+  }
+
+  // Prefer at least three rows when an assistant outcome is available.
+  const provisional = finish();
+  if (provisional.length < 3) {
+    const latestAssistant = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant" && message.content.trim().length > 0);
+    if (latestAssistant) {
+      push({
+        id: `outcome:${latestAssistant.id}`,
+        kind: "outcome",
+        title: firstLine(latestAssistant.content),
+        ts: latestAssistant.timestamp,
+        messageId: latestAssistant.id,
+      });
+    }
+  }
+
+  return finish();
+}
+
+/** Refresh head.previewStrip + messageCount from the session record body. */
+export function withSessionGraphHeadProjection(
+  record: ChatSessionRecord,
+): ChatSessionRecord {
+  const previewStrip = buildSessionGraphStrip(record);
+  const messageCount = record.messages.length;
+  const nextHead: ChatSessionHead = {
+    ...record.head,
+    messageCount,
+  };
+  if (previewStrip.length > 0) {
+    nextHead.previewStrip = previewStrip;
+  } else {
+    delete nextHead.previewStrip;
+  }
+  return { ...record, head: nextHead };
+}
+
 export function messagesThroughFork(
   messages: ChatMessage[],
   forkMessageId: string | undefined,
@@ -431,17 +599,25 @@ export function buildSessionGraph(
       ? topics
       : topics.filter((head) => resolveSessionGraphId(head) === filterGraphId);
   const visibleIds = new Set(visible.map((head) => head.id));
-  const nodes = visible.map((head) => ({
-    id: head.id,
-    parentId:
-      head.parentSessionId && visibleIds.has(head.parentSessionId)
-        ? head.parentSessionId
-        : null,
-    title: head.title,
-    ...(head.responsibility ? { responsibility: head.responsibility } : {}),
-    status: head.status,
-    graphId: resolveSessionGraphId(head) ?? DEFAULT_SESSION_GRAPH_ID,
-  }));
+  const nodes = visible.map((head) => {
+    const previewStrip = head.previewStrip ?? [];
+    return {
+      id: head.id,
+      parentId:
+        head.parentSessionId && visibleIds.has(head.parentSessionId)
+          ? head.parentSessionId
+          : null,
+      title: head.title,
+      ...(head.responsibility ? { responsibility: head.responsibility } : {}),
+      status: head.status,
+      graphId: resolveSessionGraphId(head) ?? DEFAULT_SESSION_GRAPH_ID,
+      stripCount: previewStrip.length,
+      messageCount: head.messageCount ?? 0,
+      lastUpdatedAt: head.lastUpdatedAt,
+      ...(head.forkMessageId ? { forkMessageId: head.forkMessageId } : {}),
+      previewStrip,
+    };
+  });
   return {
     nodes,
     edges: nodes
@@ -595,7 +771,7 @@ export function buildForkedChatSession(
     inheritedDigest || parentIsTopic ? "topic" : "misc";
   const responsibility = inheritedDigest?.responsibility ?? parent.head.responsibility;
   const parentGraphId = resolveSessionGraphId(parent.head);
-  return {
+  return withSessionGraphHeadProjection({
     version: "0.2.0",
     head: {
       id,
@@ -614,7 +790,7 @@ export function buildForkedChatSession(
     },
     messages: [],
     ...(inheritedDigest ? { inheritedDigest } : {}),
-  };
+  });
 }
 
 export function sessionGraphShieldInsets(input: SessionGraphInsetsInput): SessionGraphInsets {

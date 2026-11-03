@@ -5,6 +5,7 @@ import Button from '../../ui/Button'
 import { useAgentPoolStore } from './agentPoolStore'
 import AgentPoolHistoryStrip from './AgentPoolHistoryStrip'
 import AgentPoolJumpMenu from './AgentPoolJumpMenu'
+import AgentPoolMiniWaterfall from './AgentPoolMiniWaterfall'
 import AgentPoolModelIcon from './AgentPoolModelIcon'
 import AgentPoolRowExpand from './AgentPoolRowExpand'
 import type { AgentPoolHistoryEntry, AgentPoolTask } from './projectAgentPool'
@@ -12,6 +13,7 @@ import styles from './AgentPoolRow.module.css'
 
 interface Props {
   task: AgentPoolTask
+  nowMs: number
   expanded: boolean
   historyExpanded: boolean
   onToggleExpand: () => void
@@ -21,6 +23,7 @@ interface Props {
 
 export default function AgentPoolRow({
   task,
+  nowMs,
   expanded,
   historyExpanded,
   onToggleExpand,
@@ -35,6 +38,13 @@ export default function AgentPoolRow({
 
   const stackCount = task.history.length
   const showDone = task.status !== 'reviewing'
+  const displaySpans =
+    selectedHistory && selectedHistory.spans.length > 0
+      ? selectedHistory.spans
+      : task.spans
+  const displayOriginMs = selectedHistory?.originMs ?? task.originMs
+  const displaySteps = selectedHistory?.flowSteps ?? task.flowSteps
+  const displayAction = selectedHistory?.currentAction ?? task.currentAction
 
   return (
     <article
@@ -82,9 +92,15 @@ export default function AgentPoolRow({
           />
         </div>
 
-        <div className={styles.lifeLine} aria-hidden={!expanded}>
-          <span className={styles.lifeTrack} />
-          <span className={styles.lifeAction}>{task.currentAction}</span>
+        <div className={styles.lifeLine}>
+          <AgentPoolMiniWaterfall
+            spans={displaySpans}
+            originMs={displayOriginMs}
+            nowMs={nowMs}
+            compact
+            ariaLabel={ts('agentFlow.pool.miniWaterfall')}
+          />
+          <span className={styles.lifeAction}>{displayAction}</span>
         </div>
 
         <button
@@ -123,8 +139,11 @@ export default function AgentPoolRow({
 
       {expanded ? (
         <AgentPoolRowExpand
-          steps={selectedHistory?.flowSteps ?? task.flowSteps}
-          currentAction={selectedHistory?.currentAction ?? task.currentAction}
+          steps={displaySteps}
+          spans={displaySpans}
+          originMs={displayOriginMs}
+          nowMs={nowMs}
+          currentAction={displayAction}
         />
       ) : null}
     </article>

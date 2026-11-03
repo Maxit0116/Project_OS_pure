@@ -1,21 +1,48 @@
 import type { SessionGraphModel } from '@contracts/index'
 import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js'
 
-export const SESSION_NODE_WIDTH = 228
-/** Compact card: task + title row and status/actions — description lives in the hover preview. */
-export const SESSION_NODE_HEIGHT = 64
+export const SESSION_NODE_WIDTH = 252
+/** Compact head row: task + title + live chip. */
+export const SESSION_NODE_HEAD_HEIGHT = 34
+/** Footer: message count + relative time. */
+export const SESSION_NODE_FOOT_HEIGHT = 26
+/** Vertical padding around the strip list. */
+export const SESSION_NODE_STRIP_PAD = 8
+/** One curated strip row. */
+export const SESSION_NODE_STRIP_ROW = 22
+/** Empty / missing strip still reserves one row for the empty label. */
+export const SESSION_NODE_MIN_STRIP_ROWS = 1
+
+/** Compact card when there is no strip content yet. */
+export const SESSION_NODE_HEIGHT = estimateSessionNodeHeight(0)
+
+export function estimateSessionNodeHeight(stripCount: number): number {
+  const rows = Math.max(SESSION_NODE_MIN_STRIP_ROWS, stripCount)
+  return (
+    SESSION_NODE_HEAD_HEIGHT +
+    SESSION_NODE_STRIP_PAD +
+    rows * SESSION_NODE_STRIP_ROW +
+    SESSION_NODE_FOOT_HEIGHT
+  )
+}
 
 export interface SessionGraphLayout {
   width: number
   height: number
   positions: Record<string, { x: number; y: number }>
+  heights: Record<string, number>
 }
 
 const elk = new ELK()
 
 export async function layoutSessionGraph(model: SessionGraphModel): Promise<SessionGraphLayout> {
   if (model.nodes.length === 0) {
-    return { width: 0, height: 0, positions: {} }
+    return { width: 0, height: 0, positions: {}, heights: {} }
+  }
+
+  const heights: Record<string, number> = {}
+  for (const node of model.nodes) {
+    heights[node.id] = estimateSessionNodeHeight(node.stripCount)
   }
 
   const graph: ElkNode = {
@@ -31,7 +58,7 @@ export async function layoutSessionGraph(model: SessionGraphModel): Promise<Sess
     children: model.nodes.map((node) => ({
       id: node.id,
       width: SESSION_NODE_WIDTH,
-      height: SESSION_NODE_HEIGHT,
+      height: heights[node.id] ?? SESSION_NODE_HEIGHT,
     })),
     edges: model.edges.map((edge) => ({
       id: `${edge.source}-${edge.target}`,
@@ -50,5 +77,6 @@ export async function layoutSessionGraph(model: SessionGraphModel): Promise<Sess
     width: Math.max(laidOut.width ?? SESSION_NODE_WIDTH, SESSION_NODE_WIDTH),
     height: Math.max(laidOut.height ?? SESSION_NODE_HEIGHT, SESSION_NODE_HEIGHT),
     positions,
+    heights,
   }
 }

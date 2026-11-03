@@ -58,6 +58,28 @@ export const ChatSessionClassificationSchema = z.enum(["topic", "misc"]);
 
 export const ChatSessionClassificationSourceSchema = z.enum(["auto", "manual"]);
 
+/** Curated Session Graph card strip kinds (not full chat history). */
+export const SessionGraphStripKindSchema = z.enum([
+  "intent",
+  "decision",
+  "question",
+  "outcome",
+  "note",
+]);
+
+export const SESSION_GRAPH_STRIP_TITLE_MAX = 80;
+export const SESSION_GRAPH_STRIP_MAX_ITEMS = 5;
+
+export const SessionGraphStripItemSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: SessionGraphStripKindSchema,
+    title: z.string().trim().min(1).max(SESSION_GRAPH_STRIP_TITLE_MAX),
+    ts: z.string().min(1),
+    messageId: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const SessionContextDigestSchema = z
   .object({
     responsibility: z.string().trim().min(1).max(240),
@@ -106,6 +128,10 @@ export const ChatSessionHeadSchema = z
     classification: ChatSessionClassificationSchema.optional(),
     classificationSource: ChatSessionClassificationSourceSchema.optional(),
     responsibility: z.string().trim().min(1).max(240).optional(),
+    /** Curated highlight reel for Session Graph cards (newest first, max 5). */
+    previewStrip: z.array(SessionGraphStripItemSchema).max(SESSION_GRAPH_STRIP_MAX_ITEMS).optional(),
+    /** Message count for Session Graph card footers. */
+    messageCount: z.number().int().nonnegative().optional(),
   })
   .strict();
 
@@ -193,6 +219,8 @@ export type ChatSessionClassification = z.infer<typeof ChatSessionClassification
 export type ChatSessionClassificationSource = z.infer<
   typeof ChatSessionClassificationSourceSchema
 >;
+export type SessionGraphStripKind = z.infer<typeof SessionGraphStripKindSchema>;
+export type SessionGraphStripItem = z.infer<typeof SessionGraphStripItemSchema>;
 export type SessionContextDigest = z.infer<typeof SessionContextDigestSchema>;
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export type ChatSessionHead = z.infer<typeof ChatSessionHeadSchema>;

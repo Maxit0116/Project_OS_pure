@@ -9,6 +9,7 @@ import { HARNESS_TOOL_NAMES } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
+import SettingsGroup from './SettingsGroup'
 import styles from './SettingsPanel.module.css'
 
 const TOOL_OPTIONS = ['*', ...HARNESS_TOOL_NAMES] as const
@@ -71,9 +72,9 @@ export default function HarnessSettingsSection() {
       {error && <p className={styles.formError}>{error}</p>}
 
       {memory && (
-        <>
-          <h3 className={styles.sectionTitle}>{ts('settings.harness.memory')}</h3>
-          <p className={styles.help}>{ts('settings.harness.memoryHelp')}</p>
+        <SettingsGroup label={ts('settings.harness.memory')}>
+          <div className={styles.settingRowStackedPad}>
+            <p className={styles.help}>{ts('settings.harness.memoryHelp')}</p>
           <label className={styles.checkboxRow}>
             <input
               type="checkbox"
@@ -292,7 +293,8 @@ export default function HarnessSettingsSection() {
           >
             {ts('settings.harness.memoryConsolidate')}
           </Button>
-        </>
+          </div>
+        </SettingsGroup>
       )}
 
       <h3 className={styles.sectionTitle}>{ts('settings.harness.permissions')}</h3>

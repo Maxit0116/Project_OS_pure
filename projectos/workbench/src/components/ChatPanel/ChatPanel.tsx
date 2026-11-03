@@ -41,13 +41,15 @@ import {
 import LoopAuthoringBanner from '../LoopGraph/LoopAuthoringBanner'
 import { shouldSuggestPlanMode } from './suggestPlanMode'
 import ConversationNavRail from './ConversationNavRail'
-import { collectUserTurns } from './conversationNavTurns'
+import { collectUserTurns, scrollTurnIntoView } from './conversationNavTurns'
 import styles from './ChatPanel.module.css'
 
 export default function ChatPanel() {
   const messages = useWorkbenchStore((s) => s.messages)
   const inheritedDigest = useChatSessionStore((s) => s.inheritedDigest)
   const activeSessionId = useChatSessionStore((s) => s.activeSessionId)
+  const pendingRevealMessageId = useChatSessionStore((s) => s.pendingRevealMessageId)
+  const clearPendingRevealMessage = useChatSessionStore((s) => s.clearPendingRevealMessage)
   const forkSession = useChatSessionStore((s) => s.forkSession)
   const composerDraft = useWorkbenchStore((s) => s.composerDraft)
   const setComposerDraft = useWorkbenchStore((s) => s.setComposerDraft)
@@ -240,8 +242,24 @@ export default function ChatPanel() {
   useEffect(() => {
     const el = messagesRef.current
     if (!el) return
+    if (pendingRevealMessageId) return
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-  }, [messages, pendingRefinement, pendingPlan, debugSession, refineLoading])
+  }, [messages, pendingRefinement, pendingPlan, debugSession, refineLoading, pendingRevealMessageId])
+
+  useEffect(() => {
+    if (!pendingRevealMessageId) return
+    const el = messagesRef.current
+    if (!el) return
+    const messageId = pendingRevealMessageId
+    const frame = window.requestAnimationFrame(() => {
+      const found = scrollTurnIntoView(el, messageId)
+      clearPendingRevealMessage()
+      if (!found) {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      }
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [pendingRevealMessageId, messages, clearPendingRevealMessage, activeSessionId])
 
   useEffect(() => {
     if (!isRecording && !isTranscribing) return
@@ -320,12 +338,13 @@ export default function ChatPanel() {
             !!activeSessionId &&
             (msg.role === 'user' || msg.role === 'assistant') &&
             msg.content.trim().length > 0
-          const isUserTurn = msg.role === 'user' && msg.content.trim().length > 0
+          const canAnchor =
+            (msg.role === 'user' || msg.role === 'assistant') && msg.content.trim().length > 0
           return (
             <div
               key={msg.id}
               className={`${styles.message} ${styles[msg.role]}`}
-              {...(isUserTurn ? { 'data-message-id': msg.id } : {})}
+              {...(canAnchor ? { 'data-message-id': msg.id } : {})}
             >
               <div className={styles.messageBody}>
                 {msg.role === 'user' && (attachments.length || msg.invokedSkillId) ? (

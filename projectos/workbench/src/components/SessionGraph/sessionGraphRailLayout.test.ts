@@ -3,8 +3,10 @@ import type { ChatSessionHead } from '@contracts/index'
 import {
   createRailFolder,
   insertGraphOnRail,
+  moveFolderIntoFolder,
   moveGraphIntoFolder,
   removeGraphFromLayout,
+  renameRailFolder,
   syncRailLayoutWithGraphs,
 } from './sessionGraphRailLayout'
 
@@ -27,7 +29,7 @@ describe('sessionGraphRailLayout (graph-centric)', () => {
   it('syncs missing topic graphs onto the rail and prunes empty ones', () => {
     const synced = syncRailLayoutWithGraphs(
       {
-        version: 2,
+        version: 3,
         entries: [
           { kind: 'graph', graphId: 'gone' },
           { kind: 'graph', graphId: 'g1' },
@@ -42,19 +44,41 @@ describe('sessionGraphRailLayout (graph-centric)', () => {
   })
 
   it('moves a graph into a folder and removes the top-level entry', () => {
-    let layout = createRailFolder(
-      { version: 2, entries: [{ kind: 'graph', graphId: 'g1' }] },
+    const created = createRailFolder(
+      { version: 3, entries: [{ kind: 'graph', graphId: 'g1' }] },
       'Auth',
     )
-    const folderId = (layout.entries[1] as { id: string }).id
-    layout = moveGraphIntoFolder(layout, 'g1', folderId)
+    const layout = moveGraphIntoFolder(created.layout, 'g1', created.folderId)
     expect(layout.entries).toHaveLength(1)
-    expect(layout.entries[0]).toMatchObject({ kind: 'folder', graphIds: ['g1'] })
+    expect(layout.entries[0]).toMatchObject({
+      kind: 'folder',
+      children: [{ kind: 'graph', graphId: 'g1' }],
+    })
+  })
+
+  it('nests folders and rejects cycles', () => {
+    const a = createRailFolder({ version: 3, entries: [] }, 'A')
+    const b = createRailFolder(a.layout, 'B')
+    const nested = moveFolderIntoFolder(b.layout, b.folderId, a.folderId)
+    expect(nested.entries).toHaveLength(1)
+    expect(nested.entries[0]).toMatchObject({
+      kind: 'folder',
+      id: a.folderId,
+      children: [{ kind: 'folder', id: b.folderId }],
+    })
+    const blocked = moveFolderIntoFolder(nested, a.folderId, b.folderId)
+    expect(blocked).toEqual(nested)
   })
 
   it('inserts and removes graph entries', () => {
-    const inserted = insertGraphOnRail({ version: 2, entries: [] }, 'g1')
+    const inserted = insertGraphOnRail({ version: 3, entries: [] }, 'g1')
     expect(inserted.entries).toEqual([{ kind: 'graph', graphId: 'g1' }])
     expect(removeGraphFromLayout(inserted, 'g1').entries).toEqual([])
+  })
+
+  it('renames a folder', () => {
+    const created = createRailFolder({ version: 3, entries: [] }, 'Old')
+    const renamed = renameRailFolder(created.layout, created.folderId, 'New')
+    expect(renamed.entries[0]).toMatchObject({ kind: 'folder', title: 'New' })
   })
 })

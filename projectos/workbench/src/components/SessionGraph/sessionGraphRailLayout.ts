@@ -15,7 +15,7 @@ export type SessionGraphRailFolderEntry = {
   kind: 'folder'
   id: string
   title: string
-  graphIds: string[]
+  children: SessionGraphRailEntry[]
 }
 
 export type SessionGraphRailEntry =
@@ -23,8 +23,17 @@ export type SessionGraphRailEntry =
   | SessionGraphRailFolderEntry
 
 export interface SessionGraphRailLayout {
-  version: 2
+  version: 3
   entries: SessionGraphRailEntry[]
+}
+
+/** @deprecated flat folder graphIds (migrated on load). */
+interface LegacyRailLayoutV2 {
+  version: 2
+  entries: Array<
+    | { kind: 'graph'; graphId: string }
+    | { kind: 'folder'; id: string; title: string; graphIds: string[] }
+  >
 }
 
 /** @deprecated legacy session-pinned rail (migrated on load). */
@@ -39,7 +48,7 @@ interface LegacyRailLayoutV1 {
 const LAYOUT_KEY_PREFIX = 'projectos_session_graph_rail_'
 
 export function emptySessionGraphRailLayout(): SessionGraphRailLayout {
-  return { version: 2, entries: [] }
+  return { version: 3, entries: [] }
 }
 
 export function loadSessionGraphRailLayout(
@@ -50,9 +59,15 @@ export function loadSessionGraphRailLayout(
   try {
     const raw = localStorage.getItem(`${LAYOUT_KEY_PREFIX}${projectId}`)
     if (!raw) return emptySessionGraphRailLayout()
-    const parsed = JSON.parse(raw) as SessionGraphRailLayout | LegacyRailLayoutV1
+    const parsed = JSON.parse(raw) as
+      | SessionGraphRailLayout
+      | LegacyRailLayoutV2
+      | LegacyRailLayoutV1
+    if (parsed?.version === 3 && Array.isArray(parsed.entries)) {
+      return { version: 3, entries: sanitizeEntries(parsed.entries) }
+    }
     if (parsed?.version === 2 && Array.isArray(parsed.entries)) {
-      return { version: 2, entries: sanitizeEntries(parsed.entries) }
+      return migrateV2Layout(parsed)
     }
     if (parsed?.version === 1 && Array.isArray(parsed.entries)) {
       return migrateV1Layout(parsed, heads)
@@ -71,10 +86,30 @@ export function saveSessionGraphRailLayout(
   try {
     localStorage.setItem(
       `${LAYOUT_KEY_PREFIX}${projectId}`,
-      JSON.stringify({ version: 2, entries: sanitizeEntries(layout.entries) }),
+      JSON.stringify({ version: 3, entries: sanitizeEntries(layout.entries) }),
     )
   } catch {
     // Ignore quota / private-mode failures.
+  }
+}
+
+function migrateV2Layout(legacy: LegacyRailLayoutV2): SessionGraphRailLayout {
+  return {
+    version: 3,
+    entries: sanitizeEntries(
+      legacy.entries.map((entry) => {
+        if (entry.kind === 'graph') return entry
+        return {
+          kind: 'folder' as const,
+          id: entry.id,
+          title: entry.title || '',
+          children: (entry.graphIds ?? []).map((graphId) => ({
+            kind: 'graph' as const,
+            graphId,
+          })),
+        }
+      }),
+    ),
   }
 }
 
@@ -94,49 +129,175 @@ function migrateV1Layout(
       entries.push({ kind: 'graph', graphId })
       continue
     }
-    const graphIds: string[] = []
+    const children: SessionGraphRailEntry[] = []
     for (const sessionId of entry.sessionIds ?? []) {
       const head = byId.get(sessionId)
       const graphId = head ? resolveSessionGraphId(head) : null
       if (!graphId || seen.has(graphId)) continue
       seen.add(graphId)
-      graphIds.push(graphId)
+      children.push({ kind: 'graph', graphId })
     }
     entries.push({
       kind: 'folder',
       id: entry.id,
       title: entry.title || '',
-      graphIds,
+      children,
     })
   }
-  return { version: 2, entries: sanitizeEntries(entries) }
+  return { version: 3, entries: sanitizeEntries(entries) }
 }
 
 function sanitizeEntries(entries: SessionGraphRailEntry[]): SessionGraphRailEntry[] {
-  const seen = new Set<string>()
+  const seenGraphs = new Set<string>()
+  const seenFolders = new Set<string>()
+
+  const walk = (list: SessionGraphRailEntry[]): SessionGraphRailEntry[] => {
+    const out: SessionGraphRailEntry[] = []
+    for (const entry of list) {
+      if (entry.kind === 'graph') {
+        if (!entry.graphId || seenGraphs.has(entry.graphId)) continue
+        seenGraphs.add(entry.graphId)
+        out.push({ kind: 'graph', graphId: entry.graphId })
+        continue
+      }
+      if (entry.kind !== 'folder' || !entry.id || seenFolders.has(entry.id)) continue
+      seenFolders.add(entry.id)
+      const legacyGraphIds = (entry as { graphIds?: string[] }).graphIds
+      const rawChildren =
+        Array.isArray(entry.children) && entry.children.length > 0
+          ? entry.children
+          : (legacyGraphIds ?? []).map((graphId) => ({
+              kind: 'graph' as const,
+              graphId,
+            }))
+      out.push({
+        kind: 'folder',
+        id: entry.id,
+        title: typeof entry.title === 'string' ? entry.title : '',
+        children: walk(rawChildren),
+      })
+    }
+    return out
+  }
+
+  return walk(entries)
+}
+
+export function collectGraphIds(entries: SessionGraphRailEntry[]): string[] {
+  const ids: string[] = []
+  const walk = (list: SessionGraphRailEntry[]) => {
+    for (const entry of list) {
+      if (entry.kind === 'graph') ids.push(entry.graphId)
+      else walk(entry.children)
+    }
+  }
+  walk(entries)
+  return ids
+}
+
+export function countFolderItems(folder: SessionGraphRailFolderEntry): number {
+  return collectGraphIds(folder.children).length
+}
+
+export function folderContainsActive(
+  folder: SessionGraphRailFolderEntry,
+  activeGraphId: string | null,
+): boolean {
+  if (!activeGraphId) return false
+  return collectGraphIds(folder.children).includes(activeGraphId)
+}
+
+export function findFolderEntry(
+  entries: SessionGraphRailEntry[],
+  folderId: string,
+): SessionGraphRailFolderEntry | null {
+  for (const entry of entries) {
+    if (entry.kind === 'folder') {
+      if (entry.id === folderId) return entry
+      const nested = findFolderEntry(entry.children, folderId)
+      if (nested) return nested
+    }
+  }
+  return null
+}
+
+function isDescendantFolder(
+  entries: SessionGraphRailEntry[],
+  ancestorId: string,
+  maybeDescendantId: string,
+): boolean {
+  const ancestor = findFolderEntry(entries, ancestorId)
+  if (!ancestor) return false
+  const walk = (list: SessionGraphRailEntry[]): boolean => {
+    for (const entry of list) {
+      if (entry.kind !== 'folder') continue
+      if (entry.id === maybeDescendantId) return true
+      if (walk(entry.children)) return true
+    }
+    return false
+  }
+  return walk(ancestor.children)
+}
+
+function mapEntries(
+  entries: SessionGraphRailEntry[],
+  mapper: (entry: SessionGraphRailEntry) => SessionGraphRailEntry | null,
+): SessionGraphRailEntry[] {
   const out: SessionGraphRailEntry[] = []
   for (const entry of entries) {
-    if (entry.kind === 'graph') {
-      if (!entry.graphId || seen.has(entry.graphId)) continue
-      seen.add(entry.graphId)
-      out.push({ kind: 'graph', graphId: entry.graphId })
+    if (entry.kind === 'folder') {
+      const nextFolder: SessionGraphRailFolderEntry = {
+        ...entry,
+        children: mapEntries(entry.children, mapper),
+      }
+      const mapped = mapper(nextFolder)
+      if (mapped) out.push(mapped)
       continue
     }
-    if (entry.kind !== 'folder' || !entry.id) continue
-    const graphIds: string[] = []
-    for (const id of entry.graphIds ?? []) {
-      if (!id || seen.has(id)) continue
-      seen.add(id)
-      graphIds.push(id)
-    }
-    out.push({
-      kind: 'folder',
-      id: entry.id,
-      title: typeof entry.title === 'string' ? entry.title : '',
-      graphIds,
-    })
+    const mapped = mapper(entry)
+    if (mapped) out.push(mapped)
   }
   return out
+}
+
+function extractMatching(
+  entries: SessionGraphRailEntry[],
+  match: (entry: SessionGraphRailEntry) => boolean,
+): { entries: SessionGraphRailEntry[]; extracted: SessionGraphRailEntry | null } {
+  let extracted: SessionGraphRailEntry | null = null
+  const walk = (list: SessionGraphRailEntry[]): SessionGraphRailEntry[] => {
+    const out: SessionGraphRailEntry[] = []
+    for (const entry of list) {
+      if (extracted == null && match(entry)) {
+        extracted = entry
+        continue
+      }
+      if (entry.kind === 'folder') {
+        out.push({ ...entry, children: walk(entry.children) })
+        continue
+      }
+      out.push(entry)
+    }
+    return out
+  }
+  return { entries: walk(entries), extracted }
+}
+
+function insertIntoFolderChildren(
+  entries: SessionGraphRailEntry[],
+  folderId: string,
+  item: SessionGraphRailEntry,
+): SessionGraphRailEntry[] {
+  return entries.map((entry) => {
+    if (entry.kind !== 'folder') return entry
+    if (entry.id === folderId) {
+      return { ...entry, children: [...entry.children, item] }
+    }
+    return {
+      ...entry,
+      children: insertIntoFolderChildren(entry.children, folderId, item),
+    }
+  })
 }
 
 /**
@@ -148,23 +309,14 @@ export function syncRailLayoutWithGraphs(
   heads: ChatSessionHead[],
 ): SessionGraphRailLayout {
   const live = new Set(listTopicGraphIds(heads))
-  const known = new Set(
-    layout.entries.flatMap((entry) =>
-      entry.kind === 'graph' ? [entry.graphId] : entry.graphIds,
-    ),
-  )
+  const known = new Set(collectGraphIds(layout.entries))
   const pruned = sanitizeEntries(
-    layout.entries
-      .map((entry) => {
-        if (entry.kind === 'graph') {
-          return live.has(entry.graphId) ? entry : null
-        }
-        return {
-          ...entry,
-          graphIds: entry.graphIds.filter((id) => live.has(id)),
-        }
-      })
-      .filter((entry): entry is SessionGraphRailEntry => entry != null),
+    mapEntries(layout.entries, (entry) => {
+      if (entry.kind === 'graph') {
+        return live.has(entry.graphId) ? entry : null
+      }
+      return entry
+    }),
   )
   const extras: SessionGraphRailGraphEntry[] = []
   for (const graphId of live) {
@@ -177,20 +329,44 @@ export function syncRailLayoutWithGraphs(
     const rb = pickGraphRepresentative(heads, b.graphId)
     return (rb?.lastUpdatedAt ?? '').localeCompare(ra?.lastUpdatedAt ?? '')
   })
-  return { version: 2, entries: [...pruned, ...extras] }
+  return { version: 3, entries: [...pruned, ...extras] }
 }
 
 export function createRailFolder(
   layout: SessionGraphRailLayout,
   title: string,
-): SessionGraphRailLayout {
-  const id = `folder_${crypto.randomUUID()}`
+): { layout: SessionGraphRailLayout; folderId: string } {
+  const folderId = `folder_${crypto.randomUUID()}`
   return {
-    version: 2,
-    entries: [
-      ...layout.entries,
-      { kind: 'folder', id, title: title.trim() || 'Folder', graphIds: [] },
-    ],
+    folderId,
+    layout: {
+      version: 3,
+      entries: [
+        ...layout.entries,
+        {
+          kind: 'folder',
+          id: folderId,
+          title: title.trim() || 'Folder',
+          children: [],
+        },
+      ],
+    },
+  }
+}
+
+export function renameRailFolder(
+  layout: SessionGraphRailLayout,
+  folderId: string,
+  title: string,
+): SessionGraphRailLayout {
+  const next = title.trim() || 'Folder'
+  return {
+    version: 3,
+    entries: mapEntries(layout.entries, (entry) =>
+      entry.kind === 'folder' && entry.id === folderId
+        ? { ...entry, title: next }
+        : entry,
+    ),
   }
 }
 
@@ -214,7 +390,7 @@ export function reorderRailEntries(
   if (!moved) return layout
   const insertAt = fromIndex < toIndex ? toIndex - 1 : toIndex
   entries.splice(insertAt, 0, moved)
-  return { version: 2, entries }
+  return { version: 3, entries }
 }
 
 export function removeGraphFromLayout(
@@ -222,18 +398,12 @@ export function removeGraphFromLayout(
   graphId: string,
 ): SessionGraphRailLayout {
   return {
-    version: 2,
-    entries: layout.entries
-      .map((entry) => {
-        if (entry.kind === 'graph') {
-          return entry.graphId === graphId ? null : entry
-        }
-        return {
-          ...entry,
-          graphIds: entry.graphIds.filter((id) => id !== graphId),
-        }
-      })
-      .filter((entry): entry is SessionGraphRailEntry => entry != null),
+    version: 3,
+    entries: sanitizeEntries(
+      mapEntries(layout.entries, (entry) =>
+        entry.kind === 'graph' && entry.graphId === graphId ? null : entry,
+      ),
+    ),
   }
 }
 
@@ -241,17 +411,22 @@ export function removeFolderFromLayout(
   layout: SessionGraphRailLayout,
   folderId: string,
 ): SessionGraphRailLayout {
-  const entries: SessionGraphRailEntry[] = []
-  for (const entry of layout.entries) {
-    if (entry.kind === 'folder' && entry.id === folderId) {
-      for (const graphId of entry.graphIds) {
-        entries.push({ kind: 'graph', graphId })
+  const lift = (list: SessionGraphRailEntry[]): SessionGraphRailEntry[] => {
+    const out: SessionGraphRailEntry[] = []
+    for (const entry of list) {
+      if (entry.kind === 'folder' && entry.id === folderId) {
+        out.push(...entry.children)
+        continue
       }
-      continue
+      if (entry.kind === 'folder') {
+        out.push({ ...entry, children: lift(entry.children) })
+        continue
+      }
+      out.push(entry)
     }
-    entries.push(entry)
+    return out
   }
-  return { version: 2, entries: sanitizeEntries(entries) }
+  return { version: 3, entries: sanitizeEntries(lift(layout.entries)) }
 }
 
 export function moveGraphIntoFolder(
@@ -259,15 +434,55 @@ export function moveGraphIntoFolder(
   graphId: string,
   folderId: string,
 ): SessionGraphRailLayout {
+  if (!findFolderEntry(layout.entries, folderId)) return layout
   const without = removeGraphFromLayout(layout, graphId)
   return {
-    version: 2,
-    entries: without.entries.map((entry) => {
-      if (entry.kind !== 'folder' || entry.id !== folderId) return entry
-      if (entry.graphIds.includes(graphId)) return entry
-      return { ...entry, graphIds: [...entry.graphIds, graphId] }
-    }),
+    version: 3,
+    entries: sanitizeEntries(
+      insertIntoFolderChildren(without.entries, folderId, {
+        kind: 'graph',
+        graphId,
+      }),
+    ),
   }
+}
+
+export function moveFolderIntoFolder(
+  layout: SessionGraphRailLayout,
+  folderId: string,
+  targetFolderId: string,
+): SessionGraphRailLayout {
+  if (folderId === targetFolderId) return layout
+  if (!findFolderEntry(layout.entries, targetFolderId)) return layout
+  if (isDescendantFolder(layout.entries, folderId, targetFolderId)) return layout
+  const { entries, extracted } = extractMatching(
+    layout.entries,
+    (entry) => entry.kind === 'folder' && entry.id === folderId,
+  )
+  if (!extracted || extracted.kind !== 'folder') return layout
+  return {
+    version: 3,
+    entries: sanitizeEntries(
+      insertIntoFolderChildren(entries, targetFolderId, extracted),
+    ),
+  }
+}
+
+export function insertFolderOnRail(
+  layout: SessionGraphRailLayout,
+  folderId: string,
+  atIndex?: number,
+): SessionGraphRailLayout {
+  const { entries, extracted } = extractMatching(
+    layout.entries,
+    (entry) => entry.kind === 'folder' && entry.id === folderId,
+  )
+  if (!extracted || extracted.kind !== 'folder') return layout
+  const next = [...entries]
+  const index =
+    atIndex == null ? next.length : Math.max(0, Math.min(next.length, atIndex))
+  next.splice(index, 0, extracted)
+  return { version: 3, entries: sanitizeEntries(next) }
 }
 
 export function findRailGraphIndex(
@@ -290,7 +505,7 @@ export function insertGraphOnRail(
   const index =
     atIndex == null ? entries.length : Math.max(0, Math.min(entries.length, atIndex))
   entries.splice(index, 0, entry)
-  return { version: 2, entries }
+  return { version: 3, entries }
 }
 
 export function replaceGraphOnRail(

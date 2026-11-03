@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useI18n } from '../../i18n'
 import Button from '../ui/Button'
+import SettingsGroup from './SettingsGroup'
+import SettingsRow from './SettingsRow'
 import styles from './SettingsPanel.module.css'
 
 interface BridgeState {
@@ -79,95 +81,88 @@ export default function SpatialPinSettingsSection() {
     <section className={styles.section}>
       <p className={styles.hubIntro}>{ts('settings.spatialPinIntro')}</p>
 
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('settings.spatialPinPrimaryPath')}</span>
-        <span>{ts('settings.spatialPinPrimaryPathDesc')}</span>
-      </label>
-
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('settings.spatialPinExternalIde')}</span>
-        <span>{ts('settings.spatialPinExternalIdeDesc')}</span>
-      </label>
-
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('settings.spatialPinPermissions')}</span>
-        <span>{ts('settings.spatialPinPermissionsDesc')}</span>
-      </label>
-
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('settings.spatialPinActiveProject')}</span>
-        <span>
-          {session?.workspacePath ??
-            session?.projectId ??
-            ts('settings.spatialPinNoProject')}
-        </span>
-      </label>
-
-      {session && session.candidates.length > 0 && (
-        <label className={styles.field}>
-          <span className={styles.label}>{ts('settings.spatialPinCandidates')}</span>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {session.candidates.map((item) => (
-              <li key={item.projectId}>
-                {item.displayName}{' '}
-                <span style={{ opacity: 0.7 }}>({item.source})</span>
-              </li>
-            ))}
-          </ul>
-        </label>
-      )}
-
-      <Button
-        variant="primary"
-        size="sm"
-        onClick={() => void window.projectOS?.spatialPin.beginCapture()}
-      >
-        {ts('settings.spatialPinStartCapture')}
-      </Button>
-
-      <p className={styles.hubIntro} style={{ marginTop: 20 }}>
-        {ts('settings.spatialPinOptionalChrome')}
-      </p>
-
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('settings.spatialPinStatus')}</span>
-        <span>
-          {bridge?.connected
-            ? ts('settings.spatialPinConnected')
-            : ts('settings.spatialPinDisconnected')}
-          {bridge?.port ? ` · :${bridge.port}` : ''}
-          {session?.webEnhanceAvailable
-            ? ` · ${ts('settings.spatialPinEnhanceOn')}`
-            : ''}
-        </span>
-      </label>
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('settings.spatialPinPort')}</span>
-        <code>{bridge?.port ?? '—'}</code>
-        {bridge?.port ? (
+      <SettingsGroup label={ts('settings.spatialPinPrimaryPath')}>
+        <SettingsRow
+          title={ts('settings.spatialPinPrimaryPath')}
+          description={ts('settings.spatialPinPrimaryPathDesc')}
+        >
           <Button
-            variant="secondary"
+            variant="primary"
             size="sm"
-            onClick={() => void copy('port', String(bridge.port))}
+            onClick={() => void window.projectOS?.spatialPin.beginCapture()}
           >
-            {copied === 'port' ? ts('settings.spatialPinCopied') : ts('settings.spatialPinCopy')}
+            {ts('settings.spatialPinStartCapture')}
           </Button>
-        ) : null}
-      </label>
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('settings.spatialPinToken')}</span>
-        <code style={{ wordBreak: 'break-all' }}>{bridge?.token ?? '—'}</code>
-        {bridge?.token ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void copy('token', bridge.token!)}
-          >
-            {copied === 'token' ? ts('settings.spatialPinCopied') : ts('settings.spatialPinCopy')}
-          </Button>
-        ) : null}
-      </label>
-      <p className={styles.hubIntro}>{ts('settings.spatialPinExtensionHint')}</p>
+        </SettingsRow>
+        <SettingsRow
+          title={ts('settings.spatialPinExternalIde')}
+          description={ts('settings.spatialPinExternalIdeDesc')}
+        />
+        <SettingsRow
+          title={ts('settings.spatialPinPermissions')}
+          description={ts('settings.spatialPinPermissionsDesc')}
+        />
+        <SettingsRow title={ts('settings.spatialPinActiveProject')}>
+          <span className={styles.help}>
+            {session?.workspacePath ??
+              session?.projectId ??
+              ts('settings.spatialPinNoProject')}
+          </span>
+        </SettingsRow>
+        {session && session.candidates.length > 0 && (
+          <SettingsRow title={ts('settings.spatialPinCandidates')} stacked>
+            <ul className={styles.candidateList}>
+              {session.candidates.map((item) => (
+                <li key={item.projectId}>
+                  {item.displayName}{' '}
+                  <span className={styles.help}>({item.source})</span>
+                </li>
+              ))}
+            </ul>
+          </SettingsRow>
+        )}
+      </SettingsGroup>
+
+      <SettingsGroup label={ts('settings.spatialPinOptionalChrome')}>
+        <SettingsRow
+          title={ts('settings.spatialPinStatus')}
+          description={ts('settings.spatialPinExtensionHint')}
+        >
+          <span className={styles.help}>
+            {bridge?.connected
+              ? ts('settings.spatialPinConnected')
+              : ts('settings.spatialPinDisconnected')}
+            {bridge?.port ? ` · :${bridge.port}` : ''}
+            {session?.webEnhanceAvailable
+              ? ` · ${ts('settings.spatialPinEnhanceOn')}`
+              : ''}
+          </span>
+        </SettingsRow>
+        <SettingsRow title={ts('settings.spatialPinPort')}>
+          <code>{bridge?.port ?? '—'}</code>
+          {bridge?.port ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void copy('port', String(bridge.port))}
+            >
+              {copied === 'port' ? ts('settings.spatialPinCopied') : ts('settings.spatialPinCopy')}
+            </Button>
+          ) : null}
+        </SettingsRow>
+        <SettingsRow title={ts('settings.spatialPinToken')} stacked>
+          <code className={styles.tokenCode}>{bridge?.token ?? '—'}</code>
+          {bridge?.token ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void copy('token', bridge.token!)}
+            >
+              {copied === 'token' ? ts('settings.spatialPinCopied') : ts('settings.spatialPinCopy')}
+            </Button>
+          ) : null}
+        </SettingsRow>
+      </SettingsGroup>
     </section>
   )
 }

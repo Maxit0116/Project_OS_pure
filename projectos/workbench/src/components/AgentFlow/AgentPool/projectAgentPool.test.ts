@@ -1,11 +1,18 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { AgentActionEvent, AgentDelegationEvent, AgentFlowStep } from '@contracts/index'
 import {
+  agentPoolAxisRangeMs,
   buildHistoryEntryFromTask,
   projectAgentPool,
+  projectAgentPoolSpans,
+  resetAgentPoolSyntheticOrigins,
   summarizeActionEvent,
   type AgentPoolTask,
 } from './projectAgentPool'
+
+beforeEach(() => {
+  resetAgentPoolSyntheticOrigins()
+})
 
 function step(partial: Partial<AgentFlowStep> & Pick<AgentFlowStep, 'id' | 'label'>): AgentFlowStep {
   return {
@@ -69,6 +76,9 @@ describe('projectAgentPool', () => {
     expect(rows[0]?.currentAction).toContain('src/a.ts')
     expect(rows[0]?.modelLabel).toBe('Fable 5.1')
     expect(rows[0]?.source).toBe('root')
+    expect(rows[0]?.spans.some((span) => span.kind === 'agent')).toBe(true)
+    expect(rows[0]?.spans.some((span) => span.endMs == null)).toBe(true)
+    expect(rows[0]?.originMs).toBe(Date.parse('2026-01-01T00:00:01.000Z'))
   })
 
   it('projects delegated tasks alongside the root', () => {
@@ -125,6 +135,8 @@ describe('projectAgentPool', () => {
               currentAction: 'Earlier action',
               completedAt: '2026-01-01T00:00:00.000Z',
               flowSteps: [],
+              spans: [],
+              originMs: Date.parse('2026-01-01T00:00:00.000Z'),
             },
           ],
         },
@@ -201,12 +213,38 @@ describe('projectAgentPool', () => {
       requirementSummary: 'Edit file',
       acceptanceCriteria: ['ok'],
       flowSteps: [{ id: 's1', label: 'Generate', status: 'complete' }],
+      spans: [
+        {
+          id: 'span:agent',
+          kind: 'agent',
+          label: 'Edit file',
+          status: 'running',
+          startMs: 0,
+        },
+      ],
+      originMs: Date.parse('2026-02-01T00:00:00.000Z'),
       loopSpecId: null,
     }
-    const entry = buildHistoryEntryFromTask(task, '2026-02-01T00:00:00.000Z')
+    const entry = buildHistoryEntryFromTask(task, '2026-02-01T00:00:05.000Z')
     expect(entry.runId).toBe('run-9')
     expect(entry.flowSteps).toHaveLength(1)
-    expect(entry.completedAt).toBe('2026-02-01T00:00:00.000Z')
+    expect(entry.completedAt).toBe('2026-02-01T00:00:05.000Z')
+    expect(entry.spans[0]?.endMs).toBe(5000)
+    expect(entry.spans[0]?.status).toBe('complete')
+  })
+
+  it('projects action spans onto a shared relative clock', () => {
+    const { spans, originMs } = projectAgentPoolSpans({
+      title: 'Root',
+      status: 'running',
+      steps: [],
+      actions: [fileRead('src/a.ts')],
+      currentAction: 'Reading src/a.ts',
+    })
+    expect(originMs).toBe(Date.parse('2026-01-01T00:00:01.000Z'))
+    expect(spans.some((span) => span.kind === 'action' && span.endMs === 80)).toBe(true)
+    expect(spans.some((span) => span.id === 'span:active' && span.endMs == null)).toBe(true)
+    expect(agentPoolAxisRangeMs(spans, 1500)).toBeGreaterThanOrEqual(2000)
   })
 
   it('summarizes action events for the life-line label', () => {

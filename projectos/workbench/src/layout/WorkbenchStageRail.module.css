@@ -17,9 +17,11 @@
   top: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: max-content;
+  /* Wider than the toolbar peep — generous horizontal hit pad. */
+  width: max(min(420px, calc(100vw - 48px)), max-content);
   max-width: calc(100vw - 24px);
-  height: 14px;
+  /* Collapsed hit strip: tall enough to catch the pointer without needing precision. */
+  height: 28px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -49,7 +51,7 @@
   border-top: none;
   background: var(--tech-bg-side-panel, var(--color-bg-side-panel));
   box-shadow: var(--tech-shadow-md, none);
-  transform: translateY(calc(-100% + 3px));
+  transform: translateY(calc(-100% + 4px));
   opacity: 0;
   pointer-events: none;
   transition:

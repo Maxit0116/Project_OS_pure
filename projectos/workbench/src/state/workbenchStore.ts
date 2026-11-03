@@ -4975,11 +4975,18 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
   },
 
-  setSettingsOpen: (open, focusView) =>
+  setSettingsOpen: (open, focusView) => {
     set({
       settingsOpen: open,
       ...(focusView !== undefined ? { settingsFocusView: focusView } : open ? {} : { settingsFocusView: null }),
-    }),
+    })
+    const chat = useChatSessionStore.getState()
+    if (open) {
+      chat.setCanvasOverlay('settings')
+    } else if (chat.canvasOverlay === 'settings') {
+      chat.setCanvasOverlay('none')
+    }
+  },
   clearSettingsFocusView: () => set({ settingsFocusView: null }),
   setSelectedModelProfileId: (profileId) => set({ selectedModelProfileId: profileId }),
 

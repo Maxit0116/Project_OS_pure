@@ -17,7 +17,7 @@ export default function PresentationModeToggle({
     <label className={styles.toggleRow}>
       <div>
         <div className={styles.toggleLabel}>{label}</div>
-        {description && <div className={styles.toggleDesc}>{description}</div>}
+        {description ? <div className={styles.toggleDesc}>{description}</div> : null}
       </div>
       <input
         type="checkbox"

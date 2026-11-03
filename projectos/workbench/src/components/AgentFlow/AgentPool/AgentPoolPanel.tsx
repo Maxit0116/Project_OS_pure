@@ -11,6 +11,7 @@ import {
 } from './agentPoolStore'
 import AgentPoolRow from './AgentPoolRow'
 import { projectAgentPool } from './projectAgentPool'
+import { useAgentPoolNow } from './useAgentPoolNow'
 import styles from './AgentPoolPanel.module.css'
 
 export default function AgentPoolPanel() {
@@ -85,6 +86,20 @@ export default function AgentPoolPanel() {
     ],
   )
 
+  const nowMs = useAgentPoolNow(tasks)
+
+  const summary = useMemo(() => {
+    let running = 0
+    let awaiting = 0
+    let errors = 0
+    for (const task of tasks) {
+      if (task.status === 'running' || task.status === 'continuing') running += 1
+      if (task.status === 'awaiting_user_done') awaiting += 1
+      if (task.status === 'error') errors += 1
+    }
+    return { total: tasks.length, running, awaiting, errors }
+  }, [tasks])
+
   if (tasks.length === 0) {
     return (
       <EmptyState
@@ -98,11 +113,22 @@ export default function AgentPoolPanel() {
   return (
     <div className={styles.panel} aria-label={ts('agentFlow.pool.title')}>
       <p className={styles.hint}>{ts('agentFlow.pool.hint')}</p>
+      <div className={styles.summary} aria-label={ts('agentFlow.pool.summaryAria')}>
+        <span>{ts('agentFlow.pool.summaryTotal', { count: summary.total })}</span>
+        <span>{ts('agentFlow.pool.summaryRunning', { count: summary.running })}</span>
+        <span>{ts('agentFlow.pool.summaryAwaiting', { count: summary.awaiting })}</span>
+        {summary.errors > 0 ? (
+          <span data-tone="error">
+            {ts('agentFlow.pool.summaryErrors', { count: summary.errors })}
+          </span>
+        ) : null}
+      </div>
       <div className={styles.list}>
         {tasks.map((task) => (
           <AgentPoolRow
             key={task.taskId}
             task={task}
+            nowMs={nowMs}
             expanded={expandedTaskId === task.taskId}
             historyExpanded={historyExpandedTaskId === task.taskId}
             onToggleExpand={() => {

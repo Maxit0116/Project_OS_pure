@@ -18,11 +18,25 @@ const head: ChatSessionHead = {
 }
 
 const layout: SessionGraphRailLayout = {
-  version: 2,
+  version: 3,
   entries: [{ kind: 'graph', graphId: 'graph_a' }],
 }
 
 const noop = () => undefined
+
+const railProps = {
+  onOpenGraph: noop,
+  onCreate: noop,
+  onCreateFolder: noop,
+  onRenameFolder: noop,
+  onCancelRenameFolder: noop,
+  onRemoveGraph: noop,
+  onRemoveFolder: noop,
+  onGraphPointerDown: noop,
+  onFolderPointerDown: noop,
+  onPointerMove: noop,
+  onPointerUp: noop,
+}
 
 describe('WorkingSessionRail', () => {
   it('keeps a collapsed graph rail with create and delete controls', () => {
@@ -31,14 +45,7 @@ describe('WorkingSessionRail', () => {
         layout={layout}
         heads={[head]}
         activeGraphId="graph_a"
-        onOpenGraph={noop}
-        onCreate={noop}
-        onCreateFolder={noop}
-        onRemoveGraph={noop}
-        onRemoveFolder={noop}
-        onGraphPointerDown={noop}
-        onPointerMove={noop}
-        onPointerUp={noop}
+        {...railProps}
       />,
     )
     expect(html).toContain('data-working-session-rail')
@@ -52,7 +59,7 @@ describe('WorkingSessionRail', () => {
     const html = renderToStaticMarkup(
       <WorkingSessionRail
         layout={{
-          version: 2,
+          version: 3,
           entries: [
             { kind: 'graph', graphId: 'graph_a' },
             { kind: 'graph', graphId: 'graph_b' },
@@ -65,16 +72,33 @@ describe('WorkingSessionRail', () => {
         activeGraphId="graph_a"
         draggingGraphId="graph_a"
         railDropIndex={1}
-        onOpenGraph={noop}
-        onCreate={noop}
-        onCreateFolder={noop}
-        onRemoveGraph={noop}
-        onRemoveFolder={noop}
-        onGraphPointerDown={noop}
-        onPointerMove={noop}
-        onPointerUp={noop}
+        {...railProps}
       />,
     )
     expect(html).toContain('data-rail-drop-gap')
+  })
+
+  it('keeps folder children mounted but collapsed until revealed', () => {
+    const html = renderToStaticMarkup(
+      <WorkingSessionRail
+        layout={{
+          version: 3,
+          entries: [
+            {
+              kind: 'folder',
+              id: 'folder_1',
+              title: 'Auth',
+              children: [{ kind: 'graph', graphId: 'graph_a' }],
+            },
+          ],
+        }}
+        heads={[head]}
+        activeGraphId="graph_a"
+        forceExpanded
+        {...railProps}
+      />,
+    )
+    expect(html).toContain('data-folder-revealed="false"')
+    expect(html).toContain('data-folder-children')
   })
 })

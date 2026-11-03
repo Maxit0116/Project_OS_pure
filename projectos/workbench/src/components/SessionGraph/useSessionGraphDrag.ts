@@ -25,6 +25,8 @@ export interface SessionDragState {
   sessionId: string | null
   /** Graph being moved (rail). Also set for session drags once known. */
   graphId: string | null
+  /** Folder being moved (rail). Mutually exclusive with session/graph moves. */
+  folderId: string | null
   title: string
   source: SessionDragSource
   x: number
@@ -52,12 +54,18 @@ function readDropTarget(element: Element | null): SessionDropTarget | null {
 function readRailDropIndex(
   clientY: number,
   draggedGraphId: string | null,
+  draggedFolderId: string | null = null,
 ): number | null {
   const list = document.querySelector('[data-working-session-rail-list]')
   if (!list) return null
   const items = Array.from(
     list.querySelectorAll<HTMLElement>('[data-rail-entry-index]'),
-  ).filter((el) => el.dataset.graphId !== draggedGraphId)
+  ).filter((el) => {
+    if (el.dataset.railNested === 'true') return false
+    if (draggedGraphId && el.dataset.graphId === draggedGraphId) return false
+    if (draggedFolderId && el.dataset.folderId === draggedFolderId) return false
+    return true
+  })
   if (items.length === 0) return 0
   for (const item of items) {
     const rect = item.getBoundingClientRect()
@@ -72,7 +80,9 @@ function readRailDropIndex(
 }
 
 interface Options {
-  onDragStart: (state: Pick<SessionDragState, 'sessionId' | 'graphId' | 'source'>) => void
+  onDragStart: (
+    state: Pick<SessionDragState, 'sessionId' | 'graphId' | 'folderId' | 'source'>,
+  ) => void
   onDragEnd: () => void
   onDrop: (state: SessionDragState, target: SessionDropTarget) => void
 }
@@ -82,6 +92,7 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
   const pendingRef = useRef<{
     sessionId: string | null
     graphId: string | null
+    folderId: string | null
     title: string
     source: SessionDragSource
     pointerId: number
@@ -110,6 +121,7 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
     (
       sessionId: string | null,
       graphId: string | null,
+      folderId: string | null,
       title: string,
       source: SessionDragSource,
       pointerId: number,
@@ -128,6 +140,7 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
       const next: SessionDragState = {
         sessionId,
         graphId,
+        folderId,
         title,
         source,
         x,
@@ -138,7 +151,7 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
       dragRef.current = next
       activePointerRef.current = pointerId
       setDrag(next)
-      onDragStartRef.current({ sessionId, graphId, source })
+      onDragStartRef.current({ sessionId, graphId, folderId, source })
     },
     [clearPending],
   )
@@ -170,7 +183,7 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
         target?.kind === 'folder' ||
         Boolean(el?.closest?.('[data-working-session-rail]'))
       const railDropIndex = overRail
-        ? readRailDropIndex(event.clientY, current.graphId)
+        ? readRailDropIndex(event.clientY, current.graphId, current.folderId)
         : null
       const next: SessionDragState = {
         ...current,
@@ -204,7 +217,11 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
           target.kind === 'graph' &&
           current.graphId &&
           target.graphId === current.graphId
-        if (!selfGraph) {
+        const selfFolder =
+          target.kind === 'folder' &&
+          current.folderId &&
+          target.folderId === current.folderId
+        if (!selfGraph && !selfFolder) {
           onDropRef.current(current, target)
         } else if (current.source === 'rail' && current.railDropIndex != null) {
           onDropRef.current(current, {
@@ -238,6 +255,7 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
       payload: {
         sessionId?: string | null
         graphId?: string | null
+        folderId?: string | null
         title: string
         source: SessionDragSource
       },
@@ -251,9 +269,11 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
       const target = event.currentTarget
       const sessionId = payload.sessionId ?? null
       const graphId = payload.graphId ?? null
+      const folderId = payload.folderId ?? null
       pendingRef.current = {
         sessionId,
         graphId,
+        folderId,
         title: payload.title,
         source: payload.source,
         pointerId,
@@ -266,6 +286,7 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
           beginDrag(
             sessionId,
             graphId,
+            folderId,
             payload.title,
             payload.source,
             pointerId,
@@ -289,6 +310,7 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
         beginDrag(
           pending.sessionId,
           pending.graphId,
+          pending.folderId,
           pending.title,
           pending.source,
           pending.pointerId,
@@ -325,12 +347,19 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
  */
 export function previewRailReorder(
   entries: Array<{ kind: string; graphId?: string; id?: string }>,
-  draggedGraphId: string,
+  draggedGraphId: string | null,
   dropIndex: number | null,
+  draggedFolderId: string | null = null,
 ): { display: typeof entries; placeholderIndex: number | null } {
-  const fromIndex = entries.findIndex(
-    (entry) => entry.kind === 'graph' && entry.graphId === draggedGraphId,
-  )
+  const fromIndex = entries.findIndex((entry) => {
+    if (draggedGraphId && entry.kind === 'graph' && entry.graphId === draggedGraphId) {
+      return true
+    }
+    if (draggedFolderId && entry.kind === 'folder' && entry.id === draggedFolderId) {
+      return true
+    }
+    return false
+  })
   if (fromIndex < 0) {
     return {
       display: entries,

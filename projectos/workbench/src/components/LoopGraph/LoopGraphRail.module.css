@@ -229,9 +229,88 @@
   background: var(--tech-error);
 }
 
-.create {
+.itemWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.railExpanded .itemWrap {
+  justify-content: stretch;
+}
+
+.itemLifted {
+  opacity: 0.28;
+  transform: scale(0.92);
+}
+
+.itemDropTarget {
+  outline: 1px solid var(--tech-accent);
+  outline-offset: -1px;
+}
+
+.deleteButton {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 999px;
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.itemWrap:hover .deleteButton,
+.itemWrap:focus-within .deleteButton,
+.railExpanded .deleteButton {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.deleteButton:hover {
+  color: var(--tech-error);
+  background: var(--tech-bg-muted);
+}
+
+.deleteButton:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
   margin-top: auto;
+  width: 100%;
+}
+
+.railExpanded .footer {
+  align-items: stretch;
+}
+
+.create {
+  flex-shrink: 0;
 }
 
 .createLabel {
@@ -241,10 +320,137 @@
   white-space: nowrap;
 }
 
+.folderBadge {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border-strong);
+  color: var(--tech-text-primary);
+  font-size: 9px;
+  line-height: 12px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.folderBlock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  border-radius: 6px;
+  transition: background-color 160ms var(--ease-out);
+}
+
+.railExpanded .folderBlock {
+  align-items: stretch;
+}
+
+.folderBlockRevealed {
+  background: color-mix(in srgb, var(--tech-bg-muted) 40%, transparent);
+}
+
+.folderHeader {
+  width: 100%;
+  position: relative;
+}
+
+.folderHeader .icon {
+  position: relative;
+}
+
+.folderIcon {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 140ms var(--ease-out);
+}
+
+.folderIconOpen {
+  opacity: 1;
+}
+
+.folderIconHidden {
+  opacity: 0;
+}
+
+.folderChildren {
+  display: grid;
+  grid-template-rows: 0fr;
+  width: 100%;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    grid-template-rows 200ms var(--ease-out),
+    opacity 150ms var(--ease-out);
+}
+
+.folderChildrenOpen {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.folderChildrenInner {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 10px;
+}
+
+.folderChild {
+  width: 100%;
+}
+
+.folderEmpty {
+  padding: 6px 8px;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-muted);
+}
+
+.renameForm {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.renameInput {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 4px;
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.renameInput:focus {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rail,
   .item,
-  .create {
+  .create,
+  .folderBlock,
+  .folderChildren,
+  .folderIcon {
     transition: none;
   }
 }

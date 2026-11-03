@@ -43,7 +43,6 @@ export default function AppShell() {
   const centerTab = useWorkbenchStore((s) => s.centerTab)
   const openWorkspace = useWorkbenchStore((s) => s.openWorkspace)
   const dismissError = useWorkbenchStore((s) => s.dismissError)
-  const settingsOpen = useWorkbenchStore((s) => s.settingsOpen)
   const setSettingsOpen = useWorkbenchStore((s) => s.setSettingsOpen)
   const bottomDockOpen = useBottomDockStore((s) => s.open)
   const historyOpen = useChatSessionStore((s) => s.historyOpen)
@@ -165,6 +164,7 @@ export default function AppShell() {
             <MarketplaceOverlay />
             <AgentFlowOverlay />
             <SpatialCaptureOverlay />
+            <SettingsPanel />
             <ChatHistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />
             <EdgeRails
               leftMounted={leftPresence.mounted}
@@ -184,7 +184,6 @@ export default function AppShell() {
         <ToastContainer />
         <CommandPalette />
         <AppMenuBridge />
-        {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       </div>
     </FunctionMapBleedRoot>
   )

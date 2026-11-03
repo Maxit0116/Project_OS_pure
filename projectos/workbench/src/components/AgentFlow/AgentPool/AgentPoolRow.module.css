@@ -131,34 +131,25 @@
 
 .lifeLine {
   display: flex;
-  align-items: center;
-  gap: var(--space-sm);
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
   padding-inline: var(--space-xs);
 }
 
-.lifeTrack {
-  flex: 0 0 24px;
-  height: 2px;
-  border-radius: 1px;
-  background: linear-gradient(
-    90deg,
-    var(--tech-accent, var(--color-accent)),
-    transparent
-  );
-}
-
-.row[data-status='running'] .lifeTrack {
-  animation: poolPulse 1.4s var(--ease-out, ease-out) infinite;
-}
-
 .lifeAction {
-  font-size: var(--font-size-xs);
+  font-size: 10px;
   color: var(--tech-text-secondary, var(--color-text-secondary));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  padding-inline: 2px;
+}
+
+.spanKind {
+  color: var(--tech-text-muted, var(--color-text-muted));
+  text-transform: lowercase;
 }
 
 .expandBtn {
@@ -338,22 +329,6 @@
   align-self: center;
   color: var(--tech-text-muted, var(--color-text-muted));
   padding: 0 2px;
-}
-
-@keyframes poolPulse {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .row[data-status='running'] .lifeTrack {
-    animation: none;
-  }
 }
 
 @media (max-width: 720px) {

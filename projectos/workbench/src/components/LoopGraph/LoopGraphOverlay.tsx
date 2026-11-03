@@ -20,6 +20,21 @@ import LoopGraphContextMenu, {
 } from './LoopGraphContextMenu'
 import LoopGraphRail from './LoopGraphRail'
 import {
+  createLoopRailFolder,
+  emptyLoopGraphRailLayout,
+  findLoopFolderEntry,
+  insertLoopFolderOnRail,
+  insertLoopOnRail,
+  loadLoopGraphRailLayout,
+  moveLoopFolderIntoFolder,
+  moveLoopIntoFolder,
+  removeLoopFolderFromLayout,
+  renameLoopRailFolder,
+  saveLoopGraphRailLayout,
+  syncRailLayoutWithLoops,
+  type LoopGraphRailLayout,
+} from './loopGraphRailLayout'
+import {
   LOOP_NODE_H,
   LOOP_NODE_W,
   nearestPort,
@@ -74,7 +89,13 @@ export default function LoopGraphOverlay() {
 
   const [viewport, setViewport] = useState({ x: 32, y: 32, scale: 1 })
   const [dragging, setDragging] = useState(false)
+  const [railLayout, setRailLayout] = useState<LoopGraphRailLayout>(() =>
+    emptyLoopGraphRailLayout(),
+  )
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const railLayoutRef = useRef(railLayout)
+  railLayoutRef.current = railLayout
   const [expandedNodeIds, setExpandedNodeIds] = useState<Record<string, boolean>>({})
   const [acceptedAssumptions, setAcceptedAssumptions] = useState<Record<string, boolean>>({})
   const [confirmedCycles, setConfirmedCycles] = useState<Record<string, boolean>>({})
@@ -90,6 +111,24 @@ export default function LoopGraphOverlay() {
     if (!open || !project) return
     void loadForWorkspace()
   }, [open, project, loadForWorkspace])
+
+  useEffect(() => {
+    if (!project?.projectId) {
+      setRailLayout(emptyLoopGraphRailLayout())
+      return
+    }
+    setRailLayout(loadLoopGraphRailLayout(project.projectId))
+  }, [project?.projectId])
+
+  const mergedRail = useMemo(
+    () => syncRailLayoutWithLoops(railLayout, heads),
+    [railLayout, heads],
+  )
+
+  const persistRail = (next: LoopGraphRailLayout) => {
+    setRailLayout(next)
+    if (project?.projectId) saveLoopGraphRailLayout(project.projectId, next)
+  }
 
   useEffect(() => {
     if (!open) return undefined
@@ -271,10 +310,61 @@ export default function LoopGraphOverlay() {
       label={ts('chat.loopGraph.title')}
     >
       <LoopGraphRail
+        layout={mergedRail}
         items={heads}
         activeLoopId={document?.id ?? null}
+        renamingFolderId={renamingFolderId}
         onOpen={(id) => void selectLoop(id)}
         onCreate={() => void createLoop()}
+        onCreateFolder={() => {
+          const created = createLoopRailFolder(
+            railLayoutRef.current,
+            ts('chat.loopGraph.folderUntitled'),
+          )
+          persistRail(created.layout)
+          setRenamingFolderId(created.folderId)
+        }}
+        onRenameFolder={(folderId, title) => {
+          persistRail(renameLoopRailFolder(railLayoutRef.current, folderId, title))
+          setRenamingFolderId(null)
+        }}
+        onCancelRenameFolder={() => {
+          if (renamingFolderId) {
+            const folder = findLoopFolderEntry(
+              railLayoutRef.current.entries,
+              renamingFolderId,
+            )
+            if (
+              folder &&
+              folder.children.length === 0 &&
+              (!folder.title.trim() ||
+                folder.title.trim() === ts('chat.loopGraph.folderUntitled'))
+            ) {
+              persistRail(
+                removeLoopFolderFromLayout(railLayoutRef.current, renamingFolderId),
+              )
+            }
+          }
+          setRenamingFolderId(null)
+        }}
+        onRemoveFolder={(folderId) => {
+          if (renamingFolderId === folderId) setRenamingFolderId(null)
+          persistRail(removeLoopFolderFromLayout(mergedRail, folderId))
+        }}
+        onMoveIntoFolder={(loopId, folderId) => {
+          persistRail(moveLoopIntoFolder(railLayoutRef.current, loopId, folderId))
+        }}
+        onMoveFolderIntoFolder={(folderId, targetFolderId) => {
+          persistRail(
+            moveLoopFolderIntoFolder(railLayoutRef.current, folderId, targetFolderId),
+          )
+        }}
+        onMoveToRail={(loopId) => {
+          persistRail(insertLoopOnRail(railLayoutRef.current, loopId))
+        }}
+        onMoveFolderToRail={(folderId) => {
+          persistRail(insertLoopFolderOnRail(railLayoutRef.current, folderId))
+        }}
       />
       <div className={styles.main}>
         <header className={styles.header}>

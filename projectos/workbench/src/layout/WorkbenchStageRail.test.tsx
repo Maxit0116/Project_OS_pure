@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { useChatSessionStore } from '../state/chatSessionStore'
 import WorkbenchStageRail from './WorkbenchStageRail'
 
 describe('WorkbenchStageRail', () => {
@@ -18,5 +19,18 @@ describe('WorkbenchStageRail', () => {
     expect(html).toContain('data-chat-tool="marketplace"')
     expect(html).toContain('aria-label="Agent 流程"')
     expect(html).not.toContain('aria-label="聊天记录"')
+  })
+
+  it('stays collapsed while a center overlay is open', () => {
+    useChatSessionStore.setState({
+      sessionGraphOpen: true,
+      loopGraphOpen: false,
+      githubGraphOpen: false,
+      marketplaceOpen: false,
+      agentFlowOpen: false,
+    })
+    const html = renderToStaticMarkup(<WorkbenchStageRail />)
+    expect(html).toContain('data-revealed="false"')
+    expect(html).toContain('aria-pressed="true"')
   })
 })

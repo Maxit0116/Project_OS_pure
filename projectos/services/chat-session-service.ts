@@ -25,6 +25,7 @@ import {
   demoteChatSessionToMisc,
   placeChatSessionOnGraph,
   preserveChatSessionContext,
+  withSessionGraphHeadProjection,
   type ChatSessionContextUpdate,
 } from "../contracts/chat-session-context.js";
 import {
@@ -125,9 +126,12 @@ export function upsertChatSession(
   workspaceRoot: string,
   record: ChatSessionRecord,
 ): ChatSessionRecord {
-  const parsed = preserveChatSessionContext(
+  const preserved = preserveChatSessionContext(
     getChatSession(workspaceRoot, record.head.id),
     ChatSessionRecordSchema.parse(record),
+  );
+  const parsed = ChatSessionRecordSchema.parse(
+    withSessionGraphHeadProjection(preserved),
   );
   ensureSessionsDir(workspaceRoot);
   writeFileSync(

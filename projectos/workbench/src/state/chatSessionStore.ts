@@ -44,6 +44,7 @@ export type CanvasOverlay =
   | 'agent-flow'
   | 'github'
   | 'marketplace'
+  | 'settings'
 
 /** Suppresses auto-open while a run id is not known yet (Ask / Plan still starting). */
 const AGENT_FLOW_DISMISS_IDLE = '__agent_flow_idle__'
@@ -135,6 +136,8 @@ interface ChatSessionStore {
   agentFlowDismissedRunId: string | null
   inheritedDigest: SessionContextDigest | null
   loading: boolean
+  /** One-shot: after switchSession, ChatPanel scrolls to this message id. */
+  pendingRevealMessageId: string | null
 
   loadForWorkspace: () => Promise<void>
   clear: () => void
@@ -159,6 +162,9 @@ interface ChatSessionStore {
   openAgentFlowForRun: (runId: string | null) => void
   /** Close the Agent Flow card. A busy run will not auto-open again. */
   closeAgentFlow: () => void
+  /** Open a session and optionally scroll to a message after load. */
+  openSessionAtMessage: (sessionId: string, messageId?: string | null) => Promise<void>
+  clearPendingRevealMessage: () => void
   switchSession: (sessionId: string) => Promise<void>
   createSession: (options?: {
     seedWelcome?: boolean
@@ -302,6 +308,28 @@ function overlayState(overlay: CanvasOverlay) {
   }
 }
 
+/**
+ * Close workbench Settings when another canvas overlay takes the slot.
+ * Must not run inside `overlayState` — that helper is also used while
+ * initializing this store, and calling workbenchStore then hits a circular
+ * import (blank renderer).
+ */
+function closeSettingsUnlessOverlay(overlay: CanvasOverlay) {
+  if (overlay === 'settings') return
+  const wb = useWorkbenchStore.getState()
+  if (!wb.settingsOpen) return
+  useWorkbenchStore.setState({ settingsOpen: false, settingsFocusView: null })
+}
+
+function setCanvasOverlayState(
+  set: (partial: ReturnType<typeof overlayState> | Record<string, unknown>) => void,
+  overlay: CanvasOverlay,
+  extra?: Record<string, unknown>,
+) {
+  set(extra ? { ...overlayState(overlay), ...extra } : overlayState(overlay))
+  closeSettingsUnlessOverlay(overlay)
+}
+
 export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   heads: [],
   pinnedIds: [],
@@ -311,6 +339,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   agentFlowDismissedRunId: null,
   inheritedDigest: null,
   loading: false,
+  pendingRevealMessageId: null,
 
   clear: () => {
     if (persistTimer) {
@@ -322,15 +351,25 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       titleSummarizeTimer = null
     }
     clearPersistedCanvasOverlay()
-    set({
+    setCanvasOverlayState(set, 'none', {
       heads: [],
       pinnedIds: [],
       activeSessionId: null,
       historyOpen: false,
       inheritedDigest: null,
       loading: false,
-      ...overlayState('none'),
+      pendingRevealMessageId: null,
     })
+  },
+
+  clearPendingRevealMessage: () => set({ pendingRevealMessageId: null }),
+
+  openSessionAtMessage: async (sessionId, messageId) => {
+    set({
+      pendingRevealMessageId: messageId?.trim() ? messageId.trim() : null,
+    })
+    useWorkbenchStore.setState({ rightPanelTab: 'chat', rightPanelOpen: true })
+    await get().switchSession(sessionId)
   },
 
   setHistoryOpen: (open) => set({ historyOpen: open }),
@@ -338,47 +377,47 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   toggleHistory: () => set((state) => ({ historyOpen: !state.historyOpen })),
 
   setCanvasOverlay: (overlay) => {
-    set(overlayState(overlay))
+    setCanvasOverlayState(set, overlay)
   },
 
   setSessionGraphOpen: (open) => {
-    set(overlayState(open ? 'session' : 'none'))
+    setCanvasOverlayState(set, open ? 'session' : 'none')
   },
 
   toggleSessionGraph: () => {
-    set(overlayState(get().canvasOverlay === 'session' ? 'none' : 'session'))
+    setCanvasOverlayState(set, get().canvasOverlay === 'session' ? 'none' : 'session')
   },
 
   setLoopGraphOpen: (open) => {
-    set(overlayState(open ? 'loop' : 'none'))
+    setCanvasOverlayState(set, open ? 'loop' : 'none')
   },
 
   toggleLoopGraph: () => {
-    set(overlayState(get().canvasOverlay === 'loop' ? 'none' : 'loop'))
+    setCanvasOverlayState(set, get().canvasOverlay === 'loop' ? 'none' : 'loop')
   },
 
   setGithubGraphOpen: (open) => {
-    set(overlayState(open ? 'github' : 'none'))
+    setCanvasOverlayState(set, open ? 'github' : 'none')
   },
 
   toggleGithubGraph: () => {
-    set(overlayState(get().canvasOverlay === 'github' ? 'none' : 'github'))
+    setCanvasOverlayState(set, get().canvasOverlay === 'github' ? 'none' : 'github')
   },
 
   setMarketplaceOpen: (open) => {
-    set(overlayState(open ? 'marketplace' : 'none'))
+    setCanvasOverlayState(set, open ? 'marketplace' : 'none')
   },
 
   toggleMarketplace: () => {
-    set(overlayState(get().canvasOverlay === 'marketplace' ? 'none' : 'marketplace'))
+    setCanvasOverlayState(set, get().canvasOverlay === 'marketplace' ? 'none' : 'marketplace')
   },
 
   setSpatialCaptureOpen: (open) => {
-    set(overlayState(open ? 'spatial' : 'none'))
+    setCanvasOverlayState(set, open ? 'spatial' : 'none')
   },
 
   toggleSpatialCapture: () => {
-    set(overlayState(get().canvasOverlay === 'spatial' ? 'none' : 'spatial'))
+    setCanvasOverlayState(set, get().canvasOverlay === 'spatial' ? 'none' : 'spatial')
   },
 
   setAgentFlowOpen: (open) => {
@@ -392,14 +431,14 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   presentAgentFlow: () => {
-    set({ ...overlayState('agent-flow'), agentFlowDismissedRunId: null })
+    setCanvasOverlayState(set, 'agent-flow', { agentFlowDismissedRunId: null })
   },
 
   openAgentFlowForRun: (runId) => {
     const dismissed = get().agentFlowDismissedRunId
     if (runId && dismissed === runId) return
     if (!runId && dismissed === AGENT_FLOW_DISMISS_IDLE) return
-    set(overlayState('agent-flow'))
+    setCanvasOverlayState(set, 'agent-flow')
   },
 
   closeAgentFlow: () => {
@@ -407,10 +446,11 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     const workbench = useWorkbenchStore.getState()
     const busy = workbench.flowStatus === 'running' || workbench.refineLoading
     const token = busy ? (workbench.activeRunId ?? AGENT_FLOW_DISMISS_IDLE) : null
-    set({
-      ...overlayState('none'),
-      ...(token ? { agentFlowDismissedRunId: token } : {}),
-    })
+    setCanvasOverlayState(
+      set,
+      'none',
+      token ? { agentFlowDismissedRunId: token } : undefined,
+    )
   },
 
   loadForWorkspace: async () => {
@@ -419,7 +459,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
 
     // Project open always lands on C4; overlays only after explicit user/run open.
     clearPersistedCanvasOverlay()
-    set({ loading: true, ...overlayState('none') })
+    setCanvasOverlayState(set, 'none', { loading: true })
     try {
       let index = await client.getChatSessionIndex(project.projectId)
       let heads = index.heads
@@ -513,11 +553,11 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
 
       // Hard guarantee: opening a project never leaves a center overlay up.
       clearPersistedCanvasOverlay()
-      set({ ...overlayState('none') })
+      setCanvasOverlayState(set, 'none')
     } catch (error) {
       console.error('[chatSessionStore] failed to load sessions', error)
       clearPersistedCanvasOverlay()
-      set({ loading: false, ...overlayState('none') })
+      setCanvasOverlayState(set, 'none', { loading: false })
     }
   },
 

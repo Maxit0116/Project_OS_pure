@@ -16,6 +16,16 @@ const sampleTask: AgentPoolTask = {
   requirementSummary: 'Fix login',
   acceptanceCriteria: ['Works'],
   flowSteps: [{ id: 's1', label: 'Locate', status: 'complete' }],
+  spans: [
+    {
+      id: 'span:agent',
+      kind: 'agent',
+      label: 'Edit login',
+      status: 'running',
+      startMs: 0,
+    },
+  ],
+  originMs: Date.parse('2026-01-01T00:00:00.000Z'),
   loopSpecId: null,
 }
 

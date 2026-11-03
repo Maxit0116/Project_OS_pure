@@ -4,6 +4,7 @@ import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
 import TextInput from '../ui/TextInput'
+import SettingsGroup from './SettingsGroup'
 import styles from './SettingsPanel.module.css'
 import teamStyles from './TeamGithubSection.module.css'
 
@@ -97,136 +98,139 @@ export default function TeamGithubSection() {
       )}
 
       {statusLoaded && !presentationMode && !oauthConfigured && !connected && (
-        <div className={teamStyles.bannerWarn}>
-          <p>{ts('settings.teamGithub.oauthMissing')}</p>
-          <p className={styles.hint}>{ts('settings.teamGithub.useGhCliHelp')}</p>
-          <p className={styles.hint}>{ts('settings.teamGithub.callbackHint')}</p>
-          <div className={teamStyles.actions}>
+        <SettingsGroup label={ts('settings.teamGithub.oauthMissing')}>
+          <div className={styles.settingRowStackedPad}>
+            <p className={styles.hint}>{ts('settings.teamGithub.useGhCliHelp')}</p>
+            <p className={styles.hint}>{ts('settings.teamGithub.callbackHint')}</p>
+            <div className={teamStyles.actions}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={() => void handleImportGh()}
+              >
+                {ts('settings.teamGithub.useGhCli')}
+              </Button>
+              <a
+                className={teamStyles.link}
+                href="https://github.com/settings/developers"
+                target="_blank"
+                rel="noreferrer"
+              >
+                {ts('settings.teamGithub.createOauthApp')}
+              </a>
+            </div>
+            <label className={styles.field}>
+              <span className={styles.label}>{ts('settings.teamGithub.clientIdLabel')}</span>
+              <TextInput
+                value={clientIdDraft}
+                placeholder={ts('settings.teamGithub.clientIdPlaceholder')}
+                onChange={(e) => setClientIdDraft(e.target.value)}
+              />
+            </label>
             <Button
               variant="secondary"
               size="sm"
-              disabled={busy}
-              onClick={() => void handleImportGh()}
+              disabled={busy || !clientIdDraft.trim()}
+              onClick={() => void handleSaveClientId()}
             >
-              {ts('settings.teamGithub.useGhCli')}
+              {ts('settings.teamGithub.saveClientId')}
             </Button>
-            <a
-              className={teamStyles.link}
-              href="https://github.com/settings/developers"
-              target="_blank"
-              rel="noreferrer"
-            >
-              {ts('settings.teamGithub.createOauthApp')}
-            </a>
           </div>
-          <label className={styles.field}>
-            <span className={styles.label}>{ts('settings.teamGithub.clientIdLabel')}</span>
-            <TextInput
-              value={clientIdDraft}
-              placeholder={ts('settings.teamGithub.clientIdPlaceholder')}
-              onChange={(e) => setClientIdDraft(e.target.value)}
-            />
-          </label>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={busy || !clientIdDraft.trim()}
-            onClick={() => void handleSaveClientId()}
-          >
-            {ts('settings.teamGithub.saveClientId')}
-          </Button>
-        </div>
+        </SettingsGroup>
       )}
 
       {statusLoaded && !presentationMode && oauthConfigured && !connected && !pending && (
         <p className={teamStyles.ready}>{ts('settings.teamGithub.oauthConfigured')}</p>
       )}
 
-      {connected ? (
-        <div className={teamStyles.profile}>
-          {status?.avatarUrl ? (
-            <img
-              className={teamStyles.avatar}
-              src={status.avatarUrl}
-              alt=""
-              width={40}
-              height={40}
-            />
-          ) : (
-            <div className={teamStyles.avatarFallback} aria-hidden>
-              <GitBranch size={20} strokeWidth={1.75} />
-            </div>
-          )}
-          <div className={teamStyles.profileText}>
-            <div className={teamStyles.login}>
-              {ts('settings.teamGithub.connectedAs', { login: status?.login ?? '—' })}
-            </div>
-            {status?.name ? <div className={teamStyles.name}>{status.name}</div> : null}
-          </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true)
-              void disconnectGitHub().finally(() => setBusy(false))
-            }}
-          >
-            {ts('settings.teamGithub.disconnect')}
-          </Button>
-        </div>
-      ) : pending ? (
-        <div className={teamStyles.pending}>
-          <p className={teamStyles.signingIn}>{ts('settings.teamGithub.signingIn')}</p>
-          {pending.userCode !== 'LOOPBACK' && (
-            <>
-              <p className={styles.hint}>{ts('settings.teamGithub.deviceCodeHint')}</p>
-              <div className={teamStyles.codeRow}>
-                <code className={teamStyles.code}>{pending.userCode}</code>
-                <Button variant="secondary" size="sm" onClick={() => void handleCopyCode()}>
-                  {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
-                  {ts('settings.teamGithub.copyDeviceCode')}
-                </Button>
+      <SettingsGroup label={ts('settings.tabs.teamGithub')}>
+        {connected ? (
+          <div className={teamStyles.profile}>
+            {status?.avatarUrl ? (
+              <img
+                className={teamStyles.avatar}
+                src={status.avatarUrl}
+                alt=""
+                width={40}
+                height={40}
+              />
+            ) : (
+              <div className={teamStyles.avatarFallback} aria-hidden>
+                <GitBranch size={20} strokeWidth={1.75} />
               </div>
-            </>
-          )}
-          <p className={styles.hint}>{ts('settings.teamGithub.signingInHint')}</p>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true)
-              void cancelGitHubOAuth().finally(() => setBusy(false))
-            }}
-          >
-            {ts('settings.teamGithub.cancel')}
-          </Button>
-        </div>
-      ) : (
-        <div className={teamStyles.actions}>
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={busy}
-            onClick={() => void handleConnect()}
-          >
-            <GitBranch size={14} strokeWidth={1.75} aria-hidden />
-            {ts('settings.teamGithub.connect')}
-          </Button>
-          {!oauthConfigured && !presentationMode && (
+            )}
+            <div className={teamStyles.profileText}>
+              <div className={teamStyles.login}>
+                {ts('settings.teamGithub.connectedAs', { login: status?.login ?? '—' })}
+              </div>
+              {status?.name ? <div className={teamStyles.name}>{status.name}</div> : null}
+            </div>
             <Button
               variant="secondary"
               size="sm"
               disabled={busy}
-              onClick={() => void handleImportGh()}
+              onClick={() => {
+                setBusy(true)
+                void disconnectGitHub().finally(() => setBusy(false))
+              }}
             >
-              {ts('settings.teamGithub.useGhCli')}
+              {ts('settings.teamGithub.disconnect')}
             </Button>
-          )}
-          <span className={styles.hint}>{ts('settings.teamGithub.notConnected')}</span>
-        </div>
-      )}
+          </div>
+        ) : pending ? (
+          <div className={teamStyles.pending}>
+            <p className={teamStyles.signingIn}>{ts('settings.teamGithub.signingIn')}</p>
+            {pending.userCode !== 'LOOPBACK' && (
+              <>
+                <p className={styles.hint}>{ts('settings.teamGithub.deviceCodeHint')}</p>
+                <div className={teamStyles.codeRow}>
+                  <code className={teamStyles.code}>{pending.userCode}</code>
+                  <Button variant="secondary" size="sm" onClick={() => void handleCopyCode()}>
+                    {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
+                    {ts('settings.teamGithub.copyDeviceCode')}
+                  </Button>
+                </div>
+              </>
+            )}
+            <p className={styles.hint}>{ts('settings.teamGithub.signingInHint')}</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true)
+                void cancelGitHubOAuth().finally(() => setBusy(false))
+              }}
+            >
+              {ts('settings.teamGithub.cancel')}
+            </Button>
+          </div>
+        ) : (
+          <div className={`${teamStyles.actions} ${styles.settingRowStackedPad}`}>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={busy}
+              onClick={() => void handleConnect()}
+            >
+              <GitBranch size={14} strokeWidth={1.75} aria-hidden />
+              {ts('settings.teamGithub.connect')}
+            </Button>
+            {!oauthConfigured && !presentationMode && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={() => void handleImportGh()}
+              >
+                {ts('settings.teamGithub.useGhCli')}
+              </Button>
+            )}
+            <span className={styles.hint}>{ts('settings.teamGithub.notConnected')}</span>
+          </div>
+        )}
+      </SettingsGroup>
     </section>
   )
 }

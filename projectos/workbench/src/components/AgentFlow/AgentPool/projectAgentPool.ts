@@ -16,6 +16,25 @@ export type AgentPoolTaskStatus =
 
 export type AgentPoolTaskSource = 'root' | 'delegation' | 'session' | 'compose'
 
+/** Span kinds for the pool mini-waterfall (Kobra-style shared clock). */
+export type AgentPoolSpanKind = 'agent' | 'step' | 'model' | 'tool' | 'action'
+
+export type AgentPoolSpanStatus = 'running' | 'complete' | 'error'
+
+/**
+ * One bar on the row timeline. Running spans omit `endMs` and grow to panel `now`.
+ * Times are milliseconds relative to the task's `originMs`.
+ */
+export interface AgentPoolSpan {
+  id: string
+  parentId?: string
+  kind: AgentPoolSpanKind
+  label: string
+  status: AgentPoolSpanStatus
+  startMs: number
+  endMs?: number
+}
+
 export interface AgentPoolFlowStep {
   id: string
   label: string
@@ -29,6 +48,8 @@ export interface AgentPoolHistoryEntry {
   currentAction: string
   completedAt: string
   flowSteps: AgentPoolFlowStep[]
+  spans: AgentPoolSpan[]
+  originMs: number
 }
 
 export interface AgentPoolTask {
@@ -45,6 +66,10 @@ export interface AgentPoolTask {
   requirementSummary: string
   acceptanceCriteria: string[]
   flowSteps: AgentPoolFlowStep[]
+  /** Live mini-waterfall spans for this task identity. */
+  spans: AgentPoolSpan[]
+  /** Epoch ms for span relative clock (shared with panel `now`). */
+  originMs: number
   loopSpecId: string | null
 }
 
@@ -252,6 +277,224 @@ function toFlowSteps(steps: AgentFlowStep[]): AgentPoolFlowStep[] {
   }))
 }
 
+const SYNTHETIC_STEP_MS = 1000
+const POINT_ACTION_MS = 80
+/** Minimum axis length so a brand-new run still shows a readable track. */
+export const AGENT_POOL_MIN_RANGE_MS = 2_000
+
+/** Sticky wall origins for tasks that have no event timestamps yet. */
+const syntheticOriginByTaskId = new Map<string, number>()
+
+function stableSyntheticOrigin(taskId: string): number {
+  const existing = syntheticOriginByTaskId.get(taskId)
+  if (existing != null) return existing
+  const next = Date.now()
+  syntheticOriginByTaskId.set(taskId, next)
+  return next
+}
+
+/** Test helper — clear sticky synthetic origins between cases. */
+export function resetAgentPoolSyntheticOrigins(): void {
+  syntheticOriginByTaskId.clear()
+}
+
+function parseEventMs(timestamp: string): number | null {
+  const value = Date.parse(timestamp)
+  return Number.isFinite(value) ? value : null
+}
+
+function isLivePoolStatus(status: AgentPoolTaskStatus): boolean {
+  return status === 'running' || status === 'continuing'
+}
+
+function mapStepToSpanStatus(status: string): AgentPoolSpanStatus {
+  if (status === 'error') return 'error'
+  if (status === 'complete' || status === 'skipped' || status === 'warning') return 'complete'
+  return 'running'
+}
+
+function actionDurationMs(event: AgentActionEvent): number | null {
+  if (event.type === 'model_request' || event.type === 'mcp_tool_call') {
+    const duration = event.payload.durationMs
+    return typeof duration === 'number' && Number.isFinite(duration) ? duration : null
+  }
+  return null
+}
+
+function actionSpanKind(event: AgentActionEvent): AgentPoolSpanKind {
+  if (event.type === 'model_request') return 'model'
+  if (event.type === 'mcp_tool_call') return 'tool'
+  return 'action'
+}
+
+function actionSpanStatus(event: AgentActionEvent): AgentPoolSpanStatus {
+  if (event.type === 'model_request') {
+    return event.payload.status === 'failed' ? 'error' : 'complete'
+  }
+  if (event.type === 'mcp_tool_call') {
+    return event.payload.status === 'failed' || event.payload.status === 'rejected'
+      ? 'error'
+      : 'complete'
+  }
+  if (event.type === 'file_read') {
+    return event.payload.status === 'failed' ? 'error' : 'complete'
+  }
+  if (event.type === 'verification_result') {
+    return event.payload.status === 'failed' ? 'error' : 'complete'
+  }
+  if (event.type === 'apply_result') {
+    return event.payload.outcome === 'rejected' ||
+      event.payload.outcome === 'recovery_required'
+      ? 'error'
+      : 'complete'
+  }
+  return 'complete'
+}
+
+function agentSpanStatus(taskStatus: AgentPoolTaskStatus): AgentPoolSpanStatus {
+  if (taskStatus === 'error') return 'error'
+  if (isLivePoolStatus(taskStatus)) return 'running'
+  return 'complete'
+}
+
+function sealRunningSpans(spans: AgentPoolSpan[], endMs: number): AgentPoolSpan[] {
+  return spans.map((span) =>
+    span.endMs == null
+      ? {
+          ...span,
+          endMs,
+          status: span.status === 'running' ? 'complete' : span.status,
+        }
+      : span,
+  )
+}
+
+/**
+ * Project steps + action events onto a shared relative clock.
+ * Running leaf/agent spans omit `endMs` so the UI can grow them to `now`.
+ */
+export function projectAgentPoolSpans(input: {
+  title: string
+  status: AgentPoolTaskStatus
+  steps: AgentFlowStep[]
+  actions: AgentActionEvent[]
+  currentAction: string
+  /** Task identity — stabilizes synthetic origins across re-projections. */
+  taskId?: string
+  /** Optional absolute origin; defaults to earliest action timestamp or sticky now. */
+  originMs?: number
+}): { spans: AgentPoolSpan[]; originMs: number } {
+  const { title, status, steps, actions, currentAction } = input
+  const actionTimes = actions
+    .map((event) => parseEventMs(event.timestamp))
+    .filter((value): value is number => value != null)
+  const originMs =
+    input.originMs ??
+    (actionTimes.length > 0
+      ? Math.min(...actionTimes)
+      : input.taskId
+        ? stableSyntheticOrigin(input.taskId)
+        : Date.now())
+  const live = isLivePoolStatus(status)
+  const agentId = 'span:agent'
+  const childSpans: AgentPoolSpan[] = []
+
+  if (actions.length > 0) {
+    for (const event of actions) {
+      const at = parseEventMs(event.timestamp)
+      if (at == null) continue
+      const atRel = Math.max(0, at - originMs)
+      const duration = actionDurationMs(event) ?? POINT_ACTION_MS
+      // Keep a visible bar when the first event lands exactly on the origin.
+      const endMs = Math.max(atRel, duration)
+      const startMs = Math.max(0, endMs - duration)
+      childSpans.push({
+        id: `span:action:${event.eventId}`,
+        parentId: agentId,
+        kind: actionSpanKind(event),
+        label: summarizeActionEvent(event),
+        status: actionSpanStatus(event),
+        startMs,
+        endMs,
+      })
+    }
+    if (live) {
+      const lastEnd = childSpans.reduce(
+        (max, span) => Math.max(max, span.endMs ?? span.startMs),
+        0,
+      )
+      childSpans.push({
+        id: 'span:active',
+        parentId: agentId,
+        kind: 'step',
+        label: currentAction || 'Working…',
+        status: 'running',
+        startMs: lastEnd,
+      })
+    }
+  } else if (steps.length > 0) {
+    let cursor = 0
+    for (const step of steps) {
+      const spanStatus = mapStepToSpanStatus(step.status)
+      const done = spanStatus !== 'running'
+      childSpans.push({
+        id: `span:step:${step.id}`,
+        parentId: agentId,
+        kind: 'step',
+        label: step.label,
+        status: spanStatus,
+        startMs: cursor,
+        endMs: done ? cursor + SYNTHETIC_STEP_MS : undefined,
+      })
+      if (done) cursor += SYNTHETIC_STEP_MS
+    }
+  } else if (live) {
+    childSpans.push({
+      id: 'span:active',
+      parentId: agentId,
+      kind: 'step',
+      label: currentAction || 'Working…',
+      status: 'running',
+      startMs: 0,
+    })
+  }
+
+  const covered = childSpans.reduce(
+    (max, span) => Math.max(max, span.endMs ?? span.startMs),
+    0,
+  )
+  const spans: AgentPoolSpan[] = [
+    {
+      id: agentId,
+      kind: 'agent',
+      label: title,
+      status: agentSpanStatus(status),
+      startMs: 0,
+      endMs: live ? undefined : Math.max(covered, POINT_ACTION_MS),
+    },
+    ...childSpans,
+  ]
+  return { spans, originMs }
+}
+
+/** Axis length for layout: at least min range, and at least the furthest tip / now. */
+export function agentPoolAxisRangeMs(
+  spans: AgentPoolSpan[],
+  relativeNowMs: number,
+  minRangeMs = AGENT_POOL_MIN_RANGE_MS,
+): number {
+  let max = relativeNowMs
+  for (const span of spans) {
+    max = Math.max(max, span.startMs, span.endMs ?? relativeNowMs)
+  }
+  return Math.max(minRangeMs, max)
+}
+
+export function taskNeedsLiveClock(task: Pick<AgentPoolTask, 'status' | 'spans'>): boolean {
+  if (isLivePoolStatus(task.status)) return true
+  return task.spans.some((span) => span.endMs == null)
+}
+
 function applyOverlay(
   task: AgentPoolTask,
   overlay: AgentPoolOverlayState,
@@ -280,13 +523,27 @@ function buildRootTask(input: ProjectAgentPoolInput): AgentPoolTask | null {
   const taskId = activeRunId ? `root:${activeRunId}` : 'root:active'
   const title = steps[0]?.label ?? 'Agent run'
   const acceptanceCriteria = extractAcceptanceCriteria(flowActions)
+  const status = mapFlowStatus(flowStatus)
+  const currentAction = latestActionLabel(
+    flowActions,
+    steps,
+    flowStatus === 'running' ? 'Working…' : 'Idle',
+  )
+  const { spans, originMs } = projectAgentPoolSpans({
+    title,
+    status,
+    steps,
+    actions: flowActions,
+    currentAction,
+    taskId,
+  })
   return {
     taskId,
     title,
     modelLabel,
     modelId,
-    status: mapFlowStatus(flowStatus),
-    currentAction: latestActionLabel(flowActions, steps, flowStatus === 'running' ? 'Working…' : 'Idle'),
+    status,
+    currentAction,
     runId: activeRunId,
     chatSessionId,
     source: 'root',
@@ -297,6 +554,8 @@ function buildRootTask(input: ProjectAgentPoolInput): AgentPoolTask | null {
         ? acceptanceCriteria
         : [`Confirm ${title} meets the requirement`],
     flowSteps: toFlowSteps(steps),
+    spans,
+    originMs,
     loopSpecId: null,
   }
 }
@@ -321,13 +580,23 @@ function buildDelegationTasks(input: ProjectAgentPoolInput): AgentPoolTask[] {
     const childActions = childEvents.filter(isActionEvent)
     const childSteps = collectRunSteps(childEvents)
     const acceptanceCriteria = extractAcceptanceCriteria(childActions)
+    const status = mapDelegatedStatus(input.flowDelegationEvents, childRunId)
+    const currentAction = latestActionLabel(childActions, childSteps, 'Delegated')
+    const { spans, originMs } = projectAgentPoolSpans({
+      title,
+      status,
+      steps: childSteps,
+      actions: childActions,
+      currentAction,
+      taskId,
+    })
     rows.push({
       taskId,
       title,
       modelLabel: input.modelLabel,
       modelId: input.modelId,
-      status: mapDelegatedStatus(input.flowDelegationEvents, childRunId),
-      currentAction: latestActionLabel(childActions, childSteps, 'Delegated'),
+      status,
+      currentAction,
       runId: childRunId,
       chatSessionId: input.chatSessionId,
       source: 'delegation',
@@ -338,6 +607,8 @@ function buildDelegationTasks(input: ProjectAgentPoolInput): AgentPoolTask[] {
           ? acceptanceCriteria
           : [`Confirm ${title} meets the requirement`],
       flowSteps: toFlowSteps(childSteps),
+      spans,
+      originMs,
       loopSpecId: null,
     })
   }
@@ -354,26 +625,40 @@ function buildSessionTasks(
   return sessions
     .filter((session) => session.id !== activeSessionId)
     .filter((session) => session.status === 'running' || session.status === 'awaiting_review')
-    .map((session) => ({
-      taskId: `session:${session.id}`,
-      title: session.title || 'Untitled session',
-      modelLabel,
-      modelId,
-      status:
-        session.status === 'awaiting_review'
-          ? ('awaiting_user_done' as const)
-          : ('running' as const),
-      currentAction:
-        session.status === 'awaiting_review' ? 'Needs review' : 'Working in another session',
-      runId: null,
-      chatSessionId: session.id,
-      source: 'session' as const,
-      history: [],
-      requirementSummary: session.title || 'Session task',
-      acceptanceCriteria: ['Confirm this session task meets the requirement'],
-      flowSteps: [],
-      loopSpecId: null,
-    }))
+    .map((session) => {
+      const status: AgentPoolTaskStatus =
+        session.status === 'awaiting_review' ? 'awaiting_user_done' : 'running'
+      const title = session.title || 'Untitled session'
+      const currentAction =
+        session.status === 'awaiting_review' ? 'Needs review' : 'Working in another session'
+      const taskId = `session:${session.id}`
+      const { spans, originMs } = projectAgentPoolSpans({
+        title,
+        status,
+        steps: [],
+        actions: [],
+        currentAction,
+        taskId,
+      })
+      return {
+        taskId,
+        title,
+        modelLabel,
+        modelId,
+        status,
+        currentAction,
+        runId: null,
+        chatSessionId: session.id,
+        source: 'session' as const,
+        history: [],
+        requirementSummary: session.title || 'Session task',
+        acceptanceCriteria: ['Confirm this session task meets the requirement'],
+        flowSteps: [],
+        spans,
+        originMs,
+        loopSpecId: null,
+      }
+    })
 }
 
 function buildComposeTasks(
@@ -396,23 +681,33 @@ function buildComposeTasks(
           : status === 'done'
             ? 'awaiting_user_done'
             : 'running'
+      const currentAction =
+        slot.link?.summary?.trim() ||
+        (status === 'queued'
+          ? 'Queued'
+          : status === 'running'
+            ? 'Working…'
+            : status === 'done'
+              ? 'Done — ready for review'
+              : status === 'error'
+                ? 'Failed'
+                : 'Ready')
+      const taskId = `compose:${slot.slotId}`
+      const { spans, originMs } = projectAgentPoolSpans({
+        title: slot.name,
+        status: poolStatus,
+        steps: [],
+        actions: [],
+        currentAction,
+        taskId,
+      })
       return {
-        taskId: `compose:${slot.slotId}`,
+        taskId,
         title: slot.name,
         modelLabel,
         modelId,
         status: poolStatus,
-        currentAction:
-          slot.link?.summary?.trim() ||
-          (status === 'queued'
-            ? 'Queued'
-            : status === 'running'
-              ? 'Working…'
-              : status === 'done'
-                ? 'Done — ready for review'
-                : status === 'error'
-                  ? 'Failed'
-                  : 'Ready'),
+        currentAction,
         runId: slot.link?.runId ?? null,
         chatSessionId,
         source: 'compose' as const,
@@ -424,6 +719,8 @@ function buildComposeTasks(
             : `Confirm ${slot.name} meets the requirement`,
         ],
         flowSteps: [],
+        spans,
+        originMs,
         loopSpecId: null,
       }
     })
@@ -472,6 +769,10 @@ export function projectAgentPool(input: ProjectAgentPoolInput): AgentPoolTask[] 
 }
 
 export function buildHistoryEntryFromTask(task: AgentPoolTask, now = new Date().toISOString()): AgentPoolHistoryEntry {
+  const completedAtMs = Date.parse(now)
+  const relativeEnd = Number.isFinite(completedAtMs)
+    ? Math.max(0, completedAtMs - task.originMs)
+    : agentPoolAxisRangeMs(task.spans, 0)
   return {
     id: `${task.taskId}:${now}`,
     runId: task.runId,
@@ -479,5 +780,7 @@ export function buildHistoryEntryFromTask(task: AgentPoolTask, now = new Date().
     currentAction: task.currentAction,
     completedAt: now,
     flowSteps: task.flowSteps,
+    spans: sealRunningSpans(task.spans, relativeEnd),
+    originMs: task.originMs,
   }
 }
