@@ -37,6 +37,7 @@ export type ProjectOSErrorCode =
   | "ownership_ambiguous"
   | "file_owner_not_found"
   | "local_context_unavailable"
+  | "attachment_unavailable"
   | "diff_apply_unsupported"
   | "diff_scope_violation"
   | "diff_apply_failed"

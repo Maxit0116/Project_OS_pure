@@ -4,11 +4,27 @@ import {
   type ModelExecutionSnapshot,
 } from "../harness/executor-selection.js";
 import type { ExecutorSelection } from "../../contracts/executor-selection.js";
+import {
+  ExecutorResultSchema,
+  ExecutorTaskSchema,
+  type ExecutorInterfaceContract,
+  type ExecutorResult,
+  type ExecutorTask,
+} from "../../contracts/executor-adapter.js";
+import {
+  createScopedHarnessHost,
+  type HarnessHost,
+  type HarnessHostOperations,
+  type NodeExecutorAdapter,
+} from "../harness/executor-adapter.js";
+import { ProjectOSModelExecutor } from "../harness/project-os-model-executor.js";
+import { ExecutorRegistry } from "../harness/executor-registry.js";
 import type { RequestIntent } from "../../contracts/request-intent.js";
+import { createHash } from "node:crypto";
 import { mkdirSync, appendFileSync, readFileSync } from "node:fs";
 import { z } from "zod";
 
-import type { AgentRun } from "../../contracts/agent-run.js";
+import type { AgentRun, AgentRunStatus } from "../../contracts/agent-run.js";
 import type { ContextAssemblyOmissionReason } from "../../contracts/context-assembly.js";
 import {
   HierarchyDelegationPlanSchema,
@@ -78,16 +94,16 @@ import {
   type GreenfieldInitializationTranche,
   type GreenfieldProductGraphProposal,
 } from "../../contracts/greenfield-initialization-plan.js";
-import type {
-  AgentProfile,
-  ChangeExecutionPolicy,
-  ModelProfile,
-  ThinkingDepth,
+import {
+  modelProfileLabel,
+  type AgentProfile,
+  type ChangeExecutionPolicy,
+  type ModelProfile,
+  type ThinkingDepth,
 } from "../../contracts/settings.js";
 import type {
   ModelGatewayRequest,
   ModelGatewayResponse,
-  ModelToolDefinition,
 } from "../../contracts/model-gateway.js";
 import { AgentRunSchema } from "../../contracts/agent-run.js";
 import { GeneratedDiffSchema } from "../../contracts/diff.js";
@@ -187,6 +203,14 @@ export interface OrchestratorRunState {
   /** CTX-0 record for this run. Hashes only. */
   contextAssembly?: ContextAssembly;
   approvedIntent?: RequestIntent;
+  interfaceContracts?: ExecutorInterfaceContract[];
+  /**
+   * Set when this run is dispatched through a registered `NodeExecutorAdapter`
+   * instead of Project OS's built-in model loop. Children inherit it.
+   */
+  runtimeExecutor?: { executorId: string; label: string };
+  /** Independent validator for a runtime run's proposal, fixed on the approved intent. */
+  validatorExecution?: ModelExecutionSnapshot;
   userPrompt?: string;
   validationResult?: AgentProposalValidationResult;
   validatedDiffJson?: string;
@@ -207,7 +231,12 @@ export interface OrchestratorRunState {
 export interface CreateOrchestratorRunOptions {
   executorSelection?: ExecutorSelection;
   modelExecution?: ModelExecutionSnapshot;
+  /** Dispatch this run through a registered adapter. Exclusive with a model binding. */
+  runtimeExecutor?: { executorId: string; label?: string };
+  /** Validator model for a runtime run. Without one the run's proposal stays review-only. */
+  validatorExecution?: ModelExecutionSnapshot;
   approvedIntent?: RequestIntent;
+  interfaceContracts?: ExecutorInterfaceContract[];
   runId?: string;
   localContext?: AgentContextBundle | CreateFileContextBundle;
   executionPolicy?: ChangeExecutionPolicy;
@@ -295,6 +324,9 @@ function resolveRunMemoryIndex(
       truncated: options.memoryIndexTruncated ?? false,
       entryCount: options.memoryIndexEntryCount
         ?? (markdown.trim() ? markdown.split("\n").filter((line) => line.trim()).length : 0),
+
+      // Caller-supplied markdown is injected verbatim; no stale entries are filtered.
+      skippedStaleCount: 0,
     };
   }
   if (options.parentRunId) {
@@ -467,6 +499,8 @@ export interface AutomaticLeafExecutionDependency {
 export interface AgentOrchestratorOptions {
   gateway: ModelGateway;
   settingsService: SettingsService;
+  /** Adapters a run may be dispatched to. Defaults to an empty registry. */
+  executors?: ExecutorRegistry;
   eventPersistence?: AgentRunEventPersistence;
   validateGeneratedDiffScope: (runId: string, diff: GeneratedDiff) => void;
   automaticLeafExecution?: AutomaticLeafExecutionDependency;
@@ -499,7 +533,7 @@ export interface AgentOrchestratorOptions {
 export interface MemoryProposalRunSnapshot {
   runId: string;
   parentRunId?: string;
-  runStatus: "complete" | "error" | "cancelled" | "queued" | "running" | "awaiting_review";
+  runStatus: AgentRunStatus;
   userPrompt: string;
   understood: string;
   usedMcp: boolean;
@@ -591,46 +625,83 @@ const FileEditPlanSchema = z.object({
 
 type FileEditPlan = z.infer<typeof FileEditPlanSchema>;
 
+const ModelTaskInterfaceContractSchema = z.object({
+  contractId: z.string().trim().min(1).max(120),
+  producerTaskKey: z.string().trim().min(1).max(120),
+  consumerTaskKeys: z.array(z.string().trim().min(1).max(120)).min(1),
+  identity: z.object({
+    kind: z.enum(["symbol", "endpoint", "message"]),
+    name: z.string().trim().min(1).max(240),
+  }).strict(),
+  behavior: z.string().trim().min(1).max(1_000),
+  units: z.string().trim().min(1).max(300).optional(),
+  failureSemantics: z.string().trim().min(1).max(1_000),
+  acceptanceExamples: z.array(z.object({ input: z.string().max(2_000), expected: z.string().max(2_000) }).strict()).min(1).max(8),
+}).strict();
+
+const ModelDelegationTaskBaseSchema = z.object({
+  path: z.string().min(1),
+  operation: z.enum(["create", "delete"]).optional(),
+  responsibility: z.string().trim().min(1).max(500).optional(),
+  objective: z.string().trim().min(1).max(2_000),
+  acceptanceCriteria: z.array(z.string().trim().min(1).max(500)).min(1).max(12),
+}).strict();
+
+function refineModelDelegationTask(
+  task: z.infer<typeof ModelDelegationTaskBaseSchema>,
+  ctx: z.RefinementCtx,
+): void {
+  if (task.operation === "create" && !task.responsibility) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["responsibility"],
+      message: "Create tasks require a responsibility",
+    });
+  }
+  if (task.operation !== "create" && task.responsibility) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["responsibility"],
+      message: "Modify tasks cannot include a create responsibility",
+    });
+  }
+}
+
+const ModelDelegationTaskSchema = ModelDelegationTaskBaseSchema.superRefine(refineModelDelegationTask);
+
 const ModelDelegationPlanSchema = z.object({
   objective: z.string().trim().min(1).max(2_000),
-  tasks: z.array(z.object({
-    path: z.string().min(1),
-    operation: z.enum(["create", "delete"]).optional(),
-    responsibility: z.string().trim().min(1).max(500).optional(),
-    objective: z.string().trim().min(1).max(2_000),
-    acceptanceCriteria: z.array(z.string().trim().min(1).max(500)).min(1).max(12),
-  }).strict().superRefine((task, ctx) => {
-    if (task.operation === "create" && !task.responsibility) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["responsibility"],
-        message: "Create tasks require a responsibility",
-      });
-    }
-    if (task.operation !== "create" && task.responsibility) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["responsibility"],
-        message: "Modify tasks cannot include a create responsibility",
-      });
-    }
-  })).min(1).max(8),
+  tasks: z.array(ModelDelegationTaskSchema).min(1).max(8),
   rationale: z.string().trim().min(1).max(2_000),
 }).strict();
 
 type ModelDelegationPlan = z.infer<typeof ModelDelegationPlanSchema>;
 
-const ModelHierarchyPlannerPlanSchema = z.object({
+const ModelHierarchyLeafPlanSchema = z.object({
   objective: z.string().trim().min(1).max(2_000),
-  tasks: z.array(z.object({
-    nodeId: z.string().min(1),
-    objective: z.string().trim().min(1).max(2_000),
-    acceptanceCriteria: z.array(z.string().trim().min(1).max(500)).min(1).max(12),
-  }).strict()).min(1).max(8),
+  tasks: z.array(ModelDelegationTaskBaseSchema.extend({
+    taskKey: z.string().trim().min(1).max(120).optional(),
+    dependencyTaskKeys: z.array(z.string().trim().min(1).max(120)).default([]),
+    interfaceContractIds: z.array(z.string().trim().min(1).max(120)).default([]),
+  }).superRefine(refineModelDelegationTask)).min(1).max(8),
+  contracts: z.array(ModelTaskInterfaceContractSchema).default([]),
   rationale: z.string().trim().min(1).max(2_000),
 }).strict();
 
-const ModelHierarchyLeafPlanSchema = ModelDelegationPlanSchema;
+const ModelHierarchyPlannerPlanSchema = z.object({
+  objective: z.string().trim().min(1).max(2_000),
+  tasks: z.array(z.object({
+    taskKey: z.string().trim().min(1).max(120).optional(),
+    nodeId: z.string().min(1),
+    dependencyTaskKeys: z.array(z.string().trim().min(1).max(120)).default([]),
+    interfaceContractIds: z.array(z.string().trim().min(1).max(120)).default([]),
+    objective: z.string().trim().min(1).max(2_000),
+    acceptanceCriteria: z.array(z.string().trim().min(1).max(500)).min(1).max(12),
+  }).strict()).min(1).max(8),
+  contracts: z.array(ModelTaskInterfaceContractSchema).default([]),
+  rationale: z.string().trim().min(1).max(2_000),
+}).strict();
+
 
 const ModelBatchValidationSchema = z.object({
   verdict: z.enum(["valid", "invalid"]),
@@ -772,6 +843,7 @@ interface HierarchyExpansionReservation {
 export class AgentOrchestrator {
   private readonly gateway: ModelGateway;
   private readonly settingsService: SettingsService;
+  private readonly executors: ExecutorRegistry;
   private readonly eventPersistence: AgentRunEventPersistence;
   private readonly validateGeneratedDiffScope: (
     runId: string,
@@ -809,6 +881,7 @@ export class AgentOrchestrator {
   constructor(options: AgentOrchestratorOptions) {
     this.gateway = options.gateway;
     this.settingsService = options.settingsService;
+    this.executors = options.executors ?? new ExecutorRegistry();
     this.eventPersistence = options.eventPersistence ?? "filesystem";
     this.validateGeneratedDiffScope = options.validateGeneratedDiffScope;
     this.automaticLeafExecution = options.automaticLeafExecution;
@@ -856,12 +929,21 @@ export class AgentOrchestrator {
       settings.execution.defaultModelProfileId ||
       settings.modelProfiles.find((profile) => profile.isDefault)?.id ||
       settings.modelProfiles[0]?.id;
-    const modelExecution = cloneJson(
-      inherited ??
-        options.modelExecution ??
-        resolveModelExecution(settings, options.executorSelection, fallbackProfileId) ??
-        null,
-    );
+    const runtimeExecutor = this.resolveRuntimeBinding(parent, options);
+    if (runtimeExecutor && !approvedIntent) {
+      throw new ProjectOSError(
+        "diff_scope_violation",
+        "A runtime executor may only run under an approved request intent",
+      );
+    }
+    const modelExecution = runtimeExecutor
+      ? null
+      : cloneJson(
+        inherited ??
+          options.modelExecution ??
+          resolveModelExecution(settings, options.executorSelection, fallbackProfileId) ??
+          null,
+      );
     const modelProfile = modelExecution?.profile;
 
     const harnessMode = kind === "debug_fix" ? "debug" : "change";
@@ -952,7 +1034,22 @@ export class AgentOrchestrator {
       ...(options.parentRunId ? { parentRunId: options.parentRunId } : {}),
       ...(options.rootRunId ? { rootRunId: options.rootRunId } : {}),
       role,
-      ...(modelExecution ? { executor: runExecutorMetadata(modelExecution) } : {}),
+      ...(runtimeExecutor
+        ? {
+            executor: {
+              kind: "runtime" as const,
+              executorId: runtimeExecutor.executorId,
+              runtimeProfileId: runtimeExecutor.executorId,
+              label: runtimeExecutor.label,
+              thinkingDepth: runtimeThinkingDepth(
+                this.executors.resolve(runtimeExecutor.executorId)?.describe().thinkingDepths ?? [],
+                settings.execution.thinkingDepth ?? "medium",
+              ),
+            },
+          }
+        : modelExecution
+          ? { executor: runExecutorMetadata(modelExecution) }
+          : {}),
       ...(approvedIntent ? { approvedIntent: {
         intentId: approvedIntent.id,
         revision: approvedIntent.revision,
@@ -973,8 +1070,17 @@ export class AgentOrchestrator {
       memoryInjection,
       contextAssembly: assembled.assembly,
       ...(approvedIntent ? { approvedIntent: cloneJson(approvedIntent) } : {}),
+      ...(options.interfaceContracts ? { interfaceContracts: cloneJson(options.interfaceContracts) } : {}),
       ...(appendix?.markdown ? { taskAppendix: appendix.markdown } : {}),
       ...(options.userPrompt ? { userPrompt: options.userPrompt } : {}),
+      ...(runtimeExecutor ? { runtimeExecutor } : {}),
+      ...(runtimeExecutor
+        ? parent?.validatorExecution
+          ? { validatorExecution: cloneJson(parent.validatorExecution) }
+          : options.validatorExecution
+            ? { validatorExecution: cloneJson(options.validatorExecution) }
+            : {}
+        : {}),
       ...(modelProfile ? { modelProfile } : {}),
       ...(options.localContext && isNodeContextBundle(options.localContext)
         ? { nodeContext: cloneJson(options.localContext) }
@@ -1511,12 +1617,26 @@ export class AgentOrchestrator {
     state.pipelineStartedAt = Date.now();
     this.emit(workspace, state, createEvent(runId, "run_started"));
 
+    if (state.runtimeExecutor) {
+      try {
+        await this.runRuntimeExecutorTask(workspace, state, state.runtimeExecutor);
+      } catch (error) {
+        // A cancelled or interrupted run keeps the status that cancellation set.
+        if (!(error instanceof AgentRunCancelledError) && state.run.status === "running") {
+          state.status = "error";
+          state.run.status = "error";
+        }
+        throw error;
+      }
+      return;
+    }
+
     if (state.modelProfile) {
       try {
-        if (state.run.scope?.kind === "node-plan") {
-          await this.runNodePlanningPipeline(workspace, state);
-        } else if (isHierarchyPlannerScope(state.run.scope)) {
+        if (isHierarchyPlannerScope(state.run.scope)) {
           await this.runHierarchyPlanningPipeline(workspace, state);
+        } else if (state.run.scope?.kind === "node-plan") {
+          await this.runNodePlanningPipeline(workspace, state);
         } else if (state.run.scope?.kind === "leaf-create") {
           await this.runLiveModelCreatePipeline(workspace, state);
         } else if (state.run.scope?.kind === "leaf-delete") {
@@ -1637,6 +1757,473 @@ export class AgentOrchestrator {
       }
       throw error;
     }
+  }
+
+  /**
+   * Resolve which registered adapter, if any, runs this task. A child always
+   * inherits its parent's binding, so a task tree uses one executor.
+   */
+  private resolveRuntimeBinding(
+    parent: OrchestratorRunState | undefined,
+    options: CreateOrchestratorRunOptions,
+  ): { executorId: string; label: string } | undefined {
+    const requested = parent ? parent.runtimeExecutor : options.runtimeExecutor;
+    if (!requested) return undefined;
+    if (!parent && (options.modelExecution || options.executorSelection)) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        "A run cannot bind both a model and a runtime executor",
+      );
+    }
+    const adapter = this.executors.resolve(requested.executorId);
+    if (!adapter) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        `Executor '${requested.executorId}' is not registered`,
+      );
+    }
+    return { executorId: adapter.id, label: requested.label ?? adapter.id };
+  }
+
+  /**
+   * Run one leaf task through a registered `NodeExecutorAdapter`.
+   *
+   * The adapter sees the project only through the task-scoped host: reads are
+   * limited to the task's allowed paths and a proposal is staged only after the
+   * server's scope check accepts it. The orchestrator stays the scheduler. A
+   * runtime proposal has no independent validation yet, so the run stops at
+   * review and `requireValidatedProposal` keeps refusing to apply it.
+   */
+  private async runRuntimeExecutorTask(
+    workspace: LoadedProjectOSWorkspace,
+    state: OrchestratorRunState,
+    binding: { executorId: string; label: string },
+  ): Promise<void> {
+    const runId = state.run.runId;
+    const step = createLiveRunningStep(state, "generate_proposal");
+    this.emit(workspace, state, createEvent(runId, "step_started", step));
+    const closed = { failed: false };
+    const fail = (message: string): never => {
+      const error = new ProjectOSError("agent_orchestration_failed", message);
+      closed.failed = true;
+      this.emitFailedStep(workspace, state, step, error);
+      throw error;
+    };
+    try {
+      await this.runRuntimeExecutorStep(workspace, state, binding, step, fail);
+    } catch (error) {
+      // An adapter that throws must not leave its step open; a cancellation keeps
+      // the status the cancel set.
+      if (!closed.failed && !(error instanceof AgentRunCancelledError)) {
+        this.emitFailedStep(workspace, state, step, error);
+      }
+      throw error;
+    }
+  }
+
+  private async runRuntimeExecutorStep(
+    workspace: LoadedProjectOSWorkspace,
+    state: OrchestratorRunState,
+    binding: { executorId: string; label: string },
+    step: AgentFlowStep,
+    fail: (message: string) => never,
+  ): Promise<void> {
+    const runId = state.run.runId;
+    const adapter = this.executors.resolve(binding.executorId);
+    if (!adapter) return fail(`Executor '${binding.executorId}' is not registered`);
+    const bundle = state.localContext;
+    if (state.run.scope.kind !== "leaf-file" || !bundle) {
+      return fail(`Executor '${binding.label}' cannot run '${state.run.scope.kind}' tasks yet`);
+    }
+    const mode = state.run.kind === "debug_fix" ? "debug" : "change";
+    const capabilities = adapter.describe();
+    if (!capabilities.roles.includes("leaf") || !capabilities.modes.includes(mode) || !capabilities.proposalExport) {
+      return fail(`Executor '${binding.label}' does not support ${mode} proposals for a file`);
+    }
+
+    const task = this.buildLeafTask(workspace, state, `runtime:${binding.executorId}`, mode);
+    const staged: StagedProposal = { diff: undefined };
+    const operations = this.leafHostOperations(workspace, state, step.id, staged);
+    const { result, progress } = await this.runAdapterTask(
+      state,
+      adapter,
+      task,
+      createScopedHarnessHost(task, operations),
+      binding.label,
+    );
+    if ("taskId" in result && result.taskId !== task.taskId) {
+      return fail(`Executor '${binding.label}' answered for another task`);
+    }
+
+    switch (result.outcome) {
+      case "completed":
+        break;
+      case "failed":
+        return fail(result.reason || "Executor failed without a reason");
+      case "cancelled":
+        return fail(`Executor cancelled the task: ${result.reason || "no reason given"}`);
+      default:
+        return fail(
+          `Executor '${binding.label}' returned '${result.outcome}', which this path does not support yet`,
+        );
+    }
+
+    // Only the proposal that passed the server's scope check is ever used.
+    const diff = staged.diff;
+    if (!diff) return fail("Executor completed without submitting a proposal");
+    if (result.proposal && canonicalDiffJson(result.proposal.diff) !== canonicalDiffJson(diff)) {
+      return fail("Executor returned a proposal different from the one it staged");
+    }
+    state.diff = diff;
+    this.emitDiffProposed(workspace, state, diff, step.id);
+    this.emit(
+      workspace,
+      state,
+      createEvent(
+        runId,
+        "step_completed",
+        completeStep(
+          step,
+          progress
+            ? `${binding.label}: ${progress}`
+            : `${binding.label} proposed changes to ${diff.files.map((file) => file.path).join(", ")}.`,
+        ),
+      ),
+    );
+
+    // A proposal is applicable only after an independent model has accepted it. The
+    // executor never validates its own work, and a dev stand-in is never applicable.
+    const reviewOnlyReason = await this.validateRuntimeProposal(workspace, state, adapter, binding.label, diff);
+    this.emit(
+      workspace,
+      state,
+      createEvent(runId, "diff_ready", undefined, {
+        fileCount: diff.files.length,
+        paths: diff.files.map((file) => file.path),
+        ...(reviewOnlyReason ? { reviewOnly: true, reviewOnlyReason } : {}),
+      }),
+    );
+    this.emit(workspace, state, createActionEvent(runId, "verification_result", { status: "not_run" }));
+    this.emit(workspace, state, createEvent(runId, "verification_completed", undefined, { status: "not_run" }));
+    state.run.status = "awaiting_review";
+    state.status = "complete";
+    state.run.completedAt = new Date().toISOString();
+    this.emit(
+      workspace,
+      state,
+      createEvent(runId, "run_completed", undefined, { executionPolicy: "review_first" }),
+    );
+  }
+
+  /**
+   * Validate a runtime proposal with the validator model fixed on the approved intent.
+   * Returns why the proposal stays review-only, or undefined once validation accepted it.
+   * An invalid verdict fails the run: a runtime executor is not restarted with feedback.
+   */
+  private async validateRuntimeProposal(
+    workspace: LoadedProjectOSWorkspace,
+    state: OrchestratorRunState,
+    adapter: NodeExecutorAdapter,
+    label: string,
+    diff: GeneratedDiff,
+  ): Promise<string | undefined> {
+    if (adapter.devOnly) {
+      return `${label} is a development stand-in, so its proposal can be reviewed but never applied.`;
+    }
+    const validator = state.validatorExecution;
+    const intent = state.approvedIntent;
+    const path = state.localContext?.scope.selectedFilePath;
+    if (!validator || !intent || !path) {
+      return "No validator model was chosen for this request, so this proposal can be reviewed but not applied. Configure a model profile and request the change again to have it validated.";
+    }
+    const plan: FileEditPlan = {
+      path,
+      objective: intent.goal.slice(0, 2_000),
+      targetDescription: `Apply the approved request to ${path}`,
+      anchors: [path],
+      constraints: intent.outOfScope.slice(0, 12).map((item) => item.slice(0, 500).trim()).filter(Boolean),
+      acceptanceCriteria: intent.acceptance.slice(0, 12).map((item) => item.slice(0, 500).trim()).filter(Boolean),
+      rationale: `Proposed by ${label}; judged only against the approved intent.`,
+      changeRequired: true,
+    };
+    const validateStep = createLiveRunningStep(state, "validate_proposal");
+    this.emit(workspace, state, createEvent(state.run.runId, "step_started", validateStep));
+    try {
+      // The executor's free-text summary is never shown to the validator.
+      const judged: GeneratedDiff = { ...diff, summary: `Proposed change to ${path}` };
+      const result = await this.validateProposal(workspace, state, plan, judged, validateStep.id, validator);
+      state.validationResult = result;
+      state.validatedDiffJson = JSON.stringify(diff);
+      this.emit(
+        workspace,
+        state,
+        createEvent(
+          state.run.runId,
+          "step_completed",
+          completeStep(validateStep, `Independent validation accepted the proposal for ${result.path}.`),
+        ),
+      );
+      return undefined;
+    } catch (error) {
+      if (!(error instanceof AgentRunCancelledError)) this.emitFailedStep(workspace, state, validateStep, error);
+      throw error;
+    }
+  }
+
+  /** The task an adapter is given for this leaf-file run. */
+  private buildLeafTask(
+    workspace: LoadedProjectOSWorkspace,
+    state: OrchestratorRunState,
+    executorBindingId: string,
+    mode: "change" | "debug",
+    overrides: { objective?: string; acceptanceCriteria?: string[] } = {},
+  ): ExecutorTask {
+    const runId = state.run.runId;
+    const bundle = state.localContext!;
+    // A hierarchy child is identified by its qualified plan task id, which is what the
+    // interface contracts name; any other run is its own task.
+    const parent = state.run.parentRunId ? this.runs.get(state.run.parentRunId) : undefined;
+    const planned = parent?.delegatedHierarchyChildren?.find((child) => child.runId === runId);
+    const planId = parent?.hierarchyPlan?.planId;
+    const taskId = planned && planId
+      ? (planned.taskId.startsWith(`${planId}:`) ? planned.taskId : `${planId}:${planned.taskId}`)
+      : runId;
+    const contracts = (state.interfaceContracts ?? []).filter((contract) =>
+      contract.producerTaskId === taskId || contract.consumerTaskIds.includes(taskId));
+    return ExecutorTaskSchema.parse({
+      taskId,
+      runId,
+      ...(state.run.parentRunId ? { parentTaskId: state.run.parentRunId } : {}),
+      rootRunId: state.run.rootRunId ?? runId,
+      projectId: workspace.project.projectId,
+      executorBindingId,
+      scope: state.run.scope,
+      mode,
+      role: "leaf",
+      objective: overrides.objective?.trim() ||
+        state.approvedIntent?.goal.trim() ||
+        (state.userPrompt ?? "").trim() ||
+        state.refinement.understood.trim() ||
+        "Complete the requested change",
+      dependencyTaskIds: [],
+      acceptanceCriteria: overrides.acceptanceCriteria ?? [...(state.approvedIntent?.acceptance ?? [])],
+      interfaceContractIds: contracts.map((contract) => contract.contractId),
+      interfaceContracts: contracts,
+      contextBundleHash: bundle.bundleHash,
+      allowedReadPaths: [...bundle.allowedReadPaths],
+      allowedWritePaths: [...bundle.allowedWritePaths],
+    });
+  }
+
+  /**
+   * The server side of the harness host for one leaf task. Reads are limited to the task's
+   * paths; a proposal is staged only after the server's scope check and only if it starts
+   * from the file the task was given (the executor's own `before` is never trusted).
+   */
+  private leafHostOperations(
+    workspace: LoadedProjectOSWorkspace,
+    state: OrchestratorRunState,
+    stepId: string,
+    staged: StagedProposal,
+  ): HarnessHostOperations {
+    const runId = state.run.runId;
+    const bundle = state.localContext!;
+    const unsupported = (operation: string): never => {
+      throw new ProjectOSError(
+        "not_implemented",
+        `Host operation '${operation}' is not available to a leaf task yet`,
+      );
+    };
+    return {
+      // Inspecting a node would return file contents beyond this task's read paths, so it
+      // stays unavailable until a read-scoped projection exists. Structure alone is safe.
+      inspectNode: async () => unsupported("inspect_node"),
+      listChildren: async (_task, nodeId, cursor) => {
+        this.assertRunActive(state);
+        this.assertNodeWithinTask(workspace, state, nodeId);
+        const children = workspace.graph.nodes
+          .filter((node) => node.parentId === nodeId)
+          .map((node) => node.id);
+        const start = cursor === undefined ? 0 : Number(cursor);
+        if (!Number.isInteger(start) || start < 0 || start > children.length) {
+          throw new ProjectOSError("agent_orchestration_failed", "Invalid child listing cursor");
+        }
+        const end = Math.min(children.length, start + HOST_CHILD_PAGE_SIZE);
+        return {
+          nodeIds: children.slice(start, end),
+          totalCount: children.length,
+          ...(end < children.length ? { nextCursor: String(end) } : {}),
+        };
+      },
+      consultNode: async () => unsupported("consult_node"),
+      delegate: async () => unsupported("delegate"),
+      requestDecision: async () => unsupported("request_decision"),
+      readSource: async (_task, path) => {
+        this.assertRunActive(state);
+        const content = this.readWorkspaceFile(workspace, state, path, stepId);
+        if (content === undefined) {
+          throw new ProjectOSError("agent_orchestration_failed", `Could not read '${path}'`);
+        }
+        return {
+          path,
+          sha256: `sha256:${createHash("sha256").update(content).digest("hex")}`,
+          content,
+        };
+      },
+      submitProposal: async (_task, proposal) => {
+        this.assertRunActive(state);
+        if (staged.diff) return { accepted: false, reason: "A proposal is already staged for this task" };
+        try {
+          this.validateGeneratedDiffScope(runId, proposal.diff);
+        } catch (error) {
+          staged.scopeError = error;
+          return { accepted: false, reason: sanitizeErrorMessage(error) };
+        }
+        for (const file of proposal.diff.files) {
+          if (file.changeType !== "modify") continue;
+          if (file.before === undefined || file.after === undefined) {
+            return { accepted: false, reason: `Proposal for '${file.path}' must include its full before and after content` };
+          }
+          const snapshot = bundle.fileManifest.find((entry) => entry.path === file.path)?.content ??
+            this.readWorkspaceFile(workspace, state, file.path, stepId);
+          if (snapshot === undefined || file.before !== snapshot) {
+            return { accepted: false, reason: `Proposal for '${file.path}' does not start from the file the task was given` };
+          }
+        }
+        staged.diff = cloneJson(proposal.diff);
+        return { accepted: true };
+      },
+    };
+  }
+
+  /** A task may look at its own node and the nodes beneath it, nothing else. */
+  private assertNodeWithinTask(
+    workspace: LoadedProjectOSWorkspace,
+    state: OrchestratorRunState,
+    nodeId: string,
+  ): void {
+    const scope = state.run.scope;
+    const rootId = scope && "nodeId" in scope ? scope.nodeId : undefined;
+    const byId = new Map(workspace.graph.nodes.map((node) => [node.id, node] as const));
+    let current = byId.get(nodeId);
+    for (let depth = 0; current && depth < 64; depth += 1) {
+      if (current.id === rootId) return;
+      current = current.parentId ? byId.get(current.parentId) : undefined;
+    }
+    throw new ProjectOSError(
+      "diff_scope_violation",
+      `Node '${nodeId}' is outside this task's subtree`,
+    );
+  }
+
+  /**
+   * Start an adapter and wait for its result. The wait is bounded by the run's remaining
+   * wall-clock budget and by cancellation, so an adapter that ignores `cancel` cannot hold
+   * the run open, and the result is parsed rather than trusted.
+   */
+  private async runAdapterTask(
+    state: OrchestratorRunState,
+    adapter: NodeExecutorAdapter,
+    task: ExecutorTask,
+    host: HarnessHost,
+    label: string,
+    /** False for the in-process model: its gateway calls already enforce the run's remaining budget. */
+    options: { enforceDeadline: boolean } = { enforceDeadline: true },
+  ): Promise<{ result: ExecutorResult; progress: string | undefined }> {
+    const runId = state.run.runId;
+    this.assertRunActive(state);
+    const handle = await adapter.start(task, host);
+    const controller = this.runAbortControllers.get(runId);
+    const onAbort = () => {
+      void handle.cancel("Run was cancelled").catch(() => undefined);
+    };
+    controller?.signal.addEventListener("abort", onAbort, { once: true });
+    if (controller?.signal.aborted) onAbort();
+
+    const progress: { last: string | undefined } = { last: undefined };
+    const drainEvents = (async () => {
+      for await (const event of handle.events) {
+        if (event.type === "progress") progress.last = event.message;
+      }
+    })().catch(() => undefined);
+    const remainingMs = Math.max(
+      0,
+      this.pipelineBudget.maxWallClockMs - (Date.now() - (state.pipelineStartedAt ?? Date.now())),
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_resolve, reject) => {
+      if (!options.enforceDeadline) return;
+      timer = setTimeout(() => {
+        void handle.cancel("Run time budget exceeded").catch(() => undefined);
+        reject(new ProjectOSError(
+          "pipeline_budget_exceeded",
+          `Executor '${label}' did not finish within the run's time budget`,
+          { details: { reason: "wall_clock" } },
+        ));
+      }, remainingMs);
+    });
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      const rejectCancelled = () => reject(new AgentRunCancelledError(runId));
+      controller?.signal.addEventListener("abort", rejectCancelled, { once: true });
+      if (controller?.signal.aborted) rejectCancelled();
+    });
+    const settled = Promise.resolve(handle.result);
+    settled.catch(() => undefined);
+    try {
+      const result = ExecutorResultSchema.parse(await Promise.race([settled, timedOut, cancelled]));
+      await Promise.race([drainEvents, new Promise((resolve) => setTimeout(resolve, 1_000))]);
+      this.assertRunActive(state);
+      return { result, progress: progress.last };
+    } finally {
+      clearTimeout(timer);
+      controller?.signal.removeEventListener("abort", onAbort);
+    }
+  }
+
+  /**
+   * Produce the built-in model's proposal for a located edit through the same harness path a
+   * runtime executor uses: a task, the scoped host, and the server's staging checks. Locate,
+   * validate and regenerate stay in the pipeline that calls this.
+   */
+  private async proposeThroughHarness(
+    workspace: LoadedProjectOSWorkspace,
+    state: OrchestratorRunState,
+    plan: FileEditPlan,
+    stepId: string,
+    feedback: { summary: string; rationale: string; scopeStatus: string } | undefined,
+  ): Promise<GeneratedDiff> {
+    const profile = state.modelProfile!;
+    const adapter = new ProjectOSModelExecutor(() =>
+      this.generateDiff(workspace, state, [], plan, stepId, feedback));
+    const mode = state.run.kind === "debug_fix" ? "debug" : "change";
+    const task = this.buildLeafTask(workspace, state, `model:${profile.id}`, mode, {
+      objective: plan.objective,
+      acceptanceCriteria: plan.acceptanceCriteria,
+    });
+    const staged: StagedProposal = { diff: undefined };
+    const operations = this.leafHostOperations(workspace, state, stepId, staged);
+    const { result } = await this.runAdapterTask(
+      state,
+      adapter,
+      task,
+      createScopedHarnessHost(task, operations),
+      modelProfileLabel(profile),
+      { enforceDeadline: false },
+    );
+    // Preserve the generator's own error (budget, scope, malformed output) for the pipeline.
+    const failure = adapter.takeError();
+    if (failure !== undefined) throw failure;
+    if (staged.scopeError !== undefined) throw staged.scopeError;
+    if (result.outcome !== "completed" || !staged.diff) {
+      throw new ProjectOSError(
+        "diff_scope_violation",
+        result.outcome === "failed" && result.reason
+          ? result.reason
+          : "The model's proposal was not accepted by the harness",
+        { details: { runId: state.run.runId } },
+      );
+    }
+    return staged.diff;
   }
 
   private async runNodePlanningPipeline(
@@ -1822,25 +2409,12 @@ export class AgentOrchestrator {
           reason: "child_failure",
         }),
       );
-      if (completed.length === 0) {
-        const error = new ProjectOSError(
-          "agent_orchestration_failed",
-          "One or more delegated file runs failed; no files were applied",
-        );
-        this.emitFailedStep(workspace, state, delegateStep, error);
-        throw error;
-      }
-      children = children.filter((child) =>
-        completed.some((result) => result.runId === child.runId),
+      const error = new ProjectOSError(
+        "agent_orchestration_failed",
+        "A delegated file task failed; the complete request remains unapplied",
       );
-      plan = {
-        ...plan,
-        tasks: plan.tasks.filter((task) =>
-          children.some((child) => child.taskId === task.taskId),
-        ),
-      };
-      state.delegatedChildren = children;
-      state.delegationPlan = plan;
+      this.emitFailedStep(workspace, state, delegateStep, error);
+      throw error;
     }
 
     this.emit(
@@ -1979,7 +2553,15 @@ export class AgentOrchestrator {
       if ("tranches" in plan) state.greenfieldPlan = plan;
       else if ("rootNodeId" in plan) state.nodeDeletionPlan = plan;
       else if (plan.version === "0.1.0") state.nodeScaffoldPlan = plan;
-      else state.hierarchyPlan = plan;
+      else {
+        state.hierarchyPlan = plan;
+        state.interfaceContracts = [
+          ...new Map(
+            [...(state.interfaceContracts ?? []), ...(plan.contracts ?? [])]
+              .map((contract) => [contract.contractId, contract] as const),
+          ).values(),
+        ];
+      }
       this.emit(
         workspace,
         state,
@@ -2073,7 +2655,7 @@ export class AgentOrchestrator {
       throw error;
     }
 
-    const results = await Promise.all(children.map(async (child) => {
+    const runHierarchyChild = async (child: DelegatedHierarchyRun) => {
       this.emit(
         workspace,
         state,
@@ -2126,7 +2708,50 @@ export class AgentOrchestrator {
         );
         return { ...child, ok: false as const };
       }
-    }));
+    };
+    const childrenByTaskId = new Map(children.map((child) => [child.taskId, child]));
+    const pendingTaskIds = new Set(children.map((child) => child.taskId));
+    const resultsByTaskId = new Map<string, Awaited<ReturnType<typeof runHierarchyChild>>>();
+    while (pendingTaskIds.size > 0) {
+      const blockedTaskIds = [...pendingTaskIds].filter((taskId) => {
+        const task = plan.tasks.find((candidate) => candidate.taskId === taskId)!;
+        return (task.dependencyTaskIds ?? []).some((dependencyId) => resultsByTaskId.get(dependencyId)?.ok === false);
+      });
+      for (const taskId of blockedTaskIds) {
+        pendingTaskIds.delete(taskId);
+        const child = childrenByTaskId.get(taskId)!;
+        this.emit(
+          workspace,
+          state,
+          createDelegationEvent(state.run.runId, "child_run_completed", {
+            planId: plan.planId,
+            taskId,
+            childRunId: child.runId,
+            status: "blocked",
+            failureCategory: "dependency_failed",
+          }),
+        );
+        resultsByTaskId.set(taskId, { ...child, ok: false as const });
+      }
+      if (pendingTaskIds.size === 0) break;
+
+      const readyTaskIds = [...pendingTaskIds].filter((taskId) => {
+        const task = plan.tasks.find((candidate) => candidate.taskId === taskId)!;
+        return (task.dependencyTaskIds ?? []).every((dependencyId) => resultsByTaskId.get(dependencyId)?.ok === true);
+      });
+      if (readyTaskIds.length === 0) {
+        throw new ProjectOSError("agent_orchestration_failed", "Delegation dependencies are cyclic or unresolved");
+      }
+      const batch = await Promise.all(readyTaskIds.map(async (taskId) => ({
+        taskId,
+        result: await runHierarchyChild(childrenByTaskId.get(taskId)!),
+      })));
+      for (const { taskId, result } of batch) {
+        pendingTaskIds.delete(taskId);
+        resultsByTaskId.set(taskId, result);
+      }
+    }
+    const results = children.map((child) => resultsByTaskId.get(child.taskId) ?? { ...child, ok: false as const });
     const failed = results.filter((result) => !result.ok);
     if (failed.length > 0) {
       this.emit(
@@ -2592,13 +3217,47 @@ export class AgentOrchestrator {
         ) {
           throw new DelegationPlanError("invalid_plan_shape");
         }
+        const taskKeys = proposed.tasks.map((task, index) => task.taskKey ?? `task_key_${index + 1}`);
+        if (new Set(taskKeys).size !== taskKeys.length) {
+          throw new DelegationPlanError("invalid_plan_shape");
+        }
+        const planId = `plan_${crypto.randomUUID()}`;
+        const taskIdByKey = new Map(taskKeys.map((key, index) => [key, `${planId}:task_${index + 1}`]));
+        const contractIdByKey = new Map(proposed.contracts.map((contract) => [
+          contract.contractId,
+          `${planId}:${contract.contractId}`,
+        ]));
+        const resolveTaskId = (key: string): string => {
+          const taskId = taskIdByKey.get(key);
+          if (!taskId) throw new DelegationPlanError("invalid_plan_shape");
+          return taskId;
+        };
+        const contracts = proposed.contracts.map((contract) => ({
+          contractId: contractIdByKey.get(contract.contractId)!,
+          producerTaskId: resolveTaskId(contract.producerTaskKey),
+          consumerTaskIds: contract.consumerTaskKeys.map(resolveTaskId),
+          identity: contract.identity,
+          behavior: sanitizeValidationNarrative(contract.behavior, 1_000, "Shared interface behavior"),
+          ...(contract.units ? { units: sanitizeValidationNarrative(contract.units, 300, "Interface units") } : {}),
+          failureSemantics: sanitizeValidationNarrative(contract.failureSemantics, 1_000, "Interface failure behavior"),
+          acceptanceExamples: contract.acceptanceExamples.map((example) => ({
+            input: sanitizeValidationNarrative(example.input, 2_000, "Interface input example"),
+            expected: sanitizeValidationNarrative(example.expected, 2_000, "Interface expected example"),
+          })),
+        }));
         const tasks: HierarchyDelegationTask[] = proposed.tasks.map((task, index) => {
           const common = {
-            taskId: `task_${index + 1}`,
+            taskId: taskIdByKey.get(taskKeys[index]!)!,
             objective: sanitizeValidationNarrative(task.objective, 500, "Scoped delegated change"),
+            dependencyTaskIds: task.dependencyTaskKeys.map(resolveTaskId),
             acceptanceCriteria: task.acceptanceCriteria.map((criterion) =>
               sanitizeValidationNarrative(criterion, 300, "Requested change is present")
             ),
+            interfaceContractIds: task.interfaceContractIds.map((contractId) => {
+              const namespacedId = contractIdByKey.get(contractId);
+              if (!namespacedId) throw new DelegationPlanError("invalid_plan_shape");
+              return namespacedId;
+            }),
           };
           if (target.kind === "leaf-file") {
             if (scope.kind !== "component" || !task.path) {
@@ -2623,13 +3282,14 @@ export class AgentOrchestrator {
         });
         const plan = HierarchyDelegationPlanSchema.parse({
           version: "0.2.0",
-          planId: `plan_${crypto.randomUUID()}`,
+          planId,
           projectId: state.run.projectId,
           parentRunId: state.run.runId,
           parentScope: scope,
           contextHash: hierarchyContextHash(state),
           objective: sanitizeValidationNarrative(proposed.objective, 500, "Scoped graph change"),
           tasks,
+          contracts,
           rationale: sanitizeValidationNarrative(
             proposed.rationale,
             500,
@@ -5071,10 +5731,9 @@ export class AgentOrchestrator {
         createEvent(state.run.runId, "step_started", generateStep),
       );
       try {
-        diff = await this.generateDiff(
+        diff = await this.proposeThroughHarness(
           workspace,
           state,
-          [],
           fileEditPlan,
           generateStep.id,
           validationFeedback,
@@ -6468,8 +7127,11 @@ export class AgentOrchestrator {
     plan: FileEditPlan,
     diff: GeneratedDiff,
     phaseId: string,
+    validator?: ModelExecutionSnapshot,
   ): Promise<AgentProposalValidationResult> {
-    if (!state.modelProfile || !state.localContext) {
+    const validatorProfile = validator?.profile ?? state.modelProfile;
+    const validatorDepth = validator?.thinkingDepth ?? state.thinkingDepth;
+    if (!validatorProfile || !state.localContext) {
       throw new ProjectOSError(
         "agent_orchestration_failed",
         "A model profile and bound local context are required to validate a proposal",
@@ -6500,7 +7162,7 @@ export class AgentOrchestrator {
         {
           projectId: workspace.project.projectId,
           requestKind: "agent_step",
-          modelPreference: state.modelProfile.id,
+          modelPreference: validatorProfile.id,
           systemPrompt: proposalValidationSystemPrompt(
             state.agentProfile.systemPrompt,
             plan.path,
@@ -6529,9 +7191,10 @@ export class AgentOrchestrator {
           },
           redactionPolicy: "secrets_and_paths",
           maxOutputTokens,
-          thinkingDepth: state.thinkingDepth,
+          thinkingDepth: validatorDepth,
         },
         phaseId,
+        validatorProfile,
       );
 
       try {
@@ -6932,8 +7595,10 @@ export class AgentOrchestrator {
       | "validate_batch",
     request: ModelGatewayRequest,
     phaseId?: string,
+    /** The profile to call instead of the run's own, e.g. a runtime run's validator. */
+    profileOverride?: ModelProfile,
   ): Promise<ModelGatewayResponse> {
-    const profile = state.modelProfile;
+    const profile = profileOverride ?? state.modelProfile;
     if (!profile) {
       throw new ProjectOSError(
         "agent_orchestration_failed",
@@ -6946,7 +7611,59 @@ export class AgentOrchestrator {
     try {
       const elapsed = Date.now() - (state.pipelineStartedAt ?? started);
       const abortSignal = this.runAbortControllers.get(state.run.runId)?.signal;
-      const response = await this.gateway.complete(profile, request, {
+      const intent = state.approvedIntent;
+      const inputRecord = request.input && typeof request.input === "object" && !Array.isArray(request.input)
+        ? request.input as Record<string, unknown>
+        : { taskInput: request.input };
+      const includeTaskContext = Boolean(state.interfaceContracts?.length);
+      const modelRequest: ModelGatewayRequest = intent || includeTaskContext
+        ? {
+            ...request,
+            ...(intent ? {
+              systemPrompt: [
+                request.systemPrompt,
+                "Follow approvedIntentContext as the user's approved product scope. Preserve all recorded answers. Do not expand its effects.",
+              ].filter(Boolean).join("\n\n"),
+            } : {}),
+            input: {
+              ...inputRecord,
+              ...(intent ? {
+                approvedIntentContext: {
+                  revision: intent.revision,
+                  approvalHash: intent.approvalHash,
+                  goal: intent.goal,
+                  touches: intent.touches,
+                  structuralEffects: intent.structuralEffects,
+                  assumptions: intent.assumptions,
+                  outOfScope: intent.outOfScope,
+                  acceptance: intent.acceptance,
+                  answers: intent.questions.flatMap((question) => {
+                    if (!question.answer) return [];
+                    const selectedOption = question.options?.find(
+                      (option) => option.id === question.selectedOptionId,
+                    );
+                    return [{
+                      questionId: question.id,
+                      question: question.text,
+                      answer: question.answer,
+                      ...(question.selectedOptionId ? {
+                        selectedOptionId: question.selectedOptionId,
+                        ...(selectedOption ? { selectedOptionLabel: selectedOption.label } : {}),
+                      } : {}),
+                    }];
+                  }),
+                },
+              } : {}),
+              ...(includeTaskContext ? {
+                nodeTaskContext: {
+                  taskId: state.run.runId,
+                  interfaceContracts: state.interfaceContracts,
+                },
+              } : {}),
+            },
+          }
+        : request;
+      const response = await this.gateway.complete(profile, modelRequest, {
         maxTotalDurationMs: Math.max(0, this.pipelineBudget.maxWallClockMs - elapsed),
         ...(abortSignal ? { signal: abortSignal } : {}),
       });
@@ -7188,6 +7905,31 @@ function createRunningStep(
   };
 }
 
+const HOST_CHILD_PAGE_SIZE = 50;
+
+interface StagedProposal {
+  diff: GeneratedDiff | undefined;
+  /** The server's own scope error, kept so the model pipeline rethrows it with its code. */
+  scopeError?: unknown;
+}
+
+/** The configured depth when the adapter supports it, otherwise the first it does. */
+function runtimeThinkingDepth(
+  supported: readonly ("off" | "low" | "medium" | "high")[],
+  wanted: "off" | "low" | "medium" | "high",
+): "off" | "low" | "medium" | "high" {
+  return supported.includes(wanted) ? wanted : supported[0] ?? "off";
+}
+
+/** Key-order independent form of a diff, for comparing two copies of one proposal. */
+function canonicalDiffJson(diff: GeneratedDiff): string {
+  return JSON.stringify({
+    runId: diff.runId,
+    summary: diff.summary,
+    files: diff.files.map((file) => [file.path, file.changeType, file.before ?? null, file.after ?? null, file.patch ?? null]),
+  });
+}
+
 function createLiveRunningStep(
   state: OrchestratorRunState,
   kind:
@@ -7325,13 +8067,7 @@ function createDelegationEvent<TType extends AgentDelegationEvent["type"]>(
   });
 }
 
-function diffProposedFiles(diff: { files: Array<{
-  path: string
-  changeType: "modify" | "create" | "delete"
-  before?: string
-  after?: string
-  patch?: string
-}> }) {
+function diffProposedFiles(diff: Pick<GeneratedDiff, "files">) {
   return diff.files.map((file) => {
     const stats = hunkStats(file);
     return {
@@ -7632,11 +8368,15 @@ type HierarchyPlanTarget =
 type ParsedHierarchyPlan = {
   objective: string;
   tasks: Array<{
+    taskKey?: string | undefined;
     objective: string;
     acceptanceCriteria: string[];
+    dependencyTaskKeys: string[];
+    interfaceContractIds: string[];
     path?: string;
     nodeId?: string;
   }>;
+  contracts: Array<z.infer<typeof ModelTaskInterfaceContractSchema>>;
   rationale: string;
 };
 
@@ -7770,8 +8510,9 @@ function hierarchyDelegationSystemPrompt(
   const targetInstruction = greenfield
     ? "The graph is empty. Produce the complete typed greenfield product hierarchy described below."
     : target.kind === "leaf-file"
-    ? `Delegate only to required files from this server-supplied list: ${JSON.stringify(target.allowedIds)}. Return {"objective":"...","tasks":[{"path":"candidate/path","objective":"...","acceptanceCriteria":["..."]}],"rationale":"..."}.`
-    : `Delegate only to immediate ${target.level} graph children from this server-supplied list: ${JSON.stringify(target.allowedIds)}. Return {"objective":"...","tasks":[{"nodeId":"candidate-node","objective":"...","acceptanceCriteria":["..."]}],"rationale":"..."}.`;
+    ? `Delegate only to required files from this server-supplied list: ${JSON.stringify(target.allowedIds)}. Return {"objective":"...","tasks":[{"taskKey":"api","path":"candidate/path","dependencyTaskKeys":[],"interfaceContractIds":[],"objective":"...","acceptanceCriteria":["..."]}],"contracts":[],"rationale":"..."}.`
+    : `Delegate only to immediate ${target.level} graph children from this server-supplied list: ${JSON.stringify(target.allowedIds)}. Return {"objective":"...","tasks":[{"taskKey":"billing","nodeId":"candidate-node","dependencyTaskKeys":[],"interfaceContractIds":[],"objective":"...","acceptanceCriteria":["..."]}],"contracts":[],"rationale":"..."}.`;
+  const contractInstruction = `Use taskKey values only to refer to tasks in this plan. A dependent task names its prerequisites in dependencyTaskKeys; dependencies must be acyclic. When tasks exchange a boundary, define one contracts entry such as {"contractId":"receipt_api","producerTaskKey":"api","consumerTaskKeys":["billing_ui"],"identity":{"kind":"endpoint","name":"POST /api/receipts"},"behavior":"Creates one receipt for one successful payment","units":"receipt id is an opaque string","failureSemantics":"Duplicate payment ids return the original receipt","acceptanceExamples":[{"input":"payment_1","expected":"receipt_1"}]}. Reference that contractId from every producer and consumer task. Pass the same contract to both sides. Do not invent a contract when tasks are independent.`;
   const scaffoldInstruction = greenfield || scope.kind === "component"
     ? ""
     : `For an explicitly requested NEW immediate child node, return instead {"operation":"add_node","node":{"name":"...","summary":"...","responsibility":"..."},"wiring":[{"direction":"from_new|to_new","existingNodeId":"server-listed existing node id","relation":"uses|depends_on|calls|data_flows_to|...","label":"...","purpose":"..."}],"files":[{"path":"existing-directory/new-file.ext","responsibility":"...","objective":"...","acceptanceCriteria":["..."]}],"rationale":"..."}. The server chooses the durable node and edge ids. Files are permitted only when the new child is a component, and each parent directory must already exist within the parent graph scope. A node with no files requires at least one wiring edge.`;
@@ -7784,6 +8525,7 @@ function hierarchyDelegationSystemPrompt(
   return `${agentPrompt}
 Plan one graph layer for the ${scope.kind} planner. This phase has zero write capability and cannot mutate the graph.
 ${targetInstruction}
+${contractInstruction}
 ${scaffoldInstruction}
 ${deletionInstruction}
 ${greenfieldInstruction}

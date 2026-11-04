@@ -1,3 +1,4 @@
+import type { ExecutorRegistry } from "../services/harness/executor-registry.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -51,7 +52,6 @@ import settingsFixture from "./sample-projectos-fixtures/settings.json" with { t
 import semanticTreeFixture from "./sample-projectos-fixtures/semantic-tree.json" with { type: "json" };
 import mapContentFixture from "./sample-projectos-fixtures/map-content.json" with { type: "json" };
 import {
-  mockClearChatSessions,
   mockDeleteChatSession,
   mockGetChatSession,
   mockGetChatSessionIndex,
@@ -139,6 +139,7 @@ export interface MockProjectOSApiClientOptions {
   runEventPersistence?: AgentRunEventPersistence;
   localContextAssembler?: LocalContextAssemblerDependency;
   modelGateway?: ModelGateway;
+  executors?: ExecutorRegistry;
 }
 
 export class MockProjectOSApiClient extends ProjectOSLocalApi {
@@ -154,6 +155,7 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
         ? { localContextAssembler: options.localContextAssembler }
         : {}),
       ...(options.modelGateway ? { modelGateway: options.modelGateway } : {}),
+      ...(options.executors ? { executors: options.executors } : {}),
     });
   }
 

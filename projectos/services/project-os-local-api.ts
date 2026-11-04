@@ -1,5 +1,12 @@
 import { resolveModelExecution, type ModelExecutionSnapshot } from "./harness/executor-selection.js";
+import { ExecutorRegistry } from "./harness/executor-registry.js";
+import type { ExecutorOption, ExecutorSelection } from "../contracts/executor-selection.js";
 import { DurableRunStateStore } from "./harness/durable-run-state.js";
+import {
+  interfaceContractsForHierarchyChild,
+  mergeInterfaceContracts,
+  normalizeHierarchyDelegationPlan,
+} from "./harness/hierarchy-plan-adapter.js";
 import { RequestIntentExtractionService } from "./request-intent-extraction.js";
 import {
   intentAllowsFile,
@@ -229,6 +236,7 @@ import {
   type MapArtifact,
   type MapContentDocument,
   type UpdateMapArtifactPatch,
+  noteDocumentToPlainText,
 } from "../contracts/map-content.js";
 import {
   applyStackGeometry,
@@ -376,6 +384,8 @@ import type {
 const MAX_RECENT_CHANGES = 50;
 
 export interface ProjectOSLocalApiOptions {
+  /** Agent runtimes a request may choose instead of a model profile. Empty by default. */
+  executors?: ExecutorRegistry;
   sampleWorkspaceRoot?: string;
   workspaceStore?: ProjectOSWorkspaceStore;
   secretStore?: SecretStore;
@@ -395,7 +405,6 @@ export interface ProjectOSLocalApiOptions {
   workspaceTransactionCoordinator?: WorkspaceTransactionCoordinatorDependency;
   dependencyImpactScanner?: DependencyImpactScannerDependency;
   /** Desktop main injects shell.openExternal; tests may omit. */
-  openExternalUrl?: (url: string) => Promise<void>;
   /**
    * Directory for personal agent memory (`<userData>/agent-memory`).
    * Omit in tests that are not exercising memory.
@@ -488,9 +497,17 @@ interface FrozenTurnDelivery {
   omissions: ContextAssembly["omissions"];
 }
 
+/** A registered agent runtime bound to a refinement in place of a model profile. */
+interface RuntimeExecutorBinding {
+  executorId: string;
+  label: string;
+}
+
 interface StoredRefinement {
   /** null freezes fixture routing; undefined belongs to legacy refinements. */
   modelExecution?: ModelExecutionSnapshot | null;
+  /** Set when the approved intent chose a registered runtime; `modelExecution` is then null. */
+  runtimeExecutor?: RuntimeExecutorBinding;
   approvedIntent?: RequestIntent;
   refinement: PromptRefinement;
   projectId: string;
@@ -660,7 +677,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly auditDirectory: string | undefined;
   private readonly workspaceTransactionCoordinator: WorkspaceTransactionCoordinatorDependency | undefined;
   private readonly dependencyImpactScanner: DependencyImpactScannerDependency | undefined;
-  private readonly openExternalUrl: ((url: string) => Promise<void>) | undefined;
   private readonly agentMemoryRoot: string | undefined;
   private readonly memoryProposalDelayMs: number;
   private readonly memoryProposalTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -672,6 +688,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly registriesByProjectId = new Map<string, ScenarioRegistry>();
   private readonly registeredRunsByRunId = new Map<string, RegisteredScenarioRun>();
   private readonly refinementsById = new Map<string, StoredRefinement>();
+  private readonly pendingIntentConfirmations = new Map<string, Promise<AgentRun>>();
   private readonly plansById = new Map<string, ImplementationPlan>();
   private readonly planExecutions = new Map<string, ModelExecutionSnapshot>();
   private readonly debugExecutions = new Map<string, ModelExecutionSnapshot>();
@@ -714,8 +731,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly boundGreenfieldInitializations = new Map<string, BoundGreenfieldInitialization>();
   private readonly activeGreenfieldInitializations = new Map<string, string>();
   private writeTransactionRuntime: Promise<WriteTransactionRuntime> | undefined;
+  private readonly executors: ExecutorRegistry;
 
   constructor(options: ProjectOSLocalApiOptions = {}) {
+    this.executors = options.executors ?? new ExecutorRegistry();
     this.sampleWorkspaceRoot = options.sampleWorkspaceRoot;
     this.workspaceStore = options.workspaceStore ?? new ProjectOSWorkspaceStore();
     this.secretStore = options.secretStore ?? new InMemorySecretStore();
@@ -748,7 +767,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     this.auditDirectory = options.auditDirectory;
     this.workspaceTransactionCoordinator = options.workspaceTransactionCoordinator;
     this.dependencyImpactScanner = options.dependencyImpactScanner;
-    this.openExternalUrl = options.openExternalUrl;
     this.agentMemoryRoot = options.agentMemoryRoot;
     this.memoryProposalDelayMs = options.memoryProposalDelayMs ?? 1_200;
     if (options.writeTransactionRuntime) {
@@ -757,6 +775,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     this.orchestrator = new AgentOrchestrator({
       gateway: this.modelGateway,
       settingsService: this.settingsService,
+      executors: this.executors,
       validateGeneratedDiffScope: (runId, diff) =>
         this.validateGeneratedDiffScope(runId, diff),
       automaticLeafExecution: {
@@ -948,8 +967,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       force: parsedOptions.force === true,
       userInitiated: true,
       scanMode: parsedOptions.mode,
-      nodeIds: parsedOptions.nodeIds,
-      changedFiles: parsedOptions.changedFiles,
+      ...(parsedOptions.nodeIds !== undefined ? { nodeIds: parsedOptions.nodeIds } : {}),
+      ...(parsedOptions.changedFiles !== undefined
+        ? { changedFiles: parsedOptions.changedFiles }
+        : {}),
       refinedGraph: parsedOptions.refinedGraph,
     });
     const reloaded = this.requireLoadedWorkspace(projectId);
@@ -1105,8 +1126,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         force: options.force,
         userInitiated: options.userInitiated,
         scanMode: options.scanMode,
-        nodeIds: options.nodeIds,
-        changedFiles: options.changedFiles,
+        ...(options.nodeIds !== undefined ? { nodeIds: options.nodeIds } : {}),
+        ...(options.changedFiles !== undefined ? { changedFiles: options.changedFiles } : {}),
         refinedGraph: options.refinedGraph,
         scanId,
         onProgress: report,
@@ -1578,7 +1599,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         },
       ],
     });
-    workspace.currentWork = this.workspaceStore.writeCurrentWork(
+    workspace.currentWork = await this.workspaceStore.writeCurrentWork(
       workspace.workspaceRoot,
       currentWork,
     );
@@ -1618,8 +1639,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       appendProposedTimelineEntry(workspace.workspaceRoot, {
         filePath: file.path,
         runId,
-        before: file.before,
-        after: file.after,
+        ...(file.before !== undefined ? { before: file.before } : {}),
+        ...(file.after !== undefined ? { after: file.after } : {}),
         label: "Agent proposed",
       }),
     );
@@ -1866,7 +1887,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       resolvedScope.kind === "file" ? resolvedScope.selectedFilePath : undefined,
       projectRuleLoadOptions({
         filePaths: filePathsFromContextBundle(augmented.bundle),
-        attachments: parsedRequest.attachments,
+        ...(parsedRequest.attachments !== undefined ? { attachments: parsedRequest.attachments } : {}),
       }),
     );
     const assembled = assembleRunContext({
@@ -1990,6 +2011,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   ): Promise<RequestIntent> {
     const parsedRequest = ExtractRequestIntentRequestSchema.parse(request);
     const workspace = this.requireLoadedWorkspace(parsedRequest.projectId);
+    const fileOwner = parsedRequest.filePath
+      ? resolveFileOwnerScope(workspace, parsedRequest.filePath, parsedRequest.nodeId)
+      : undefined;
+    const runtime = this.resolveRuntimeSelection(workspace, parsedRequest.executorSelection);
+    if (runtime) {
+      const intent = await this.buildRuntimeFileIntent(workspace, parsedRequest, fileOwner, runtime);
+      return this.durableRunStateFor(workspace).saveIntent(intent);
+    }
     const execution = resolveModelExecution(
       workspace.settings,
       parsedRequest.executorSelection,
@@ -2002,11 +2031,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
     const globalContext = await this.createGlobalPlanningContext(workspace, "en");
     const intent = await this.intentExtractionService.extract({
-      request: parsedRequest,
+      request: fileOwner ? { ...parsedRequest, nodeId: fileOwner.nodeId } : parsedRequest,
       graph: workspace.graph,
       globalContext,
       execution,
-      inspectNode: (nodeId) => this.assembleNodeLocalContext(workspace, nodeId, "en"),
+      inspectNode: async (nodeId) => this.assembleNodeLocalContext(workspace, nodeId, "en"),
     });
     return this.durableRunStateFor(workspace).saveIntent(intent);
   }
@@ -2074,10 +2103,19 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     if (currentGraphHash !== intent.baseGraphHash) {
       throw new ProjectOSError("diff_stale", "Project graph changed after intent approval; review the intent again");
     }
+    const selectedFile = intent.requestedFile && intent.structuralEffects.length === 0 &&
+      intent.touches.every((touch) => touch.nodeId === intent.requestedFile!.nodeId &&
+        touch.allow.editExisting && !touch.allow.addParts && touch.allow.deletePartIds.length === 0)
+      ? resolveFileOwnerScope(workspace, intent.requestedFile.path, intent.requestedFile.nodeId)
+      : undefined;
     const rawPrompt = [
+      intent.rawRequest,
       intent.goal,
+      ...(intent.requestedFile ? [`Selected file: ${intent.requestedFile.path}`] : []),
       `Approved capabilities: ${intent.touches.map((touch) => `${touch.nodeId}: ${touch.reason}`).join("; ")}`,
       ...(intent.assumptions.length ? [`Assumptions: ${intent.assumptions.join("; ")}`] : []),
+      ...intent.questions.filter((question) => question.answer).map((question) =>
+        `Approved answer (${question.id}): ${question.text} — ${question.answer}${question.selectedOptionId ? ` [${question.selectedOptionId}]` : ""}`),
       ...(intent.outOfScope.length ? [`Out of scope: ${intent.outOfScope.join("; ")}`] : []),
       `Acceptance: ${intent.acceptance.join("; ")}`,
     ].join("\n\n");
@@ -2085,9 +2123,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       id: `refine_${intent.id}_${intent.revision}`,
       understood: intent.goal,
       ambiguities: [],
-      suggestions: intent.assumptions,
+      suggestions: [
+        ...intent.assumptions,
+        ...intent.questions.filter((question) => question.answer).map((question) =>
+          `Approved answer (${question.id}): ${question.answer}`),
+      ],
       affectedNodeIds: intent.touches.map((touch) => touch.nodeId),
-      affectedFiles: [],
+      affectedFiles: selectedFile ? [selectedFile.selectedFilePath] : [],
       confidence: 1,
       mode: "model",
       executionPolicy: workspace.settings.execution.changeExecutionPolicy,
@@ -2095,7 +2137,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     await this.storeRefinement(
       {
         projectId,
-        ...(intent.entryNodeId ? { nodeId: intent.entryNodeId } : {}),
+        ...(selectedFile
+          ? { nodeId: selectedFile.nodeId, filePath: selectedFile.selectedFilePath }
+          : intent.entryNodeId ? { nodeId: intent.entryNodeId } : {}),
         rawPrompt,
       },
       refinement,
@@ -2105,8 +2149,114 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ? { profile: intent.executorSnapshot.profile, thinkingDepth: intent.executorSnapshot.thinkingDepth }
         : null,
       intent,
+      this.resolveRuntimeSelection(workspace, intent.executorSelection),
     );
     return refinement;
+  }
+
+  async listExecutors(projectId: string): Promise<ExecutorOption[]> {
+    this.requireLoadedWorkspace(projectId);
+    return this.executors.list()
+      .filter(({ capabilities }) =>
+        capabilities.proposalExport &&
+        capabilities.modes.includes("change") &&
+        capabilities.roles.includes("leaf"))
+      .map(({ id }) => {
+        const adapter = this.executors.resolve(id)!;
+        return {
+          kind: "runtime" as const,
+          executorId: adapter.id,
+          runtimeProfileId: adapter.id,
+          label: adapter.label ?? adapter.id,
+          devOnly: adapter.devOnly === true,
+        };
+      });
+  }
+
+  /**
+   * Resolve a request's runtime choice against the registry. Returns undefined for a
+   * model choice or no choice. A runtime that is not registered in this build is
+   * rejected, as is any explicit live choice while presentation or fixture mode is on.
+   */
+  private resolveRuntimeSelection(
+    workspace: LoadedProjectOSWorkspace,
+    selection: ExecutorSelection | undefined,
+  ): RuntimeExecutorBinding | undefined {
+    if (selection?.kind !== "runtime") return undefined;
+    if (workspace.settings.presentationMode || workspace.settings.execution.mode === "fixture") {
+      throw new ProjectOSError(
+        "invalid_settings",
+        "Turn off presentation/fixture mode before choosing a live executor",
+      );
+    }
+    const adapter = this.executors.resolve(selection.runtimeProfileId);
+    if (!adapter) {
+      throw new ProjectOSError(
+        "not_implemented",
+        `Agent runtime '${selection.runtimeProfileId}' is not available in this build`,
+      );
+    }
+    return { executorId: adapter.id, label: adapter.label ?? adapter.id };
+  }
+
+  /**
+   * A runtime executor edits exactly the file the user selected, so the intent is derived
+   * locally from that selection instead of by a model. The user still approves it on the
+   * intent card before anything runs.
+   */
+  private buildRuntimeFileIntent(
+    workspace: LoadedProjectOSWorkspace,
+    request: ExtractRequestIntentRequest,
+    owner: { nodeId: string } | undefined,
+    runtime: RuntimeExecutorBinding,
+  ): Promise<RequestIntent> {
+    if (!request.filePath || !owner) {
+      throw new ProjectOSError(
+        "invalid_settings",
+        `${runtime.label} can only change one selected file. Select a file, or choose a model profile for a broader request.`,
+      );
+    }
+    // Fixed now so the card names who will see the file and diff, and the approval covers it.
+    // A dev stand-in is never validated and never sends anything to a model, so it names none.
+    const validator = this.executors.resolve(runtime.executorId)?.devOnly
+      ? undefined
+      : resolveModelExecution(workspace.settings);
+    return computeProjectGraphHash(workspace.graph).then((baseGraphHash) => {
+      const draft = RequestIntentSchema.parse({
+        version: "0.1.0",
+        id: `intent_${crypto.randomUUID()}`,
+        projectId: workspace.project.projectId,
+        rawRequest: request.rawRequest,
+        requestedFile: { nodeId: owner.nodeId, path: request.filePath },
+        goal: request.rawRequest,
+        kind: "change",
+        entryNodeId: null,
+        touches: [{
+          nodeId: owner.nodeId,
+          reason: `Edit ${request.filePath}, the file you selected.`,
+          allow: { editExisting: true, addParts: false, deletePartIds: [] },
+        }],
+        structuralEffects: [],
+        assumptions: [`${runtime.label} runs without a model and edits only ${request.filePath}.`],
+        outOfScope: ["Other files, new nodes and deletions."],
+        acceptance: [request.rawRequest],
+        questions: [],
+        executorSelection: request.executorSelection,
+        ...(validator
+          ? {
+              validatorSnapshot: {
+                kind: "model" as const,
+                profile: cloneJson(validator.profile),
+                thinkingDepth: validator.thinkingDepth,
+              },
+            }
+          : {}),
+        baseGraphHash,
+        revision: 1,
+        status: "draft",
+      });
+      return this.requestIntentService.normalizeDraft(workspace.graph, draft);
+    });
   }
 
   async listSkills(projectId: string): Promise<ListSkillsResult> {
@@ -2311,13 +2461,20 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         const doc = await this.getMapContent(workspace.project.projectId);
         const artifact = doc.artifacts.find((item) => item.id === artifactId);
         if (!artifact) return null;
-        return {
-          title: artifact.title,
-          ...(artifact.type === 'urls' && artifact.urls
-            ? { url: artifact.urls.items[0]?.url }
-            : {}),
-          bodyText: artifact.type === 'note' ? artifact.body : undefined,
-        };
+        const title = mapArtifactTitle(artifact)?.trim() || artifact.type;
+        if (artifact.type === "urls") {
+          const url = artifact.urls.items[0]?.url;
+          return { title, ...(url !== undefined ? { url } : {}) };
+        }
+        if (artifact.type === "note") {
+          // The rich document is what the editor saves; a legacy `body` is never cleared, so it
+          // can be older than the document and must only be a fallback.
+          const bodyText = artifact.note.document
+            ? noteDocumentToPlainText(artifact.note.document)
+            : artifact.note.body;
+          return { title, ...(bodyText !== undefined ? { bodyText } : {}) };
+        }
+        return { title };
       },
     };
   }
@@ -2382,7 +2539,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       request.filePath,
       projectRuleLoadOptions({
         filePaths: request.filePath ? [request.filePath] : [],
-        attachments: request.attachments,
+        ...(request.attachments !== undefined ? { attachments: request.attachments } : {}),
       }),
     );
     return {
@@ -2465,7 +2622,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       parsedRequest.scope.kind === "file" ? parsedRequest.scope.selectedFilePath : undefined,
       projectRuleLoadOptions({
         filePaths: filePathsFromContextBundle(augmented.bundle),
-        attachments: parsedRequest.attachments,
+        ...(parsedRequest.attachments !== undefined ? { attachments: parsedRequest.attachments } : {}),
       }),
     );
     const planAssembly = assembleRunContext({
@@ -2499,7 +2656,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       profile,
       thinkingDepth: modelExecution?.thinkingDepth,
       clarifyingAnswers: parsedRequest.clarifyingAnswers,
-      existingQuestions: parsedRequest.existingQuestions,
+      ...(parsedRequest.existingQuestions !== undefined
+        ? { existingQuestions: parsedRequest.existingQuestions }
+        : {}),
       supplementalMarkdown: [
         planAssembly.instructions,
         augmented.supplementalMarkdown,
@@ -2515,7 +2674,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ...(parsedRequest.existingPlanId
         ? {
             existingPlanId: parsedRequest.existingPlanId,
-            existingCreatedAt: existing?.createdAt,
+            ...(existing?.createdAt !== undefined
+              ? { existingCreatedAt: existing.createdAt }
+              : {}),
           }
         : {}),
     });
@@ -2635,6 +2796,73 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return ImplementationPlanSchema.parse(plan);
   }
 
+  private async approveExistingActionIntent(input: {
+    workspace: LoadedProjectOSWorkspace;
+    rawRequest: string;
+    goal: string;
+    filePaths: string[];
+    fallbackNodeIds: string[];
+    acceptance: string[];
+    execution: ModelExecutionSnapshot;
+  }): Promise<RequestIntent> {
+    const owners = new Map<string, string[]>();
+    for (const path of stableUniqueStrings(input.filePaths)) {
+      const owner = resolveFileOwnerScope(input.workspace, path);
+      const paths = owners.get(owner.nodeId) ?? [];
+      paths.push(path);
+      owners.set(owner.nodeId, paths);
+    }
+    for (const nodeId of input.fallbackNodeIds) {
+      if (input.workspace.graph.nodes.some((node) => node.id === nodeId) && !owners.has(nodeId)) {
+        owners.set(nodeId, []);
+      }
+    }
+    if (owners.size === 0) {
+      throw new ProjectOSError(
+        "local_context_unavailable",
+        "The accepted action has no graph node or existing file to build",
+      );
+    }
+
+    const intentId = `intent_action_${crypto.randomUUID()}`;
+    const baseGraphHash = await computeProjectGraphHash(input.workspace.graph);
+    const draft = RequestIntentSchema.parse({
+      version: "0.1.0",
+      id: intentId,
+      projectId: input.workspace.project.projectId,
+      rawRequest: input.rawRequest,
+      goal: input.goal,
+      kind: "change",
+      entryNodeId: null,
+      touches: [...owners.entries()].map(([nodeId, paths]) => ({
+        nodeId,
+        reason: paths.length
+          ? `The accepted action targets ${paths.join(", ")}.`
+          : "The user accepted this action for the selected graph node.",
+        allow: { editExisting: true, addParts: false, deletePartIds: [] },
+      })),
+      structuralEffects: [],
+      assumptions: ["Keep implementation within the accepted action's existing node and file scope."],
+      outOfScope: ["New nodes, deletions, and files outside the accepted action scope."],
+      acceptance: stableUniqueStrings(input.acceptance.length ? input.acceptance : [input.goal]),
+      questions: [],
+      executorSelection: { kind: "model", modelProfileId: input.execution.profile.id },
+      executorSnapshot: {
+        kind: "model",
+        profile: cloneJson(input.execution.profile),
+        thinkingDepth: input.execution.thinkingDepth,
+      },
+      baseGraphHash,
+      revision: 1,
+      status: "draft",
+    });
+    const normalized = this.requestIntentService.normalizeDraft(input.workspace.graph, draft);
+    const approval = this.requestIntentService.approve(input.workspace.graph, normalized, draft.revision);
+    const store = this.durableRunStateFor(input.workspace);
+    store.saveIntent(normalized);
+    return store.approveIntent(intentId, draft.revision, approval);
+  }
+
   async buildPlan(planId: string): Promise<PromptRefinement> {
     const stored = this.plansById.get(planId);
     if (!stored) {
@@ -2662,17 +2890,29 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       sourcePlanId: planId,
       executionPolicy: "review_first",
     };
+    const storedExecution = this.refinementsById.get(refinement.id)?.modelExecution;
+    const approvedIntent = storedExecution
+      ? await this.approveExistingActionIntent({
+          workspace,
+          rawRequest: rawPrompt,
+          goal: stored.objective,
+          filePaths: stableUniqueStrings([
+            ...stored.steps.flatMap((step) => step.affectedFiles),
+            ...(stored.scope.kind === "file" ? [stored.scope.selectedFilePath] : []),
+          ]),
+          fallbackNodeIds: stored.scope.kind === "global" ? [] : [stored.scope.nodeId],
+          acceptance: stored.steps.flatMap((step) => step.acceptanceCriteria),
+          execution: storedExecution,
+        })
+      : undefined;
     await this.storeRefinement(
       { projectId: stored.projectId, nodeId, filePath, rawPrompt },
       withPlanSource,
       resolveResponseLanguage(rawPrompt),
+      undefined,
+      storedExecution ?? null,
+      approvedIntent,
     );
-    const buildingPlan: ImplementationPlan = {
-      ...stored,
-      status: "building",
-      updatedAt: new Date().toISOString(),
-    };
-    this.persistPlan(workspace, buildingPlan);
     return withPlanSource;
   }
 
@@ -2842,10 +3082,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       stored.session,
     );
 
-    let run: AgentRun;
+    let run: AgentRun | undefined;
     if (harnessError) {
-      run = await this.startHarnessFix(harnessError.errorId);
-    } else {
+      try {
+        run = await this.startHarnessFix(harnessError.errorId);
+      } catch (error) {
+        if (!(error instanceof ProjectOSError) || error.code !== "harness_record_not_found") throw error;
+      }
+    }
+    if (!run) {
       const scope = stored.session.scope;
       const fixSummary =
         stored.session.proposedFix?.summary ?? stored.session.bugDescription;
@@ -2890,6 +3135,25 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           ? { chatSessionId: stored.session.chatSessionId }
           : {}),
       }, this.debugExecutions.get(stored.session.sessionId));
+      const modelExecution = this.refinementsById.get(refinement.id)?.modelExecution;
+      if (modelExecution) {
+        const intent = await this.approveExistingActionIntent({
+          workspace,
+          rawRequest: rawPrompt,
+          goal: fixSummary,
+          filePaths: [ownerScope.selectedFilePath],
+          fallbackNodeIds: [ownerScope.nodeId],
+          acceptance: [`Resolve the reported bug: ${fixSummary}`],
+          execution: modelExecution,
+        });
+        await this.storeRefinement({
+          projectId: stored.session.projectId,
+          nodeId: ownerScope.nodeId,
+          filePath: ownerScope.selectedFilePath,
+          rawPrompt,
+          ...(stored.session.chatSessionId ? { chatSessionId: stored.session.chatSessionId } : {}),
+        }, refinement, resolveResponseLanguage(rawPrompt), undefined, modelExecution, intent);
+      }
       run = await this.confirmExecution(refinement.id);
     }
 
@@ -3026,20 +3290,123 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   }
 
   async confirmExecution(refinementId: string): Promise<AgentRun> {
+    const intent = this.refinementsById.get(refinementId)?.approvedIntent;
+    if (!intent) return this.confirmExecutionOnce(refinementId);
+    const key = `${intent.projectId}:${intent.id}:${intent.revision}`;
+    const inFlight = this.pendingIntentConfirmations.get(key);
+    if (inFlight) return inFlight;
+    const confirmation = this.confirmExecutionOnce(refinementId);
+    this.pendingIntentConfirmations.set(key, confirmation);
+    try {
+      return await confirmation;
+    } finally {
+      if (this.pendingIntentConfirmations.get(key) === confirmation) {
+        this.pendingIntentConfirmations.delete(key);
+      }
+    }
+  }
+
+  private async confirmExecutionOnce(refinementId: string): Promise<AgentRun> {
     const stored = this.refinementsById.get(refinementId);
     if (stored) {
       const { refinement, projectId } = stored;
-        const projectWorkspace = this.workspacesByProjectId.get(projectId);
+      const projectWorkspace = this.workspacesByProjectId.get(projectId);
       if (projectWorkspace) {
-        const usesModel = stored.modelExecution === undefined
+        const usesRuntime = stored.runtimeExecutor !== undefined;
+        const usesModel = !usesRuntime && (stored.modelExecution === undefined
           ? agentRunUsesModel(projectWorkspace.settings)
-          : stored.modelExecution !== null;
-        const fileLiveContext = usesModel && stored.requestedScope.selectedFilePath
+          : stored.modelExecution !== null);
+        if ((usesModel || usesRuntime) && !stored.approvedIntent) {
+          throw new ProjectOSError(
+            "diff_scope_violation",
+            usesRuntime
+              ? "Executor-backed changes require an approved request intent before execution"
+              : "Model-backed changes require an approved request intent before execution",
+          );
+        }
+        if (usesRuntime && !stored.requestedScope.selectedFilePath) {
+          throw new ProjectOSError(
+            "not_implemented",
+            `${stored.runtimeExecutor!.label} can only change one selected file`,
+          );
+        }
+        const fileLiveContext = (usesModel || usesRuntime) && stored.requestedScope.selectedFilePath
           ? this.prepareLiveRunContext(projectWorkspace, stored)
           : undefined;
 
-        if (usesModel) {
-          const runId = `run_${crypto.randomUUID()}`;
+        if (usesModel || usesRuntime) {
+          const runStateStore = this.durableRunStateFor(projectWorkspace);
+          let runId = `run_${crypto.randomUUID()}`;
+          if (stored.approvedIntent) {
+            const intent = stored.approvedIntent;
+            const existingBinding = runStateStore.loadIntentExecutionBinding(
+              projectId,
+              intent.id,
+              intent.revision,
+            );
+            if (existingBinding) {
+              const inMemoryRun = this.orchestrator.getRun(existingBinding.rootRunId);
+              if (inMemoryRun) {
+                if (inMemoryRun.run.status === "queued") {
+                  const approved = stored.approvedIntent;
+                  if (approved) {
+                    const approvedAt = approved.approvedAt ?? new Date().toISOString();
+                    runStateStore.saveDecision({
+                      version: "0.1.0",
+                      id: `decision_${approved.id}_r${approved.revision}_approval`,
+                      projectId,
+                      rootRunId: inMemoryRun.run.runId,
+                      runId: inMemoryRun.run.runId,
+                      ...(approved.entryNodeId ? { nodeId: approved.entryNodeId } : {}),
+                      kind: "intent",
+                      question: approved.goal,
+                      options: [{ id: "approve", label: "Approved" }],
+                      status: "resolved",
+                      revision: 1,
+                      answer: { optionId: "approve" },
+                      createdAt: approvedAt,
+                      resolvedAt: approvedAt,
+                    });
+                  }
+                  if (refinement.sourcePlanId) {
+                    this.updatePlanBuildStatus(projectWorkspace, refinement.sourcePlanId, "building");
+                  }
+                  if (!this.pendingOrchestratorStarts.has(inMemoryRun.run.runId)) {
+                    this.pendingOrchestratorStarts.set(inMemoryRun.run.runId, {
+                      workspace: projectWorkspace,
+                      runId: inMemoryRun.run.runId,
+                    });
+                  }
+                  this.maybeStartPendingOrchestratorRun(inMemoryRun.run.runId);
+                }
+                return cloneJson(inMemoryRun.run);
+              }
+              const diskRun = this.loadDiskRun(existingBinding.rootRunId);
+              if (diskRun?.run) {
+                if (diskRun.run.status === "queued") {
+                  throw new ProjectOSError(
+                    "run_not_found",
+                    `Run '${existingBinding.rootRunId}' is queued without an in-memory task; start a new request to continue.`,
+                  );
+                }
+                return cloneJson(diskRun.run);
+              }
+              if (diskRun?.snapshotCorrupt) {
+                throw new ProjectOSError(
+                  "run_not_found",
+                  `The run bound to approved intent '${intent.id}' has an unreadable snapshot; refusing to create a duplicate.`,
+                );
+              }
+              runId = existingBinding.rootRunId;
+            } else {
+              runId = runStateStore.bindIntentExecution(
+                projectId,
+                intent.id,
+                intent.revision,
+                runId,
+              ).rootRunId;
+            }
+          }
           const requestedNodeId = stored.requestedScope.nodeId;
           const isPlanner = !stored.requestedScope.selectedFilePath;
           const isGlobalPlan = isPlanner && !requestedNodeId;
@@ -3094,6 +3461,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
               {
                 runId,
                 ...(stored.modelExecution ? { modelExecution: cloneJson(stored.modelExecution) } : {}),
+                ...(stored.runtimeExecutor ? { runtimeExecutor: { ...stored.runtimeExecutor } } : {}),
+                ...(stored.runtimeExecutor && stored.approvedIntent?.validatorSnapshot
+                  ? {
+                      validatorExecution: {
+                        profile: cloneJson(stored.approvedIntent.validatorSnapshot.profile),
+                        thinkingDepth: stored.approvedIntent.validatorSnapshot.thinkingDepth,
+                      },
+                    }
+                  : {}),
                 ...(stored.approvedIntent ? { approvedIntent: cloneJson(stored.approvedIntent) } : {}),
                 ...(isGlobalPlan
                   ? { globalContext: globalContext! }
@@ -3103,12 +3479,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
                 scope: isGlobalPlan
                   ? { kind: "global" }
                   : isNodePlan
-                  ? {
-                      kind: requestedNode!.level === "component"
-                        ? "node-plan"
-                        : requestedNode!.level as "context" | "container",
-                      nodeId: requestedNodeId!,
-                    }
+                  ? { kind: requestedNode!.level as "context" | "container" | "component", nodeId: requestedNodeId! }
                   : {
                       kind: "leaf-file",
                       nodeId: requestedNodeId!,
@@ -3136,7 +3507,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
               const approvedAt = approved.approvedAt ?? new Date().toISOString();
               this.durableRunStateFor(projectWorkspace).saveDecision({
                 version: "0.1.0",
-                id: `decision_${approved.id}_approval`,
+                id: `decision_${approved.id}_r${approved.revision}_approval`,
                 projectId: projectWorkspace.project.projectId,
                 rootRunId: runState.run.runId,
                 runId: runState.run.runId,
@@ -3168,6 +3539,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             workspace: projectWorkspace,
             runId: runState.run.runId,
           });
+          if (refinement.sourcePlanId) {
+            this.updatePlanBuildStatus(projectWorkspace, refinement.sourcePlanId, "building");
+          }
           this.maybeStartPendingOrchestratorRun(runState.run.runId);
           return {
             ...cloneJson(runState.run),
@@ -3503,9 +3877,19 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private async assertApprovedIntentAllowsPublication(
     state: OrchestratorRunState,
     workspace: LoadedProjectOSWorkspace,
+    proposedDiff?: GeneratedDiff,
+    createdFiles: Array<{ path: string; nodeId: string }> = [],
   ): Promise<void> {
     const intent = state.approvedIntent;
-    if (!intent) return;
+    if (!intent) {
+      if ((state.modelProfile || state.runtimeExecutor || state.refinement.mode === "model") && state.run.kind !== "demo") {
+        throw new ProjectOSError(
+          "diff_scope_violation",
+          "Model-backed publication has no approved request intent",
+        );
+      }
+      return;
+    }
     if (!this.requestIntentService.isApprovalValid(intent) ||
       intent.baseGraphHash !== await computeProjectGraphHash(workspace.graph)) {
       throw new ProjectOSError(
@@ -3519,7 +3903,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const parentNodeId = scaffold.parentScope.kind === "global"
         ? undefined
         : scaffold.parentScope.nodeId;
-      if (!parentNodeId || !intentAllowsNodeAddition(intent, parentNodeId, scaffold.node.name)) {
+      if (!parentNodeId || !intentAllowsNodeAddition(
+        intent,
+        parentNodeId,
+        scaffold.node.name,
+        scaffold.node.level,
+        scaffold.wiring,
+      ) || scaffold.files.length > 0 && !intent.touches.some((touch) =>
+        touch.nodeId === parentNodeId && touch.allow.addParts)) {
         throw new ProjectOSError("diff_scope_violation", "Node scaffold is outside the approved structural intent");
       }
     }
@@ -3532,24 +3923,70 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     )) {
       throw new ProjectOSError("diff_scope_violation", "Node deletion is outside the approved structural intent");
     }
-    if (state.diff && !scaffold && !deletion) {
-      const nodeId = "nodeId" in state.run.scope ? state.run.scope.nodeId : undefined;
-      for (const file of state.diff.files) {
-        if (file.changeType === "create") continue;
-        if (!intentAllowsFile(
-          intent,
-          workspace.graph,
-          file.path,
-          file.changeType === "delete" ? "delete" : "modify",
-          nodeId,
-        )) {
-          throw new ProjectOSError(
-            "diff_scope_violation",
-            `Publication for '${file.path}' exceeds the approved intent capabilities`,
-          );
+    if (state.greenfieldPlan) {
+      throw new ProjectOSError(
+        "diff_scope_violation",
+        "Greenfield graph publication is not supported through a single-node intent",
+      );
+    }
+    for (const task of state.delegationPlan?.tasks ?? []) {
+      const operation = task.operation === "create" ? "create" : task.operation === "delete" ? "delete" : "modify";
+      if (!intentAllowsFile(intent, workspace.graph, task.filePath, operation, state.delegationPlan?.nodeId)) {
+        throw new ProjectOSError("diff_scope_violation", `Delegated ${operation} for '${task.filePath}' exceeds approved intent`);
+      }
+    }
+    for (const leaf of state.wholeTreeTransactionPlan?.leaves ?? []) {
+      if (!intentAllowsFile(intent, workspace.graph, leaf.filePath, "modify", leaf.nodeId)) {
+        throw new ProjectOSError("diff_scope_violation", `Whole-tree work for '${leaf.filePath}' exceeds approved intent`);
+      }
+    }
+    for (const file of createdFiles) {
+      if (!intentAllowsFile(intent, workspace.graph, file.path, "create", file.nodeId)) {
+        throw new ProjectOSError(
+          "diff_scope_violation",
+          `Creation for '${file.path}' exceeds the approved intent capabilities`,
+        );
+      }
+    }
+    if (!scaffold && !deletion) {
+      const diff = proposedDiff ?? state.diff;
+      if (diff) {
+        for (const file of diff.files) {
+          const nodeId = "nodeId" in state.run.scope
+            ? state.run.scope.nodeId
+            : state.delegationPlan?.nodeId ?? state.wholeTreeTransactionPlan?.leaves.find((leaf) => leaf.filePath === file.path)?.nodeId;
+          const allowed = file.changeType === "create"
+            ? Boolean(nodeId && intentAllowsFile(intent, workspace.graph, file.path, "create", nodeId))
+            : intentAllowsFile(
+              intent,
+              workspace.graph,
+              file.path,
+              file.changeType === "delete" ? "delete" : "modify",
+              nodeId,
+            );
+          if (!allowed) {
+            throw new ProjectOSError(
+              "diff_scope_violation",
+              `Publication for '${file.path}' exceeds the approved intent capabilities`,
+            );
+          }
         }
       }
     }
+  }
+
+  private async assertApprovedIntentBeforeCommit(
+    runId: string,
+    workspace: LoadedProjectOSWorkspace,
+    proposedDiff?: GeneratedDiff,
+    createdFiles: Array<{ path: string; nodeId: string }> = [],
+  ): Promise<void> {
+    const state = this.orchestrator.getRun(runId);
+    if (!state) {
+      throw new ProjectOSError("run_not_found", `Run '${runId}' is unavailable at the publication boundary`);
+    }
+    const currentWorkspace = this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
+    await this.assertApprovedIntentAllowsPublication(state, currentWorkspace, proposedDiff, createdFiles);
   }
 
   async applyDiff(runId: string): Promise<ApplyResult> {
@@ -4008,7 +4445,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const evidence = buildVerificationEvidence({
       runId,
       commands: input.commands,
-      blockedReason: input.blockedReason,
+      ...(input.blockedReason !== undefined ? { blockedReason: input.blockedReason } : {}),
       plannedPaths: input.plannedPaths,
       writtenPaths: input.writtenPaths,
       symbolIndexAvailable: suggestedTests !== null,
@@ -5859,7 +6296,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const leaf = resolveLoopLeafWriteScope(
       workspace.graph.nodes.map((node) => ({
         id: node.id,
-        children: node.children,
+        ...(node.children !== undefined ? { children: node.children } : {}),
         linkedFiles: node.linkedFiles.map((file) => ({ path: file.path })),
       })),
       featureNodeId,
@@ -6364,7 +6801,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       request.mimeType,
       profile,
       this.secretStore,
-      { language: request.language },
+      request.language !== undefined ? { language: request.language } : {},
     );
     return { text };
   }
@@ -6454,6 +6891,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     memoryInjection?: MemoryInjectionSnapshot,
     modelExecution?: ModelExecutionSnapshot | null,
     approvedIntent?: RequestIntent,
+    runtimeExecutor?: RuntimeExecutorBinding,
   ): Promise<void> {
     const previous = this.refinementsById.get(refinement.id);
     const injection = memoryInjection ?? previous?.memoryInjection;
@@ -6471,6 +6909,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           ? { modelExecution: cloneJson(previous.modelExecution) }
           : {}),
       ...(approvedIntent ? { approvedIntent: cloneJson(approvedIntent) } : {}),
+      ...(runtimeExecutor ? { runtimeExecutor: { ...runtimeExecutor } } : {}),
       projectId: request.projectId,
       requestedScope: {
         nodeId: request.nodeId,
@@ -6650,11 +7089,29 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   }
 
   private persistPlan(workspace: LoadedProjectOSWorkspace, plan: ImplementationPlan): void {
-    this.plansById.set(plan.id, plan);
     const plansDir = join(workspace.projectOSRoot, "plans");
     mkdirSync(plansDir, { recursive: true });
     const targetPath = join(plansDir, `${plan.id}.json`);
     writeFileSync(targetPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+    this.plansById.set(plan.id, plan);
+  }
+
+  private updatePlanBuildStatus(
+    workspace: LoadedProjectOSWorkspace,
+    planId: string,
+    status: ImplementationPlan["status"],
+  ): void {
+    const current = this.plansById.get(planId);
+    if (!current || !["ready", "building", "proposal_ready"].includes(current.status)) return;
+    try {
+      this.persistPlan(workspace, {
+        ...current,
+        status,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error(`[projectos] failed to update build plan '${planId}' status`, error);
+    }
   }
 
   private persistDebugSession(
@@ -7547,6 +8004,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         edgeId: () => `edge_${crypto.randomUUID()}`,
       },
       updatedAt: now,
+      beforeCommit: () => this.assertApprovedIntentBeforeCommit(parentRun.runId, workspace),
     });
     if (transaction.outcome === "recovery_required") {
       return ApplyResultSchema.parse({
@@ -7769,6 +8227,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       updatedAt: now,
       beforeCommit: () => {
         this.assertImpactDeleteGate(workspace, transactionBinding, materializedOverrides);
+        return this.assertApprovedIntentBeforeCommit(parentRun.runId, workspace);
       },
     });
     if (transaction.outcome === "recovery_required") {
@@ -7963,6 +8422,18 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       );
     }
 
+    const executorPlan = normalizeHierarchyDelegationPlan(plan);
+    const executorTaskIds = new Set(executorPlan.tasks.map((task) => task.taskId));
+    if (executorTaskIds.size !== plan.tasks.length ||
+      plan.tasks.some((task) => !executorTaskIds.has(task.taskId))) {
+      throw new ProjectOSError("diff_scope_violation", "Delegation plan could not be normalized to the node-task contract");
+    }
+    const visiblePlanContracts = mergeInterfaceContracts(
+      parentState?.interfaceContracts ?? [],
+      executorPlan.contracts,
+    );
+    if (parentState) parentState.interfaceContracts = cloneJson(visiblePlanContracts);
+
     const nodesById = new Map(workspace.graph.nodes.map((node) => [node.id, node]));
     const parentNode = parentScope.kind === "global"
       ? undefined
@@ -8097,6 +8568,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
 
     try {
       for (const item of prepared) {
+        const interfaceContracts = interfaceContractsForHierarchyChild(
+          item.task.taskId,
+          visiblePlanContracts,
+          executorPlan,
+        );
         if (item.kind === "leaf") {
           if (item.task.targetKind !== "leaf-file") {
             throw new ProjectOSError(
@@ -8111,6 +8587,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           );
           this.orchestrator.createRun(workspace, item.refinement, "feature_change", {
             runId: item.runId,
+            interfaceContracts,
             localContext: item.context.bundle,
             executionPolicy: "review_first",
             scope: {
@@ -8125,6 +8602,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         } else {
           this.orchestrator.createRun(workspace, item.refinement, "feature_change", {
             runId: item.runId,
+            interfaceContracts,
             localContext: item.nodeContext,
             executionPolicy: "review_first",
             scope: { kind: item.task.level, nodeId: item.task.nodeId },
@@ -8452,6 +8930,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ) {
           throw new ProjectOSError("diff_stale", "Greenfield tranche authorization changed at commit");
         }
+        await this.assertApprovedIntentBeforeCommit(parentRun.runId, workspace);
       },
     });
     if (transaction.outcome === "recovery_required") {
@@ -9041,6 +9520,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             "Graph mutation is blocked while greenfield initialization is active",
           );
         }
+        return this.assertApprovedIntentBeforeCommit(parentRun.runId, workspace);
       },
     });
     if (transaction.outcome === "recovery_required") {
@@ -9263,6 +9743,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         }
         const fresh = this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
         this.assertNodeDeletionBasis(fresh, binding, materializedOverrides);
+        return this.assertApprovedIntentBeforeCommit(parentRun.runId, fresh);
       },
     });
     if (transaction.outcome === "recovery_required") {
@@ -9831,6 +10312,20 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         workspace.project.projectId,
         `Agent orchestration failed: ${message}`,
       );
+    } finally {
+      const state = this.orchestrator.getRun(runId);
+      const planId = state?.refinement.sourcePlanId;
+      if (state && planId) {
+        const status: ImplementationPlan["status"] =
+          state.run.status === "awaiting_review"
+            ? "proposal_ready"
+            : state.run.status === "complete" || state.applyResult?.applied
+              ? "built"
+              : state.run.status === "queued" || state.run.status === "running"
+                ? "building"
+                : "ready";
+        this.updatePlanBuildStatus(workspace, planId, status);
+      }
     }
   }
 
@@ -9949,7 +10444,23 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         },
       ],
       ...(transactionGroup ? { transactionGroup } : {}),
-      ...(beforeCommit ? { beforeCommit } : {}),
+      beforeCommit: async () => {
+        const currentWorkspace = this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
+        const orchestratorState = this.orchestrator.getRun(runId);
+        if (orchestratorState) {
+          await this.assertApprovedIntentAllowsPublication(
+            orchestratorState,
+            currentWorkspace,
+            substantiveDiff,
+          );
+        } else if (run.kind !== "demo") {
+          throw new ProjectOSError(
+            "run_not_found",
+            `Run '${runId}' is unavailable at the publication boundary`,
+          );
+        }
+        await beforeCommit?.();
+      },
       ...(acceptCommitted
         ? {
             acceptCommitted: (result) => acceptCommitted({
@@ -11072,42 +11583,20 @@ function assertMapAssetReferenceExists(
   resolveExistingMapAssetPath(workspace, assetPath);
 }
 
-function collectImageAssetPaths(mapContent: MapContentDocument): Set<string> {
-  const paths = new Set<string>();
-  for (const artifact of mapContent.artifacts) {
-    if (artifact.type === "image") {
-      paths.add(artifact.image.assetPath);
-    }
-  }
-  return paths;
-}
-
-function syncMapAssetsToOpeningState(workspace: LoadedProjectOSWorkspace): void {
-  const allowed = collectImageAssetPaths(workspace.openingMapContent);
-
-  for (const assetPath of [...workspace.mapAssets.keys()]) {
-    if (!allowed.has(assetPath)) {
-      workspace.mapAssets.delete(assetPath);
-    }
-  }
-
-  if (isInMemoryWorkspaceRoot(workspace.workspaceRoot)) {
-    return;
-  }
-
-  const assetsDir = join(workspace.projectOSRoot, "map-assets");
-  if (!existsSync(assetsDir)) {
-    return;
-  }
-
-  for (const fileName of readdirSync(assetsDir)) {
-    const assetPath = `map-assets/${fileName}`;
-    if (!allowed.has(assetPath)) {
-      const absolute = join(assetsDir, fileName);
-      if (existsSync(absolute)) {
-        unlinkSync(absolute);
-      }
-    }
+function mapArtifactTitle(artifact: MapArtifact): string | undefined {
+  switch (artifact.type) {
+    case "note":
+      return artifact.note.title;
+    case "plan":
+      return artifact.plan.title;
+    case "acceptance_list":
+      return artifact.acceptance.title;
+    case "terminal":
+      return artifact.terminal.title;
+    case "image":
+      return artifact.image.title;
+    case "urls":
+      return artifact.urls.title;
   }
 }
 

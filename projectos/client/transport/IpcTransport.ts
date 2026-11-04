@@ -49,6 +49,7 @@ import type {
   ChatSessionIndex,
   ChatSessionRecord,
 } from "../../contracts/chat-session.js";
+import type { ExecutorOption } from "../../contracts/executor-selection.js";
 import type { ListSkillsResult, SkillContent } from "../../contracts/skills.js";
 import type { AgentHarnessConfig } from "../../contracts/agent-harness-config.js";
 import type {
@@ -430,6 +431,10 @@ export class IpcTransport implements ApiTransport {
 
   listSkills(projectId: string): Promise<ListSkillsResult> {
     return this.invoke("listSkills", projectId);
+  }
+
+  listExecutors(projectId: string): Promise<ExecutorOption[]> {
+    return this.invoke("listExecutors", projectId);
   }
 
   getComposerMentions(
@@ -915,7 +920,10 @@ export class IpcTransport implements ApiTransport {
     projectId: string,
     title?: string,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
-    return this.invoke("createLoopGraph", projectId).then(async (doc) => {
+    return this.invoke<import("../../contracts/loop-graph.js").LoopGraphDocument>(
+      "createLoopGraph",
+      projectId,
+    ).then(async (doc) => {
       if (!title?.trim()) return doc;
       return this.upsertLoopGraph(projectId, { ...doc, title: title.trim() });
     });

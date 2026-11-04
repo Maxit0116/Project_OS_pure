@@ -78,6 +78,17 @@ describe("durable run state", () => {
       .toThrow(/Completed tasks must be unique checkpoint tasks/);
   });
 
+  it("binds one root run durably to an approved intent revision", () => {
+    const root = mkdtempSync(join(tmpdir(), "run-state-")); roots.push(root);
+    const store = new DurableRunStateStore(join(root, ".projectos"));
+    const first = store.bindIntentExecution("project_1", "intent_1", 3, "run_first");
+    const retry = store.bindIntentExecution("project_1", "intent_1", 3, "run_retry");
+    expect(retry.rootRunId).toBe(first.rootRunId);
+    const restartedStore = new DurableRunStateStore(join(root, ".projectos"));
+    expect(restartedStore.loadIntentExecutionBinding("project_1", "intent_1", 3)?.rootRunId)
+      .toBe("run_first");
+  });
+
   it("reserves a shared root budget and refuses over-dispatch", () => {
     const ledger = new RootBudgetLedger({ maxConcurrency: 2, maxInputTokens: 100, maxOutputTokens: 100 });
     ledger.reserve({ id: "child_1", concurrency: 1, activeTimeMs: 20, inputTokens: 50, outputTokens: 10, spendCents: 0 });

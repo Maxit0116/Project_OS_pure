@@ -708,7 +708,7 @@ function acceptRefinedGraph(
       version: "0.5.0",
       projectId: base.projectId,
       views: mergeArchitectureViews({
-        existing: base.views,
+        ...(base.views !== undefined ? { existing: base.views } : {}),
         generated:
           incoming.views ??
           synthesizeDefaultArchitectureViews(incoming.nodes, {
@@ -753,7 +753,7 @@ function acceptRefinedGraph(
       };
     }),
     views: mergeArchitectureViews({
-      existing: base.views,
+      ...(base.views !== undefined ? { existing: base.views } : {}),
       generated:
         incoming.views ??
         synthesizeDefaultArchitectureViews(nodes, {
@@ -857,7 +857,7 @@ function asRecordArray(value: unknown): Record<string, unknown>[] {
 
 function normalizeNode(
   raw: Record<string, unknown>,
-  language: ScanLanguage,
+  _language: ScanLanguage,
 ): FunctionalNode {
   const id = String(raw.id ?? "node_unknown");
   const name = String(raw.name ?? id);
@@ -882,7 +882,7 @@ function normalizeNode(
           : raw.elementType === "component"
             ? "component"
             : undefined;
-  let elementType =
+  let elementType: FunctionalNode["elementType"] =
     raw.elementType === "person" ||
     raw.elementType === "software_system" ||
     raw.elementType === "external_system" ||
@@ -1094,7 +1094,7 @@ function assembleFromRounds(input: {
     return node;
   });
 
-  let nodes = [...skeleton, ...components].map((node) => ({
+  let nodes: FunctionalNode[] = [...skeleton, ...components].map((node) => ({
     ...node,
     layer: node.layer && layerIds.has(node.layer) ? node.layer : layers[1]?.id ?? layers[0]!.id,
   }));
@@ -1195,7 +1195,12 @@ export async function runStructureGraphAiScan(
     stepId: Parameters<typeof stepEvent>[1]["stepId"],
     detail?: string,
   ): void => {
-    report?.(stepEvent(type, { scanId, projectId, stepId, detail }));
+    report?.(stepEvent(type, {
+      scanId,
+      projectId,
+      stepId,
+      ...(detail !== undefined ? { detail } : {}),
+    }));
   };
 
   if (
@@ -1419,7 +1424,7 @@ export async function runStructureGraphAiScan(
       base: input.graph,
       incoming: assembled,
       mode: scanMode,
-      deepenIds: input.nodeIds,
+      ...(input.nodeIds !== undefined ? { deepenIds: input.nodeIds } : {}),
     });
 
     const enrichedNodes = enrichNodesForC4Shapes({
@@ -1431,8 +1436,10 @@ export async function runStructureGraphAiScan(
       sourceKind: "ai",
       fileIndex: merged.fileIndex,
     });
+    const existingViews =
+      scanMode === "regenerate" ? merged.views : (input.graph.views ?? merged.views);
     const views = mergeArchitectureViews({
-      existing: scanMode === "regenerate" ? merged.views : (input.graph.views ?? merged.views),
+      ...(existingViews !== undefined ? { existing: existingViews } : {}),
       generated: generatedViews,
       mode: scanMode === "regenerate" ? "regenerate" : "refine",
     });
@@ -1447,7 +1454,7 @@ export async function runStructureGraphAiScan(
     emitStep(
       "step_completed",
       "link_code",
-      `${result.fileIndex.length} files · ${result.fileRelations.length} relations`,
+      `${result.fileIndex.length} files · ${result.fileRelations?.length ?? 0} relations`,
     );
 
     activeStep = "validate_save";

@@ -18,6 +18,7 @@ import {
   migrateLegacyNotePayload,
   migrateLegacyPlanPayload,
   parseMapContentDocument,
+  noteDocumentToPlainText,
   plainTextToNoteDocument,
 } from "./map-content.js";
 
@@ -309,5 +310,23 @@ describe("UpdateMapArtifactPatchSchema", () => {
     });
 
     expect(result.success).toBe(true);
+  });
+});
+
+describe("noteDocumentToPlainText", () => {
+  it("puts each block and list item on its own line and keeps hard breaks", () => {
+    const text = (value: string) => ({ type: "text", text: value });
+    const document = {
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [text("one"), { type: "hardBreak" }, text("two")] },
+        { type: "bulletList", content: [
+          { type: "listItem", content: [{ type: "paragraph", content: [text("a")] }] },
+          { type: "listItem", content: [{ type: "paragraph", content: [text("b")] }] },
+        ] },
+      ],
+    };
+    expect(noteDocumentToPlainText(document as never)).toBe("one\ntwo\na\nb");
+    expect(noteDocumentToPlainText(plainTextToNoteDocument("x\ny"))).toBe("x\ny");
   });
 });

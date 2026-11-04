@@ -35,7 +35,7 @@ export function resolveModelExecution(
   if (explicit?.kind === "runtime") {
     throw new ProjectOSError(
       "not_implemented",
-      `Agent runtime profile '${explicit.runtimeProfileId}' is not installed`,
+      `Agent runtime '${explicit.runtimeProfileId}' can only change one selected file. Ask, Plan, Debug and multi-file requests need a model profile`,
     );
   }
   const id =

@@ -47,6 +47,7 @@ const PROJECTOS_IPC_SIGNATURES = {
   ensureCodeFileUnderstanding: ['string', 'string'],
   askAgent: ['record'],
   listSkills: ['string'],
+  listExecutors: ['string'],
   getComposerMentions: ['string', 'string'],
   getSkill: ['string', 'string'],
   listAgentWorktrees: ['string'],

@@ -431,7 +431,7 @@ export const AgentDelegationEventSchema = z.discriminatedUnion("type", [
       planId: z.string().min(1),
       taskId: z.string().min(1),
       childRunId: z.string().min(1),
-      status: z.enum(["awaiting_review", "complete", "error"]),
+      status: z.enum(["awaiting_review", "complete", "blocked", "error"]),
       failureCategory: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/u).optional(),
     }).strict(),
   }).strict(),
@@ -499,6 +499,7 @@ export type ToolPolicyDecisionPayload = z.infer<
 export type ContextAssembledPayload = z.infer<
   typeof ContextAssembledPayloadSchema
 >;
+export type ContextAttachedPayload = z.infer<typeof ContextAttachedPayloadSchema>;
 export type AgentLifecycleEvent = z.infer<typeof AgentLifecycleEventSchema>;
 export type AgentActionEvent = z.infer<typeof AgentActionEventSchema>;
 export type AgentDelegationEvent = z.infer<typeof AgentDelegationEventSchema>;

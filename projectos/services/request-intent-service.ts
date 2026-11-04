@@ -108,9 +108,37 @@ export function intentAllowsNodeAddition(
   intent: RequestIntent,
   parentNodeId: string,
   name: string,
+  level: "context" | "container" | "component",
+  wiring: readonly {
+    existingNodeId: string;
+    direction: "from_new" | "to_new";
+    relation: string;
+    label: string;
+    purpose?: string | undefined;
+  }[],
 ): boolean {
   return intent.structuralEffects.some((effect) =>
-    effect.kind === "add_node" && effect.parentNodeId === parentNodeId && effect.name === name);
+    effect.kind === "add_node" &&
+    effect.parentNodeId === parentNodeId &&
+    effect.name === name &&
+    effect.level === level &&
+    structuralWiringKey(effect.wiring ?? []) === structuralWiringKey(wiring));
+}
+
+function structuralWiringKey(wiring: readonly {
+  existingNodeId: string;
+  direction: "from_new" | "to_new";
+  relation: string;
+  label: string;
+  purpose?: string | undefined;
+}[]): string {
+  return JSON.stringify(wiring.map((edge) => ({
+    existingNodeId: edge.existingNodeId,
+    direction: edge.direction,
+    relation: edge.relation,
+    label: edge.label,
+    ...(edge.purpose ? { purpose: edge.purpose } : {}),
+  })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))));
 }
 
 export function intentAllowsNodeDeletion(
@@ -139,7 +167,7 @@ export class RequestIntentService {
     }
     for (const effect of parsed.structuralEffects) {
       const referenced = effect.kind === "add_node"
-        ? [effect.parentNodeId]
+        ? [effect.parentNodeId, ...(effect.wiring ?? []).map((wire) => wire.existingNodeId)]
         : effect.kind === "delete_node"
           ? [effect.nodeId]
           : [effect.sourceNodeId, effect.targetNodeId];

@@ -70,6 +70,7 @@ import type {
   ChatSessionIndex,
   ChatSessionRecord,
 } from "./chat-session.js";
+import type { ExecutorOption } from "./executor-selection.js";
 import type { ListSkillsResult, SkillContent } from "./skills.js";
 import type {
   LocationHint,
@@ -216,6 +217,8 @@ export interface ProjectOSApi {
   ): Promise<CodeFileUnderstandingEntry>;
   askAgent(request: AgentAskRequest): Promise<AgentAnswerResult>;
   listSkills(projectId: string): Promise<ListSkillsResult>;
+  /** Agent runtimes registered in this build that a request may choose instead of a model profile. */
+  listExecutors(projectId: string): Promise<ExecutorOption[]>;
   getComposerMentions(
     projectId: string,
     query: string,

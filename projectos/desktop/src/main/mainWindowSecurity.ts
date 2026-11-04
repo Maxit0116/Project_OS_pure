@@ -90,7 +90,7 @@ export function installMainWindowNavigationGuard(
 }
 
 function resolveRequestingOrigin(
-  webContents: WebContents | undefined,
+  webContents: WebContents | null | undefined,
   requestingOrigin: string | undefined,
   details?: { requestingUrl?: string },
 ): string {

@@ -160,7 +160,12 @@ export function readGitRepositoryStatus(
     ]);
     if (counts.ok) {
       const [ahead, behind] = counts.stdout.trim().split(/\s+/).map(Number);
-      if (Number.isInteger(ahead) && Number.isInteger(behind)) {
+      if (
+        ahead !== undefined &&
+        behind !== undefined &&
+        Number.isInteger(ahead) &&
+        Number.isInteger(behind)
+      ) {
         status.ahead = ahead;
         status.behind = behind;
       }

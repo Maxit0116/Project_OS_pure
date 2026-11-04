@@ -23,9 +23,11 @@
     "../services/**/*",
     "../utils/**/*",
     "../validation/**/*",
+    "../shared/**/*",
     "../errors.ts"
   ],
   "exclude": [
-    "../**/*.test.ts"
+    "../**/*.test.ts",
+    "../validation/node-compat.d.ts"
   ]
 }

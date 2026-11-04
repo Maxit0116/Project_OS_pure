@@ -106,9 +106,9 @@ export class StructureScanProgressTracker {
   } {
     const scanId = randomUUID();
     const startedAt = nowIso();
-    const steps = createPlannedStructureScanSteps({
-      skipMapContext: input.skipMapContext,
-    });
+    const steps = createPlannedStructureScanSteps(
+      input.skipMapContext !== undefined ? { skipMapContext: input.skipMapContext } : {},
+    );
     const progress: StructureScanProgress = {
       scanId,
       projectId: input.projectId,

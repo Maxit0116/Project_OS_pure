@@ -159,7 +159,11 @@ function mockGateway(
       model: "mock",
       output:
         task === "structure_graph_round_a"
-          ? roundA({ includeDanglingEdge: options?.includeDanglingEdge })
+          ? roundA(
+              options?.includeDanglingEdge !== undefined
+                ? { includeDanglingEdge: options.includeDanglingEdge }
+                : {},
+            )
           : roundB(authName),
       usage: { inputTokens: 1, outputTokens: 2 },
       latencyMs: 1,

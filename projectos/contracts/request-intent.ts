@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { ExecutorSelectionSchema } from "./executor-selection.js";
+import { FunctionalEdgeRelationSchema } from "./graph.js";
 import { ModelProfileSchema, ThinkingDepthSchema } from "./settings.js";
 
 export const IntentTouchSchema = z.object({
@@ -13,11 +14,21 @@ export const IntentTouchSchema = z.object({
   }).strict(),
 }).strict();
 
+export const IntentNodeWiringSchema = z.object({
+  existingNodeId: z.string().min(1),
+  direction: z.enum(["from_new", "to_new"]),
+  relation: FunctionalEdgeRelationSchema,
+  label: z.string().trim().min(1).max(200),
+  purpose: z.string().trim().min(1).max(500).optional(),
+}).strict();
+
 export const IntentStructuralEffectSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("add_node"),
     parentNodeId: z.string().min(1),
     name: z.string().trim().min(1),
+    level: z.enum(["context", "container", "component"]).optional(),
+    wiring: z.array(IntentNodeWiringSchema).max(8).optional(),
     source: z.enum(["model_proposed", "server_derived"]),
   }).strict(),
   z.object({
@@ -50,7 +61,13 @@ export const RequestIntentDraftSchema = z.object({
   kind: z.enum(["change", "add_node", "delete_node", "mixed"]),
   touches: z.array(IntentTouchSchema).min(1),
   structuralProposals: z.array(z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("add_node"), parentNodeId: z.string().min(1), name: z.string().trim().min(1) }).strict(),
+    z.object({
+      kind: z.literal("add_node"),
+      parentNodeId: z.string().min(1),
+      name: z.string().trim().min(1),
+      level: z.enum(["context", "container", "component"]),
+      wiring: z.array(IntentNodeWiringSchema).max(8),
+    }).strict(),
     z.object({ kind: z.literal("delete_node"), nodeId: z.string().min(1) }).strict(),
     z.object({ kind: z.literal("connect_nodes"), sourceNodeId: z.string().min(1), targetNodeId: z.string().min(1) }).strict(),
   ])),
@@ -65,6 +82,10 @@ export const RequestIntentSchema = z.object({
   id: z.string().min(1),
   projectId: z.string().min(1),
   rawRequest: z.string().trim().min(1),
+  requestedFile: z.object({
+    nodeId: z.string().min(1),
+    path: z.string().min(1),
+  }).strict().optional(),
   goal: z.string().trim().min(1),
   kind: z.enum(["change", "add_node", "delete_node", "mixed"]),
   entryNodeId: z.string().min(1).nullable(),
@@ -76,6 +97,16 @@ export const RequestIntentSchema = z.object({
   questions: z.array(IntentQuestionSchema),
   executorSelection: ExecutorSelectionSchema,
   executorSnapshot: z.object({
+    kind: z.literal("model"),
+    profile: ModelProfileSchema,
+    thinkingDepth: ThinkingDepthSchema,
+  }).strict().optional(),
+  /**
+   * The model that independently validates a runtime executor's proposal. Fixed when the
+   * intent is drafted and covered by the approval hash, so the user sees and approves which
+   * provider will receive the file and diff. Absent means the proposal stays review-only.
+   */
+  validatorSnapshot: z.object({
     kind: z.literal("model"),
     profile: ModelProfileSchema,
     thinkingDepth: ThinkingDepthSchema,
@@ -101,6 +132,7 @@ export const ExtractRequestIntentRequestSchema = z.object({
 }).strict();
 
 export type IntentTouch = z.infer<typeof IntentTouchSchema>;
+export type IntentNodeWiring = z.infer<typeof IntentNodeWiringSchema>;
 export type IntentStructuralEffect = z.infer<typeof IntentStructuralEffectSchema>;
 export type IntentQuestion = z.infer<typeof IntentQuestionSchema>;
 export type RequestIntentDraft = z.infer<typeof RequestIntentDraftSchema>;

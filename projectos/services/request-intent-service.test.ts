@@ -84,12 +84,24 @@ describe("request intent routing and approval", () => {
     const intent = {
       ...draft(["container_next_web"]),
       structuralEffects: [
-        { kind: "add_node" as const, parentNodeId: "container_next_web", name: "Receipts", source: "model_proposed" as const },
+        {
+          kind: "add_node" as const,
+          parentNodeId: "container_next_web",
+          name: "Receipts",
+          level: "component" as const,
+          wiring: [{ existingNodeId: "feat_checkout", direction: "to_new" as const, relation: "calls" as const, label: "send receipt" }],
+          source: "model_proposed" as const,
+        },
         { kind: "delete_node" as const, nodeId: "feat_checkout", descendantCount: 2, ownedFileCount: 3, source: "server_derived" as const },
       ],
     };
-    expect(intentAllowsNodeAddition(intent, "container_next_web", "Receipts")).toBe(true);
-    expect(intentAllowsNodeAddition(intent, "container_saas_database", "Receipts")).toBe(false);
+    const wiring = [{ existingNodeId: "feat_checkout", direction: "to_new" as const, relation: "calls", label: "send receipt" }];
+    expect(intentAllowsNodeAddition(intent, "container_next_web", "Receipts", "component", wiring)).toBe(true);
+    expect(intentAllowsNodeAddition(intent, "container_saas_database", "Receipts", "component", wiring)).toBe(false);
+    expect(intentAllowsNodeAddition(intent, "container_next_web", "Receipts", "component", [])).toBe(false);
+    expect(intentAllowsNodeAddition(intent, "container_next_web", "Receipts", "component", [
+      { ...wiring[0]!, label: "unapproved edge" },
+    ])).toBe(false);
     expect(intentAllowsNodeDeletion(intent, "feat_checkout", 2, 3)).toBe(true);
     expect(intentAllowsNodeDeletion(intent, "feat_checkout", 2, 4)).toBe(false);
   });

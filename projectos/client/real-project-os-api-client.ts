@@ -51,6 +51,7 @@ import type {
   MapContentDocument,
   UpdateMapArtifactPatch,
 } from "../contracts/map-content.js";
+import type { ExecutorOption } from "../contracts/executor-selection.js";
 import type { ListSkillsResult, SkillContent } from "../contracts/skills.js";
 import type { AgentHarnessConfig } from "../contracts/agent-harness-config.js";
 import type {
@@ -312,6 +313,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   listSkills(projectId: string): Promise<ListSkillsResult> {
     return this.transport.listSkills(projectId);
+  }
+
+  listExecutors(projectId: string): Promise<ExecutorOption[]> {
+    return this.transport.listExecutors(projectId);
   }
 
   getComposerMentions(

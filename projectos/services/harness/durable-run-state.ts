@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -11,6 +11,7 @@ import {
   type RunDecision,
 } from "../../contracts/run-state.js";
 import { RequestIntentSchema, type RequestIntent } from "../../contracts/request-intent.js";
+import { z } from "zod";
 import { cloneJson } from "../../utils/json.js";
 
 function safeId(value: string): boolean {
@@ -23,18 +24,32 @@ function atomicJsonWrite(filePath: string, value: unknown): void {
   renameSync(tempPath, filePath);
 }
 
+const IntentExecutionBindingSchema = z.object({
+  version: z.literal("0.1.0"),
+  projectId: z.string().min(1),
+  intentId: z.string().min(1),
+  intentRevision: z.number().int().positive(),
+  rootRunId: z.string().min(1),
+  createdAt: z.string().min(1),
+}).strict();
+
+export type IntentExecutionBinding = z.infer<typeof IntentExecutionBindingSchema>;
+
 export class DurableRunStateStore {
   private readonly decisionsRoot: string;
   private readonly checkpointsRoot: string;
   private readonly intentsRoot: string;
+  private readonly runStartsRoot: string;
 
   constructor(projectOSRoot: string) {
     this.decisionsRoot = join(projectOSRoot, "run-decisions");
     this.checkpointsRoot = join(projectOSRoot, "run-checkpoints");
     this.intentsRoot = join(projectOSRoot, "run-intents");
+    this.runStartsRoot = join(projectOSRoot, "run-starts");
     mkdirSync(this.decisionsRoot, { recursive: true });
     mkdirSync(this.checkpointsRoot, { recursive: true });
     mkdirSync(this.intentsRoot, { recursive: true });
+    mkdirSync(this.runStartsRoot, { recursive: true });
   }
 
   saveDecision(decision: RunDecision): RunDecision {
@@ -134,6 +149,55 @@ export class DurableRunStateStore {
     const filePath = join(this.intentsRoot, `${intentId}.json`);
     if (!existsSync(filePath)) return null;
     return RequestIntentSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
+  }
+
+  bindIntentExecution(
+    projectId: string,
+    intentId: string,
+    intentRevision: number,
+    proposedRootRunId: string,
+  ): IntentExecutionBinding {
+    if (!safeId(intentId) || !safeId(proposedRootRunId)) throw new Error("Unsafe intent execution binding id");
+    const binding = IntentExecutionBindingSchema.parse({
+      version: "0.1.0",
+      projectId,
+      intentId,
+      intentRevision,
+      rootRunId: proposedRootRunId,
+      createdAt: new Date().toISOString(),
+    });
+    const filePath = join(this.runStartsRoot, `${intentId}_${intentRevision}.json`);
+    let fd: number | undefined;
+    try {
+      fd = openSync(filePath, "wx", 0o600);
+      writeFileSync(fd, `${JSON.stringify(binding, null, 2)}\n`, "utf8");
+      fsyncSync(fd);
+      closeSync(fd);
+      return binding;
+    } catch (error) {
+      if (fd !== undefined) closeSync(fd);
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const existing = IntentExecutionBindingSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
+      if (existing.projectId !== projectId || existing.intentId !== intentId ||
+        existing.intentRevision !== intentRevision) {
+        throw new Error("Intent execution binding identity does not match its storage key");
+      }
+      return existing;
+    }
+  }
+
+  loadIntentExecutionBinding(
+    projectId: string,
+    intentId: string,
+    intentRevision: number,
+  ): IntentExecutionBinding | null {
+    if (!safeId(intentId)) return null;
+    const filePath = join(this.runStartsRoot, `${intentId}_${intentRevision}.json`);
+    if (!existsSync(filePath)) return null;
+    const binding = IntentExecutionBindingSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
+    if (binding.projectId !== projectId || binding.intentId !== intentId ||
+      binding.intentRevision !== intentRevision) return null;
+    return binding;
   }
 }
 

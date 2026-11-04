@@ -293,6 +293,10 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async listExecutors(_projectId: string) {
+    return transportNotConnected();
+  }
+
   async getComposerMentions(_projectId: string, _query: string) {
     return transportNotConnected();
   }

@@ -116,13 +116,17 @@ export function captureLocatorAtPoint(
   if (!el) {
     return { url, routePath };
   }
+  const selector = buildStableSelector(el);
+  const axName = axNameForElement(el);
+  const textHint = textHintForElement(el);
+  const bounds = boundsForElement(el);
   return {
     url,
     routePath,
-    selector: buildStableSelector(el),
-    axName: axNameForElement(el),
-    textHint: textHintForElement(el),
-    bounds: boundsForElement(el),
+    ...(selector !== undefined ? { selector } : {}),
+    ...(axName !== undefined ? { axName } : {}),
+    ...(textHint !== undefined ? { textHint } : {}),
+    ...(bounds !== undefined ? { bounds } : {}),
   };
 }
 

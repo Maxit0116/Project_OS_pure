@@ -540,7 +540,13 @@ export function buildSpatialPinUserContent(
   options?: BuildSpatialPinUserContentOptions,
 ): string {
   const locationLine = formatSpatialPinLocationLine(pin);
-  return buildSpatialPinUserContentWithStencils(pin.composer, {
+  const { prompt, stencilBrief, generationScope } = pin.composer;
+  const composer = {
+    prompt,
+    ...(stencilBrief !== undefined ? { stencilBrief } : {}),
+    ...(generationScope !== undefined ? { generationScope } : {}),
+  };
+  return buildSpatialPinUserContentWithStencils(composer, {
     locationLine,
     ...(options?.placements ? { placements: options.placements } : {}),
     ...(options?.outOfScope ? { outOfScope: options.outOfScope } : {}),

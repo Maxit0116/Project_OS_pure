@@ -7,7 +7,7 @@ function minimalGraph(overrides: Partial<ProjectGraph> = {}): ProjectGraph {
     version: "0.5.0",
     projectId: "p1",
     projectName: "P1",
-    projectType: "nextjs",
+    projectType: "nextjs-app",
     analyzedAt: new Date().toISOString(),
     analysisStatus: "complete",
     architecture: {

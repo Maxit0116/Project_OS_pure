@@ -207,7 +207,8 @@ Choose among the provided hypothesis ids. Keep the fix summary short.`,
 function parseJson<T>(
   output: string,
   reasoning: string | undefined,
-  schema: z.ZodType<T>,
+  // Input is `unknown` so T is inferred from the schema's output (after defaults).
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
 ): T {
   for (const source of orderedModelOutputSources(output, reasoning)) {
     try {

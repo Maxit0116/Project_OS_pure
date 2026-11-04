@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ProjectGraph } from "../contracts/graph.js";
 import {
   RequestIntentDraftSchema,
@@ -13,10 +14,71 @@ import type { ModelGateway } from "./model-gateway/index.js";
 import type { ModelExecutionSnapshot } from "./harness/executor-selection.js";
 import { RequestIntentService } from "./request-intent-service.js";
 
-const SYSTEM_PROMPT = `You convert a software change request into an editable intent draft.
-Use only node ids supplied in the immediate graph. The person approves product effects, not file paths.
-Ask questions only for material choices the repository cannot resolve. Make reasonable minor assumptions explicit.
-Return JSON matching the supplied schema. Do not claim files were read or tests were run.`;
+const DISCOVERY_SYSTEM_PROMPT = `You are the master agent planning a software change from repository evidence.
+Begin with the immediate graph. You may inspect a node, list its children, read a file present in an inspected node's context, or consult a node for a focused read-only answer. Choose one action at a time and use only supplied node ids and file paths. After enough evidence, return a final intent. Ask the user only about material product choices that code and repository evidence cannot answer. Do not claim a file was read unless it appears in observations or that tests were run.
+Return exactly one JSON object matching the supplied action schema.`;
+const CONSULT_SYSTEM_PROMPT = `You are a read-only specialist answering one focused question about a software node. Use only the supplied node context, cite relevant file paths when possible, and say when evidence is insufficient. Do not propose changes, invoke tools, or claim checks were run. Return a concise plain-text answer.`;
+
+const DiscoveryActionSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("inspect_node"),
+    nodeId: z.string().min(1),
+    reason: z.string().trim().min(1),
+  }).strict(),
+  z.object({
+    action: z.literal("list_children"),
+    nodeId: z.string().min(1),
+    reason: z.string().trim().min(1),
+  }).strict(),
+  z.object({
+    action: z.literal("read_source"),
+    nodeId: z.string().min(1),
+    path: z.string().min(1),
+    question: z.string().trim().min(1),
+  }).strict(),
+  z.object({
+    action: z.literal("consult_node"),
+    nodeId: z.string().min(1),
+    question: z.string().trim().min(1),
+  }).strict(),
+  z.object({
+    action: z.literal("final"),
+    intent: RequestIntentDraftSchema,
+  }).strict(),
+]);
+
+const MAX_DISCOVERY_ACTIONS = 24;
+const DISCOVERY_OUTPUT_SCHEMA = {
+  oneOf: [
+    { type: "object", properties: { action: { const: "inspect_node" }, nodeId: { type: "string" }, reason: { type: "string" } }, required: ["action", "nodeId", "reason"], additionalProperties: false },
+    { type: "object", properties: { action: { const: "list_children" }, nodeId: { type: "string" }, reason: { type: "string" } }, required: ["action", "nodeId", "reason"], additionalProperties: false },
+    { type: "object", properties: { action: { const: "read_source" }, nodeId: { type: "string" }, path: { type: "string" }, question: { type: "string" } }, required: ["action", "nodeId", "path", "question"], additionalProperties: false },
+    { type: "object", properties: { action: { const: "consult_node" }, nodeId: { type: "string" }, question: { type: "string" } }, required: ["action", "nodeId", "question"], additionalProperties: false },
+    {
+      type: "object",
+      properties: {
+        action: { const: "final" },
+        intent: {
+          type: "object",
+          properties: {
+            goal: { type: "string" },
+            kind: { enum: ["change", "add_node", "delete_node", "mixed"] },
+            touches: { type: "array", items: { type: "object", properties: { nodeId: { type: "string" }, reason: { type: "string" }, allow: { type: "object", properties: { editExisting: { type: "boolean" }, addParts: { type: "boolean" }, deletePartIds: { type: "array", items: { type: "string" } } }, required: ["editExisting", "addParts", "deletePartIds"], additionalProperties: false } }, required: ["nodeId", "reason", "allow"], additionalProperties: false } },
+            structuralProposals: { type: "array", items: { type: "object" } },
+            assumptions: { type: "array", items: { type: "string" } },
+            outOfScope: { type: "array", items: { type: "string" } },
+            acceptance: { type: "array", items: { type: "string" } },
+            questions: { type: "array", items: { type: "object", properties: { id: { type: "string" }, text: { type: "string" }, options: { type: "array", items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" } }, required: ["id", "label"], additionalProperties: false } }, recommendation: { type: "string" } }, required: ["id", "text"], additionalProperties: false } },
+          },
+          required: ["goal", "kind", "touches", "structuralProposals", "assumptions", "outOfScope", "acceptance", "questions"],
+          additionalProperties: false,
+        },
+      },
+      required: ["action", "intent"],
+      additionalProperties: false,
+    },
+  ],
+} as const;
 
 export class RequestIntentExtractionService {
   constructor(
@@ -32,60 +94,121 @@ export class RequestIntentExtractionService {
     inspectNode?: (nodeId: string) => Promise<NodeContextBundle>;
   }): Promise<RequestIntent> {
     const { request, graph, globalContext, execution } = input;
-    const modelInput = {
+    const initialInput = {
       rawRequest: request.rawRequest,
       selectedNodeHint: request.nodeId,
       selectedFileHint: request.filePath,
       immediateGraph: globalContext.immediateNodes ?? globalContext.topLevelNodes,
       immediateRelations: globalContext.immediateRelations ?? [],
       executorSelection: request.executorSelection,
-      outputSchema: {
-        goal: "string",
-        kind: "change | add_node | delete_node | mixed",
-        touches: [{ nodeId: "known node id", reason: "string", allow: { editExisting: "boolean", addParts: "boolean", deletePartIds: ["known descendant id"] } }],
-        structuralProposals: ["add_node | delete_node | connect_nodes"],
-        assumptions: ["string"],
-        outOfScope: ["string"],
-        acceptance: ["observable outcome"],
-        questions: [{ id: "string", text: "material user choice", options: [{ id: "string", label: "string" }], recommendation: "string" }],
-      },
+      outputSchema: DISCOVERY_OUTPUT_SCHEMA,
     };
-    const complete = (value: unknown) => this.gateway.complete(execution.profile, {
+    const complete = (value: unknown, systemPrompt = DISCOVERY_SYSTEM_PROMPT) => this.gateway.complete(execution.profile, {
       projectId: request.projectId,
       requestKind: "request_intent",
       modelPreference: execution.profile.id,
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt,
       input: value,
       thinkingDepth: execution.thinkingDepth,
       redactionPolicy: "secrets_and_paths",
     });
-    const parseDraft = async (value: unknown) => {
+    const parseAction = async (value: unknown) => {
       const response = await complete(value);
       const jsonOutput = resolveModelStructuredOutput(response.output, response.reasoning)
         .replace(/^```(?:json)?\s*/iu, "")
         .replace(/\s*```$/u, "");
-      return RequestIntentDraftSchema.parse(JSON.parse(jsonOutput));
+      return DiscoveryActionSchema.parse(JSON.parse(jsonOutput));
     };
-    let draft = await parseDraft(modelInput);
     const inspectNode = input.inspectNode;
-    const drilldownIds = [...new Set(draft.touches
-      .map((touch) => touch.nodeId)
-      .filter((nodeId) => {
-        const node = graph.nodes.find((candidate) => candidate.id === nodeId);
-        return Boolean(inspectNode && node?.level && ["context", "container"].includes(node.level) && node.children?.length);
-      }))].slice(0, 6);
-    if (drilldownIds.length && inspectNode) {
-      const discovered = await Promise.all(drilldownIds.map(async (nodeId) => ({
-        selectedNodeId: nodeId,
-        context: await inspectNode(nodeId),
-      })));
-      draft = await parseDraft({
-        ...modelInput,
-        initialIntent: draft,
-        discoveredNodeContexts: discovered,
-        instruction: "Use discovered repository facts to refine touched nodes and resolve answerable questions. Keep only user choices that remain materially ambiguous.",
+    const observations: Array<Record<string, unknown>> = [];
+    const inspectedContexts = new Map<string, NodeContextBundle>();
+    const performedActions = new Set<string>();
+    const knownNodeIds = new Set([
+      ...(globalContext.immediateNodes ?? globalContext.topLevelNodes).map((node) => node.id),
+      ...(request.nodeId ? [request.nodeId] : []),
+    ]);
+    let draft: z.infer<typeof RequestIntentDraftSchema> | undefined;
+    let actionCount = 0;
+
+    while (!draft) {
+      const exhausted = actionCount >= MAX_DISCOVERY_ACTIONS;
+      const action = await parseAction({
+        ...initialInput,
+        observations,
+        discovery: {
+          actionsTaken: actionCount,
+          maxActions: MAX_DISCOVERY_ACTIONS,
+          ...(exhausted ? {
+            limitReached: true,
+            instruction: "Stop exploring now. Return a final intent from the evidence collected, explicitly recording any unresolved repository fact as an assumption or user question.",
+          } : {}),
+        },
       });
+      if (action.action === "final") {
+        draft = action.intent;
+        if (exhausted) {
+          draft.assumptions.push("Repository discovery reached its per-request action limit; confirm any unresolved implementation details before execution.");
+        }
+        break;
+      }
+      if (exhausted) {
+        throw new Error(`Master discovery reached its ${MAX_DISCOVERY_ACTIONS}-action limit without producing a plan`);
+      }
+
+      const node = graph.nodes.find((candidate) => candidate.id === action.nodeId);
+      if (!node) throw new Error(`Master discovery referenced unknown node '${action.nodeId}'`);
+      if (!knownNodeIds.has(action.nodeId)) {
+        throw new Error(`Master discovery must discover node '${action.nodeId}' before inspecting it`);
+      }
+      if (!inspectNode) throw new Error("Node inspection is unavailable in this runtime");
+      const actionKey = action.action === "read_source"
+        ? `${action.action}:${action.nodeId}:${action.path}`
+        : `${action.action}:${action.nodeId}${"question" in action ? `:${action.question}` : ""}`;
+      if (performedActions.has(actionKey)) {
+        observations.push({ action: action.action, nodeId: action.nodeId, result: "Repeated action skipped to prevent a discovery loop." });
+        actionCount += 1;
+        continue;
+      }
+      performedActions.add(actionKey);
+
+      const context = inspectedContexts.get(action.nodeId) ?? await inspectNode(action.nodeId);
+      inspectedContexts.set(action.nodeId, context);
+      for (const related of [
+        context.neighborhood.selected,
+        ...context.neighborhood.children,
+        ...(context.neighborhood.parent ? [context.neighborhood.parent] : []),
+        ...context.neighborhood.upstream,
+        ...context.neighborhood.downstream,
+      ]) knownNodeIds.add(related.id);
+      if (action.action === "inspect_node" || action.action === "list_children") {
+        observations.push({ action: action.action, nodeId: action.nodeId, reason: action.reason, context });
+      } else if (action.action === "read_source") {
+        const file = context.fileManifest.find((candidate) => candidate.path === action.path);
+        if (!file) {
+          observations.push({ action: action.action, nodeId: action.nodeId, path: action.path, result: "File is not in this node's inspected context; choose a listed file or inspect another owning node." });
+        } else if (file.content === undefined) {
+          observations.push({ action: action.action, nodeId: action.nodeId, path: action.path, result: `Source unavailable: ${file.omissionReason ?? file.disposition}.` });
+        } else {
+          observations.push({ action: action.action, nodeId: action.nodeId, path: action.path, sha256: file.sha256, question: action.question, source: file.content });
+        }
+      } else {
+        const response = await complete({
+          kind: "read_only_node_consultation",
+          project: { name: globalContext.projectName, description: globalContext.conciseDescription },
+          nodeContext: context,
+          question: action.question,
+        }, CONSULT_SYSTEM_PROMPT);
+        observations.push({
+          action: action.action,
+          nodeId: action.nodeId,
+          question: action.question,
+          answer: resolveModelStructuredOutput(response.output, response.reasoning).slice(0, 6000),
+        });
+      }
+      actionCount += 1;
     }
+
+    if (!draft) throw new Error("Master discovery ended without a final intent");
     const structuralEffects: IntentStructuralEffect[] = draft.structuralProposals.map((effect) => {
       switch (effect.kind) {
         case "add_node":
@@ -127,6 +250,9 @@ export class RequestIntentExtractionService {
       projectId: request.projectId,
       rawRequest: request.rawRequest,
       goal: draft.goal,
+      ...(request.filePath && request.nodeId
+        ? { requestedFile: { nodeId: request.nodeId, path: request.filePath } }
+        : {}),
       kind: draft.kind,
       entryNodeId: null,
       touches: draft.touches,

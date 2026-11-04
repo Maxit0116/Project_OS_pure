@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FunctionalEdge, FunctionalNode } from "../../contracts/graph.js";
+import type { FileEntry, FunctionalEdge, FunctionalNode } from "../../contracts/graph.js";
 import {
   componentHasCodeGraph,
   liftRelationshipsToVisibleAncestors,
@@ -56,6 +56,7 @@ describe("c4-architecture-views", () => {
   it("synthesizes a code view from fileIndex ownership when linkedFiles is empty", () => {
     const component = node("identity", "component", "web", "component");
     component.linkedFiles = [];
+    const ownedFile: FileEntry = { path: "qimen/chart.py", nodeIds: ["identity"], type: "lib", imports: [], exports: [], status: "normal" };
     const views = synthesizeDefaultArchitectureViews(
       [
         node("system", "context", undefined, "software_system"),
@@ -63,7 +64,7 @@ describe("c4-architecture-views", () => {
         component,
       ],
       {
-        fileIndex: [{ path: "qimen/chart.py", nodeIds: ["identity"], type: "lib", imports: [], exports: [], status: "normal" }],
+        fileIndex: [ownedFile],
       },
     );
     expect(componentHasCodeGraph(component, [{ nodeIds: ["identity"] }])).toBe(true);

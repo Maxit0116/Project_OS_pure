@@ -60,8 +60,9 @@ export function findHarnessRecordForSession(
     harnessDescriptionsMatch(candidate.rawError, session.bugDescription),
   );
   if (byError) return byError;
-  if (session.scope.kind === "global") return undefined;
-  return records.find((candidate) => candidate.businessNodeId === session.scope.nodeId);
+  const scope = session.scope;
+  if (scope.kind === "global") return undefined;
+  return records.find((candidate) => candidate.businessNodeId === scope.nodeId);
 }
 
 export function resolveDebugFixFilePath(

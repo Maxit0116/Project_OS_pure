@@ -132,13 +132,13 @@ export class LanguageServerManager {
       if (headerEnd < 0) return
 
       const header = session.buffer.slice(0, headerEnd)
-      const lengthMatch = header.match(/Content-Length:\s*(\d+)/i)
-      if (!lengthMatch) {
+      const contentLengthText = header.match(/Content-Length:\s*(\d+)/i)?.[1]
+      if (contentLengthText === undefined) {
         session.buffer = session.buffer.slice(headerEnd + 4)
         continue
       }
 
-      const contentLength = Number.parseInt(lengthMatch[1], 10)
+      const contentLength = Number.parseInt(contentLengthText, 10)
       const messageStart = headerEnd + 4
       const messageEnd = messageStart + contentLength
       if (session.buffer.length < messageEnd) return

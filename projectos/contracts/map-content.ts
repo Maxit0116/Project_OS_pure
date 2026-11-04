@@ -75,6 +75,28 @@ export function plainTextToNoteDocument(text: string): NoteDocument {
   };
 }
 
+const NOTE_BLOCK_TYPES = new Set([
+  "paragraph", "heading", "blockquote", "codeBlock",
+  "bulletList", "orderedList", "listItem", "taskList", "taskItem",
+]);
+
+function noteNodeText(node: unknown): string {
+  if (!node || typeof node !== "object") return "";
+  const record = node as { type?: unknown; text?: unknown; content?: unknown };
+  if (typeof record.text === "string") return record.text;
+  if (record.type === "hardBreak") return "\n";
+  if (!Array.isArray(record.content)) return "";
+  // Blocks (list items, paragraphs in a quote) each get their own line.
+  const hasBlockChild = record.content.some((child) =>
+    child && typeof child === "object" && NOTE_BLOCK_TYPES.has((child as { type?: string }).type ?? ""));
+  return record.content.map(noteNodeText).join(hasBlockChild ? "\n" : "");
+}
+
+/** Inverse of plainTextToNoteDocument: one line per top-level block. */
+export function noteDocumentToPlainText(document: NoteDocument): string {
+  return document.content.map(noteNodeText).join("\n");
+}
+
 function migrateLegacyNotePayload(value: unknown): unknown {
   if (!value || typeof value !== "object") {
     return value;

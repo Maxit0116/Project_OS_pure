@@ -38,7 +38,7 @@ describe('executor selection and immutable run binding', () => {
 
   it('rejects unknown models and uninstalled runtimes without falling back', () => {
     expect(() => resolveModelExecution(settings(), { kind: 'model', modelProfileId: 'missing' })).toThrow(/not found/);
-    expect(() => resolveModelExecution(settings(), { kind: 'runtime', runtimeProfileId: 'external' })).toThrow(/not installed/);
+    expect(() => resolveModelExecution(settings(), { kind: 'runtime', runtimeProfileId: 'external' })).toThrow(/need a model profile/);
     expect(ExecutorSelectionSchema.safeParse({ kind: 'runtime', runtimeProfileId: 'x', modelProfileId: 'a' }).success).toBe(false);
     expect(resolveModelExecution(createDefaultSettings('empty'))).toBeUndefined();
   });
