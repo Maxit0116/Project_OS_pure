@@ -233,10 +233,16 @@ export function reduceRunEventState(
               {
                 id: messageId,
                 role: 'assistant',
-                content: getStoreMessage(state.locale, 'chat.automaticApplySummary', {
-                  count: state.applyResult.filesChanged.length,
-                  status,
-                }),
+                // One sentence per outcome: "verified" must never be claimed for a run that was not checked.
+                content: getStoreMessage(
+                  state.locale,
+                  status === 'passed'
+                    ? 'chat.automaticApplyPassed'
+                    : status === 'failed'
+                      ? 'chat.automaticApplyFailed'
+                      : 'chat.automaticApplyNotRun',
+                  { count: state.applyResult.filesChanged.length },
+                ),
                 format: 'markdown',
                 timestamp: event.timestamp,
               },

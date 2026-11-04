@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProjectOSError } from "../errors.js";
 import type { ProjectGraph } from "../contracts/graph.js";
 import {
   RequestIntentDraftSchema,
@@ -112,12 +113,39 @@ export class RequestIntentExtractionService {
       thinkingDepth: execution.thinkingDepth,
       redactionPolicy: "secrets_and_paths",
     });
+    // Some providers occasionally answer a JSON-only request with something else (for example their
+    // own tool-call markup). One corrective retry recovers that; a second miss is reported as such.
     const parseAction = async (value: unknown) => {
-      const response = await complete(value);
-      const jsonOutput = resolveModelStructuredOutput(response.output, response.reasoning)
-        .replace(/^```(?:json)?\s*/iu, "")
-        .replace(/\s*```$/u, "");
-      return DiscoveryActionSchema.parse(JSON.parse(jsonOutput));
+      let correction: { previousReply: string; problem: string } | undefined;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const response = await complete(correction
+          ? {
+              ...(value as Record<string, unknown>),
+              correction: {
+                problem: correction.problem,
+                previousReplyStartedWith: correction.previousReply,
+                instruction: "Reply again with exactly one JSON object matching the action schema. No tool-call markup, no prose, no code fences.",
+              },
+            }
+          : value);
+        const jsonOutput = resolveModelStructuredOutput(response.output, response.reasoning)
+          .replace(/^```(?:json)?\s*/iu, "")
+          .replace(/\s*```$/u, "");
+        try {
+          return DiscoveryActionSchema.parse(JSON.parse(jsonOutput));
+        } catch (error) {
+          correction = {
+            previousReply: jsonOutput.trim().slice(0, 160),
+            problem: error instanceof SyntaxError
+              ? "the reply was not valid JSON"
+              : "the JSON did not match the action schema",
+          };
+        }
+      }
+      throw new ProjectOSError(
+        "model_output_invalid",
+        "The model did not return a usable planning step after a retry",
+      );
     };
     const inspectNode = input.inspectNode;
     const observations: Array<Record<string, unknown>> = [];
@@ -255,7 +283,8 @@ export class RequestIntentExtractionService {
         : {}),
       kind: draft.kind,
       entryNodeId: null,
-      touches: draft.touches,
+      // Only the server marks a touch as derived; whatever the model sent there is ignored.
+      touches: draft.touches.map(({ derived: _ignored, ...touch }) => touch),
       structuralEffects,
       assumptions: draft.assumptions,
       outOfScope: draft.outOfScope,

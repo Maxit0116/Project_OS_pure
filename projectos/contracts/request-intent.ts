@@ -12,6 +12,11 @@ export const IntentTouchSchema = z.object({
     addParts: z.boolean(),
     deletePartIds: z.array(z.string().min(1)),
   }).strict(),
+  /**
+   * Set by the server for an owner of the requested file that the model did not name. It widens
+   * what the approver sees and what publication may touch, but it is not work to route or delegate.
+   */
+  derived: z.literal(true).optional(),
 }).strict();
 
 export const IntentNodeWiringSchema = z.object({

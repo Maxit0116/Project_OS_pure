@@ -14,6 +14,7 @@ import {
   intentAllowsNodeAddition,
   intentAllowsNodeDeletion,
   RequestIntentService,
+  uncoveredFileOwnerIds,
 } from "./request-intent-service.js";
 import type { AgentRun } from "../contracts/agent-run.js";
 import {
@@ -3965,9 +3966,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
               nodeId,
             );
           if (!allowed) {
+            const uncovered = file.changeType === "create"
+              ? []
+              : uncoveredFileOwnerIds(intent, workspace.graph, file.path);
             throw new ProjectOSError(
               "diff_scope_violation",
-              `Publication for '${file.path}' exceeds the approved intent capabilities`,
+              `Publication for '${file.path}' exceeds the approved intent capabilities` +
+                (uncovered.length > 0
+                  ? `: the intent does not cover ${uncovered.join(", ")}, which also own${uncovered.length === 1 ? "s" : ""} the file`
+                  : ""),
             );
           }
         }

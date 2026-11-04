@@ -339,7 +339,7 @@ export function AutomaticApplySummary({
       <strong>
         {ts('agentFlow.automaticApplySummary', {
           count: applyResult.filesChanged.length,
-          status: verificationResult.status,
+          status: ts(`diff.verification_${verificationResult.status}` as 'diff.verification_passed'),
         })}
       </strong>
       <div className={styles.automaticSummaryActions}>

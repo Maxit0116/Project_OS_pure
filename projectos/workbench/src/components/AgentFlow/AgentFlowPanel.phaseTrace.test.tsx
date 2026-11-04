@@ -130,7 +130,30 @@ describe('AgentFlowPanel phase-linked trace', () => {
     />)
 
     expect(html).toContain('data-agent-flow="automatic-apply-summary"')
-    expect(html).toContain('验证：passed')
+    // A person reads the outcome in words, never the raw status value.
+    expect(html).toContain('验证：验证通过')
+    expect(html).not.toContain('passed')
     expect(html).toContain('查看已应用的修改')
+  })
+
+  it.each([
+    ['failed', '验证：验证失败'],
+    ['not_run', '验证：尚未运行验证'],
+  ] as const)('words a %s verification in the applied-change summary without the raw status', (status, shown) => {
+    const applyResult = {
+      runId: 'run_trace',
+      applied: true,
+      filesChanged: ['app/login/page.tsx'],
+      verificationStatus: status,
+      outcome: 'applied' as const,
+      backupId: 'backup_trace',
+    }
+    const html = renderToStaticMarkup(<AutomaticApplySummary
+      applyResult={applyResult}
+      verificationResult={{ runId: 'run_trace', status, results: [] }}
+      onReviewDiff={vi.fn()}
+    />)
+    expect(html).toContain(shown)
+    expect(html).not.toContain('not_run')
   })
 })

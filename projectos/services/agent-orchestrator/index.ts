@@ -4494,7 +4494,7 @@ export class AgentOrchestrator {
     } catch (error) {
       if (error instanceof AgentRunCancelledError) throw error;
       verificationError = sanitizeErrorMessage(error);
-      verification = { runId: state.run.runId, status: "failed", results: [] };
+      verification = verificationFromThrownError(state.run.runId, error);
     }
     state.verificationResult = verification;
     if (state.applyResult) {
@@ -4532,7 +4532,7 @@ export class AgentOrchestrator {
         completeStep(
           verifyStep,
           verification.status === "not_run"
-            ? "No verification commands were configured."
+            ? verificationError ?? "No verification commands were configured."
             : `Configured whole-tree verification ${verification.status}.`,
         ),
       ),
@@ -5368,7 +5368,7 @@ export class AgentOrchestrator {
     } catch (error) {
       if (error instanceof AgentRunCancelledError) throw error;
       verificationError = sanitizeErrorMessage(error);
-      verification = { runId: state.run.runId, status: "failed", results: [] };
+      verification = verificationFromThrownError(state.run.runId, error);
     }
     state.verificationResult = verification;
     if (state.applyResult) {
@@ -5396,7 +5396,7 @@ export class AgentOrchestrator {
         completeStep(
           verifyStep,
           verification.status === "not_run"
-            ? "No verification commands were configured."
+            ? verificationError ?? "No verification commands were configured."
             : `Configured transaction-group verification ${verification.status}.`,
         ),
       ),
@@ -6534,11 +6534,7 @@ export class AgentOrchestrator {
       if (error instanceof AgentRunCancelledError) throw error;
       if (error instanceof ProjectOSError && error.code === "pipeline_budget_exceeded") throw error;
       verificationError = sanitizeErrorMessage(error);
-      verification = {
-        runId: state.run.runId,
-        status: "failed",
-        results: [],
-      };
+      verification = verificationFromThrownError(state.run.runId, error);
     }
     state.verificationResult = verification;
     if (verification.evidence) {
@@ -6633,7 +6629,7 @@ export class AgentOrchestrator {
         completeStep(
           verifyStep,
           verification.status === "not_run"
-            ? "No verification commands were configured."
+            ? verificationError ?? "No verification commands were configured."
             : `Configured verification ${verification.status}.`,
         ),
       ),
@@ -8974,6 +8970,20 @@ function childRunIdsOf(state: OrchestratorRunState): string[] {
 
 function formatVerificationCommand(command: string, args: string[]): string {
   return [command, ...args].join(" ");
+}
+
+/**
+ * What a verify() call that THREW means. Approval, a missing runner and a policy denial all stop the
+ * commands before anything runs: that is "not run", never "failed". Reporting it as a failed
+ * verification told people their change was broken, and failed the whole run, when no check had happened.
+ */
+function verificationFromThrownError(runId: string, error: unknown): VerificationRunResult {
+  const stoppedBeforeRunning = error instanceof ProjectOSError && (
+    error.code === "verification_approval_required" ||
+    error.code === "verification_unavailable" ||
+    error.code === "tool_policy_denied"
+  );
+  return { runId, status: stoppedBeforeRunning ? "not_run" : "failed", results: [] };
 }
 
 function verificationCompletedPayload(

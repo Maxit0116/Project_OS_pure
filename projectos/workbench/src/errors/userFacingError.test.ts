@@ -11,6 +11,15 @@ describe('userFacingErrorMessage', () => {
     expect(userFacingErrorMessage(error, 'en')).not.toMatch(/Error invoking|ProjectOSError|grounded answers/u)
   })
 
+  it('says plainly that nothing changed when the model keeps returning unusable output', () => {
+    const error = new ProjectOSError('model_output_invalid', 'The model did not return a usable planning step after a retry')
+    expect(userFacingErrorMessage(error, 'en')).toMatch(/Nothing was changed/u)
+    expect(userFacingErrorMessage(error, 'zh')).toMatch(/未做任何改动/u)
+    const wrapped = new Error(`Error invoking remote method 'projectos:extractRequestIntent': ${encodeIpcError({ code: 'model_output_invalid', message: 'raw' })}`)
+    // Over IPC the code arrives only inside the message; the transport rebuilds it into a coded error.
+    expect(userFacingErrorMessage(Object.assign(wrapped, { code: 'model_output_invalid' }), 'en')).toMatch(/Nothing was changed/u)
+  })
+
   it('explains each provider status instead of printing the status alone', () => {
     const failure = (status: number) => new ProjectOSError('model_connection_failed', `Model provider request failed (HTTP ${status})`)
     expect(userFacingErrorMessage(failure(401), 'en')).toMatch(/rejected the API key/u)

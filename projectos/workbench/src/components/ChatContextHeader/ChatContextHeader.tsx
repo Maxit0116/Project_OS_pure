@@ -86,6 +86,13 @@ export default function ChatContextHeader() {
           )}
         </div>
       )}
+    </div>
+  )
+
+  // Send stays disabled until a file has an owner. The reason and the choice must not sit inside the
+  // collapsed dropdown, whose label only says that no context is loaded.
+  const blockingScope = (pendingFileOwnerChoice || fileScopeError === 'not_mapped') && (
+    <div className={styles.boundScope} role="status">
       {pendingFileOwnerChoice && (
         <div className={styles.ownerChoice}>
           <strong>{ts('context.ownershipChooser')}</strong>
@@ -199,6 +206,7 @@ export default function ChatContextHeader() {
           <span className={styles.triggerScope}>{scopeLabel}</span>
         )}
       </button>
+      {blockingScope}
       {assembly && <ContextUsage assembly={assembly} />}
 
       {expanded && (

@@ -69,13 +69,11 @@ export function intentAllowsNode(
   });
 }
 
-export function intentAllowsFile(
-  intent: RequestIntent,
+/** Every component that owns a file, whether it links the file or the file index names it. */
+function fileOwners(
   graph: ProjectGraph,
   filePath: string,
-  operation: "modify" | "create" | "delete",
-  candidateNodeId?: string,
-): boolean {
+): Array<{ id: string; ancestors: string[] }> {
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
   const ownerIds = new Set(graph.nodes
     .filter((node) => node.level === "component" && node.linkedFiles.some((file) => file.path === filePath))
@@ -85,7 +83,60 @@ export function intentAllowsFile(
       if (nodes.get(nodeId)?.level === "component") ownerIds.add(nodeId);
     }
   }
-  const owners = [...ownerIds].map((id) => ({ id, ancestors: ancestorIds(nodes.get(id)!, nodes) }));
+  return [...ownerIds].map((id) => ({ id, ancestors: ancestorIds(nodes.get(id)!, nodes) }));
+}
+
+function allowsEditingOwner(intent: RequestIntent, owner: { ancestors: string[] }): boolean {
+  return intent.touches.some((touch) => touch.allow.editExisting && owner.ancestors.includes(touch.nodeId));
+}
+
+/**
+ * Owners of a file that an intent would have to cover before the file may be modified, and does
+ * not. A shared file changes every capability that links it, so the approver has to see all of them.
+ */
+export function uncoveredFileOwnerIds(
+  intent: RequestIntent,
+  graph: ProjectGraph,
+  filePath: string,
+): string[] {
+  return fileOwners(graph, filePath)
+    .filter((owner) => !allowsEditingOwner(intent, owner))
+    .map((owner) => owner.id);
+}
+
+/**
+ * The file a person asked to change may be linked by several components. Publishing it changes all
+ * of them, and the approval boundary requires every owner to be covered, so the draft states the
+ * co-owners itself instead of leaving the approver to learn about them from a failure after the run.
+ * Only runs once the draft already allows editing at least one owner of the requested file.
+ */
+function sharedFileOwnerTouches(graph: ProjectGraph, intent: RequestIntent): RequestIntent["touches"] {
+  const requested = intent.requestedFile?.path;
+  if (!requested) return [];
+  const owners = fileOwners(graph, requested);
+  const covered = owners.filter((owner) => allowsEditingOwner(intent, owner));
+  if (covered.length === 0) return [];
+  const names = new Map(graph.nodes.map((node) => [node.id, node.name]));
+  const coveredNames = covered.map((owner) => names.get(owner.id) ?? owner.id).join(", ");
+  return owners
+    .filter((owner) => !allowsEditingOwner(intent, owner))
+    .map((owner) => ({
+      nodeId: owner.id,
+      reason: `Shares ${requested} with ${coveredNames}; changing the file also changes this capability.`,
+      allow: { editExisting: true, addParts: false, deletePartIds: [] },
+      derived: true as const,
+    }));
+}
+
+export function intentAllowsFile(
+  intent: RequestIntent,
+  graph: ProjectGraph,
+  filePath: string,
+  operation: "modify" | "create" | "delete",
+  candidateNodeId?: string,
+): boolean {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const owners = fileOwners(graph, filePath);
   const touchesOwner = (ownerId: string, capability: "editExisting" | "addParts") => {
     const ancestors = owners.find((owner) => owner.id === ownerId)?.ancestors ?? [];
     return intent.touches.some((touch) => touch.allow[capability] && ancestors.includes(touch.nodeId));
@@ -175,9 +226,16 @@ export class RequestIntentService {
         if (!nodeIds.has(nodeId)) throw new Error(`Intent effect references unknown node '${nodeId}'`);
       }
     }
+    const touches = [...parsed.touches, ...sharedFileOwnerTouches(graph, parsed)];
     return RequestIntentSchema.parse({
       ...parsed,
-      entryNodeId: smallestPlannerNode(graph, parsed.touches.map((touch) => touch.nodeId)),
+      touches,
+      // Routing follows the work the model planned. A co-owner added only for approval must not
+      // lift a one-file change into a multi-node plan.
+      entryNodeId: smallestPlannerNode(
+        graph,
+        touches.filter((touch) => !touch.derived).map((touch) => touch.nodeId),
+      ),
       status: "draft",
       approvalHash: undefined,
       approvedAt: undefined,

@@ -8,6 +8,7 @@ import {
   intentAllowsNodeDeletion,
   RequestIntentService,
   smallestPlannerNode,
+  uncoveredFileOwnerIds,
 } from "./request-intent-service.js";
 
 const graph = ProjectGraphSchema.parse(graphFixture);
@@ -78,6 +79,68 @@ describe("request intent routing and approval", () => {
       ...intent,
       touches: [{ ...intent.touches[0]!, allow: { editExisting: false, addParts: false, deletePartIds: ["feat_checkout"] } }],
     }, graph, checkoutFile, "delete")).toBe(true);
+  });
+
+  describe("a requested file that more than one component owns", () => {
+    // lib/data.ts is linked by Prisma data access (feat_database) and Content & Search (feat_blog).
+    const sharedFile = "lib/data.ts";
+    const withRequestedFile = (touches: string[]): RequestIntent => ({
+      ...draft(touches),
+      requestedFile: { nodeId: "feat_database", path: sharedFile },
+    });
+
+    it("shows the co-owner on the draft, so approving covers every capability the change reaches", () => {
+      const service = new RequestIntentService();
+      const normalized = service.normalizeDraft(graph, withRequestedFile(["feat_database"]));
+      expect(normalized.touches.map((touch) => touch.nodeId).sort()).toEqual(["feat_blog", "feat_database"]);
+      const added = normalized.touches.find((touch) => touch.nodeId === "feat_blog")!;
+      expect(added.reason).toContain(sharedFile);
+      expect(added.allow).toEqual({ editExisting: true, addParts: false, deletePartIds: [] });
+      expect(added.derived).toBe(true);
+      expect(normalized.touches.find((touch) => touch.nodeId === "feat_database")!.derived).toBeUndefined();
+      // The change is one file in one component: it must not be routed up to a planner over both.
+      expect(normalized.entryNodeId).toBe("feat_database");
+      // Without the derived touch the publication boundary refused this exact file.
+      expect(intentAllowsFile(withRequestedFile(["feat_database"]), graph, sharedFile, "modify")).toBe(false);
+      expect(intentAllowsFile(normalized, graph, sharedFile, "modify")).toBe(true);
+      expect(service.approve(graph, normalized, 1).status).toBe("approved");
+    });
+
+    it("is idempotent, so approving what the person saw does not change it", () => {
+      const service = new RequestIntentService();
+      const once = service.normalizeDraft(graph, withRequestedFile(["feat_database"]));
+      const twice = service.normalizeDraft(graph, once);
+      expect(twice.touches).toEqual(once.touches);
+      expect(twice.entryNodeId).toBe(once.entryNodeId);
+      expect(twice.entryNodeId).toBe("feat_database");
+    });
+
+    it("adds nothing when the intent already covers every owner, or does not touch the file's owners", () => {
+      const service = new RequestIntentService();
+      const both = service.normalizeDraft(graph, withRequestedFile(["feat_database", "feat_blog"]));
+      expect(both.touches).toHaveLength(2);
+      // Touching an unrelated capability must not quietly grant edits to the file's owners.
+      const unrelated = service.normalizeDraft(graph, withRequestedFile(["feat_checkout"]));
+      expect(unrelated.touches.map((touch) => touch.nodeId)).toEqual(["feat_checkout"]);
+      // No requested file means nothing to derive from.
+      const noFile = service.normalizeDraft(graph, draft(["feat_database"]));
+      expect(noFile.touches.map((touch) => touch.nodeId)).toEqual(["feat_database"]);
+    });
+
+    it("does not extend a file that has one owner", () => {
+      const service = new RequestIntentService();
+      const checkoutFile = graph.nodes.find((node) => node.id === "feat_checkout")!.linkedFiles[0]!.path;
+      const normalized = service.normalizeDraft(graph, {
+        ...draft(["feat_checkout"]),
+        requestedFile: { nodeId: "feat_checkout", path: checkoutFile },
+      });
+      expect(normalized.touches.map((touch) => touch.nodeId)).toEqual(["feat_checkout"]);
+    });
+
+    it("names the owners an intent leaves uncovered", () => {
+      expect(uncoveredFileOwnerIds(withRequestedFile(["feat_database"]), graph, sharedFile)).toEqual(["feat_blog"]);
+      expect(uncoveredFileOwnerIds(withRequestedFile(["feat_database", "feat_blog"]), graph, sharedFile)).toEqual([]);
+    });
   });
 
   it("requires structural publication to match the reviewed parent, target, and impact counts", () => {

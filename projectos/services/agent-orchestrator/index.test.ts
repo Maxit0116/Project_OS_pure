@@ -944,6 +944,68 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     });
   });
 
+  describe("verification that throws before it runs a command", () => {
+    async function runAutomaticWith(verifyError: Error) {
+      const automaticLeafExecution: AutomaticLeafExecutionDependency = {
+        async apply(_workspace, run) {
+          return {
+            runId: run.runId,
+            applied: true,
+            filesChanged: ["app/login/page.tsx"],
+            verificationStatus: "not_run",
+            outcome: "applied",
+            backupId: "backup-automatic",
+          };
+        },
+        async verify() { throw verifyError; },
+      };
+      const { orchestrator, workspace } = createModelOrchestrator(
+        JSON.stringify({
+          summary: "Automatic validated change",
+          path: "app/login/page.tsx",
+          edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "AUTOMATIC_MARKER" }],
+        }),
+        [],
+        sampleWorkspaceRoot,
+        [{ output: validFileEditPlanOutput() }],
+        "memory",
+        [{ output: validProposalValidationOutput() }],
+        automaticLeafExecution,
+      );
+      const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+        localContext: localContextBundle(workspace),
+        executionPolicy: "automatic",
+      });
+      await orchestrator.startRun(workspace, state.run.runId, toolContext());
+      return state;
+    }
+
+    it.each([
+      ["verification_approval_required", "Verification commands require explicit user approval"],
+      ["verification_unavailable", "Verification execution is not available in this runtime"],
+      ["tool_policy_denied", "run_verification is not allowed here"],
+    ] as const)("reports %s as not_run and keeps the applied change, instead of failing the run", async (code, message) => {
+      const state = await runAutomaticWith(new ProjectOSError(code, message));
+
+      expect(state.verificationResult?.status).toBe("not_run");
+      expect(state.applyResult).toMatchObject({ applied: true, verificationStatus: "not_run" });
+      expect(state.events.find((event) => event.type === "verification_completed")?.payload)
+        .toMatchObject({ status: "not_run", message: expect.stringContaining(message.slice(0, 20)) });
+      expect(state.events.some((event) => event.type === "step_failed")).toBe(false);
+      expect(state.run.status).toBe("complete");
+      expect(state.events.find((event) => event.type === "run_completed")?.payload)
+        .not.toMatchObject({ failureReason: "verification_failed" });
+    });
+
+    it("still reports an unexpected verifier crash as a failed verification", async () => {
+      const state = await runAutomaticWith(new Error("spawn ENOENT"));
+
+      expect(state.verificationResult?.status).toBe("failed");
+      expect(state.events.find((event) => event.type === "verification_completed")?.payload)
+        .toMatchObject({ status: "failed" });
+    });
+  });
+
   it("automatically applies a validated proposal, reports failed verification, and completes", async () => {
     const calls: string[] = [];
     const automaticLeafExecution: AutomaticLeafExecutionDependency = {

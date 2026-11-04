@@ -31,6 +31,7 @@ export type ProjectOSErrorCode =
   | "invalid_project_description"
   | "model_connection_failed"
   | "model_not_configured"
+  | "model_output_invalid"
   | "external_agent_failed"
   | "agent_orchestration_failed"
   | "proposal_validation_failed"

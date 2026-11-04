@@ -58,6 +58,69 @@ describe('ChatContextHeader', () => {
     expect(html).toContain('Browse public pages and enter login flow.')
   })
 
+  it('shows the owner choice without expanding, because Send is disabled until a file has an owner', () => {
+    mockStoreState({
+      context: null,
+      contextLoading: false,
+      graph: { nodes: [{ id: 'feat_database', name: 'Prisma 数据访问' }, { id: 'feat_blog', name: '内容与搜索' }] },
+      selectedNodeId: null,
+      globalAgentActive: false,
+      selectedFilePath: 'lib/data.ts',
+      pendingFileOwnerChoice: { filePath: 'lib/data.ts', candidateNodeIds: ['feat_database', 'feat_blog'] },
+      fileScopeError: null,
+      selectFile: vi.fn(),
+      chooseFileOwner: vi.fn(),
+    })
+
+    const html = renderToStaticMarkup(<ChatContextHeader />)
+
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('context.ownershipChooser')
+    expect(html).toContain('lib/data.ts')
+    expect(html).toContain('Prisma 数据访问')
+    expect(html).toContain('内容与搜索')
+  })
+
+  it('says why a file with no owning node cannot be sent, without expanding', () => {
+    mockStoreState({
+      context: null,
+      contextLoading: false,
+      graph: { nodes: [] },
+      selectedNodeId: null,
+      globalAgentActive: false,
+      selectedFilePath: 'lib/validators.ts',
+      pendingFileOwnerChoice: null,
+      fileScopeError: 'not_mapped',
+      selectFile: vi.fn(),
+      chooseFileOwner: vi.fn(),
+    })
+
+    const html = renderToStaticMarkup(<ChatContextHeader />)
+
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('context.fileNotMapped')
+  })
+
+  it('adds no owner prompt when the scope is already resolved', () => {
+    mockStoreState({
+      context: null,
+      contextLoading: false,
+      graph: { nodes: [{ id: 'feat_database', name: 'Prisma 数据访问' }] },
+      selectedNodeId: 'feat_database',
+      globalAgentActive: false,
+      selectedFilePath: 'lib/data.ts',
+      pendingFileOwnerChoice: null,
+      fileScopeError: null,
+      selectFile: vi.fn(),
+      chooseFileOwner: vi.fn(),
+    })
+
+    const html = renderToStaticMarkup(<ChatContextHeader />)
+
+    expect(html).not.toContain('context.ownershipChooser')
+    expect(html).not.toContain('context.fileNotMapped')
+  })
+
   it('defaults the trigger to global / whole project when nothing is selected', () => {
     mockStoreState({
       context: null,
