@@ -959,7 +959,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const profile = this.settingsService.resolveModelProfile(workspace.settings);
     if (!profile) {
       throw new ProjectOSError(
-        "settings_not_found",
+        "model_not_configured",
         "Configure a default model profile before scanning the structure map",
       );
     }
@@ -1098,7 +1098,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const profile = this.settingsService.resolveModelProfile(workspace.settings);
     if (!profile) {
       throw new ProjectOSError(
-        "settings_not_found",
+        "model_not_configured",
         "Configure a default model profile before scanning the structure map",
       );
     }
@@ -1367,7 +1367,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const profile = this.settingsService.resolveModelProfile(workspace.settings);
     if (!profile) {
       throw new ProjectOSError(
-        "settings_not_found",
+        "model_not_configured",
         "No default model profile is configured for code-file understanding",
       );
     }
@@ -1800,7 +1800,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const memoryTurn = this.beginMemoryTurn(workspace, parsedRequest.question);
     if (!profile) {
       throw new ProjectOSError(
-        "agent_answer_unavailable",
+        "model_not_configured",
         "A configured model profile is required for grounded answers",
       );
     }
@@ -2588,7 +2588,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const profile = modelExecution?.profile;
     if (!profile) {
       throw new ProjectOSError(
-        "plan_generation_failed",
+        "model_not_configured",
         "A configured model profile is required to create a plan",
       );
     }

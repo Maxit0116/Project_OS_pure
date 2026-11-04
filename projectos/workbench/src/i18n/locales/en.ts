@@ -818,6 +818,15 @@ const en = {
     approve: 'Approve and start',
     revise: 'Edit request',
   },
+  errors: {
+    modelNotConfigured: 'No model is set up yet. Open Settings → Models, add a model profile with your API key, then try again.',
+    providerRejectedKey: 'The model provider rejected the API key (HTTP {status}). Check the key in Settings → Models.',
+    providerPaymentRequired: 'The model provider says the account has insufficient balance (HTTP {status}). Top up the account or use another key.',
+    providerNotFound: 'The model provider could not find that model or endpoint (HTTP {status}). Check the model name and Base URL in Settings → Models.',
+    providerRateLimited: 'The model provider is rate-limiting requests (HTTP {status}). Wait a moment and try again.',
+    providerUnavailable: 'The model provider had a server error (HTTP {status}). Try again shortly.',
+    providerFailed: 'The model provider rejected the request (HTTP {status}).',
+  },
   chat: {
     placeholder: 'Describe what you want changed. I’ll restate it before generating a proposal…',
     askPlaceholder: 'Ask about the selected node or file…',

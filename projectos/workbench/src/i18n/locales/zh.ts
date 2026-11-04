@@ -818,6 +818,15 @@ const zh = {
     approve: '批准并开始',
     revise: '修改请求',
   },
+  errors: {
+    modelNotConfigured: '尚未配置模型。请打开“设置 → 模型”，添加带 API Key 的模型配置后再试。',
+    providerRejectedKey: '模型服务商拒绝了该 API Key（HTTP {status}）。请到“设置 → 模型”检查密钥。',
+    providerPaymentRequired: '模型服务商提示账户余额不足（HTTP {status}）。请充值或更换密钥。',
+    providerNotFound: '模型服务商找不到该模型或接口（HTTP {status}）。请到“设置 → 模型”检查模型名称和 Base URL。',
+    providerRateLimited: '模型服务商正在限流（HTTP {status}）。请稍候再试。',
+    providerUnavailable: '模型服务商出现服务器错误（HTTP {status}）。请稍后重试。',
+    providerFailed: '模型服务商拒绝了该请求（HTTP {status}）。',
+  },
   chat: {
     placeholder: '描述你想修改什么，我会先复述理解，再生成修改方案…',
     askPlaceholder: '询问所选节点或文件…',

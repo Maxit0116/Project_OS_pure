@@ -136,6 +136,7 @@ import type { MapArtifactRenameFlow } from './mapArtifactRenameFlow'
 export type { MapArtifactRenameFlow } from './mapArtifactRenameFlow'
 import type { PickedMapImageFile } from '../components/FunctionMap/pickMapImageFile'
 import { sanitizeErrorMessage } from '../../../utils/sanitize-error-message'
+import { userFacingErrorMessage, userFacingProviderText } from '../errors/userFacingError'
 import {
   collectDirectoryAncestorPaths,
   collectSemanticAncestorIdsForPaths,
@@ -374,7 +375,7 @@ export function createAskFailureChatMessage(
     id: msgId(),
     role: 'system',
     content: getStoreMessage(locale, 'chat.askFailure', {
-      message: sanitizeErrorMessage(error),
+      message: userFacingErrorMessage(error, locale),
     }),
     timestamp: new Date().toISOString(),
   }
@@ -2943,7 +2944,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           latestPlanTrace: {
             status: 'error',
             scope: planScope,
-            message: sanitizeErrorMessage(error),
+            message: userFacingErrorMessage(error, current.locale),
           },
           messages: [
             ...current.messages,
@@ -2951,7 +2952,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
               id: msgId(),
               role: 'assistant' as const,
               content: getStoreMessage(current.locale, 'plan.failure', {
-                message: sanitizeErrorMessage(error),
+                message: userFacingErrorMessage(error, current.locale),
               }),
               timestamp: new Date().toISOString(),
             },
@@ -4643,7 +4644,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         type: result.ok ? 'success' : 'warning',
         message: result.ok
           ? getStoreMessage(locale, 'settings.connectionOk', { ms: result.latencyMs })
-          : result.message ?? getStoreMessage(locale, 'settings.connectionFailed'),
+          : (result.message && (userFacingProviderText(result.message, locale) ?? result.message)) ||
+            getStoreMessage(locale, 'settings.connectionFailed'),
       })
     } catch (error) {
       if (get().project?.projectId === projectId) {

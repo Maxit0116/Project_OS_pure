@@ -77,6 +77,7 @@ import type {
   UpdateMapArtifactPatch,
 } from "../../contracts/map-content.js";
 import { ProjectOSError, type ProjectOSErrorCode } from "../../errors.js";
+import { decodeIpcError, stripIpcWrapper } from "../../shared/ipc-error/index.js";
 import type { ApiTransport } from "./ApiTransport.js";
 
 interface SerializedProjectOSError {
@@ -122,12 +123,31 @@ export type AsyncIpcErrorHandler = (operation: string, error: unknown) => void;
 
 function translateIpcError(error: unknown): unknown {
   const projectOsError = readSerializedProjectOSError(error);
-  if (!projectOsError) return error;
-  return new ProjectOSError(
-    projectOsError.code,
-    projectOsError.message,
-    projectOsError.details ? { details: projectOsError.details } : {},
-  );
+  if (projectOsError) {
+    return new ProjectOSError(
+      projectOsError.code,
+      projectOsError.message,
+      projectOsError.details ? { details: projectOsError.details } : {},
+    );
+  }
+  // Over real Electron IPC only the message arrives, with the structured error encoded in it.
+  if (error instanceof Error) {
+    const decoded = decodeIpcError(error.message);
+    if (decoded) {
+      return new ProjectOSError(
+        decoded.code as ProjectOSErrorCode,
+        decoded.message,
+        decoded.details ? { details: decoded.details } : {},
+      );
+    }
+    const readable = stripIpcWrapper(error.message);
+    if (readable !== error.message) {
+      const cleaned = new Error(readable);
+      if (error.stack !== undefined) cleaned.stack = error.stack;
+      return cleaned;
+    }
+  }
+  return error;
 }
 
 function reportAsyncIpcError(operation: string, error: unknown): void {
