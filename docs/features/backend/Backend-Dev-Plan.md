@@ -22,6 +22,7 @@
 | Sandbox | [`Sandbox-Runtime-Dev-Plan.md`](Sandbox-Runtime-Dev-Plan.md) SB-0–SB-2 | 并发上限、进程组清理、保护路径监视。仍 `softOnly`，无 OS 隔离 |
 | Planning | [`Planning-Orchestration-Dev-Plan.md`](Planning-Orchestration-Dev-Plan.md) P-0–P-3 | Implement 附着叶子 Run；verify 只认证据；失败才沿 feedback 再开一轮 |
 | Loops Graph Studio | [`../Loops-Graph-Workflow-Studio-Dev-Plan.md`](../Loops-Graph-Workflow-Studio-Dev-Plan.md) | 产品级工作流编排演进（画布、可靠性、重规划、触发）；复用 Planning 底座，不另起 Runtime |
+| Node Harness / Hierarchical Agent Protocol | [`../Hierarchical-Agent-Protocol-Dev-Plan.md`](../Hierarchical-Agent-Protocol-Dev-Plan.md) NH-0–NH-8 | Revised discussion draft (2026-10-26), not started. Both model and full-runtime adapters; global drill-down; configurable request budgets and durable decisions; graph membership without numeric quotas; shared integration evidence |
 | Verification | [`Verification-Eval-Dev-Plan.md`](Verification-Eval-Dev-Plan.md) V-0–V-3 | 每次运行有证据；`not_run` 不是通过；离线分数不进用户验收 |
 | Session | [`Session-State-Dev-Plan.md`](Session-State-Dev-Plan.md) S-0–S-2 | 半截运行是 `interrupted`；已写入的不会因继续而再写一遍 |
 | Security | [`Security-Governance-Dev-Plan.md`](Security-Governance-Dev-Plan.md) SEC-0–SEC-3 | 审批与拒绝写入审计；无账号系统 |
@@ -49,12 +50,14 @@
 
 ## 3. 继续锁定的产品决定
 
-- Route ②（模型自由选择任意工具）保持关闭。验证失败后的再改，由服务器在同一条流水线里限次重试（H5）。
+- Built-in model execution retains its current Route ① during adapter rollout. The revised node-harness plan explicitly adds complete external agent runtimes with their own loops; capability validation, server authorization and transaction publication still apply. This supersedes a blanket Route ② deferral for all executor types.
 - 不把向量检索当成默认发现手段。RAG-5 仍关。
 - 记忆不是项目事实。代码、图和当前文件字节优先（MEM-6）。
 - 不把 C4 图扩成调用图。
 - 不做云端 Devbox、多租户、计费和团队权限。
 - 多 Agent 并行不在当前阶段做。worktree 是隔离目录，不是调度器。
+  - Clarification (2026-10-26): child-run parallelism inside a task already exists. NH adds request-wide budgets and execution concurrency controls, not a fleet scheduler or permanent agent per node. Graph cardinality does not inherit runtime task caps. Consultation and external runtimes use the node-harness protocol.
+- 人工门（2026-10-26 调整）：默认只有「意图确认」一道门，确认后自动执行并可撤销；`review_first` 仍是高级选项。依据见 [`agent-requirements.md`](../../../agent-requirements.md) §2.3。
 
 ## 4. 阶段进度
 
@@ -102,3 +105,5 @@ Policy、六槽、记忆、词法检索、C4、叶子流水线
 |------|------|
 | 2026-10-20 | 初稿。按 12 子系统拆后端合格线。 |
 | 2026-10-20 | Phase 1–3 切片落地后，更新关系表与「够用部分」；标明收尾是人工冒烟，不是再开实现切片。 |
+| 2026-10-26 | Revised to NH-0–NH-8 after user clarification: both plug-in modes, global discovery, budgets/checkpoints/decisions, explicit graph placement and real cross-block evaluation. No implementation started. |
+| 2026-10-26 | 新增 Hierarchical Agent Protocol 计划入口（§0 表）；默认人工门改为「意图确认」（agent-requirements §2.3）；澄清 §3 多 Agent 条目。 |

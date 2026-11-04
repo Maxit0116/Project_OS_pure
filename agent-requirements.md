@@ -5,9 +5,11 @@
 > **Harness 总地图（对标 Cursor / Devin / Codex、波次 H0–H4）**：[`docs/features/Agent-Harness-Dev-Plan.md`](docs/features/Agent-Harness-Dev-Plan.md)。本文仍是 leaf pipeline / 委托 / 事务不变量的权威；Harness 文档负责运行时骨架与大厂差距排期，不平行改写 Part 5。  
 > **Memory 开发计划（学习笔记，不是 Phase G）**：[`docs/features/Agent-Memory-Dev-Plan.md`](docs/features/Agent-Memory-Dev-Plan.md)。G 与 Part 7 的排期仍以本文为准。  
 > **RAG 开发计划（共享检索，不是向量库替代功能图）**：[`docs/features/RAG-Dev-Plan.md`](docs/features/RAG-Dev-Plan.md)。Part 7 的约束仍以本文为准。
+>
+> **Current node-harness plan (2026-10-26 revision)**: [`docs/features/Hierarchical-Agent-Protocol-Dev-Plan.md`](docs/features/Hierarchical-Agent-Protocol-Dev-Plan.md), slices NH-0–NH-8. Supports both models and full agent runtimes; the global agent can inspect deeper; graph cardinality is not an agent limit; request budgets and decisions are durable. Latest discussion overrides conflicting historical restrictions below. Implementation is not started.
 
 ## Vision in one line
-A **layered agent system**: a **Global agent** above the architecture graph decomposes intent into **plans** and delegates down the graph (产品全景 → 系统组成 → 功能模块/node → file). **Only leaf file-agents write.** Every change is **visible** (honest step trace) and **reversible** (undo). A non-coder never has to confirm — an **agent** validates and the change is undoable.
+A **node-harness system**: a stable harness at every graph node accepts either a model-backed executor or a complete agent runtime. The global/master starts with the immediate structure, explores deeper when useful, and delegates through the graph. Server-authorized leaf proposals publish through recoverable transactions. Users confirm intent, can answer pending decisions, observe evidence, and undo the task.
 
 ---
 
@@ -30,8 +32,8 @@ The leaf-layer local agent is built, safe, and visible:
 ## Part 2 — Layered agent architecture  [PLANNED, locked this session]
 
 ### 2.1 Structure
-- **Global root agent** sits above the graph; plans over the **existing** graph, never writes, never mutates structure (for now).
-- **Agent tree = the architecture graph**: 产品全景 → 系统组成 → 功能模块(node) → file.
+- **Global/master agent** starts with the immediate graph and may inspect deeper nodes/files, consult and delegate as needed. Initial context is not a visibility ceiling. Structural proposals remain server-validated; source publication remains leaf-authorized.
+- **Node harnesses follow the architecture graph**: 产品全景 → 系统组成 → 功能模块(node) → file. Task-scoped executor instances use those harnesses; a graph node is not a permanently running agent. Both model-backed and complete-runtime executors are planned. No arbitrary component/agent count defines valid architecture.
 - **Non-leaf agents are plan-only** — they emit a plan (data), never a diff.
 - **Leaf file-agents are the only writers**, each bound to a single file.
 - **Modify can be initiated at any node** → that node's agent plans → delegates down → writes land only at leaves.
@@ -45,10 +47,10 @@ The leaf-layer local agent is built, safe, and visible:
   - The role instance and conversational working memory are destroyed at task end; the records above survive it.
 
 ### 2.3 Human role
-- **Default (non-coder): NO human pre-approval.** The agent modifies, then reports what it changed. The safety net is **an agent validation phase (leaf AND node) + deterministic server validation + task-level undo** — never a human confirm.
+- **Default (non-coder): ONE human gate — the request intent.** Before any run starts, the user confirms an intent card (`RequestIntent`: goal, touched blocks, structural effects in plain numbers, acceptance checks; see [`docs/features/Hierarchical-Agent-Protocol-Dev-Plan.md`](docs/features/Hierarchical-Agent-Protocol-Dev-Plan.md)). After that there is **NO further pre-approval**: the agent modifies, then reports what it changed. The safety net is **an agent validation phase (leaf AND node) + deterministic server validation + task-level undo**. Work that would exceed the approved intent (a structural change not on the card, extra blocks) **pauses for a fresh confirmation**; it never proceeds silently. *(Changed 2026-10-26. Earlier text: "NO human pre-approval". Appendix B keeps that decision verbatim.)*
 - Every automatic apply — single-file leaf and multi-file node — is preceded by an **agent semantic-validation phase** (§2.4, §3.2 phase 4). Generation does not count as validating its own output.
-- The refinement **confirm-gate becomes an optional "advanced/programmer mode"** (`review_first`), off by default.
-- **Undo is permanently kept** — the "no confirm" flow is safe *because reversible*, not *because pre-approved*.
+- `review_first` remains an optional "advanced/programmer mode", off by default. It additionally stops before apply so the diff can be reviewed.
+- **Undo is permanently kept** — the flow is safe *because reversible*. The intent gate protects correct understanding of the request; it is not a security control and never grants write authority (plan invariant N1).
 
 ### 2.4 Agent validation & multi-file transaction semantics  (policy **(a)**)
 **Agent validator (leaf and node):** zero write authorization, read-only access to the plan / proposals / snapshots / acceptance criteria, returns a strict typed result (e.g. `BatchValidationResult`), cannot add files / modify diffs / expand scope / invoke commit, and **fails closed** on malformed output. Its approval is **semantic evidence, not security authority**.
@@ -100,6 +102,7 @@ Drop `understand`/`retrieve_context`/`inspect_files` as separate steps (they ove
 
 ### 3.3 Route decision
 - **Route ① — orchestrated visible pipeline [DONE].** Fixed sequence, any model, deterministic; "tool calls" are our real orchestrated operations shown honestly. *(Live Change: D1–D3 in `runLiveModelChangePipeline`.)*
+- **Scope clarification (2026-10-26):** the following Route ② deferral describes the built-in model executor. The new node-harness plan explicitly includes complete external runtimes with their own loops, connected through capability-checked adapters and the same server publication boundary.
 - **Route ② — model-directed tool loop [DEFERRED].** Model chooses read/grep/edit, we execute + loop. Needs reliable function-calling; K2 can't do stable structured output, let alone a loop. Adds schema-compliance, read-scope, termination, context-growth, recovery failure modes.
 - **Later middle-ground (not first slice):** a bounded context-expansion request — the locate call may return `needsMoreContext: [path]`, and the server permits **one** additional read **only from already-authorized `allowedReadPaths`**. Limited model-directed retrieval without a general tool loop.
 

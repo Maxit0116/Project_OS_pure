@@ -23,3 +23,6 @@ api_key.md
 
 # Local research clones
 .tmp-codesee/
+
+# Local provider credentials (never commit)
+deepseek_api.md
