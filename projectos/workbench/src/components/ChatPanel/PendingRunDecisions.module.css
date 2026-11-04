@@ -17,9 +17,17 @@
   font-weight: 600;
 }
 
-.count, .kind {
+.count, .kind, .rootRun {
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
+}
+
+.rootRun {
+  margin-left: auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .decision {

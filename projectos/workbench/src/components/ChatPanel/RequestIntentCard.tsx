@@ -8,11 +8,13 @@ interface Props {
   intent: RequestIntent
   busy: boolean
   executorLabel: string
+  /** For a runtime executor: who validates its proposal. Undefined for a model run. */
+  validation?: { kind: 'model'; label: string } | { kind: 'devOnly' } | { kind: 'none' }
   onApprove: (answers: Array<{ questionId: string; answer: string; selectedOptionId?: string }>) => void
   onRevise: () => void
 }
 
-export default function RequestIntentCard({ intent, busy, executorLabel, onApprove, onRevise }: Props) {
+export default function RequestIntentCard({ intent, busy, executorLabel, validation, onApprove, onRevise }: Props) {
   const { ts } = useI18n()
   const [answers, setAnswers] = useState<Record<string, { answer: string; selectedOptionId?: string }>>(() =>
     Object.fromEntries(intent.questions.filter((question) => question.answer).map((question) => [
@@ -42,6 +44,14 @@ export default function RequestIntentCard({ intent, busy, executorLabel, onAppro
         <h4>{ts('intent.goal')}</h4>
         <p>{intent.goal}</p>
       </section>
+      {validation ? (
+        <section className={styles.section}>
+          <h4>{ts('intent.validation')}</h4>
+          <p>{validation.kind === 'model'
+            ? ts('intent.validatedBy', { name: validation.label })
+            : validation.kind === 'devOnly' ? ts('intent.devStandIn') : ts('intent.noValidator')}</p>
+        </section>
+      ) : null}
       <section className={styles.section}>
         <h4>{ts('intent.touchedCapabilities')}</h4>
         <ul>{intent.touches.map((touch) => <li key={touch.nodeId}>{touch.nodeId}: {touch.reason}</li>)}</ul>
@@ -54,7 +64,21 @@ export default function RequestIntentCard({ intent, busy, executorLabel, onAppro
               {effect.kind === 'delete_node'
                 ? ts('intent.deleteEffect', { nodeId: effect.nodeId, nodes: effect.descendantCount, files: effect.ownedFileCount })
                 : effect.kind === 'add_node'
-                  ? ts('intent.addEffect', { name: effect.name, parent: effect.parentNodeId })
+                  ? <>
+                    {ts('intent.addEffect', { name: effect.name, parent: effect.parentNodeId, level: effect.level ?? ts('intent.legacyLevel') })}
+                    {(effect.wiring ?? []).length > 0 ? (
+                      <ul>{(effect.wiring ?? []).map((wire, wireIndex) => (
+                        <li key={`${wire.existingNodeId}-${wireIndex}`}>
+                          {ts('intent.addWiringEffect', {
+                            direction: wire.direction === 'from_new' ? 'from' : 'to',
+                            nodeId: wire.existingNodeId,
+                            relation: wire.relation,
+                            label: wire.label,
+                          })}
+                        </li>
+                      ))}</ul>
+                    ) : null}
+                  </>
                   : ts('intent.connectEffect', { source: effect.sourceNodeId, target: effect.targetNodeId })}
             </li>
           ))}</ul>

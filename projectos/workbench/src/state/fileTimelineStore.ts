@@ -153,6 +153,7 @@ export const useFileTimelineStore = create<FileTimelineStore>((set, get) => ({
       codeSubTab: 'diff',
       generatedDiff: previewDiff,
       diffReady: true,
+      diffReviewOnlyReason: null,
     })
   },
 

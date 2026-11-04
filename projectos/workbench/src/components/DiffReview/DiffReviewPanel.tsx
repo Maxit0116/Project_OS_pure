@@ -26,6 +26,8 @@ interface Props {
   verificationCommandApproval: VerificationCommandApprovalStatus | null
   verificationLoading: boolean
   undoLoading: boolean
+  /** When set, the proposal can be reviewed but not applied; shown instead of Apply. */
+  reviewOnlyReason?: string | null
   onApply: () => void
   onVerify: () => void
   onApproveVerification: () => void
@@ -39,6 +41,7 @@ export default function DiffReviewPanel({
   verificationCommandApproval,
   verificationLoading,
   undoLoading,
+  reviewOnlyReason = null,
   onApply,
   onVerify,
   onApproveVerification,
@@ -89,6 +92,9 @@ export default function DiffReviewPanel({
         <div>
           <h2>{ts('diff.title')}</h2>
           <p className={styles.summary}>{diff.summary}</p>
+          {reviewOnlyReason && !applyResult?.applied ? (
+            <p className={styles.summary} role="note">{reviewOnlyReason}</p>
+          ) : null}
         </div>
         <div className={styles.headerActions}>
           {!applyResult?.applied && (
@@ -96,7 +102,13 @@ export default function DiffReviewPanel({
               <span className={styles.changeCount}>
                 {ts('diff.willChange', { count: diff.files.length })}
               </span>
-              <Button onClick={onApply}>{ts('common.apply')}</Button>
+              {reviewOnlyReason ? (
+                <span className={styles.changeCount} role="status">
+                  {ts('diff.reviewOnly')}
+                </span>
+              ) : (
+                <Button onClick={onApply}>{ts('common.apply')}</Button>
+              )}
             </>
           )}
           {applyResult?.applied && (

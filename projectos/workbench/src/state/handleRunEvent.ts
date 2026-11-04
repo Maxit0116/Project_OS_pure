@@ -56,6 +56,7 @@ export interface RunEventStoreSlice {
   /** Live Graph execution overlay; rebuilt from run events, not Chat text. */
   executionOverlay: ExecutionOverlay | null
   diffReady: boolean
+  diffReviewOnlyReason?: string | null
   messages: ChatMessage[]
   conversationCheckpoints?: ConversationCheckpointDraft[]
   applyResult?: ApplyResult | null
@@ -192,6 +193,11 @@ export function reduceRunEventState(
   if (event.type === 'diff_ready') {
     patch.diffReady = true
     patch.flowStatus = 'awaiting_review'
+    const reviewOnly = event.payload as { reviewOnly?: unknown; reviewOnlyReason?: unknown } | undefined
+    patch.diffReviewOnlyReason =
+      reviewOnly?.reviewOnly === true && typeof reviewOnly.reviewOnlyReason === 'string'
+        ? reviewOnly.reviewOnlyReason
+        : null
   }
 
   if (event.type === 'apply_result') {

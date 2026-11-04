@@ -6,6 +6,7 @@ import type {
   AgentActionEvent,
   AgentDelegationEvent,
   AgentProfile,
+  AgentRun,
   AgentRunRole,
   AgentRunScope,
   AgentRunEvent,
@@ -64,6 +65,7 @@ import type {
 } from './removedApiStubTypes'
 import { buildPromptComposerFields, emptyComposerDraft } from '@contracts/index'
 import type { MapWorkGroupMutationInput, UpdateMapWorkGroupPatch, WorkGroupSelectionItem } from '@contracts/index'
+import type { ExecutorOption, ExecutorSelection } from '@contracts/index'
 import { FileOwnershipErrorDetailsSchema, MAP_ARTIFACT_DEFAULT_SIZES, emptyNoteDocument } from '@contracts/index'
 import { getActiveStackMember, getStackMembers, syncStackGeometry } from '@contracts/index'
 import {
@@ -283,6 +285,31 @@ export function isGlobalAgentScope(state: {
   return true
 }
 
+/**
+ * The executor a request carries. A chosen runtime applies to Agent-mode changes
+ * only; Ask, Plan and Debug always use the selected model. Fixture and
+ * presentation modes never carry a live choice.
+ */
+export function selectExecutorForRequest(state: {
+  chatMode: ChatMode
+  selectedModelProfileId: string | null
+  selectedRuntimeId: string | null
+  executorOptions: ExecutorOption[]
+  settings: ProjectOSSettings | null
+}): ExecutorSelection | undefined {
+  if (state.settings?.presentationMode || state.settings?.execution.mode === 'fixture') return undefined
+  if (
+    state.chatMode === 'change' &&
+    state.selectedRuntimeId !== null &&
+    state.executorOptions.some((option) => option.executorId === state.selectedRuntimeId)
+  ) {
+    return { kind: 'runtime', runtimeProfileId: state.selectedRuntimeId }
+  }
+  return state.selectedModelProfileId
+    ? { kind: 'model', modelProfileId: state.selectedModelProfileId }
+    : undefined
+}
+
 export function canSubmitAgentPrompt(state: {
   chatMode: ChatMode
   globalAgentActive: boolean
@@ -462,6 +489,7 @@ export interface WorkbenchState {
   agentFlowSubject: AgentFlowSubject
 
   activeRunId: string | null
+  decisionRootRunId: string | null
   runDecisions: RunDecision[]
   focusedDecisionId: string | null
   decisionResolvingIds: string[]
@@ -479,6 +507,8 @@ export interface WorkbenchState {
   /** Phase 3: run id paused from the graph (interrupted); Resume calls continueAgentRun. */
   liveGraphPausedRunId: string | null
   diffReady: boolean
+  /** Set when the run's proposal can be reviewed but not applied (no independent validation). */
+  diffReviewOnlyReason: string | null
   generatedDiff: GeneratedDiff | null
   applyResult: ApplyResult | null
   verificationResult: VerificationRunResult | null
@@ -500,6 +530,10 @@ export interface WorkbenchState {
   settings: ProjectOSSettings | null
   settingsOpen: boolean
   selectedModelProfileId: string | null
+  /** Agent runtimes this build offers for single-file changes; empty in a production build. */
+  executorOptions: ExecutorOption[]
+  /** A chosen runtime replaces the model for Agent-mode changes only. */
+  selectedRuntimeId: string | null
   modelSelectionPending: boolean
   mapContent: MapContentDocument | null
   features: FeaturesFile | null
@@ -649,7 +683,7 @@ export interface WorkbenchState {
   clearSelection: () => void
   dismissError: () => void
   sendPrompt: (input: string | ComposerDraft) => Promise<void>
-  confirmRefinement: () => Promise<void>
+  confirmRefinement: (onStarted?: (run: AgentRun) => void) => Promise<void>
   reviseRefinement: () => void
   confirmPlanBuild: () => Promise<void>
   submitPlanClarification: (
@@ -723,6 +757,8 @@ export interface WorkbenchState {
   refreshMcpTools: (serverId: string) => Promise<McpToolDescriptor[]>
   setSettingsOpen: (open: boolean) => void
   setSelectedModelProfileId: (profileId: string | null) => void
+  loadExecutorOptions: () => Promise<void>
+  selectRuntimeExecutor: (executorId: string | null) => void
   selectChatModel: (profileId: string) => Promise<boolean>
   setThinkingDepth: (depth: ThinkingDepth) => Promise<void>
   setPresentationMode: (enabled: boolean) => Promise<void>
@@ -1161,6 +1197,8 @@ async function loadWorkspaceIntoStore(
     storyFocusedFeatureId: null,
     settings,
     selectedModelProfileId: defaultModelProfileId,
+    executorOptions: [] as ExecutorOption[],
+    selectedRuntimeId: null as string | null,
     modelSelectionPending: false,
     context: null,
     ...initialTransientState,
@@ -1228,6 +1266,7 @@ const initialTransientState = {
   latestContextAssembly: null as import('@contracts/index').ContextAssembly | null,
   agentFlowSubject: 'run' as AgentFlowSubject,
   activeRunId: null as string | null,
+  decisionRootRunId: null as string | null,
   runDecisions: [] as RunDecision[],
   focusedDecisionId: null as string | null,
   decisionResolvingIds: [] as string[],
@@ -1242,6 +1281,7 @@ const initialTransientState = {
   liveGraphFocusTaskId: null as string | null,
   liveGraphPausedRunId: null as string | null,
   diffReady: false,
+  diffReviewOnlyReason: null,
   generatedDiff: null as GeneratedDiff | null,
   applyResult: null as ApplyResult | null,
   verificationResult: null as VerificationRunResult | null,
@@ -1316,6 +1356,7 @@ function queueStructureRefineForChangedFilesImpl(
 export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   let nodeContextRequestSequence = 0
   let fileContextRequestSequence = 0
+  let decisionRequestSequence = 0
 
   const loadSelectedNodeContext = async (nodeId: string) => {
     const { client, project } = get()
@@ -1460,7 +1501,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
     useChatSessionStore.getState().presentAgentFlow()
     set({
-      activeRunId: decision.rootRunId,
+      decisionRootRunId: decision.rootRunId,
       agentFlowSubject: 'run',
       rightPanelTab: 'chat',
       rightPanelOpen: true,
@@ -1543,6 +1584,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   projectDescriptionSaving: false,
   settingsOpen: false,
   selectedModelProfileId: null,
+  executorOptions: [],
+  selectedRuntimeId: null,
   modelSelectionPending: false,
   mapContent: null,
   features: null,
@@ -1643,7 +1686,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       if (!runId || !decisionId) return
       useChatSessionStore.getState().presentAgentFlow()
       set({
-        activeRunId: runId,
+        decisionRootRunId: runId,
         agentFlowSubject: 'run',
         rightPanelTab: 'chat',
         rightPanelOpen: true,
@@ -1851,6 +1894,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       useChatSessionStore.getState().presentAgentFlow()
       set({
         activeRunId: run.runId,
+        decisionRootRunId: run.rootRunId ?? run.runId,
         runDecisions: [],
         focusedDecisionId: null,
         decisionResolvingIds: [],
@@ -2616,9 +2660,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       draft.invokedSkillId ?? get().activeCustomModeSkillId ?? undefined
     const composerFieldsWithMode = {
       ...composerFields,
-      ...(state.selectedModelProfileId && !state.settings?.presentationMode && state.settings?.execution.mode !== 'fixture'
-        ? { executorSelection: { kind: 'model' as const, modelProfileId: state.selectedModelProfileId } }
-        : {}),
+      ...(selectExecutorForRequest(state) ? { executorSelection: selectExecutorForRequest(state)! } : {}),
       ...(effectiveSkillId ? { invokedSkillId: effectiveSkillId } : {}),
     }
 
@@ -3042,6 +3084,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       liveGraphFocusTaskId: null,
         liveGraphPausedRunId: null,
       diffReady: false,
+      diffReviewOnlyReason: null,
       diffReadyBanner: null,
       pendingChangesDrawerDismissedRunId: null,
       diffFileStats: [],
@@ -3089,7 +3132,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     scheduleChatSessionPersist()
   },
 
-  confirmRefinement: async () => {
+  confirmRefinement: async (onStarted) => {
     const { client, pendingRefinement, pushToast, locale } = get()
     if (!pendingRefinement) return
     const subscriptionProjectId = get().project?.projectId
@@ -3109,6 +3152,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         refinementConfirmed: true,
         latestContextAssembly: delivered.contextAssembly ?? get().latestContextAssembly,
         activeRunId: run.runId,
+        decisionRootRunId: run.rootRunId ?? run.runId,
         runDecisions: [],
         focusedDecisionId: null,
         flowSteps: [],
@@ -3123,6 +3167,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         liveGraphPausedRunId: null,
         agentFlowSubject: 'run',
         diffReady: false,
+        diffReviewOnlyReason: null,
         generatedDiff: null,
         applyResult: null,
         verificationResult: null,
@@ -3137,6 +3182,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         diffFileStats: [],
         selectedDiffFilePath: null,
       })
+      onStarted?.(run)
       void get().loadRunDecisions(run.rootRunId ?? run.runId)
 
       const isCurrentRunSubscription = () => {
@@ -3148,10 +3194,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       const handledRunEventIds = new Set<string>()
       let lastDecisionRefreshAt = 0
       const refreshRunDecisionsIfDue = () => {
+        const rootRunId = run.rootRunId ?? run.runId
+        const inspectedRootRunId = get().decisionRootRunId
+        if (inspectedRootRunId && inspectedRootRunId !== rootRunId) return
         const now = Date.now()
         if (now - lastDecisionRefreshAt < 1_500) return
         lastDecisionRefreshAt = now
-        void get().loadRunDecisions(run.rootRunId ?? run.runId)
+        void get().loadRunDecisions(rootRunId)
       }
       const applyRunEvent = (event: AgentRunEvent) => {
         if (!isCurrentRunSubscription()) return
@@ -3392,8 +3441,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   confirmPlanBuild: async () => {
-    const { client, pendingPlan, pushToast, locale } = get()
-    if (!pendingPlan || pendingPlan.status !== 'ready') return
+    const { client, project, pendingPlan, refineLoading, pushToast, locale } = get()
+    if (!pendingPlan || pendingPlan.status !== 'ready' || refineLoading) return
     if (pendingPlan.steps.length === 0) {
       pushToast({
         type: 'warning',
@@ -3402,27 +3451,45 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       })
       return
     }
-    set({ refineLoading: true, planConfirmed: true })
+    const isCurrentBuild = () => get().project?.projectId === project?.projectId &&
+      get().pendingPlan?.id === pendingPlan.id
+    set({ refineLoading: true, planConfirmed: false, error: null })
     try {
       const refinement = await client.buildPlan(pendingPlan.id)
-      useChatSessionStore.getState().presentAgentFlow()
-      set({
-        refineLoading: false,
-        lastBuiltPlan: pendingPlan,
-        pendingPlan: null,
-        pendingRefinement: refinement,
-        refinementConfirmed: true,
-        chatMode: 'change',
-        agentFlowSubject: 'run',
-        rightPanelTab: 'chat',
+      if (!isCurrentBuild()) return
+      set({ pendingRefinement: refinement, refinementConfirmed: false })
+      let started = false
+      await get().confirmRefinement(() => {
+        if (!isCurrentBuild()) return
+        started = true
+        set({
+          refineLoading: false,
+          lastBuiltPlan: pendingPlan,
+          pendingPlan: null,
+          planConfirmed: true,
+          chatMode: 'change',
+          agentFlowSubject: 'run',
+          rightPanelTab: 'chat',
+        })
+        pushToast({ type: 'info', message: getStoreMessage(locale, 'plan.buildStarted') })
       })
-      pushToast({ type: 'info', message: getStoreMessage(locale, 'plan.buildStarted') })
-      await get().confirmRefinement()
+      if (!started && isCurrentBuild()) {
+        set({
+          refineLoading: false,
+          planConfirmed: false,
+          refinementConfirmed: false,
+          pendingRefinement: null,
+          chatMode: 'plan',
+          agentFlowSubject: 'plan',
+        })
+      }
     } catch (error) {
+      if (!isCurrentBuild()) return
       set({
         refineLoading: false,
         planConfirmed: false,
         refinementConfirmed: false,
+        pendingRefinement: null,
         error: errorMessage(error, 'Failed to build plan'),
       })
     }
@@ -3602,13 +3669,18 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   loadRunDecisions: async (requestedRootRunId) => {
-    const { client, project, activeRunId } = get()
-    const rootRunId = requestedRootRunId ?? activeRunId
+    const { client, project, activeRunId, decisionRootRunId } = get()
+    const rootRunId = requestedRootRunId ?? decisionRootRunId ?? activeRunId
     if (!project || !rootRunId) return
     const projectId = project.projectId
+    const requestSequence = ++decisionRequestSequence
+    set({ decisionRootRunId: rootRunId })
     try {
       const decisions = await client.listRunDecisions(projectId, rootRunId)
-      if (get().project?.projectId !== projectId) return
+      const current = get()
+      if (current.project?.projectId !== projectId ||
+        current.decisionRootRunId !== rootRunId ||
+        requestSequence !== decisionRequestSequence) return
       const previousPendingIds = new Set(get().runDecisions
         .filter((item) => item.rootRunId === rootRunId && item.status === 'pending')
         .map((item) => item.id))
@@ -3829,6 +3901,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       liveGraphFocusTaskId: null,
         liveGraphPausedRunId: null,
       diffReady: false,
+      diffReviewOnlyReason: null,
       generatedDiff: null,
       applyResult: null,
       verificationResult: null,
@@ -3847,6 +3920,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       set((current) => ({
         refineLoading: false,
         activeRunId: run.runId,
+        decisionRootRunId: run.rootRunId ?? run.runId,
         flowStatus: 'running',
         agentFlowSubject: 'run',
         harnessFixRunId: null,
@@ -3954,6 +4028,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         }
         set({
           diffReady: false,
+          diffReviewOnlyReason: null,
           error: getStoreMessage(locale, 'diff.notAvailable', { status: runStatus }),
         })
         maybeNotifyDiffReady(targetRunId, 0)
@@ -3965,8 +4040,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   applyCurrentDiff: async () => {
-    const { client, project, activeRunId, generatedDiff, editorBuffers, pushToast, locale, selectedNodeId } = get()
+    const { client, project, activeRunId, generatedDiff, editorBuffers, pushToast, locale, selectedNodeId, diffReviewOnlyReason } = get()
     if (!project || !activeRunId) return
+    if (diffReviewOnlyReason) {
+      pushToast({ type: 'warning', message: diffReviewOnlyReason })
+      return
+    }
     try {
       const applyResult = await client.applyDiff(activeRunId)
       const [graph, tree, currentWork] = await Promise.all([
@@ -4245,6 +4324,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       set({
         harnessFixRunId: run.runId,
         activeRunId: run.runId,
+        decisionRootRunId: run.rootRunId ?? run.runId,
         flowSteps: [],
         flowActions: [],
         flowDelegationEvents: [],
@@ -4275,7 +4355,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   resetDemo: async () => {
-    const { client, project, runDisposable, locale } = get()
+    const { client, project, runDisposable } = get()
     if (!project) return
     runDisposable?.dispose()
 
@@ -4584,6 +4664,36 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setSelectedModelProfileId: (profileId) => set({ selectedModelProfileId: profileId }),
+
+  loadExecutorOptions: async () => {
+    const { client, project } = get()
+    if (!project) {
+      set({ executorOptions: [], selectedRuntimeId: null })
+      return
+    }
+    const projectId = project.projectId
+    let options: ExecutorOption[] = []
+    try {
+      options = await client.listExecutors(projectId)
+    } catch {
+      options = []
+    }
+    if (get().project?.projectId !== projectId) return
+    set((current) => ({
+      executorOptions: options,
+      selectedRuntimeId: options.some((option) => option.executorId === current.selectedRuntimeId)
+        ? current.selectedRuntimeId
+        : null,
+    }))
+  },
+
+  selectRuntimeExecutor: (executorId) =>
+    set((current) => ({
+      selectedRuntimeId:
+        executorId !== null && current.executorOptions.some((option) => option.executorId === executorId)
+          ? executorId
+          : null,
+    })),
 
   selectChatModel: async (profileId) => {
     const { client, project, settings, modelSelectionPending } = get()

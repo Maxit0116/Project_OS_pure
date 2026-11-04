@@ -23,6 +23,7 @@ afterEach(() => {
     client: originalClient,
     project: null,
     activeRunId: null,
+    decisionRootRunId: null,
     runDecisions: [],
     decisionResolvingIds: [],
     error: null,
@@ -64,5 +65,35 @@ describe('run decisions state', () => {
       revision: 2,
     })
     expect(useWorkbenchStore.getState().decisionResolvingIds).toEqual([])
+  })
+
+  it('discards an out-of-order decision response for a no-longer-inspected run', async () => {
+    const workspace = createMockSampleWorkspace()
+    const finish = new Map<string, (decisions: RunDecision[]) => void>()
+    const listRunDecisions = vi.fn((projectId: string, rootRunId: string) => new Promise<RunDecision[]>((resolve) => {
+      finish.set(rootRunId, resolve)
+    }))
+    useWorkbenchStore.setState({
+      client: { listRunDecisions } as unknown as ProjectOSApi,
+      project: workspace.project,
+      activeRunId: 'root_active',
+      decisionRootRunId: null,
+      runDecisions: [],
+      decisionResolvingIds: [],
+      notifyOnPendingDecision: false,
+    })
+
+    const firstRequest = useWorkbenchStore.getState().loadRunDecisions('root_history_a')
+    const secondRequest = useWorkbenchStore.getState().loadRunDecisions('root_history_b')
+    const decisionA = { ...decision, id: 'decision_history_a', rootRunId: 'root_history_a', runId: 'root_history_a' }
+    const decisionB = { ...decision, id: 'decision_history_b', rootRunId: 'root_history_b', runId: 'root_history_b' }
+    finish.get('root_history_b')!([decisionB])
+    await secondRequest
+    finish.get('root_history_a')!([decisionA])
+    await firstRequest
+
+    expect(useWorkbenchStore.getState().activeRunId).toBe('root_active')
+    expect(useWorkbenchStore.getState().decisionRootRunId).toBe('root_history_b')
+    expect(useWorkbenchStore.getState().runDecisions).toEqual([decisionB])
   })
 })

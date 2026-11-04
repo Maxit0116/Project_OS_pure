@@ -57,11 +57,20 @@ export default function ComposerControlBar({
   const modelSelectionPending = useWorkbenchStore((s) => s.modelSelectionPending)
   const selectedModelProfileId = useWorkbenchStore((s) => s.selectedModelProfileId)
   const selectChatModel = useWorkbenchStore((s) => s.selectChatModel)
+  const executorOptions = useWorkbenchStore((s) => s.executorOptions)
+  const selectedRuntimeId = useWorkbenchStore((s) => s.selectedRuntimeId)
+  const loadExecutorOptions = useWorkbenchStore((s) => s.loadExecutorOptions)
+  const selectRuntimeExecutor = useWorkbenchStore((s) => s.selectRuntimeExecutor)
+  const projectId = useWorkbenchStore((s) => s.project?.projectId)
   const setThinkingDepth = useWorkbenchStore((s) => s.setThinkingDepth)
   const setSettingsOpen = useWorkbenchStore((s) => s.setSettingsOpen)
   const { ts } = useI18n()
 
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
+
+  useEffect(() => {
+    void loadExecutorOptions()
+  }, [projectId, loadExecutorOptions])
   const barRef = useRef<HTMLDivElement>(null)
   const modelTriggerRef = useRef<HTMLSpanElement>(null)
 
@@ -105,13 +114,19 @@ export default function ComposerControlBar({
     }
   }
 
+  const activeRuntime = chatMode === 'change'
+    ? executorOptions.find((option) => option.executorId === selectedRuntimeId)
+    : undefined
+  const hasRuntimes = executorOptions.length > 0
   const modelThinkingLabel = presentationMode
     ? ts('chat.demoModelName')
-    : !hasModels
-      ? ts('chat.configureModel')
-      : selectedModel
-        ? modelProfileLabel(selectedModel)
-        : ts('chat.executionModel')
+    : activeRuntime
+      ? activeRuntime.label
+      : !hasModels
+        ? ts('chat.configureModel')
+        : selectedModel
+          ? modelProfileLabel(selectedModel)
+          : ts('chat.executionModel')
 
   const currentModeVisual = CHAT_MODE_VISUALS[chatMode]
   const CurrentModeIcon = currentModeVisual.icon
@@ -186,7 +201,7 @@ export default function ComposerControlBar({
             {modelThinkingLabel}
             <span className={styles.chipMeta}> · {thinkingLabel(DEMO_THINKING_DEPTH)}</span>
           </Chip>
-        ) : !hasModels ? (
+        ) : !hasModels && !hasRuntimes ? (
           <Chip className={styles.chipTruncate} onClick={() => setSettingsOpen(true)}>
             {modelThinkingLabel}
           </Chip>
@@ -202,7 +217,7 @@ export default function ComposerControlBar({
                 setOpenMenu((current) => (current === 'modelThinking' ? null : 'modelThinking'))}
             >
               <span ref={modelTriggerRef} className={styles.chipLabel}>{modelThinkingLabel}</span>
-              <span className={styles.chipMeta}>· {thinkingLabel(thinkingDepth)}</span> ▾
+              {!activeRuntime && <span className={styles.chipMeta}>· {thinkingLabel(thinkingDepth)}</span>} ▾
             </Chip>
             {openMenu === 'modelThinking' && (
               <div className={styles.dropdownAnchor} role="dialog" aria-label={ts('composer.modelPickerLabel')}>
@@ -215,9 +230,19 @@ export default function ComposerControlBar({
                   profiles={modelProfiles}
                   selectedId={selectedModelProfileId}
                   pending={modelSelectionPending}
+                  runtimes={executorOptions}
+                  selectedRuntimeId={selectedRuntimeId}
+                  onSelectRuntime={(executorId) => {
+                    selectRuntimeExecutor(executorId)
+                    if (executorId !== null) {
+                      setOpenMenu(null)
+                      modelTriggerRef.current?.closest('button')?.focus()
+                    }
+                  }}
                   onSelect={(id) => {
                     void selectChatModel(id).then((selected) => {
                       if (selected) {
+                        selectRuntimeExecutor(null)
                         setOpenMenu(null)
                         modelTriggerRef.current?.closest('button')?.focus()
                       }

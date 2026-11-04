@@ -65,7 +65,6 @@ export function arrowTargetRect(
 /** Stage-space obstacle rects the curve must travel around. */
 export function arrowObstacles(
   region: OverlayRegion,
-  arrow: OverlayArrow,
   card: ScreenRect,
   extra: ScreenRect[] = [],
 ): ScreenRect[] {
@@ -99,7 +98,7 @@ export function resolveArrowEdgeConnection(
     headScreen,
     attachScreen,
     target,
-    obstacles: arrowObstacles(region, arrow, card),
+    obstacles: arrowObstacles(region, card),
   }
 }
 

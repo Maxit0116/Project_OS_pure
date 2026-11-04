@@ -356,8 +356,8 @@ export function projectArchitectureView(
   }
 
   const resolved = resolveArchitectureView({
-    views: options.views,
-    viewKey: options.viewKey,
+    ...(options.views !== undefined ? { views: options.views } : {}),
+    ...(options.viewKey !== undefined ? { viewKey: options.viewKey } : {}),
     level,
     scope,
   })

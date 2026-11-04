@@ -5,7 +5,8 @@ import styles from './AttachmentChips.module.css'
 interface AttachmentChipsProps {
   attachments: PromptAttachment[]
   invokedSkillLabel?: string
-  onRemove: (attachmentId: string) => void
+  /** Omit for read-only chips (sent messages): no remove control is rendered. */
+  onRemove?: (attachmentId: string) => void
   onClearSkill?: () => void
 }
 
@@ -37,14 +38,16 @@ export default function AttachmentChips({
         <span key={attachment.id} className={styles.chip}>
           <span className={styles.prefix}>@</span>
           <span className={styles.label}>{attachment.label}</span>
-          <button
-            type="button"
-            className={styles.remove}
-            onClick={() => onRemove(attachment.id)}
-            aria-label={`Remove ${attachment.label}`}
-          >
-            <X size={12} />
-          </button>
+          {onRemove ? (
+            <button
+              type="button"
+              className={styles.remove}
+              onClick={() => onRemove(attachment.id)}
+              aria-label={`Remove ${attachment.label}`}
+            >
+              <X size={12} />
+            </button>
+          ) : null}
         </span>
       ))}
     </div>

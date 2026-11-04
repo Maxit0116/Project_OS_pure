@@ -34,7 +34,7 @@ export default function CodeEditorTabBar({ paneId }: Props) {
   const tabCount = filePaths.length
   const activeFilePath = pane?.activeFilePath ?? null
 
-  const tabListRef = useRef<HTMLDivElement>(null)
+  const tabListRef = useRef<HTMLDivElement | null>(null)
   const tabRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const prevTabCountRef = useRef(tabCount)
   const prevActiveFileRef = useRef(activeFilePath)

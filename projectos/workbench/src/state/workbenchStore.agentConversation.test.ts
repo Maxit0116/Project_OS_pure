@@ -35,6 +35,7 @@ afterEach(() => {
     refineLoading: false,
     composerDraft: emptyComposerDraft(),
     activeRunId: null,
+    decisionRootRunId: null,
     runDecisions: [],
     focusedDecisionId: null,
     decisionResolvingIds: [],
@@ -920,6 +921,8 @@ describe('agent conversation routing', () => {
   it('clears the transient Ask trace when loading and resetting a workspace', async () => {
     useWorkbenchStore.setState({
       client: originalClient,
+      editorBuffers: {},
+      editorSavedBuffers: {},
       latestAskTrace: {
         status: 'running',
         scope: { kind: 'node', nodeId: 'feat_login' },
@@ -988,8 +991,22 @@ describe('agent conversation routing', () => {
       sourcePlanId: 'plan_1',
       executionPolicy: 'review_first' as const,
     }))
+    const run: AgentRun = {
+      runId: 'run-plan-confirmed', projectId: 'sample-graph-saas', kind: 'feature_change',
+      status: 'running', relatedNodeIds: ['feat_login'], relatedFiles: ['app/login/page.tsx'],
+      startedAt: '2026-10-29T00:00:00.000Z',
+    }
+    setReadyScope({
+      buildPlan,
+      confirmExecution: vi.fn(async () => run),
+      streamAgentRun: vi.fn(() => ({ dispose() {} })),
+      listRunDecisions: vi.fn(async () => []),
+      getAgentRunEvents: vi.fn(async () => [{
+        eventId: 'plan-step', runId: run.runId, timestamp: run.startedAt, type: 'step_started',
+        step: { id: 'step-plan', kind: 'understand', label: 'Understand', status: 'running', relatedNodeIds: [], relatedFiles: [] },
+      }]),
+    } as unknown as ProjectOSApi, 'plan')
     useWorkbenchStore.setState({
-      client: { buildPlan } as unknown as ProjectOSApi,
       pendingPlan: {
         version: '0.1.0',
         id: 'plan_1',
@@ -1111,7 +1128,8 @@ describe('agent conversation routing', () => {
 
     expect(useWorkbenchStore.getState()).toMatchObject({
       focusedDecisionId: decision.id,
-      activeRunId: decision.rootRunId,
+      activeRunId: null,
+      decisionRootRunId: decision.rootRunId,
       rightPanelTab: 'chat',
       rightPanelOpen: true,
     })
@@ -1123,6 +1141,7 @@ describe('agent conversation routing', () => {
   it('opens a stale decision notification on its recorded history without resolving it', async () => {
     const client = new MockProjectOSApiClient()
     setReadyScope(client)
+    useWorkbenchStore.setState({ activeRunId: 'still_running_run' })
     const projectId = useWorkbenchStore.getState().project!.projectId
     const decision: RunDecision = {
       version: '0.1.0',
@@ -1149,6 +1168,8 @@ describe('agent conversation routing', () => {
     expect(list).toHaveBeenCalledWith(decision.projectId, decision.rootRunId)
     expect(useWorkbenchStore.getState().runDecisions).toEqual([decision])
     expect(useWorkbenchStore.getState().focusedDecisionId).toBe(decision.id)
+    expect(useWorkbenchStore.getState().decisionRootRunId).toBe(decision.rootRunId)
+    expect(useWorkbenchStore.getState().activeRunId).toBe('still_running_run')
     expect(resolve).not.toHaveBeenCalled()
   })
 })
@@ -1221,3 +1242,17 @@ function leafDelegation(
     },
   }
 }
+
+it('keeps the ready plan available when run confirmation fails',async()=>{
+ const client={buildPlan:vi.fn(async()=>({id:'h0-ref',understood:'Edit checkout',ambiguities:[],suggestions:[],affectedNodeIds:['feat_checkout'],affectedFiles:[],confidence:1,mode:'model',sourcePlanId:'h0-plan'})),confirmExecution:vi.fn(async()=>{throw new Error('H0 start rejected')})} as unknown as ProjectOSApi;
+ setReadyScope(client,'plan');
+ useWorkbenchStore.setState({pendingPlan:{version:'0.1.0',id:'h0-plan',projectId:'sample-graph-saas',scope:{kind:'global'},objective:'Edit checkout',steps:[{id:'s1',description:'Edit checkout',affectedFiles:[],acceptanceCriteria:['Updated']}],todos:[],ambiguities:[],rationale:'Requested',status:'ready',createdAt:'2026-10-29',updatedAt:'2026-10-29'},planConfirmed:false,flowStatus:'idle',error:null});
+ await useWorkbenchStore.getState().confirmPlanBuild();
+ expect(useWorkbenchStore.getState().pendingPlan?.id).toBe('h0-plan');
+ expect(useWorkbenchStore.getState().planConfirmed).toBe(false);
+ expect(useWorkbenchStore.getState().chatMode).toBe('plan');
+ expect(useWorkbenchStore.getState().refinementConfirmed).toBe(false);
+ expect(useWorkbenchStore.getState().toasts).toHaveLength(0);
+ expect(useWorkbenchStore.getState().flowStatus).toBe('error');
+ expect(useWorkbenchStore.getState().error).toContain('H0 start rejected');
+});

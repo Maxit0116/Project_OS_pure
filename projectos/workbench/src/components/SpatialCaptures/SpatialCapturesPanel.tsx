@@ -346,7 +346,7 @@ export default function SpatialCapturesPanel() {
                 className={`${styles.pullTab} ${drawerOpen ? styles.pullTabOpen : ''}`}
                 aria-expanded={drawerOpen}
                 aria-controls={drawerOpen ? `capture-sessions-${head.id}` : undefined}
-                aria-label={ts('spatialCaptures.activityToggle', { title: head.title })}
+                aria-label={ts('spatialCaptures.activityToggle', { title: head.title ?? '' })}
                 onClick={() =>
                   setOpenCaptureId((current) => (current === head.id ? null : head.id))
                 }
@@ -359,7 +359,7 @@ export default function SpatialCapturesPanel() {
                 id={`capture-sessions-${head.id}`}
                 className={`${styles.drawer} ${drawerOpen && drawerExpanded ? styles.drawerOpen : ''}`}
                 role="region"
-                aria-label={ts('spatialCaptures.activityToggle', { title: head.title })}
+                aria-label={ts('spatialCaptures.activityToggle', { title: head.title ?? '' })}
               >
               <div className={styles.drawerInner}>
                 {running.length > 0 ? (

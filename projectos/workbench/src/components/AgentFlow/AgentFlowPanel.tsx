@@ -545,6 +545,7 @@ type DelegatedRunStatus =
   | 'running'
   | 'awaiting_review'
   | 'complete'
+  | 'blocked'
   | 'error'
   | 'applied'
   | 'not_applied'

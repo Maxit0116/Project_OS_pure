@@ -1,6 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { Plugin } from 'vite'
 import {
   WHISPER_MODEL_FILES,
   WHISPER_MODEL_ID,
@@ -144,7 +143,21 @@ export async function stageWhisperModel(
   return true
 }
 
-export function offlineSpeechAssets(): Plugin {
+/**
+ * Structural plugin contract instead of vite's `Plugin`: this module is consumed by
+ * the workbench build and by electron-vite in `desktop/`, which resolve separate
+ * `vite` installs whose `Plugin` types are not assignable to each other.
+ */
+export interface OfflineSpeechAssetsPlugin {
+  name: string
+  configResolved(config: {
+    publicDir: string
+    root: string
+    logger: { info(message: string): void; warn(message: string): void }
+  }): Promise<void>
+}
+
+export function offlineSpeechAssets(): OfflineSpeechAssetsPlugin {
   return {
     name: 'projectos:offline-speech-assets',
     async configResolved({ publicDir, root, logger }) {

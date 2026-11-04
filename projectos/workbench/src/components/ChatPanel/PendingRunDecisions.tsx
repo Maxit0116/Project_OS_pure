@@ -36,9 +36,14 @@ export default function PendingRunDecisions({ decisions, resolvingIds, focusedDe
   const answered = decisions.filter((decision) => decision.status !== 'pending')
 
   return (
-    <section ref={cardRef} className={styles.card} aria-label={ts('decisions.title')}>
+    <section
+      ref={cardRef}
+      className={styles.card}
+      aria-label={`${ts('decisions.title')} ${decisions[0]?.rootRunId ?? ''}`.trim()}
+    >
       <header className={styles.header}>
         <span>{ts('decisions.title')}</span>
+        <span className={styles.rootRun}>{ts('decisions.forRun', { id: decisions[0]?.rootRunId ?? '' })}</span>
         <span className={styles.count}>{pending.length}</span>
       </header>
       {pending.map((decision) => {

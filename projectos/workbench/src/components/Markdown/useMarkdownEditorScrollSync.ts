@@ -1,8 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import type { Monaco } from '@monaco-editor/react'
 import { getRegisteredEditor } from '../CodeEditor/editorNavigation'
-
-type MonacoEditor = ReturnType<Monaco['editor']['create']>
 
 interface Options {
   filePath: string

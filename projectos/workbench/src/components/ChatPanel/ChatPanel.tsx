@@ -9,6 +9,7 @@ import {
 } from '../../state/pendingChangesDrawer'
 import PendingChangesDrawer from '../PendingChangesDrawer/PendingChangesDrawer'
 import { useI18n } from '../../i18n'
+import { modelProfileLabel } from '@contracts/index'
 import PromptRefinementCard from './PromptRefinementCard'
 import RequestIntentCard from './RequestIntentCard'
 import PlanReviewCard from './PlanReviewCard'
@@ -56,6 +57,7 @@ export default function ChatPanel() {
   const pendingRefinement = useWorkbenchStore((s) => s.pendingRefinement)
   const pendingIntent = useWorkbenchStore((s) => s.pendingIntent)
   const settings = useWorkbenchStore((s) => s.settings)
+  const executorOptions = useWorkbenchStore((s) => s.executorOptions)
   const approveRequestIntent = useWorkbenchStore((s) => s.approveRequestIntent)
   const reviseRequestIntent = useWorkbenchStore((s) => s.reviseRequestIntent)
   const pendingPlan = useWorkbenchStore((s) => s.pendingPlan)
@@ -305,12 +307,17 @@ export default function ChatPanel() {
   const showGlobalAgentHint =
     (globalAgentActive || (!selectedNodeId && !selectedFilePath)) &&
     (chatMode === 'change' || chatMode === 'plan')
+  const pendingIntentRuntimeId =
+    pendingIntent?.executorSelection.kind === 'runtime' ? pendingIntent.executorSelection.runtimeProfileId : null
   const pendingIntentExecutorLabel = (() => {
     if (!pendingIntent) return ''
     const snapshot = pendingIntent.executorSnapshot
     if (snapshot) return snapshot.profile.displayName ?? snapshot.profile.name
     const selection = pendingIntent.executorSelection
-    if (selection.kind === 'runtime') return selection.runtimeProfileId
+    if (selection.kind === 'runtime') {
+      return executorOptions.find((option) => option.executorId === selection.runtimeProfileId)?.label ??
+        selection.runtimeProfileId
+    }
     return settings?.modelProfiles.find((profile) => profile.id === selection.modelProfileId)?.name ??
       selection.modelProfileId
   })()
@@ -401,6 +408,15 @@ export default function ChatPanel() {
             intent={pendingIntent}
             busy={refineLoading}
             executorLabel={pendingIntentExecutorLabel}
+            {...(pendingIntentRuntimeId !== null
+              ? {
+                  validation: pendingIntent.validatorSnapshot
+                    ? { kind: 'model' as const, label: modelProfileLabel(pendingIntent.validatorSnapshot.profile) }
+                    : executorOptions.find((option) => option.executorId === pendingIntentRuntimeId)?.devOnly
+                      ? { kind: 'devOnly' as const }
+                      : { kind: 'none' as const },
+                }
+              : {})}
             onApprove={(answers) => void approveRequestIntent(answers)}
             onRevise={reviseRequestIntent}
           />

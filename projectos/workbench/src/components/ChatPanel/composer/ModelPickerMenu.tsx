@@ -1,6 +1,6 @@
 import { useId, useRef, useState, type KeyboardEvent } from 'react'
 import { Check, Search, Settings2 } from 'lucide-react'
-import { modelProfileLabel, type ModelProfile } from '@contracts/index'
+import { modelProfileLabel, type ExecutorOption, type ModelProfile } from '@contracts/index'
 import { useI18n } from '../../../i18n'
 import styles from './ComposerControlBar.module.css'
 
@@ -10,6 +10,10 @@ interface Props {
   pending: boolean
   onSelect: (id: string) => void
   onManage: () => void
+  /** Registered agent runtimes; omitted or empty in a production build. */
+  runtimes?: ExecutorOption[]
+  selectedRuntimeId?: string | null
+  onSelectRuntime?: (executorId: string | null) => void
 }
 
 export function filterModelProfiles(profiles: ModelProfile[], query: string): ModelProfile[] {
@@ -20,7 +24,10 @@ export function filterModelProfiles(profiles: ModelProfile[], query: string): Mo
   })
 }
 
-export default function ModelPickerMenu({ profiles, selectedId, pending, onSelect, onManage }: Props) {
+export default function ModelPickerMenu({
+  profiles, selectedId, pending, onSelect, onManage,
+  runtimes = [], selectedRuntimeId = null, onSelectRuntime,
+}: Props) {
   const { ts } = useI18n()
   const [query, setQuery] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
@@ -72,6 +79,30 @@ export default function ModelPickerMenu({ profiles, selectedId, pending, onSelec
         ))}
         {filtered.length === 0 && <p className={styles.modelEmpty} role="status">{ts('composer.noModelsFound')}</p>}
       </div>
+      {runtimes.length > 0 && onSelectRuntime && (
+        <div role="group" aria-label={ts('composer.runtimeSection')}>
+          <div className={styles.sectionDivider} />
+          <div className={styles.sectionLabel}>{ts('composer.runtimeSection')}</div>
+          {runtimes.map((runtime) => {
+            const active = runtime.executorId === selectedRuntimeId
+            return (
+              <button
+                key={runtime.executorId}
+                type="button"
+                className={`${styles.menuItem} ${active ? styles.menuItemActive : ''}`}
+                aria-pressed={active}
+                onClick={() => onSelectRuntime(active ? null : runtime.executorId)}
+              >
+                <span className={styles.modelCopy}>
+                  <span>{runtime.label}</span>
+                </span>
+                {active && <Check size={14} className={styles.modelCheck} aria-hidden />}
+              </button>
+            )
+          })}
+          <p className={styles.modelHint}>{ts('composer.runtimeHelp')}</p>
+        </div>
+      )}
       <p className={styles.modelHint} role={pending ? 'status' : undefined}>
         {ts(pending ? 'composer.savingModel' : 'composer.modelChoiceHelp')}
       </p>

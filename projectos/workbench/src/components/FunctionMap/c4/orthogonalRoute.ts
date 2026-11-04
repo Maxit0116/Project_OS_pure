@@ -1216,7 +1216,6 @@ export function buildOrthogonalRoute(
 ): OrthogonalRouteResult {
   const clearance = input.clearance ?? DEFAULT_CLEARANCE
   const parallelIndex = input.parallelIndex ?? 0
-  const parallelCount = input.parallelCount ?? 1
   const edgeIndex = input.edgeIndex ?? parallelIndex
   const labelBox = input.labelBox ?? { width: 96, height: 22 }
   const laneGap = input.laneGap ?? laneGapForLabels(labelBox.height)
@@ -1313,15 +1312,6 @@ export function buildOrthogonalRoute(
 
   let bestPoints = candidates[0] ?? [start, end]
   let bestScore = Number.NEGATIVE_INFINITY
-  let bestPlacement = placeCenteredLabel(
-    bestPoints,
-    labelBox,
-    labelObstacles,
-    reservedLabels,
-    labelId,
-    foreignWires,
-  )
-
   for (const candidate of candidates) {
     const routeHits = polylineHitsObstacles(candidate, routeObstacles)
     const { total, placement } = scoreRoute(
@@ -1343,7 +1333,6 @@ export function buildOrthogonalRoute(
     if (adjusted > bestScore) {
       bestScore = adjusted
       bestPoints = candidate
-      bestPlacement = placement
     }
   }
 
