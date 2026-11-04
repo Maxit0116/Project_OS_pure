@@ -1825,6 +1825,20 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
       expect(plan.tasks.map((task) => task.interfaceContractIds)).toEqual([[contractId], [contractId]]);
     });
 
+    it("accepts a number or boolean as the expected value of a contract example", async () => {
+      // Observed live: `"expected": 3` for "the count is 3" failed a sound plan as an invalid shape.
+      const harness = createHierarchyBudgetHarness("plan-numeric-examples");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.every((request) => request.planRetry === undefined)).toBe(true);
+      expect(harness.root.hierarchyPlan!.contracts![0]!.acceptanceExamples).toEqual([
+        { input: "2 todo and 1 in_progress", expected: "3" },
+        { input: "no team", expected: "0" },
+        { input: "closed", expected: "false" },
+      ]);
+    });
+
     it("fits a long model rationale and objective into the plan limits instead of failing the plan", async () => {
       // Observed live: a 500+ character rationale was cut to 501 characters (500 plus an ellipsis) and
       // then rejected by the plan's own limit of 500, on the first attempt and on the retry.
@@ -2771,6 +2785,7 @@ const DEPENDENCY_PLAN_MODES: ReadonlySet<string> = new Set([
   "plan-long-text",
   "plan-unreferenced-contract",
   "plan-inherited-contract-id",
+  "plan-numeric-examples",
 ]);
 
 type HierarchyBudgetHarnessMode =
@@ -2784,7 +2799,8 @@ type HierarchyBudgetHarnessMode =
   | "plan-extra-keys"
   | "plan-long-text"
   | "plan-unreferenced-contract"
-  | "plan-inherited-contract-id";
+  | "plan-inherited-contract-id"
+  | "plan-numeric-examples";
 
 interface HierarchyBudgetNode {
   id: string;
@@ -3004,7 +3020,9 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
               behavior: "Creates one receipt for one successful payment",
               units: "receipt id is an opaque string",
               failureSemantics: "Duplicate payment ids return the original receipt",
-              acceptanceExamples: [{ input: "payment_1", expected: "receipt_1" }],
+              acceptanceExamples: mode === "plan-numeric-examples"
+                ? [{ input: "2 todo and 1 in_progress", expected: 3 }, { input: "no team", expected: 0 }, { input: "closed", expected: false }]
+                : [{ input: "payment_1", expected: "receipt_1" }],
             }],
             rationale: longText
               ? `The consumer depends on the receipt id contract produced by the API. ${"Because. ".repeat(120)}`

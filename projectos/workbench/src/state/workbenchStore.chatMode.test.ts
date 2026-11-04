@@ -116,6 +116,28 @@ describe('workbenchStore chat mode M0', () => {
     expect(useWorkbenchStore.getState().refineLoading).toBe(false)
   })
 
+  it.each([
+    ['zh', /不会再调用模型或启动新任务/u],
+    ['en', /No more model calls or tasks will start/u],
+  ] as const)('stopAgentRun says in the chat what Stop did (%s), not only in a toast that disappears', async (locale, expected) => {
+    const cancelAgentRun = vi.fn(async () => ({}))
+    useWorkbenchStore.setState({
+      locale,
+      client: { cancelAgentRun } as unknown as ProjectOSApi,
+      activeRunId: 'run_1',
+      flowStatus: 'running',
+      runDisposable: { dispose: vi.fn() },
+      refineLoading: true,
+      messages: [],
+    })
+
+    await useWorkbenchStore.getState().stopAgentRun()
+
+    const last = useWorkbenchStore.getState().messages.at(-1)
+    expect(last?.role).toBe('system')
+    expect(last?.content).toMatch(expected)
+  })
+
   it('isolate:false flips mode without creating a session', async () => {
     const createSession = vi.fn(async () => 'chat_x')
     useChatSessionStore.setState({ createSession } as never)

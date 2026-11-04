@@ -842,6 +842,7 @@ const zh = {
     modeCanEdit: '可编辑',
     stop: '停止',
     agentStopped: '已停止 Agent',
+    agentStoppedMessage: '已停止。不会再调用模型或启动新任务，尚未应用的改动不会写入你的文件。运行到一半的任务会显示为“已停止”。',
     exploredFiles: '查阅了 {count} 个文件',
     exploredFilesEmpty: '未额外查阅文件',
     retrievalHits: '引用了项目中的 {count} 处',
@@ -1243,6 +1244,7 @@ const zh = {
     runOutcome: {
       pending: '等待中',
       running: '执行中',
+      stopped: '已停止',
       awaiting_review: '待审核',
       complete: '已完成',
       blocked: '阻塞',

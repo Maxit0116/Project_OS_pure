@@ -656,6 +656,13 @@ type FileEditPlan = z.infer<typeof FileEditPlanSchema>;
 // so a model's extra keys can grant nothing. They used to reject the whole plan: live DeepSeek added a
 // stray "^" key, then (told to remove it) a "taskKeyNote" key on each task, and a correct two-task plan
 // failed twice as an "invalid plan shape". Unknown keys are dropped; missing or mistyped fields still fail.
+// A model writes `"expected": 3` for an example whose result is the number 3. It means the text "3";
+// rejecting the whole plan over it (observed live) helps nobody.
+const ExampleTextSchema = z.preprocess(
+  (value) => value === undefined || typeof value === "string" ? value : JSON.stringify(value),
+  z.string().max(2_000),
+);
+
 const ModelTaskInterfaceContractSchema = z.object({
   contractId: z.string().trim().min(1).max(120),
   producerTaskKey: z.string().trim().min(1).max(120),
@@ -667,7 +674,7 @@ const ModelTaskInterfaceContractSchema = z.object({
   behavior: z.string().trim().min(1).max(1_000),
   units: z.string().trim().min(1).max(300).optional(),
   failureSemantics: z.string().trim().min(1).max(1_000),
-  acceptanceExamples: z.array(z.object({ input: z.string().max(2_000), expected: z.string().max(2_000) })).min(1).max(8),
+  acceptanceExamples: z.array(z.object({ input: ExampleTextSchema, expected: ExampleTextSchema })).min(1).max(8),
 });
 
 const ModelDelegationTaskBaseSchema = z.object({

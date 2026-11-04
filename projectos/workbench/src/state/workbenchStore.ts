@@ -2380,6 +2380,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       message: getStoreMessage(locale, 'chat.agentStopped'),
       autoDismiss: 2500,
     })
+    // The toast disappears; the chat is where the person looks for what happened to the run.
+    if (runId) {
+      set((s) => ({
+        messages: [
+          ...s.messages,
+          {
+            id: msgId(),
+            role: 'system' as const,
+            content: getStoreMessage(locale, 'chat.agentStoppedMessage'),
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }))
+    }
     scheduleChatSessionPersist()
   },
 

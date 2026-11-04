@@ -103,9 +103,25 @@ describe("master discovery output handling", () => {
     const { gateway, seen } = gatewayReplying([JSON.stringify({ action: "dance" }), FINAL_REPLY]);
     await extractWith(gateway);
     expect(seen).toHaveLength(2);
-    expect((seen[1] as { correction: { problem: string } }).correction.problem).toBe(
-      "the JSON did not match the action schema",
+    expect((seen[1] as { correction: { problem: string } }).correction.problem).toMatch(
+      /^the JSON did not match the action schema \(action: /u,
     );
+  });
+
+  it("tells the model which part of its answer did not fit, so the retry can fix it", async () => {
+    // Observed live: the model invented a structural proposal of kind "add_relation" for a code-level
+    // dependency; the retry was told only that the JSON "did not match", and the run failed.
+    const bad = JSON.parse(FINAL_REPLY) as { intent: Record<string, unknown> };
+    bad.intent.structuralProposals = [{ kind: "add_relation", sourceNodeId: "feat_database", targetNodeId: "feat_blog" }];
+    const { gateway, seen, systemPrompts } = gatewayReplying([JSON.stringify(bad), FINAL_REPLY]);
+    const intent = await extractWith(gateway);
+    expect(intent.structuralEffects).toEqual([]);
+    const problem = (seen[1] as { correction: { problem: string } }).correction.problem;
+    expect(problem).toMatch(/structuralProposals/u);
+    expect(problem).toMatch(/add_node.*delete_node.*connect_nodes/u);
+    // And the first request already says what the kinds are and when to leave the array empty.
+    expect(systemPrompts[0]).toMatch(/not a structural change, so leave it empty/u);
+    expect(JSON.stringify((seen[0] as { outputSchema: unknown }).outputSchema)).toMatch(/connect_nodes/u);
   });
 
   it("gives up after one retry with a coded error, not a raw SyntaxError", async () => {

@@ -258,6 +258,7 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
             <DelegatedRunTree
               events={flowDelegationEvents}
               tracesByRun={delegatedRunTraces}
+              live={status === 'running'}
             />
           )}
           {unphasedActions.length > 0 && (
@@ -368,9 +369,12 @@ interface DelegatedTraceView {
 export function DelegatedRunTree({
   events,
   tracesByRun,
+  live = true,
 }: {
   events: AgentDelegationEvent[]
   tracesByRun: Record<string, DelegatedTraceView>
+  /** False once the run has ended or was stopped: a task with no outcome is then stopped, not running. */
+  live?: boolean
 }) {
   const { ts } = useI18n()
   const plan = events.find((event) => event.type === 'plan_created')?.payload.plan
@@ -410,6 +414,7 @@ export function DelegatedRunTree({
             tracesByRun={tracesByRun}
             depth={1}
             ancestorRunIds={new Set<string>()}
+            live={live}
           />
         ))}
       </div>
@@ -423,12 +428,14 @@ function DelegatedRunNode({
   tracesByRun,
   depth,
   ancestorRunIds,
+  live,
 }: {
   event: Extract<AgentDelegationEvent, { type: 'task_delegated' }>
   parentEvents: AgentDelegationEvent[]
   tracesByRun: Record<string, DelegatedTraceView>
   depth: number
   ancestorRunIds: Set<string>
+  live: boolean
 }) {
   const { ts } = useI18n()
   const runId = event.payload.childRunId
@@ -451,7 +458,7 @@ function DelegatedRunNode({
   )?.payload.plan
   const role = trace?.role ?? inferDelegatedRole(event)
   const scopeKind = trace?.scopeKind ?? inferDelegatedScope(event)
-  const status = resolveDelegatedRunStatus(parentEvents, runId)
+  const status = resolveDelegatedRunStatus(parentEvents, runId, live)
   const nextAncestors = new Set(ancestorRunIds)
   const hasCycle = nextAncestors.has(runId)
   nextAncestors.add(runId)
@@ -532,6 +539,7 @@ function DelegatedRunNode({
               tracesByRun={tracesByRun}
               depth={depth + 1}
               ancestorRunIds={nextAncestors}
+              live={live}
             />
           ))}
         </div>
@@ -543,6 +551,7 @@ function DelegatedRunNode({
 type DelegatedRunStatus =
   | 'pending'
   | 'running'
+  | 'stopped'
   | 'awaiting_review'
   | 'complete'
   | 'blocked'
@@ -554,6 +563,7 @@ type DelegatedRunStatus =
 function resolveDelegatedRunStatus(
   parentEvents: AgentDelegationEvent[],
   childRunId: string,
+  live: boolean,
 ): DelegatedRunStatus {
   const outcome = parentEvents.find(
     (candidate) => candidate.type === 'child_run_outcome' &&
@@ -565,10 +575,14 @@ function resolveDelegatedRunStatus(
       candidate.payload.childRunId === childRunId,
   )
   if (completed?.type === 'child_run_completed') return completed.payload.status
-  return parentEvents.some(
+  const started = parentEvents.some(
     (candidate) => candidate.type === 'child_run_started' &&
       candidate.payload.childRunId === childRunId,
-  ) ? 'running' : 'pending'
+  )
+  // A task that started but never reported an outcome cannot still be running once the run is not
+  // live: it was stopped. The stream is closed on Stop, so no event will ever say so.
+  if (started) return live ? 'running' : 'stopped'
+  return 'pending'
 }
 
 function isDelegationEvent(event: AgentRunEvent): event is AgentDelegationEvent {

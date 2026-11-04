@@ -17,7 +17,7 @@ import { RequestIntentService } from "./request-intent-service.js";
 
 const DISCOVERY_SYSTEM_PROMPT = `You are the master agent planning a software change from repository evidence.
 Begin with the immediate graph. You may inspect a node, list its children, read a file present in an inspected node's context, or consult a node for a focused read-only answer. Choose one action at a time and use only supplied node ids and file paths. After enough evidence, return a final intent. Ask the user only about material product choices that code and repository evidence cannot answer. Do not claim a file was read unless it appears in observations or that tests were run.
-In each touch, list under files the existing files you expect that capability's change to edit, with paths exactly as supplied. Write the human-readable text of a final intent (goal, touch reasons, assumptions, out of scope, acceptance criteria, questions) in the language of the user's request, while keeping node ids, file paths and code identifiers exactly as supplied.
+structuralProposals is only for adding a node, deleting a node, or connecting two existing nodes (kinds add_node, delete_node, connect_nodes); a code-level dependency between existing capabilities is not a structural change, so leave it empty. In each touch, list under files the existing files you expect that capability's change to edit, with paths exactly as supplied. Write the human-readable text of a final intent (goal, touch reasons, assumptions, out of scope, acceptance criteria, questions) in the language of the user's request, while keeping node ids, file paths and code identifiers exactly as supplied.
 Return exactly one JSON object matching the supplied action schema.`;
 const CONSULT_SYSTEM_PROMPT = `You are a read-only specialist answering one focused question about a software node. Use only the supplied node context, cite relevant file paths when possible, and say when evidence is insufficient. Do not propose changes, invoke tools, or claim checks were run. Return a concise plain-text answer.`;
 
@@ -73,7 +73,11 @@ const DISCOVERY_OUTPUT_SCHEMA = {
             goal: { type: "string" },
             kind: { enum: ["change", "add_node", "delete_node", "mixed"] },
             touches: { type: "array", items: { type: "object", properties: { nodeId: { type: "string" }, reason: { type: "string" }, files: { type: "array", items: { type: "string" } }, allow: { type: "object", properties: { editExisting: { type: "boolean" }, addParts: { type: "boolean" }, deletePartIds: { type: "array", items: { type: "string" } } }, required: ["editExisting", "addParts", "deletePartIds"], additionalProperties: false } }, required: ["nodeId", "reason", "allow"], additionalProperties: false } },
-            structuralProposals: { type: "array", items: { type: "object" } },
+            structuralProposals: { type: "array", items: { oneOf: [
+              { type: "object", properties: { kind: { const: "add_node" }, parentNodeId: { type: "string" }, name: { type: "string" }, level: { enum: ["context", "container", "component"] }, wiring: { type: "array", items: { type: "object", properties: { existingNodeId: { type: "string" }, direction: { enum: ["from_new", "to_new"] }, relation: { type: "string" }, label: { type: "string" }, purpose: { type: "string" } }, required: ["existingNodeId", "direction", "relation", "label"] } } }, required: ["kind", "parentNodeId", "name", "level", "wiring"] },
+              { type: "object", properties: { kind: { const: "delete_node" }, nodeId: { type: "string" } }, required: ["kind", "nodeId"] },
+              { type: "object", properties: { kind: { const: "connect_nodes" }, sourceNodeId: { type: "string" }, targetNodeId: { type: "string" } }, required: ["kind", "sourceNodeId", "targetNodeId"] },
+            ] } },
             assumptions: { type: "array", items: { type: "string" } },
             outOfScope: { type: "array", items: { type: "string" } },
             acceptance: { type: "array", items: { type: "string" } },
@@ -151,11 +155,13 @@ export class RequestIntentExtractionService {
         try {
           return DiscoveryActionSchema.parse(JSON.parse(jsonOutput));
         } catch (error) {
+          // Say which part did not fit; "did not match" alone leaves the model nothing to fix.
+          const issue = error instanceof z.ZodError ? error.issues[0] : undefined;
           correction = {
             previousReply: jsonOutput.trim().slice(0, 160),
             problem: error instanceof SyntaxError
               ? "the reply was not valid JSON"
-              : "the JSON did not match the action schema",
+              : `the JSON did not match the action schema${issue ? ` (${issue.path.join(".") || "root"}: ${issue.message})`.slice(0, 300) : ""}`,
           };
         }
       }

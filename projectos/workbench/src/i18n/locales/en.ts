@@ -842,6 +842,7 @@ const en = {
     modeCanEdit: 'Can edit',
     stop: 'Stop',
     agentStopped: 'Agent stopped',
+    agentStoppedMessage: 'Stopped. No more model calls or tasks will start, and nothing that was not applied yet is written to your files. Tasks that were running show as stopped.',
     exploredFiles: 'Consulted {count} file(s)',
     exploredFilesEmpty: 'No extra files consulted',
     retrievalHits: 'Referenced {count} place(s) in the project',
@@ -1247,6 +1248,7 @@ const en = {
     runOutcome: {
       pending: 'Pending',
       running: 'Running',
+      stopped: 'Stopped',
       awaiting_review: 'Awaiting review',
       complete: 'Complete',
       blocked: 'Blocked',
