@@ -29,16 +29,31 @@ const FINAL_REPLY = JSON.stringify({
 /** What DeepSeek replied once when asked for JSON: its own tool-call markup. */
 const DSML_REPLY = "<｜｜DSML｜｜ function_calls><｜｜DSML｜｜ invoke name=\"read_source\">";
 
-function gatewayReplying(outputs: string[]) {
+type ScriptedReply = string | { output: string; finishReason: "length" | "stop" };
+
+function gatewayReplying(outputs: ScriptedReply[]) {
   const seen: unknown[] = [];
+  const caps: Array<number | undefined> = [];
+  const systemPrompts: string[] = [];
   const gateway = {
-    complete: async (_profile: unknown, request: { input: unknown }) => {
+    complete: async (_profile: unknown, request: { input: unknown; maxOutputTokens?: number; systemPrompt?: string }) => {
       seen.push(request.input);
-      const output = outputs[Math.min(seen.length - 1, outputs.length - 1)]!;
-      return { output, usage: { inputTokens: 1, outputTokens: 1 }, requestId: "r", provider: "custom", model: "m", durationMs: 1 };
+      systemPrompts.push(request.systemPrompt ?? "");
+      caps.push(request.maxOutputTokens);
+      const scripted = outputs[Math.min(seen.length - 1, outputs.length - 1)]!;
+      const reply = typeof scripted === "string" ? { output: scripted, finishReason: "stop" as const } : scripted;
+      return {
+        output: reply.output,
+        finishReason: reply.finishReason,
+        usage: { inputTokens: 1, outputTokens: reply.finishReason === "length" ? 2048 : 1 },
+        requestId: "r",
+        provider: "custom",
+        model: "m",
+        durationMs: 1,
+      };
     },
   } as unknown as ModelGateway;
-  return { gateway, seen };
+  return { gateway, seen, caps, systemPrompts };
 }
 
 function extractWith(gateway: ModelGateway) {
@@ -99,6 +114,61 @@ describe("master discovery output handling", () => {
     expect(failure).toBeInstanceOf(ProjectOSError);
     expect((failure as ProjectOSError).code).toBe("model_output_invalid");
     expect(seen).toHaveLength(2);
+  });
+
+  it("asks for the intent card in the language the person wrote the request in", async () => {
+    // Observed live: a Chinese request produced an English goal, assumptions and acceptance list.
+    const { gateway, systemPrompts } = gatewayReplying([FINAL_REPLY]);
+    await extractWith(gateway);
+    expect(systemPrompts[0]).toMatch(/in the language of the user's request/u);
+    expect(systemPrompts[0]).toMatch(/node ids, file paths and code identifiers exactly/u);
+  });
+
+  it("states its own output budget instead of the gateway's 2048-token default", async () => {
+    const { gateway, caps } = gatewayReplying([FINAL_REPLY]);
+    await extractWith(gateway);
+    expect(caps).toEqual([8192]);
+  });
+
+  it("asks again with a larger budget when a reply is cut off, without scolding the model about its format", async () => {
+    // Observed live: DeepSeek spent its whole 2048 budget reasoning and returned nothing, then cut the
+    // final intent off mid-string on the retry. The person saw a failure after the model had read the code.
+    const cutOffFinal = { output: FINAL_REPLY.slice(0, 120), finishReason: "length" as const };
+    const { gateway, seen, caps } = gatewayReplying([cutOffFinal, FINAL_REPLY]);
+    const intent = await extractWith(gateway);
+    expect(intent.goal).toBe("Let fetchPosts take an optional limit");
+    expect(caps).toEqual([8192, 16_384]);
+    expect((seen[1] as { correction?: unknown }).correction).toBeUndefined();
+  });
+
+  it("reports a reply that is cut off even after the larger budget as exactly that", async () => {
+    const empty = { output: "", finishReason: "length" as const };
+    const { gateway, caps } = gatewayReplying([empty]);
+    const failure = await extractWith(gateway).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ProjectOSError);
+    expect((failure as ProjectOSError).code).toBe("model_output_invalid");
+    expect((failure as ProjectOSError).message).toMatch(/cut off/);
+    expect(caps).toEqual([8192, 16_384]);
+  });
+
+  it("keeps the files the model says it will edit, and derives the other owners of a shared one", async () => {
+    const reply = JSON.parse(FINAL_REPLY) as { intent: { touches: Array<Record<string, unknown>> } };
+    reply.intent.touches[0]!.files = ["lib/db.ts"];
+    const { gateway } = gatewayReplying([JSON.stringify(reply)]);
+    const intent = await extractWith(gateway);
+    expect(intent.touches.find((touch) => !touch.derived)!.files).toEqual(["lib/db.ts"]);
+    expect(intent.touches.filter((touch) => touch.derived).length).toBeGreaterThan(1);
+  });
+
+  it("drops keys the model adds to its answer instead of failing the whole intent", async () => {
+    // The same stray-key habit that failed the delegation plan twice live.
+    const reply = JSON.parse(FINAL_REPLY) as { intent: Record<string, unknown> & { touches: Array<Record<string, unknown>> } };
+    reply.intent.confidence = "high";
+    reply.intent.touches[0]!.note = "ignored";
+    const { gateway, seen } = gatewayReplying([JSON.stringify({ ...reply, thinking: "..." })]);
+    const intent = await extractWith(gateway);
+    expect(seen).toHaveLength(1);
+    expect(JSON.stringify(intent)).not.toMatch(/"confidence"|"note"|"thinking"/u);
   });
 
   it("covers every owner of the requested file in the approved capabilities", async () => {

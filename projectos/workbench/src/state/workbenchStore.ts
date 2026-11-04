@@ -895,8 +895,15 @@ async function reconcileStaleFlowStatus(
   }
 }
 
+/**
+ * The sentence a person sees for a failed request: coded errors in their language, provider
+ * failures explained, wrapper text stripped. The raw message used to reach the banner, so a Chinese
+ * UI showed "The model did not return a usable planning step after a retry".
+ */
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback
+  return error instanceof Error
+    ? userFacingErrorMessage(error, useWorkbenchStore.getState().locale)
+    : fallback
 }
 
 /** Compact, user-visible reason for structure rescan failures (IPC preserves message). */

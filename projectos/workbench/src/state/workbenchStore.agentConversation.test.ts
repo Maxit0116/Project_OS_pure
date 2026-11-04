@@ -476,6 +476,25 @@ describe('agent conversation routing', () => {
     expect(useWorkbenchStore.getState().pendingRefinement).toBeNull()
   })
 
+  it.each([
+    ['zh', /无法被 Project OS 解析/u],
+    ['en', /could not use, even after one retry/u],
+  ] as const)('shows a failed intent extraction in the person\'s language (%s), not the raw English error', async (locale, expected) => {
+    const failure = Object.assign(
+      new Error('The model did not return a usable planning step after a retry'),
+      { code: 'model_output_invalid' },
+    )
+    const extractRequestIntent = vi.fn(async () => { throw failure })
+    setReadyScope({ extractRequestIntent } as unknown as ProjectOSApi, 'change')
+    useWorkbenchStore.setState({ locale })
+
+    await useWorkbenchStore.getState().sendPrompt('Change the heading')
+
+    expect(useWorkbenchStore.getState().error).toMatch(expected)
+    expect(useWorkbenchStore.getState().error).not.toMatch(/did not return a usable planning step/u)
+    expect(useWorkbenchStore.getState().refineLoading).toBe(false)
+  })
+
   it('keeps the intent card as the only human gate before starting a Change', async () => {
     const intent = requestIntent('sample-graph-saas', 'intent-approved', 'Change the heading')
     const extractRequestIntent = vi.fn(async () => intent)

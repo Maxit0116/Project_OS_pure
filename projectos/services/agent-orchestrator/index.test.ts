@@ -25,6 +25,7 @@ import { SettingsService } from "../settings-service.js";
 import { ProjectOSLocalApi } from "../project-os-local-api.js";
 import {
   AgentOrchestrator,
+  boundUpstreamProposals,
   type AgentRunEventPersistence,
   type AutomaticLeafExecutionDependency,
   type GreenfieldInitializationDependency,
@@ -1767,6 +1768,124 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
       .toEqual([[contractId], [contractId]]);
   });
 
+  describe("a plan whose interface contract uses a kind the schema does not know", () => {
+    it("tells the planner which kinds exist, and on retry which field was wrong", async () => {
+      // Observed live: the model wrote identity.kind "function" (the prompt only showed "endpoint"),
+      // the plan was rejected as an "invalid plan shape", and the retry was told nothing more, so it
+      // repeated the mistake and the whole cross-component run failed.
+      const harness = createHierarchyBudgetHarness("contract-kind-retry");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      const [first, retry] = harness.planRequests;
+      expect(first?.systemPrompt).toMatch(/identity\.kind is exactly one of "symbol".*"endpoint".*"message"/u);
+      expect(first?.planRetry).toBeUndefined();
+      expect(retry?.planRetry).toMatchObject({ reason: "invalid_plan_shape" });
+      expect(JSON.stringify(retry?.planRetry)).toMatch(/contracts\.0\.identity\.kind/u);
+      expect(JSON.stringify(retry?.planRetry)).toMatch(/symbol.*endpoint.*message/u);
+      expect(harness.root.hierarchyPlan?.contracts).toHaveLength(1);
+      expect(harness.root.hierarchyPlan?.contracts?.[0]?.identity.kind).toBe("endpoint");
+    });
+
+    it("drops keys the plan schema does not know instead of failing a correct plan", async () => {
+      // Observed live: a stray "^" key, then "taskKeyNote" on each task, failed a sound two-task plan twice.
+      const harness = createHierarchyBudgetHarness("plan-extra-keys");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      // Nothing needed a retry: child planners ask too, but none was told its plan was invalid.
+      expect(harness.planRequests.every((request) => request.planRetry === undefined)).toBe(true);
+      expect(harness.root.hierarchyPlan?.tasks).toHaveLength(2);
+      expect(JSON.stringify(harness.root.hierarchyPlan)).not.toMatch(/taskKeyNote|stray/u);
+    });
+
+    it("gives a contract's producer and consumer the contract even when the plan did not repeat it on the tasks", async () => {
+      // Observed live: two tasks joined by a declared contract, neither listing it; the plan schema
+      // rejected "Task ... must reference contract ..." and the retry did not fix it.
+      const harness = createHierarchyBudgetHarness("plan-unreferenced-contract");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.every((request) => request.planRetry === undefined)).toBe(true);
+      const plan = harness.root.hierarchyPlan!;
+      const contractId = plan.contracts![0]!.contractId;
+      expect(plan.tasks.map((task) => task.interfaceContractIds)).toEqual([[contractId], [contractId]]);
+    });
+
+    it("ignores a contract id the plan does not define, such as one inherited from the parent plan", async () => {
+      // Observed live: a component planner copied its parent's namespaced contract id onto its tasks,
+      // and the plan failed twice. Inherited contracts reach every child anyway.
+      const harness = createHierarchyBudgetHarness("plan-inherited-contract-id");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.every((request) => request.planRetry === undefined)).toBe(true);
+      const plan = harness.root.hierarchyPlan!;
+      const contractId = plan.contracts![0]!.contractId;
+      expect(plan.tasks.map((task) => task.interfaceContractIds)).toEqual([[contractId], [contractId]]);
+    });
+
+    it("fits a long model rationale and objective into the plan limits instead of failing the plan", async () => {
+      // Observed live: a 500+ character rationale was cut to 501 characters (500 plus an ellipsis) and
+      // then rejected by the plan's own limit of 500, on the first attempt and on the retry.
+      const harness = createHierarchyBudgetHarness("plan-long-text");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.every((request) => request.planRetry === undefined)).toBe(true);
+      const plan = harness.root.hierarchyPlan!;
+      expect(plan.rationale.length).toBeLessThanOrEqual(500);
+      expect(plan.objective.length).toBeLessThanOrEqual(500);
+      expect(plan.rationale.endsWith("…")).toBe(true);
+    });
+
+    it("gives the one-layer planner more room than the gateway default, so reasoning cannot cut the plan off", async () => {
+      const harness = createHierarchyBudgetHarness("dependency-contract");
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      expect(harness.planRequests[0]?.maxOutputTokens).toBeGreaterThanOrEqual(4096);
+    });
+
+    it("still fails after the retry, and names the field in the error details", async () => {
+      const harness = createHierarchyBudgetHarness("contract-kind-always-wrong");
+
+      const failure = await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId)
+        .catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({
+        code: "agent_orchestration_failed",
+        message: expect.stringContaining("invalid plan shape"),
+        details: { failureCategory: "retry_also_invalid", problem: expect.stringContaining("identity.kind") },
+      });
+      expect(harness.planRequests).toHaveLength(2);
+    });
+  });
+
+  it("shows a consumer the files its producer proposed, before anything is applied", async () => {
+    // Observed live: the profile task only had the contract. It re-implemented the shared predicate in
+    // its own file and forced types with `as unknown as`, and the independent validator rejected it.
+    const harness = createHierarchyBudgetHarness("dependency-contract");
+
+    await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+    const consumerRequests = harness.taskContextSeen.filter((seen) => seen.path === "src/consumer/index.ts");
+    const producerRequests = harness.taskContextSeen.filter((seen) => seen.path === "src/producer/index.ts");
+    expect(consumerRequests.length).toBeGreaterThan(0);
+    expect(producerRequests.length).toBeGreaterThan(0);
+    // The producer depends on nothing; every model call for the consumer carries the producer's proposal.
+    expect(producerRequests.every((seen) => seen.upstream === undefined)).toBe(true);
+    for (const seen of consumerRequests) {
+      expect(seen.upstream).toEqual([expect.objectContaining({
+        objective: "Expose the receipt endpoint",
+        files: [expect.objectContaining({
+          path: "src/producer/index.ts",
+          changeType: "modify",
+          after: "UPDATED:src/producer/index.ts",
+        })],
+      })]);
+      expect(seen.systemPrompt).toMatch(/upstreamProposals lists files that tasks you depend on have already proposed/u);
+    }
+  });
+
   it("does not start consumers when their producer subtree fails", async () => {
     const harness = createHierarchyBudgetHarness("dependency-failed");
 
@@ -2643,12 +2762,29 @@ function createModelOrchestrator(
   return { orchestrator, workspace, requests, scopeValidationCalls };
 }
 
+const DEPENDENCY_PLAN_MODES: ReadonlySet<string> = new Set([
+  "dependency-contract",
+  "dependency-failed",
+  "contract-kind-retry",
+  "contract-kind-always-wrong",
+  "plan-extra-keys",
+  "plan-long-text",
+  "plan-unreferenced-contract",
+  "plan-inherited-contract-id",
+]);
+
 type HierarchyBudgetHarnessMode =
   | "leaf-cap"
   | "planner-cap"
   | "misleveled-child"
   | "dependency-contract"
-  | "dependency-failed";
+  | "dependency-failed"
+  | "contract-kind-retry"
+  | "contract-kind-always-wrong"
+  | "plan-extra-keys"
+  | "plan-long-text"
+  | "plan-unreferenced-contract"
+  | "plan-inherited-contract-id";
 
 interface HierarchyBudgetNode {
   id: string;
@@ -2687,7 +2823,7 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
 
   const nodes = new Map<string, HierarchyBudgetNode>();
   const contextIds: string[] = [];
-  if (mode === "dependency-contract" || mode === "dependency-failed") {
+  if (DEPENDENCY_PLAN_MODES.has(mode)) {
     for (const name of ["producer", "consumer"]) {
       const contextId = `dependency_context_${name}`;
       const containerId = `dependency_container_${name}`;
@@ -2761,6 +2897,8 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
     });
   }
 
+  const planRequests: Array<{ planRetry: unknown; systemPrompt: string; maxOutputTokens?: number }> = [];
+  const taskContextSeen: Array<{ mode: string | undefined; path: string | undefined; upstream: unknown; systemPrompt: string }> = [];
   const counters = {
     plannerChildrenCreated: 0,
     leafChildrenCreated: 0,
@@ -2787,6 +2925,13 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
         : typeof fileEditPlan?.path === "string"
           ? fileEditPlan.path
           : undefined;
+      const nodeTaskContext = isRecord(input.nodeTaskContext) ? input.nodeTaskContext : undefined;
+      taskContextSeen.push({
+        mode: requestMode,
+        path: selectedPath,
+        upstream: nodeTaskContext?.upstreamProposals,
+        systemPrompt: request.systemPrompt ?? "",
+      });
       let output: string;
 
       if (requestMode === "validate_whole_tree_batch" && Array.isArray(transactionPlan?.leaves)) {
@@ -2807,24 +2952,45 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
           rationale: "The producer and consumer use the same interface contract.",
         });
       } else if (requestMode === "plan_graph_delegation") {
-        if ((mode === "dependency-contract" || mode === "dependency-failed") &&
+        planRequests.push({
+          planRetry: input.planRetry,
+          systemPrompt: request.systemPrompt ?? "",
+          ...(request.maxOutputTokens !== undefined ? { maxOutputTokens: request.maxOutputTokens } : {}),
+        });
+        // The model's natural word for a function is "function"; the contract schema only knows
+        // symbol, endpoint and message. "contract-kind-retry" corrects itself once it is told why.
+        const contractKind = mode === "contract-kind-always-wrong" || (mode === "contract-kind-retry" && !input.planRetry)
+          ? "function"
+          : "endpoint";
+        if ((DEPENDENCY_PLAN_MODES.has(mode)) &&
           immediateTargets?.kind === "planner" && allowedIds.length === 2) {
+          const extra = mode === "plan-extra-keys";
+          const longText = mode === "plan-long-text";
+          // The contract names its producer and consumer, but the tasks do not repeat its id.
+          const contractRefs = mode === "plan-unreferenced-contract"
+            ? []
+            : mode === "plan-inherited-contract-id"
+              ? ["contract_receipt", "plan_parent:inherited_contract"]
+              : ["contract_receipt"];
           output = JSON.stringify({
-            objective: "Coordinate the receipt producer and consumer",
+            ...(extra ? { "^": "stray" } : {}),
+            objective: longText ? `Coordinate the receipt producer and consumer. ${"Detail. ".repeat(120)}` : "Coordinate the receipt producer and consumer",
             tasks: [
               {
+                ...(extra ? { taskKeyNote: "ignored" } : {}),
                 taskKey: "producer",
                 nodeId: allowedIds[0],
                 dependencyTaskKeys: [],
-                interfaceContractIds: ["contract_receipt"],
+                interfaceContractIds: contractRefs,
                 objective: "Expose the receipt endpoint",
                 acceptanceCriteria: ["The endpoint returns a receipt id"],
               },
               {
+                ...(extra ? { taskKeyNote: "ignored" } : {}),
                 taskKey: "consumer",
                 nodeId: allowedIds[1],
                 dependencyTaskKeys: ["producer"],
-                interfaceContractIds: ["contract_receipt"],
+                interfaceContractIds: contractRefs,
                 objective: "Display the receipt id",
                 acceptanceCriteria: ["The confirmation shows the endpoint receipt id"],
               },
@@ -2833,13 +2999,16 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
               contractId: "contract_receipt",
               producerTaskKey: "producer",
               consumerTaskKeys: ["consumer"],
-              identity: { kind: "endpoint", name: "POST /api/receipts" },
+              ...(extra ? { note: "ignored" } : {}),
+              identity: { kind: contractKind, name: "POST /api/receipts" },
               behavior: "Creates one receipt for one successful payment",
               units: "receipt id is an opaque string",
               failureSemantics: "Duplicate payment ids return the original receipt",
               acceptanceExamples: [{ input: "payment_1", expected: "receipt_1" }],
             }],
-            rationale: "The consumer depends on the receipt id contract produced by the API.",
+            rationale: longText
+              ? `The consumer depends on the receipt id contract produced by the API. ${"Because. ".repeat(120)}`
+              : "The consumer depends on the receipt id contract produced by the API.",
           });
         } else if (immediateTargets?.kind === "planner" && allowedIds.length > 0) {
           output = JSON.stringify({
@@ -3027,6 +3196,8 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
     workspace,
     root,
     counters,
+    planRequests,
+    taskContextSeen,
     allStates: () => [root, ...childStates],
     allEvents: () => [root, ...childStates].flatMap((state) => state.events),
   };
@@ -3316,3 +3487,40 @@ function toolContext() {
     },
   } as never;
 }
+
+describe("what a consumer is shown of its producers' proposals", () => {
+  const proposal = (taskId: string, after: string) => ({
+    taskId,
+    nodeId: `node_${taskId}`,
+    objective: `Objective of ${taskId}`,
+    files: [{ path: `src/${taskId}.ts`, changeType: "modify" as const, after }],
+  });
+
+  it("passes small proposals through untouched", () => {
+    const input = [proposal("a", "export const a = 1;")];
+    expect(boundUpstreamProposals(input)).toEqual(input);
+  });
+
+  it("cuts a very large file to its limit and says so, keeping the path and change type exact", () => {
+    const [bounded] = boundUpstreamProposals([proposal("a", "x".repeat(40_000))]);
+    const file = bounded!.files[0]!;
+    expect(file.after).toHaveLength(16_000);
+    expect(file.truncated).toBe(true);
+    expect(file).toMatchObject({ path: "src/a.ts", changeType: "modify" });
+  });
+
+  it("stops handing out content once the total budget is spent, but still names every file", () => {
+    const bounded = boundUpstreamProposals(
+      ["a", "b", "c", "d"].map((id) => proposal(id, "y".repeat(16_000))),
+    );
+    const lengths = bounded.map((item) => item.files[0]!.after?.length ?? 0);
+    expect(lengths).toEqual([16_000, 16_000, 16_000, 0]);
+    expect(bounded[3]!.files[0]).toMatchObject({ path: "src/d.ts", truncated: true });
+    expect(bounded.map((item) => item.files[0]!.path)).toEqual(["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"]);
+  });
+
+  it("leaves a deletion as just its path", () => {
+    const deletion = { taskId: "a", nodeId: "n", objective: "o", files: [{ path: "src/old.ts", changeType: "delete" as const }] };
+    expect(boundUpstreamProposals([deletion])).toEqual([deletion]);
+  });
+});

@@ -327,7 +327,7 @@ export default function ChatPanel() {
       <div className={styles.messagesShell}>
         <div className={styles.messages} ref={messagesRef}>
         {showGlobalAgentHint ? (
-          <div className={styles.suggestPlanBanner}>{ts('chat.globalAgentEmptyHint')}</div>
+          <div className={styles.suggestPlanBanner}>{ts('context.globalAgentEmptyHint')}</div>
         ) : null}
         {inheritedDigest ? <InheritedSessionCard digest={inheritedDigest} /> : null}
         <PendingRunDecisions

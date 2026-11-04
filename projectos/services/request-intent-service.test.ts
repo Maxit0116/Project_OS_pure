@@ -8,6 +8,7 @@ import {
   intentAllowsNodeDeletion,
   RequestIntentService,
   smallestPlannerNode,
+  splitFilesByApprovedIntent,
   uncoveredFileOwnerIds,
 } from "./request-intent-service.js";
 
@@ -140,6 +141,71 @@ describe("request intent routing and approval", () => {
     it("names the owners an intent leaves uncovered", () => {
       expect(uncoveredFileOwnerIds(withRequestedFile(["feat_database"]), graph, sharedFile)).toEqual(["feat_blog"]);
       expect(uncoveredFileOwnerIds(withRequestedFile(["feat_database", "feat_blog"]), graph, sharedFile)).toEqual([]);
+    });
+  });
+
+  describe("files the model says a change will edit", () => {
+    const withFiles = (nodeId: string, files: string[]): RequestIntent => {
+      const intent = draft([nodeId]);
+      return { ...intent, touches: [{ ...intent.touches[0]!, files }] };
+    };
+
+    it("adds every other owner of a shared file as a derived touch, naming the file", () => {
+      // lib/db.ts is linked by seven components. Observed live: the plan put a helper there, nobody had
+      // approved the other six, and the run could only fail or sidestep the file.
+      const normalized = new RequestIntentService().normalizeDraft(graph, withFiles("feat_database", ["lib/db.ts"]));
+      const derived = normalized.touches.filter((touch) => touch.derived);
+      expect(derived.map((touch) => touch.nodeId).sort()).toEqual([
+        "component_route_api", "feat_admin", "feat_blog", "feat_checkout", "feat_notifications", "feat_profile",
+      ]);
+      expect(derived.every((touch) => touch.reason.includes("lib/db.ts"))).toBe(true);
+      expect(derived.every((touch) => touch.allow.editExisting && !touch.allow.addParts)).toBe(true);
+      expect(intentAllowsFile(normalized, graph, "lib/db.ts", "modify")).toBe(true);
+      expect(normalized.entryNodeId).toBe("feat_database");
+    });
+
+    it("is idempotent, and leaves out paths the project does not have", () => {
+      const service = new RequestIntentService();
+      const once = service.normalizeDraft(graph, withFiles("feat_database", ["lib/db.ts", "lib/not-a-file.ts"]));
+      expect(service.normalizeDraft(graph, once).touches).toEqual(once.touches);
+      expect(once.touches.some((touch) => touch.reason.includes("not-a-file"))).toBe(false);
+    });
+
+    it("does not hand out edit rights for a file no touch could reach", () => {
+      // feat_checkout does not own lib/team.ts (feat_team does); declaring it grants nothing.
+      const normalized = new RequestIntentService().normalizeDraft(graph, withFiles("feat_checkout", ["lib/team.ts"]));
+      expect(normalized.touches.map((touch) => touch.nodeId)).toEqual(["feat_checkout"]);
+    });
+
+    it("adds each owner once, however many declared files it shares", () => {
+      const intent = draft(["feat_profile"]);
+      const both: RequestIntent = { ...intent, touches: [{ ...intent.touches[0]!, files: ["lib/db.ts", "lib/auth.ts"] }] };
+      const normalized = new RequestIntentService().normalizeDraft(graph, both);
+      const ids = normalized.touches.map((touch) => touch.nodeId);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+  });
+
+  describe("which files a planner may pick under an approved intent", () => {
+    // lib/db.ts is linked by seven components; components/ProfileForm.tsx by one (feat_profile).
+    const intent = draft(["feat_profile", "feat_team"]);
+
+    it("withholds a shared file whose other owners the intent does not cover, and names them", () => {
+      const { allowed, withheld } = splitFilesByApprovedIntent(intent, graph, [
+        "app/profile/page.tsx",
+        "components/ProfileForm.tsx",
+        "lib/db.ts",
+      ]);
+      expect(allowed).toEqual(["app/profile/page.tsx", "components/ProfileForm.tsx"]);
+      expect(withheld).toHaveLength(1);
+      expect(withheld[0]!.path).toBe("lib/db.ts");
+      expect(withheld[0]!.uncoveredOwnerIds).toEqual(expect.arrayContaining(["feat_database", "feat_blog", "feat_admin"]));
+      expect(withheld[0]!.uncoveredOwnerIds).not.toContain("feat_profile");
+    });
+
+    it("allows the shared file once the intent covers every owner of it", () => {
+      const everyOwner = draft(["feat_profile", "feat_database", "feat_blog", "feat_admin", "feat_checkout", "feat_notifications", "component_route_api"]);
+      expect(splitFilesByApprovedIntent(everyOwner, graph, ["lib/db.ts"]).allowed).toEqual(["lib/db.ts"]);
     });
   });
 

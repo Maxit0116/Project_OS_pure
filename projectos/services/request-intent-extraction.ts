@@ -10,13 +10,14 @@ import {
 } from "../contracts/request-intent.js";
 import type { GlobalContextBundle, NodeContextBundle } from "../contracts/local-context.js";
 import { computeProjectGraphHash } from "./graph-change-set-engine.js";
-import { resolveModelStructuredOutput } from "./model-json-output.js";
+import { isTruncatedModelOutput, resolveModelStructuredOutput } from "./model-json-output.js";
 import type { ModelGateway } from "./model-gateway/index.js";
 import type { ModelExecutionSnapshot } from "./harness/executor-selection.js";
 import { RequestIntentService } from "./request-intent-service.js";
 
 const DISCOVERY_SYSTEM_PROMPT = `You are the master agent planning a software change from repository evidence.
 Begin with the immediate graph. You may inspect a node, list its children, read a file present in an inspected node's context, or consult a node for a focused read-only answer. Choose one action at a time and use only supplied node ids and file paths. After enough evidence, return a final intent. Ask the user only about material product choices that code and repository evidence cannot answer. Do not claim a file was read unless it appears in observations or that tests were run.
+In each touch, list under files the existing files you expect that capability's change to edit, with paths exactly as supplied. Write the human-readable text of a final intent (goal, touch reasons, assumptions, out of scope, acceptance criteria, questions) in the language of the user's request, while keeping node ids, file paths and code identifiers exactly as supplied.
 Return exactly one JSON object matching the supplied action schema.`;
 const CONSULT_SYSTEM_PROMPT = `You are a read-only specialist answering one focused question about a software node. Use only the supplied node context, cite relevant file paths when possible, and say when evidence is insufficient. Do not propose changes, invoke tools, or claim checks were run. Return a concise plain-text answer.`;
 
@@ -25,30 +26,37 @@ const DiscoveryActionSchema = z.discriminatedUnion("action", [
     action: z.literal("inspect_node"),
     nodeId: z.string().min(1),
     reason: z.string().trim().min(1),
-  }).strict(),
+  }),
   z.object({
     action: z.literal("list_children"),
     nodeId: z.string().min(1),
     reason: z.string().trim().min(1),
-  }).strict(),
+  }),
   z.object({
     action: z.literal("read_source"),
     nodeId: z.string().min(1),
     path: z.string().min(1),
     question: z.string().trim().min(1),
-  }).strict(),
+  }),
   z.object({
     action: z.literal("consult_node"),
     nodeId: z.string().min(1),
     question: z.string().trim().min(1),
-  }).strict(),
+  }),
   z.object({
     action: z.literal("final"),
     intent: RequestIntentDraftSchema,
-  }).strict(),
+  }),
 ]);
 
 const MAX_DISCOVERY_ACTIONS = 24;
+// The gateway's own default is 2048 output tokens. A reasoning model spends most of that thinking
+// and the JSON step (the final intent above all) is cut off, so discovery states its own budget and
+// asks once more with a larger one when a reply is cut off.
+const DISCOVERY_STEP_MAX_OUTPUT_TOKENS = 8192;
+const DISCOVERY_STEP_RETRY_MAX_OUTPUT_TOKENS = 16_384;
+const CONSULTATION_MAX_OUTPUT_TOKENS = 4096;
+const CONSULTATION_RETRY_MAX_OUTPUT_TOKENS = 8192;
 const DISCOVERY_OUTPUT_SCHEMA = {
   oneOf: [
     { type: "object", properties: { action: { const: "inspect_node" }, nodeId: { type: "string" }, reason: { type: "string" } }, required: ["action", "nodeId", "reason"], additionalProperties: false },
@@ -64,7 +72,7 @@ const DISCOVERY_OUTPUT_SCHEMA = {
           properties: {
             goal: { type: "string" },
             kind: { enum: ["change", "add_node", "delete_node", "mixed"] },
-            touches: { type: "array", items: { type: "object", properties: { nodeId: { type: "string" }, reason: { type: "string" }, allow: { type: "object", properties: { editExisting: { type: "boolean" }, addParts: { type: "boolean" }, deletePartIds: { type: "array", items: { type: "string" } } }, required: ["editExisting", "addParts", "deletePartIds"], additionalProperties: false } }, required: ["nodeId", "reason", "allow"], additionalProperties: false } },
+            touches: { type: "array", items: { type: "object", properties: { nodeId: { type: "string" }, reason: { type: "string" }, files: { type: "array", items: { type: "string" } }, allow: { type: "object", properties: { editExisting: { type: "boolean" }, addParts: { type: "boolean" }, deletePartIds: { type: "array", items: { type: "string" } } }, required: ["editExisting", "addParts", "deletePartIds"], additionalProperties: false } }, required: ["nodeId", "reason", "allow"], additionalProperties: false } },
             structuralProposals: { type: "array", items: { type: "object" } },
             assumptions: { type: "array", items: { type: "string" } },
             outOfScope: { type: "array", items: { type: "string" } },
@@ -104,7 +112,7 @@ export class RequestIntentExtractionService {
       executorSelection: request.executorSelection,
       outputSchema: DISCOVERY_OUTPUT_SCHEMA,
     };
-    const complete = (value: unknown, systemPrompt = DISCOVERY_SYSTEM_PROMPT) => this.gateway.complete(execution.profile, {
+    const complete = (value: unknown, systemPrompt: string, maxOutputTokens: number) => this.gateway.complete(execution.profile, {
       projectId: request.projectId,
       requestKind: "request_intent",
       modelPreference: execution.profile.id,
@@ -112,12 +120,15 @@ export class RequestIntentExtractionService {
       input: value,
       thinkingDepth: execution.thinkingDepth,
       redactionPolicy: "secrets_and_paths",
+      maxOutputTokens,
     });
     // Some providers occasionally answer a JSON-only request with something else (for example their
     // own tool-call markup). One corrective retry recovers that; a second miss is reported as such.
     const parseAction = async (value: unknown) => {
       let correction: { previousReply: string; problem: string } | undefined;
+      let cutOff = false;
       for (let attempt = 0; attempt < 2; attempt += 1) {
+        const maxOutputTokens = attempt === 0 ? DISCOVERY_STEP_MAX_OUTPUT_TOKENS : DISCOVERY_STEP_RETRY_MAX_OUTPUT_TOKENS;
         const response = await complete(correction
           ? {
               ...(value as Record<string, unknown>),
@@ -127,7 +138,13 @@ export class RequestIntentExtractionService {
                 instruction: "Reply again with exactly one JSON object matching the action schema. No tool-call markup, no prose, no code fences.",
               },
             }
-          : value);
+          : value, DISCOVERY_SYSTEM_PROMPT, maxOutputTokens);
+        if (isTruncatedModelOutput(response, maxOutputTokens)) {
+          // The reply ran out of room (usually the model's own reasoning used it). Nothing in it is
+          // worth correcting; ask again with a larger budget.
+          cutOff = true;
+          continue;
+        }
         const jsonOutput = resolveModelStructuredOutput(response.output, response.reasoning)
           .replace(/^```(?:json)?\s*/iu, "")
           .replace(/\s*```$/u, "");
@@ -144,7 +161,9 @@ export class RequestIntentExtractionService {
       }
       throw new ProjectOSError(
         "model_output_invalid",
-        "The model did not return a usable planning step after a retry",
+        cutOff
+          ? "The model's planning step was cut off at its output limit, even after a retry with a larger one"
+          : "The model did not return a usable planning step after a retry",
       );
     };
     const inspectNode = input.inspectNode;
@@ -220,17 +239,24 @@ export class RequestIntentExtractionService {
           observations.push({ action: action.action, nodeId: action.nodeId, path: action.path, sha256: file.sha256, question: action.question, source: file.content });
         }
       } else {
-        const response = await complete({
+        const consultation = {
           kind: "read_only_node_consultation",
           project: { name: globalContext.projectName, description: globalContext.conciseDescription },
           nodeContext: context,
           question: action.question,
-        }, CONSULT_SYSTEM_PROMPT);
+        };
+        let response = await complete(consultation, CONSULT_SYSTEM_PROMPT, CONSULTATION_MAX_OUTPUT_TOKENS);
+        if (isTruncatedModelOutput(response, CONSULTATION_MAX_OUTPUT_TOKENS)) {
+          response = await complete(consultation, CONSULT_SYSTEM_PROMPT, CONSULTATION_RETRY_MAX_OUTPUT_TOKENS);
+        }
         observations.push({
           action: action.action,
           nodeId: action.nodeId,
           question: action.question,
           answer: resolveModelStructuredOutput(response.output, response.reasoning).slice(0, 6000),
+          ...(isTruncatedModelOutput(response, CONSULTATION_RETRY_MAX_OUTPUT_TOKENS)
+            ? { note: "This answer was cut off at the model's output limit; treat it as incomplete." }
+            : {}),
         });
       }
       actionCount += 1;

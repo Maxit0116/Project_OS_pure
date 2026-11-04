@@ -135,6 +135,8 @@ import {
 } from "../agent-activity-evidence.js";
 import { createProviderReasoningTrace } from "../reasoning-trace.js";
 import { computeProjectGraphHash } from "../graph-change-set-engine.js";
+import type { ProjectGraph } from "../../contracts/graph.js";
+import { splitFilesByApprovedIntent } from "../request-intent-service.js";
 import {
   CREATE_FILE_MAX_BYTES,
   validateCreateFileContent,
@@ -156,6 +158,29 @@ import {
 } from "../harness/audit.js";
 import { loadInstructionMaterials, selectedFilePathFromBundle } from "../harness/walk-instructions.js";
 import { buildTaskAppendix } from "../context-task-appendix.js";
+
+/**
+ * What a task this run depends on has already proposed. The change is not applied yet, but it will be
+ * applied together with this run's own, so the consumer has to build against it (its new names,
+ * signatures and payloads) rather than against the old files on disk.
+ */
+export interface UpstreamProposal {
+  taskId: string;
+  nodeId: string;
+  objective: string;
+  files: Array<{
+    path: string;
+    changeType: "create" | "modify" | "delete";
+    /** The proposed full content of a created or modified file. */
+    after?: string;
+    patch?: string;
+    /** The content was cut to fit the model's context; the path and change type are still exact. */
+    truncated?: true;
+  }>;
+}
+
+const UPSTREAM_FILE_CHAR_LIMIT = 16_000;
+const UPSTREAM_TOTAL_CHAR_LIMIT = 48_000;
 
 export interface OrchestratorRunState {
   run: AgentRun;
@@ -204,6 +229,8 @@ export interface OrchestratorRunState {
   contextAssembly?: ContextAssembly;
   approvedIntent?: RequestIntent;
   interfaceContracts?: ExecutorInterfaceContract[];
+  /** Proposals from the tasks this run depends on, and from those its parent depends on. */
+  upstreamProposals?: UpstreamProposal[];
   /**
    * Set when this run is dispatched through a registered `NodeExecutorAdapter`
    * instead of Project OS's built-in model loop. Children inherit it.
@@ -625,6 +652,10 @@ const FileEditPlanSchema = z.object({
 
 type FileEditPlan = z.infer<typeof FileEditPlanSchema>;
 
+// The server reads only the fields named below and derives everything that carries authority itself,
+// so a model's extra keys can grant nothing. They used to reject the whole plan: live DeepSeek added a
+// stray "^" key, then (told to remove it) a "taskKeyNote" key on each task, and a correct two-task plan
+// failed twice as an "invalid plan shape". Unknown keys are dropped; missing or mistyped fields still fail.
 const ModelTaskInterfaceContractSchema = z.object({
   contractId: z.string().trim().min(1).max(120),
   producerTaskKey: z.string().trim().min(1).max(120),
@@ -632,12 +663,12 @@ const ModelTaskInterfaceContractSchema = z.object({
   identity: z.object({
     kind: z.enum(["symbol", "endpoint", "message"]),
     name: z.string().trim().min(1).max(240),
-  }).strict(),
+  }),
   behavior: z.string().trim().min(1).max(1_000),
   units: z.string().trim().min(1).max(300).optional(),
   failureSemantics: z.string().trim().min(1).max(1_000),
-  acceptanceExamples: z.array(z.object({ input: z.string().max(2_000), expected: z.string().max(2_000) }).strict()).min(1).max(8),
-}).strict();
+  acceptanceExamples: z.array(z.object({ input: z.string().max(2_000), expected: z.string().max(2_000) })).min(1).max(8),
+});
 
 const ModelDelegationTaskBaseSchema = z.object({
   path: z.string().min(1),
@@ -645,7 +676,7 @@ const ModelDelegationTaskBaseSchema = z.object({
   responsibility: z.string().trim().min(1).max(500).optional(),
   objective: z.string().trim().min(1).max(2_000),
   acceptanceCriteria: z.array(z.string().trim().min(1).max(500)).min(1).max(12),
-}).strict();
+});
 
 function refineModelDelegationTask(
   task: z.infer<typeof ModelDelegationTaskBaseSchema>,
@@ -673,7 +704,7 @@ const ModelDelegationPlanSchema = z.object({
   objective: z.string().trim().min(1).max(2_000),
   tasks: z.array(ModelDelegationTaskSchema).min(1).max(8),
   rationale: z.string().trim().min(1).max(2_000),
-}).strict();
+});
 
 type ModelDelegationPlan = z.infer<typeof ModelDelegationPlanSchema>;
 
@@ -686,7 +717,7 @@ const ModelHierarchyLeafPlanSchema = z.object({
   }).superRefine(refineModelDelegationTask)).min(1).max(8),
   contracts: z.array(ModelTaskInterfaceContractSchema).default([]),
   rationale: z.string().trim().min(1).max(2_000),
-}).strict();
+});
 
 const ModelHierarchyPlannerPlanSchema = z.object({
   objective: z.string().trim().min(1).max(2_000),
@@ -697,10 +728,10 @@ const ModelHierarchyPlannerPlanSchema = z.object({
     interfaceContractIds: z.array(z.string().trim().min(1).max(120)).default([]),
     objective: z.string().trim().min(1).max(2_000),
     acceptanceCriteria: z.array(z.string().trim().min(1).max(500)).min(1).max(12),
-  }).strict()).min(1).max(8),
+  })).min(1).max(8),
   contracts: z.array(ModelTaskInterfaceContractSchema).default([]),
   rationale: z.string().trim().min(1).max(2_000),
-}).strict();
+});
 
 
 const ModelBatchValidationSchema = z.object({
@@ -743,7 +774,8 @@ type DelegationPlanFailureCategory =
   | "response_truncated";
 
 class DelegationPlanError extends Error {
-  constructor(readonly category: DelegationPlanFailureCategory) {
+  /** `detail` says which part of the plan was wrong, so the retry can be told instead of guessing. */
+  constructor(readonly category: DelegationPlanFailureCategory, readonly detail?: string) {
     super(category);
     this.name = "DelegationPlanError";
   }
@@ -2667,6 +2699,21 @@ export class AgentOrchestrator {
       );
       try {
         this.assertRunActive(state);
+        const task = plan.tasks.find((candidate) => candidate.taskId === child.taskId);
+        const upstream = boundUpstreamProposals([
+          ...(state.upstreamProposals ?? []),
+          ...(task?.dependencyTaskIds ?? []).flatMap((dependencyId) => {
+            const producer = childrenByTaskId.get(dependencyId);
+            const producerTask = plan.tasks.find((candidate) => candidate.taskId === dependencyId);
+            if (!producer || !producerTask) return [];
+            const files = this.collectProposedFiles(producer.runId);
+            return files.length > 0
+              ? [{ taskId: dependencyId, nodeId: producerTask.nodeId, objective: producerTask.objective, files }]
+              : [];
+          }),
+        ]);
+        const startingChild = this.runs.get(child.runId);
+        if (startingChild && upstream.length > 0) startingChild.upstreamProposals = upstream;
         await this.startRun(workspace, child.runId);
         this.assertRunActive(state);
         const childState = this.runs.get(child.runId);
@@ -3041,8 +3088,9 @@ export class AgentOrchestrator {
         "A model profile and planner scope are required for recursive delegation",
       );
     }
-    const target = hierarchyPlanTarget(state);
+    const target = restrictLeafCandidatesToApprovedIntent(hierarchyPlanTarget(state), state, workspace.graph);
     let firstFailure: DelegationPlanFailureCategory | undefined;
+    let firstFailureDetail: string | undefined;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const retrying = attempt === 1;
       const response = await this.completeWithTrace(
@@ -3070,15 +3118,18 @@ export class AgentOrchestrator {
               ? {
                   planRetry: {
                     reason: firstFailure ?? "invalid_plan_shape",
-                    instruction: "Return only the required JSON object. Do not repeat the rejected response.",
+                    ...(firstFailureDetail ? { problem: firstFailureDetail } : {}),
+                    instruction: "Return only the required JSON object, with the problem above corrected. Do not repeat the rejected response.",
                   },
                 }
               : {}),
           },
           redactionPolicy: "secrets_and_paths",
+          // A reasoning model spends part of this on its own thinking; 2048 cut off plans that were
+          // otherwise fine, so the one-layer planner gets the room its reply needs.
           maxOutputTokens: target.allowedIds.length === 0
             ? retrying && firstFailure === "response_truncated" ? 12_288 : 8_192
-            : retrying && firstFailure === "response_truncated" ? 4_096 : 2_048,
+            : retrying && firstFailure === "response_truncated" ? 8_192 : 4_096,
           thinkingDepth: state.thinkingDepth,
         },
         phaseId,
@@ -3215,11 +3266,16 @@ export class AgentOrchestrator {
           new Set(identifiers).size !== identifiers.length ||
           identifiers.some((identifier) => !target.allowedIds.includes(identifier!))
         ) {
-          throw new DelegationPlanError("invalid_plan_shape");
+          throw new DelegationPlanError(
+            "invalid_plan_shape",
+            target.kind === "leaf-file"
+              ? "every task needs one distinct path from the candidate files"
+              : "every task needs one distinct nodeId from the allowed child list",
+          );
         }
         const taskKeys = proposed.tasks.map((task, index) => task.taskKey ?? `task_key_${index + 1}`);
         if (new Set(taskKeys).size !== taskKeys.length) {
-          throw new DelegationPlanError("invalid_plan_shape");
+          throw new DelegationPlanError("invalid_plan_shape", "taskKey values must be distinct");
         }
         const planId = `plan_${crypto.randomUUID()}`;
         const taskIdByKey = new Map(taskKeys.map((key, index) => [key, `${planId}:task_${index + 1}`]));
@@ -3229,7 +3285,9 @@ export class AgentOrchestrator {
         ]));
         const resolveTaskId = (key: string): string => {
           const taskId = taskIdByKey.get(key);
-          if (!taskId) throw new DelegationPlanError("invalid_plan_shape");
+          if (!taskId) {
+            throw new DelegationPlanError("invalid_plan_shape", `'${key.slice(0, 60)}' is used as a taskKey reference but no task has that taskKey`);
+          }
           return taskId;
         };
         const contracts = proposed.contracts.map((contract) => ({
@@ -3253,11 +3311,24 @@ export class AgentOrchestrator {
             acceptanceCriteria: task.acceptanceCriteria.map((criterion) =>
               sanitizeValidationNarrative(criterion, 300, "Requested change is present")
             ),
-            interfaceContractIds: task.interfaceContractIds.map((contractId) => {
-              const namespacedId = contractIdByKey.get(contractId);
-              if (!namespacedId) throw new DelegationPlanError("invalid_plan_shape");
-              return namespacedId;
-            }),
+            // A contract already names its producer and consumers, so a participant that forgot to
+            // repeat the contract id on its own task is given it. (Live DeepSeek did exactly that and
+            // a sound plan failed twice.) A task that lists a contract it does not take part in is
+            // still rejected below by the plan schema, with the reason.
+            interfaceContractIds: [...new Set([
+              // An id this plan does not define is a contract inherited from the parent plan (the model
+              // copies the parent's id onto its tasks) or a slip. Inherited contracts already reach every
+              // child through the host, so it is left out rather than failing the plan.
+              ...task.interfaceContractIds.flatMap((contractId) => {
+                const namespacedId = contractIdByKey.get(contractId);
+                return namespacedId ? [namespacedId] : [];
+              }),
+              ...contracts
+                .filter((contract) =>
+                  contract.producerTaskId === taskIdByKey.get(taskKeys[index]!) ||
+                  contract.consumerTaskIds.includes(taskIdByKey.get(taskKeys[index]!)!))
+                .map((contract) => contract.contractId),
+            ])],
           };
           if (target.kind === "leaf-file") {
             if (scope.kind !== "component" || !task.path) {
@@ -3302,14 +3373,26 @@ export class AgentOrchestrator {
         const failure = error instanceof DelegationPlanError
           ? error.category
           : "invalid_plan_shape";
+        const detail = error instanceof DelegationPlanError
+          ? error.detail
+          : error instanceof z.ZodError
+            ? `${error.issues[0]?.path.join(".") || "(plan)"}: ${error.issues[0]?.message ?? "invalid"}`.slice(0, 300)
+            : undefined;
         if (!retrying) {
           firstFailure = failure;
+          firstFailureDetail = detail;
           continue;
         }
         throw new ProjectOSError(
           "agent_orchestration_failed",
           `Graph delegation planning failed (${safeDelegationFailureLabel(failure)})`,
-          { details: { failureCategory: "retry_also_invalid", lastFailureCategory: failure } },
+          {
+            details: {
+              failureCategory: "retry_also_invalid",
+              lastFailureCategory: failure,
+              ...(detail ? { problem: detail } : {}),
+            },
+          },
         );
       }
     }
@@ -4099,6 +4182,23 @@ export class AgentOrchestrator {
       filesApplied: state.applyResult.filesChanged.length,
       verificationStatus,
     }));
+  }
+
+  /** Every file a finished subtree proposes, found through the leaves under it. */
+  private collectProposedFiles(runId: string, seen = new Set<string>()): UpstreamProposal["files"] {
+    if (seen.has(runId)) return [];
+    seen.add(runId);
+    const state = this.runs.get(runId);
+    if (!state) return [];
+    if (state.run.scope?.kind === "leaf-file") {
+      return (state.diff?.files ?? []).map((file) => ({
+        path: file.path,
+        changeType: file.changeType,
+        ...(file.after !== undefined ? { after: file.after } : {}),
+        ...(file.patch !== undefined && file.after === undefined ? { patch: file.patch } : {}),
+      }));
+    }
+    return (state.delegatedHierarchyChildren ?? []).flatMap((child) => this.collectProposedFiles(child.runId, seen));
   }
 
   private buildWholeTreeTransactionPlan(
@@ -7611,14 +7711,20 @@ export class AgentOrchestrator {
       const inputRecord = request.input && typeof request.input === "object" && !Array.isArray(request.input)
         ? request.input as Record<string, unknown>
         : { taskInput: request.input };
-      const includeTaskContext = Boolean(state.interfaceContracts?.length);
+      const upstreamProposals = state.upstreamProposals ?? [];
+      const includeTaskContext = Boolean(state.interfaceContracts?.length) || upstreamProposals.length > 0;
       const modelRequest: ModelGatewayRequest = intent || includeTaskContext
         ? {
             ...request,
-            ...(intent ? {
+            ...(intent || upstreamProposals.length > 0 ? {
               systemPrompt: [
                 request.systemPrompt,
-                "Follow approvedIntentContext as the user's approved product scope. Preserve all recorded answers. Do not expand its effects.",
+                intent
+                  ? "Follow approvedIntentContext as the user's approved product scope. Preserve all recorded answers. Do not expand its effects."
+                  : undefined,
+                upstreamProposals.length > 0
+                  ? "nodeTaskContext.upstreamProposals lists files that tasks you depend on have already proposed. They are not applied to disk yet but will be applied together with your change: build against the names, signatures and payloads they define, import from those files instead of re-implementing them, and never edit those files yourself."
+                  : undefined,
               ].filter(Boolean).join("\n\n"),
             } : {}),
             input: {
@@ -7654,6 +7760,7 @@ export class AgentOrchestrator {
                 nodeTaskContext: {
                   taskId: state.run.runId,
                   interfaceContracts: state.interfaceContracts,
+                  ...(upstreamProposals.length > 0 ? { upstreamProposals } : {}),
                 },
               } : {}),
             },
@@ -8341,7 +8448,29 @@ function sanitizePlanText(
     .replace(/[\r\n]+/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
-  return truncate(sanitized || fallback, maxLength);
+  const text = sanitized || fallback;
+  // The result has to fit the schema limit it is checked against, ellipsis included: `truncate`
+  // returns max + 1 characters, so a long model rationale was cut to 501 and then rejected by a
+  // limit of 500, failing the whole plan on both attempts.
+  return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…` : text;
+}
+
+/** Keep what a consumer is shown within the model's context, saying so when content is cut. */
+export function boundUpstreamProposals(proposals: UpstreamProposal[]): UpstreamProposal[] {
+  let remaining = UPSTREAM_TOTAL_CHAR_LIMIT;
+  return proposals.map((proposal) => ({
+    ...proposal,
+    files: proposal.files.map((file) => {
+      const content = file.after ?? file.patch;
+      if (content === undefined) return file;
+      const allowed = Math.max(0, Math.min(UPSTREAM_FILE_CHAR_LIMIT, remaining));
+      const kept = content.slice(0, allowed);
+      remaining -= kept.length;
+      if (kept.length === content.length) return file;
+      const { after: _after, patch: _patch, ...rest } = file;
+      return { ...rest, ...(file.after !== undefined ? { after: kept } : { patch: kept }), truncated: true as const };
+    }),
+  }));
 }
 
 function stableUniqueCriteria(criteria: string[]): string[] {
@@ -8396,6 +8525,28 @@ function hierarchyPlannerScopeDepth(kind: HierarchyPlannerScope["kind"]): number
     case "component":
       return 3;
   }
+}
+
+/**
+ * A planner may only pick files the approved request lets it modify. A file shared with capabilities
+ * the person did not approve would be refused at the publication boundary after all the work was
+ * done; it stays readable context but is not offered as something to edit.
+ */
+function restrictLeafCandidatesToApprovedIntent(
+  target: HierarchyPlanTarget,
+  state: OrchestratorRunState,
+  graph: ProjectGraph,
+): HierarchyPlanTarget {
+  const intent = state.approvedIntent;
+  if (!intent || target.kind !== "leaf-file" || target.allowedIds.length === 0) return target;
+  const { allowed, withheld } = splitFilesByApprovedIntent(intent, graph, target.allowedIds);
+  if (allowed.length === 0) {
+    throw new ProjectOSError(
+      "agent_orchestration_failed",
+      `None of this component's files can be changed under the approved request: ${withheld.map((file) => file.path).slice(0, 5).join(", ")} are shared with capabilities the request does not cover`,
+    );
+  }
+  return { ...target, allowedIds: allowed };
 }
 
 function hierarchyPlanTarget(state: OrchestratorRunState): HierarchyPlanTarget {
@@ -8508,7 +8659,7 @@ function hierarchyDelegationSystemPrompt(
     : target.kind === "leaf-file"
     ? `Delegate only to required files from this server-supplied list: ${JSON.stringify(target.allowedIds)}. Return {"objective":"...","tasks":[{"taskKey":"api","path":"candidate/path","dependencyTaskKeys":[],"interfaceContractIds":[],"objective":"...","acceptanceCriteria":["..."]}],"contracts":[],"rationale":"..."}.`
     : `Delegate only to immediate ${target.level} graph children from this server-supplied list: ${JSON.stringify(target.allowedIds)}. Return {"objective":"...","tasks":[{"taskKey":"billing","nodeId":"candidate-node","dependencyTaskKeys":[],"interfaceContractIds":[],"objective":"...","acceptanceCriteria":["..."]}],"contracts":[],"rationale":"..."}.`;
-  const contractInstruction = `Use taskKey values only to refer to tasks in this plan. A dependent task names its prerequisites in dependencyTaskKeys; dependencies must be acyclic. When tasks exchange a boundary, define one contracts entry such as {"contractId":"receipt_api","producerTaskKey":"api","consumerTaskKeys":["billing_ui"],"identity":{"kind":"endpoint","name":"POST /api/receipts"},"behavior":"Creates one receipt for one successful payment","units":"receipt id is an opaque string","failureSemantics":"Duplicate payment ids return the original receipt","acceptanceExamples":[{"input":"payment_1","expected":"receipt_1"}]}. Reference that contractId from every producer and consumer task. Pass the same contract to both sides. Do not invent a contract when tasks are independent.`;
+  const contractInstruction = `Use taskKey values only to refer to tasks in this plan. A dependent task names its prerequisites in dependencyTaskKeys; dependencies must be acyclic. When tasks exchange a boundary, define one contracts entry such as {"contractId":"receipt_api","producerTaskKey":"api","consumerTaskKeys":["billing_ui"],"identity":{"kind":"endpoint","name":"POST /api/receipts"},"behavior":"Creates one receipt for one successful payment","units":"receipt id is an opaque string","failureSemantics":"Duplicate payment ids return the original receipt","acceptanceExamples":[{"input":"payment_1","expected":"receipt_1"}]}. identity.kind is exactly one of "symbol" (an exported function, class, type or constant), "endpoint" (an HTTP route) or "message" (an event or queued message); name is the identifier a consumer will use. Reference that contractId from every producer and consumer task. Pass the same contract to both sides. Do not invent a contract when tasks are independent.`;
   const scaffoldInstruction = greenfield || scope.kind === "component"
     ? ""
     : `For an explicitly requested NEW immediate child node, return instead {"operation":"add_node","node":{"name":"...","summary":"...","responsibility":"..."},"wiring":[{"direction":"from_new|to_new","existingNodeId":"server-listed existing node id","relation":"uses|depends_on|calls|data_flows_to|...","label":"...","purpose":"..."}],"files":[{"path":"existing-directory/new-file.ext","responsibility":"...","objective":"...","acceptanceCriteria":["..."]}],"rationale":"..."}. The server chooses the durable node and edge ids. Files are permitted only when the new child is a component, and each parent directory must already exist within the parent graph scope. A node with no files requires at least one wiring edge.`;
@@ -8600,6 +8751,7 @@ function parseHierarchyDelegationPlan(
   targetKind: HierarchyPlanTarget["kind"],
 ): ParsedHierarchyPlan {
   let parsedJson = false;
+  let detail: string | undefined;
   for (const candidate of extractJsonObjectCandidates(output)) {
     let parsed: unknown;
     try {
@@ -8617,9 +8769,14 @@ function parseHierarchyDelegationPlan(
         !("tasks" in result.data) ||
         result.data.tasks.every((task) => !("operation" in task) || !task.operation))
     ) return result.data;
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      if (issue) detail = `${issue.path.join(".") || "(plan)"}: ${issue.message}`.slice(0, 300);
+    }
   }
   throw new DelegationPlanError(
     parsedJson ? "invalid_plan_shape" : "malformed_json",
+    detail,
   );
 }
 

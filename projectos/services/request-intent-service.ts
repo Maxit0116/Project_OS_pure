@@ -105,27 +105,58 @@ export function uncoveredFileOwnerIds(
 }
 
 /**
- * The file a person asked to change may be linked by several components. Publishing it changes all
- * of them, and the approval boundary requires every owner to be covered, so the draft states the
- * co-owners itself instead of leaving the approver to learn about them from a failure after the run.
- * Only runs once the draft already allows editing at least one owner of the requested file.
+ * A file the change edits may be linked by several components. Publishing it changes all of them, and
+ * the approval boundary requires every owner to be covered, so the draft states the co-owners itself
+ * instead of leaving the approver to learn about them from a failure after the run. The files are the
+ * one the person asked for and those the model declared while reading the code. A file none of the
+ * touches allows editing is left alone: nothing in the intent grants access to it, so a derived
+ * touch would hand out edit rights nobody asked for.
  */
 function sharedFileOwnerTouches(graph: ProjectGraph, intent: RequestIntent): RequestIntent["touches"] {
-  const requested = intent.requestedFile?.path;
-  if (!requested) return [];
-  const owners = fileOwners(graph, requested);
-  const covered = owners.filter((owner) => allowsEditingOwner(intent, owner));
-  if (covered.length === 0) return [];
+  const indexed = new Set(graph.fileIndex.map((entry) => entry.path));
+  for (const node of graph.nodes) for (const file of node.linkedFiles) indexed.add(file.path);
+  const declared = [...new Set([
+    ...(intent.requestedFile ? [intent.requestedFile.path] : []),
+    ...intent.touches.flatMap((touch) => touch.files ?? []),
+  ])].filter((path) => indexed.has(path));
   const names = new Map(graph.nodes.map((node) => [node.id, node.name]));
-  const coveredNames = covered.map((owner) => names.get(owner.id) ?? owner.id).join(", ");
-  return owners
-    .filter((owner) => !allowsEditingOwner(intent, owner))
-    .map((owner) => ({
-      nodeId: owner.id,
-      reason: `Shares ${requested} with ${coveredNames}; changing the file also changes this capability.`,
-      allow: { editExisting: true, addParts: false, deletePartIds: [] },
-      derived: true as const,
-    }));
+  const derived = new Map<string, { files: string[]; coveredNames: Set<string> }>();
+  for (const path of declared) {
+    const owners = fileOwners(graph, path);
+    const covered = owners.filter((owner) => allowsEditingOwner(intent, owner));
+    if (covered.length === 0) continue;
+    for (const owner of owners.filter((candidate) => !allowsEditingOwner(intent, candidate))) {
+      const entry = derived.get(owner.id) ?? { files: [], coveredNames: new Set<string>() };
+      entry.files.push(path);
+      for (const coveredOwner of covered) entry.coveredNames.add(names.get(coveredOwner.id) ?? coveredOwner.id);
+      derived.set(owner.id, entry);
+    }
+  }
+  return [...derived].map(([nodeId, entry]) => ({
+    nodeId,
+    reason: `Shares ${entry.files.join(", ")} with ${[...entry.coveredNames].join(", ")}; changing the file also changes this capability.`,
+    allow: { editExisting: true, addParts: false, deletePartIds: [] },
+    derived: true as const,
+  }));
+}
+
+/**
+ * Of the files a planner could pick, the ones the approved intent lets it modify, and why it
+ * withholds the rest. A file several capabilities share is withheld unless every owner is approved;
+ * picking one anyway used to fail at the very end, after the models had done all their work.
+ */
+export function splitFilesByApprovedIntent(
+  intent: RequestIntent,
+  graph: ProjectGraph,
+  filePaths: readonly string[],
+): { allowed: string[]; withheld: Array<{ path: string; uncoveredOwnerIds: string[] }> } {
+  const allowed: string[] = [];
+  const withheld: Array<{ path: string; uncoveredOwnerIds: string[] }> = [];
+  for (const path of filePaths) {
+    if (intentAllowsFile(intent, graph, path, "modify")) allowed.push(path);
+    else withheld.push({ path, uncoveredOwnerIds: uncoveredFileOwnerIds(intent, graph, path) });
+  }
+  return { allowed, withheld };
 }
 
 export function intentAllowsFile(

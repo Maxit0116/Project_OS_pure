@@ -13,7 +13,13 @@ export const IntentTouchSchema = z.object({
     deletePartIds: z.array(z.string().min(1)),
   }).strict(),
   /**
-   * Set by the server for an owner of the requested file that the model did not name. It widens
+   * Existing files the model expects this change to edit, as it found them while reading the code.
+   * A file several capabilities own is shared: the server adds those owners as derived touches so the
+   * approver sees every capability the change reaches. Paths the project does not have are ignored.
+   */
+  files: z.array(z.string().min(1).max(300)).max(12).optional(),
+  /**
+   * Set by the server for an owner of a file the change edits that the model did not name. It widens
    * what the approver sees and what publication may touch, but it is not work to route or delegate.
    */
   derived: z.literal(true).optional(),
@@ -61,10 +67,12 @@ export const IntentQuestionSchema = z.object({
 }).strict();
 
 /** Closed model output used before the server derives graph routing and deletion counts. */
+// What the model returns. Keys it adds beyond these are dropped rather than failing the whole
+// answer; the server derives everything that carries authority and re-validates the stored intent.
 export const RequestIntentDraftSchema = z.object({
   goal: z.string().trim().min(1),
   kind: z.enum(["change", "add_node", "delete_node", "mixed"]),
-  touches: z.array(IntentTouchSchema).min(1),
+  touches: z.array(IntentTouchSchema.strip()).min(1),
   structuralProposals: z.array(z.discriminatedUnion("kind", [
     z.object({
       kind: z.literal("add_node"),
@@ -80,7 +88,7 @@ export const RequestIntentDraftSchema = z.object({
   outOfScope: z.array(z.string().trim().min(1)),
   acceptance: z.array(z.string().trim().min(1)).min(1),
   questions: z.array(IntentQuestionSchema),
-}).strict();
+});
 
 export const RequestIntentSchema = z.object({
   version: z.literal("0.1.0"),

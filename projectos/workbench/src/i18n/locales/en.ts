@@ -1824,6 +1824,7 @@ const en = {
       approvalRejected: 'Verification approval dismissed',
       status: {
         running: 'Running',
+        waiting: 'Waiting for your answer',
         complete: 'Done',
         error: 'Failed',
       },

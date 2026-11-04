@@ -1818,6 +1818,7 @@ const zh = {
       approvalRejected: '已取消验证审批',
       status: {
         running: '进行中',
+        waiting: '等待你的回答',
         complete: '已完成',
         error: '失败',
       },
