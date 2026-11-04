@@ -1166,7 +1166,8 @@ describe("sample-graph-saas Project OS fixtures", () => {
         expect(fileNode.elementType).toBe("code_element");
         expect(fileNode.parentId).toBe(module.id);
         expect(fileNode.linkedFiles).toHaveLength(1);
-        expect(fileNode.name).toBe(fileNode.linkedFiles[0]?.path);
+        // Code diagrams name the file, not its full path (architectureView.ts).
+        expect(fileNode.name).toBe(fileNode.linkedFiles[0]?.path.split("/").pop());
         expect(fileNode.description).toMatch(/[\u3400-\u9fff]/);
       }
     }
