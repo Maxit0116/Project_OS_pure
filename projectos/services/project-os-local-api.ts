@@ -658,6 +658,22 @@ interface DependencyImpactScanResult {
 }
 
 
+/**
+ * Whether a leaf's independent-review evidence lets its change be committed with the rest. Every
+ * criterion must be satisfied; "uncertain" is accepted only when the batch was held for review and
+ * the person applied it anyway. "Unsatisfied" is never accepted.
+ */
+export function wholeTreeLeafEvidenceAccepted(
+  task: { status: "consistent" | "inconsistent" | "uncertain"; criteria: Array<{ criterion: string; status: "satisfied" | "unsatisfied" | "uncertain" }> },
+  expectedCriteria: readonly string[],
+  reviewAcknowledged: boolean,
+): boolean {
+  const criterionOk = (status: string) => status === "satisfied" || (reviewAcknowledged && status === "uncertain");
+  return (task.status === "consistent" || (reviewAcknowledged && task.status === "uncertain")) &&
+    task.criteria.length === expectedCriteria.length &&
+    task.criteria.every((criterion, index) => criterion.criterion === expectedCriteria[index] && criterionOk(criterion.status));
+}
+
 export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly sampleWorkspaceRoot: string | undefined;
   private readonly workspaceStore: ProjectOSWorkspaceStore;
@@ -4041,7 +4057,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         throw error;
       }
       if (result.applied && result.outcome === "applied") {
-        const verification = await this.executeConfiguredVerification(runId, workspace);
+        const verification = await this.verifyAfterApply(runId, workspace);
         if (verification.results.length === 0) {
           this.orchestrator.recordVerificationResult(
             workspace,
@@ -4091,7 +4107,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         throw error;
       }
       if (result.applied && result.outcome === "applied") {
-        const verification = await this.executeConfiguredVerification(runId, workspace);
+        const verification = await this.verifyAfterApply(runId, workspace);
         for (const commandResult of verification.results) {
           this.orchestrator.recordVerificationResult(
             workspace,
@@ -4156,7 +4172,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         throw error;
       }
       if (result.applied && result.outcome === "applied") {
-        const verification = await this.executeConfiguredVerification(runId, workspace);
+        const verification = await this.verifyAfterApply(runId, workspace);
         if (verification.results.length === 0) {
           this.orchestrator.recordVerificationResult(
             workspace,
@@ -4217,7 +4233,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         throw error;
       }
       if (result.applied && result.outcome === "applied") {
-        const verification = await this.executeConfiguredVerification(runId, workspace);
+        const verification = await this.verifyAfterApply(runId, workspace);
         if (verification.results.length === 0) {
           this.orchestrator.recordVerificationResult(
             workspace,
@@ -4269,6 +4285,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async runVerification(runId: string): Promise<VerificationRunResult> {
     const run = await this.getAgentRun(runId);
     const workspace = this.requireLoadedWorkspace(run.projectId);
+    // Not verifyAfterApply: when a person presses "run verification", an unapproved command must
+    // come back as the approval error, because that is what opens the approval card.
     const verification = await this.executeConfiguredVerification(runId, workspace);
     if (verification.results.length === 0) {
       this.orchestrator.recordVerificationResult(
@@ -4320,6 +4338,31 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
     }
     return approved;
+  }
+
+  /**
+   * Verification that follows an apply. The files are already written, so a verification that could
+   * not run (it needs the person's approval, there is no runner, or policy denied it) must not turn
+   * the apply into an error: the run would never be finalized, the UI would show a failure and keep
+   * offering to apply what is already on disk. It is "not run", and the evidence already says why.
+   */
+  private async verifyAfterApply(
+    runId: string,
+    workspace: LoadedProjectOSWorkspace,
+  ): Promise<VerificationRunResult> {
+    try {
+      return await this.executeConfiguredVerification(runId, workspace);
+    } catch (error) {
+      if (
+        error instanceof ProjectOSError &&
+        (error.code === "verification_approval_required" ||
+          error.code === "verification_unavailable" ||
+          error.code === "tool_policy_denied")
+      ) {
+        return { runId, status: "not_run", results: [] };
+      }
+      throw error;
+    }
   }
 
   private async executeConfiguredVerification(
@@ -9886,6 +9929,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       );
     }
 
+    // The server held this batch for review because some criteria could not be confirmed by reading
+    // (it recorded that itself, never the model). The person's Apply is the acknowledgement; without it
+    // anything short of "satisfied" is refused here as before.
+    const reviewAcknowledged = Boolean(rootState.batchReviewReason);
     const combinedFiles: GeneratedDiff["files"] = [];
     const canonicalTargets = new Set<string>();
     const fileIdentities = new Set<string>();
@@ -9908,13 +9955,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         validationTask.taskId !== leaf.transactionTaskId ||
         validationTask.childRunId !== leaf.childRunId ||
         validationTask.path !== leaf.filePath ||
-        validationTask.status !== "consistent" ||
-        validationTask.criteria.length !== leaf.acceptanceCriteria.length ||
-        validationTask.criteria.some(
-          (criterion, criterionIndex) =>
-            criterion.criterion !== leaf.acceptanceCriteria[criterionIndex] ||
-            criterion.status !== "satisfied",
-        ) ||
+        !wholeTreeLeafEvidenceAccepted(validationTask, leaf.acceptanceCriteria, reviewAcknowledged) ||
         !leafState ||
         leafState.run.rootRunId !== rootRun.runId ||
         leafState.run.scope?.kind !== "leaf-file" ||

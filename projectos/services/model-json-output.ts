@@ -42,13 +42,15 @@ export function resolveProposalValidationMaxOutputTokens(
   retrying: boolean,
   firstFailure?: "response_truncated",
 ): number {
+  // A reasoning model thinks inside this budget as well as writing the verdict. 4096 was cut off on
+  // a quarter of the leaf reviews in the cross-component runs, each costing a second full review.
   if (!retrying) {
-    return 4096;
-  }
-  if (firstFailure === "response_truncated") {
     return 8192;
   }
-  return 6144;
+  if (firstFailure === "response_truncated") {
+    return 16_384;
+  }
+  return 12_288;
 }
 
 export function resolveFileEditPlanMaxOutputTokens(

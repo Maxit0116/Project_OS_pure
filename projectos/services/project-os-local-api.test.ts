@@ -23,7 +23,7 @@ import { ProjectOSError } from "../errors.js";
 import { InMemorySecretStore } from "../persistence/secret-store.js";
 import { ProjectOSWorkspaceStore } from "../persistence/workspace-store.js";
 import { validateAgentRunEventSequence } from "../validation/index.js";
-import { ProjectOSLocalApi } from "./project-os-local-api.js";
+import { ProjectOSLocalApi, wholeTreeLeafEvidenceAccepted } from "./project-os-local-api.js";
 import { LocalContextAssembler } from "./local-context-assembler.js";
 import { ModelGateway } from "./model-gateway/index.js";
 import * as writeTransactionModule from "./recoverable-write-transaction.js";
@@ -1180,6 +1180,52 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       code: "verification_approval_required",
     });
     expect(existsSync(changedMarker)).toBe(false);
+  });
+
+  describe("verification that follows an apply", () => {
+    // Observed live: applying a held whole-tree change wrote the files, then the unapproved
+    // verification command threw out of applyDiff. The UI showed "Verification commands require
+    // explicit user approval" as an error and kept offering to apply what was already on disk.
+    type Verifier = { verifyAfterApply(runId: string, workspace: unknown): Promise<unknown>; executeConfiguredVerification: unknown };
+    const apiThatThrows = (error: unknown): Verifier => {
+      const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() }) as unknown as Verifier;
+      api.executeConfiguredVerification = async () => { throw error; };
+      return api;
+    };
+
+    it.each([
+      "verification_approval_required",
+      "verification_unavailable",
+      "tool_policy_denied",
+    ] as const)("reports not_run, not a failed apply, when verification cannot run (%s)", async (code) => {
+      const api = apiThatThrows(new ProjectOSError(code, "cannot run"));
+      await expect(api.verifyAfterApply("run_1", {})).resolves.toEqual({ runId: "run_1", status: "not_run", results: [] });
+    });
+
+    it("still surfaces an error that is not about verification being unable to run", async () => {
+      const api = apiThatThrows(new ProjectOSError("agent_orchestration_failed", "something else"));
+      await expect(api.verifyAfterApply("run_1", {})).rejects.toMatchObject({ code: "agent_orchestration_failed" });
+    });
+
+    it("keeps the approval error for an explicit run-verification request, which is what opens the approval card", async () => {
+      const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() }) as unknown as {
+        runVerification(runId: string): Promise<unknown>;
+        getAgentRun(runId: string): Promise<{ projectId: string }>;
+        requireLoadedWorkspace(projectId: string): unknown;
+        executeConfiguredVerification: unknown;
+      };
+      api.getAgentRun = async () => ({ projectId: "p" });
+      api.requireLoadedWorkspace = () => ({});
+      api.executeConfiguredVerification = async () => { throw new ProjectOSError("verification_approval_required", "needs approval"); };
+      await expect(api.runVerification("run_1")).rejects.toMatchObject({ code: "verification_approval_required" });
+    });
+
+    it("passes a real result through untouched", async () => {
+      const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() }) as unknown as Verifier;
+      const result = { runId: "run_1", status: "passed", results: [] };
+      api.executeConfiguredVerification = async () => result;
+      await expect(api.verifyAfterApply("run_1", {})).resolves.toBe(result);
+    });
   });
 
   it("reports verification not_run when no commands are configured", async () => {
@@ -5576,3 +5622,33 @@ class FailCommitAndRollbackApi extends ProjectOSLocalApi {
     super.commitStagedFile(temporaryPath, targetPath);
   }
 }
+
+describe("whole-tree commit evidence", () => {
+  const criteria = ["c0", "c1"];
+  const task = (status: "consistent" | "uncertain" | "inconsistent", statuses: Array<"satisfied" | "unsatisfied" | "uncertain">) => ({
+    status,
+    criteria: statuses.map((criterionStatus, index) => ({ criterion: `c${index}`, status: criterionStatus })),
+  });
+
+  it("accepts a fully satisfied leaf whether or not the batch was held", () => {
+    expect(wholeTreeLeafEvidenceAccepted(task("consistent", ["satisfied", "satisfied"]), criteria, false)).toBe(true);
+    expect(wholeTreeLeafEvidenceAccepted(task("consistent", ["satisfied", "satisfied"]), criteria, true)).toBe(true);
+  });
+
+  it("refuses an uncertain leaf unless the batch was held for review and the person applied it", () => {
+    // Observed live: a held change could never be applied, because this check wanted every
+    // criterion satisfied and the hold exists precisely because some were not.
+    expect(wholeTreeLeafEvidenceAccepted(task("uncertain", ["satisfied", "uncertain"]), criteria, false)).toBe(false);
+    expect(wholeTreeLeafEvidenceAccepted(task("uncertain", ["satisfied", "uncertain"]), criteria, true)).toBe(true);
+  });
+
+  it("never accepts an unsatisfied criterion or an inconsistent leaf", () => {
+    expect(wholeTreeLeafEvidenceAccepted(task("uncertain", ["unsatisfied", "satisfied"]), criteria, true)).toBe(false);
+    expect(wholeTreeLeafEvidenceAccepted(task("inconsistent", ["satisfied", "satisfied"]), criteria, true)).toBe(false);
+  });
+
+  it("refuses evidence for different criteria than the leaf was given", () => {
+    expect(wholeTreeLeafEvidenceAccepted(task("consistent", ["satisfied"]), criteria, true)).toBe(false);
+    expect(wholeTreeLeafEvidenceAccepted({ status: "consistent", criteria: [{ criterion: "c0", status: "satisfied" }, { criterion: "other", status: "satisfied" }] }, criteria, true)).toBe(false);
+  });
+});

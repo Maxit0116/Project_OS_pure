@@ -105,14 +105,16 @@ const OpenAiResponseSchema = z.object({
       content: z.string().nullable().optional(),
       reasoning_content: z.string().nullable().optional(),
       reasoning: z.string().nullable().optional(),
+      // A provider adds fields of its own (DeepSeek sends `index` on every tool call). The ones read
+      // here are checked; the rest are ignored, or the whole reply was rejected as "invalid payload".
       tool_calls: z.array(z.object({
         id: z.string().min(1),
         type: z.literal("function"),
         function: z.object({
           name: z.string().min(1),
           arguments: z.string(),
-        }).strict(),
-      }).strict()).optional(),
+        }),
+      })).optional(),
     }),
     finish_reason: z.string().nullable().optional(),
   })).min(1),
@@ -146,8 +148,8 @@ const OllamaResponseSchema = z.object({
       function: z.object({
         name: z.string().min(1),
         arguments: z.union([z.string(), z.record(z.unknown())]),
-      }).strict(),
-    }).strict()).optional(),
+      }),
+    })).optional(),
   }),
 });
 
@@ -416,7 +418,20 @@ export function buildOpenAiChatBody(
   ) {
     body.reasoning_effort = input.thinkingDepth;
   }
+  // DeepSeek reasons by default and "off" used to change nothing: the model still spent its whole
+  // output budget thinking (titles and digests were cut off at 64-400 tokens). It has an explicit switch.
+  if (input.thinkingDepth === "off" && isDeepSeekEndpoint(profile.baseUrl)) {
+    body.thinking = { type: "disabled" };
+  }
   return body;
+}
+
+export function isDeepSeekEndpoint(baseUrl: string | undefined): boolean {
+  try {
+    return new URL(baseUrl ?? "").hostname.toLowerCase().endsWith("deepseek.com");
+  } catch {
+    return false;
+  }
 }
 
 export function supportsOpenAiReasoningEffort(model: string): boolean {

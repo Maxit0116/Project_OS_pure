@@ -115,7 +115,10 @@ export class ModelGateway {
     } finally {
       deadline.stop();
     }
-    const output = redactText(result.output, request.redactionPolicy);
+    // A structured request asks for a tool call: its arguments are the answer. Only the first call
+    // counts; a model that answered in text instead is returned as text.
+    const structuredCall = request.structured ? result.toolCalls?.[0] : undefined;
+    const output = redactText(structuredCall ? structuredCall.arguments : result.output, request.redactionPolicy);
     const reasoning = result.reasoning
       ? redactText(result.reasoning, request.redactionPolicy)
       : undefined;
@@ -126,6 +129,7 @@ export class ModelGateway {
       provider: modelProfileLabel(profile),
       model: profile.model,
       output,
+      ...(structuredCall ? { toolName: structuredCall.name } : {}),
       ...(reasoning ? { reasoning } : {}),
       ...(result.finishReason ? { finishReason: result.finishReason } : {}),
       usage: {
@@ -390,6 +394,7 @@ export class ModelGateway {
         ? { thinkingDepth: request.thinkingDepth }
         : {}),
       ...(request.images?.length ? { images: request.images } : {}),
+      ...(request.structured ? { tools: request.structured.tools } : {}),
     };
   }
 }

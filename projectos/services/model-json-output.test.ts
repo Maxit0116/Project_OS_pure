@@ -40,9 +40,9 @@ describe("isTruncatedModelOutput", () => {
 });
 
 describe("resolveProposalValidationMaxOutputTokens", () => {
-  it("uses 4096 first and 8192 after truncation", () => {
-    expect(resolveProposalValidationMaxOutputTokens(false)).toBe(4096);
-    expect(resolveProposalValidationMaxOutputTokens(true, "response_truncated")).toBe(8192);
+  it("uses 8192 first and 16384 after truncation", () => {
+    expect(resolveProposalValidationMaxOutputTokens(false)).toBe(8192);
+    expect(resolveProposalValidationMaxOutputTokens(true, "response_truncated")).toBe(16_384);
   });
 });
 
