@@ -1,6 +1,8 @@
 node_modules/
 out/
 dist/
+# electron-builder output (dmg, zip and the unpacked app), produced by `npm run dist:mac`
+projectos/desktop/release/
 .next/
 *.db
 .env
