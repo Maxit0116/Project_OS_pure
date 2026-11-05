@@ -31,6 +31,7 @@ export type ProjectOSErrorCode =
   | "invalid_project_description"
   | "model_connection_failed"
   | "model_unreachable"
+  | "review_unmet_requirements"
   | "model_timeout"
   | "model_not_configured"
   | "model_output_invalid"

@@ -489,6 +489,10 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async applyDespiteUnmetRequirements(_runId: string): Promise<ApplyResult> {
+    return transportNotConnected();
+  }
+
   async runVerification(_runId: string): Promise<VerificationRunResult> {
     return transportNotConnected();
   }

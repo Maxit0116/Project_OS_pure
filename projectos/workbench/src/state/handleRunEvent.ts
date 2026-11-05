@@ -26,6 +26,7 @@ import { truncateDiffReadySummary } from '../notifications/diffReadyNotification
 import type { CenterTab, ChatMessage, CodeSubTab } from './workbenchStore'
 import { logRunEventToActivity } from './activityLogFromRunEvent'
 import { useChatSessionStore } from './chatSessionStore'
+import { parseUnmetRequirements, type UnmetRequirement } from './unmetRequirements'
 
 export interface FlowCorrection {
   id: string
@@ -58,6 +59,7 @@ export interface RunEventStoreSlice {
   executionOverlay: ExecutionOverlay | null
   diffReady: boolean
   diffReviewOnlyReason?: string | null
+  diffUnmetRequirements?: UnmetRequirement[]
   messages: ChatMessage[]
   conversationCheckpoints?: ConversationCheckpointDraft[]
   applyResult?: ApplyResult | null
@@ -199,7 +201,8 @@ export function reduceRunEventState(
   if (event.type === 'diff_ready') {
     patch.diffReady = true
     patch.flowStatus = 'awaiting_review'
-    const reviewOnly = event.payload as { reviewOnly?: unknown; reviewOnlyReason?: unknown } | undefined
+    const reviewOnly = event.payload as { reviewOnly?: unknown; reviewOnlyReason?: unknown; unmetRequirements?: unknown } | undefined
+    patch.diffUnmetRequirements = parseUnmetRequirements(reviewOnly?.unmetRequirements)
     patch.diffReviewOnlyReason =
       reviewOnly?.reviewOnly === true && typeof reviewOnly.reviewOnlyReason === 'string'
         ? reviewOnly.reviewOnlyReason

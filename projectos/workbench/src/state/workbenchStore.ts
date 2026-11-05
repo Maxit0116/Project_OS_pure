@@ -184,6 +184,7 @@ import {
   type SaveModelProfileInput,
 } from './modelProfileMutations'
 import { resolveFileOwnerSelection } from './fileOwnerSelection'
+import { unmetRequirementsFromMessage, type UnmetRequirement } from './unmetRequirements'
 import { isNodeAgentArchitectureLevel } from '../components/FunctionMap/architectureView'
 import {
   closeEditorFileInLayout,
@@ -510,6 +511,8 @@ export interface WorkbenchState {
   diffReady: boolean
   /** Set when the run's proposal can be reviewed but not applied (no independent validation). */
   diffReviewOnlyReason: string | null
+  /** Requirements the independent review says a held change does not meet; Apply becomes "apply anyway". */
+  diffUnmetRequirements: UnmetRequirement[]
   generatedDiff: GeneratedDiff | null
   applyResult: ApplyResult | null
   verificationResult: VerificationRunResult | null
@@ -727,7 +730,7 @@ export interface WorkbenchState {
   confirmDebugFix: () => Promise<void>
   markDebugFixed: () => Promise<void>
   loadDiff: (runId?: string) => Promise<void>
-  applyCurrentDiff: () => Promise<void>
+  applyCurrentDiff: (options?: { anyway?: boolean }) => Promise<void>
   runCurrentVerification: () => Promise<void>
   approveAndRunCurrentVerification: () => Promise<void>
   undoCurrentApply: () => Promise<void>
@@ -1295,6 +1298,7 @@ const initialTransientState = {
   liveGraphPausedRunId: null as string | null,
   diffReady: false,
   diffReviewOnlyReason: null,
+  diffUnmetRequirements: [],
   generatedDiff: null as GeneratedDiff | null,
   applyResult: null as ApplyResult | null,
   verificationResult: null as VerificationRunResult | null,
@@ -3139,6 +3143,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         liveGraphPausedRunId: null,
       diffReady: false,
       diffReviewOnlyReason: null,
+      diffUnmetRequirements: [],
       diffReadyBanner: null,
       pendingChangesDrawerDismissedRunId: null,
       diffFileStats: [],
@@ -3222,6 +3227,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         agentFlowSubject: 'run',
         diffReady: false,
         diffReviewOnlyReason: null,
+        diffUnmetRequirements: [],
         generatedDiff: null,
         applyResult: null,
         verificationResult: null,
@@ -3956,6 +3962,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         liveGraphPausedRunId: null,
       diffReady: false,
       diffReviewOnlyReason: null,
+      diffUnmetRequirements: [],
       generatedDiff: null,
       applyResult: null,
       verificationResult: null,
@@ -4113,6 +4120,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         set({
           diffReady: false,
           diffReviewOnlyReason: null,
+          diffUnmetRequirements: [],
           error: getStoreMessage(locale, 'diff.notAvailable', { status: runStatus }),
         })
         maybeNotifyDiffReady(targetRunId, 0)
@@ -4123,7 +4131,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
   },
 
-  applyCurrentDiff: async () => {
+  applyCurrentDiff: async (options) => {
     const { client, project, activeRunId, generatedDiff, editorBuffers, pushToast, locale, selectedNodeId, diffReviewOnlyReason } = get()
     if (!project || !activeRunId) return
     if (diffReviewOnlyReason) {
@@ -4131,7 +4139,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       return
     }
     try {
-      const applyResult = await client.applyDiff(activeRunId)
+      // "Apply anyway" is its own server call: the ordinary Apply is refused for a change the review
+      // says does not meet a requirement, so it cannot be reached by accident.
+      const applyResult = options?.anyway
+        ? await client.applyDespiteUnmetRequirements(activeRunId)
+        : await client.applyDiff(activeRunId)
       const [graph, tree, currentWork] = await Promise.all([
         client.getProjectGraph(project.projectId),
         client.getSemanticTree(project.projectId),
@@ -4188,6 +4200,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             : current.messages
         return {
           applyResult,
+          diffUnmetRequirements: [],
           verificationResult: null,
           verificationCommandApproval: null,
           currentWork,
@@ -4213,6 +4226,14 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       setTimeout(() => set({ bouncingNodeIds: [] }), 600)
       scheduleChatSessionPersist()
     } catch (err) {
+      // The change was held for unmet requirements and the screen did not know (the run was opened
+      // later): show them now, with the "apply anyway" choice, instead of only an error.
+      const refused = typeof err === 'object' && err !== null && 'code' in err &&
+        (err as { code?: string }).code === 'review_unmet_requirements'
+      if (refused) {
+        const unmet = unmetRequirementsFromMessage(err instanceof Error ? err.message : '')
+        if (unmet.length > 0) set({ diffUnmetRequirements: unmet })
+      }
       set({ error: errorMessage(err, 'Failed to apply diff') })
     }
   },

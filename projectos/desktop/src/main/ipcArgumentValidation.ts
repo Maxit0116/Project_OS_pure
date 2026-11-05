@@ -83,6 +83,7 @@ const PROJECTOS_IPC_SIGNATURES = {
   getAgentRunEvents: ['string'],
   getDiff: ['string'],
   applyDiff: ['string'],
+  applyDespiteUnmetRequirements: ['string'],
   runVerification: ['string'],
   getVerificationCommandApproval: ['string'],
   approveVerificationCommands: ['string', 'string'],

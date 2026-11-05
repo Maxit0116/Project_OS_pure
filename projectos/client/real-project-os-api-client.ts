@@ -504,6 +504,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.getDiff(runId);
   }
 
+  applyDespiteUnmetRequirements(runId: string): Promise<ApplyResult> {
+    return this.transport.applyDespiteUnmetRequirements(runId);
+  }
+
   applyDiff(runId: string): Promise<ApplyResult> {
     return this.transport.applyDiff(runId);
   }

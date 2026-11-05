@@ -684,6 +684,10 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("getDiff", runId);
   }
 
+  applyDespiteUnmetRequirements(runId: string): Promise<ApplyResult> {
+    return this.invoke("applyDespiteUnmetRequirements", runId);
+  }
+
   applyDiff(runId: string): Promise<ApplyResult> {
     return this.invoke("applyDiff", runId);
   }

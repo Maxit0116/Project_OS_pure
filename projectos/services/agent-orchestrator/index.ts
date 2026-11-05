@@ -241,6 +241,13 @@ export interface OrchestratorRunState {
    * is then held for the person's review instead of being applied automatically or discarded.
    */
   batchReviewReason?: string;
+  /**
+   * Set when the repaired change was still judged not to meet some requirement, and nothing else
+   * was wrong (the files agree with each other). The server records this itself, never the model.
+   * The change is then held: it is applied only by the person's explicit "apply anyway", never
+   * automatically, and the plain Apply refuses while this is set.
+   */
+  unmetRequirements?: WholeTreeReviewFinding[];
   /** The leaf-level equivalent: its independent review could not confirm some criteria by reading. */
   proposalReviewReason?: string;
   /** The located edit target a leaf proposed against; kept so a rejected proposal can be regenerated. */
@@ -813,7 +820,16 @@ export interface WholeTreeReviewFinding {
 
 /** The whole-tree review rejected the batch, and says which files to send back. */
 class WholeTreeReviewRejectedError extends ProjectOSError {
-  constructor(readonly findings: WholeTreeReviewFinding[]) {
+  constructor(
+    readonly findings: WholeTreeReviewFinding[],
+    /**
+     * True when the only objection is unmet requirements: the files agree with each other, so after
+     * the repair round the change may be held for the person instead of discarded.
+     */
+    readonly holdable = false,
+    /** What the reviewer concluded, kept so a held change records the verdict it was held under. */
+    readonly validation?: BatchValidationResult,
+  ) {
     // The first finding goes into the message: when the repair round also fails, this is all a person
     // sees, and "rejected the batch" does not say which file or which requirement.
     const first = findings[0];
@@ -831,6 +847,16 @@ class WholeTreeReviewRejectedError extends ProjectOSError {
 
 /** One extra round, once: a rejected file gets the reviewer's finding and is regenerated. */
 export const MAX_WHOLE_TREE_REPAIR_ROUNDS = 1;
+
+/** What the workbench is shown about a held change's unmet requirements (bounded). */
+export function unmetRequirementsPayload(
+  findings: readonly WholeTreeReviewFinding[],
+): Array<{ path: string; problems: string[] }> {
+  return findings.slice(0, 8).map((finding) => ({
+    path: finding.path,
+    problems: finding.problems.slice(0, 4).map((problem) => problem.slice(0, 500)),
+  }));
+}
 
 class DelegationPlanError extends Error {
   /** `detail` says which part of the plan was wrong, so the retry can be told instead of guessing. */
@@ -2953,6 +2979,40 @@ export class AgentOrchestrator {
     } catch (error) {
       if (
         error instanceof WholeTreeReviewRejectedError &&
+        round >= MAX_WHOLE_TREE_REPAIR_ROUNDS &&
+        error.holdable &&
+        error.validation
+      ) {
+        // The repair did not make the reviewer happy and nothing else is wrong. Do not throw the
+        // work away: hold it with the unmet requirements shown, applied only by an explicit "apply
+        // anyway". The verdict stays "invalid" on record.
+        state.batchValidationResult = error.validation;
+        state.validatedBatchBinding = this.serializeValidatedWholeTreeBinding(state);
+        state.unmetRequirements = error.findings;
+        const unmetCount = error.findings.reduce((count, finding) => count + finding.problems.length, 0);
+        this.emit(
+          workspace,
+          state,
+          createActionEvent(state.run.runId, "decision_summary", {
+            summary: `Not applied yet: after one repair the independent review still says ${unmetCount} requirement${unmetCount === 1 ? " is" : "s are"} not met (${error.findings[0]!.path}: ${error.findings[0]!.problems[0]}). Nothing was changed. Read the change, then apply it anyway or reword the request.`.slice(0, 900),
+          }, batchStep.id),
+        );
+        this.emit(
+          workspace,
+          state,
+          createEvent(
+            state.run.runId,
+            "step_completed",
+            completeStep(
+              batchStep,
+              `The independent review still found ${unmetCount} unmet requirement${unmetCount === 1 ? "" : "s"} after one repair; holding for review.`,
+            ),
+          ),
+        );
+        break;
+      }
+      if (
+        error instanceof WholeTreeReviewRejectedError &&
         round < MAX_WHOLE_TREE_REPAIR_ROUNDS
       ) {
         this.emit(
@@ -2975,7 +3035,7 @@ export class AgentOrchestrator {
     }
     }
 
-    if (state.executionPolicy === "review_first" || state.batchReviewReason) {
+    if (state.executionPolicy === "review_first" || state.batchReviewReason || state.unmetRequirements?.length) {
       state.run.status = "awaiting_review";
       state.status = "complete";
       state.run.completedAt = new Date().toISOString();
@@ -2987,6 +3047,9 @@ export class AgentOrchestrator {
         createEvent(state.run.runId, "diff_ready", undefined, {
           fileCount: transactionPlan.leaves.length,
           paths: transactionPlan.leaves.map((leaf) => leaf.filePath),
+          ...(state.unmetRequirements?.length
+            ? { unmetRequirements: unmetRequirementsPayload(state.unmetRequirements) }
+            : {}),
         }),
       );
       this.emit(
@@ -4817,7 +4880,18 @@ export class AgentOrchestrator {
               ? [{ childRunId: leaf.childRunId, path: leaf.filePath, problems: problems.slice(0, 4), crossFile }]
               : [];
           });
-          if (findings.length > 0) throw new WholeTreeReviewRejectedError(findings);
+          // Held rather than discarded only when the sole objection is a requirement the reviewer
+          // says is unmet: files that disagree with each other cannot be waved through by a person
+          // who has not read them, so those still fail.
+          const filesAgree = parsed.crossFileAssessment.status !== "inconsistent" &&
+            parsed.tasks.every((task) =>
+              task.status !== "inconsistent" ||
+              task.criteria.some((criterion) => criterion.status === "unsatisfied"));
+          const hasUnmet = parsed.tasks.some((task) =>
+            task.criteria.some((criterion) => criterion.status === "unsatisfied"));
+          if (findings.length > 0) {
+            throw new WholeTreeReviewRejectedError(findings, filesAgree && hasUnmet, result);
+          }
           throw new ProjectOSError(
             "proposal_validation_failed",
             "Independent agent validation rejected the whole-tree proposal batch",
@@ -4976,13 +5050,25 @@ export class AgentOrchestrator {
     this.completeWholeTreeRuns(workspace, state, plan, verification.status);
   }
 
-  requireValidatedWholeTree(runId: string): void {
+  /** The requirements a held whole-tree change did not meet, as the server recorded them. */
+  getUnmetRequirements(runId: string): WholeTreeReviewFinding[] {
+    return this.runs.get(runId)?.unmetRequirements ?? [];
+  }
+
+  /**
+   * `acceptUnmet` is the person's explicit "apply anyway": only then does a verdict of "invalid" count,
+   * and only when the server itself recorded that the sole objection was unmet requirements.
+   */
+  requireValidatedWholeTree(runId: string, options: { acceptUnmet?: boolean } = {}): void {
     const state = this.runs.get(runId);
+    const heldAnyway = options.acceptUnmet === true &&
+      (state?.unmetRequirements?.length ?? 0) > 0 &&
+      state?.batchValidationResult?.verdict === "invalid";
     if (
       !state ||
       state.run.parentRunId ||
       !isHierarchyPlannerScope(state.run.scope) ||
-      state.batchValidationResult?.verdict !== "valid" ||
+      (state.batchValidationResult?.verdict !== "valid" && !heldAnyway) ||
       !state.wholeTreeTransactionPlan ||
       state.validatedBatchBinding !== this.serializeValidatedWholeTreeBinding(state)
     ) {
@@ -8887,6 +8973,33 @@ function restrictLeafCandidatesToApprovedIntent(
   return { ...target, allowedIds: allowed };
 }
 
+/**
+ * A planner that cannot delegate is a dead end, so it is never offered: a container with no
+ * components under it gives its planner no allowed child, and a component that owns no file gives it
+ * nothing to edit. Observed live: a database container with no components was chosen for a schema
+ * change, its planner's reply was rejected twice, and the whole run failed with "invalid plan shape".
+ * The work then goes to the node that does own the files. When every candidate is a dead end the list
+ * is left alone, so the failure stays as it was and is not hidden.
+ */
+export function dropPlannersThatCannotDelegate(
+  target: HierarchyPlanTarget,
+  graph: ProjectGraph,
+): HierarchyPlanTarget {
+  if (target.kind !== "planner" || target.level === "context") return target;
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const ownsFile = (nodeId: string) =>
+    graph.fileIndex.some((file) => file.nodeIds.includes(nodeId)) ||
+    (nodes.get(nodeId)?.linkedFiles?.length ?? 0) > 0 && graph.fileIndex.length === 0;
+  const usable = target.allowedIds.filter((nodeId) => {
+    const node = nodes.get(nodeId);
+    if (!node) return true;
+    return target.level === "container" ? (node.children?.length ?? 0) > 0 : ownsFile(nodeId);
+  });
+  return usable.length > 0 && usable.length < target.allowedIds.length
+    ? { ...target, allowedIds: usable }
+    : target;
+}
+
 /** A planner delegates to the children the approved request's work reaches, not to approval-only co-owners. */
 function restrictPlannerChildrenToApprovedIntent(
   target: HierarchyPlanTarget,
@@ -9133,33 +9246,6 @@ function parseGreenfieldProductGraphProposal(
   }
   return undefined;
 }
-/**
- * A planner that cannot delegate is a dead end, so it is never offered: a container with no
- * components under it gives its planner no allowed child, and a component that owns no file gives it
- * nothing to edit. Observed live: a database container with no components was chosen for a schema
- * change, its planner's reply was rejected twice, and the whole run failed with "invalid plan shape".
- * The work then goes to the node that does own the files. When every candidate is a dead end the list
- * is left alone, so the failure stays as it was and is not hidden.
- */
-export function dropPlannersThatCannotDelegate(
-  target: HierarchyPlanTarget,
-  graph: ProjectGraph,
-): HierarchyPlanTarget {
-  if (target.kind !== "planner" || target.level === "context") return target;
-  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
-  const ownsFile = (nodeId: string) =>
-    graph.fileIndex.some((file) => file.nodeIds.includes(nodeId)) ||
-    (nodes.get(nodeId)?.linkedFiles?.length ?? 0) > 0 && graph.fileIndex.length === 0;
-  const usable = target.allowedIds.filter((nodeId) => {
-    const node = nodes.get(nodeId);
-    if (!node) return true;
-    return target.level === "container" ? (node.children?.length ?? 0) > 0 : ownsFile(nodeId);
-  });
-  return usable.length > 0 && usable.length < target.allowedIds.length
-    ? { ...target, allowedIds: usable }
-    : target;
-}
-
 
 function parseNodeScaffoldPlan(
   output: string,

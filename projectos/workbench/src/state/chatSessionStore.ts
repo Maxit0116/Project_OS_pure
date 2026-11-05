@@ -225,6 +225,7 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
     liveGraphPausedRunId: null,
     diffReady: false,
     diffReviewOnlyReason: null,
+    diffUnmetRequirements: [],
     generatedDiff: null,
     applyResult: null,
     verificationResult: null,

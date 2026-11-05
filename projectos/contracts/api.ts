@@ -309,6 +309,11 @@ export interface ProjectOSApi {
   ): Disposable;
   getDiff(runId: string): Promise<GeneratedDiff>;
   applyDiff(runId: string): Promise<ApplyResult>;
+  /**
+   * The person's explicit "apply anyway" for a change the server held because the independent review
+   * said some requirement is not met. The ordinary `applyDiff` refuses such a change.
+   */
+  applyDespiteUnmetRequirements(runId: string): Promise<ApplyResult>;
   runVerification(runId: string): Promise<VerificationRunResult>;
   getVerificationCommandApproval(projectId: string): Promise<VerificationCommandApprovalStatus>;
   approveVerificationCommands(

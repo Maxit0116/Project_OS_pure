@@ -154,6 +154,7 @@ export const useFileTimelineStore = create<FileTimelineStore>((set, get) => ({
       generatedDiff: previewDiff,
       diffReady: true,
       diffReviewOnlyReason: null,
+      diffUnmetRequirements: [],
     })
   },
 

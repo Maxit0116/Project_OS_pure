@@ -103,4 +103,14 @@ describe('userFacingProviderText', () => {
     expect(userFacingErrorMessage(error, 'en')).toMatch(/can no longer be applied/u)
     expect(userFacingErrorMessage(error, 'en')).not.toMatch(/Generated diff is stale/u)
   })
+  it('says a held change was not applied because a requirement is unmet, and what the choices are', () => {
+    const error = Object.assign(
+      new Error('The independent review says this change does not meet: app/page.tsx: The heading must say Welcome'),
+      { code: 'review_unmet_requirements' },
+    )
+    expect(userFacingErrorMessage(error, 'en')).toMatch(/not applied.*does not meet a requirement \(app\/page\.tsx: The heading must say Welcome\).*Apply anyway.*reword/u)
+    expect(userFacingErrorMessage(error, 'zh')).toMatch(/改动未应用.*app\/page\.tsx.*仍然应用/u)
+    const bare = Object.assign(new Error('refused'), { code: 'review_unmet_requirements' })
+    expect(userFacingErrorMessage(bare, 'en')).toMatch(/does not meet a requirement\. Read the change/u)
+  })
 })

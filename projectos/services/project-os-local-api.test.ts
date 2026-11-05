@@ -1,5 +1,6 @@
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { readAuditApprovals } from "./harness/audit.js";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -3882,6 +3883,74 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
   });
 
+  describe("a change held because the review says a requirement is not met", () => {
+    async function heldRun() {
+      const tempWorkspaceRoot = copySampleWorkspace();
+      const auditDirectory = mkdtempSync(join(tmpdir(), "projectos-audit-"));
+      const pagePath = join(tempWorkspaceRoot, "app/login/page.tsx");
+      const formPath = join(tempWorkspaceRoot, "components/LoginForm.tsx");
+      const before = { page: readFileSync(pagePath, "utf8"), form: readFileSync(formPath, "utf8") };
+      const api = new ProjectOSLocalApi({
+        sampleWorkspaceRoot: tempWorkspaceRoot,
+        localContextAssembler: new LocalContextAssembler(),
+        modelGateway: new RecursiveHierarchyGateway({ unmetCriterion: true }),
+        runEventPersistence: "memory",
+        auditDirectory,
+      });
+      const project = await api.openSampleWorkspace();
+      // Automatic on purpose: an unmet requirement must never be applied by the policy alone.
+      await enableModelExecution(api, project.projectId, "automatic");
+      const root = await runApprovedGlobalRequest(api, project.projectId);
+      await waitForRunStatus(api, root.runId, "awaiting_review");
+      return { api, root, pagePath, formPath, before, auditDirectory };
+    }
+
+    it("refuses the ordinary Apply, says what is unmet, and writes nothing", async () => {
+      const { api, root, pagePath, formPath, before } = await heldRun();
+
+      await expect(api.applyDiff(root.runId)).rejects.toMatchObject({
+        code: "review_unmet_requirements",
+        message: expect.stringMatching(/does not meet: .*: The heading does not say what the requirement asks\./u),
+        details: { unmetRequirements: [expect.objectContaining({ problems: ["The heading does not say what the requirement asks."] })] },
+      });
+      expect(readFileSync(pagePath, "utf8")).toBe(before.page);
+      expect(readFileSync(formPath, "utf8")).toBe(before.form);
+    });
+
+    it("writes the change only through the explicit apply-anyway call, and records that in the audit trail", async () => {
+      const { api, root, pagePath, formPath, before, auditDirectory } = await heldRun();
+
+      const applied = await api.applyDespiteUnmetRequirements(root.runId);
+
+      expect(applied).toMatchObject({ applied: true, outcome: "applied", filesChanged: expect.arrayContaining(["app/login/page.tsx", "components/LoginForm.tsx"]) });
+      expect(readFileSync(pagePath, "utf8")).not.toBe(before.page);
+      expect(readFileSync(formPath, "utf8")).not.toBe(before.form);
+      // The choice is recorded first, before any file is written.
+      const audit = readAuditApprovals(auditDirectory);
+      expect(audit[0]).toMatchObject({ runId: root.runId, tool: "apply_unmet_requirements", decision: "allow" });
+      expect(audit.filter((record) => record.tool === "apply_unmet_requirements")).toHaveLength(1);
+    });
+
+    it("has nothing to apply anyway for a change that was not held for unmet requirements", async () => {
+      const tempWorkspaceRoot = copySampleWorkspace();
+      const api = new ProjectOSLocalApi({
+        sampleWorkspaceRoot: tempWorkspaceRoot,
+        localContextAssembler: new LocalContextAssembler(),
+        modelGateway: new RecursiveHierarchyGateway(),
+        runEventPersistence: "memory",
+      });
+      const project = await api.openSampleWorkspace();
+      await enableModelExecution(api, project.projectId, "review_first");
+      const root = await runApprovedGlobalRequest(api, project.projectId);
+      await waitForRunStatus(api, root.runId, "awaiting_review");
+
+      await expect(api.applyDespiteUnmetRequirements(root.runId)).rejects.toMatchObject({
+        code: "proposal_validation_failed",
+        message: expect.stringMatching(/nothing to apply anyway/u),
+      });
+    });
+  });
+
   it("rejects graph-layer skipping even when a caller invokes delegation directly", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
     const api = new ProjectOSLocalApi({
@@ -4079,6 +4148,18 @@ describe("ProjectOSLocalApi model mutation approval", () => {
 
 function getLocalApiInternals(api: ProjectOSLocalApi): LocalApiTestInternals {
   return api as unknown as LocalApiTestInternals;
+}
+
+/** A request for the whole product, taken the way the app takes it: intent, approval, then execution. */
+async function runApprovedGlobalRequest(api: ProjectOSLocalApi, projectId: string) {
+  const intent = await api.extractRequestIntent({
+    projectId,
+    rawRequest: "Update login consistently across the product.",
+    executorSelection: { kind: "model", modelProfileId: "fixture-model" },
+  });
+  await api.approveRequestIntent(projectId, intent.id, intent.revision);
+  const refinement = await api.prepareIntentExecution(projectId, intent.id);
+  return api.confirmExecution(refinement.id);
 }
 
 async function enableModelExecution(
@@ -5367,7 +5448,7 @@ class NodeDelegationGateway extends ModelGateway {
 class RecursiveHierarchyGateway extends ModelGateway {
   readonly requests: ModelGatewayRequest[] = [];
 
-  constructor(private readonly options: { onWholeTreeValidation?: () => void } = {}) {
+  constructor(private readonly options: { onWholeTreeValidation?: () => void; unmetCriterion?: boolean } = {}) {
     super({ secretStore: new InMemorySecretStore() });
   }
 
@@ -5387,7 +5468,26 @@ class RecursiveHierarchyGateway extends ModelGateway {
         : undefined;
     let output: string;
 
-    if (request.requestKind === "prompt_refinement") {
+    if (request.requestKind === "request_intent") {
+      // A request for the whole product needs an approved intent before a model may write.
+      output = JSON.stringify({
+        action: "final",
+        intent: {
+          goal: "Update login consistently across the product",
+          kind: "change",
+          touches: [{
+            nodeId: "feat_login",
+            reason: "Owns the login page and form",
+            allow: { editExisting: true, addParts: false, deletePartIds: [] },
+          }],
+          structuralProposals: [],
+          assumptions: [],
+          outOfScope: [],
+          acceptance: ["The login change is applied consistently"],
+          questions: [],
+        },
+      });
+    } else if (request.requestKind === "prompt_refinement") {
       output = JSON.stringify({
         understood: "Update login consistently across the product.",
         ambiguities: [],
@@ -5467,7 +5567,7 @@ class RecursiveHierarchyGateway extends ModelGateway {
       const leaves = transactionPlan ? transactionPlan.leaves as unknown[] : [];
       output = JSON.stringify({
         verdict: "valid",
-        tasks: leaves.map((rawLeaf) => {
+        tasks: leaves.map((rawLeaf, leafIndex) => {
           const leaf = isRecord(rawLeaf) ? rawLeaf : {};
           const criteria = Array.isArray(leaf.acceptanceCriteria)
             ? leaf.acceptanceCriteria.filter((item): item is string => typeof item === "string")
@@ -5477,10 +5577,12 @@ class RecursiveHierarchyGateway extends ModelGateway {
             childRunId: leaf.childRunId,
             path: leaf.filePath,
             status: "consistent",
-            criteria: criteria.map((criterion) => ({
+            criteria: criteria.map((criterion, criterionIndex) => ({
               criterion,
-              status: "satisfied",
-              explanation: "The leaf proposal satisfies this criterion.",
+              status: this.options.unmetCriterion && leafIndex === 0 && criterionIndex === 0 ? "unsatisfied" : "satisfied",
+              explanation: this.options.unmetCriterion && leafIndex === 0 && criterionIndex === 0
+                ? "The heading does not say what the requirement asks."
+                : "The leaf proposal satisfies this criterion.",
             })),
             summary: "The leaf is consistent with the whole-tree plan.",
           };
@@ -5645,6 +5747,17 @@ describe("whole-tree commit evidence", () => {
   it("never accepts an unsatisfied criterion or an inconsistent leaf", () => {
     expect(wholeTreeLeafEvidenceAccepted(task("uncertain", ["unsatisfied", "satisfied"]), criteria, true)).toBe(false);
     expect(wholeTreeLeafEvidenceAccepted(task("inconsistent", ["satisfied", "satisfied"]), criteria, true)).toBe(false);
+  });
+
+  it("takes an unsatisfied criterion only when the person chose apply anyway", () => {
+    const unmet = task("inconsistent", ["unsatisfied", "satisfied"]);
+    expect(wholeTreeLeafEvidenceAccepted(unmet, criteria, false)).toBe(false);
+    expect(wholeTreeLeafEvidenceAccepted(unmet, criteria, true)).toBe(false);
+    expect(wholeTreeLeafEvidenceAccepted(unmet, criteria, false, true)).toBe(true);
+    // A file called inconsistent for no unmet requirement is not rescued by it.
+    expect(wholeTreeLeafEvidenceAccepted(task("inconsistent", ["satisfied", "satisfied"]), criteria, false, true)).toBe(false);
+    // The criteria must still be exactly the delegated ones.
+    expect(wholeTreeLeafEvidenceAccepted(task("inconsistent", ["unsatisfied"]), criteria, false, true)).toBe(false);
   });
 
   it("refuses evidence for different criteria than the leaf was given", () => {

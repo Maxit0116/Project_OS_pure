@@ -834,6 +834,8 @@ const en = {
     fileNotOwnedUnnamed: 'That file is not part of any feature, so Agent cannot change it yet. Select it in the file tree and add it to a feature, then try again.',
     reviewRejected: 'The change was not applied: the independent review could not confirm a requirement ({detail}). Nothing was written. Reword the request, or drop that requirement, and ask again.',
     reviewRejectedBare: 'The change was not applied: the independent review rejected it. Nothing was written. Reword the request and ask again.',
+    reviewUnmet: 'The change was not applied: the independent review says it does not meet a requirement ({detail}). Read the change, then choose "Apply anyway", or reword the request.',
+    reviewUnmetBare: 'The change was not applied: the independent review says it does not meet a requirement. Read the change, then choose "Apply anyway", or reword the request.',
     diffStale: 'The file changed after this change was prepared, so it can no longer be applied. Ask again so the change is prepared on the current file.',
     debugTargetUnresolved: 'Project OS could not tell which file to fix. Select the file (or the feature it belongs to) in the tree, then start the debug session again.',
     modelOutputInvalid: 'The model replied in a form Project OS could not use, even after one retry. Nothing was changed. Try again, or pick another model in Settings → Models.',
@@ -1408,6 +1410,9 @@ const en = {
   diff: {
     title: 'Diff Review',
     reviewOnly: 'Review only — not validated, cannot be applied',
+    unmetTitle: 'The independent review says this change does not meet:',
+    unmetHint: 'Nothing has been written yet. Read the change, then apply it anyway or reword your request.',
+    applyAnyway: 'Apply anyway',
     willChange: 'Will change {count} file(s)',
     applied: 'Applied',
     appliedFiles: 'Applied ({count} files)',

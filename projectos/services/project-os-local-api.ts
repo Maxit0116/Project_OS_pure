@@ -285,6 +285,7 @@ import {
   AgentOrchestrator,
   type AgentRunEventPersistence,
   type OrchestratorRunState,
+  unmetRequirementsPayload,
 } from "./agent-orchestrator/index.js";
 import {
   pickRefinementBackend,
@@ -668,9 +669,20 @@ export function wholeTreeLeafEvidenceAccepted(
   task: { status: "consistent" | "inconsistent" | "uncertain"; criteria: Array<{ criterion: string; status: "satisfied" | "unsatisfied" | "uncertain" }> },
   expectedCriteria: readonly string[],
   reviewAcknowledged: boolean,
+  /**
+   * The person chose "apply anyway" for a change the server held because the reviewer found some
+   * requirement unmet. Only then is "unsatisfied" taken, and the criteria must still be exactly the
+   * ones that were delegated, so a reply that dropped or reworded one is still refused.
+   */
+  unmetAccepted = false,
 ): boolean {
-  const criterionOk = (status: string) => status === "satisfied" || (reviewAcknowledged && status === "uncertain");
-  return (task.status === "consistent" || (reviewAcknowledged && task.status === "uncertain")) &&
+  const acknowledged = reviewAcknowledged || unmetAccepted;
+  const criterionOk = (status: string) =>
+    status === "satisfied" || (acknowledged && status === "uncertain") || (unmetAccepted && status === "unsatisfied");
+  const statusOk = task.status === "consistent" ||
+    (acknowledged && task.status === "uncertain") ||
+    (unmetAccepted && task.status === "inconsistent" && task.criteria.some((criterion) => criterion.status === "unsatisfied"));
+  return statusOk &&
     task.criteria.length === expectedCriteria.length &&
     task.criteria.every((criterion, index) => criterion.criterion === expectedCriteria[index] && criterionOk(criterion.status));
 }
@@ -4030,6 +4042,32 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   }
 
   async applyDiff(runId: string): Promise<ApplyResult> {
+    return this.applyDiffForRun(runId, { acceptUnmet: false });
+  }
+
+  /**
+   * The person's explicit "apply anyway": the change was held because the independent review said
+   * some requirement is not met. A separate method, not a flag on `applyDiff`, so the ordinary Apply
+   * can never cross this gate; it is recorded in the audit trail.
+   */
+  async applyDespiteUnmetRequirements(runId: string): Promise<ApplyResult> {
+    if (this.orchestrator.getUnmetRequirements(runId).length === 0) {
+      throw new ProjectOSError(
+        "proposal_validation_failed",
+        "This change was not held for unmet requirements, so there is nothing to apply anyway",
+      );
+    }
+    if (this.auditDirectory) {
+      recordAuditApproval(this.auditDirectory, {
+        runId,
+        tool: "apply_unmet_requirements",
+        decision: "allow",
+      });
+    }
+    return this.applyDiffForRun(runId, { acceptUnmet: true });
+  }
+
+  private async applyDiffForRun(runId: string, options: { acceptUnmet: boolean }): Promise<ApplyResult> {
     const alreadyApplied = this.orchestrator.idempotentApplyResult(runId);
     if (alreadyApplied) return alreadyApplied;
     if (!this.orchestrator.getRun(runId)) {
@@ -4167,7 +4205,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           "Whole-tree change has not completed independent batch validation",
         );
       }
-      this.orchestrator.requireValidatedWholeTree(runId);
+      const unmet = this.orchestrator.getUnmetRequirements(runId);
+      if (unmet.length > 0 && !options.acceptUnmet) {
+        // Say what is unmet and what to do, so the person is not left with a raw validation error.
+        throw new ProjectOSError(
+          "review_unmet_requirements",
+          `The independent review says this change does not meet: ${unmet[0]!.path}: ${unmet[0]!.problems[0] ?? "a requirement"}`.slice(0, 600),
+          { details: { unmetRequirements: unmetRequirementsPayload(unmet) } },
+        );
+      }
+      this.orchestrator.requireValidatedWholeTree(runId, { acceptUnmet: options.acceptUnmet });
       const workspace = this.requireLoadedWorkspace(orchestratorRun.run.projectId);
       let result: ApplyResult;
       try {
@@ -4176,6 +4223,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           orchestratorRun.run,
           plan,
           validation,
+          options.acceptUnmet,
         );
       } catch (error) {
         this.orchestrator.recordWholeTreeApply(workspace, runId, {
@@ -9913,9 +9961,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     rootRun: AgentRun,
     plan: WholeTreeTransactionPlan,
     validation: BatchValidationResult,
+    acceptUnmet = false,
   ): Promise<ApplyResult> {
     const rootState = this.orchestrator.getRun(rootRun.runId);
-    this.orchestrator.requireValidatedWholeTree(rootRun.runId);
+    this.orchestrator.requireValidatedWholeTree(rootRun.runId, { acceptUnmet });
     if (
       rootRun.parentRunId ||
       rootRun.projectId !== workspace.project.projectId ||
@@ -9926,7 +9975,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       validation.parentRunId !== rootRun.runId ||
       validation.planId !== plan.transactionPlanId ||
       validation.contextBundleHash !== plan.rootContextHash ||
-      validation.verdict !== "valid" ||
+      (validation.verdict !== "valid" && !(acceptUnmet && (rootState.unmetRequirements?.length ?? 0) > 0)) ||
       validation.tasks.length !== plan.leaves.length
     ) {
       throw new ProjectOSError(
@@ -9972,7 +10021,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         validationTask.taskId !== leaf.transactionTaskId ||
         validationTask.childRunId !== leaf.childRunId ||
         validationTask.path !== leaf.filePath ||
-        !wholeTreeLeafEvidenceAccepted(validationTask, leaf.acceptanceCriteria, reviewAcknowledged) ||
+        !wholeTreeLeafEvidenceAccepted(validationTask, leaf.acceptanceCriteria, reviewAcknowledged, acceptUnmet) ||
         !leafState ||
         leafState.run.rootRunId !== rootRun.runId ||
         leafState.run.scope?.kind !== "leaf-file" ||

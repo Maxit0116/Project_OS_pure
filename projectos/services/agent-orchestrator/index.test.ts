@@ -2079,20 +2079,57 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
       expect(leaf.events.some((event) => event.type === "diff_ready" && (event.payload as { repair_attempt?: number })?.repair_attempt === 1)).toBe(true);
     });
 
-    it("gives up after one repair and fails with the reviewer's rejection, instead of looping", async () => {
-      const harness = createHierarchyBudgetHarness("batch-unsatisfied");
+    it("gives up after one repair, and fails when the files disagree with each other, instead of looping", async () => {
+      const harness = createHierarchyBudgetHarness("batch-inconsistent-files");
 
       await expect(harness.orchestrator.startRun(harness.workspace, harness.root.run.runId))
         .rejects.toMatchObject({ code: "proposal_validation_failed" });
 
       expect(harness.wholeTreeReviews).toHaveLength(1 + MAX_WHOLE_TREE_REPAIR_ROUNDS);
       expect(harness.generationRequests.filter((request) => request.path === "src/producer/index.ts")).toHaveLength(2);
+      // A person cannot judge files that disagree with each other by reading one requirement, so
+      // this is never held for an "apply anyway".
+      expect(harness.root.unmetRequirements).toBeUndefined();
+    });
+
+    it("holds the change after one repair when only a requirement stays unmet, instead of discarding it", async () => {
+      // The policy the owner chose after the live runs: a requirement the reviewer still calls unmet
+      // after one repair is shown to the person, who may read the change and apply it anyway.
+      const harness = createHierarchyBudgetHarness("batch-unsatisfied");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.wholeTreeReviews).toHaveLength(1 + MAX_WHOLE_TREE_REPAIR_ROUNDS);
+      expect(harness.root.run.status).toBe("awaiting_review");
+      // The record keeps the reviewer's real verdict.
+      expect(harness.root.batchValidationResult?.verdict).toBe("invalid");
+      expect(harness.root.unmetRequirements?.map((finding) => finding.path)).toEqual([
+        "src/producer/index.ts",
+        "src/consumer/index.ts",
+      ]);
+      const ready = harness.root.events.find((event) => event.type === "diff_ready");
+      expect(ready).toMatchObject({
+        payload: {
+          fileCount: 2,
+          unmetRequirements: [
+            { path: "src/producer/index.ts", problems: ["The delegated receipt contract is checked."] },
+            { path: "src/consumer/index.ts", problems: ["The delegated receipt contract is checked."] },
+          ],
+        },
+      });
+      expect(harness.root.events.filter((event) => event.type === "decision_summary").at(-1)).toMatchObject({
+        payload: { summary: expect.stringMatching(/Not applied yet: after one repair the independent review still says 2 requirements are not met/u) },
+      });
+      expect(harness.root.events.find((event) => event.type === "run_completed")).toMatchObject({ payload: { filesApplied: 0 } });
+      // The server holds it; nothing but the person's explicit choice lets it through.
+      expect(() => harness.orchestrator.requireValidatedWholeTree(harness.root.run.runId)).toThrow(/does not have independent validation/u);
+      expect(() => harness.orchestrator.requireValidatedWholeTree(harness.root.run.runId, { acceptUnmet: true })).not.toThrow();
     });
 
     it("says which file and which requirement the final rejection is about", async () => {
       // Observed live: a criterion that could not be met as written ended the run with only "rejected
       // the whole-tree proposal batch", and nothing said what to change in the request.
-      const harness = createHierarchyBudgetHarness("batch-unsatisfied");
+      const harness = createHierarchyBudgetHarness("batch-inconsistent-files");
 
       const failure = await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId)
         .then(() => undefined, (error: unknown) => error as Error & { details?: { findings?: Array<{ path: string; problems: string[] }> } });
@@ -2161,8 +2198,20 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
       expect(leaf?.validationResult?.criteria.some((criterion) => criterion.status === "uncertain")).toBe(true);
     });
 
-    it("still rejects a batch with a criterion that is actually unsatisfied", async () => {
+    it("never applies a batch with an unsatisfied criterion by itself, even when the policy is automatic", async () => {
       const harness = createHierarchyBudgetHarness("batch-unsatisfied", "automatic");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.root.run.status).toBe("awaiting_review");
+      expect(harness.root.events.find((event) => event.type === "run_completed")).toMatchObject({ payload: { filesApplied: 0 } });
+      expect(harness.root.events.some((event) => event.type === "apply_result")).toBe(false);
+      expect(harness.root.unmetRequirements?.length).toBe(2);
+      expect(harness.root.batchReviewReason).toBeUndefined();
+    });
+
+    it("still rejects a batch whose files disagree with each other", async () => {
+      const harness = createHierarchyBudgetHarness("batch-inconsistent-files", "automatic");
 
       await expect(harness.orchestrator.startRun(harness.workspace, harness.root.run.runId))
         .rejects.toMatchObject({ code: "proposal_validation_failed" });
@@ -3059,6 +3108,7 @@ const DEPENDENCY_PLAN_MODES: ReadonlySet<string> = new Set([
   "contract-kind-twice-wrong",
   "batch-uncertain",
   "batch-unsatisfied",
+  "batch-inconsistent-files",
   "leaf-uncertain",
   "batch-truncated-once",
   "plan-self-consumer",
@@ -3084,6 +3134,7 @@ type HierarchyBudgetHarnessMode =
   | "contract-kind-twice-wrong"
   | "batch-uncertain"
   | "batch-unsatisfied"
+  | "batch-inconsistent-files"
   | "leaf-uncertain"
   | "batch-truncated-once"
   | "plan-self-consumer"
@@ -3269,7 +3320,7 @@ function createHierarchyBudgetHarness(
                     criterion: mode === "batch-drifting-copy" ? `${String(criterion)} (reworded)` : criterion,
                     // The reviewer cannot run a build or read another page: one criterion is "uncertain".
                     status: criterionIndex === 0 && mode === "batch-uncertain" ? "uncertain"
-                      : (criterionIndex === 0 && mode === "batch-unsatisfied") || repairableFault ? "unsatisfied"
+                      : (criterionIndex === 0 && (mode === "batch-unsatisfied" || mode === "batch-inconsistent-files")) || repairableFault ? "unsatisfied"
                         : "satisfied",
                     explanation: repairableFault
                       ? "The consumer reads prisma.teamMember, a model that does not exist; the schema's model is membership."
@@ -3279,7 +3330,9 @@ function createHierarchyBudgetHarness(
               : [],
             summary: "The delegated proposal satisfies its task contract.",
           })),
-          crossFileAssessment: { status: "consistent", summary: "The shared receipt interface is consistent." },
+          crossFileAssessment: mode === "batch-inconsistent-files"
+            ? { status: "inconsistent", summary: "The consumer calls a function the producer no longer exports." }
+            : { status: "consistent", summary: "The shared receipt interface is consistent." },
           summary: "The complete receipt change is consistent.",
           rationale: "The producer and consumer use the same interface contract.",
         });
