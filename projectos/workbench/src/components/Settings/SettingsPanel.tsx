@@ -20,6 +20,7 @@ import NotificationSettingsSection from './NotificationSettingsSection'
 import ProjectDescriptionSection from './ProjectDescriptionSection'
 import SpatialPinSettingsSection from './SpatialPinSettingsSection'
 import HarnessSettingsSection from './HarnessSettingsSection'
+import VerificationSettingsSection from './VerificationSettingsSection'
 import { trapDialogTab } from './settingsDialogFocus'
 import styles from './SettingsPanel.module.css'
 
@@ -34,6 +35,7 @@ type SettingsView =
   | 'agents'
   | 'spatialPin'
   | 'harness'
+  | 'verification'
 
 interface Props {
   onClose: () => void
@@ -105,6 +107,13 @@ export default function SettingsPanel({ onClose }: Props) {
         : ts('settings.notificationsOff'),
     },
     { id: 'general', label: ts('settings.tabs.general'), summary: settings.presentationMode ? ts('settings.realDemoSummaryDemo') : ts('settings.realDemoSummaryReal') },
+    {
+      id: 'verification',
+      label: ts('settings.tabs.verification'),
+      summary: (settings.verification?.commands.length ?? 0) > 0
+        ? ts('settings.verification.summaryCount', { count: settings.verification?.commands.length ?? 0 })
+        : ts('settings.verification.summaryNone'),
+    },
     { id: 'models', label: ts('settings.tabs.models'), summary: ts('settings.modelsSummary', { count: settings.modelProfiles.length }) },
     { id: 'agents', label: ts('settings.tabs.agents'), summary: ts('settings.agentsSummary', { count: settings.agentProfiles.length }) },
     {
@@ -173,6 +182,7 @@ export default function SettingsPanel({ onClose }: Props) {
             {view === 'agents' && <AgentProfilesSection />}
             {view === 'spatialPin' && <SpatialPinSettingsSection />}
             {view === 'harness' && <HarnessSettingsSection />}
+            {view === 'verification' && <VerificationSettingsSection />}
           </div>
         </div>
       </GlassLens>
