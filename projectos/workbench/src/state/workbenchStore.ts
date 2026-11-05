@@ -2639,6 +2639,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
       if (fileContent !== null) {
         openLspDocumentIfReady(filePath, fileContent)
+        // The outline was first asked for while the server held the empty placeholder this file is
+        // opened with, so it came back with no symbols; ask again now that it has the real text.
+        useOutlineStore.getState().scheduleFetchOutline(filePath)
       }
     } catch (err) {
       if (!isCurrentRequest()) return
