@@ -69,7 +69,12 @@ export function resolveDebugFixFilePath(
   session: DebugSession,
   workspace: Pick<LoadedProjectOSWorkspace, "graph">,
 ): string | undefined {
-  const touched = session.proposedFix?.touchedFiles?.find((file) => file.trim());
+  // A path the model named is used only when the project has that file: an invented one would send
+  // the fix to a file that does not exist.
+  const known = new Set(workspace.graph.fileIndex.map((file) => file.path));
+  const touched = session.proposedFix?.touchedFiles
+    ?.map((file) => file.trim())
+    .find((file) => file !== "" && known.has(file));
   if (touched) return touched;
   const instrumented = session.instrumentation.find((item) => item.filePath)?.filePath;
   if (instrumented) return instrumented;

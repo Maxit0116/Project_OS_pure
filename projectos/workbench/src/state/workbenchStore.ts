@@ -4000,6 +4000,36 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       })
       set({ runDisposable: disposable })
     } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: unknown }).code ?? '')
+        : ''
+      if (code === 'debug_target_unresolved') {
+        // A bug reported with no file selected, and no probes to say where it is: Agent's own
+        // discovery reads the project to find the file, and its intent card keeps the person in
+        // charge of what gets changed.
+        const { locale } = get()
+        set((current) => ({
+          refineLoading: false,
+          error: null,
+          chatMode: 'change',
+          messages: [
+            ...current.messages,
+            {
+              id: msgId(),
+              role: 'system' as const,
+              content: getStoreMessage(locale, 'debug.handoffMessage'),
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        }))
+        await get().sendPrompt(
+          getStoreMessage(locale, 'debug.handoffPrompt', {
+            bug: debugSession.bugDescription,
+            summary: debugSession.proposedFix?.summary ?? debugSession.bugDescription,
+          }),
+        )
+        return
+      }
       set({
         refineLoading: false,
         error: errorMessage(error, 'Failed to confirm debug fix'),

@@ -1204,6 +1204,10 @@ const zh = {
     continueToReproduce: '继续复现步骤',
     applyFix: '应用建议修复',
     markFixed: '问题已修复 — 清理插桩',
+    handoffMessage:
+      '调试 · 无法确定要改哪个文件，已把这个修复交给 Agent 去定位。批准前请先在意图卡片上确认范围。',
+    handoffPrompt:
+      '修复这个 bug：{bug}\n\n目前的诊断：{summary}\n\n请找出需要改动的文件并修复。',
     cleanupFixPendingHint:
       '建议修复还在等你审核，尚未应用。请先在“代码 / Diff”里点“应用”，再清理插桩。',
     cleanupFixPendingConfirm:

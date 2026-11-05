@@ -1206,6 +1206,10 @@ const en = {
     continueToReproduce: 'Continue to reproduction',
     applyFix: 'Apply proposed fix',
     markFixed: 'Bug is fixed — clean up instrumentation',
+    handoffMessage:
+      'Debug · Project OS could not tell which file to change, so it handed the fix to Agent, which will look for the file. Check the scope on the intent card before approving.',
+    handoffPrompt:
+      'Fix this bug: {bug}\n\nDiagnosis so far: {summary}\n\nFind the file or files that need to change and fix it.',
     cleanupFixPendingHint:
       'The suggested fix is still waiting for your review and has not been applied. Apply it in Code / Diff first, then clean up the instrumentation.',
     cleanupFixPendingConfirm:

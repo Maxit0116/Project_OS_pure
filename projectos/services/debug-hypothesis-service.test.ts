@@ -149,6 +149,35 @@ describe("DebugHypothesisService", () => {
       expect((requests[1]!.input as { repair: { problem: string } }).repair.problem).toMatch(/'hyp_zzz' is not one of hyp_a/u);
     });
 
+    it("sends back a root cause that names no file, because a bug reported without a file is fixed in the file the analysis names", async () => {
+      // Observed live: with no file selected the analysis described the right file in prose, left
+      // touchedFiles empty, and the fix then failed for want of a target.
+      const session = { hypotheses: [{ id: "hyp_a", summary: "Null owner", confidence: 0.7, evidence: [] }], instrumentation: [], bugDescription: "boom" } as unknown as DebugSession;
+      const { gateway, requests } = scripted([
+        { output: JSON.stringify({ chosenRootCauseId: "hyp_a", proposedFixSummary: "Guard the owner in lib/team.ts" }), toolName: "submit_root_cause" },
+        { output: JSON.stringify({ chosenRootCauseId: "hyp_a", proposedFixSummary: "Guard the owner", touchedFiles: ["lib/team.ts"] }), toolName: "submit_root_cause" },
+      ]);
+      const result = await new DebugHypothesisService(gateway as never).chooseRootCauseFromLogs({
+        projectId: "proj", session, logs: [], profile, thinkingDepth: "medium",
+      });
+      expect(result.proposedFix.touchedFiles).toEqual(["lib/team.ts"]);
+      expect((requests[1]!.input as { repair: { problem: string } }).repair.problem).toMatch(/touchedFiles: name at least one repo-relative file path/u);
+    });
+
+    it("reports every problem with a root-cause answer at once", async () => {
+      const session = { hypotheses: [{ id: "hyp_a", summary: "Null owner", confidence: 0.7, evidence: [] }], instrumentation: [], bugDescription: "boom" } as unknown as DebugSession;
+      const { gateway, requests } = scripted([
+        { output: JSON.stringify({ chosenRootCauseId: "hyp_zzz", proposedFixSummary: "x" }), toolName: "submit_root_cause" },
+        { output: JSON.stringify({ chosenRootCauseId: "hyp_a", proposedFixSummary: "y", touchedFiles: ["a.ts"] }), toolName: "submit_root_cause" },
+      ]);
+      await new DebugHypothesisService(gateway as never).chooseRootCauseFromLogs({
+        projectId: "proj", session, logs: [], profile, thinkingDepth: "medium",
+      });
+      const problem = (requests[1]!.input as { repair: { problem: string } }).repair.problem;
+      expect(problem).toMatch(/'hyp_zzz' is not one of hyp_a/u);
+      expect(problem).toMatch(/touchedFiles: name at least one/u);
+    });
+
     it("still falls back to placeholders when the model never produces a usable answer", async () => {
       const { gateway } = scripted([{ output: "not json at all" }]);
       const hypotheses = await new DebugHypothesisService(gateway as never).generateHypotheses({

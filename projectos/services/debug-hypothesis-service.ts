@@ -112,9 +112,13 @@ const ROOT_CAUSE_TOOL = tool("submit_root_cause", "Choose the most likely root c
   properties: {
     chosenRootCauseId: { type: "string", description: "One of the supplied hypothesis ids" },
     proposedFixSummary: { type: "string" },
-    touchedFiles: { type: "array", items: { type: "string" } },
+    touchedFiles: {
+      type: "array",
+      items: { type: "string" },
+      description: "Repo-relative paths of the files that must change, exactly as they appear in the evidence",
+    },
   },
-  required: ["chosenRootCauseId", "proposedFixSummary"],
+  required: ["chosenRootCauseId", "proposedFixSummary", "touchedFiles"],
 });
 
 export class DebugHypothesisService {
@@ -268,7 +272,7 @@ Anchors MUST appear verbatim in the provided file preview. Paths must be from sc
           modelPreference: input.profile.id,
           systemPrompt: `You analyze debug logs. Answer by calling submit_root_cause. If tools are unavailable, respond with JSON only:
 {"chosenRootCauseId":"hyp_…","proposedFixSummary":"...","touchedFiles":["path"]}
-Choose among the provided hypothesis ids. Keep the fix summary short.`,
+Choose among the provided hypothesis ids. Keep the fix summary short. Name every file that must change in touchedFiles, as repo-relative paths taken from the evidence; the fix cannot start without one.`,
           input: {
             mode: "debug_analyze",
             writeCapability: false,
@@ -286,11 +290,18 @@ Choose among the provided hypothesis ids. Keep the fix summary short.`,
           retryMaxOutputTokens: DEBUG_STEP_RETRY_MAX_OUTPUT_TOKENS,
           accept: ({ value: answer }) => {
             const payload = RootCausePayloadSchema.parse(answer);
+            const issues: string[] = [];
             if (!input.session.hypotheses.some((item) => item.id === payload.chosenRootCauseId)) {
-              throw new StructuredIssues([
+              issues.push(
                 `chosenRootCauseId: '${payload.chosenRootCauseId}' is not one of ${input.session.hypotheses.map((item) => item.id).join(", ")}`,
-              ]);
+              );
             }
+            // Without a file the fix has no target (a bug reported with no file selected is
+            // fixed in the file the analysis names), so the answer has to carry one.
+            if (!payload.touchedFiles.some((file) => file.trim() !== "")) {
+              issues.push("touchedFiles: name at least one repo-relative file path that must change");
+            }
+            if (issues.length > 0) throw new StructuredIssues(issues);
             return payload;
           },
         },
