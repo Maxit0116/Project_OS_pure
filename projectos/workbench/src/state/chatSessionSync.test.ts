@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { deriveChatSessionTitle, emptyComposerDraft } from '@contracts/index'
 import {
   buildChatSessionRecord,
+  deriveChatSessionStatus,
   resolvePersistedChatSessionTitle,
 } from './chatSessionSync'
 import type { WorkbenchState } from './workbenchStore'
@@ -34,6 +35,20 @@ const baseState = {
   | 'refineLoading'
   | 'activeRunId'
 >
+
+describe('the status a conversation is listed with', () => {
+  const status = (over: Record<string, unknown>) =>
+    deriveChatSessionStatus({ ...baseState, ...over } as never)
+
+  it('is not running for a run that has finished, though its run id is still set', () => {
+    expect(status({ activeRunId: 'run_1', flowStatus: 'complete' })).toBe('idle')
+  })
+
+  it('is running while the run is, or a request is being prepared', () => {
+    expect(status({ activeRunId: 'run_1', flowStatus: 'running' })).toBe('running')
+    expect(status({ refineLoading: true })).toBe('running')
+  })
+})
 
 describe('chatSessionSync', () => {
   it('derives title from first user message', () => {

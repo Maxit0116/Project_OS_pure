@@ -60,7 +60,9 @@ export function deriveChatSessionStatus(state: WorkbenchState): ChatSessionStatu
   if (state.flowStatus === 'awaiting_review') return 'awaiting_review'
   if (state.pendingRefinement && !state.refinementConfirmed) return 'awaiting_review'
   if (state.pendingPlan && !state.planConfirmed) return 'awaiting_review'
-  if (state.flowStatus === 'running' || state.refineLoading || state.activeRunId) return 'running'
+  // An active run id stays set after the run ends (the review and undo work from it), so it is not
+  // evidence that the run is going: a finished run was listed as running for good.
+  if (state.flowStatus === 'running' || state.refineLoading) return 'running'
   if (state.flowStatus === 'error' || state.flowStatus === 'interrupted') return 'error'
   return 'idle'
 }

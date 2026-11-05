@@ -90,6 +90,31 @@ describe('leaving a conversation', () => {
     expect(state.decisionResolvingIds).toEqual([])
   })
 
+  it.each([
+    ['complete', 'complete'],
+    ['awaiting_review', 'awaiting_review'],
+    ['interrupted', 'interrupted'],
+    ['running', 'running'],
+  ] as const)('reopens a conversation whose run is %s as %s, not as running', async (runStatus, expected) => {
+    // Observed on the packaged app: a run that had finished and applied reopened after a restart with
+    // "running" and a Stop button, because replaying its events starts at run_started and the saved
+    // status was stale.
+    const getAgentRun = vi.fn(async () => ({ runId: 'run_done', status: runStatus }))
+    const getAgentRunEvents = vi.fn(async () => [
+      { eventId: 'evt_1', runId: 'run_done', timestamp: now, type: 'run_started' },
+    ])
+    useWorkbenchStore.setState({
+      client: clientFor(
+        { chat_done: record('chat_done', 'change', { activeRunId: 'run_done', flowStatus: 'running' }) },
+        { getAgentRun, getAgentRunEvents },
+      ),
+    })
+
+    await useChatSessionStore.getState().switchSession('chat_done')
+    await vi.waitFor(() => expect(getAgentRunEvents).toHaveBeenCalled())
+    await vi.waitFor(() => expect(useWorkbenchStore.getState().flowStatus).toBe(expected))
+  })
+
   it('brings back the questions of the run a conversation is still in', async () => {
     const getAgentRun = vi.fn(async () => ({ runId: 'run_new_leaf', rootRunId: 'run_new', status: 'running' }))
     const listRunDecisions = vi.fn(async () => [{ ...staleDecision, id: 'decision_new', rootRunId: 'run_new' }])
