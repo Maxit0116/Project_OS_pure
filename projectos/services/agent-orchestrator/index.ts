@@ -243,6 +243,16 @@ export interface OrchestratorRunState {
   batchReviewReason?: string;
   /** The leaf-level equivalent: its independent review could not confirm some criteria by reading. */
   proposalReviewReason?: string;
+  /** The located edit target a leaf proposed against; kept so a rejected proposal can be regenerated. */
+  fileEditPlan?: FileEditPlan;
+  /** How many times the whole-tree review sent this leaf back for a repair. */
+  repairRounds?: number;
+  /**
+   * Root runs only: the files the delegated plans of this request have already chosen to change,
+   * and which planner chose them. Two tasks that change the same file are refused when the batch is
+   * assembled, after all the generation; claiming at planning time says so while it is cheap.
+   */
+  claimedLeafFiles?: Map<string, string>;
   /**
    * Set when this run is dispatched through a registered `NodeExecutorAdapter`
    * instead of Project OS's built-in model loop. Children inherit it.
@@ -781,7 +791,8 @@ type BatchValidationFailureCategory =
   | "response_truncated";
 
 class BatchValidationError extends Error {
-  constructor(readonly category: BatchValidationFailureCategory) {
+  /** Which part of the reply was wrong, so the retry can be told. */
+  constructor(readonly category: BatchValidationFailureCategory, readonly detail?: string) {
     super(category);
     this.name = "BatchValidationError";
   }
@@ -791,6 +802,25 @@ type DelegationPlanFailureCategory =
   | "malformed_json"
   | "invalid_plan_shape"
   | "response_truncated";
+
+/** What the whole-tree reviewer found wrong with one file, in its own words (bounded). */
+export interface WholeTreeReviewFinding {
+  childRunId: string;
+  path: string;
+  problems: string[];
+  crossFile: string;
+}
+
+/** The whole-tree review rejected the batch, and says which files to send back. */
+class WholeTreeReviewRejectedError extends ProjectOSError {
+  constructor(readonly findings: WholeTreeReviewFinding[]) {
+    super("proposal_validation_failed", "Independent agent validation rejected the whole-tree proposal batch");
+    this.name = "WholeTreeReviewRejectedError";
+  }
+}
+
+/** One extra round, once: a rejected file gets the reviewer's finding and is regenerated. */
+export const MAX_WHOLE_TREE_REPAIR_ROUNDS = 1;
 
 class DelegationPlanError extends Error {
   /** `detail` says which part of the plan was wrong, so the retry can be told instead of guessing. */
@@ -2241,7 +2271,7 @@ export class AgentOrchestrator {
     state: OrchestratorRunState,
     plan: FileEditPlan,
     stepId: string,
-    feedback: { summary: string; rationale: string; scopeStatus: string } | undefined,
+    feedback: { summary: string; rationale: string; scopeStatus: string; source?: "whole_tree_review" } | undefined,
   ): Promise<GeneratedDiff> {
     const profile = state.modelProfile!;
     const adapter = new ProjectOSModelExecutor(() =>
@@ -2862,9 +2892,13 @@ export class AgentOrchestrator {
       return;
     }
 
-    const transactionPlan = this.buildWholeTreeTransactionPlan(state);
+    let transactionPlan!: WholeTreeTransactionPlan;
+    for (let round = 0; ; round += 1) {
+    transactionPlan = this.buildWholeTreeTransactionPlan(state);
     state.wholeTreeTransactionPlan = transactionPlan;
-    const batchStep = createNodeRunningStep(state, "validate_batch");
+    const roundStep = createNodeRunningStep(state, "validate_batch");
+    // A second review needs its own step id: a completed step cannot be restarted.
+    const batchStep = round === 0 ? roundStep : { ...roundStep, id: `${roundStep.id}_r${round}` };
     this.emit(workspace, state, createEvent(state.run.runId, "step_started", batchStep));
     try {
       const validation = await this.validateWholeTreeBatch(
@@ -2905,9 +2939,30 @@ export class AgentOrchestrator {
           ),
         ),
       );
+      break;
     } catch (error) {
+      if (
+        error instanceof WholeTreeReviewRejectedError &&
+        round < MAX_WHOLE_TREE_REPAIR_ROUNDS
+      ) {
+        this.emit(
+          workspace,
+          state,
+          createEvent(
+            state.run.runId,
+            "step_completed",
+            completeStep(
+              batchStep,
+              `The independent review rejected ${error.findings.length} file${error.findings.length === 1 ? "" : "s"}; sending its findings back for one repair.`,
+            ),
+          ),
+        );
+        await this.repairRejectedLeaves(workspace, state, error.findings);
+        continue;
+      }
       this.emitFailedStep(workspace, state, batchStep, error);
       throw error;
+    }
     }
 
     if (state.executionPolicy === "review_first" || state.batchReviewReason) {
@@ -2935,6 +2990,150 @@ export class AgentOrchestrator {
       return;
     }
     await this.applyAndVerifyWholeTree(workspace, state, transactionPlan);
+  }
+
+  /**
+   * The whole-tree review rejected some files. Each gets the reviewer's finding once, is
+   * regenerated against its own located edit target, passes its own independent review again, and
+   * then the whole batch is reviewed again. One round only: a second rejection fails the run with
+   * what the reviewer said, rather than looping on a model that cannot fix it.
+   */
+  private async repairRejectedLeaves(
+    workspace: LoadedProjectOSWorkspace,
+    rootState: OrchestratorRunState,
+    findings: WholeTreeReviewFinding[],
+  ): Promise<void> {
+    // The repair round has its own wall-clock window; the budget exists to bound a runaway, and one
+    // extra round is bounded by MAX_WHOLE_TREE_REPAIR_ROUNDS.
+    rootState.pipelineStartedAt = Date.now();
+    this.emit(
+      workspace,
+      rootState,
+      createActionEvent(rootState.run.runId, "decision_summary", {
+        summary: `The whole-tree review rejected ${findings.map((finding) => finding.path).join(", ").slice(0, 300)}. Each file is sent back once with the reviewer's finding, then the batch is reviewed again.`,
+      }),
+    );
+    for (const finding of findings) {
+      const leaf = this.runs.get(finding.childRunId);
+      if (!leaf || leaf.run.rootRunId !== rootState.run.runId) {
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          `Rejected leaf '${finding.childRunId}' is not part of this run`,
+        );
+      }
+      await this.repairLeafProposal(workspace, leaf, finding);
+      this.assertRunActive(rootState);
+    }
+  }
+
+  private async repairLeafProposal(
+    workspace: LoadedProjectOSWorkspace,
+    leaf: OrchestratorRunState,
+    finding: WholeTreeReviewFinding,
+  ): Promise<void> {
+    const plan = leaf.fileEditPlan;
+    if (!plan || !leaf.modelProfile || !leaf.localContext) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        `Leaf '${leaf.run.runId}' cannot be repaired: its edit target is not available`,
+      );
+    }
+    const settled = { status: leaf.status, runStatus: leaf.run.status };
+    // The leaf is finished; reopen it for this one regeneration with a fresh model-call and clock budget.
+    leaf.repairRounds = (leaf.repairRounds ?? 0) + 1;
+    const attempt = 1 + leaf.repairRounds;
+    leaf.pipelineStartedAt = Date.now();
+    leaf.modelCallCount = 0;
+    delete leaf.proposalReviewReason;
+    leaf.status = "running";
+    leaf.run.status = "running";
+    delete leaf.run.completedAt;
+    try {
+      const generateStep = createLiveRunningStep(leaf, "generate_proposal", attempt);
+      this.emit(workspace, leaf, createEvent(leaf.run.runId, "step_started", generateStep));
+      let diff: GeneratedDiff;
+      try {
+        diff = await this.proposeThroughHarness(workspace, leaf, plan, generateStep.id, {
+          summary: finding.problems.join(" | "),
+          rationale: finding.crossFile,
+          scopeStatus: "compliant",
+          source: "whole_tree_review",
+        });
+        this.assertRunActive(leaf);
+        this.emitDiffProposed(workspace, leaf, diff, generateStep.id);
+        this.emit(
+          workspace,
+          leaf,
+          createEvent(
+            leaf.run.runId,
+            "step_completed",
+            completeStep(generateStep, `Regenerated ${finding.path} to fix what the whole-tree review found.`),
+          ),
+        );
+      } catch (error) {
+        if (!(error instanceof AgentRunCancelledError)) this.emitFailedStep(workspace, leaf, generateStep, error);
+        throw error;
+      }
+      leaf.diff = diff;
+      const validateStep = createLiveRunningStep(leaf, "validate_proposal", attempt);
+      this.emit(workspace, leaf, createEvent(leaf.run.runId, "step_started", validateStep));
+      try {
+        const result = await this.validateProposal(workspace, leaf, plan, diff, validateStep.id);
+        this.assertRunActive(leaf);
+        leaf.validationResult = result;
+        leaf.validatedDiffJson = JSON.stringify(diff);
+        this.emit(
+          workspace,
+          leaf,
+          createEvent(
+            leaf.run.runId,
+            "step_completed",
+            completeStep(validateStep, `Independent validation accepted the repaired proposal for ${result.path}.`),
+          ),
+        );
+      } catch (error) {
+        if (!(error instanceof AgentRunCancelledError)) this.emitFailedStep(workspace, leaf, validateStep, error);
+        throw error;
+      }
+      this.emit(
+        workspace,
+        leaf,
+        createEvent(leaf.run.runId, "diff_ready", undefined, {
+          fileCount: diff.files.length,
+          paths: diff.files.map((file) => file.path),
+          repair_attempt: 1,
+        }),
+      );
+      leaf.status = settled.status;
+      leaf.run.status = settled.runStatus;
+      leaf.run.completedAt = new Date().toISOString();
+    } catch (error) {
+      if (!(error instanceof AgentRunCancelledError)) {
+        leaf.status = "error";
+        leaf.run.status = "error";
+      }
+      throw error;
+    }
+  }
+
+  private leafFileClaims(state: OrchestratorRunState): Map<string, string> {
+    const root = this.runs.get(state.run.rootRunId ?? state.run.runId) ?? state;
+    root.claimedLeafFiles ??= new Map();
+    return root.claimedLeafFiles;
+  }
+
+  /** The candidates a leaf-level planner may still choose: not a file another planner already took. */
+  private excludeClaimedLeafFiles(target: HierarchyPlanTarget, state: OrchestratorRunState): HierarchyPlanTarget {
+    if (target.kind !== "leaf-file" || target.allowedIds.length === 0) return target;
+    const claims = this.leafFileClaims(state);
+    const free = target.allowedIds.filter((path) => !claims.has(path) || claims.get(path) === state.run.runId);
+    if (free.length === 0) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        "Every file this component could change is already being changed by another task of this request",
+      );
+    }
+    return { ...target, allowedIds: free };
   }
 
   private reserveHierarchyExpansion(
@@ -3137,12 +3336,15 @@ export class AgentOrchestrator {
         "A model profile and planner scope are required for recursive delegation",
       );
     }
-    const target = restrictLeafCandidatesToApprovedIntent(hierarchyPlanTarget(state), state, workspace.graph);
+    const baseTarget = restrictLeafCandidatesToApprovedIntent(hierarchyPlanTarget(state), state, workspace.graph);
+    let target = baseTarget;
     let firstFailure: DelegationPlanFailureCategory | undefined;
     let firstFailureDetail: string | undefined;
     const maxPlanAttempts = 3;
     for (let attempt = 0; attempt < maxPlanAttempts; attempt += 1) {
       const retrying = attempt >= 1;
+      // Recomputed every attempt: a sibling planner may have claimed a file since the last one.
+      target = this.excludeClaimedLeafFiles(baseTarget, state);
       const response = await this.completeWithTrace(
         workspace,
         state,
@@ -3340,6 +3542,18 @@ export class AgentOrchestrator {
         if (new Set(taskKeys).size !== taskKeys.length) {
           throw new DelegationPlanError("invalid_plan_shape", "taskKey values must be distinct");
         }
+        if (target.kind === "leaf-file") {
+          const claims = this.leafFileClaims(state);
+          const clashing = proposed.tasks
+            .map((task) => task.path!)
+            .filter((path) => claims.has(path) && claims.get(path) !== state.run.runId);
+          if (clashing.length > 0) {
+            throw new DelegationPlanError(
+              "invalid_plan_shape",
+              `${clashing.join(", ")} ${clashing.length === 1 ? "is" : "are"} already being changed by another task of this request; choose other files, or leave it to that task`,
+            );
+          }
+        }
         const planId = `plan_${crypto.randomUUID()}`;
         const taskIdByKey = new Map(taskKeys.map((key, index) => [key, `${planId}:task_${index + 1}`]));
         const contractIdByKey = new Map(proposed.contracts.map((contract) => [
@@ -3430,6 +3644,12 @@ export class AgentOrchestrator {
             "The task was decomposed along immediate graph children.",
           ),
         });
+        if (target.kind === "leaf-file") {
+          // Claim in the same synchronous run as the check above, so two planners finishing together
+          // cannot both take a file.
+          const claims = this.leafFileClaims(state);
+          for (const task of proposed.tasks) claims.set(task.path!, state.run.runId);
+        }
         this.emitProviderReasoning(state, phaseId, response.reasoning);
         return plan;
       } catch (error) {
@@ -4452,6 +4672,7 @@ export class AgentOrchestrator {
       };
     });
 
+    let firstFailureDetail: string | undefined;
     let firstFailure: BatchValidationFailureCategory | undefined;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const retrying = attempt === 1;
@@ -4478,6 +4699,7 @@ export class AgentOrchestrator {
               ? {
                   validationRetry: {
                     reason: firstFailure ?? "invalid_validation_shape",
+                    ...(firstFailureDetail ? { problem: firstFailureDetail } : {}),
                     instruction: "Return only the required JSON object. Do not repeat the rejected response.",
                   },
                 }
@@ -4496,25 +4718,12 @@ export class AgentOrchestrator {
           throw new BatchValidationError("response_truncated");
         }
         const parsed = parseBatchValidation(response.output, response.reasoning);
-        if (parsed.tasks.length !== plan.leaves.length) {
-          throw new BatchValidationError("invalid_validation_shape");
-        }
-        for (const [index, leaf] of plan.leaves.entries()) {
-          const result = parsed.tasks[index];
-          if (
-            !result ||
-            result.taskId !== leaf.transactionTaskId ||
-            result.childRunId !== leaf.childRunId ||
-            result.path !== leaf.filePath ||
-            result.criteria.length !== leaf.acceptanceCriteria.length ||
-            result.criteria.some(
-              (criterion, criterionIndex) =>
-                criterion.criterion !== leaf.acceptanceCriteria[criterionIndex],
-            )
-          ) {
-            throw new BatchValidationError("invalid_validation_shape");
-          }
-        }
+        alignBatchReview(parsed, plan.leaves.map((leaf) => ({
+          taskId: leaf.transactionTaskId,
+          childRunId: leaf.childRunId,
+          path: leaf.filePath,
+          criteria: leaf.acceptanceCriteria,
+        })));
         const semanticallyValid = isEvidenceValidBatchValidation(parsed);
         // Nothing unsatisfied and the files agree with each other, but some criteria cannot be
         // confirmed by reading (they need a build or another page). That is a reason to ask the
@@ -4577,6 +4786,20 @@ export class AgentOrchestrator {
         );
         this.emitProviderReasoning(state, phaseId, response.reasoning);
         if (result.verdict !== "valid") {
+          const crossFile = sanitizePlanText(parsed.crossFileAssessment.summary, 500, "The files are not consistent with each other.");
+          const findings: WholeTreeReviewFinding[] = parsed.tasks.flatMap((task, index) => {
+            const leaf = plan.leaves[index]!;
+            const problems = task.criteria
+              .filter((criterion) => criterion.status === "unsatisfied")
+              .map((criterion) => sanitizePlanText(criterion.explanation, 500, "A criterion is not satisfied."));
+            if (problems.length === 0 && task.status === "inconsistent") {
+              problems.push(sanitizePlanText(task.summary, 500, "This file is inconsistent with the rest of the change."));
+            }
+            return problems.length > 0
+              ? [{ childRunId: leaf.childRunId, path: leaf.filePath, problems: problems.slice(0, 4), crossFile }]
+              : [];
+          });
+          if (findings.length > 0) throw new WholeTreeReviewRejectedError(findings);
           throw new ProjectOSError(
             "proposal_validation_failed",
             "Independent agent validation rejected the whole-tree proposal batch",
@@ -4600,12 +4823,19 @@ export class AgentOrchestrator {
           : "invalid_validation_shape";
         if (!retrying) {
           firstFailure = failure;
+          firstFailureDetail = error instanceof BatchValidationError ? error.detail : undefined;
           continue;
         }
         throw new ProjectOSError(
           "proposal_validation_failed",
           `Whole-tree batch validation failed (${safeBatchValidationFailureLabel(failure)})`,
-          { details: { failureCategory: "retry_also_invalid", lastFailureCategory: failure } },
+          {
+            details: {
+              failureCategory: "retry_also_invalid",
+              lastFailureCategory: failure,
+              ...(error instanceof BatchValidationError && error.detail ? { problem: error.detail } : {}),
+            },
+          },
         );
       }
     }
@@ -5225,27 +5455,15 @@ export class AgentOrchestrator {
           }
           throw error;
         }
-        if (parsed.tasks.length !== plan.tasks.length) {
-          throw new BatchValidationError("invalid_validation_shape");
+        if (children.length < plan.tasks.length) {
+          throw new BatchValidationError("invalid_validation_shape", "a delegated child run is missing");
         }
-        for (const [index, task] of plan.tasks.entries()) {
-          const child = children[index];
-          const result = parsed.tasks[index];
-          if (
-            !child ||
-            !result ||
-            result.taskId !== task.taskId ||
-            result.childRunId !== child.runId ||
-            result.path !== task.filePath ||
-            result.criteria.length !== task.acceptanceCriteria.length ||
-            result.criteria.some(
-              (criterion, criterionIndex) =>
-                criterion.criterion !== task.acceptanceCriteria[criterionIndex],
-            )
-          ) {
-            throw new BatchValidationError("invalid_validation_shape");
-          }
-        }
+        alignBatchReview(parsed, plan.tasks.map((task, index) => ({
+          taskId: task.taskId,
+          childRunId: children[index]!.runId,
+          path: task.filePath,
+          criteria: task.acceptanceCriteria,
+        })));
         const semanticallyValid = isEvidenceValidBatchValidation(parsed);
         const result = BatchValidationResultSchema.parse({
           version: "0.1.0",
@@ -5876,6 +6094,7 @@ export class AgentOrchestrator {
         locateStep.id,
       );
       state.plannedWritePaths = [fileEditPlan.path];
+      state.fileEditPlan = fileEditPlan;
       if (this.runs.get(state.run.runId) !== state) {
         return;
       }
@@ -5907,7 +6126,7 @@ export class AgentOrchestrator {
 
     let diff: GeneratedDiff | undefined;
     let validationFeedback:
-      | { summary: string; rationale: string; scopeStatus: string }
+      | { summary: string; rationale: string; scopeStatus: string; source?: "whole_tree_review" }
       | undefined;
     // One semantic regenerate after an evidence-invalid proposal (e.g. cross-file
     // dependency / scopeStatus:violation) before failing the child run.
@@ -6495,13 +6714,7 @@ export class AgentOrchestrator {
           }
           throw error;
         }
-        if (
-          parsed.path !== created.path ||
-          parsed.criteria.length !== criteria.length ||
-          parsed.criteria.some((criterion, index) => criterion.criterion !== criteria[index])
-        ) {
-          throw new ProposalValidationError("invalid_validation_shape");
-        }
+        alignProposalReview(parsed, criteria, created.path);
         const classified = classifyProposalValidation(parsed);
         const result = AgentProposalValidationResultSchema.parse({
           version: "0.1.0",
@@ -7410,14 +7623,7 @@ export class AgentOrchestrator {
             { details: { failureCategory: "wrong_path_or_scope", runId: state.run.runId } },
           );
         }
-        if (
-          parsed.criteria.length !== plan.acceptanceCriteria.length ||
-          parsed.criteria.some(
-            (criterion, index) => criterion.criterion !== plan.acceptanceCriteria[index],
-          )
-        ) {
-          throw new ProposalValidationError("invalid_validation_shape");
-        }
+        alignProposalReview(parsed, plan.acceptanceCriteria, plan.path);
         const classified = classifyProposalValidation(parsed);
         const result = AgentProposalValidationResultSchema.parse({
           version: "0.1.0",
@@ -7486,7 +7692,7 @@ export class AgentOrchestrator {
     stepOutputs: string[],
     fileEditPlan?: FileEditPlan,
     phaseId?: string,
-    semanticValidationRetry?: { summary: string; rationale: string; scopeStatus: string },
+    semanticValidationRetry?: { summary: string; rationale: string; scopeStatus: string; source?: "whole_tree_review" },
     verificationRepair?: VerificationRepairInput,
   ): Promise<GeneratedDiff> {
     if (!state.modelProfile) {
@@ -9073,6 +9279,7 @@ function parseBatchValidation(
   reasoning?: string,
 ): z.infer<typeof ModelBatchValidationSchema> {
   let parsedJson = false;
+  let detail: string | undefined;
   const seen = new Set<string>();
   for (const source of orderedModelOutputSources(output, reasoning)) {
     for (const candidate of extractJsonObjectCandidates(source)) {
@@ -9087,11 +9294,68 @@ function parseBatchValidation(
       }
       const result = ModelBatchValidationSchema.safeParse(parsed);
       if (result.success) return result.data;
+      const issue = result.error.issues[0];
+      if (issue) detail = `${issue.path.join(".") || "(reply)"}: ${issue.message}`.slice(0, 300);
     }
   }
   throw new BatchValidationError(
     parsedJson ? "invalid_validation_shape" : "malformed_json",
+    detail,
   );
+}
+
+/**
+ * A reviewer is asked to copy task ids, paths and every criterion back with its verdict. The server
+ * already has all of them, and a copy that drifts failed the whole run: a paraphrased criterion, or
+ * text the redactor changed before the model ever saw it. The reply is matched to the plan by task id
+ * when every id is there and by position otherwise, the server's own identity and criterion text are
+ * kept, and only a different number of tasks or criteria is refused (with which one).
+ */
+export function alignBatchReview(
+  parsed: { tasks: Array<{ taskId: string; childRunId: string; path: string; criteria: Array<{ criterion: string }> }> },
+  expected: ReadonlyArray<{ taskId: string; childRunId: string; path: string; criteria: readonly string[] }>,
+): void {
+  if (parsed.tasks.length !== expected.length) {
+    throw new BatchValidationError(
+      "invalid_validation_shape",
+      `tasks: expected ${expected.length} entries, one per task, in order; got ${parsed.tasks.length}`,
+    );
+  }
+  const byId = new Map(parsed.tasks.map((task) => [task.taskId, task]));
+  const ordered = byId.size === parsed.tasks.length && expected.every((task) => byId.has(task.taskId))
+    ? expected.map((task) => byId.get(task.taskId)!)
+    : parsed.tasks;
+  parsed.tasks = ordered.map((task, index) => {
+    const wanted = expected[index]!;
+    if (task.criteria.length !== wanted.criteria.length) {
+      throw new BatchValidationError(
+        "invalid_validation_shape",
+        `tasks.${index} (${wanted.path}): expected ${wanted.criteria.length} criteria, one per criterion, in order; got ${task.criteria.length}`,
+      );
+    }
+    task.taskId = wanted.taskId;
+    task.childRunId = wanted.childRunId;
+    task.path = wanted.path;
+    task.criteria.forEach((criterion, criterionIndex) => {
+      criterion.criterion = wanted.criteria[criterionIndex]!;
+    });
+    return task;
+  });
+}
+
+/** The same for one file's review: the criteria are the server's, matched by position. */
+export function alignProposalReview(
+  parsed: { path: string; criteria: Array<{ criterion: string }> },
+  expectedCriteria: readonly string[],
+  path: string,
+): void {
+  if (parsed.criteria.length !== expectedCriteria.length) {
+    throw new ProposalValidationError("invalid_validation_shape");
+  }
+  parsed.path = path;
+  parsed.criteria.forEach((criterion, index) => {
+    criterion.criterion = expectedCriteria[index]!;
+  });
 }
 
 function isEvidenceValidBatchValidation(
@@ -9420,7 +9684,7 @@ function generationSystemPrompt(
   selectedPath: string,
   responseLanguage: string,
   retryCategory?: ModelGeneratedDiffError["category"],
-  semanticValidationRetry?: { summary: string; rationale: string; scopeStatus: string },
+  semanticValidationRetry?: { summary: string; rationale: string; scopeStatus: string; source?: "whole_tree_review" },
   verificationRepair?: VerificationRepairInput,
 ): string {
   const retryInstruction = retryCategory === "response_truncated"
@@ -9428,7 +9692,9 @@ function generationSystemPrompt(
     : retryCategory
       ? `The previous response failed validation (${retryCategory}). Return only the required JSON object; do not repeat or discuss the rejected response. The after field must be the complete modified source, never a placeholder.`
       : "";
-  const semanticRetryInstruction = semanticValidationRetry
+  const semanticRetryInstruction = semanticValidationRetry?.source === "whole_tree_review"
+    ? `The independent whole-tree review found this file inconsistent with the rest of the change. Finding: ${sanitizePlanText(semanticValidationRetry.summary, 700, "The file does not fit the rest of the change")}. Cross-file note: ${sanitizePlanText(semanticValidationRetry.rationale, 500, "See the finding")}. Fix exactly what the finding describes, using the names, models and signatures the finding and the connected files show, and change nothing else. Return the complete revised file.`
+    : semanticValidationRetry
     ? `A previous proposal for this file was rejected by independent validation (scope=${semanticValidationRetry.scopeStatus}). Rejection summary: ${sanitizePlanText(semanticValidationRetry.summary, 400, "Proposal rejected")}. Rejection rationale: ${sanitizePlanText(semanticValidationRetry.rationale, 600, "Fix the proposal within the authorized file")}. Produce a revised complete after that stays runnable using only APIs/fields already present on the selected file snapshot (or safe local fallbacks). Do not assume other files will be changed.`
     : "";
   const repairInstruction = verificationRepair

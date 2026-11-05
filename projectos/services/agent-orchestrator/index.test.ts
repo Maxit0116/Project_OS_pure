@@ -26,7 +26,10 @@ import { ProjectOSLocalApi } from "../project-os-local-api.js";
 import {
   AgentOrchestrator,
   boundUpstreamProposals,
+  alignBatchReview,
+  alignProposalReview,
   classifyProposalValidation,
+  MAX_WHOLE_TREE_REPAIR_ROUNDS,
   WHOLE_TREE_VALIDATION_MAX_OUTPUT_TOKENS,
   WHOLE_TREE_VALIDATION_RETRY_MAX_OUTPUT_TOKENS,
   type AgentRunEventPersistence,
@@ -1854,6 +1857,38 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
       ]);
     });
 
+    it("does not let a second task pick a file an earlier task of the request already took", async () => {
+      // Observed live: three sibling components were planned together and two picked lib/db.ts;
+      // the duplicate was only refused when the batch was assembled, after all the generation.
+      const harness = createHierarchyBudgetHarness("shared-file-sequential");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      const paths = harness.root.wholeTreeTransactionPlan!.leaves.map((leaf) => leaf.filePath);
+      expect(paths.filter((path) => path === "src/shared/index.ts")).toHaveLength(1);
+      expect(paths).toHaveLength(3);
+      // The later planner was never offered the claimed file.
+      const consumerPlan = harness.planRequests.find((request) =>
+        (request.tools![0]!.function.parameters as { properties: { tasks: { items: { properties: { path?: { enum: string[] } } } } } })
+          .properties.tasks.items.properties.path?.enum?.includes("src/consumer/index.ts"));
+      const offered = (consumerPlan!.tools![0]!.function.parameters as { properties: { tasks: { items: { properties: { path: { enum: string[] } } } } } })
+        .properties.tasks.items.properties.path.enum;
+      expect(offered).not.toContain("src/shared/index.ts");
+    });
+
+    it("sends back a plan that picks a file another planner took at the same moment, and says why", async () => {
+      const harness = createHierarchyBudgetHarness("shared-file-parallel");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      const paths = harness.root.wholeTreeTransactionPlan!.leaves.map((leaf) => leaf.filePath);
+      expect(paths.filter((path) => path === "src/shared/index.ts")).toHaveLength(1);
+      const corrections = harness.planRequests
+        .map((request) => request.planRetry as { problem?: string } | undefined)
+        .filter((retry) => retry?.problem?.includes("already being changed by another task"));
+      expect(corrections.length).toBeGreaterThanOrEqual(1);
+    });
+
     it("fits a long model rationale and objective into the plan limits instead of failing the plan", async () => {
       // Observed live: a 500+ character rationale was cut to 501 characters (500 plus an ellipsis) and
       // then rejected by the plan's own limit of 500, on the first attempt and on the retry.
@@ -1947,6 +1982,65 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
       })]);
       expect(seen.systemPrompt).toMatch(/upstreamProposals lists files that tasks you depend on have already proposed/u);
     }
+  });
+
+  describe("a reviewer that copies the plan back imperfectly", () => {
+    it("is matched to the plan by position, with the server's own ids and criterion text", async () => {
+      // Observed live: one criterion of eleven came back reworded, the server wanted it byte for byte,
+      // and a four-file change failed after about 35 model calls.
+      const harness = createHierarchyBudgetHarness("batch-drifting-copy");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.wholeTreeReviews).toHaveLength(1);
+      expect(harness.root.run.status).toBe("awaiting_review");
+      const result = harness.root.batchValidationResult!;
+      const planned = harness.root.wholeTreeTransactionPlan!.leaves;
+      expect(result.tasks.map((task) => task.taskId)).toEqual(planned.map((leaf) => leaf.transactionTaskId));
+      expect(result.tasks.map((task) => task.path)).toEqual(planned.map((leaf) => leaf.filePath));
+      expect(JSON.stringify(result)).not.toContain("(reworded)");
+    });
+  });
+
+  describe("a whole-tree review that rejects one file", () => {
+    it("sends the reviewer's finding back to that file, regenerates it once, and reviews the batch again", async () => {
+      // Observed live: the reviewer caught a page that used `prisma.teamMember` (the model is
+      // `membership`), and the run, about 25 model calls, was lost.
+      const harness = createHierarchyBudgetHarness("batch-repairable");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.root.run.status).toBe("awaiting_review");
+      expect(harness.wholeTreeReviews).toHaveLength(2);
+      expect(harness.root.batchValidationResult?.verdict).toBe("valid");
+      // Only the rejected file was regenerated, and it was told what was wrong in the reviewer's words.
+      const byPath = (path: string) => harness.generationRequests.filter((request) => request.path === path);
+      expect(byPath("src/consumer/index.ts")).toHaveLength(2);
+      expect(byPath("src/producer/index.ts")).toHaveLength(1);
+      const repair = byPath("src/consumer/index.ts")[1]!;
+      expect(repair.systemPrompt).toMatch(/independent whole-tree review found this file inconsistent/u);
+      expect(repair.systemPrompt).toMatch(/prisma\.teamMember, a model that does not exist/u);
+      expect(byPath("src/consumer/index.ts")[0]!.systemPrompt).not.toMatch(/whole-tree review found/u);
+      // The root says what it is doing, and the repaired leaf is a finished, valid leaf again.
+      expect(harness.root.events.some((event) =>
+        event.type === "decision_summary" && /rejected src\/consumer\/index\.ts/u.test(JSON.stringify(event.payload)))).toBe(true);
+      const leaf = harness.allStates().find((state) => state.run.scope?.kind === "leaf-file" && state.run.scope.filePath === "src/consumer/index.ts")!;
+      expect(leaf.repairRounds).toBe(1);
+      expect(leaf.run.status).toBe("awaiting_review");
+      expect(leaf.validationResult?.verdict).toBe("valid");
+      expect(leaf.validatedDiffJson).toBe(JSON.stringify(leaf.diff));
+      expect(leaf.events.some((event) => event.type === "diff_ready" && (event.payload as { repair_attempt?: number })?.repair_attempt === 1)).toBe(true);
+    });
+
+    it("gives up after one repair and fails with the reviewer's rejection, instead of looping", async () => {
+      const harness = createHierarchyBudgetHarness("batch-unsatisfied");
+
+      await expect(harness.orchestrator.startRun(harness.workspace, harness.root.run.runId))
+        .rejects.toMatchObject({ code: "proposal_validation_failed" });
+
+      expect(harness.wholeTreeReviews).toHaveLength(1 + MAX_WHOLE_TREE_REPAIR_ROUNDS);
+      expect(harness.generationRequests.filter((request) => request.path === "src/producer/index.ts")).toHaveLength(2);
+    });
   });
 
   describe("the whole-tree review's output budget", () => {
@@ -2909,6 +3003,10 @@ const DEPENDENCY_PLAN_MODES: ReadonlySet<string> = new Set([
   "leaf-uncertain",
   "batch-truncated-once",
   "plan-self-consumer",
+  "batch-repairable",
+  "shared-file-sequential",
+  "shared-file-parallel",
+  "batch-drifting-copy",
 ]);
 
 type HierarchyBudgetHarnessMode =
@@ -2929,7 +3027,11 @@ type HierarchyBudgetHarnessMode =
   | "batch-unsatisfied"
   | "leaf-uncertain"
   | "batch-truncated-once"
-  | "plan-self-consumer";
+  | "plan-self-consumer"
+  | "batch-repairable"
+  | "shared-file-sequential"
+  | "shared-file-parallel"
+  | "batch-drifting-copy";
 
 interface HierarchyBudgetNode {
   id: string;
@@ -2980,7 +3082,9 @@ function createHierarchyBudgetHarness(
       contextIds.push(contextId);
       nodes.set(contextId, { id: contextId, level: "context", children: [containerId], files: [] });
       nodes.set(containerId, { id: containerId, level: "container", children: [componentId], files: [] });
-      nodes.set(componentId, { id: componentId, level: "component", children: [], files: [file] });
+      // Two components that both own one file: each planner would pick it.
+      const sharesAFile = mode === "shared-file-sequential" || mode === "shared-file-parallel";
+      nodes.set(componentId, { id: componentId, level: "component", children: [], files: sharesAFile ? [file, "src/shared/index.ts"] : [file] });
     }
   } else if (mode === "leaf-cap") {
     for (let branch = 0; branch < 5; branch += 1) {
@@ -3048,6 +3152,7 @@ function createHierarchyBudgetHarness(
   const planRequests: Array<{ planRetry: unknown; systemPrompt: string; maxOutputTokens?: number; tools?: Array<{ function: { name: string; parameters: Record<string, unknown> } }> }> = [];
   let rootPlanCalls = 0;
   const wholeTreeReviews: Array<{ maxOutputTokens?: number; systemPrompt: string }> = [];
+  const generationRequests: Array<{ path: string; systemPrompt: string }> = [];
   const taskContextSeen: Array<{ mode: string | undefined; path: string | undefined; upstream: unknown; systemPrompt: string }> = [];
   const counters = {
     plannerChildrenCreated: 0,
@@ -3091,20 +3196,27 @@ function createHierarchyBudgetHarness(
         });
         output = JSON.stringify({
           verdict: "valid",
-          tasks: transactionPlan.leaves.filter(isRecord).map((leaf) => ({
-            taskId: leaf.transactionTaskId,
+          tasks: transactionPlan.leaves.filter(isRecord).map((leaf, leafIndex) => ({
+            // A reviewer that copies identity and criteria back imperfectly.
+            taskId: mode === "batch-drifting-copy" ? `copied_${leafIndex}` : leaf.transactionTaskId,
             childRunId: leaf.childRunId,
-            path: leaf.filePath,
+            path: mode === "batch-drifting-copy" ? `./${String(leaf.filePath)}` : leaf.filePath,
             status: "consistent",
             criteria: Array.isArray(leaf.acceptanceCriteria)
-              ? leaf.acceptanceCriteria.map((criterion, criterionIndex) => ({
-                  criterion,
-                  // The reviewer cannot run a build or read another page: one criterion is "uncertain".
-                  status: criterionIndex === 0 && mode === "batch-uncertain" ? "uncertain"
-                    : criterionIndex === 0 && mode === "batch-unsatisfied" ? "unsatisfied"
-                      : "satisfied",
-                  explanation: "The delegated receipt contract is checked.",
-                }))
+              ? leaf.acceptanceCriteria.map((criterion, criterionIndex) => {
+                  // The reviewer finds a real bug in the second file on its first look only.
+                  const repairableFault = mode === "batch-repairable" && wholeTreeReviews.length === 1 && leafIndex === 1 && criterionIndex === 0;
+                  return {
+                    criterion: mode === "batch-drifting-copy" ? `${String(criterion)} (reworded)` : criterion,
+                    // The reviewer cannot run a build or read another page: one criterion is "uncertain".
+                    status: criterionIndex === 0 && mode === "batch-uncertain" ? "uncertain"
+                      : (criterionIndex === 0 && mode === "batch-unsatisfied") || repairableFault ? "unsatisfied"
+                        : "satisfied",
+                    explanation: repairableFault
+                      ? "The consumer reads prisma.teamMember, a model that does not exist; the schema's model is membership."
+                      : "The delegated receipt contract is checked.",
+                  };
+                })
               : [],
             summary: "The delegated proposal satisfies its task contract.",
           })),
@@ -3155,7 +3267,7 @@ function createHierarchyBudgetHarness(
                 ...(extra ? { taskKeyNote: "ignored" } : {}),
                 taskKey: "consumer",
                 nodeId: allowedIds[1],
-                dependencyTaskKeys: ["producer"],
+                dependencyTaskKeys: mode === "shared-file-parallel" ? [] : ["producer"],
                 interfaceContractIds: contractRefs,
                 objective: "Display the receipt id",
                 acceptanceCriteria: ["The confirmation shows the endpoint receipt id"],
@@ -3237,6 +3349,7 @@ function createHierarchyBudgetHarness(
           rationale: "The proposal remains within its leaf scope.",
         });
       } else if (selectedPath) {
+        generationRequests.push({ path: selectedPath, systemPrompt: request.systemPrompt ?? "" });
         output = JSON.stringify({
           summary: `Change ${selectedPath}`,
           path: selectedPath,
@@ -3370,6 +3483,7 @@ function createHierarchyBudgetHarness(
     planRequests,
     taskContextSeen,
     wholeTreeReviews,
+    generationRequests,
     allStates: () => [root, ...childStates],
     allEvents: () => [root, ...childStates].flatMap((state) => state.events),
   };
@@ -3721,5 +3835,77 @@ describe("how a leaf proposal's review reads", () => {
 
   it("fails on a scope violation even when every criterion is satisfied", () => {
     expect(classifyProposalValidation(review(["satisfied"], "violation"))).toMatchObject({ valid: false, needsReview: false });
+  });
+});
+
+describe("matching a reviewer's reply to the plan", () => {
+  const expected = [
+    { taskId: "t1", childRunId: "r1", path: "a.ts", criteria: ["first criterion", "second criterion"] },
+    { taskId: "t2", childRunId: "r2", path: "b.ts", criteria: ["only criterion"] },
+  ];
+  const reply = (tasks: Array<{ taskId: string; path: string; criteria: string[] }>) => ({
+    tasks: tasks.map((task) => ({
+      taskId: task.taskId,
+      childRunId: "copied",
+      path: task.path,
+      criteria: task.criteria.map((criterion) => ({ criterion })),
+    })),
+  });
+
+  it("keeps the server's identity and criterion text when the copy drifted", () => {
+    const parsed = reply([
+      { taskId: "t1", path: "./a.ts", criteria: ["first criterion, reworded", "second criterion"] },
+      { taskId: "t2", path: "b.ts", criteria: ["only criterion "] },
+    ]);
+    alignBatchReview(parsed, expected);
+    expect(parsed.tasks.map((task) => task.criteria.map((criterion) => criterion.criterion))).toEqual([
+      ["first criterion", "second criterion"],
+      ["only criterion"],
+    ]);
+    expect(parsed.tasks.map((task) => [task.taskId, task.childRunId, task.path])).toEqual([
+      ["t1", "r1", "a.ts"],
+      ["t2", "r2", "b.ts"],
+    ]);
+  });
+
+  it("puts tasks back in plan order when every id is present but they came in another order", () => {
+    const parsed = reply([
+      { taskId: "t2", path: "b.ts", criteria: ["x"] },
+      { taskId: "t1", path: "a.ts", criteria: ["x", "y"] },
+    ]);
+    alignBatchReview(parsed, expected);
+    expect(parsed.tasks.map((task) => task.taskId)).toEqual(["t1", "t2"]);
+    expect(parsed.tasks[0]!.criteria).toHaveLength(2);
+  });
+
+  it("falls back to position when the ids it sent back are not the plan's", () => {
+    const parsed = reply([
+      { taskId: "copied_0", path: "a", criteria: ["x", "y"] },
+      { taskId: "copied_1", path: "b", criteria: ["x"] },
+    ]);
+    alignBatchReview(parsed, expected);
+    expect(parsed.tasks.map((task) => task.taskId)).toEqual(["t1", "t2"]);
+  });
+
+  it("refuses a different number of tasks, saying how many were wanted", () => {
+    expect(() => alignBatchReview(reply([{ taskId: "t1", path: "a.ts", criteria: ["x", "y"] }]), expected))
+      .toThrow(expect.objectContaining({ category: "invalid_validation_shape", detail: expect.stringContaining("expected 2 entries") }));
+  });
+
+  it("refuses a different number of criteria, naming the file", () => {
+    const parsed = reply([
+      { taskId: "t1", path: "a.ts", criteria: ["x", "y"] },
+      { taskId: "t2", path: "b.ts", criteria: ["x", "y", "z"] },
+    ]);
+    expect(() => alignBatchReview(parsed, expected))
+      .toThrow(expect.objectContaining({ detail: expect.stringContaining("tasks.1 (b.ts): expected 1 criteria") }));
+  });
+
+  it("does the same for one file's review", () => {
+    const parsed = { path: "wrong.ts", criteria: [{ criterion: "reworded" }, { criterion: "also reworded" }] };
+    alignProposalReview(parsed, ["first criterion", "second criterion"], "a.ts");
+    expect(parsed).toEqual({ path: "a.ts", criteria: [{ criterion: "first criterion" }, { criterion: "second criterion" }] });
+    expect(() => alignProposalReview({ path: "a.ts", criteria: [{ criterion: "x" }] }, ["a", "b"], "a.ts"))
+      .toThrow(expect.objectContaining({ category: "invalid_validation_shape" }));
   });
 });
