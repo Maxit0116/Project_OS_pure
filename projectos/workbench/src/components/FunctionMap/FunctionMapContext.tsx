@@ -312,6 +312,22 @@ interface PreviewAnchorRect {
   height: number
 }
 
+/**
+ * The map is scoped to one node (the container whose components it draws). When the graph is replaced
+ * (a generated map takes over from the placeholder one a new folder starts with) that node may not
+ * exist any more, and a view scoped to a missing node draws nothing. Returns the scope to switch to,
+ * or `undefined` when the current one is still valid. Observed on a real repository: the map was blank
+ * until a level was clicked.
+ */
+export function reconcileArchitectureScope(
+  nodes: readonly Pick<FunctionalNode, 'id'>[],
+  scopeId: string | null,
+  defaultScopeId: string | null,
+): string | null | undefined {
+  if (scopeId === null) return undefined
+  return nodes.some((node) => node.id === scopeId) ? undefined : defaultScopeId
+}
+
 export function resolveFunctionMapPreviewPosition(
   clientX: number,
   clientY: number,
@@ -565,6 +581,18 @@ export function FunctionMapProvider({
       setArchitectureScopeId(defaultScopeIdForLevel(nodes, preferredLevel, fileIndex))
     }
   }, [architectureLevel, architectureLevels, fileIndex, nodes, preferredLevel])
+
+  // A scope that names a node the (new) graph does not have draws nothing: move to the level's default.
+  useEffect(() => {
+    const next = reconcileArchitectureScope(
+      nodes,
+      architectureScopeId,
+      defaultScopeIdForLevel(nodes, architectureLevel, fileIndex),
+    )
+    if (next === undefined) return
+    setArchitectureScopeId(next)
+    setActiveViewKeyState(null)
+  }, [architectureLevel, architectureScopeId, fileIndex, nodes])
 
   useEffect(() => {
     setFocusedCodeNodeId(null)
