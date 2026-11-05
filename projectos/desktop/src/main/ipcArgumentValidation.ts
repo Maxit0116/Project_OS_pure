@@ -15,6 +15,7 @@ const PROJECTOS_IPC_SIGNATURES = {
   getProjectGraph: ['string'],
   getSemanticTree: ['string'],
   listWorkspaceDirectory: ['string', 'string'],
+  assignFileOwner: ['string', 'string', 'string'],
   getNodeContext: ['string', 'string'],
   getFileContext: ['string', 'string'],
   getGlobalAgentContext: ['string', 'string'],

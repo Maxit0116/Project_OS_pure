@@ -133,6 +133,8 @@ export interface ProjectOSApi {
     projectId: string,
     relativePath: string,
   ): Promise<WorkspaceDirectoryEntry[]>;
+  /** Give a file no node owns to one node (graph only), so Agent can change it. Returns the new graph. */
+  assignFileOwner(projectId: string, filePath: string, nodeId: string): Promise<ProjectGraph>;
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload>;
   getFileContext(projectId: string, path: string): Promise<ContextPayload>;
   getGlobalAgentContext(

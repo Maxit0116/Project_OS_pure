@@ -40,6 +40,8 @@ export type ProjectOSErrorCode =
   | "agent_answer_unavailable"
   | "ownership_ambiguous"
   | "file_owner_not_found"
+  | "file_already_owned"
+  | "invalid_file_owner"
   | "local_context_unavailable"
   | "attachment_unavailable"
   | "diff_apply_unsupported"

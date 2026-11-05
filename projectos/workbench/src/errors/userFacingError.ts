@@ -41,6 +41,10 @@ export function userFacingErrorMessage(error: unknown, locale: Locale): string {
   if (code === 'model_output_invalid') return getStoreMessage(locale, 'errors.modelOutputInvalid')
   if (code === 'debug_target_unresolved') return getStoreMessage(locale, 'errors.debugTargetUnresolved')
   if (code === 'diff_stale') return getStoreMessage(locale, 'errors.diffStale')
+  if (code === 'file_owner_not_found') {
+    const file = /File '([^']+)'/u.exec(error instanceof Error ? error.message : '')?.[1]
+    return getStoreMessage(locale, file ? 'errors.fileNotOwned' : 'errors.fileNotOwnedUnnamed', { file: file ?? '' })
+  }
   const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
   const readable = raw ? stripIpcWrapper(raw) : ''
   return userFacingProviderText(readable, locale) ?? sanitizeErrorMessage(readable || error)

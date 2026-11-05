@@ -681,6 +681,8 @@ export interface WorkbenchState {
   openFileAgentChat: (filePath: string, preferredNodeId: string) => Promise<void>
   selectFile: (filePath: string, preferredNodeId?: string) => Promise<void>
   chooseFileOwner: (nodeId: string) => void
+  /** Give the selected file, which no node owns, to a node so Agent can change it. */
+  assignFileOwner: (nodeId: string) => Promise<void>
   clearSelection: () => void
   dismissError: () => void
   sendPrompt: (input: string | ComposerDraft) => Promise<void>
@@ -2650,6 +2652,33 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       pendingFileOwnerChoice: null,
       fileScopeError: null,
     })
+  },
+
+  assignFileOwner: async (nodeId) => {
+    const { client, project, selectedFilePath, fileScopeError, locale, pushToast } = get()
+    if (!project || !selectedFilePath || fileScopeError !== 'not_mapped') return
+    const projectId = project.projectId
+    const filePath = selectedFilePath
+    try {
+      await client.assignFileOwner(projectId, filePath, nodeId)
+      const [graph, tree] = await Promise.all([
+        client.getProjectGraph(projectId),
+        client.getSemanticTree(projectId),
+      ])
+      if (get().project?.projectId !== projectId || get().selectedFilePath !== filePath) return
+      set({ graph, tree })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'context.fileAssigned', {
+          file: filePath,
+          name: graph.nodes.find((node) => node.id === nodeId)?.name ?? nodeId,
+        }),
+      })
+      // Select it the way a click in the tree does, so the context and scope follow the new owner.
+      await get().selectFile(filePath, nodeId)
+    } catch (error) {
+      set({ error: errorMessage(error, 'Failed to assign the file to a feature') })
+    }
   },
 
   clearSelection: () =>

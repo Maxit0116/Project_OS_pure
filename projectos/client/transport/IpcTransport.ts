@@ -268,6 +268,10 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("listWorkspaceDirectory", projectId, relativePath);
   }
 
+  assignFileOwner(projectId: string, filePath: string, nodeId: string): Promise<ProjectGraph> {
+    return this.invoke("assignFileOwner", projectId, filePath, nodeId);
+  }
+
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload> {
     return this.invoke("getNodeContext", projectId, nodeId);
   }

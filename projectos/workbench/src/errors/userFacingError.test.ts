@@ -79,6 +79,13 @@ describe('userFacingProviderText', () => {
     expect(userFacingErrorMessage(timeout, 'zh')).toMatch(/120 秒内没有响应/u)
   })
 
+  it('says a file no feature owns cannot be changed yet and how to fix that', () => {
+    const error = Object.assign(new Error("File 'lib/validators.ts' is not owned or linked by any functional node"), { code: 'file_owner_not_found' })
+    expect(userFacingErrorMessage(error, 'en')).toMatch(/lib\/validators\.ts is not part of any feature.*add it to a feature/u)
+    expect(userFacingErrorMessage(error, 'zh')).toMatch(/lib\/validators\.ts 不属于任何功能.*加入某个功能/u)
+    expect(userFacingErrorMessage(error, 'en')).not.toMatch(/functional node/u)
+  })
+
   it('says a change that went stale cannot be applied and what to do, not the internal diff text', () => {
     // Observed live: applying a debug fix after the probes were cleaned up showed this raw English line.
     const error = Object.assign(new Error("Generated diff is stale for 'lib/team.ts'"), { code: 'diff_stale' })

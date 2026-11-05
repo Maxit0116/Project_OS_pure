@@ -177,4 +177,58 @@ describe('ChatContextHeader', () => {
     expect(html).toContain('context.usageNotSearched')
     expect(html).toContain('context.usageOmissions.editor_buffer')
   })
+
+  it('offers the features that own files beside an unmapped file, instead of a dead end', () => {
+    // Observed in the sample: lib/validators.ts has no owner, so Agent could never change it and the
+    // screen only said so. The nodes that own files next to it are offered, nearest first.
+    mockStoreState({
+      context: null,
+      contextLoading: false,
+      graph: {
+        nodes: [
+          { id: 'system', name: 'SaaS', level: 'context', linkedFiles: [] },
+          { id: 'feat_team', name: 'Team & Roles', level: 'component', linkedFiles: [{ path: 'lib/team.ts', role: 'primary' }, { path: 'lib/team-roles.ts', role: 'supporting' }] },
+          { id: 'feat_ui', name: 'UI kit', level: 'component', linkedFiles: [{ path: 'components/ui/Button.tsx', role: 'primary' }] },
+        ],
+      },
+      selectedNodeId: null,
+      globalAgentActive: false,
+      selectedFilePath: 'lib/validators.ts',
+      pendingFileOwnerChoice: null,
+      fileScopeError: 'not_mapped',
+      selectFile: vi.fn(),
+      chooseFileOwner: vi.fn(),
+      assignFileOwner: vi.fn(),
+    })
+
+    const html = renderToStaticMarkup(<ChatContextHeader />)
+
+    expect(html).toContain('context.fileNotMapped')
+    expect(html).toContain('context.fileNotMappedHelp')
+    // The nearest owner is the one-click choice; the whole-project node is never offered.
+    expect(html).toContain('context.assignOwnerButton')
+    // Each choice says why it is offered, so the person can judge a guess made from folders.
+    expect(html).toContain('context.assignOwnerSharedDir')
+    expect(html.indexOf('context.assignOwnerButton')).toBeLessThan(html.indexOf('context.assignOwnerOther'))
+    expect(html).toContain('Team &amp; Roles')
+    expect(html).not.toContain('>SaaS<')
+  })
+
+  it('offers no way to add an owner when the file already has one', () => {
+    mockStoreState({
+      context: null,
+      contextLoading: false,
+      graph: { nodes: [{ id: 'feat_team', name: 'Team', level: 'component', linkedFiles: [{ path: 'lib/team.ts', role: 'primary' }] }] },
+      selectedNodeId: 'feat_team',
+      globalAgentActive: false,
+      selectedFilePath: 'lib/team.ts',
+      pendingFileOwnerChoice: null,
+      fileScopeError: null,
+      selectFile: vi.fn(),
+      chooseFileOwner: vi.fn(),
+      assignFileOwner: vi.fn(),
+    })
+
+    expect(renderToStaticMarkup(<ChatContextHeader />)).not.toContain('context.fileNotMappedHelp')
+  })
 })

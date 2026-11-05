@@ -264,6 +264,7 @@ import {
   UpdateMapWorkGroupPatchSchema,
 } from "../contracts/map-work-group.js";
 import { ProjectOSError } from "../errors.js";
+import { assignFileToNode } from "./file-owner-assignment.js";
 import { buildVerificationEvidence } from "./verification-evidence.js";
 import { suggestedTestsFromIndex } from "./code-intelligence/index.js";
 import { reconcileInterruptedAgentRuns } from "./harness/interrupted-runs.js";
@@ -1271,6 +1272,22 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
   }
 
+
+  /**
+   * Give a file no node owns to one node, so Agent can change it. Written to the graph on disk with
+   * the semantic tree rebuilt from it; the previous graph is restored if anything after the write
+   * fails (the same safeguard regenerating the map uses).
+   */
+  async assignFileOwner(projectId: string, filePath: string, nodeId: string): Promise<ProjectGraph> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    if (!workspaceFileIsReadable(workspace.workspaceRoot, filePath)) {
+      throw new ProjectOSError("file_not_found", `'${filePath}' is not a file in this project`);
+    }
+    const next = assignFileToNode(workspace.graph, filePath, nodeId);
+    const reloaded = await this.persistScannedStructureGraph(workspace, next);
+    this.workspacesByProjectId.set(projectId, reloaded);
+    return cloneJson(reloaded.graph);
+  }
 
   async getProjectGraph(projectId: string): Promise<ProjectGraph> {
     return this.requireLoadedWorkspace(projectId).graph;

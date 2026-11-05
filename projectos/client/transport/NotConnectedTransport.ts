@@ -96,6 +96,14 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async assignFileOwner(
+    _projectId: string,
+    _filePath: string,
+    _nodeId: string,
+  ): Promise<ProjectGraph> {
+    return transportNotConnected();
+  }
+
   async getNodeContext(
     _projectId: string,
     _nodeId: string,

@@ -130,6 +130,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.listWorkspaceDirectory(projectId, relativePath);
   }
 
+  assignFileOwner(projectId: string, filePath: string, nodeId: string): Promise<ProjectGraph> {
+    return this.transport.assignFileOwner(projectId, filePath, nodeId);
+  }
+
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload> {
     return this.transport.getNodeContext(projectId, nodeId);
   }
