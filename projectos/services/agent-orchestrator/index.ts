@@ -814,7 +814,17 @@ export interface WholeTreeReviewFinding {
 /** The whole-tree review rejected the batch, and says which files to send back. */
 class WholeTreeReviewRejectedError extends ProjectOSError {
   constructor(readonly findings: WholeTreeReviewFinding[]) {
-    super("proposal_validation_failed", "Independent agent validation rejected the whole-tree proposal batch");
+    // The first finding goes into the message: when the repair round also fails, this is all a person
+    // sees, and "rejected the batch" does not say which file or which requirement.
+    const first = findings[0];
+    const reason = first?.problems[0];
+    super(
+      "proposal_validation_failed",
+      first && reason
+        ? `Independent agent validation rejected the whole-tree proposal batch: ${first.path}: ${reason}`.slice(0, 600)
+        : "Independent agent validation rejected the whole-tree proposal batch",
+      { details: { findings: findings.map((finding) => ({ path: finding.path, problems: finding.problems })) } },
+    );
     this.name = "WholeTreeReviewRejectedError";
   }
 }

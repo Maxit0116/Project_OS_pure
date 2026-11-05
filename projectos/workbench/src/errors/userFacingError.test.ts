@@ -86,6 +86,16 @@ describe('userFacingProviderText', () => {
     expect(userFacingErrorMessage(error, 'en')).not.toMatch(/functional node/u)
   })
 
+  it('says a change the review rejected was not applied, which requirement failed, and what to do', () => {
+    // Observed live: a requirement that could not be met as written ended the run with "rejected the
+    // whole-tree proposal batch" and nothing about what to change.
+    const text = 'Independent agent validation rejected the whole-tree proposal batch: app/profile/page.tsx: The count is not restricted inside the nested select.'
+    expect(userFacingErrorMessage(new Error(text), 'en')).toMatch(/not applied.*could not confirm a requirement \(app\/profile\/page\.tsx: The count is not restricted.*Nothing was written.*Reword the request/u)
+    expect(userFacingErrorMessage(new Error(text), 'zh')).toMatch(/改动未应用.*app\/profile\/page\.tsx.*没有写入任何文件/u)
+    const bare = 'Independent agent validation rejected the whole-tree proposal batch'
+    expect(userFacingErrorMessage(new Error(bare), 'en')).toMatch(/Nothing was written/u)
+  })
+
   it('says a change that went stale cannot be applied and what to do, not the internal diff text', () => {
     // Observed live: applying a debug fix after the probes were cleaned up showed this raw English line.
     const error = Object.assign(new Error("Generated diff is stale for 'lib/team.ts'"), { code: 'diff_stale' })

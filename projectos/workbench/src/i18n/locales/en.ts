@@ -832,6 +832,8 @@ const en = {
     modelTimedOut: 'The model did not answer within {seconds} seconds. The service may be busy or your connection slow; try again.',
     fileNotOwned: '{file} is not part of any feature, so Agent cannot change it yet. Select it in the file tree and add it to a feature, then try again.',
     fileNotOwnedUnnamed: 'That file is not part of any feature, so Agent cannot change it yet. Select it in the file tree and add it to a feature, then try again.',
+    reviewRejected: 'The change was not applied: the independent review could not confirm a requirement ({detail}). Nothing was written. Reword the request, or drop that requirement, and ask again.',
+    reviewRejectedBare: 'The change was not applied: the independent review rejected it. Nothing was written. Reword the request and ask again.',
     diffStale: 'The file changed after this change was prepared, so it can no longer be applied. Ask again so the change is prepared on the current file.',
     debugTargetUnresolved: 'Project OS could not tell which file to fix. Select the file (or the feature it belongs to) in the tree, then start the debug session again.',
     modelOutputInvalid: 'The model replied in a form Project OS could not use, even after one retry. Nothing was changed. Try again, or pick another model in Settings → Models.',

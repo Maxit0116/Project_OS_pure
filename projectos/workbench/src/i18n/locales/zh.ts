@@ -832,6 +832,8 @@ const zh = {
     modelTimedOut: '模型在 {seconds} 秒内没有响应。服务可能繁忙或网络较慢，请重试。',
     fileNotOwned: '{file} 不属于任何功能，Agent 暂时无法修改它。请在文件树里选中它并加入某个功能，然后重试。',
     fileNotOwnedUnnamed: '该文件不属于任何功能，Agent 暂时无法修改它。请在文件树里选中它并加入某个功能，然后重试。',
+    reviewRejected: '改动未应用：独立评审无法确认某项要求（{detail}）。没有写入任何文件。请调整请求，或去掉这项要求，然后重新提出。',
+    reviewRejectedBare: '改动未应用：独立评审没有通过。没有写入任何文件。请调整请求后重新提出。',
     diffStale: '这个修改方案生成之后文件又被改动了，所以无法再应用。请重新发起请求，让方案基于当前文件生成。',
     debugTargetUnresolved: '无法确定要修复哪个文件。请在目录里选中出问题的文件（或它所属的功能），再重新开始调试。',
     modelOutputInvalid: '模型两次返回的内容都无法被 Project OS 解析，未做任何改动。请重试，或在“设置 → 模型”里换一个模型。',

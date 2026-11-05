@@ -2088,6 +2088,18 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
       expect(harness.wholeTreeReviews).toHaveLength(1 + MAX_WHOLE_TREE_REPAIR_ROUNDS);
       expect(harness.generationRequests.filter((request) => request.path === "src/producer/index.ts")).toHaveLength(2);
     });
+
+    it("says which file and which requirement the final rejection is about", async () => {
+      // Observed live: a criterion that could not be met as written ended the run with only "rejected
+      // the whole-tree proposal batch", and nothing said what to change in the request.
+      const harness = createHierarchyBudgetHarness("batch-unsatisfied");
+
+      const failure = await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId)
+        .then(() => undefined, (error: unknown) => error as Error & { details?: { findings?: Array<{ path: string; problems: string[] }> } });
+
+      expect(failure?.message).toMatch(/rejected the whole-tree proposal batch: src\/producer\/index\.ts: The delegated receipt contract is checked\./u);
+      expect(failure?.details?.findings?.[0]).toMatchObject({ path: "src/producer/index.ts", problems: ["The delegated receipt contract is checked."] });
+    });
   });
 
   describe("the whole-tree review's output budget", () => {

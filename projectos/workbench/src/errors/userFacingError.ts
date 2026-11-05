@@ -6,6 +6,7 @@ import { stripIpcWrapper } from '../../../shared/ipc-error'
 const PROVIDER_FAILURE = /Model provider request failed \(HTTP (\d{3})\)/u
 const PROVIDER_UNREACHABLE = /Model provider unreachable \((\w+)\): (\S+)/u
 const PROVIDER_TIMEOUT = /Model request timed out after (\d+)s/u
+const REVIEW_REJECTED = /Independent agent validation rejected the whole-tree proposal batch(?:: ([\s\S]+))?/u
 
 /**
  * A provider failure turned into something a person can act on. Returns undefined when the text
@@ -16,6 +17,11 @@ export function userFacingProviderText(text: string, locale: Locale): string | u
   if (unreachable) {
     const [, kind, host] = unreachable
     return getStoreMessage(locale, kind === 'refused' ? 'errors.modelRefused' : 'errors.modelUnreachable', { host: host ?? '' })
+  }
+  const rejected = REVIEW_REJECTED.exec(text)
+  if (rejected) {
+    const detail = rejected[1]?.trim()
+    return getStoreMessage(locale, detail ? 'errors.reviewRejected' : 'errors.reviewRejectedBare', { detail: detail ?? '' })
   }
   const seconds = PROVIDER_TIMEOUT.exec(text)?.[1]
   if (seconds) return getStoreMessage(locale, 'errors.modelTimedOut', { seconds })

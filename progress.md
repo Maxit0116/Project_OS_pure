@@ -1,5 +1,15 @@
 # Progress
 
+## 2026-11-05 (S5 first pass) - the eight gaps after S4: fixed or tested on the built app
+
+- **Fixed and observed live:** a Verification settings screen (add, edit, remove, suggestions from `package.json`/`tsconfig.json`, shell operators refused; saved to `.projectos/settings.json`); a file no node owns can be given to a feature from the context header (observed: `lib/validators.ts` assigned, then Agent changed `validateEmail`, applied, `tsc` 0, correct at the 254/255 boundary); a lost connection reads as "could not reach the model service (host)" instead of a bare `fetch failed` (observed with an unresolvable host); a bug reported with no file selected is handed to Agent when no file can be resolved (observed: intent card, held, applied, `lib/team.ts` fixed, `tsc` 0).
+- **A different request, tested:** admin user directory "teams joined" column. Run 1 failed ("One or more delegated subtrees failed": a leaf reply that was not JSON, cause not proven because the capture missed it); the provider now retries one unreadable body, bounds the body read with the 120 s deadline and records what the provider sent. Then 3 of 3 passed (`tsc` 0 each). 3 of 4 overall on a request not tuned for.
+- **Explained, not changed:** the final review rejection now names the file and the unmet requirement and the workbench says nothing was written and to reword the request (unit-tested). Whether an unsatisfiable requirement should be held for review instead of rejected is the owner's call.
+- **Not built:** a question that pauses and resumes a run (design discussion). **Not tested:** other providers, a repository other than the sample, a packaged install, the `origin/graph` merge.
+- **Tests:** 2031 tests, 1927 pass, 80 fail (same 80 as S1), 24 skipped, 0 new; five typechecks clean; every new behaviour mutation-checked. Disposable app data and traffic captures deleted; key only in `deepseek_api.md`, 0 commits. Committed locally, nothing pushed.
+- **Open:** owner suggestions are folder-based only and a regenerated map may drop an assignment; the agent rewrote existing column headers in one run; the "应用建议修复" label; the rest of the S5 audit (every other surface).
+- Next step: decide the unsatisfiable-requirement policy and whether to build in-run questions; then the rest of S5.
+
 ## 2026-11-05 (night) - S4 part 3: the debug flow end to end; clean-up no longer undoes the fix
 
 - **Observed on the built app (file-scoped Script B on a seeded bug):** hypotheses with probabilities, probes inserted and the file still compiling, root cause named correctly, suggested fix, a fix run whose change waits in the diff review, "应用" applies it, "问题已修复 — 清理插桩" removes the probes. Result: 0 probes left, the file byte for byte the committed version, `tsc` 0; "运行验证" showed the approval card (`npx tsc --noEmit`), "批准并运行" ended in "验证通过"; audit: `apply_diff allow` (path hash) and `run_verification allow`.
