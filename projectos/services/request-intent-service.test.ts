@@ -7,6 +7,7 @@ import {
   intentAllowsNodeAddition,
   intentAllowsNodeDeletion,
   RequestIntentService,
+  plannerChildrenForIntent,
   smallestPlannerNode,
   splitFilesByApprovedIntent,
   uncoveredFileOwnerIds,
@@ -183,6 +184,43 @@ describe("request intent routing and approval", () => {
       const normalized = new RequestIntentService().normalizeDraft(graph, both);
       const ids = normalized.touches.map((touch) => touch.nodeId);
       expect(new Set(ids).size).toBe(ids.length);
+    });
+  });
+
+  describe("which children a planner may delegate to under an approved intent", () => {
+    const webComponents = graph.nodes.filter((node) => node.parentId === "container_next_web").map((node) => node.id);
+    const withDerived = (): RequestIntent => {
+      const intent = draft(["feat_profile", "feat_team"]);
+      return {
+        ...intent,
+        touches: [
+          ...intent.touches,
+          ...["feat_blog", "feat_admin", "feat_checkout"].map((nodeId) => ({
+            nodeId,
+            reason: "Shares lib/db.ts with Account; changing the file also changes this capability.",
+            allow: { editExisting: true, addParts: false, deletePartIds: [] as string[] },
+            derived: true as const,
+          })),
+        ],
+      };
+    };
+
+    it("offers only the components the work reaches, not the co-owners approved for a shared file", () => {
+      expect(webComponents.length).toBeGreaterThan(5);
+      expect(plannerChildrenForIntent(withDerived(), graph, webComponents).sort()).toEqual(["feat_profile", "feat_team"]);
+    });
+
+    it("offers the container above a touched component to a planner one level up", () => {
+      expect(plannerChildrenForIntent(withDerived(), graph, ["container_next_web", "container_saas_database"]))
+        .toEqual(["container_next_web"]);
+    });
+
+    it("offers every component under a touched container", () => {
+      expect(plannerChildrenForIntent(draft(["container_next_web"]), graph, webComponents).sort()).toEqual([...webComponents].sort());
+    });
+
+    it("leaves the list alone when the intent reaches none of it", () => {
+      expect(plannerChildrenForIntent(draft(["container_saas_database"]), graph, webComponents)).toEqual(webComponents);
     });
   });
 

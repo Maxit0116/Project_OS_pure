@@ -114,6 +114,53 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     });
   });
 
+  it("keeps co-owners that were approved only for a shared file apart from the work a planner is given", async () => {
+    // Observed live: derived touches listed as capabilities led a planner to fan one request out to
+    // eight components, three of them only there because they share lib/db.ts.
+    const output = JSON.stringify({
+      summary: "Update the heading",
+      path: "app/login/page.tsx",
+      edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "UPDATED_MARKER" }],
+    });
+    const { orchestrator, workspace, requests } = createModelOrchestrator(output);
+    const approvedIntent: RequestIntent = {
+      version: "0.1.0",
+      id: "intent_shared_owner",
+      projectId: workspace.project.projectId,
+      rawRequest: "Change the heading",
+      goal: "Change the heading",
+      kind: "change",
+      entryNodeId: "feat_login",
+      touches: [
+        { nodeId: "feat_login", reason: "Owns the heading", allow: { editExisting: true, addParts: false, deletePartIds: [] } },
+        { nodeId: "feat_blog", reason: "Shares lib/db.ts with Account; changing the file also changes this capability.", allow: { editExisting: true, addParts: false, deletePartIds: [] }, derived: true },
+      ],
+      structuralEffects: [],
+      assumptions: [],
+      outOfScope: [],
+      acceptance: ["The heading is updated"],
+      questions: [],
+      executorSelection: { kind: "model", modelProfileId: "test-model" },
+      baseGraphHash: "sha256:approved_graph",
+      revision: 1,
+      status: "approved",
+      approvalHash: "sha256:approved_intent",
+      approvedAt: new Date().toISOString(),
+    };
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+      approvedIntent,
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    const generation = requests.find((request) => request.requestKind === "change_generation");
+    const context = (generation!.input as { approvedIntentContext: { touches: Array<{ nodeId: string }>; sharedFileCoOwners?: Array<{ nodeId: string }>; sharedFileCoOwnersNote?: string } }).approvedIntentContext;
+    expect(context.touches.map((touch) => touch.nodeId)).toEqual(["feat_login"]);
+    expect(context.sharedFileCoOwners?.map((owner) => owner.nodeId)).toEqual(["feat_blog"]);
+    expect(context.sharedFileCoOwnersNote).toMatch(/do not assign work to them/u);
+  });
+
   it("passes the shared producer-consumer contract into the actual model task input", async () => {
     const output = JSON.stringify({
       summary: "Update login heading",

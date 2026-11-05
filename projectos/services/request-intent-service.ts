@@ -159,6 +159,35 @@ export function splitFilesByApprovedIntent(
   return { allowed, withheld };
 }
 
+/**
+ * Of the graph children a planner could delegate to, the ones the request's own work reaches: a
+ * child that is, contains, or sits under a node the intent really touches. Capabilities added only
+ * because they share a file with the work (derived touches) are approval coverage, not work; offered
+ * as targets, a planner fanned out to eight components for a three-component change.
+ */
+export function plannerChildrenForIntent(
+  intent: RequestIntent,
+  graph: ProjectGraph,
+  childIds: readonly string[],
+): string[] {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const worked = intent.touches.filter((touch) => !touch.derived);
+  const reached = childIds.filter((childId) => {
+    const child = nodes.get(childId);
+    if (!child) return false;
+    const childChain = ancestorIds(child, nodes);
+    return worked.some((touch) => {
+      const touched = nodes.get(touch.nodeId);
+      if (!touched) return false;
+      return childId === touch.nodeId ||
+        ancestorIds(touched, nodes).includes(childId) ||
+        childChain.includes(touch.nodeId);
+    });
+  });
+  // An intent that reaches none of them (an add-node request under a container, say) leaves the list alone.
+  return reached.length > 0 ? reached : [...childIds];
+}
+
 export function intentAllowsFile(
   intent: RequestIntent,
   graph: ProjectGraph,

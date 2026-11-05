@@ -137,7 +137,7 @@ import { createProviderReasoningTrace } from "../reasoning-trace.js";
 import { computeProjectGraphHash } from "../graph-change-set-engine.js";
 import type { ProjectGraph } from "../../contracts/graph.js";
 import type { ModelToolDefinition } from "../../contracts/model-gateway.js";
-import { splitFilesByApprovedIntent } from "../request-intent-service.js";
+import { plannerChildrenForIntent, splitFilesByApprovedIntent } from "../request-intent-service.js";
 import {
   CREATE_FILE_MAX_BYTES,
   validateCreateFileContent,
@@ -3336,7 +3336,11 @@ export class AgentOrchestrator {
         "A model profile and planner scope are required for recursive delegation",
       );
     }
-    const baseTarget = restrictLeafCandidatesToApprovedIntent(hierarchyPlanTarget(state), state, workspace.graph);
+    const baseTarget = restrictLeafCandidatesToApprovedIntent(
+      restrictPlannerChildrenToApprovedIntent(hierarchyPlanTarget(state), state, workspace.graph),
+      state,
+      workspace.graph,
+    );
     let target = baseTarget;
     let firstFailure: DelegationPlanFailureCategory | undefined;
     let firstFailureDetail: string | undefined;
@@ -8043,7 +8047,18 @@ export class AgentOrchestrator {
                   revision: intent.revision,
                   approvalHash: intent.approvalHash,
                   goal: intent.goal,
-                  touches: intent.touches,
+                  // Capabilities listed only because they share a file with the work are approval
+                  // coverage. Kept apart so a planner does not read them as tasks.
+                  touches: intent.touches.filter((touch) => !touch.derived),
+                  ...(intent.touches.some((touch) => touch.derived)
+                    ? {
+                        sharedFileCoOwners: intent.touches
+                          .filter((touch) => touch.derived)
+                          .map((touch) => ({ nodeId: touch.nodeId, reason: touch.reason })),
+                        sharedFileCoOwnersNote:
+                          "These capabilities share a file the change edits. They are approved only so the file can be changed; do not assign work to them.",
+                      }
+                    : {}),
                   structuralEffects: intent.structuralEffects,
                   assumptions: intent.assumptions,
                   outOfScope: intent.outOfScope,
@@ -8856,6 +8871,17 @@ function restrictLeafCandidatesToApprovedIntent(
     );
   }
   return { ...target, allowedIds: allowed };
+}
+
+/** A planner delegates to the children the approved request's work reaches, not to approval-only co-owners. */
+function restrictPlannerChildrenToApprovedIntent(
+  target: HierarchyPlanTarget,
+  state: OrchestratorRunState,
+  graph: ProjectGraph,
+): HierarchyPlanTarget {
+  const intent = state.approvedIntent;
+  if (!intent || target.kind !== "planner" || target.allowedIds.length === 0) return target;
+  return { ...target, allowedIds: plannerChildrenForIntent(intent, graph, target.allowedIds) };
 }
 
 function hierarchyPlanTarget(state: OrchestratorRunState): HierarchyPlanTarget {

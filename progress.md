@@ -1,5 +1,13 @@
 # Progress
 
+## 2026-11-05 (later) - S3 repeat: repair loop, file claims, reviewer copies, fan-out; 5 of 5 on the final build
+
+- **Repeat evidence (three batches of five live runs, same request, fresh sample each, driver applies a held change and type-checks):** batch 1 3/5, batch 2 2 verified + 2 auto-applied (unchecked) + 2 failed, **batch 3 5/5 verified** (`tsc` 0 each, 29-31 calls, 240-300 s, no correction rounds).
+- **Built:** bounded whole-tree repair (one round, rejected files only, reviewer's finding in the prompt, independent re-review, then batch re-review; observed live once); file claims at planning time; reviewer replies matched by id/position with the server's own text (the exact-echo check also broke on redacted text); planners offered only the children the work reaches and co-owners passed as `sharedFileCoOwners`, not as touches.
+- **Open:** a criterion that cannot be satisfied as written (nested Prisma `select`) fails the run with no escalation; a visible "model unreachable" state (a lost network stalled runs for 40+ minutes with no explanation); one request is tuned, a different one is the next test; in-run question that pauses and resumes; the whole-tree planner's other answer shapes are not on the runner.
+- **Tests:** 1944 tests, 1840 pass, 80 fail (same 80 as S1), 24 skipped, 0 new; five typechecks clean. Committed locally, nothing pushed.
+- Next step: S4 (kill the app mid-run; unknown shell and out-of-scope write denied or asked with an audit event; Script B debug).
+
 ## 2026-11-05 - Structured-step runner, review-first policy, and the cross-component change observed through review
 
 - **Built:** `services/structured-step.ts` (answers as tools, exact-issue repair loop of up to three attempts, cut-off handling, every attempt reported). The gateway returns a tool call's arguments as `output` and its name as `toolName`; `thinkingDepth: "off"` really turns DeepSeek's thinking off. Intent discovery runs on it (one tool per action); the one-layer planner offers `submit_plan` (enum node ids and contract kinds), `add_node`, `delete_node` and gets three attempts. Measured on 116 structured requests over ten live runs: 115 tool calls, about 6 needed a correction, 2 were cut off and recovered.
