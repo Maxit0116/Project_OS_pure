@@ -113,4 +113,17 @@ describe('userFacingProviderText', () => {
     const bare = Object.assign(new Error('refused'), { code: 'review_unmet_requirements' })
     expect(userFacingErrorMessage(bare, 'en')).toMatch(/does not meet a requirement\. Read the change/u)
   })
+
+  it('says a file too large to change is too large, with its size and the limit, when a subtree failed for that', () => {
+    // Observed on a real repository: the main service file (12.7 KB) ended a run with only "One or more delegated subtrees failed".
+    const text = "One or more delegated subtrees failed; no files were applied: Selected file 'src/app/routes/article/article.service.ts' cannot be used for local context: selected_file_too_large (about 3182 tokens; the limit is 12000)"
+    expect(userFacingProviderText(text, 'en')).toMatch(/Agent cannot change src\/app\/routes\/article\/article\.service\.ts.*about 3182 tokens; the limit is 12000.*Nothing was written/u)
+    expect(userFacingProviderText(text, 'zh')).toMatch(/Agent 无法修改 src\/app\/routes\/article\/article\.service\.ts.*3182.*12000/u)
+  })
+
+  it('keeps the reason a failed subtree gave, and still says something when it gave none', () => {
+    expect(userFacingProviderText('One or more delegated subtrees failed; no files were applied: Model edit planning failed (malformed JSON)', 'en'))
+      .toBe('Part of the change could not be prepared, so nothing was written: Model edit planning failed (malformed JSON)')
+    expect(userFacingProviderText('One or more delegated subtrees failed; no files were applied', 'en')).toBeUndefined()
+  })
 })

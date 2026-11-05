@@ -834,6 +834,8 @@ const en = {
     fileNotOwnedUnnamed: 'That file is not part of any feature, so Agent cannot change it yet. Select it in the file tree and add it to a feature, then try again.',
     reviewRejected: 'The change was not applied: the independent review could not confirm a requirement ({detail}). Nothing was written. Reword the request, or drop that requirement, and ask again.',
     reviewRejectedBare: 'The change was not applied: the independent review rejected it. Nothing was written. Reword the request and ask again.',
+    fileTooLarge: 'Agent cannot change {file}: it is too large to send to the model whole (about {tokens} tokens; the limit is {limit}). Split it into smaller files, or ask for the change in a smaller file. Nothing was written.',
+    subtreeFailed: 'Part of the change could not be prepared, so nothing was written: {reason}',
     reviewUnmet: 'The change was not applied: the independent review says it does not meet a requirement ({detail}). Read the change, then choose "Apply anyway", or reword the request.',
     reviewUnmetBare: 'The change was not applied: the independent review says it does not meet a requirement. Read the change, then choose "Apply anyway", or reword the request.',
     diffStale: 'The file changed after this change was prepared, so it can no longer be applied. Ask again so the change is prepared on the current file.',

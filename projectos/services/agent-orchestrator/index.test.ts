@@ -2421,6 +2421,19 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     expect(consumerState?.run.status).toBe("error");
   });
 
+  it("says why the first subtree failed, not only that one did", async () => {
+    // Observed on a real repository: "One or more delegated subtrees failed" hid that the file to change
+    // was too large for Agent, and the person could not tell what to do about it.
+    const harness = createHierarchyBudgetHarness("dependency-failed");
+
+    const failure = await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId)
+      .then(() => undefined, (error: unknown) => error as Error);
+
+    expect(failure?.message).toBe(
+      "One or more delegated subtrees failed; no files were applied: Model edit planning failed (malformed JSON)",
+    );
+  });
+
   it("rejects a delegated planner whose actual scope is not deeper than its parent", async () => {
     const harness = createHierarchyBudgetHarness("misleveled-child");
 

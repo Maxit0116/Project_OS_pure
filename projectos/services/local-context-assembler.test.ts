@@ -444,7 +444,7 @@ describe("LocalContextAssembler", () => {
       "secret_risk",
       `token = 'sk-ant-api03-${"a".repeat(32)}'\n`,
     ],
-    ["oversized content", "src/selected.ts", "selected_file_too_large", "x".repeat(12_001)],
+    ["oversized content", "src/selected.ts", "selected_file_too_large", "x".repeat(48_001)],
   ])("fails closed when the selected file has %s", (_label, path, reason, content) => {
     const fixture = createFixture([linked(path, "primary")]);
     if (content instanceof Uint8Array) writeBytes(fixture.root, path, content);
@@ -452,6 +452,22 @@ describe("LocalContextAssembler", () => {
 
     expect(() => assemble(fixture.workspace, undefined, path)).toThrowError(
       expect.objectContaining({ code: "local_context_unavailable", message: expect.stringContaining(reason) }),
+    );
+  });
+
+  it("accepts a selected file of the size of an ordinary service file, and says how far over the limit a larger one is", () => {
+    // Observed on a real repository: article.service.ts, 12.7 KB (about 3,200 tokens), was refused by the old 3,000 limit.
+    const fixture = createFixture([linked("src/service.ts", "primary")]);
+    writeText(fixture.root, "src/service.ts", "x".repeat(12_728));
+    expect(() => assemble(fixture.workspace, undefined, "src/service.ts")).not.toThrow();
+
+    const tooBig = createFixture([linked("src/big.ts", "primary")]);
+    writeText(tooBig.root, "src/big.ts", "x".repeat(60_000));
+    expect(() => assemble(tooBig.workspace, undefined, "src/big.ts")).toThrowError(
+      expect.objectContaining({
+        code: "local_context_unavailable",
+        message: expect.stringContaining("(about 15000 tokens; the limit is 12000)"),
+      }),
     );
   });
 

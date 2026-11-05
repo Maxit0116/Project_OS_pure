@@ -48,7 +48,12 @@ import type { LoadedProjectOSWorkspace } from "../persistence/workspace-store.js
 import { resolveContainedPath } from "../utils/path-containment.js";
 import { containsHighConfidenceSecret } from "./high-confidence-secret-patterns.js";
 
-export const SELECTED_FILE_MAX_ESTIMATED_TOKENS = 3_000;
+/**
+ * The file an edit targets is sent whole, but the model answers with search/replace edits, never the whole
+ * file, so the limit is about what fits in a prompt, not in an answer. 3,000 refused the main service file
+ * of an ordinary 40-file Express app (12.7 KB), and only after planning had spent its model calls.
+ */
+export const SELECTED_FILE_MAX_ESTIMATED_TOKENS = 12_000;
 export const CONNECTED_CONTEXT_TOKEN_LIMIT = 8_000;
 export const CONNECTED_FILE_TOKEN_LIMIT = 2_000;
 export const CONNECTED_FILE_LIMIT = 8;
@@ -713,7 +718,11 @@ export class LocalContextAssembler {
       const estimatedTokens = estimateTokens(inspected.content);
       if (candidate.relationship === "selected") {
         if (estimatedTokens > SELECTED_FILE_MAX_ESTIMATED_TOKENS) {
-          throw unavailableSelectedFile(candidate.path, "selected_file_too_large");
+          // Say how far over it is: "could not be used" does not tell a person whether to split the file.
+          throw new ProjectOSError(
+            "local_context_unavailable",
+            `Selected file '${candidate.path}' cannot be used for local context: selected_file_too_large (about ${estimatedTokens} tokens; the limit is ${SELECTED_FILE_MAX_ESTIMATED_TOKENS})`,
+          );
         }
         selectedEstimatedTokens = estimatedTokens;
         manifest.push(exactManifestEntry(candidate, inspected));

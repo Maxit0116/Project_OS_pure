@@ -2820,6 +2820,7 @@ export class AgentOrchestrator {
       throw error;
     }
 
+    const failureReasons = new Map<string, string>();
     const runHierarchyChild = async (child: DelegatedHierarchyRun) => {
       this.emit(
         workspace,
@@ -2886,6 +2887,10 @@ export class AgentOrchestrator {
             ),
           }),
         );
+        // Kept so the failure the person sees can say why: "a subtree failed" alone does not.
+        failureReasons.set(child.taskId, error instanceof ProjectOSError
+          ? sanitizePlanText(error.message, 240, "")
+          : "");
         return { ...child, ok: false as const };
       }
     };
@@ -2944,9 +2949,13 @@ export class AgentOrchestrator {
           reason: "child_failure",
         }),
       );
+      // The first reason a child gave, without the generic prefix a nested planner already added.
+      const firstReason = failed
+        .map((result) => failureReasons.get(result.taskId)?.replace(/^One or more delegated subtrees failed; no files were applied:?\s*/u, ""))
+        .find((reason) => Boolean(reason));
       const error = new ProjectOSError(
         "agent_orchestration_failed",
-        "One or more delegated subtrees failed; no files were applied",
+        `One or more delegated subtrees failed; no files were applied${firstReason ? `: ${firstReason}` : ""}`.slice(0, 600),
       );
       this.emitFailedStep(workspace, state, delegateStep, error);
       throw error;

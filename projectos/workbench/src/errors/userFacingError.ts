@@ -6,6 +6,8 @@ import { stripIpcWrapper } from '../../../shared/ipc-error'
 const PROVIDER_FAILURE = /Model provider request failed \(HTTP (\d{3})\)/u
 const PROVIDER_UNREACHABLE = /Model provider unreachable \((\w+)\): (\S+)/u
 const PROVIDER_TIMEOUT = /Model request timed out after (\d+)s/u
+const FILE_TOO_LARGE = /Selected file '([^']+)' cannot be used for local context: selected_file_too_large \(about (\d+) tokens; the limit is (\d+)\)/u
+const SUBTREES_FAILED = /^One or more delegated subtrees failed; no files were applied(?::\s*([\s\S]+))?$/u
 const REVIEW_REJECTED = /Independent agent validation rejected the whole-tree proposal batch(?:: ([\s\S]+))?/u
 
 /**
@@ -13,6 +15,17 @@ const REVIEW_REJECTED = /Independent agent validation rejected the whole-tree pr
  * is not a provider failure, so the caller keeps the original message.
  */
 export function userFacingProviderText(text: string, locale: Locale): string | undefined {
+  const tooLarge = FILE_TOO_LARGE.exec(text)
+  if (tooLarge) {
+    const [, file, tokens, limit] = tooLarge
+    return getStoreMessage(locale, 'errors.fileTooLarge', { file: file ?? '', tokens: tokens ?? '', limit: limit ?? '' })
+  }
+  // The aggregate message of a failed delegation: keep the reason it carries, drop the generic part.
+  const subtrees = SUBTREES_FAILED.exec(text.trim())?.[1]?.trim()
+  if (subtrees) {
+    return userFacingProviderText(subtrees, locale) ??
+      getStoreMessage(locale, 'errors.subtreeFailed', { reason: subtrees })
+  }
   const unreachable = PROVIDER_UNREACHABLE.exec(text)
   if (unreachable) {
     const [, kind, host] = unreachable
