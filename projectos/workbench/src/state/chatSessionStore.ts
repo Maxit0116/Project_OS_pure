@@ -147,8 +147,10 @@ interface ChatSessionStore {
 async function restoreRunFlow(activeRunId: string): Promise<void> {
   const { client } = useWorkbenchStore.getState()
   if (!client) return
+  let rootRunId = activeRunId
   try {
-    await client.getAgentRun(activeRunId)
+    const run = await client.getAgentRun(activeRunId)
+    rootRunId = run.rootRunId ?? run.runId
   } catch (error) {
     const code = typeof error === 'object' && error !== null && 'code' in error
       ? (error as { code?: string }).code
@@ -166,6 +168,8 @@ async function restoreRunFlow(activeRunId: string): Promise<void> {
     return
   }
 
+  // The run's questions live on the server; the screen was just cleared of the previous conversation's.
+  void useWorkbenchStore.getState().loadRunDecisions(rootRunId)
   try {
     const events = await client.getAgentRunEvents(activeRunId)
     if (events.length === 0) return
@@ -230,6 +234,14 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
     applyResult: null,
     verificationResult: null,
     refineLoading: false,
+    // Belongs to the conversation that was left. An intent card still pending there would otherwise
+    // keep Send disabled here (the card shows only in Agent mode), and a question card from its run
+    // would appear in a conversation that never asked it.
+    pendingIntent: null,
+    runDecisions: [],
+    decisionRootRunId: null,
+    focusedDecisionId: null,
+    decisionResolvingIds: [],
   })
   if (hydrated.activeRunId) {
     useChatSessionStore.getState().presentAgentFlow()

@@ -324,7 +324,9 @@ export function canSubmitAgentPrompt(state: {
   modelSelectionPending?: boolean
 }): boolean {
   if (state.modelSelectionPending) return false
-  if (state.pendingIntent) return false
+  // The approval card is drawn only in Agent mode, so it can only hold up Agent mode: elsewhere the
+  // person would be facing a disabled Send with nothing on screen to say why.
+  if (state.pendingIntent && state.chatMode === 'change') return false
   if (isGlobalAgentScope(state)) {
     // M3.B: Ask/Debug/Anchored + Plan/Agent (global planner → leaf child runs)
     return (
