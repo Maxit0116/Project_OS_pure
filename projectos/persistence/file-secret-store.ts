@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { SecretStore } from "./secret-store.js";
@@ -14,6 +14,14 @@ export class FileSecretStore implements SecretStore {
   constructor(userDataPath: string) {
     mkdirSync(userDataPath, { recursive: true });
     this.filePath = join(userDataPath, "secrets.json");
+    // A file made by an earlier build may be readable by other accounts; fix it at start-up, not only on the next write.
+    if (existsSync(this.filePath)) {
+      try {
+        chmodSync(this.filePath, 0o600);
+      } catch {
+        // Not ours to change (read-only volume, other owner): reading still works, and the failure is not fatal.
+      }
+    }
   }
 
   private loadCache(): Record<string, string> {
@@ -37,7 +45,10 @@ export class FileSecretStore implements SecretStore {
 
   private persist(): void {
     const payload: SecretFilePayload = { secrets: this.loadCache() };
-    writeFileSync(this.filePath, JSON.stringify(payload, null, 2), "utf8");
+    // Model API keys live here in plain text, so only the person who owns the account may read them.
+    // `mode` applies only when the file is created; the chmod also tightens a file an older build made.
+    writeFileSync(this.filePath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    chmodSync(this.filePath, 0o600);
   }
 
   async set(ref: string, value: string): Promise<void> {
