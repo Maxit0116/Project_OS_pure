@@ -249,7 +249,8 @@ export function parseDiffReadyNotificationPayload(input: unknown): {
     typeof title !== 'string' || !title.trim() || title.length > 200 ||
     typeof body !== 'string' || !body.trim() || body.length > 2_000 ||
     (destination !== 'ask' && destination !== 'diff' && destination !== 'decisions') ||
-    !Array.isArray(runIds) || runIds.length === 0 || runIds.length > 128 ||
+    // An answer to a question belongs to no run, so only a change or a decision must name one.
+    !Array.isArray(runIds) || (runIds.length === 0 && destination !== 'ask') || runIds.length > 128 ||
     runIds.some((runId) =>
       typeof runId !== 'string' || !runId || runId.length > 256 || runId.includes('\0')) ||
     new Set(runIds).size !== runIds.length ||

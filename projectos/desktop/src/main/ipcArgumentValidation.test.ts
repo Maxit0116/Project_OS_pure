@@ -49,6 +49,20 @@ describe('privileged IPC argument validation', () => {
     )
   })
 
+  it('accepts the notification for an answer to a question, which belongs to no run', () => {
+    // Observed on the built app: every Ask answer finished while the window was in the background raised
+    // "Notification payload is invalid", because the answer carries no run id and one was required.
+    expect(parseDiffReadyNotificationPayload({
+      title: 'Answer ready',
+      body: 'How favoriting works',
+      destination: 'ask',
+      runIds: [],
+    })).toEqual({ title: 'Answer ready', body: 'How favoriting works', destination: 'ask', runIds: [] })
+    // A change and a decision still have to name the run they are about.
+    expect(() => parseDiffReadyNotificationPayload({ title: 'Decision', body: 'Choose', destination: 'decisions', runIds: [], decisionId: 'd1' }))
+      .toThrow('Notification payload is invalid')
+  })
+
   it('bounds notifications and window titles before invoking OS APIs', () => {
     expect(parseDiffReadyNotificationPayload({
       title: 'Diff ready',
@@ -72,6 +86,9 @@ describe('privileged IPC argument validation', () => {
     })).toThrow('Notification payload is invalid')
     expect(() => parseDiffReadyNotificationPayload({
       title: 'Diff ready', body: 'Review', runIds: ['run_one', 'run_one'],
+    })).toThrow('Notification payload is invalid')
+    expect(() => parseDiffReadyNotificationPayload({
+      title: 'Diff ready', body: 'Review', runIds: [],
     })).toThrow('Notification payload is invalid')
     expect(() => parseWindowTitle('ProjectOS\nspoofed')).toThrow('Window title is invalid')
     expect(parseWindowTitle('ProjectOS — Sample')).toBe('ProjectOS — Sample')
