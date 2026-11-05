@@ -6,6 +6,22 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("AppQuitCoordinator with no cleanup to wait for", () => {
+  it("leaves the quit alone, so one request is enough to exit", () => {
+    // Found on the packaged app: cancelling the quit and asking for it again closed the window on the
+    // first Cmd+Q and left the app running until a second one.
+    const app = { quit: vi.fn(), exit: vi.fn() };
+    const coordinator = new AppQuitCoordinator(app, {});
+    const event = { preventDefault: vi.fn() };
+
+    coordinator.handleBeforeQuit(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(app.quit).not.toHaveBeenCalled();
+    expect(app.exit).not.toHaveBeenCalled();
+  });
+});
+
 describe("AppQuitCoordinator", () => {
   it("allows one reentrant app.quit only after cleanup succeeds", async () => {
     const harness = createHarness();
