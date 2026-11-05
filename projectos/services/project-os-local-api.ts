@@ -806,6 +806,18 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       gateway: this.modelGateway,
       settingsService: this.settingsService,
       executors: this.executors,
+      decisions: {
+        open: (decision) => { this.recordRunDecision(decision); },
+        supersede: (decisionId) => {
+          // Best effort: a question that cannot be retired must not hide why the run ended.
+          try {
+            for (const workspace of this.workspacesByProjectId.values()) {
+              const store = this.durableRunStateFor(workspace);
+              if (store.loadDecision(decisionId)) { store.supersedeDecision(decisionId); return; }
+            }
+          } catch { /* the run's own outcome is what the person needs to see */ }
+        },
+      },
       validateGeneratedDiffScope: (runId, diff) =>
         this.validateGeneratedDiffScope(runId, diff),
       automaticLeafExecution: {
@@ -3755,12 +3767,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         `Run decision '${decisionId}' was not found in project '${projectId}'`,
       );
     }
-    return store.resolveDecision(
+    const resolved = store.resolveDecision(
       decisionId,
       expectedRevision,
       answer,
       status,
     );
+    // A run may be waiting on this answer (a question the agent asked mid-run); wake it.
+    this.orchestrator.deliverDecision(resolved);
+    return resolved;
   }
 
   async getRunCheckpoint(

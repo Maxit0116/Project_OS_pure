@@ -47,6 +47,17 @@ import {
   type BatchValidationResult,
 } from "../../contracts/batch-validation.js";
 import type { VerificationRunResult } from "../../contracts/exec-command.js";
+import type { RunDecision } from "../../contracts/run-state.js";
+import {
+  ASK_USER_STAGES,
+  MAX_RUN_QUESTIONS,
+  type AnsweredQuestion,
+  answerFromDecision,
+  buildQuestionDecision,
+  parseAskUser,
+  withAskUserOption,
+  withUserAnswers,
+} from "./ask-user.js";
 import type { VerificationEvidence } from "../../contracts/verification-evidence.js";
 import { verificationFailureAllowsRepair } from "../verification-evidence.js";
 import { writeRunSnapshot } from "../harness/persisted-run.js";
@@ -248,6 +259,9 @@ export interface OrchestratorRunState {
    * automatically, and the plain Apply refuses while this is set.
    */
   unmetRequirements?: WholeTreeReviewFinding[];
+  /** On a root run: how many questions the agent has put to the person, and what they answered. */
+  questionsAsked?: number;
+  answeredQuestions?: AnsweredQuestion[];
   /** The leaf-level equivalent: its independent review could not confirm some criteria by reading. */
   proposalReviewReason?: string;
   /** The located edit target a leaf proposed against; kept so a rejected proposal can be regenerated. */
@@ -552,6 +566,13 @@ export interface AutomaticLeafExecutionDependency {
   ): Promise<VerificationRunResult>;
 }
 
+/** The durable place a question to the person lives while it waits for an answer. */
+export interface RunDecisionPort {
+  open(decision: RunDecision): void;
+  /** A question nobody will answer any more (the run was cancelled): take it off the screen. */
+  supersede(decisionId: string): void;
+}
+
 export interface AgentOrchestratorOptions {
   gateway: ModelGateway;
   settingsService: SettingsService;
@@ -579,6 +600,11 @@ export interface AgentOrchestratorOptions {
    * still emits run events. This is not a "trust this run" switch.
    */
   auditDirectory?: string;
+  /**
+   * Where a question the agent puts to the person is kept, so it shows as a card in the chat. Unset
+   * means no question is ever asked: every step decides for itself, as before.
+   */
+  decisions?: RunDecisionPort;
   /** Fired after a root run_completed event is persisted. Must not throw into the run. */
   onRootRunCompleted?: (
     workspace: LoadedProjectOSWorkspace,
@@ -810,6 +836,17 @@ type DelegationPlanFailureCategory =
   | "invalid_plan_shape"
   | "response_truncated";
 
+/** The steps of a run that call the model; only some of them may ask the person a question. */
+type ModelCallStage =
+  | "refine"
+  | "generate"
+  | "answer"
+  | "locate"
+  | "edit"
+  | "validate"
+  | "plan"
+  | "validate_batch";
+
 /** What the whole-tree reviewer found wrong with one file, in its own words (bounded). */
 export interface WholeTreeReviewFinding {
   childRunId: string;
@@ -985,6 +1022,12 @@ export class AgentOrchestrator {
   private readonly runs = new Map<string, OrchestratorRunState>();
   private readonly inFlightRunIds = new Set<string>();
   private readonly runAbortControllers = new Map<string, AbortController>();
+  private readonly decisionPort: RunDecisionPort | undefined;
+  /** Questions waiting for the person, by decision id. Settled by `deliverDecision` or a cancelled run. */
+  private readonly pendingQuestions = new Map<string, {
+    resolve: (answer: AnsweredQuestion) => void;
+    reject: (error: Error) => void;
+  }>();
   private readonly eventPersistenceFailedRunIds = new Set<string>();
   private readonly terminalRootRunIds: string[] = [];
   private readonly terminalRootRunIdSet = new Set<string>();
@@ -1013,6 +1056,7 @@ export class AgentOrchestrator {
     this.onRootRunCompleted = options.onRootRunCompleted;
     this.pipelineBudget = resolveLeafPipelineBudget(options.pipelineBudget);
     this.auditDirectory = options.auditDirectory;
+    this.decisionPort = options.decisions;
   }
 
   hasInFlightWork(projectId: string): boolean {
@@ -1762,8 +1806,11 @@ export class AgentOrchestrator {
           await this.runLiveModelChangePipeline(workspace, state);
         }
       } catch (error) {
-        state.status = "error";
-        state.run.status = "error";
+        // A cancelled or interrupted run keeps the status that cancellation set, as on the runtime path.
+        if (!(error instanceof AgentRunCancelledError) && state.run.status === "running") {
+          state.status = "error";
+          state.run.status = "error";
+        }
         throw error;
       }
       return;
@@ -2698,7 +2745,8 @@ export class AgentOrchestrator {
         ),
       );
     } catch (error) {
-      this.emitFailedStep(workspace, state, planStep, error);
+      // A cancelled run stays cancelled: failing the step would turn it into an error after the fact.
+      if (!(error instanceof AgentRunCancelledError)) this.emitFailedStep(workspace, state, planStep, error);
       throw error;
     }
 
@@ -8090,18 +8138,130 @@ export class AgentOrchestrator {
     }
   }
 
+  /**
+   * The person's side of a run: a step may stop and ask a product question it cannot answer from the
+   * request or the code. The run waits for the answer (its own clock stops meanwhile), the answer is
+   * kept for every later step of the run, and the step is asked again with it. Without a decision
+   * port, or past the limit, nothing is ever asked and this is just the model call.
+   */
   private async completeWithTrace(
     workspace: LoadedProjectOSWorkspace,
     state: OrchestratorRunState,
-    stage:
-      | "refine"
-      | "generate"
-      | "answer"
-      | "locate"
-      | "edit"
-      | "validate"
-      | "plan"
-      | "validate_batch",
+    stage: ModelCallStage,
+    request: ModelGatewayRequest,
+    phaseId?: string,
+    profileOverride?: ModelProfile,
+  ): Promise<ModelGatewayResponse> {
+    const root = this.runs.get(state.run.rootRunId ?? state.run.runId) ?? state;
+    for (;;) {
+      const mayAsk = Boolean(this.decisionPort) &&
+        !profileOverride &&
+        ASK_USER_STAGES.has(stage) &&
+        (root.questionsAsked ?? 0) < MAX_RUN_QUESTIONS;
+      const answered = withUserAnswers(request, root.answeredQuestions ?? []);
+      const response = await this.completeOnce(
+        workspace,
+        state,
+        stage,
+        mayAsk ? withAskUserOption(answered) : answered,
+        phaseId,
+        profileOverride,
+      );
+      const asked = mayAsk ? parseAskUser(response.output) : undefined;
+      if (!asked) return response;
+      root.questionsAsked = (root.questionsAsked ?? 0) + 1;
+      const answer = await this.putQuestionToPerson(workspace, state, root, asked, root.questionsAsked, phaseId);
+      root.answeredQuestions = [...(root.answeredQuestions ?? []), answer];
+    }
+  }
+
+  /** Records the question, waits for the person, and gives the run back the time it spent waiting. */
+  private async putQuestionToPerson(
+    workspace: LoadedProjectOSWorkspace,
+    state: OrchestratorRunState,
+    root: OrchestratorRunState,
+    asked: ReturnType<typeof parseAskUser> & object,
+    number: number,
+    phaseId?: string,
+  ): Promise<AnsweredQuestion> {
+    const port = this.decisionPort!;
+    const rootRunId = root.run.runId;
+    const nodeId = state.run.scope && "nodeId" in state.run.scope ? state.run.scope.nodeId : undefined;
+    const decision = buildQuestionDecision({
+      id: `decision_${rootRunId}_question_${number}`,
+      projectId: state.run.projectId,
+      rootRunId,
+      runId: state.run.runId,
+      ...(nodeId ? { nodeId } : {}),
+      asked: {
+        ...asked,
+        question: sanitizePlanText(asked.question, 400, "The agent needs a decision from you."),
+        options: asked.options.map((option) => ({
+          id: option.id,
+          label: sanitizePlanText(option.label, 120, "Option"),
+        })),
+      },
+      createdAt: new Date().toISOString(),
+    });
+    const abort = this.runAbortControllers.get(state.run.runId)?.signal;
+    const waiting = new Promise<AnsweredQuestion>((resolve, reject) => {
+      this.pendingQuestions.set(decision.id, { resolve, reject });
+      abort?.addEventListener("abort", () => {
+        this.pendingQuestions.delete(decision.id);
+        reject(new AgentRunCancelledError(state.run.runId));
+      }, { once: true });
+    });
+    // Nothing is asked of a run that was cancelled while the question was being written.
+    this.assertRunActive(state);
+    port.open(decision);
+    this.emit(
+      workspace,
+      state,
+      createActionEvent(state.run.runId, "decision_summary", {
+        summary: `Waiting for your answer: ${decision.question}`.slice(0, 900),
+      }, phaseId),
+    );
+    const waitStarted = Date.now();
+    try {
+      const answer = await waiting;
+      this.assertRunActive(state);
+      this.emit(
+        workspace,
+        state,
+        createActionEvent(state.run.runId, "decision_summary", {
+          summary: `You answered: ${answer.leftToAgent ? "left to the agent" : answer.answer}. Continuing.`.slice(0, 900),
+        }, phaseId),
+      );
+      return answer;
+    } catch (error) {
+      port.supersede(decision.id);
+      throw error;
+    } finally {
+      this.pendingQuestions.delete(decision.id);
+      // The person's time is not the model's time: it does not count against the run's wall clock.
+      const waited = Date.now() - waitStarted;
+      for (const candidate of [state, root]) {
+        if (candidate.pipelineStartedAt !== undefined) candidate.pipelineStartedAt += waited;
+      }
+    }
+  }
+
+  /**
+   * The person answered a question the agent asked. Returns whether a run was waiting for it; an
+   * answer to a question nobody waits for any more (the app restarted) is only recorded, not delivered.
+   */
+  deliverDecision(decision: RunDecision): boolean {
+    const waiting = this.pendingQuestions.get(decision.id);
+    if (!waiting || decision.status === "pending") return false;
+    this.pendingQuestions.delete(decision.id);
+    waiting.resolve(answerFromDecision(decision));
+    return true;
+  }
+
+  private async completeOnce(
+    workspace: LoadedProjectOSWorkspace,
+    state: OrchestratorRunState,
+    stage: ModelCallStage,
     request: ModelGatewayRequest,
     phaseId?: string,
     /** The profile to call instead of the run's own, e.g. a runtime run's validator. */

@@ -97,6 +97,27 @@ export class DurableRunStateStore {
     });
   }
 
+  /** A question nobody can answer any more (its run ended): mark it so it is not shown as waiting. */
+  supersedeDecision(decisionId: string): RunDecision | null {
+    const current = this.loadDecision(decisionId);
+    if (!current || current.status !== "pending") return current;
+    return this.saveDecision({
+      ...current,
+      status: "superseded",
+      revision: current.revision + 1,
+      resolvedAt: new Date().toISOString(),
+    });
+  }
+
+  /** Every question of a run still waiting; used to retire them when the run is gone. */
+  supersedePendingDecisions(rootRunId: string): number {
+    let count = 0;
+    for (const decision of this.listDecisions(rootRunId)) {
+      if (decision.status === "pending" && this.supersedeDecision(decision.id)?.status === "superseded") count += 1;
+    }
+    return count;
+  }
+
   saveCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
     const parsed = RunCheckpointSchema.parse(checkpoint);
     if (!safeId(parsed.id)) throw new Error("Unsafe checkpoint id");

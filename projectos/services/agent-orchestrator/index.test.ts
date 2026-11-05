@@ -2139,6 +2139,187 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     });
   });
 
+  describe("a question the agent puts to the person in the middle of a run", () => {
+    /** A decision port that remembers what was asked, standing in for the durable store. */
+    function recordingPort() {
+      const opened: import("../../contracts/run-state.js").RunDecision[] = [];
+      const superseded: string[] = [];
+      return {
+        opened,
+        superseded,
+        port: {
+          open: (decision: import("../../contracts/run-state.js").RunDecision) => { opened.push(decision); },
+          supersede: (id: string) => { superseded.push(id); },
+        },
+      };
+    }
+    const answerOnceAsked = async (
+      harness: ReturnType<typeof createHierarchyBudgetHarness>,
+      recorder: ReturnType<typeof recordingPort>,
+      answerFor: (decision: import("../../contracts/run-state.js").RunDecision) => import("../../contracts/run-state.js").RunDecision,
+    ) => {
+      await vi.waitFor(() => expect(recorder.opened.length).toBeGreaterThan(0));
+      const asked = recorder.opened[recorder.opened.length - 1]!;
+      harness.orchestrator.deliverDecision(answerFor(asked));
+    };
+
+    it("waits for the answer, then asks the same step again with it, and finishes", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      await answerOnceAsked(harness, recorder, (asked) => ({
+        ...asked,
+        status: "resolved",
+        revision: 2,
+        answer: { optionId: "option_2", text: "use the billing contact" },
+        resolvedAt: new Date().toISOString(),
+      }));
+      await running;
+
+      // The question was recorded as a card the person can answer, in the server's own option ids.
+      expect(recorder.opened).toHaveLength(1);
+      expect(recorder.opened[0]).toMatchObject({
+        kind: "clarification",
+        status: "pending",
+        question: "Should the receipt be sent to the account email or to another address?",
+        rootRunId: harness.root.run.runId,
+        recommendation: "Account email",
+        options: [
+          { id: "option_1", label: "Account email" },
+          { id: "option_2", label: "Another address" },
+          { id: "decline", label: "Let Agent decide" },
+        ],
+      });
+      // The step was asked again with the answer, and the run went on to finish.
+      const withAnswer = harness.planRequests.find((request) => request.userAnswers !== undefined);
+      expect(withAnswer?.userAnswers).toEqual([
+        { question: "Should the receipt be sent to the account email or to another address?", answer: "Another address. use the billing contact" },
+      ]);
+      expect(withAnswer?.systemPrompt).toMatch(/userAnswers are the person's answers/u);
+      expect(harness.root.run.status).toBe("awaiting_review");
+      // The run said it was waiting and then that it went on, so the person can follow it in the flow.
+      const summaries = harness.root.events
+        .filter((event) => event.type === "decision_summary")
+        .map((event) => JSON.stringify(event.payload));
+      expect(summaries.some((text) => /Waiting for your answer: Should the receipt/u.test(text))).toBe(true);
+      expect(summaries.some((text) => /You answered: Another address\. use the billing contact\. Continuing\./u.test(text))).toBe(true);
+    });
+
+    it("carries the answer to every later step of the run, not only the one that asked", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      await answerOnceAsked(harness, recorder, (asked) => ({
+        ...asked, status: "resolved", revision: 2, answer: { optionId: "option_1" }, resolvedAt: new Date().toISOString(),
+      }));
+      await running;
+
+      const laterModes = harness.taskContextSeen.filter((seen) => seen.mode === "locate_plan" || seen.mode === "validate_proposal");
+      expect(laterModes.length).toBeGreaterThan(0);
+      expect(harness.root.answeredQuestions).toEqual([
+        { question: "Should the receipt be sent to the account email or to another address?", answer: "Account email" },
+      ]);
+    });
+
+    it("treats \"let Agent decide\" as an answer that tells the model to assume and say so", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      await answerOnceAsked(harness, recorder, (asked) => ({
+        ...asked, status: "declined", revision: 2, answer: { optionId: "decline" }, resolvedAt: new Date().toISOString(),
+      }));
+      await running;
+
+      expect(harness.root.answeredQuestions).toEqual([
+        { question: expect.any(String), answer: "The person left this to the agent.", leftToAgent: true },
+      ]);
+    });
+
+    it("asks at most twice in one run, then stops offering the question", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-always", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId).catch((error: unknown) => error);
+      for (let round = 1; round <= 2; round += 1) {
+        await vi.waitFor(() => expect(recorder.opened.length).toBe(round));
+        harness.orchestrator.deliverDecision({
+          ...recorder.opened[round - 1]!, status: "resolved", revision: 2, answer: { optionId: "option_1" }, resolvedAt: new Date().toISOString(),
+        });
+      }
+      await running;
+
+      expect(recorder.opened).toHaveLength(2);
+      // The third plan request no longer invites a question.
+      const prompts = harness.planRequests.map((request) => /You may ask the person one question/u.test(request.systemPrompt));
+      expect(prompts.slice(0, 3)).toEqual([true, true, false]);
+    });
+
+    it("never invites a question from a step that only judges (the reviewers)", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      await answerOnceAsked(harness, recorder, (asked) => ({
+        ...asked, status: "resolved", revision: 2, answer: { optionId: "option_1" }, resolvedAt: new Date().toISOString(),
+      }));
+      await running;
+
+      expect(harness.wholeTreeReviews.length).toBeGreaterThan(0);
+      expect(harness.wholeTreeReviews.every((review) => !/You may ask the person one question/u.test(review.systemPrompt))).toBe(true);
+      expect(harness.taskContextSeen.filter((seen) => seen.mode === "validate_proposal")
+        .every((seen) => !/You may ask the person one question/u.test(seen.systemPrompt))).toBe(true);
+    });
+
+    it("asks nothing when no decision port is configured, and a question-shaped reply is then just a bad reply", async () => {
+      const harness = createHierarchyBudgetHarness("ask-once");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.every((request) => !/You may ask the person one question/u.test(request.systemPrompt))).toBe(true);
+      expect(harness.root.questionsAsked).toBeUndefined();
+    });
+
+    it("stops waiting, and takes the question off the screen, when the run is cancelled", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId).catch((error: unknown) => error);
+      await vi.waitFor(() => expect(recorder.opened).toHaveLength(1));
+      harness.orchestrator.cancelRun(harness.root.run.runId);
+      await running;
+
+      expect(recorder.superseded).toEqual([recorder.opened[0]!.id]);
+      expect(harness.root.run.status).toBe("cancelled");
+      // An answer that arrives too late is not delivered to anything.
+      expect(harness.orchestrator.deliverDecision({
+        ...recorder.opened[0]!, status: "resolved", revision: 2, answer: { optionId: "option_1" }, resolvedAt: new Date().toISOString(),
+      })).toBe(false);
+    });
+
+    it("does not count the person's thinking time against the run's wall clock", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+      const before = Date.now();
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      await vi.waitFor(() => expect(recorder.opened).toHaveLength(1));
+      const startedBeforeWait = harness.root.pipelineStartedAt;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 60));
+      harness.orchestrator.deliverDecision({
+        ...recorder.opened[0]!, status: "resolved", revision: 2, answer: { optionId: "option_1" }, resolvedAt: new Date().toISOString(),
+      });
+      await running;
+
+      if (startedBeforeWait !== undefined) {
+        expect(harness.root.pipelineStartedAt! - startedBeforeWait).toBeGreaterThanOrEqual(50);
+        expect(harness.root.pipelineStartedAt!).toBeGreaterThan(before);
+      }
+    });
+  });
+
   describe("the whole-tree review's output budget", () => {
     it("starts big and asks short, because a review of every criterion of every file was cut off live twice", async () => {
       const harness = createHierarchyBudgetHarness("dependency-contract");
@@ -3096,6 +3277,8 @@ function createModelOrchestrator(
 }
 
 const DEPENDENCY_PLAN_MODES: ReadonlySet<string> = new Set([
+  "ask-once",
+  "ask-always",
   "dependency-contract",
   "dependency-failed",
   "contract-kind-retry",
@@ -3109,6 +3292,8 @@ const DEPENDENCY_PLAN_MODES: ReadonlySet<string> = new Set([
   "batch-uncertain",
   "batch-unsatisfied",
   "batch-inconsistent-files",
+  "ask-once",
+  "ask-always",
   "leaf-uncertain",
   "batch-truncated-once",
   "plan-self-consumer",
@@ -3135,6 +3320,8 @@ type HierarchyBudgetHarnessMode =
   | "batch-uncertain"
   | "batch-unsatisfied"
   | "batch-inconsistent-files"
+  | "ask-once"
+  | "ask-always"
   | "leaf-uncertain"
   | "batch-truncated-once"
   | "plan-self-consumer"
@@ -3153,6 +3340,7 @@ interface HierarchyBudgetNode {
 function createHierarchyBudgetHarness(
   mode: HierarchyBudgetHarnessMode,
   rootPolicy: "review_first" | "automatic" = "review_first",
+  extra: { decisions?: import("./index.js").RunDecisionPort } = {},
 ) {
   const workspace = new ProjectOSWorkspaceStore().loadWorkspace(sampleWorkspaceRoot);
   workspace.settings = ProjectOSSettingsSchema.parse({
@@ -3259,7 +3447,7 @@ function createHierarchyBudgetHarness(
     });
   }
 
-  const planRequests: Array<{ planRetry: unknown; systemPrompt: string; maxOutputTokens?: number; tools?: Array<{ function: { name: string; parameters: Record<string, unknown> } }> }> = [];
+  const planRequests: Array<{ planRetry: unknown; userAnswers?: unknown; systemPrompt: string; maxOutputTokens?: number; tools?: Array<{ function: { name: string; parameters: Record<string, unknown> } }> }> = [];
   let rootPlanCalls = 0;
   const wholeTreeReviews: Array<{ maxOutputTokens?: number; systemPrompt: string }> = [];
   const generationRequests: Array<{ path: string; systemPrompt: string }> = [];
@@ -3339,6 +3527,7 @@ function createHierarchyBudgetHarness(
       } else if (requestMode === "plan_graph_delegation") {
         planRequests.push({
           planRetry: input.planRetry,
+          ...(input.userAnswers !== undefined ? { userAnswers: input.userAnswers } : {}),
           systemPrompt: request.systemPrompt ?? "",
           ...(request.maxOutputTokens !== undefined ? { maxOutputTokens: request.maxOutputTokens } : {}),
           ...(request.structured ? { tools: request.structured.tools as never } : {}),
@@ -3347,6 +3536,25 @@ function createHierarchyBudgetHarness(
         // symbol, endpoint and message. "contract-kind-retry" corrects itself once it is told why.
         const isRootPlan = immediateTargets?.kind === "planner" && allowedIds.length === 2;
         if (isRootPlan) rootPlanCalls += 1;
+        const asksNow = isRootPlan && (mode === "ask-always" || (mode === "ask-once" && rootPlanCalls === 1));
+        if (asksNow) {
+          // The model cannot choose between two readings of the request and asks, as it was told it may.
+          return {
+            requestId: `request_ask_${rootPlanCalls}`,
+            provider: "test",
+            model: "test-model",
+            output: JSON.stringify({
+              ask_user: {
+                question: "Should the receipt be sent to the account email or to another address?",
+                options: [{ id: "a", label: "Account email" }, { id: "b", label: "Another address" }],
+                recommendation: "a",
+              },
+            }),
+            usage: { inputTokens: 1, outputTokens: 1 },
+            usageStatus: "reported",
+            latencyMs: 1,
+          } as never;
+        }
         const contractKind = mode === "contract-kind-always-wrong" ||
           (mode === "contract-kind-retry" && !input.planRetry) ||
           (mode === "contract-kind-twice-wrong" && rootPlanCalls <= 2)
@@ -3570,6 +3778,7 @@ function createHierarchyBudgetHarness(
       }
     },
     hierarchyDelegation,
+    ...(extra.decisions ? { decisions: extra.decisions } : {}),
   });
   const rootRunId = `run_budget_root_${mode}`;
   const root = orchestrator.createRun(workspace, {
