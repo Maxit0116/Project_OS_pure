@@ -61,7 +61,7 @@ export function deriveChatSessionStatus(state: WorkbenchState): ChatSessionStatu
   if (state.pendingRefinement && !state.refinementConfirmed) return 'awaiting_review'
   if (state.pendingPlan && !state.planConfirmed) return 'awaiting_review'
   if (state.flowStatus === 'running' || state.refineLoading || state.activeRunId) return 'running'
-  if (state.flowStatus === 'error') return 'error'
+  if (state.flowStatus === 'error' || state.flowStatus === 'interrupted') return 'error'
   return 'idle'
 }
 

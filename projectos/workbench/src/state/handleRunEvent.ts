@@ -33,7 +33,7 @@ export interface FlowCorrection {
   timestamp: string
 }
 
-export type FlowStatus = 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error'
+export type FlowStatus = 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error' | 'interrupted'
 
 export interface RunEventStoreSlice {
   client: ProjectOSApi
@@ -154,7 +154,12 @@ export function reduceRunEventState(
     patch.flowSteps = upsertFlowStep(state.flowSteps, { ...event.step, status: 'complete' })
   }
 
-  if (event.type === 'run_interrupted' || event.type === 'run_cancelled') {
+  // The app was closed or killed while the run was live. It is not a failure of the work, and
+  // nothing was re-applied; saying "error" hid both facts.
+  if (event.type === 'run_interrupted') {
+    patch.flowStatus = 'interrupted'
+  }
+  if (event.type === 'run_cancelled') {
     patch.flowStatus = 'error'
   }
 

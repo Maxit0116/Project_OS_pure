@@ -1,5 +1,13 @@
 # Progress
 
+## 2026-11-05 (evening) - S4 part 1 and 2: kill mid-run and governance audit, observed on the built app
+
+- **Kill mid-run (SIGKILL, 55 s in, 15 calls, nothing written):** on relaunch the three run logs got `run_interrupted {"writes":"none"}`, nothing was re-applied, no model call replayed. The UI said "错误", "已停止", "等待中" and never "interrupted"; `reconcileStaleFlowStatus` even mapped interrupted/cancelled to "complete". Fixed: `interrupted` flow state ("已中断"), "已中断" tasks, "未启动" for tasks never reached, cancelled on disk reads idle (tests fail without each). Re-run: header "已中断", files unchanged.
+- **Governance:** the unapproved verification command was audited `run_verification deny` and not run; after the person approved the card, `run_verification allow` with the command-set hash, then "验证通过"; each applied file left an `apply_diff allow` with a path hash. Out-of-scope write not re-provoked live (covered by unit tests; seen refused in S2 before its fix).
+- **Tests:** 1957 tests, 1853 pass, 80 fail (same 80 as S1), 24 skipped, 0 new; typechecks clean. Committed locally, nothing pushed.
+- **Open:** Script B (debug end to end) not yet run; a visible "model unreachable" state; the criterion that cannot be satisfied as written.
+- Next step: Script B on the built app.
+
 ## 2026-11-05 (later) - S3 repeat: repair loop, file claims, reviewer copies, fan-out; 5 of 5 on the final build
 
 - **Repeat evidence (three batches of five live runs, same request, fresh sample each, driver applies a held change and type-checks):** batch 1 3/5, batch 2 2 verified + 2 auto-applied (unchecked) + 2 failed, **batch 3 5/5 verified** (`tsc` 0 each, 29-31 calls, 240-300 s, no correction rounds).

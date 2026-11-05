@@ -500,7 +500,7 @@ export interface WorkbenchState {
   delegatedRunTraces: Record<string, DelegatedRunTrace>
   flowTransientTraces: AgentTransientTrace[]
   flowCorrections: FlowCorrection[]
-  flowStatus: 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error'
+  flowStatus: 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error' | 'interrupted'
   /** Live Graph overlay driven by run events (see Live-Graph Dev Plan Phase 1). */
   executionOverlay: import('@contracts/index').ExecutionOverlay | null
   /** Phase 2: focus a task/phase so only its nodes and execution edges stay emphasized. */
@@ -877,7 +877,7 @@ function notifyMemoryWrite(
 
 type FlowStatus = WorkbenchState['flowStatus']
 
-async function reconcileStaleFlowStatus(
+export async function reconcileStaleFlowStatus(
   client: ProjectOSApi,
   activeRunId: string | null,
   flowStatus: FlowStatus,
@@ -889,6 +889,9 @@ async function reconcileStaleFlowStatus(
     if (run.status === 'running' || run.status === 'queued') return 'running'
     if (run.status === 'awaiting_review') return 'awaiting_review'
     if (run.status === 'error') return 'error'
+    // These used to fall through to "complete", which told a person an interrupted or stopped run had finished.
+    if (run.status === 'interrupted') return 'interrupted'
+    if (run.status === 'cancelled') return 'idle'
     return 'complete'
   } catch {
     return 'idle'
