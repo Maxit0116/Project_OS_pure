@@ -3347,7 +3347,11 @@ export class AgentOrchestrator {
       );
     }
     const baseTarget = restrictLeafCandidatesToApprovedIntent(
-      restrictPlannerChildrenToApprovedIntent(hierarchyPlanTarget(state), state, workspace.graph),
+      restrictPlannerChildrenToApprovedIntent(
+        dropPlannersThatCannotDelegate(hierarchyPlanTarget(state), workspace.graph),
+        state,
+        workspace.graph,
+      ),
       state,
       workspace.graph,
     );
@@ -8816,7 +8820,7 @@ type HierarchyPlannerScope = Extract<
   { kind: "global" | "context" | "container" | "component" }
 >;
 
-type HierarchyPlanTarget =
+export type HierarchyPlanTarget =
   | { kind: "leaf-file"; allowedIds: string[] }
   | {
       kind: "planner";
@@ -9129,6 +9133,33 @@ function parseGreenfieldProductGraphProposal(
   }
   return undefined;
 }
+/**
+ * A planner that cannot delegate is a dead end, so it is never offered: a container with no
+ * components under it gives its planner no allowed child, and a component that owns no file gives it
+ * nothing to edit. Observed live: a database container with no components was chosen for a schema
+ * change, its planner's reply was rejected twice, and the whole run failed with "invalid plan shape".
+ * The work then goes to the node that does own the files. When every candidate is a dead end the list
+ * is left alone, so the failure stays as it was and is not hidden.
+ */
+export function dropPlannersThatCannotDelegate(
+  target: HierarchyPlanTarget,
+  graph: ProjectGraph,
+): HierarchyPlanTarget {
+  if (target.kind !== "planner" || target.level === "context") return target;
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const ownsFile = (nodeId: string) =>
+    graph.fileIndex.some((file) => file.nodeIds.includes(nodeId)) ||
+    (nodes.get(nodeId)?.linkedFiles?.length ?? 0) > 0 && graph.fileIndex.length === 0;
+  const usable = target.allowedIds.filter((nodeId) => {
+    const node = nodes.get(nodeId);
+    if (!node) return true;
+    return target.level === "container" ? (node.children?.length ?? 0) > 0 : ownsFile(nodeId);
+  });
+  return usable.length > 0 && usable.length < target.allowedIds.length
+    ? { ...target, allowedIds: usable }
+    : target;
+}
+
 
 function parseNodeScaffoldPlan(
   output: string,
