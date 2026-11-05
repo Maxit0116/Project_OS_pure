@@ -102,7 +102,7 @@ export async function runStructuredStep<T>(
       const entry: StructuredAttempt = {
         attempt,
         maxOutputTokens,
-        outputTokens: response.usage.outputTokens,
+        outputTokens: response.usage?.outputTokens ?? 0,
         via: response.toolName ? "tool" : "text",
         ...(response.finishReason ? { finishReason: response.finishReason } : {}),
         ...(response.toolName ? { tool: response.toolName } : {}),
@@ -112,7 +112,7 @@ export async function runStructuredStep<T>(
       spec.onAttempt?.(entry);
     };
 
-    if (isTruncatedModelOutput(response, maxOutputTokens)) {
+    if (isTruncatedModelOutput({ ...response, usage: response.usage ?? { outputTokens: 0 } }, maxOutputTokens)) {
       lastProblem = "the answer was cut off at the output limit";
       record({ outcome: "cut_off" });
       continue;

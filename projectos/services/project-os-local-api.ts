@@ -3134,7 +3134,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const filePath = resolveDebugFixFilePath(stored.session, workspace);
       if (!filePath) {
         throw new ProjectOSError(
-          "debug_session_not_found",
+          "debug_target_unresolved",
           "No target file could be resolved for the debug fix",
         );
       }

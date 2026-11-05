@@ -60,3 +60,10 @@
   display: flex;
   gap: var(--space-sm);
 }
+
+.pendingHint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}

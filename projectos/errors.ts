@@ -56,6 +56,7 @@ export type ProjectOSErrorCode =
   | "plan_not_ready"
   | "debug_session_not_found"
   | "debug_instrumentation_failed"
+  | "debug_target_unresolved"
   | "person_not_found"
   | "invalid_collab_transition"
   | "acceptance_not_found"

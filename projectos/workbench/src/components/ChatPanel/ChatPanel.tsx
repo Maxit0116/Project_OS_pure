@@ -41,6 +41,7 @@ import {
 } from './spatialPinChatDisplay'
 import LoopAuthoringBanner from '../LoopGraph/LoopAuthoringBanner'
 import { shouldSuggestPlanMode } from './suggestPlanMode'
+import { isDebugFixPending } from '../../state/debugFixPending'
 import ConversationNavRail from './ConversationNavRail'
 import { collectUserTurns } from './conversationNavTurns'
 import styles from './ChatPanel.module.css'
@@ -123,6 +124,13 @@ export default function ChatPanel() {
   const pendingChangesDrawerVisible = useWorkbenchStore(selectPendingChangesDrawerVisible)
   const pendingChangesUndoMode = useWorkbenchStore(selectPendingChangesDrawerUndoMode)
   const { ts } = useI18n()
+  const debugFixPending = isDebugFixPending(debugSession?.phase, flowStatus)
+  // Cleaning up before the fix is applied strands it (it was prepared against the instrumented
+  // file), so ask first; never refuse, or a person who does not want the fix keeps the probes.
+  const requestDebugCleanup = () => {
+    if (debugFixPending && !window.confirm(ts('debug.cleanupFixPendingConfirm'))) return
+    void markDebugFixed()
+  }
   const agentActivities = useMemo(() => projectAgentActivities({
     messages,
     latestAskTrace,
@@ -538,7 +546,8 @@ export default function ChatPanel() {
             fixInProgress={refineLoading || flowStatus === 'running'}
             onReproduced={() => void submitDebugRepro()}
             onConfirmFix={() => void confirmDebugFix()}
-            onMarkFixed={() => void markDebugFixed()}
+            fixPending={debugFixPending}
+            onMarkFixed={requestDebugCleanup}
           />
         )}
         {chatMode === 'debug' && debugSession && !refineLoading && flowStatus !== 'running' ? (
@@ -574,7 +583,7 @@ export default function ChatPanel() {
               <button
                 type="button"
                 className={styles.debugCtaButton}
-                onClick={() => void markDebugFixed()}
+                onClick={requestDebugCleanup}
               >
                 {ts('debug.chatCtaMarkFixed')}
               </button>

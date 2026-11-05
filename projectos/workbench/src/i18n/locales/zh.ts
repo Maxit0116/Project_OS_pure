@@ -820,6 +820,8 @@ const zh = {
   },
   errors: {
     modelNotConfigured: '尚未配置模型。请打开“设置 → 模型”，添加带 API Key 的模型配置后再试。',
+    diffStale: '这个修改方案生成之后文件又被改动了，所以无法再应用。请重新发起请求，让方案基于当前文件生成。',
+    debugTargetUnresolved: '无法确定要修复哪个文件。请在目录里选中出问题的文件（或它所属的功能），再重新开始调试。',
     modelOutputInvalid: '模型两次返回的内容都无法被 Project OS 解析，未做任何改动。请重试，或在“设置 → 模型”里换一个模型。',
     providerRejectedKey: '模型服务商拒绝了该 API Key（HTTP {status}）。请到“设置 → 模型”检查密钥。',
     providerPaymentRequired: '模型服务商提示账户余额不足（HTTP {status}）。请充值或更换密钥。',
@@ -1190,6 +1192,10 @@ const zh = {
     continueToReproduce: '继续复现步骤',
     applyFix: '应用建议修复',
     markFixed: '问题已修复 — 清理插桩',
+    cleanupFixPendingHint:
+      '建议修复还在等你审核，尚未应用。请先在“代码 / Diff”里点“应用”，再清理插桩。',
+    cleanupFixPendingConfirm:
+      '建议修复尚未应用。现在清理插桩后，文件会发生变化，它将无法再应用，需要重新发起修复。仍要清理吗？',
     chatStageReproduce: '调试 · 复现：运行失败路径，出现问题后请确认。',
     chatStageFix: '调试 · 修复：已选定根因。确认后将提出作用域内补丁。',
     chatStageVerify: '调试 · 验证：修复运行已开始。问题消失后请确认。',

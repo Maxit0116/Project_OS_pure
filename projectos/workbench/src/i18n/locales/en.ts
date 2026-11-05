@@ -820,6 +820,8 @@ const en = {
   },
   errors: {
     modelNotConfigured: 'No model is set up yet. Open Settings → Models, add a model profile with your API key, then try again.',
+    diffStale: 'The file changed after this change was prepared, so it can no longer be applied. Ask again so the change is prepared on the current file.',
+    debugTargetUnresolved: 'Project OS could not tell which file to fix. Select the file (or the feature it belongs to) in the tree, then start the debug session again.',
     modelOutputInvalid: 'The model replied in a form Project OS could not use, even after one retry. Nothing was changed. Try again, or pick another model in Settings → Models.',
     providerRejectedKey: 'The model provider rejected the API key (HTTP {status}). Check the key in Settings → Models.',
     providerPaymentRequired: 'The model provider says the account has insufficient balance (HTTP {status}). Top up the account or use another key.',
@@ -1192,6 +1194,10 @@ const en = {
     continueToReproduce: 'Continue to reproduction',
     applyFix: 'Apply proposed fix',
     markFixed: 'Bug is fixed — clean up instrumentation',
+    cleanupFixPendingHint:
+      'The suggested fix is still waiting for your review and has not been applied. Apply it in Code / Diff first, then clean up the instrumentation.',
+    cleanupFixPendingConfirm:
+      'The suggested fix has not been applied. If you clean up now, it can no longer be applied because the file will have changed, and you will have to ask for the fix again. Clean up anyway?',
     chatStageReproduce:
       'Debug · Reproduce: run the failing path, then confirm when the bug appears.',
     chatStageFix:

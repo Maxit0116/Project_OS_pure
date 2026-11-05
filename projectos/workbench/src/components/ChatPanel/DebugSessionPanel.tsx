@@ -7,6 +7,8 @@ import styles from './DebugSessionPanel.module.css'
 interface Props {
   session: DebugSession
   fixInProgress: boolean
+  /** The fix is still running or waiting for review; cleaning up now would make it unappliable. */
+  fixPending?: boolean
   onReproduced: () => void
   onConfirmFix: () => void
   onMarkFixed: () => void
@@ -26,6 +28,7 @@ const PHASES = [
 export default function DebugSessionPanel({
   session,
   fixInProgress,
+  fixPending = false,
   onReproduced,
   onConfirmFix,
   onMarkFixed,
@@ -85,6 +88,10 @@ export default function DebugSessionPanel({
           <h4>{ts('debug.proposedFix')}</h4>
           <p>{session.proposedFix.summary}</p>
         </section>
+      )}
+
+      {session.phase === 'verify' && fixPending && (
+        <p className={styles.pendingHint}>{ts('debug.cleanupFixPendingHint')}</p>
       )}
 
       <div className={styles.actions}>

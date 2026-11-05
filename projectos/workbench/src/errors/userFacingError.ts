@@ -30,6 +30,8 @@ export function userFacingErrorMessage(error: unknown, locale: Locale): string {
     : ''
   if (code === 'model_not_configured') return getStoreMessage(locale, 'errors.modelNotConfigured')
   if (code === 'model_output_invalid') return getStoreMessage(locale, 'errors.modelOutputInvalid')
+  if (code === 'debug_target_unresolved') return getStoreMessage(locale, 'errors.debugTargetUnresolved')
+  if (code === 'diff_stale') return getStoreMessage(locale, 'errors.diffStale')
   const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
   const readable = raw ? stripIpcWrapper(raw) : ''
   return userFacingProviderText(readable, locale) ?? sanitizeErrorMessage(readable || error)

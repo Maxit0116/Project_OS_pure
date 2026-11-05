@@ -55,4 +55,19 @@ describe('userFacingProviderText', () => {
   it('leaves text that is not a provider failure alone', () => {
     expect(userFacingProviderText('Disk is full', 'en')).toBeUndefined()
   })
+
+  it('tells a person which step to take when a debug fix has no target file', () => {
+    const error = Object.assign(new Error('No target file could be resolved for the debug fix'), { code: 'debug_target_unresolved' })
+    expect(userFacingErrorMessage(error, 'zh')).toMatch(/选中出问题的文件/u)
+    expect(userFacingErrorMessage(error, 'en')).toMatch(/Select the file/u)
+    expect(userFacingErrorMessage(error, 'en')).not.toMatch(/No target file could be resolved/u)
+  })
+
+  it('says a change that went stale cannot be applied and what to do, not the internal diff text', () => {
+    // Observed live: applying a debug fix after the probes were cleaned up showed this raw English line.
+    const error = Object.assign(new Error("Generated diff is stale for 'lib/team.ts'"), { code: 'diff_stale' })
+    expect(userFacingErrorMessage(error, 'zh')).toMatch(/无法再应用/u)
+    expect(userFacingErrorMessage(error, 'en')).toMatch(/can no longer be applied/u)
+    expect(userFacingErrorMessage(error, 'en')).not.toMatch(/Generated diff is stale/u)
+  })
 })
