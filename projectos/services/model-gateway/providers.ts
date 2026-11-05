@@ -9,6 +9,7 @@ import type {
 import type { ModelToolCall, ModelToolDefinition } from "../../contracts/model-gateway.js";
 import { normalizeModelProfile } from "../../contracts/settings.js";
 import { ProjectOSError } from "../../errors.js";
+import { sanitizeErrorMessage } from "../../utils/sanitize-error-message.js";
 import type { SecretStore } from "../../persistence/secret-store.js";
 
 export interface ProviderImagePart {
@@ -157,7 +158,7 @@ const OllamaModelsResponseSchema = z.object({
   models: z.array(z.object({ name: z.string().min(1) })),
 });
 
-async function readResponseText(response: Response): Promise<string> {
+async function readResponseText(response: Response, signal?: AbortSignal): Promise<string> {
   if (!response.ok) {
     throw new ProjectOSError(
       "model_connection_failed",
@@ -177,6 +178,10 @@ async function readResponseText(response: Response): Promise<string> {
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
+  // An aborted read ends the stream early; the caller checks the signal and does not parse a part.
+  const stop = () => { void reader.cancel().catch(() => undefined); };
+  if (signal?.aborted) stop();
+  else signal?.addEventListener("abort", stop, { once: true });
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -188,6 +193,7 @@ async function readResponseText(response: Response): Promise<string> {
       chunks.push(value);
     }
   } finally {
+    signal?.removeEventListener("abort", stop);
     reader.releaseLock();
   }
 
@@ -215,9 +221,18 @@ function parseProviderJson<Schema extends z.ZodTypeAny>(
   try {
     decoded = JSON.parse(text);
   } catch {
+    // What the provider sent goes in the details, never in the message: "invalid JSON" alone cannot
+    // tell an empty body from an error page from a cut-off reply.
     throw new ProjectOSError(
       "model_connection_failed",
       "Model provider returned invalid JSON",
+      {
+        details: {
+          reason: text.trim() === "" ? "empty_body" : "invalid_json",
+          bodyBytes: text.length,
+          bodyStart: sanitizeErrorMessage(text.trim().slice(0, 200)),
+        },
+      },
     );
   }
   const parsed = schema.safeParse(decoded);
@@ -255,6 +270,90 @@ function isTransientProviderFetchError(error: unknown): boolean {
   );
 }
 
+export type NetworkFailureKind = "dns" | "refused" | "unreachable" | "timeout" | "connection";
+
+/**
+ * What the network did, read from the error code the platform attached, so a person can be told
+ * "could not reach the model" instead of the bare `fetch failed` that undici throws for all of it.
+ * Undefined for anything that is not the network (a bad URL, a programming error).
+ */
+export function classifyNetworkFailure(error: unknown): NetworkFailureKind | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const cause = "cause" in error && error.cause instanceof Error ? error.cause : undefined;
+  const code = String((cause as { code?: unknown } | undefined)?.code ?? (error as { code?: unknown }).code ?? "");
+  const text = `${error.message} ${cause?.message ?? ""}`.toLowerCase();
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN" || text.includes("getaddrinfo")) return "dns";
+  if (code === "ECONNREFUSED") return "refused";
+  if (code === "ENETUNREACH" || code === "EHOSTUNREACH" || code === "ENETDOWN") return "unreachable";
+  if (code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT") return "timeout";
+  if (code === "ECONNRESET" || code.startsWith("UND_ERR") || text.includes("fetch failed") || text.includes("other side closed")) {
+    return "connection";
+  }
+  return undefined;
+}
+
+function unreachableError(url: string, error: unknown): Error {
+  const kind = classifyNetworkFailure(error);
+  if (!kind) return error instanceof Error ? error : new Error("Model request failed");
+  let host = "the model provider";
+  try { host = new URL(url).host; } catch { /* keep the generic name */ }
+  return new ProjectOSError(
+    "model_unreachable",
+    `Model provider unreachable (${kind}): ${host}`,
+    { cause: error, details: { kind, host } },
+  );
+}
+
+const PROVIDER_BODY_RETRIES = 1;
+
+function isUnreadableProviderBody(error: unknown): boolean {
+  if (!(error instanceof ProjectOSError)) return false;
+  const reason = (error.details as { reason?: unknown } | undefined)?.reason;
+  return reason === "invalid_json" || reason === "empty_body";
+}
+
+/**
+ * Read a reply's body within the same deadline as its headers, and ask again once when what came
+ * back is not JSON at all (empty, an error page, cut off): that is the provider or a proxy failing,
+ * not the model answering badly, and giving up there threw away a whole multi-call run. A reply that
+ * is JSON of the wrong shape is not asked for again.
+ */
+async function withBodyRetry<T>(
+  attempt: (readBody: (response: Response) => Promise<string>) => Promise<T>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<T> {
+  for (let tries = 0; ; tries += 1) {
+    const readBody = async (response: Response): Promise<string> => {
+      const bodyAbort = new AbortController();
+      const timer = setTimeout(() => bodyAbort.abort(), timeoutMs);
+      const onCallerAbort = () => bodyAbort.abort();
+      signal?.addEventListener("abort", onCallerAbort, { once: true });
+      try {
+        const text = await readResponseText(response, bodyAbort.signal);
+        if (bodyAbort.signal.aborted) {
+          if (signal?.aborted) throw new Error("Model request cancelled");
+          throw new ProjectOSError(
+            "model_timeout",
+            `Model request timed out after ${timeoutMs / 1000}s`,
+            { details: { seconds: timeoutMs / 1000 } },
+          );
+        }
+        return text;
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onCallerAbort);
+      }
+    };
+    try {
+      return await attempt(readBody);
+    } catch (error) {
+      if (tries < PROVIDER_BODY_RETRIES && isUnreadableProviderBody(error) && !signal?.aborted) continue;
+      throw error;
+    }
+  }
+}
+
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
@@ -272,14 +371,18 @@ async function fetchWithTimeout(
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         if (signal?.aborted) throw new Error("Model request cancelled");
-        throw new Error(`Model request timed out after ${timeoutMs / 1000}s`);
+        throw new ProjectOSError(
+          "model_timeout",
+          `Model request timed out after ${timeoutMs / 1000}s`,
+          { details: { seconds: timeoutMs / 1000 } },
+        );
       }
       lastError = error;
       if (
         !isTransientProviderFetchError(error) ||
         attempt === PROVIDER_FETCH_TRANSIENT_RETRIES
       ) {
-        throw error;
+        throw unreachableError(url, error);
       }
     } finally {
       clearTimeout(timeoutId);
@@ -589,7 +692,8 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
     apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
-    const response = await fetchWithTimeout(openAiChatCompletionsUrl(profile.baseUrl), {
+    const body = await withBodyRetry(async (readBody) => {
+      const response = await fetchWithTimeout(openAiChatCompletionsUrl(profile.baseUrl), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -597,11 +701,8 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
       },
       body: JSON.stringify(buildOpenAiChatBody(profile, input)),
     }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
-
-    const body = parseProviderJson(
-      await readResponseText(response),
-      OpenAiResponseSchema,
-    );
+      return parseProviderJson(await readBody(response), OpenAiResponseSchema);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
     const choice = body.choices[0]!;
     const message = extractOpenAiMessageParts(choice.message);
     const toolCalls = message.tool_calls?.map((toolCall) => ({
@@ -640,7 +741,8 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
     apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
-    const response = await fetchWithTimeout(anthropicMessagesUrl(profile.baseUrl), {
+    const body = await withBodyRetry(async (readBody) => {
+      const response = await fetchWithTimeout(anthropicMessagesUrl(profile.baseUrl), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -649,11 +751,8 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
       },
       body: JSON.stringify(buildAnthropicMessagesBody(profile, input)),
     }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
-
-    const body = parseProviderJson(
-      await readResponseText(response),
-      AnthropicResponseSchema,
-    );
+      return parseProviderJson(await readBody(response), AnthropicResponseSchema);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
     const output = body.content
       .filter((part): part is { type: "text"; text: string } => part.type === "text")
       .map((part) => part.text)
@@ -698,7 +797,8 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
     _apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
-    const response = await fetchWithTimeout(ollamaChatUrl(profile.baseUrl), {
+    const body = await withBodyRetry(async (readBody) => {
+      const response = await fetchWithTimeout(ollamaChatUrl(profile.baseUrl), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -731,11 +831,8 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
         ...(input.tools?.length ? { tools: input.tools } : {}),
       }),
     }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
-
-    const body = parseProviderJson(
-      await readResponseText(response),
-      OllamaResponseSchema,
-    );
+      return parseProviderJson(await readBody(response), OllamaResponseSchema);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
     const output = body.message.content ?? "";
     return {
       output,
@@ -758,14 +855,13 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
     profile: ResolvedModelProfile,
     _apiKey: string | undefined,
   ): Promise<Array<{ id: string; name: string }>> {
-    const response = await fetchWithTimeout(
-      `${normalizeBaseUrl(profile.baseUrl)}/api/tags`,
-      { method: "GET" },
-    );
-    const body = parseProviderJson(
-      await readResponseText(response),
-      OllamaModelsResponseSchema,
-    );
+    const body = await withBodyRetry(async (readBody) => {
+      const response = await fetchWithTimeout(
+        `${normalizeBaseUrl(profile.baseUrl)}/api/tags`,
+        { method: "GET" },
+      );
+      return parseProviderJson(await readBody(response), OllamaModelsResponseSchema);
+    }, PROVIDER_FETCH_TIMEOUT_MS, undefined);
     return body.models.map((model) => ({
       id: model.name,
       name: model.name,

@@ -63,6 +63,22 @@ describe('userFacingProviderText', () => {
     expect(userFacingErrorMessage(error, 'en')).not.toMatch(/No target file could be resolved/u)
   })
 
+  it('tells a person the model could not be reached instead of a bare fetch failure', () => {
+    // Observed live: offline, every call failed with `fetch failed` and nothing said why.
+    const dns = Object.assign(new Error('Model provider unreachable (dns): api.deepseek.com'), { code: 'model_unreachable' })
+    expect(userFacingErrorMessage(dns, 'en')).toMatch(/could not reach the model service \(api\.deepseek\.com\)/u)
+    expect(userFacingErrorMessage(dns, 'zh')).toMatch(/无法连接到模型服务（api\.deepseek\.com）/u)
+    const refused = new Error('Model provider unreachable (refused): 127.0.0.1:11434')
+    expect(userFacingErrorMessage(refused, 'en')).toMatch(/refused the connection.*local model/u)
+    expect(userFacingErrorMessage(refused, 'en')).not.toMatch(/unreachable \(refused\)/u)
+  })
+
+  it('says how long the model was given before it timed out', () => {
+    const timeout = Object.assign(new Error('Model request timed out after 120s'), { code: 'model_timeout' })
+    expect(userFacingErrorMessage(timeout, 'en')).toMatch(/did not answer within 120 seconds/u)
+    expect(userFacingErrorMessage(timeout, 'zh')).toMatch(/120 秒内没有响应/u)
+  })
+
   it('says a change that went stale cannot be applied and what to do, not the internal diff text', () => {
     // Observed live: applying a debug fix after the probes were cleaned up showed this raw English line.
     const error = Object.assign(new Error("Generated diff is stale for 'lib/team.ts'"), { code: 'diff_stale' })

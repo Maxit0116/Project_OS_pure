@@ -495,4 +495,135 @@ describe("thinking depth body mapping", () => {
       usageReported: false,
     });
   });
+
+});
+
+describe("provider network failures", () => {
+  it("names a lost connection as the model being unreachable, not a bare 'fetch failed'", async () => {
+    // Observed live: with the laptop offline every call failed with `fetch failed` / getaddrinfo
+    // for api.deepseek.com, and a person saw no explanation.
+    const dnsFailure = () => Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("getaddrinfo ENOTFOUND api.deepseek.com"), { code: "ENOTFOUND" }),
+    });
+    const fetchMock = vi.fn(async () => { throw dnsFailure(); });
+    vi.stubGlobal("fetch", fetchMock);
+    const ollamaProfile = normalizeModelProfile({
+      id: "offline-ollama", name: "Ollama", provider: "ollama", model: "llama3.2", apiKeyRef: "",
+    });
+
+    const failure = await createProviderAdapter("ollama_chat")
+      .listModels!(ollamaProfile, undefined).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({ code: "model_unreachable" });
+    expect((failure as Error).message).toMatch(/^Model provider unreachable \(dns\)/u);
+    // The transient retries still happen before giving up.
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("tells a refused connection from a missing network", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw Object.assign(new TypeError("fetch failed"), {
+        cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:11434"), { code: "ECONNREFUSED" }),
+      });
+    }));
+    const ollamaProfile = normalizeModelProfile({
+      id: "refused-ollama", name: "Ollama", provider: "ollama", model: "llama3.2", apiKeyRef: "",
+    });
+    const failure = await createProviderAdapter("ollama_chat")
+      .listModels!(ollamaProfile, undefined).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: "model_unreachable" });
+    expect((failure as Error).message).toMatch(/^Model provider unreachable \(refused\)/u);
+  });
+
+  it("codes a timeout so the workbench can say the model did not answer", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          }, { once: true });
+        }),
+    ));
+    const ollamaProfile = normalizeModelProfile({
+      id: "slow-ollama", name: "Ollama", provider: "ollama", model: "llama3.2", apiKeyRef: "",
+    });
+    const pending = createProviderAdapter("ollama_chat").listModels!(ollamaProfile, undefined);
+    const settled = pending.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(await settled).toMatchObject({ code: "model_timeout" });
+  });
+
+  const openAiProfile = normalizeModelProfile({
+    id: "network-openai",
+    name: "OpenAI",
+    provider: "openai",
+    model: "gpt-test",
+    apiKeyRef: "network-openai-key",
+  });
+  const validReply = () => new Response(JSON.stringify({
+    choices: [{ message: { content: "hello" }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 1, completion_tokens: 1 },
+  }), { status: 200 });
+
+  it("asks again once when the provider answers 200 with an empty body, and takes the next answer", async () => {
+    // Observed live: a delegated leaf call failed with "returned invalid JSON" and, with its dependants
+    // blocked, threw away a whole run of about 16 model calls.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("", { status: 200 }))
+      .mockImplementation(async () => validReply());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createProviderAdapter("openai_chat").complete(openAiProfile, "secret", { userPrompt: "generate" }))
+      .resolves.toMatchObject({ output: "hello" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after that one retry and says what the provider sent, so a failure can be diagnosed", async () => {
+    const fetchMock = vi.fn(async () => new Response("<html>502 Bad Gateway</html>", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const failure = await createProviderAdapter("openai_chat")
+      .complete(openAiProfile, "secret", { userPrompt: "generate" }).catch((error: unknown) => error);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(failure).toMatchObject({
+      code: "model_connection_failed",
+      message: "Model provider returned invalid JSON",
+      details: { reason: "invalid_json" },
+    });
+    expect((failure as { details: { bodyStart: string } }).details.bodyStart).toContain("502 Bad Gateway");
+  });
+
+  it("does not ask again for a reply that is JSON but the wrong shape, which asking again will not fix", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ unexpected: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createProviderAdapter("openai_chat").complete(openAiProfile, "secret", { userPrompt: "generate" }))
+      .rejects.toMatchObject({ code: "model_connection_failed" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops waiting for a body that never finishes, with the same deadline as for the headers", async () => {
+    vi.useFakeTimers();
+    // Headers arrive at once; the body never ends.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({ start() { /* never closes */ } }), { status: 200 })));
+
+    const settled = createProviderAdapter("openai_chat")
+      .complete(openAiProfile, "secret", { userPrompt: "generate" }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(await settled).toMatchObject({ code: "model_timeout" });
+  });
+
+  it("leaves an error that is not about the network as it was", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Invalid URL"); }));
+    const ollamaProfile = normalizeModelProfile({
+      id: "bad-url-ollama", name: "Ollama", provider: "ollama", model: "llama3.2", apiKeyRef: "",
+    });
+    const failure = await createProviderAdapter("ollama_chat")
+      .listModels!(ollamaProfile, undefined).catch((error: unknown) => error);
+    expect((failure as Error).message).toBe("Invalid URL");
+    expect(failure).not.toMatchObject({ code: "model_unreachable" });
+  });
 });

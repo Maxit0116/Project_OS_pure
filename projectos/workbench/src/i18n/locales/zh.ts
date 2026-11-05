@@ -820,6 +820,9 @@ const zh = {
   },
   errors: {
     modelNotConfigured: '尚未配置模型。请打开“设置 → 模型”，添加带 API Key 的模型配置后再试。',
+    modelUnreachable: '无法连接到模型服务（{host}）。请检查网络连接（以及代理或 VPN），然后重试。',
+    modelRefused: '{host} 的模型服务拒绝了连接。如果是本地模型，请确认它已经启动，然后重试。',
+    modelTimedOut: '模型在 {seconds} 秒内没有响应。服务可能繁忙或网络较慢，请重试。',
     diffStale: '这个修改方案生成之后文件又被改动了，所以无法再应用。请重新发起请求，让方案基于当前文件生成。',
     debugTargetUnresolved: '无法确定要修复哪个文件。请在目录里选中出问题的文件（或它所属的功能），再重新开始调试。',
     modelOutputInvalid: '模型两次返回的内容都无法被 Project OS 解析，未做任何改动。请重试，或在“设置 → 模型”里换一个模型。',

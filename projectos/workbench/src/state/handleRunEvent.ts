@@ -21,6 +21,7 @@ import type { Locale } from '../i18n/types'
 import type { ToastType } from '../components/ui/Toast'
 import { getStoreMessage } from '../i18n/storeMessages'
 import { sanitizeErrorMessage } from '../../../utils/sanitize-error-message'
+import { userFacingProviderText } from '../errors/userFacingError'
 import { truncateDiffReadySummary } from '../notifications/diffReadyNotification'
 import type { CenterTab, ChatMessage, CodeSubTab } from './workbenchStore'
 import { logRunEventToActivity } from './activityLogFromRunEvent'
@@ -375,7 +376,9 @@ export function handleRunEvent(
       event.step?.outputSummary ??
       (typeof payload.message === 'string' ? payload.message : undefined) ??
       getStoreMessage(get().locale, 'agentFlow.stepFailed')
-    const sanitizedMessage = sanitizeErrorMessage(message)
+    // A lost connection or a slow model gets its plain sentence here too, not the provider's raw text.
+    const sanitizedMessage =
+      userFacingProviderText(sanitizeErrorMessage(message), get().locale) ?? sanitizeErrorMessage(message)
     const systemMessageId = `failure_${event.eventId}`
     set((state) => ({
       messages: state.messages.some((item) => item.id === systemMessageId)

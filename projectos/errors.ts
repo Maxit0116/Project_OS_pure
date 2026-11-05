@@ -30,6 +30,8 @@ export type ProjectOSErrorCode =
   | "invalid_settings"
   | "invalid_project_description"
   | "model_connection_failed"
+  | "model_unreachable"
+  | "model_timeout"
   | "model_not_configured"
   | "model_output_invalid"
   | "external_agent_failed"

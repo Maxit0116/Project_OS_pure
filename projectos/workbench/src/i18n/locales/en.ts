@@ -820,6 +820,9 @@ const en = {
   },
   errors: {
     modelNotConfigured: 'No model is set up yet. Open Settings → Models, add a model profile with your API key, then try again.',
+    modelUnreachable: 'Project OS could not reach the model service ({host}). Check your internet connection (and any VPN or proxy), then try again.',
+    modelRefused: 'The model service at {host} refused the connection. If this is a local model, make sure it is running, then try again.',
+    modelTimedOut: 'The model did not answer within {seconds} seconds. The service may be busy or your connection slow; try again.',
     diffStale: 'The file changed after this change was prepared, so it can no longer be applied. Ask again so the change is prepared on the current file.',
     debugTargetUnresolved: 'Project OS could not tell which file to fix. Select the file (or the feature it belongs to) in the tree, then start the debug session again.',
     modelOutputInvalid: 'The model replied in a form Project OS could not use, even after one retry. Nothing was changed. Try again, or pick another model in Settings → Models.',
