@@ -15,6 +15,7 @@ Code is distributed across files, while architecture and intent are often held i
 ## Current product direction
 
 - Status (2026-11-05): gate S0 (type checks and builds) passes; the node-harness gate SH is partly done; the sample project is reproducible from the committed fixture mirror and the graph sanitizer keeps authored content; gate S1 (first run with a live DeepSeek model) passes on the built app; gate S2 (a single-file Agent change with intent approval, validated apply, honest verification and undo, plus a model-built map of the sample) passes on the built app; gate S3 (a change across components) works on the built app (a three-capability change held for review, applied, verified and undone) through a structured-step runner that offers each model answer as a tool and repairs it with exact feedback; a bounded repair of a rejected batch is built (observed live once); a question that pauses and resumes a run mid-run is not; Stop works; the final build passed 5 of 5 live repeats; gate S4 (kill the app mid-run, governance audit, the debug flow end to end) works on the built app: a killed run shows "interrupted" and is never re-applied, an unapproved verification is audited and not run, and a debug session goes from hypotheses through probes, root cause, a reviewed fix and a clean-up that keeps the fix. the surface audit (S5) has started with the eight gaps found after S4: a verification-commands settings screen, a way to give an unowned file to a feature, plain messages for a lost connection and a rejected review, a bug reported with no file handed to Agent, and a different cross-component request tested (3 of 4 live runs passed; the failure was an intermittent provider reply, now retried once). Test triage is open: 1927 pass / 80 fail / 24 skipped of 2031 tests, all older drift (approval-rule tests, old intent-stub tests, sample real-preview suites that need `npm install` in the sample). S5 second pass (2026-11-05): an unmet requirement is held for an explicit "apply anyway", a step may ask the person a question mid-run, and a second real repository was mapped, questioned and changed on the built app; six defects found there are fixed (blank map after generation, 3,000-token file limit now 12,000, planner into a childless container, opaque subtree failure, Ask notification, Chinese bold markers). Plan mode and S6 remain.
+- Status addendum (2026-11-05, evening): gate S6 passes in the form this machine allows: the unsigned macOS build installs from its dmg and was run on the packaged app with a minimal environment (see `build_plan.md` §0 for what that does and does not prove); the Plan-mode dead end, the stale question card, the empty outline, a finished run reopening as running and a first quit that left the app alive were found and fixed on the way.
 - Governing priority (2026-11-03): shipability. The whole product must work on the built desktop app, proven gate by gate on observed runs; [`build_plan.md` §0](build_plan.md#0-shipability--the-current-priority-2026-11-03) defines the gates S0–S6. The hackathon demonstration below is gate S3.
 
 - Current milestone: a working hackathon demonstration of project-wide agent orchestration. Prioritize the master exploring the graph, delegating node tasks, consuming child reports, coordinating changes and showing the working app result. Use the existing model loop first; lock/journal hardening, crash recovery and full external-runtime support follow the demo. [`build_plan.md` §15](build_plan.md#15-active-hackathon-build-plan--make-orchestration-work-first) defines the current execution order.
@@ -59,6 +60,25 @@ npm run dev
 cd projectos/desktop
 npm run dev
 ```
+
+## Install, data and secrets (macOS build)
+
+Build: `cd projectos/desktop && npm run dist:mac` writes `release/Project OS-0.1.0-arm64.dmg` (about 176 MB), `release/Project OS-0.1.0-arm64-mac.zip` (about 169 MB) and the unpacked app (about 422 MB). `release/` is git-ignored. Only Apple Silicon is built and tested; the build is **not signed with a Developer ID and not notarized** (owner decision, 2026-11-03), but it is signed ad hoc by `desktop/scripts/adhoc-sign.cjs` so the bundle verifies. On another Mac, Gatekeeper will refuse the first launch of a downloaded copy: right-click the app and choose Open, or allow it in System Settings, Privacy & Security.
+
+What the app needs on a person's machine: nothing to launch it (no Node, npm or Electron; the language server, TypeScript and the terminal helper are packaged and unpacked next to the app). `git` on the `PATH` is used for cloning, change history and isolated work (macOS offers to install the Xcode command line tools the first time it is called if it is missing); a project's own verification commands need that project's own tools.
+
+Where things live:
+
+| What | Where |
+| --- | --- |
+| App data, per Mac account | `~/Library/Application Support/projectos-desktop/` (the folder takes the package name, not "Project OS"; macOS finds it from the account, not from the `HOME` variable) |
+| Model API keys | `secrets.json` in that folder, **plain text**, mode 0600 (an older file is tightened when the app starts). A project's settings hold only a reference to the key |
+| Which model a project uses (name, base URL, model, key reference, no key) | the project's own `.projectos/settings.json` |
+| Project state: map, conversations, runs, decisions, undo backups, proposed snapshots | the project's `.projectos/` folder (add it to `.gitignore` if the project is a repository you share) |
+| Governance audit trail; verification-command approvals | `governance-audit/` and the rest of the app data folder |
+| Browser caches, window state, Spatial Pin bridge | the rest of the app data folder |
+
+Reset: quit the app, then delete `~/Library/Application Support/projectos-desktop/` (forgets keys, recent projects and approvals) and, per project, `.projectos/` (forgets the map, conversations and runs). The bundled sample lives inside the app bundle (`Contents/Resources/sample-graph-saas`), so work on a copy of it.
 
 ## Current status and next gate
 
