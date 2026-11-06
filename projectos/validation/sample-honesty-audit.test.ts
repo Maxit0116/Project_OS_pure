@@ -310,6 +310,93 @@ describe.runIf(forced)("sample honesty closeout", () => {
     expect(notificationReadState(root).foreignUnread).toBe(1);
   }, 120_000);
 
+  it("creates a notification only for the validated bearer user", async () => {
+    const root = createRunnableSample();
+    const origin = await startRunnableSample(root);
+    const before = notificationRows(root);
+
+    const missingToken = await fetch(new URL("/api/notifications", origin), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "missing token must not persist" }),
+    });
+    expect(missingToken.status).toBe(401);
+    expect(await missingToken.json()).toEqual({ error: "Unauthorized" });
+
+    const wrongToken = await fetch(new URL("/api/notifications", origin), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer not-the-token",
+      },
+      body: JSON.stringify({
+        content: "wrong token must not persist",
+        userId: "user_2",
+        teamId: "team_foreign",
+      }),
+    });
+    expect(wrongToken.status).toBe(401);
+    expect(await wrongToken.json()).toEqual({ error: "Unauthorized" });
+
+    const blank = await fetch(new URL("/api/notifications", origin), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer mock-token",
+      },
+      body: JSON.stringify({ content: "   ", userId: "user_2" }),
+    });
+    expect(blank.status).toBe(400);
+    expect(await blank.json()).toEqual({ error: "Content is required" });
+    expect(notificationRows(root)).toEqual(before);
+
+    const created = await fetch(new URL("/api/notifications", origin), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer mock-token",
+      },
+      body: JSON.stringify({
+        content: "Owned by the token user",
+        userId: "user_2",
+        teamId: "team_foreign",
+      }),
+    });
+    expect(created.status).toBe(200);
+    expect(await created.json()).toEqual({ success: true });
+
+    const rows = notificationRows(root);
+    expect(rows.filter((row) => row.userId !== "user_1")).toEqual(
+      before.filter((row) => row.userId !== "user_1"),
+    );
+    expect(
+      rows.filter((row) => row.message === "Owned by the token user"),
+    ).toEqual([
+      {
+        id: expect.any(String),
+        userId: "user_1",
+        message: "Owned by the token user",
+        read: false,
+      },
+    ]);
+    expect(rows).toHaveLength(before.length + 1);
+
+    const listed = await fetch(new URL("/api/notifications", origin));
+    expect(listed.status).toBe(200);
+    const body = await listed.json() as Array<Record<string, unknown>>;
+    expect(body.some((row) => row["message"] === "Owned by the token user")).toBe(true);
+    expect(JSON.stringify(body)).not.toContain("user_2");
+    expect(JSON.stringify(body)).not.toContain("team_foreign");
+    for (const row of body) {
+      expect(Object.keys(row).sort()).toEqual([
+        "createdAt",
+        "id",
+        "message",
+        "read",
+      ]);
+    }
+  }, 120_000);
+
   it("renders measured admin data and labels compatibility surfaces honestly", async () => {
     const root = createRunnableSample();
     runDatabaseScript(root, `
@@ -593,6 +680,20 @@ function databaseCounts(root: string) {
       users: await prisma.user.count(),
       posts: await prisma.post.count(),
     };
+  `);
+}
+
+function notificationRows(root: string) {
+  return queryDatabase<Array<{
+    id: string;
+    userId: string;
+    message: string;
+    read: boolean;
+  }>>(root, `
+    const result = await prisma.notification.findMany({
+      orderBy: { id: "asc" },
+      select: { id: true, userId: true, message: true, read: true },
+    });
   `);
 }
 
