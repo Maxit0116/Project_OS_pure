@@ -44,6 +44,8 @@ jobs:
         # features_sync / SDD / staleness tools (those services are not present).
         run: npm run test:features
       - name: features:check
+        # Scoped tsc (contracts/features + scripts/features-check only).
+        # Does not run the full package build, which typechecks desktop/ and
+        # requires Electron deps that this job does not install.
         run: |
-          npm run features:check -- ../sample-graph-saas/.projectos/features.json
-          npm run features:check -- ./client/sample-projectos-fixtures/features.json
+          npm run features:check -- ../sample-graph-saas/.projectos/features.json ./client/sample-projectos-fixtures/features.json

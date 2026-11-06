@@ -32,7 +32,7 @@
     "fixtures:restore": "npm run build --silent && node dist/scripts/sample-fixture-reconciler.js restore",
     "fixtures:scaffold": "npm run build --silent && node dist/scripts/sample-fixture-reconciler.js scaffold",
     "fixtures:sync": "npm run build --silent && node dist/scripts/sample-fixture-reconciler.js sync",
-    "features:check": "npm run build --silent && node dist/scripts/features-check.js",
+    "features:check": "tsc -p tsconfig.features-check.json && node dist/scripts/features-check.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "env PROJECTOS_REQUIRE_REAL_PREVIEW=1 vitest run --maxWorkers=1 --minWorkers=1",
     "test:unit": "vitest run",
