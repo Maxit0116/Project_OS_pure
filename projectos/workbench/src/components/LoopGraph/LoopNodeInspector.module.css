@@ -181,6 +181,36 @@
   word-break: break-word;
 }
 
+.wiringActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clearOverride,
+.wiringPrimary {
+  align-self: flex-start;
+  border: 1px solid var(--tech-border);
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.wiringPrimary {
+  border-color: var(--tech-border-strong);
+  color: var(--tech-text-primary);
+  background: color-mix(in srgb, var(--tech-accent) 12%, var(--tech-bg-muted));
+}
+
+.clearOverride:hover,
+.wiringPrimary:hover {
+  border-color: var(--tech-border-strong);
+  color: var(--tech-text-primary);
+}
+
 .pendingPayload {
   display: flex;
   flex-direction: column;

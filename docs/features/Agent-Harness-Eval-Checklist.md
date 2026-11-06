@@ -65,7 +65,15 @@ From [`backend/Backend-Dev-Plan.md`](backend/Backend-Dev-Plan.md) §6. Check onl
 - [ ] Agent Flow shows `tool_policy_decision` / `mcp_tool_call` metadata when those events are emitted.
 - [ ] Settings → MCP: add stdio server, Test succeeds and lists tools; `enabled: false` contributes no Ask tools.
 - [ ] Settings → MCP Marketplace: catalog loads (remote/cache/bundled); Install writes disabled server with provenance; community stays disabled even if enable requested; Hide/Report remove listing locally; install does **not** write `permissions.json`.
-- [ ] Chat tools rail → Marketplace overlay: MCP and Skills tabs browse catalogs; MCP install disabled+provenance; Skill install lands under `.projectos/skills` and appears in `listSkills`; Replace required to overwrite; no auto permissions / mode switch.
+- [ ] Chat tools rail → Marketplace overlay: **six tabs** (MCP / Skills / Rules / Agents / Workflows / Stencils) + Catalog/Installed toggle; MCP install disabled+provenance; Skill → `.projectos/skills`; Rules → `.projectos/rules/<packId>/`; Agent → `agent_mkt_*` **without** auto-select; Workflow → `.projectos/loop-presets/`; Stencil → `.projectos/stencils/` in Capture Library; Replace required to overwrite; no auto permissions / mode switch.
+- [ ] Capability Marketplace (see [`Capability-Marketplace-Dev-Plan.md`](./Capability-Marketplace-Dev-Plan.md)):
+  - Export Share for Agent / Workflow / Stencil / Rules copies pack JSON; Overlay **Import pack** paste re-imports on the matching tab.
+  - Agent Detail **Dependencies** → Go install jumps to Skill/MCP/Rules tab and highlights the listing.
+  - Installed view lists cross-kind installs and uninstalls marketplace packs only (builtins untouched).
+  - Community risk copy visible; Hide removes listing; Install ≠ permissions allow; Ask without allow still does not `callTool`.
+  - **P6**: Git URL bar on all six tabs — Rules (pack JSON or `.md` folder); Agents/Workflows/Stencils require Capability Pack JSON (GitHub or raw `.json` HTTP); MCP/Skill git-url unchanged.
+  - **P6**: Builtin Stencil Library shows curated common controls (dialog/tabs/table/…); placement brief includes new templates; arbitrary frontend repo URL is **not** a stencil.
+  - **Installed Compose** (see [`Marketplace-Installed-Agent-Compose-Dev-Plan.md`](./Marketplace-Installed-Agent-Compose-Dev-Plan.md)): Installed bottom prompt → scope consent (local vs catalog) → checkable assembly card → confirm creates workforce agent; optional install-missing first; no auto-enable MCP / no permissions write; Chat/Loop Create Agent unchanged.
 - [ ] Ask with `mcp:server:*` allow: answer may include `mcpToolCalls`; activity row visible; memory proposal skipped when `usedMcp`.
 - [ ] Ask without allow: no real `callTool`; HTTP MCP to metadata / private LAN rejected.
 - [ ] Soft sandbox: unknown binary / network → `ask`; protected paths not written; `runHarnessShell` is the only shell entry for verification. `softOnly: true` remains a known limitation until OS isolation (no Seatbelt, Landlock, container, CPU, or memory quota). SB-1 adds process-group cleanup and a per-workspace concurrency cap; it does not turn this into OS isolation, and it is not an ignored vulnerability.
@@ -110,6 +118,18 @@ From [`GitHub-Card-Quick-Ops-Dev-Plan.md`](GitHub-Card-Quick-Ops-Dev-Plan.md). M
 - [ ] Interrupted run with backup: continue refuses re-apply; undo still works.
 - [ ] Pipeline budget stop is visible in events; no silent model upgrade.
 
+## Loops Graph · Agent Visual Wiring（W4）
+
+From [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md).
+
+- [ ] Agent card bottom ports: Model\* / Memory / Capability; dashed `provides` edges to satellites.
+- [ ] Config Palette / port `+` opens asset picker (model profiles, installed skills/MCP); Memory can mount directly.
+- [ ] Switch / Create & place Workforce Agent expands satellites; **Apply wiring to Agent** / **Save as new Agent** (Duty + context menu) write Definition only on confirm.
+- [ ] Action / Human / Logic stay on solid control-flow edges — cannot attach as Agent Capability satellites.
+- [ ] Community / Disabled MCP badges on satellites + Inspector wiring summary; wiring never auto-enables MCP or writes `permissions.json`.
+- [ ] Deleting an Agent / provides edge cascades orphan config satellites.
+- [ ] Compile/Run still uses existing Orchestrator + Workforce light inject (no second runtime).
+
 ## DEFERRED (do not regress by “finishing”)
 
 - Route ② open tool loop
@@ -124,4 +144,5 @@ From [`GitHub-Card-Quick-Ops-Dev-Plan.md`](GitHub-Card-Quick-Ops-Dev-Plan.md). M
 - `docs/features/Agent-Harness-Dev-Plan.md`
 - `docs/features/Agent-Harness-Tool-Registry.md`
 - `docs/features/GitHub-Auth-Dev-Plan.md`
+- `docs/features/Loops-Graph-Agent-Wiring-Dev-Plan.md`
 - `projectos/services/harness/README.md`

@@ -4,6 +4,7 @@ import type {
   AgentFlowStep,
   AgentRunEvent,
   PinComposerHubSubagentLink,
+  AgentPoolRunKpi,
   TraceMajorAction,
   TraceSpanView,
   TraceTimingQuality,
@@ -39,6 +40,7 @@ export type AgentPoolSpanKind =
   | 'apply'
   | 'verify'
   | 'wait'
+  | 'handoff'
   | 'other'
 
 export type AgentPoolSpanStatus = 'running' | 'complete' | 'error'
@@ -57,6 +59,8 @@ export interface AgentPoolSpan {
   endMs?: number
   timingQuality?: TraceTimingQuality
   level?: 1 | 2 | 3
+  /** Retry attempt when > 1 (failed sibling / re-run). */
+  attempt?: number
 }
 
 export interface AgentPoolFlowStep {
@@ -100,6 +104,8 @@ export interface AgentPoolTask {
   majorActions: TraceMajorAction[]
   traceSpans: TraceSpanView[]
   trace: AgentPoolTraceProjection | null
+  /** Evidence-honest KPI for expand strip (from projection). */
+  runKpi: AgentPoolRunKpi | null
   /** Shared PoolRun time origin (epoch ms). */
   originMs: number
   poolRunId: string | null
@@ -324,6 +330,7 @@ function barToSpan(bar: AgentPoolTraceBar): AgentPoolSpan {
     endMs: bar.endMs,
     timingQuality: bar.timingQuality,
     level: bar.level,
+    attempt: bar.attempt,
   }
 }
 
@@ -522,6 +529,7 @@ function buildRootTask(
     majorActions: trace.majorActions,
     traceSpans: trace.spans,
     trace,
+    runKpi: trace.kpi,
     originMs,
     poolRunId,
     loopSpecId: null,
@@ -588,6 +596,7 @@ function buildDelegationTasks(
       majorActions: trace.majorActions,
       traceSpans: trace.spans,
       trace,
+      runKpi: trace.kpi,
       originMs,
       poolRunId,
       loopSpecId: null,
@@ -645,6 +654,7 @@ function buildSessionTasks(
         majorActions: trace.majorActions,
         traceSpans: trace.spans,
         trace,
+        runKpi: trace.kpi,
         originMs,
         poolRunId,
         loopSpecId: null,
@@ -720,6 +730,7 @@ function buildComposeTasks(
         majorActions: trace.majorActions,
         traceSpans: trace.spans,
         trace,
+        runKpi: trace.kpi,
         originMs,
         poolRunId,
         loopSpecId: null,

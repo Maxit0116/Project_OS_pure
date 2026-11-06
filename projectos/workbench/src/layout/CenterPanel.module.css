@@ -6,6 +6,12 @@
   position: relative;
 }
 
+.labDock {
+  flex: 0 0 auto;
+  z-index: 2;
+  pointer-events: auto;
+}
+
 /* Pass clicks through to the bleed canvas; chrome uses data-zone-interactive. */
 .mapBleed.panel {
   pointer-events: none;

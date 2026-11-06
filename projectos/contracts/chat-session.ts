@@ -174,6 +174,8 @@ export const ChatSessionSnapshotSchema = z
     hasPendingPlan: z.boolean().optional(),
     activeCustomModeSkillId: z.string().min(1).nullable().optional(),
     customModePreviousChatMode: ChatSessionModeSchema.nullable().optional(),
+    /** Workforce agent for Agent Mode; null = General Agent. */
+    activeAgentDefinitionId: z.string().min(1).nullable().optional(),
     conversationCheckpoints: z.array(ConversationCheckpointSchema).optional(),
     /** Hashes of the last delivered six-slot assembly. No slot bodies. */
     latestContextAssembly: ContextAssemblySchema.optional(),

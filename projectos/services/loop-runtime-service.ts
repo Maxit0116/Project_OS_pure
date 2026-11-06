@@ -1003,6 +1003,9 @@ function stepImplementNode(
         goal: bound.goal,
         ...(bound.task ? { taskId: bound.task.id } : {}),
         agentRole: "coder",
+        ...(node.agentDefinitionId
+          ? { agentDefinitionId: node.agentDefinitionId }
+          : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : LOOP_FILES_NOT_ATTACHED;

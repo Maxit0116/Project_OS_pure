@@ -15,6 +15,8 @@ export const PromptRefineRequestSchema = z
     rawPrompt: z.string(),
     chatSessionId: z.string().min(1).optional(),
     images: z.array(ModelImagePartSchema).max(4).optional(),
+    /** Specialized workforce agent for this Change turn; omit/null = General. */
+    workforceAgentDefinitionId: z.string().min(1).nullable().optional(),
   })
   .merge(PromptComposerFieldsSchema)
   .strict();

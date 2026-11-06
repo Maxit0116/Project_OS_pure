@@ -16,17 +16,17 @@ export const EDGE_COLORS: Record<FunctionalEdgeRelation, string> = {
 
 /** Hex colors for WebGL (dark theme tokens). */
 export const EDGE_COLORS_HEX: Record<FunctionalEdgeRelation, string> = {
-  depends_on: '#a1a1aa',
-  redirects_to: '#ff9f0a',
-  data_flows_to: '#30d158',
-  imports: '#8e8e93',
-  shares_data: '#bf5af2',
-  uses: '#a1a1aa',
-  calls: '#30d158',
-  reads_from: '#bf5af2',
-  writes_to: '#ff9f0a',
-  publishes_to: '#30d158',
-  subscribes_to: '#bf5af2',
+  depends_on: '#8e8e93',
+  redirects_to: '#c98518',
+  data_flows_to: '#3a9a58',
+  imports: '#71717a',
+  shares_data: '#9570c4',
+  uses: '#8e8e93',
+  calls: '#3a9a58',
+  reads_from: '#9570c4',
+  writes_to: '#c98518',
+  publishes_to: '#3a9a58',
+  subscribes_to: '#9570c4',
 }
 
 export function isEdgeDashed(

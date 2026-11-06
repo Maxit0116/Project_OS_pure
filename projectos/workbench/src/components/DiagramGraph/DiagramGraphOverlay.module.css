@@ -1,0 +1,133 @@
+.root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  background: var(--tech-bg-canvas);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--tech-border);
+  flex-shrink: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.headerSpacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.statusChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--tech-border);
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.closeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tech-text-secondary);
+  cursor: pointer;
+}
+
+.closeButton:hover {
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+}
+
+.closeButton:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+/* Stage + notebook only — composer stays full-width below (notebook must not eat prompt). */
+.stageRow {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.modalShield {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--tech-bg-canvas) 72%, transparent);
+}
+
+.modal {
+  width: min(420px, 100%);
+  padding: 18px;
+  border: 1px solid var(--tech-border);
+  border-radius: 8px;
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--tech-text-primary);
+}
+
+.modalBody {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--tech-text-secondary);
+  line-height: 1.45;
+}
+
+.modalActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}

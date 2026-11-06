@@ -84,6 +84,26 @@ describe("McpCatalogClient", () => {
     expect(view.document.listings.every((l) => l.id !== "evil")).toBe(true);
   });
 
+  it("serves bundled immediately on cold start without waiting for remote", async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), "mcp-cat-"));
+    let resolveRemote!: (value: Response) => void;
+    const remoteGate = new Promise<Response>((resolve) => {
+      resolveRemote = resolve;
+    });
+    const fetchImpl = vi.fn(async () => remoteGate) as unknown as typeof fetch;
+    const client = new McpCatalogClient({
+      cacheRoot,
+      publicKeySpkiBase64: readBundledCatalogPublicKey(),
+      defaultCatalogUrl: "https://catalog.example.test/mcp/catalog.json",
+      fetchImpl,
+    });
+    const view = await client.getCatalog();
+    expect(view.source).toBe("bundled");
+    expect(fetchImpl).not.toHaveBeenCalled();
+    // Unblock any accidental remote waiters so the test can exit cleanly.
+    resolveRemote(new Response("{}", { status: 500 }));
+  });
+
   it("caches a verified remote catalog", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "mcp-cat-"));
     const body = readBundledCatalogBody();

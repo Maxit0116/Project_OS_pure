@@ -81,6 +81,7 @@ export function buildChatSessionSnapshot(state: WorkbenchState): ChatSessionSnap
     hasPendingPlan: Boolean(state.pendingPlan && !state.planConfirmed),
     activeCustomModeSkillId: state.activeCustomModeSkillId,
     customModePreviousChatMode: state.customModePreviousChatMode,
+    activeAgentDefinitionId: state.activeAgentDefinitionId,
     conversationCheckpoints: state.conversationCheckpoints,
     ...(state.latestContextAssembly
       ? { latestContextAssembly: state.latestContextAssembly }
@@ -161,6 +162,7 @@ export interface HydratedChatSessionState {
   activeRunId: string | null
   activeCustomModeSkillId: string | null
   customModePreviousChatMode: ChatMode | null
+  activeAgentDefinitionId: string | null
   conversationCheckpoints: WorkbenchState['conversationCheckpoints']
   latestContextAssembly: WorkbenchState['latestContextAssembly']
 }
@@ -185,6 +187,7 @@ export function hydrateChatSessionState(record: ChatSessionRecord): HydratedChat
     activeCustomModeSkillId: snapshot?.activeCustomModeSkillId ?? null,
     customModePreviousChatMode:
       previousMode && previousMode !== 'team_memory' ? previousMode : null,
+    activeAgentDefinitionId: snapshot?.activeAgentDefinitionId ?? null,
     conversationCheckpoints: snapshot?.conversationCheckpoints ?? [],
     latestContextAssembly: snapshot?.latestContextAssembly ?? null,
   }

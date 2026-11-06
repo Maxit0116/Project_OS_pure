@@ -45,14 +45,22 @@ describe('privileged IPC argument validation', () => {
     expect(parseDiffReadyNotificationPayload({
       title: 'Diff ready',
       body: 'Review the generated change',
+      destination: 'diff',
       runIds: ['run_one'],
     })).toEqual({
       title: 'Diff ready',
       body: 'Review the generated change',
+      destination: 'diff',
       runIds: ['run_one'],
     })
+    expect(parseDiffReadyNotificationPayload({
+      title: 'Reminder ready',
+      body: 'Marketplace can start',
+      destination: 'reminder',
+      runIds: ['reminder:r1'],
+    }).destination).toBe('reminder')
     expect(() => parseDiffReadyNotificationPayload({
-      title: 'Diff ready', body: 'Review', runIds: ['run_one', 'run_one'],
+      title: 'Diff ready', body: 'Review', destination: 'diff', runIds: ['run_one', 'run_one'],
     })).toThrow('Notification payload is invalid')
     expect(() => parseWindowTitle('ProjectOS\nspoofed')).toThrow('Window title is invalid')
     expect(parseWindowTitle('ProjectOS — Sample')).toBe('ProjectOS — Sample')

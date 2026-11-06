@@ -106,7 +106,7 @@
 }
 
 .toneAgent {
-  --sat-accent: #ececec;
+  --sat-accent: var(--color-accent, #c4c4c8);
 }
 
 .toneResearch {
@@ -376,7 +376,7 @@
 }
 
 .statusDotError {
-  background: #ff453a;
+  background: var(--color-error, #c94f47);
 }
 
 .progressTrack {

@@ -66,6 +66,19 @@ import {
   type SessionGraphRailLayout,
 } from './sessionGraphRailLayout'
 import {
+  applyCanvasPositionOverrides,
+  emptySessionGraphCanvasLayout,
+  getGraphCanvasPositions,
+  loadSessionGraphCanvasLayout,
+  pruneGraphCanvasPositions,
+  saveSessionGraphCanvasLayout,
+  setSessionCanvasPosition,
+  type SessionGraphCanvasLayout,
+} from './sessionGraphCanvasLayout'
+import {
+  SESSION_DRAG_MOVE_PX,
+  readRailDropIndex,
+  readSessionGraphDropTarget,
   useSessionGraphDrag,
   type SessionDragState,
   type SessionDropTarget,
@@ -145,17 +158,51 @@ export default function SessionGraphOverlay() {
   const [railLayout, setRailLayout] = useState<SessionGraphRailLayout>(() =>
     emptySessionGraphRailLayout(),
   )
+  const [canvasLayout, setCanvasLayout] = useState<SessionGraphCanvasLayout>(() =>
+    emptySessionGraphCanvasLayout(),
+  )
   const [preferredGraphId, setPreferredGraphId] = useState<string | null>(null)
   const [forceRailExpanded, setForceRailExpanded] = useState(false)
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
-  const [layout, setLayout] = useState<SessionGraphLayout | null>(null)
+  const [baseLayout, setBaseLayout] = useState<SessionGraphLayout | null>(null)
   const [viewport, setViewport] = useState({ x: 32, y: 32, scale: 1 })
   const [dragging, setDragging] = useState(false)
   const [filterQuery, setFilterQuery] = useState('')
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null)
+  const [nodeCanvasDrag, setNodeCanvasDrag] = useState<{
+    sessionId: string
+    graphId: string
+    title: string
+    mode: 'position' | 'semantic'
+    x: number
+    y: number
+    target: SessionDropTarget | null
+    railDropIndex: number | null
+  } | null>(null)
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
+  const nodeDragRef = useRef<{
+    sessionId: string
+    graphId: string
+    title: string
+    ox: number
+    oy: number
+    px: number
+    py: number
+    pointerId: number
+    mode: 'pending' | 'position' | 'semantic'
+    lastCanvasX: number
+    lastCanvasY: number
+    target: SessionDropTarget | null
+    railDropIndex: number | null
+  } | null>(null)
+  const suppressNodeClickRef = useRef(false)
+  const nodeDragCleanupRef = useRef<(() => void) | null>(null)
   const railLayoutRef = useRef(railLayout)
   railLayoutRef.current = railLayout
+  const canvasLayoutRef = useRef(canvasLayout)
+  canvasLayoutRef.current = canvasLayout
+  const viewportRef = useRef(viewport)
+  viewportRef.current = viewport
 
   const activeGraphId = useMemo(
     () => resolveActiveGraphId(heads, activeSessionId, preferredGraphId),
@@ -169,13 +216,26 @@ export default function SessionGraphOverlay() {
     () => syncRailLayoutWithGraphs(railLayout, heads),
     [railLayout, heads],
   )
+  const graphCanvasPositions = useMemo(
+    () => getGraphCanvasPositions(canvasLayout, activeGraphId),
+    [canvasLayout, activeGraphId],
+  )
+  const layout = useMemo(
+    () =>
+      baseLayout
+        ? applyCanvasPositionOverrides(baseLayout, graphCanvasPositions)
+        : null,
+    [baseLayout, graphCanvasPositions],
+  )
 
   useEffect(() => {
     if (!projectId) {
       setRailLayout(emptySessionGraphRailLayout())
+      setCanvasLayout(emptySessionGraphCanvasLayout())
       return
     }
     setRailLayout(loadSessionGraphRailLayout(projectId, heads))
+    setCanvasLayout(loadSessionGraphCanvasLayout(projectId))
     // Only re-load when project changes; heads migration uses current heads once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
@@ -184,6 +244,14 @@ export default function SessionGraphOverlay() {
     (next: SessionGraphRailLayout) => {
       setRailLayout(next)
       if (projectId) saveSessionGraphRailLayout(projectId, next)
+    },
+    [projectId],
+  )
+
+  const persistCanvas = useCallback(
+    (next: SessionGraphCanvasLayout) => {
+      setCanvasLayout(next)
+      if (projectId) saveSessionGraphCanvasLayout(projectId, next)
     },
     [projectId],
   )
@@ -381,7 +449,25 @@ export default function SessionGraphOverlay() {
   useEffect(() => {
     if (!open) return undefined
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !sessionDrag) setSessionGraphOpen(false)
+      if (event.key !== 'Escape') return
+      if (nodeDragRef.current) {
+        const drag = nodeDragRef.current
+        if (drag.mode !== 'pending') {
+          setCanvasLayout((current) =>
+            setSessionCanvasPosition(current, drag.graphId, drag.sessionId, {
+              x: drag.ox,
+              y: drag.oy,
+            }),
+          )
+        }
+        nodeDragCleanupRef.current?.()
+        nodeDragCleanupRef.current = null
+        nodeDragRef.current = null
+        setNodeCanvasDrag(null)
+        setForceRailExpanded(false)
+        return
+      }
+      if (!sessionDrag) setSessionGraphOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -391,12 +477,247 @@ export default function SessionGraphOverlay() {
     if (!open) return undefined
     let cancelled = false
     void layoutSessionGraph(model).then((next) => {
-      if (!cancelled) setLayout(next)
+      if (!cancelled) setBaseLayout(next)
     })
     return () => {
       cancelled = true
     }
   }, [open, model])
+
+  useEffect(() => {
+    if (!activeGraphId) return
+    const liveIds = model.nodes.map((node) => node.id)
+    const pruned = pruneGraphCanvasPositions(
+      canvasLayoutRef.current,
+      activeGraphId,
+      liveIds,
+    )
+    if (pruned !== canvasLayoutRef.current) persistCanvas(pruned)
+  }, [activeGraphId, model.nodes, persistCanvas])
+
+  const handleDropRef = useRef(handleDrop)
+  handleDropRef.current = handleDrop
+  const persistCanvasRef = useRef(persistCanvas)
+  persistCanvasRef.current = persistCanvas
+
+  const endNodeCanvasDrag = useCallback(() => {
+    nodeDragCleanupRef.current?.()
+    nodeDragCleanupRef.current = null
+    nodeDragRef.current = null
+    setNodeCanvasDrag(null)
+    setForceRailExpanded(false)
+  }, [])
+
+  const onNodeCanvasPointerDown = useCallback(
+    (
+      event: ReactPointerEvent,
+      payload: {
+        sessionId: string
+        graphId: string
+        title: string
+        x: number
+        y: number
+      },
+    ) => {
+      if (event.button !== 0) return
+      if ((event.target as HTMLElement).closest('[data-session-drag-ignore]')) return
+      if (sessionDrag || nodeDragRef.current) return
+      event.stopPropagation()
+      suppressNodeClickRef.current = false
+
+      const graphId = activeGraphId ?? payload.graphId
+      if (!graphId) return
+
+      const pointerId = event.pointerId
+      nodeDragRef.current = {
+        sessionId: payload.sessionId,
+        graphId,
+        title: payload.title,
+        ox: payload.x,
+        oy: payload.y,
+        px: event.clientX,
+        py: event.clientY,
+        pointerId,
+        mode: 'pending',
+        lastCanvasX: payload.x,
+        lastCanvasY: payload.y,
+        target: null,
+        railDropIndex: null,
+      }
+
+      try {
+        ;(event.currentTarget as HTMLElement).setPointerCapture(pointerId)
+      } catch {
+        /* ignore */
+      }
+
+      const detach = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        window.removeEventListener('pointercancel', onUp)
+        if (nodeDragCleanupRef.current === detach) nodeDragCleanupRef.current = null
+      }
+
+      const finish = (clientX: number, clientY: number) => {
+        detach()
+        const drag = nodeDragRef.current
+        if (!drag || drag.pointerId !== pointerId) return
+
+        if (drag.mode === 'pending') {
+          endNodeCanvasDrag()
+          return
+        }
+
+        if (drag.mode === 'semantic') {
+          const el = document.elementFromPoint(clientX, clientY)
+          let target = drag.target ?? readSessionGraphDropTarget(el)
+          const overRail = Boolean(el?.closest?.('[data-working-session-rail]'))
+          if (
+            (!target || target.kind === 'canvas') &&
+            overRail &&
+            drag.railDropIndex != null
+          ) {
+            target = { kind: 'rail', railDropIndex: drag.railDropIndex }
+          }
+          if (target && target.kind === 'rail' && drag.railDropIndex != null) {
+            target = { ...target, railDropIndex: drag.railDropIndex }
+          }
+          const reverted = setSessionCanvasPosition(
+            canvasLayoutRef.current,
+            drag.graphId,
+            drag.sessionId,
+            { x: drag.ox, y: drag.oy },
+          )
+          persistCanvasRef.current(reverted)
+          endNodeCanvasDrag()
+          if (target && target.kind !== 'canvas') {
+            void handleDropRef.current(
+              {
+                sessionId: drag.sessionId,
+                graphId: drag.graphId,
+                folderId: null,
+                title: drag.title,
+                source: 'canvas',
+                x: clientX,
+                y: clientY,
+                target,
+                railDropIndex: target.railDropIndex ?? null,
+              },
+              target,
+            )
+          }
+          return
+        }
+
+        persistCanvasRef.current(canvasLayoutRef.current)
+        endNodeCanvasDrag()
+      }
+
+      const onMove = (moveEvent: PointerEvent) => {
+        if (moveEvent.pointerId !== pointerId) return
+        const drag = nodeDragRef.current
+        if (!drag || drag.pointerId !== pointerId) return
+
+        const dxScreen = moveEvent.clientX - drag.px
+        const dyScreen = moveEvent.clientY - drag.py
+        if (drag.mode === 'pending') {
+          if (
+            dxScreen * dxScreen + dyScreen * dyScreen <
+            SESSION_DRAG_MOVE_PX * SESSION_DRAG_MOVE_PX
+          ) {
+            return
+          }
+          suppressNodeClickRef.current = true
+        }
+        moveEvent.preventDefault()
+
+        const el = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)
+        const target = readSessionGraphDropTarget(el)
+        const overRailHost = Boolean(el?.closest?.('[data-working-session-rail]'))
+        const overRail =
+          target?.kind === 'rail' ||
+          target?.kind === 'graph' ||
+          target?.kind === 'folder' ||
+          overRailHost
+        const railDropIndex = overRail
+          ? readRailDropIndex(moveEvent.clientY, drag.graphId, null)
+          : null
+        // Only leave the canvas for true external drop zones — never treat
+        // data-session-graph-drop="canvas" as a semantic target.
+        const semantic =
+          target?.kind === 'misc' ||
+          target?.kind === 'rail' ||
+          target?.kind === 'graph' ||
+          target?.kind === 'folder'
+
+        if (semantic) {
+          const nextTarget = target
+          if (drag.mode !== 'semantic') {
+            setCanvasLayout((current) =>
+              setSessionCanvasPosition(current, drag.graphId, drag.sessionId, {
+                x: drag.lastCanvasX,
+                y: drag.lastCanvasY,
+              }),
+            )
+            setForceRailExpanded(true)
+          }
+          drag.mode = 'semantic'
+          drag.target = nextTarget
+          drag.railDropIndex = railDropIndex
+          nodeDragRef.current = drag
+          setNodeCanvasDrag({
+            sessionId: drag.sessionId,
+            graphId: drag.graphId,
+            title: drag.title,
+            mode: 'semantic',
+            x: moveEvent.clientX,
+            y: moveEvent.clientY,
+            target: nextTarget,
+            railDropIndex,
+          })
+          return
+        }
+
+        const scale = viewportRef.current.scale || 1
+        const nextX = Math.max(0, drag.ox + dxScreen / scale)
+        const nextY = Math.max(0, drag.oy + dyScreen / scale)
+        drag.mode = 'position'
+        drag.lastCanvasX = nextX
+        drag.lastCanvasY = nextY
+        drag.target = null
+        drag.railDropIndex = null
+        nodeDragRef.current = drag
+        setCanvasLayout((current) =>
+          setSessionCanvasPosition(current, drag.graphId, drag.sessionId, {
+            x: nextX,
+            y: nextY,
+          }),
+        )
+        setNodeCanvasDrag({
+          sessionId: drag.sessionId,
+          graphId: drag.graphId,
+          title: drag.title,
+          mode: 'position',
+          x: moveEvent.clientX,
+          y: moveEvent.clientY,
+          target: null,
+          railDropIndex: null,
+        })
+        setForceRailExpanded(false)
+      }
+
+      const onUp = (upEvent: PointerEvent) => {
+        if (upEvent.pointerId !== pointerId) return
+        finish(upEvent.clientX, upEvent.clientY)
+      }
+
+      nodeDragCleanupRef.current = detach
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+      window.addEventListener('pointercancel', onUp)
+    },
+    [activeGraphId, endNodeCanvasDrag, sessionDrag],
+  )
 
   if (!open) return null
 
@@ -418,20 +739,35 @@ export default function SessionGraphOverlay() {
     })
   }
 
+  const activeDropTarget =
+    sessionDrag?.target ??
+    (nodeCanvasDrag?.mode === 'semantic' ? nodeCanvasDrag.target : null)
   const dropHighlight =
-    sessionDrag?.target?.kind === 'rail' ||
-    sessionDrag?.target?.kind === 'graph' ||
-    sessionDrag?.target?.kind === 'folder'
-      ? sessionDrag.target.kind
+    activeDropTarget?.kind === 'rail' ||
+    activeDropTarget?.kind === 'graph' ||
+    activeDropTarget?.kind === 'folder'
+      ? activeDropTarget.kind
       : null
 
-  const ghostTitle = sessionDrag?.title ?? ''
-  const ghostTask = sessionDrag
+  const semanticGhost =
+    sessionDrag ??
+    (nodeCanvasDrag?.mode === 'semantic'
+      ? {
+          sessionId: nodeCanvasDrag.sessionId,
+          graphId: nodeCanvasDrag.graphId,
+          folderId: null as string | null,
+          title: nodeCanvasDrag.title,
+          x: nodeCanvasDrag.x,
+          y: nodeCanvasDrag.y,
+        }
+      : null)
+  const ghostTitle = semanticGhost?.title ?? ''
+  const ghostTask = semanticGhost
     ? classifySessionTask(
         ghostTitle,
-        sessionDrag.sessionId
-          ? heads.find((h) => h.id === sessionDrag.sessionId)?.responsibility
-          : pickGraphRepresentative(heads, sessionDrag.graphId ?? '')?.responsibility,
+        semanticGhost.sessionId
+          ? heads.find((h) => h.id === semanticGhost.sessionId)?.responsibility
+          : pickGraphRepresentative(heads, semanticGhost.graphId ?? '')?.responsibility,
       )
     : null
   const GhostIcon = ghostTask ? TASK_ICON[ghostTask] : null
@@ -449,15 +785,18 @@ export default function SessionGraphOverlay() {
         forceExpanded={forceRailExpanded || renamingFolderId != null}
         renamingFolderId={renamingFolderId}
         dropHighlight={dropHighlight}
-        dropGraphId={sessionDrag?.target?.graphId ?? null}
-        dropFolderId={sessionDrag?.target?.folderId ?? null}
+        dropGraphId={activeDropTarget?.graphId ?? null}
+        dropFolderId={activeDropTarget?.folderId ?? null}
         draggingGraphId={
           sessionDrag?.source === 'rail' ? sessionDrag.graphId : null
         }
         draggingFolderId={
           sessionDrag?.source === 'rail' ? sessionDrag.folderId : null
         }
-        railDropIndex={sessionDrag?.railDropIndex ?? null}
+        railDropIndex={
+          sessionDrag?.railDropIndex ??
+          (nodeCanvasDrag?.mode === 'semantic' ? nodeCanvasDrag.railDropIndex : null)
+        }
         onOpenGraph={(graphId) => {
           void openGraph(graphId)
         }}
@@ -548,13 +887,13 @@ export default function SessionGraphOverlay() {
           </button>
         </header>
         <div
-          className={`${styles.canvas} ${dragging ? styles.canvasDragging : ''} ${
+          className={`${styles.canvas} ${dragging || nodeCanvasDrag?.mode === 'position' ? styles.canvasDragging : ''} ${
             sessionDrag?.target?.kind === 'canvas' ? styles.canvasDropTarget : ''
           }`}
           data-session-graph-drop="canvas"
           onWheel={onWheel}
           onPointerDown={(event) => {
-            if (sessionDrag) return
+            if (sessionDrag || nodeDragRef.current) return
             if ((event.target as HTMLElement).closest('[data-session-node]')) return
             dragRef.current = {
               x: viewport.x,
@@ -566,6 +905,7 @@ export default function SessionGraphOverlay() {
             event.currentTarget.setPointerCapture(event.pointerId)
           }}
           onPointerMove={(event) => {
+            if (nodeDragRef.current) return
             const drag = dragRef.current
             if (!drag) return
             setViewport((current) => ({
@@ -575,6 +915,12 @@ export default function SessionGraphOverlay() {
             }))
           }}
           onPointerUp={() => {
+            if (nodeDragRef.current) return
+            dragRef.current = null
+            setDragging(false)
+          }}
+          onPointerCancel={() => {
+            if (nodeDragRef.current) return
             dragRef.current = null
             setDragging(false)
           }}
@@ -629,7 +975,13 @@ export default function SessionGraphOverlay() {
                 if (!position) return null
                 const head = heads.find((item) => item.id === node.id)
                 const title = node.title || ts('chat.history.untitled')
-                const lifted = sessionDrag?.sessionId === node.id
+                const lifted =
+                  sessionDrag?.sessionId === node.id ||
+                  (nodeCanvasDrag?.mode === 'semantic' &&
+                    nodeCanvasDrag.sessionId === node.id)
+                const draggingNode =
+                  nodeCanvasDrag?.mode === 'position' &&
+                  nodeCanvasDrag.sessionId === node.id
                 const matches = sessionMatchesGraphQuery(filterQuery, {
                   title,
                   responsibility: node.responsibility,
@@ -654,6 +1006,7 @@ export default function SessionGraphOverlay() {
                     focused={focusedSessionId === node.id}
                     dimmed={dimmed}
                     lifted={lifted}
+                    dragging={draggingNode}
                     x={position.x}
                     y={position.y}
                     height={height}
@@ -669,16 +1022,16 @@ export default function SessionGraphOverlay() {
                     }}
                     onBranch={() => void forkSession(node.id)}
                     onMisc={() => void demoteToMisc(node.id)}
+                    shouldSuppressClick={() => suppressNodeClickRef.current}
                     onPointerDown={(event) =>
-                      onSessionPointerDown(event, {
+                      onNodeCanvasPointerDown(event, {
                         sessionId: node.id,
                         graphId: node.graphId,
                         title,
-                        source: 'canvas',
+                        x: position.x,
+                        y: position.y,
                       })
                     }
-                    onPointerMove={onSessionPointerMove}
-                    onPointerUp={onSessionPointerUp}
                   />
                 )
               })}
@@ -688,8 +1041,8 @@ export default function SessionGraphOverlay() {
         <MiscTray
           items={model.misc}
           activeSessionId={activeSessionId}
-          dropActive={sessionDrag?.target?.kind === 'misc'}
-          dragActive={Boolean(sessionDrag)}
+          dropActive={activeDropTarget?.kind === 'misc'}
+          dragActive={Boolean(sessionDrag) || nodeCanvasDrag?.mode === 'semantic'}
           dragFromMisc={sessionDrag?.source === 'misc'}
           onOpen={(sessionId) => void switchSession(sessionId)}
           onPromote={(sessionId) => {
@@ -715,10 +1068,10 @@ export default function SessionGraphOverlay() {
           onPointerUp={onSessionPointerUp}
         />
       </div>
-      {sessionDrag ? (
+      {semanticGhost ? (
         <div
           className={styles.sessionDragGhost}
-          style={{ left: sessionDrag.x + 10, top: sessionDrag.y + 10 }}
+          style={{ left: semanticGhost.x + 10, top: semanticGhost.y + 10 }}
           data-task={ghostTask ?? undefined}
           aria-hidden
         >
@@ -743,6 +1096,7 @@ function SessionNode({
   focused,
   dimmed,
   lifted,
+  dragging = false,
   x,
   y,
   height,
@@ -750,9 +1104,8 @@ function SessionNode({
   onStripItem,
   onBranch,
   onMisc,
+  shouldSuppressClick,
   onPointerDown,
-  onPointerMove,
-  onPointerUp,
 }: {
   head: ChatSessionHead | undefined
   title: string
@@ -766,6 +1119,7 @@ function SessionNode({
   focused: boolean
   dimmed: boolean
   lifted: boolean
+  dragging?: boolean
   x: number
   y: number
   height: number
@@ -773,9 +1127,8 @@ function SessionNode({
   onStripItem: (item: SessionGraphStripItem) => void
   onBranch: () => void
   onMisc: () => void
+  shouldSuppressClick: () => boolean
   onPointerDown: (event: ReactPointerEvent) => void
-  onPointerMove: (event: ReactPointerEvent) => void
-  onPointerUp: (event: ReactPointerEvent) => void
 }) {
   const { ts } = useI18n()
   const task = classifySessionTask(title, responsibility)
@@ -858,8 +1211,8 @@ function SessionNode({
   useEffect(() => () => closePreview(), [closePreview])
 
   useEffect(() => {
-    if (lifted) closePreview()
-  }, [closePreview, lifted])
+    if (lifted || dragging) closePreview()
+  }, [closePreview, dragging, lifted])
 
   return (
     <>
@@ -867,7 +1220,9 @@ function SessionNode({
         ref={nodeRef}
         className={`${styles.node} ${active ? styles.nodeActive : ''} ${
           focused ? styles.nodeFocused : ''
-        } ${dimmed ? styles.nodeDim : ''} ${lifted ? styles.nodeLifted : ''}`}
+        } ${dimmed ? styles.nodeDim : ''} ${lifted ? styles.nodeLifted : ''} ${
+          dragging ? styles.nodeDragging : ''
+        }`}
         style={{ left: x, top: y, width: SESSION_NODE_WIDTH, height }}
         data-session-node={head?.id}
         data-task={task}
@@ -875,9 +1230,6 @@ function SessionNode({
           closePreview()
           onPointerDown(event)
         }}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
         onMouseEnter={schedulePreviewOpen}
         onMouseLeave={schedulePreviewClose}
       >
@@ -889,9 +1241,11 @@ function SessionNode({
           <button
             type="button"
             className={styles.nodeTitle}
-            onClick={onOpen}
+            onClick={() => {
+              if (shouldSuppressClick()) return
+              onOpen()
+            }}
             aria-current={active ? 'true' : undefined}
-            data-session-drag-ignore=""
           >
             {title}
           </button>
@@ -941,9 +1295,11 @@ function SessionNode({
                   type="button"
                   className={styles.stripItem}
                   data-kind={item.kind}
-                  data-session-drag-ignore=""
                   title={ts(`chat.sessionGraph.stripKind.${item.kind}`)}
-                  onClick={() => onStripItem(item)}
+                  onClick={() => {
+                    if (shouldSuppressClick()) return
+                    onStripItem(item)
+                  }}
                 >
                   <span className={styles.stripGlyph} aria-hidden />
                   <span className={styles.stripTitle}>{item.title}</span>

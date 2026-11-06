@@ -53,15 +53,15 @@ export function registerProjectOsThemes(monaco: typeof Monaco): void {
     rules: DARK_RULES,
     colors: {
       'editor.background': '#181818',
-      'editor.foreground': '#f4f4f5',
+      'editor.foreground': '#dcdce0',
       'editorLineNumber.foreground': '#52525b',
-      'editorLineNumber.activeForeground': '#d4d4d8',
-      'editorCursor.foreground': '#ececec',
-      'editor.selectionBackground': '#ffffff26',
-      'editor.inactiveSelectionBackground': '#ffffff14',
-      'editor.lineHighlightBackground': '#ffffff0a',
-      'editorIndentGuide.background1': '#ffffff14',
-      'editorIndentGuide.activeBackground1': '#ffffff2e',
+      'editorLineNumber.activeForeground': '#a1a1aa',
+      'editorCursor.foreground': '#c4c4c8',
+      'editor.selectionBackground': '#c4c4c828',
+      'editor.inactiveSelectionBackground': '#c4c4c814',
+      'editor.lineHighlightBackground': '#c4c4c80a',
+      'editorIndentGuide.background1': '#c4c4c814',
+      'editorIndentGuide.activeBackground1': '#c4c4c82e',
     },
   })
   monaco.editor.defineTheme('projectos-light', {

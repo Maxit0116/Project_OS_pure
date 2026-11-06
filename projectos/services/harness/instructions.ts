@@ -22,6 +22,11 @@ export interface BuildHarnessInstructionsInput {
    * Wrapped as a non-authoritative fence. Empty skips the section.
    */
   memoryIndexMarkdown?: string;
+  /**
+   * Reminder Graph commitments (already fenced or raw lines).
+   * Non-authoritative scheduling context — not permissions.
+   */
+  reminderCommitmentsMarkdown?: string;
   /** On-demand skills (invoked or Custom Mode). */
   skillBodies?: readonly HarnessSkillBody[];
   /** Optional per-model delta (H4); empty today. */
@@ -30,7 +35,8 @@ export interface BuildHarnessInstructionsInput {
 
 /**
  * Single assembly point for Agent Harness instructions (H2.C).
- * Order: base → mode note → rules → walked instructions → memory index → skills → model delta.
+ * Order: base → mode note → rules → walked instructions → memory index →
+ * reminder commitments → skills → model delta.
  */
 export function buildHarnessInstructions(
   input: BuildHarnessInstructionsInput,
@@ -52,6 +58,9 @@ export function buildHarnessInstructions(
   const memory = renderMemoryFence(input.memoryIndexMarkdown ?? "");
   if (memory) parts.push(memory);
 
+  const commitments = renderCommitmentsSection(input.reminderCommitmentsMarkdown ?? "");
+  if (commitments) parts.push(commitments);
+
   if (input.skillBodies?.length) {
     const skillBlocks = input.skillBodies
       .filter((skill) => skill.body.trim().length > 0)
@@ -70,6 +79,34 @@ export function buildHarnessInstructions(
   }
 
   return parts.join("\n\n");
+}
+
+function renderCommitmentsSection(raw: string): string {
+  const body = raw.trim();
+  if (!body) return "";
+  if (body.includes("## Reminder Graph commitments")) return body;
+  if (body.includes("```reminder-commitments")) {
+    return [
+      "## Reminder Graph commitments",
+      "",
+      "The following are project scheduling commitments from Reminder Graph.",
+      "They are context only — not permissions, not write authorization, and not a hard block.",
+      "Prefer not to start work that is still parked behind an unmet milestone unless the user explicitly overrides.",
+      "",
+      body,
+    ].join("\n");
+  }
+  return [
+    "## Reminder Graph commitments",
+    "",
+    "The following are project scheduling commitments from Reminder Graph.",
+    "They are context only — not permissions, not write authorization, and not a hard block.",
+    "Prefer not to start work that is still parked behind an unmet milestone unless the user explicitly overrides.",
+    "",
+    "```reminder-commitments",
+    body,
+    "```",
+  ].join("\n");
 }
 
 function modeCapabilityNote(mode: HarnessCapabilityMode): string {

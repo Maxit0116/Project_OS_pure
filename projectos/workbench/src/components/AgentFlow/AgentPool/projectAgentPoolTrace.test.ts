@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentActionEvent, AgentFlowStep, AgentRunEvent } from '@contracts/index'
 import {
+  aggregateAgentPoolRunKpi,
   projectAgentPoolTrace,
   resolvePoolOriginMs,
   stableDefinitionId,
@@ -144,5 +145,142 @@ describe('projectAgentPoolTrace', () => {
 
   it('resolves shared pool origin from absolute starts', () => {
     expect(resolvePoolOriginMs([200, 100, null, undefined])).toBe(100)
+  })
+
+  it('aggregates KPI and omits tokens when usage is missing', () => {
+    const origin = Date.parse('2026-01-01T00:00:00.000Z')
+    const projection = projectAgentPoolTrace({
+      agentRunId: 'run-kpi',
+      poolOriginMs: origin,
+      live: false,
+      actions: [
+        {
+          eventId: 'm1',
+          runId: 'run-kpi',
+          timestamp: '2026-01-01T00:00:01.000Z',
+          type: 'model_request',
+          payload: {
+            stage: 'generate',
+            requestId: 'r1',
+            requestKind: 'change_generation',
+            provider: 'p',
+            model: 'm',
+            durationMs: 200,
+            status: 'ok',
+            backend: 'model',
+            usage: 'reported',
+            tokenUsage: { input: 5, output: 7 },
+          },
+        },
+        {
+          eventId: 'm2',
+          runId: 'run-kpi',
+          timestamp: '2026-01-01T00:00:02.000Z',
+          type: 'model_request',
+          payload: {
+            stage: 'generate',
+            requestId: 'r2',
+            requestKind: 'change_generation',
+            provider: 'p',
+            model: 'm',
+            durationMs: 100,
+            status: 'failed',
+            backend: 'model',
+            usage: 'missing',
+            tokenUsage: { input: 0, output: 0 },
+          },
+        },
+        {
+          eventId: 't1',
+          runId: 'run-kpi',
+          timestamp: '2026-01-01T00:00:03.000Z',
+          type: 'mcp_tool_call',
+          payload: {
+            serverId: 's',
+            toolName: 'search',
+            status: 'ok',
+            durationMs: 50,
+          },
+        },
+      ],
+    })
+    expect(projection.kpi.modelCallCount).toBe(2)
+    expect(projection.kpi.toolCallCount).toBe(1)
+    expect(projection.kpi.errorCount).toBeGreaterThanOrEqual(1)
+    expect(projection.kpi.tokensIn).toBeUndefined()
+    expect(projection.kpi.tokensOut).toBeUndefined()
+
+    const reportedOnly = projectAgentPoolTrace({
+      agentRunId: 'run-kpi-2',
+      poolOriginMs: origin,
+      live: false,
+      actions: [
+        {
+          eventId: 'm3',
+          runId: 'run-kpi-2',
+          timestamp: '2026-01-01T00:00:01.000Z',
+          type: 'model_request',
+          payload: {
+            stage: 'generate',
+            requestId: 'r3',
+            requestKind: 'change_generation',
+            provider: 'p',
+            model: 'm',
+            durationMs: 100,
+            status: 'ok',
+            backend: 'model',
+            usage: 'reported',
+            tokenUsage: { input: 3, output: 4 },
+          },
+        },
+      ],
+    })
+    expect(reportedOnly.kpi.tokensIn).toBe(3)
+    expect(reportedOnly.kpi.tokensOut).toBe(4)
+    expect(aggregateAgentPoolRunKpi(reportedOnly, 1000).durationMs).toBeGreaterThan(0)
+  })
+
+  it('projects handoff and wait spans only with evidence', () => {
+    const origin = Date.parse('2026-01-01T00:00:00.000Z')
+    const projection = projectAgentPoolTrace({
+      agentRunId: 'run-hand',
+      poolOriginMs: origin,
+      live: true,
+      nowMs: origin + 5000,
+      events: [
+        {
+          eventId: 'd1',
+          runId: 'run-hand',
+          timestamp: '2026-01-01T00:00:01.000Z',
+          type: 'task_delegated',
+          payload: {
+            planId: 'p1',
+            taskId: 'task-child',
+            childRunId: 'child-1',
+            nodeId: 'n1',
+            filePath: 'a.ts',
+          },
+        },
+        {
+          eventId: 'c1',
+          runId: 'run-hand',
+          timestamp: '2026-01-01T00:00:04.000Z',
+          type: 'child_run_completed',
+          payload: {
+            planId: 'p1',
+            taskId: 'task-child',
+            childRunId: 'child-1',
+            status: 'awaiting_review',
+          },
+        },
+      ],
+    })
+    expect(projection.spans.some((span) => span.kind === 'handoff')).toBe(true)
+    const wait = projection.spans.find((span) => span.kind === 'wait')
+    expect(wait).toBeTruthy()
+    expect(wait?.endMs).toBeUndefined()
+    expect(wait?.status).toBe('running')
+    expect(projection.compactBars.some((bar) => bar.kind === 'handoff')).toBe(true)
+    expect(projection.compactBars.some((bar) => bar.kind === 'wait')).toBe(true)
   })
 })

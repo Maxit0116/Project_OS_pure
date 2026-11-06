@@ -16,9 +16,12 @@ import { useBottomDockStore } from '../state/bottomDockStore'
 import { useTerminalShortcuts } from '../components/Terminal/useTerminalShortcuts'
 import { useEditorShortcuts } from '../components/CodeEditor/useEditorShortcuts'
 import { useKeepAwakeSync } from '../hooks/useKeepAwakeSync'
+import { useReminderDigestScheduler } from '../hooks/useReminderDigestScheduler'
 import WorkbenchSidePanels from './WorkbenchSidePanels'
 import SessionGraphOverlay from '../components/SessionGraph/SessionGraphOverlay'
 import LoopGraphOverlay from '../components/LoopGraph/LoopGraphOverlay'
+import DiagramGraphOverlay from '../components/DiagramGraph/DiagramGraphOverlay'
+import ReminderGraphOverlay from '../components/ReminderGraph/ReminderGraphOverlay'
 import GithubGraphOverlay from '../components/GithubGraph/GithubGraphOverlay'
 import MarketplaceOverlay from '../components/Marketplace/MarketplaceOverlay'
 import AgentFlowOverlay from '../components/AgentFlow/AgentFlowOverlay'
@@ -67,6 +70,7 @@ export default function AppShell() {
   useTerminalShortcuts()
   useEditorShortcuts()
   useKeepAwakeSync()
+  useReminderDigestScheduler()
 
   useEffect(() => {
     if (phase === 'ready') {
@@ -174,6 +178,8 @@ export default function AppShell() {
 
             <SessionGraphOverlay />
             <LoopGraphOverlay />
+            <DiagramGraphOverlay />
+            <ReminderGraphOverlay />
             <GithubGraphOverlay />
             <MarketplaceOverlay />
             <AgentFlowOverlay />

@@ -36,6 +36,13 @@ export function overlayRegionToCapture(
     id: region.id,
     captureRect: region.captureRect,
     mode: region.mode,
+    ...(region.askSubMode ? { askSubMode: region.askSubMode } : {}),
+    ...(region.agentDefinitionId !== undefined
+      ? { agentDefinitionId: region.agentDefinitionId }
+      : {}),
+    ...(region.agentDisplayName !== undefined
+      ? { agentDisplayName: region.agentDisplayName }
+      : {}),
     regionPrompt: region.regionPrompt,
     drawStrokes: region.drawStrokes,
     flowComplete: region.flowComplete,
@@ -75,6 +82,13 @@ export function captureRegionToOverlay(
     id: region.id,
     captureRect: region.captureRect,
     mode: region.mode,
+    ...(region.askSubMode ? { askSubMode: region.askSubMode } : {}),
+    ...(region.agentDefinitionId !== undefined
+      ? { agentDefinitionId: region.agentDefinitionId }
+      : {}),
+    ...(region.agentDisplayName !== undefined
+      ? { agentDisplayName: region.agentDisplayName }
+      : {}),
     regionPrompt: region.regionPrompt ?? '',
     drawStrokes: region.drawStrokes ?? [],
     flowComplete: region.flowComplete ?? false,

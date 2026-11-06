@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   isConditionNode,
+  isConfigNode,
   isLoopLogicNode,
   isMergeNode,
   withArchitectureDefaults,
@@ -14,13 +15,21 @@ import {
 
 export {
   LOOP_ACTION_INTEGRATIONS,
+  LOOP_AGENT_CONFIG_PORTS,
   LOOP_AGENT_ROLES,
+  LOOP_CAPABILITY_INDEGREE_MAX,
   LOOP_GITHUB_OPERATIONS,
   LOOP_HUMAN_MODES,
+  LOOP_INTENT_NODE_TYPES,
   LOOP_LOGIC_KINDS,
+  LOOP_MEMORY_MODES,
   LOOP_NODE_TYPES,
+  LOOP_SATELLITE_KINDS,
   architectureFromLegacyRole,
+  configPortForSatelliteKind,
   isConditionNode,
+  isConfigNode,
+  isDutyNode,
   isLoopLogicNode,
   isMergeNode,
   legacyRoleFromArchitecture,
@@ -28,13 +37,17 @@ export {
   withArchitectureDefaults,
   type LegacyIntentNodeRole,
   type LoopActionIntegration,
+  type LoopAgentConfigPort,
   type LoopAgentRole,
   type LoopArchitectureMapping,
   type LoopGitHubOperation,
   type LoopHumanMode,
+  type LoopIntentNodeType,
   type LoopLogicKind,
+  type LoopMemoryMode,
   type LoopNodeArchitectureFields,
   type LoopNodeType,
+  type LoopSatelliteKind,
 } from "./loop-node-architecture.js";
 
 export const LOOP_GRAPH_VERSION = "0.1.0" as const;
@@ -50,6 +63,15 @@ export const IntentNodeRoleSchema = z.enum([
 ]);
 
 export const LoopNodeTypeSchema = z.enum(["agent", "action", "logic", "human"]);
+
+/** Intent canvas types include Agent wiring satellites (`config`). */
+export const IntentGraphNodeTypeSchema = z.enum([
+  "agent",
+  "action",
+  "logic",
+  "human",
+  "config",
+]);
 
 export const LoopAgentRoleSchema = z.enum([
   "planner",
@@ -81,7 +103,45 @@ export const LoopLogicKindSchema = z.enum([
   "wait",
 ]);
 
-export const IntentEdgeKindSchema = z.enum(["depends", "feedback", "conditional"]);
+export const LoopSatelliteKindSchema = z.enum([
+  "model",
+  "memory",
+  "skill",
+  "mcp",
+  "rules",
+  "pack",
+]);
+
+export const LoopAgentConfigPortSchema = z.enum(["model", "memory", "capability"]);
+
+export const LoopMemoryModeSchema = z.enum(["project", "buffer", "none"]);
+
+export const LoopConfigRefSchema = z
+  .object({
+    modelProfileId: z.string().min(1).max(120).optional(),
+    skillId: z.string().min(1).max(120).optional(),
+    mcpServerId: z.string().min(1).max(80).optional(),
+    memoryMode: LoopMemoryModeSchema.optional(),
+    packId: z.string().min(1).max(120).optional(),
+    rulesId: z.string().min(1).max(120).optional(),
+  })
+  .strict();
+
+export const AgentWiringOverrideSchema = z
+  .object({
+    modelProfileId: z.string().min(1).max(120).nullable().optional(),
+    skillIds: z.array(z.string().min(1).max(120)).max(64).optional(),
+    mcpServerIds: z.array(z.string().min(1).max(80)).max(64).optional(),
+    memoryMode: LoopMemoryModeSchema.optional(),
+  })
+  .strict();
+
+export const IntentEdgeKindSchema = z.enum([
+  "depends",
+  "feedback",
+  "conditional",
+  "provides",
+]);
 
 export const IntentEdgePortSchema = z.enum(["n", "e", "s", "w"]);
 
@@ -134,14 +194,25 @@ export const IntentGraphNodeSchema = z
     title: z.string().trim().min(1).max(120),
     prompt: z.string().trim().max(4000),
     role: IntentNodeRoleSchema.optional(),
-    type: LoopNodeTypeSchema.optional(),
+    type: IntentGraphNodeTypeSchema.optional(),
     agentRole: LoopAgentRoleSchema.optional(),
+    /** Workforce agent binding; null/omit = General Agent. */
+    agentDefinitionId: z.string().min(1).nullable().optional(),
     humanMode: LoopHumanModeSchema.optional(),
     actionIntegration: LoopActionIntegrationSchema.optional(),
     actionOperation: z.string().trim().min(1).max(80).optional(),
     logicKind: LoopLogicKindSchema.optional(),
     maxIterations: z.number().int().positive().max(50).optional(),
     repairMode: z.boolean().optional(),
+    /** Present when `type === "config"` (Agent wiring satellite). */
+    satelliteKind: LoopSatelliteKindSchema.optional(),
+    /** Asset pointer for a config satellite. */
+    configRef: LoopConfigRefSchema.optional(),
+    /**
+     * Node-local wiring patch (Q2 default). Takes priority over provides edges
+     * and Definition when resolving runtime inject; never silently written back.
+     */
+    agentWiringOverride: AgentWiringOverrideSchema.optional(),
     position: IntentGraphPositionSchema,
     authoringSessionId: z.string().min(1).optional(),
   })
@@ -158,6 +229,11 @@ export const IntentGraphEdgeSchema = z
     branchKey: z.string().trim().min(1).max(80).optional(),
     sourcePort: IntentEdgePortSchema.optional(),
     targetPort: IntentEdgePortSchema.optional(),
+    /**
+     * Agent config port for `provides` edges (Model* / Memory / Capability).
+     * Independent of cardinal `targetPort` used for bezier routing.
+     */
+    configPort: LoopAgentConfigPortSchema.optional(),
     authoringSessionId: z.string().min(1).optional(),
   })
   .strict();
@@ -185,12 +261,15 @@ export const LoopSpecNodeSchema = z
     role: IntentNodeRoleSchema,
     type: LoopNodeTypeSchema.optional(),
     agentRole: LoopAgentRoleSchema.optional(),
+    agentDefinitionId: z.string().min(1).nullable().optional(),
     humanMode: LoopHumanModeSchema.optional(),
     actionIntegration: LoopActionIntegrationSchema.optional(),
     actionOperation: z.string().trim().min(1).max(80).optional(),
     logicKind: LoopLogicKindSchema.optional(),
     maxIterations: z.number().int().positive().max(50).optional(),
     repairMode: z.boolean().optional(),
+    /** Folded Agent wiring from Intent `provides` + override (no config nodes in Spec). */
+    resolvedWiring: AgentWiringOverrideSchema.optional(),
     goal: z.string().trim().min(1).max(1000),
     constraints: z.array(z.string().trim().min(1).max(500)).max(20),
     inputs: z.array(z.string().trim().min(1).max(240)).max(20),
@@ -204,7 +283,8 @@ export const LoopSpecEdgeSchema = z
     id: z.string().min(1),
     from: z.string().min(1),
     to: z.string().min(1),
-    kind: IntentEdgeKindSchema,
+    /** Spec topology never includes `provides` (folded at compile). */
+    kind: z.enum(["depends", "feedback", "conditional"]),
     when: z.string().trim().max(500).optional(),
     branchKey: z.string().trim().min(1).max(80).optional(),
     carry: z.array(z.string().trim().min(1).max(240)).max(10).optional(),
@@ -391,7 +471,7 @@ export const LoopGraphIndexSchema = z
 
 export const LOOP_DRAFT_HISTORY_MAX = 20;
 
-export const LoopComposerModeSchema = z.enum(["ask", "edit"]);
+export const LoopComposerModeSchema = z.enum(["ask", "edit", "create_agent"]);
 
 export const LoopGoalContextStatusSchema = z.enum(["draft", "confirmed"]);
 
@@ -535,6 +615,9 @@ export type IntentEdgePort = z.infer<typeof IntentEdgePortSchema>;
 export type IntentGraph = z.infer<typeof IntentGraphSchema>;
 export type IntentGraphNode = z.infer<typeof IntentGraphNodeSchema>;
 export type IntentGraphEdge = z.infer<typeof IntentGraphEdgeSchema>;
+export type IntentGraphNodeType = z.infer<typeof IntentGraphNodeTypeSchema>;
+export type LoopConfigRef = z.infer<typeof LoopConfigRefSchema>;
+export type AgentWiringOverride = z.infer<typeof AgentWiringOverrideSchema>;
 export type LoopSpec = z.infer<typeof LoopSpecSchema>;
 export type LoopSpecNode = z.infer<typeof LoopSpecNodeSchema>;
 export type LoopSpecEdge = z.infer<typeof LoopSpecEdgeSchema>;
@@ -543,6 +626,9 @@ export type LoopAgentRoleParsed = z.infer<typeof LoopAgentRoleSchema>;
 export type LoopHumanModeParsed = z.infer<typeof LoopHumanModeSchema>;
 export type LoopActionIntegrationParsed = z.infer<typeof LoopActionIntegrationSchema>;
 export type LoopLogicKindParsed = z.infer<typeof LoopLogicKindSchema>;
+export type LoopSatelliteKindParsed = z.infer<typeof LoopSatelliteKindSchema>;
+export type LoopAgentConfigPortParsed = z.infer<typeof LoopAgentConfigPortSchema>;
+export type LoopMemoryModeParsed = z.infer<typeof LoopMemoryModeSchema>;
 export type LoopInstance = z.infer<typeof LoopInstanceSchema>;
 export type LoopInstanceEvent = z.infer<typeof LoopInstanceEventSchema>;
 export type LoopInstanceArtifact = z.infer<typeof LoopInstanceArtifactSchema>;
@@ -720,11 +806,12 @@ export interface IntentGraphReadinessIssue {
 /** Draw-mode hard gate: every node/edge must have authored semantics before compile. */
 export function getIntentGraphCompileIssues(draft: IntentGraph): IntentGraphReadinessIssue[] {
   const issues: IntentGraphReadinessIssue[] = [];
-  if (draft.nodes.length === 0) {
+  const dutyNodes = draft.nodes.filter((node) => !isConfigNode(node));
+  if (dutyNodes.length === 0) {
     issues.push({ path: "nodes", message: "At least one node is required" });
     return issues;
   }
-  for (const node of draft.nodes) {
+  for (const node of dutyNodes) {
     if (!node.prompt.trim()) {
       issues.push({
         path: `nodes.${node.id}.prompt`,
@@ -733,6 +820,10 @@ export function getIntentGraphCompileIssues(draft: IntentGraph): IntentGraphRead
     }
   }
   for (const edge of draft.edges) {
+    if (edge.kind === "provides") {
+      // Config wiring edges do not require free-text prompts.
+      continue;
+    }
     if (!edge.prompt?.trim()) {
       issues.push({
         path: `edges.${edge.id}.prompt`,
@@ -755,6 +846,7 @@ export function isIntentGraphReadyForCompile(draft: IntentGraph): boolean {
 
 /** Lightweight role hint for Draw-mode edge kind suggestion (no LLM). */
 export function suggestIntentNodeRole(node: IntentGraphNode): IntentNodeRole {
+  if (isConfigNode(node)) return "unknown";
   if (node.type) {
     return withArchitectureDefaults(node).role;
   }
@@ -771,13 +863,22 @@ export function suggestIntentNodeRole(node: IntentGraphNode): IntentNodeRole {
 }
 
 export function suggestIntentEdgeKind(
-  edge: Pick<IntentGraphEdge, "kind" | "source" | "target" | "branchKey">,
+  edge: Pick<
+    IntentGraphEdge,
+    "kind" | "source" | "target" | "branchKey" | "configPort"
+  >,
   nodes: IntentGraphNode[],
 ): IntentEdgeKind {
   if (edge.kind) return edge.kind;
   const source = nodes.find((node) => node.id === edge.source);
   const target = nodes.find((node) => node.id === edge.target);
   if (!source || !target) return "depends";
+  if (isConfigNode(source) && (target.type ?? "agent") === "agent") {
+    return "provides";
+  }
+  if (isConfigNode(target) || isConfigNode(source)) {
+    return "provides";
+  }
   if (isConditionNode(source) || edge.branchKey) {
     return "conditional";
   }

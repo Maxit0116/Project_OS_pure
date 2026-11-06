@@ -3,10 +3,10 @@
 .modePlan,
 .modeAgent,
 .modeDebug {
-  --mode-on-color: #141414;
-  --mode-subtle: color-mix(in srgb, var(--mode-color) 14%, transparent);
-  --mode-border: color-mix(in srgb, var(--mode-color) 48%, var(--tech-border, var(--color-border)));
-  --mode-hover-border: color-mix(in srgb, var(--mode-color) 28%, var(--tech-border, var(--color-border)));
+  --mode-on-color: #1a1a1c;
+  --mode-subtle: color-mix(in srgb, var(--mode-color) 12%, transparent);
+  --mode-border: color-mix(in srgb, var(--mode-color) 42%, var(--tech-border, var(--color-border)));
+  --mode-hover-border: color-mix(in srgb, var(--mode-color) 24%, var(--tech-border, var(--color-border)));
 }
 
 .modeAsk {
@@ -17,15 +17,15 @@
   --mode-color: var(--chat-mode-plan, var(--color-warning));
 }
 
-/* Agent / Change — near-white accent (no saturated brand tint). */
+/* Agent / Change — soft grey accent (no saturated brand tint). */
 .modeAgent {
   --mode-color: var(--tech-accent, var(--color-accent));
-  --mode-on-color: var(--tech-accent-foreground, #141414);
+  --mode-on-color: var(--tech-accent-foreground, #1a1a1c);
   --mode-subtle: var(--tech-accent-subtle, var(--color-accent-subtle));
-  --mode-border: color-mix(in srgb, var(--mode-color) 35%, var(--tech-border, var(--color-border)));
+  --mode-border: color-mix(in srgb, var(--mode-color) 32%, var(--tech-border, var(--color-border)));
 }
 
 .modeDebug {
   --mode-color: var(--chat-mode-debug, var(--color-error));
-  --mode-on-color: #ffffff;
+  --mode-on-color: #e8e8ea;
 }

@@ -127,6 +127,40 @@ describe("github-graph-nav", () => {
     expect(parentGithubGraphMode("partition")).toBeNull();
     expect(parentGithubGraphMode("feature-tree")).toBe("partition");
     expect(parentGithubGraphMode("git-history")).toBe("feature-tree");
+    expect(
+      parentGithubGraphMode("git-history", {
+        sourceKind: "branch",
+        sourceId: "branch:main",
+        branchRefs: ["main"],
+        window: { kind: "commit-cap", commitCap: 200 },
+        firstParentOnly: false,
+        returnMode: "partition",
+      }),
+    ).toBe("partition");
+  });
+
+  it("stores history scope and toggles first-parent / window", () => {
+    let state = DEFAULT_GITHUB_GRAPH_NAV;
+    state = reduceGithubGraphNav(state, {
+      type: "set-history-scope",
+      scope: {
+        sourceKind: "branch",
+        sourceId: "branch:dev",
+        branchRefs: ["dev"],
+        window: { kind: "commit-cap", commitCap: 200 },
+        firstParentOnly: false,
+        returnMode: "partition",
+      },
+    });
+    expect(state.historyScope?.branchRefs).toEqual(["dev"]);
+    state = reduceGithubGraphNav(state, { type: "toggle-history-first-parent" });
+    expect(state.historyScope?.firstParentOnly).toBe(true);
+    state = reduceGithubGraphNav(state, {
+      type: "set-history-window",
+      window: { kind: "since-days", commitCap: 200, sinceDays: 14 },
+    });
+    expect(state.historyScope?.window.kind).toBe("since-days");
+    expect(state.historyScope?.window.sinceDays).toBe(14);
   });
 
   it("toggles expanded features and clears stale selection", () => {

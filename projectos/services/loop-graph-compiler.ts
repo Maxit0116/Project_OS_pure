@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   LoopCompileResultSchema,
+  isConfigNode,
   suggestIntentEdgeKind,
   suggestIntentNodeRole,
   withArchitectureDefaults,
@@ -15,6 +16,11 @@ import {
   type LoopSpecNode,
   validateLoopSpecTopology,
 } from "../contracts/loop-graph.js";
+import {
+  resolveAgentWiring,
+  toWiringOverride,
+  validateAgentWiringGraph,
+} from "./loop-agent-wiring.js";
 
 function inferRole(node: IntentGraphNode): LoopSpecNode["role"] {
   return suggestIntentNodeRole(node);
@@ -23,21 +29,39 @@ function inferRole(node: IntentGraphNode): LoopSpecNode["role"] {
 function inferEdgeKind(
   edge: IntentGraph["edges"][number],
   nodesById: Map<string, IntentGraphNode>,
-): LoopSpecEdge["kind"] {
+): LoopSpecEdge["kind"] | "provides" {
   return suggestIntentEdgeKind(edge, [...nodesById.values()]);
 }
 
-function compileSpecNode(node: IntentGraphNode): LoopSpecNode {
+function compileSpecNode(
+  node: IntentGraphNode,
+  draft: IntentGraph,
+): LoopSpecNode {
   const arch = withArchitectureDefaults(node);
   const role = inferRole(node);
   const isTestAction =
     arch.type === "action" && arch.actionIntegration === "test";
   const isVerify = role === "verify" || isTestAction;
+  const isAgent = (arch.type ?? "agent") === "agent";
+  const resolvedWiring = isAgent
+    ? toWiringOverride(resolveAgentWiring(node, draft))
+    : undefined;
+  const hasWiring =
+    resolvedWiring &&
+    (resolvedWiring.modelProfileId ||
+      (resolvedWiring.skillIds && resolvedWiring.skillIds.length > 0) ||
+      (resolvedWiring.mcpServerIds && resolvedWiring.mcpServerIds.length > 0) ||
+      resolvedWiring.memoryMode);
   return {
     id: node.id,
     role,
     type: arch.type,
     ...(arch.agentRole ? { agentRole: arch.agentRole } : {}),
+    ...(node.agentDefinitionId
+      ? { agentDefinitionId: node.agentDefinitionId }
+      : node.agentDefinitionId === null
+        ? { agentDefinitionId: null }
+        : {}),
     ...(arch.humanMode ? { humanMode: arch.humanMode } : {}),
     ...(arch.actionIntegration
       ? { actionIntegration: arch.actionIntegration }
@@ -48,6 +72,7 @@ function compileSpecNode(node: IntentGraphNode): LoopSpecNode {
       ? { maxIterations: arch.maxIterations }
       : {}),
     ...(arch.repairMode ? { repairMode: true } : {}),
+    ...(hasWiring ? { resolvedWiring } : {}),
     goal: node.prompt.trim() || node.title,
     constraints: [],
     inputs: [],
@@ -68,19 +93,27 @@ export function compileIntentGraphHeuristic(
   options?: { now?: string },
 ): LoopCompileResult {
   const now = options?.now ?? new Date().toISOString();
+  const dutyNodes = draft.nodes.filter((node) => !isConfigNode(node));
   const nodesById = new Map(draft.nodes.map((node) => [node.id, node]));
   const assumptions: LoopAssumption[] = [];
   const cycleGates: LoopCycleGate[] = [];
 
-  if (!draft.graphPrompt.trim() && draft.nodes.length > 0) {
+  for (const issue of validateAgentWiringGraph(draft)) {
+    assumptions.push({
+      id: `assume_${randomUUID()}`,
+      text: `Agent wiring: ${issue.message}`,
+    });
+  }
+
+  if (!draft.graphPrompt.trim() && dutyNodes.length > 0) {
     assumptions.push({
       id: `assume_${randomUUID()}`,
       text: "Graph-level goal was empty; inferred from the first node prompt.",
     });
   }
 
-  const nodes: LoopSpecNode[] = draft.nodes.map((node) => {
-    const compiled = compileSpecNode(node);
+  const nodes: LoopSpecNode[] = dutyNodes.map((node) => {
+    const compiled = compileSpecNode(node, draft);
     if (!node.role || node.role === "unknown" || !node.type) {
       assumptions.push({
         id: `assume_${randomUUID()}`,
@@ -90,8 +123,10 @@ export function compileIntentGraphHeuristic(
     return compiled;
   });
 
-  const edges: LoopSpecEdge[] = draft.edges.map((edge) => {
+  const edges: LoopSpecEdge[] = [];
+  for (const edge of draft.edges) {
     const kind = inferEdgeKind(edge, nodesById);
+    if (kind === "provides") continue;
     if (kind === "feedback") {
       cycleGates.push({
         edgeId: edge.id,
@@ -102,7 +137,7 @@ export function compileIntentGraphHeuristic(
         onContinuousFailure: "pause_hitl",
       });
     }
-    return {
+    edges.push({
       id: edge.id,
       from: edge.source,
       to: edge.target,
@@ -113,13 +148,13 @@ export function compileIntentGraphHeuristic(
         ? { branchKey: "default" }
         : {}),
       carry: kind === "feedback" ? ["latest_failure_summary"] : undefined,
-    };
-  });
+    });
+  }
 
   const goal =
     draft.graphPrompt.trim() ||
-    draft.nodes[0]?.prompt.trim() ||
-    draft.nodes[0]?.title ||
+    dutyNodes[0]?.prompt.trim() ||
+    dutyNodes[0]?.title ||
     "Complete the loop";
 
   const openQuestions = cycleGates.map((gate) => ({

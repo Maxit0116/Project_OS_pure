@@ -3,9 +3,11 @@ import { applyGithubCardHostBridgeEvent } from './composerRepoOpsHost'
 
 const pushToast = vi.fn()
 const setChatMode = vi.fn()
+const setAskSubMode = vi.fn()
 const sendPrompt = vi.fn()
 const setGithubGraphOpen = vi.fn()
 const requestGithubGraphRefresh = vi.fn()
+const switchSession = vi.fn(async () => undefined)
 
 vi.mock('../../state/workbenchStore', () => ({
   useWorkbenchStore: Object.assign(
@@ -14,7 +16,10 @@ vi.mock('../../state/workbenchStore', () => ({
       getState: () => ({
         pushToast,
         setChatMode,
+        setAskSubMode,
         sendPrompt,
+        project: null,
+        client: null,
       }),
       setState: vi.fn(),
     },
@@ -26,6 +31,7 @@ vi.mock('../../state/chatSessionStore', () => ({
     getState: () => ({
       setGithubGraphOpen,
       requestGithubGraphRefresh,
+      switchSession,
     }),
   },
 }))
@@ -34,9 +40,11 @@ describe('applyGithubCardHostBridgeEvent', () => {
   beforeEach(() => {
     pushToast.mockClear()
     setChatMode.mockClear()
+    setAskSubMode.mockClear()
     sendPrompt.mockClear()
     setGithubGraphOpen.mockClear()
     requestGithubGraphRefresh.mockClear()
+    switchSession.mockClear()
   })
 
   it('forwards toast', () => {

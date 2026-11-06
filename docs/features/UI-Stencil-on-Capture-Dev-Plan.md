@@ -5,7 +5,7 @@
 **产品定位一句话**：Spatial Capture 解决「改哪里」；Stencil 解决「长什么样 / 怎么交互」；Compose 解决「业务要干什么」——三者叠成一条可提交的 agent 输入，而不是再做一个独立的 Material 设计器。  
 **实现锚点**：
 - 契约：`projectos/contracts/ui-stencil.ts`；region.`stencils`；`composer.stencilBrief` / `generationScope`
-- Catalog：`UI_STENCIL_CATALOG`（Base/Motion/Visual + 3 Screen Presets）；Library 字母色块 + license / Maps-to 行；Motion 修饰符 chips
+- Catalog：`UI_STENCIL_CATALOG` v0.2（Base 含 P6 常用件 + Motion/Visual + 3 Screen Presets，约 45 条）；Library 字母色块 + license / Maps-to 行；Motion 修饰符 chips
 - Repo DS：`contracts/repo-design-system.ts`、`services/repo-design-system-service.ts`、`getRepoDesignSystem`
 - UI：`StencilLibrary.tsx`（右缘抽出 + 拖放投放）、`StencilLiveStub.tsx`（画布可交互 stub）、`StencilComposeExtras.tsx`（motion/scope）、`SpatialCaptureCanvas` + Desktop `OverlayApp`
 - Region：非 Draw 模式下按住拖动 `captureRect`，松手重裁 snapshot
@@ -18,6 +18,8 @@
 - UI 语言：`.cursor/skills/ai-devtool-ui/`、`.cursor/rules/liquid-glass-ui.mdc`（tech tokens；**不**为 catalog 把 Tailwind 引进 workbench 主壳）
 - 对标概念（非依赖）：[m3e-canvas](https://github.com/lnkiai/m3e-canvas) — sketch → structured prompt → coding agent
 - Catalog 内容来源（元数据级，非整库嵌入）：[shadcn/ui](https://github.com/shadcn-ui/ui)、[Motion](https://github.com/motiondivision/motion)、[React Bits](https://github.com/DavidHDev/react-bits)、[Magic UI](https://github.com/magicuidesign/magicui)
+
+**演进**：可分享 Stencil pack / Marketplace Stencils tab 已落地（[`Capability-Marketplace-Dev-Plan.md`](./Capability-Marketplace-Dev-Plan.md) P4）——安装到 `.projectos/stencils/`，运行时 concat 进 Library。**P6** 另精选扩充内置 `UI_STENCIL_CATALOG`（shadcn 取向常用件；仍不嵌入 npm 组件库），并支持 Stencil pack 的 GitHub/HTTP URL 与粘贴导入；本文件仍是 Capture 投放与内置 catalog 的权威实现记录。
 
 **明确不做 / 不复制**：
 - **不**把 m3e-canvas Next.js 应用或 Material 3 Expressive 运行时嵌入 Workbench / Overlay

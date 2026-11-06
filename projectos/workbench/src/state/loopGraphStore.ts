@@ -1,27 +1,40 @@
 import type {
+  AgentWiringOverride,
   IntentEdgeKind,
   IntentEdgePort,
   IntentGraph,
   IntentGraphEdge,
   IntentGraphNode,
+  LoopAgentConfigPort,
   LoopComposerMode,
   LoopCompileResult,
+  LoopConfigRef,
   LoopGoalClarificationAnswer,
   LoopGraphDocument,
   LoopGraphHead,
   LoopGraphPreset,
   LoopPaletteItem,
+  LoopSatelliteKind,
   LoopSpec,
 } from '@contracts/index'
 import {
+  configPortForSatelliteKind,
   createNodeFromPaletteItem,
   getIntentGraphCompileIssues,
   getLoopGraphPreset,
   getLoopPaletteItem,
+  isConfigNode,
   isIntentGraphReadyForCompile,
   suggestIntentEdgeKind,
   withArchitectureDefaults,
 } from '@contracts/index'
+import {
+  collectOrphanConfigNodeIds,
+  collectOrphansAfterEdgeRemoval,
+  expandWiringFromDefinition,
+  resolveAgentWiring,
+  type AgentWiringBase,
+} from '../../../services/loop-agent-wiring'
 import { create } from 'zustand'
 import { useChatSessionStore } from './chatSessionStore'
 import {
@@ -93,12 +106,55 @@ interface LoopGraphStore {
   beginAuthorNodeFromPalette: (
     paletteItemId: string,
     position: { x: number; y: number },
+    options?: {
+      agentDefinitionId?: string | null
+      title?: string
+      configRef?: LoopConfigRef
+    },
+  ) => Promise<string | null>
+  setNodeAgentDefinition: (
+    nodeId: string,
+    agentDefinitionId: string | null,
+    options?: { title?: string; wiringBase?: AgentWiringBase | null },
+  ) => void
+  /** Expand Model/Skill/MCP/Memory satellites from a Definition (or clear prior orphans). */
+  expandAgentWiring: (
+    agentNodeId: string,
+    base: AgentWiringBase,
+    options?: { replaceExistingProvides?: boolean },
+  ) => void
+  setAgentWiringOverride: (
+    nodeId: string,
+    override: AgentWiringOverride | null,
+  ) => void
+  beginAuthorConfigSatellite: (input: {
+    satelliteKind: LoopSatelliteKind
+    configRef?: LoopConfigRef
+    title?: string
+    position: { x: number; y: number }
+    wireToAgentId?: string
+  }) => Promise<string | null>
+  updateConfigSatellite: (
+    nodeId: string,
+    patch: { title?: string; configRef?: LoopConfigRef },
+  ) => void
+  /** Write current canvas wiring into the bound Workforce Agent definition (confirm first in UI). */
+  applyWiringToAgentDefinition: (agentNodeId: string) => Promise<boolean>
+  /** Create a new Workforce Agent from current canvas wiring and bind this node. */
+  saveWiringAsNewAgent: (
+    agentNodeId: string,
+    options?: { displayName?: string },
   ) => Promise<string | null>
   applyLoopPreset: (presetId: string) => Promise<boolean>
   beginAuthorEdge: (
     source: string,
     target: string,
-    ports?: { sourcePort?: IntentEdgePort; targetPort?: IntentEdgePort },
+    ports?: {
+      sourcePort?: IntentEdgePort
+      targetPort?: IntentEdgePort
+      configPort?: LoopAgentConfigPort
+      kind?: IntentEdgeKind
+    },
   ) => Promise<string | null>
   applyAuthoringFromActiveSession: (options?: {
     edgeKind?: IntentEdgeKind
@@ -400,11 +456,9 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
               cycleGates: document.pendingCompile.cycleGates,
             }
           : null,
-        phase: document?.pendingCompile
-          ? 'review'
-          : document?.approvedSpecs.length
-            ? 'run'
-            : 'draw',
+        // Always land on the draw canvas when opening Loops Graph.
+        // pendingCompile / approvedSpecs stay hydrated so Review / Run tabs remain available.
+        phase: 'draw',
         loading: false,
       })
     } catch (error) {
@@ -551,7 +605,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     return node.id
   },
 
-  beginAuthorNodeFromPalette: async (paletteItemId, position) => {
+  beginAuthorNodeFromPalette: async (paletteItemId, position, options) => {
     const current = get().document
     if (!current) return null
     const item: LoopPaletteItem | undefined = getLoopPaletteItem(paletteItemId)
@@ -568,6 +622,13 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     })
     const node = withArchitectureDefaults({
       ...seeded,
+      ...(options?.title ? { title: options.title.slice(0, 120) } : {}),
+      ...(options?.agentDefinitionId !== undefined
+        ? { agentDefinitionId: options.agentDefinitionId }
+        : {}),
+      ...(options?.configRef
+        ? { configRef: { ...(seeded.configRef ?? {}), ...options.configRef } }
+        : {}),
       authoringSessionId: sessionId,
     })
     const draft: IntentGraph = {
@@ -591,10 +652,328 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     return node.id
   },
 
+  setNodeAgentDefinition: (nodeId, agentDefinitionId, options) => {
+    const current = get().document
+    if (!current) return
+    if (get().phase !== 'draw') {
+      set({ error: 'Switch Agent is only available while the loop is in draft' })
+      return
+    }
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: current.draft.nodes.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              agentDefinitionId,
+              ...(options?.title ? { title: options.title.slice(0, 120) } : {}),
+            }
+          : node,
+      ),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+    if (options?.wiringBase) {
+      get().expandAgentWiring(nodeId, options.wiringBase, {
+        replaceExistingProvides: true,
+      })
+    }
+  },
+
+  expandAgentWiring: (agentNodeId, base, options) => {
+    const current = get().document
+    if (!current) return
+    const agent = current.draft.nodes.find((node) => node.id === agentNodeId)
+    if (!agent || isConfigNode(agent) || (agent.type ?? 'agent') !== 'agent') {
+      set({ error: 'Wiring expand requires an agent node' })
+      return
+    }
+
+    let working: IntentGraph = current.draft
+    if (options?.replaceExistingProvides) {
+      const provides = working.edges.filter(
+        (edge) => edge.kind === 'provides' && edge.target === agentNodeId,
+      )
+      const provideIds = new Set(provides.map((edge) => edge.id))
+      const withoutProvides: IntentGraph = {
+        ...working,
+        edges: working.edges.filter((edge) => !provideIds.has(edge.id)),
+      }
+      const stillUsed = new Set(
+        withoutProvides.edges
+          .filter((edge) => edge.kind === 'provides')
+          .map((edge) => edge.source),
+      )
+      const orphanIds = new Set(
+        provides
+          .map((edge) => edge.source)
+          .filter((sourceId) => !stillUsed.has(sourceId)),
+      )
+      working = {
+        ...withoutProvides,
+        nodes: withoutProvides.nodes.filter((node) => !orphanIds.has(node.id)),
+      }
+    }
+
+    const idPool: string[] = []
+    const nextId = () => {
+      const id = newLoopEntityId('node')
+      idPool.push(id)
+      return id
+    }
+    const remapped = expandWiringFromDefinition({
+      agentNodeId,
+      agentPosition: agent.position,
+      base,
+      existing: working,
+      newId: nextId,
+    })
+    // Edge ids from expand also use newId(); retag edges to edge_ prefix.
+    const draft: IntentGraph = {
+      ...working,
+      revision: current.draft.revision + 1,
+      nodes: [...working.nodes, ...remapped.nodes],
+      edges: [
+        ...working.edges,
+        ...remapped.edges.map((edge) => ({
+          ...edge,
+          id: newLoopEntityId('edge'),
+        })),
+      ],
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+  },
+
+  setAgentWiringOverride: (nodeId, override) => {
+    const current = get().document
+    if (!current) return
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: current.draft.nodes.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              ...(override
+                ? { agentWiringOverride: override }
+                : { agentWiringOverride: undefined }),
+            }
+          : node,
+      ),
+    }
+    // Strip undefined agentWiringOverride cleanly
+    draft.nodes = draft.nodes.map((node) => {
+      if (node.id !== nodeId) return node
+      if (override) return { ...node, agentWiringOverride: override }
+      const { agentWiringOverride: _removed, ...rest } = node
+      return rest
+    })
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+  },
+
+  updateConfigSatellite: (nodeId, patch) => {
+    const current = get().document
+    if (!current) return
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: current.draft.nodes.map((node) => {
+        if (node.id !== nodeId || !isConfigNode(node)) return node
+        return {
+          ...node,
+          ...(patch.title ? { title: patch.title.slice(0, 120) } : {}),
+          ...(patch.configRef
+            ? { configRef: { ...(node.configRef ?? {}), ...patch.configRef } }
+            : {}),
+        }
+      }),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+  },
+
+  applyWiringToAgentDefinition: async (agentNodeId) => {
+    const current = get().document
+    const { client, project, pushToast } = useWorkbenchStore.getState()
+    if (!current || !client?.updateWorkforceAgent || !client.listWorkforceAgents || !project) {
+      set({ error: 'Cannot apply wiring — client unavailable' })
+      return false
+    }
+    const agent = current.draft.nodes.find((node) => node.id === agentNodeId)
+    if (!agent || isConfigNode(agent) || (agent.type ?? 'agent') !== 'agent') {
+      set({ error: 'Apply wiring requires an agent node' })
+      return false
+    }
+    if (!agent.agentDefinitionId) {
+      set({
+        error: 'Bind or Save as Agent first — General Agent has no shared definition to update',
+      })
+      return false
+    }
+    try {
+      const listed = await client.listWorkforceAgents({ projectId: project.projectId })
+      const existing = listed.agents.find(
+        (item) => item.definitionId === agent.agentDefinitionId,
+      )
+      if (!existing) {
+        set({ error: 'Workforce agent definition not found' })
+        return false
+      }
+      const resolved = resolveAgentWiring(agent, current.draft, {
+        modelProfileId: existing.config.modelProfileId,
+        skillIds: existing.config.skillIds ?? [],
+        mcpServerIds: existing.config.mcpServerIds ?? [],
+      })
+      await client.updateWorkforceAgent({
+        projectId: project.projectId,
+        definitionId: existing.definitionId,
+        draft: {
+          displayName: existing.config.displayName,
+          roleLabel: existing.config.roleLabel,
+          instructions: existing.config.instructions ?? '',
+          modelProfileId: resolved.modelProfileId ?? null,
+          skillIds: resolved.skillIds,
+          mcpServerIds: resolved.mcpServerIds,
+          permissionNotes: existing.config.permissionNotes,
+        },
+      })
+      get().setAgentWiringOverride(agentNodeId, null)
+      pushToast({
+        type: 'success',
+        message: `Applied wiring to ${existing.config.displayName}`,
+        autoDismiss: 3200,
+      })
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to apply wiring'
+      set({ error: message })
+      pushToast({ type: 'error', message, autoDismiss: 4200 })
+      return false
+    }
+  },
+
+  saveWiringAsNewAgent: async (agentNodeId, options) => {
+    const current = get().document
+    const { client, project, pushToast } = useWorkbenchStore.getState()
+    if (!current || !client?.createWorkforceAgent || !project) {
+      set({ error: 'Cannot save agent — client unavailable' })
+      return null
+    }
+    const agent = current.draft.nodes.find((node) => node.id === agentNodeId)
+    if (!agent || isConfigNode(agent) || (agent.type ?? 'agent') !== 'agent') {
+      set({ error: 'Save as Agent requires an agent node' })
+      return null
+    }
+    try {
+      const resolved = resolveAgentWiring(agent, current.draft)
+      const displayName = (options?.displayName ?? agent.title ?? 'Specialized Agent').slice(
+        0,
+        120,
+      )
+      const created = await client.createWorkforceAgent({
+        projectId: project.projectId,
+        draft: {
+          displayName,
+          roleLabel: agent.agentRole,
+          instructions: agent.prompt ?? '',
+          modelProfileId: resolved.modelProfileId ?? null,
+          skillIds: resolved.skillIds,
+          mcpServerIds: resolved.mcpServerIds,
+        },
+      })
+      get().setNodeAgentDefinition(agentNodeId, created.definitionId, {
+        title: created.config.displayName,
+      })
+      get().setAgentWiringOverride(agentNodeId, null)
+      pushToast({
+        type: 'success',
+        message: `Saved as agent ${created.config.displayName}`,
+        autoDismiss: 3200,
+      })
+      return created.definitionId
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save agent'
+      set({ error: message })
+      pushToast({ type: 'error', message, autoDismiss: 4200 })
+      return null
+    }
+  },
+
+  beginAuthorConfigSatellite: async (input) => {
+    const current = get().document
+    if (!current) return null
+    const sessionId = await ensureAuthoringSession()
+    if (!sessionId) return null
+    const node: IntentGraphNode = {
+      id: newLoopEntityId('node'),
+      title: (input.title ?? input.satelliteKind).slice(0, 120),
+      prompt: '',
+      type: 'config',
+      satelliteKind: input.satelliteKind,
+      ...(input.configRef ? { configRef: input.configRef } : {}),
+      position: input.position,
+      authoringSessionId: sessionId,
+    }
+    let edges = current.draft.edges
+    if (input.wireToAgentId) {
+      const port = configPortForSatelliteKind(input.satelliteKind)
+      edges = [
+        ...edges,
+        {
+          id: newLoopEntityId('edge'),
+          source: node.id,
+          target: input.wireToAgentId,
+          kind: 'provides',
+          configPort: port,
+          sourcePort: 'n',
+          targetPort: 's',
+          prompt: '',
+          authoringSessionId: sessionId,
+        },
+      ]
+    }
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: [...current.draft.nodes, node],
+      edges,
+    }
+    const linkedSessionIds = current.linkedSessionIds.includes(sessionId)
+      ? current.linkedSessionIds
+      : [...current.linkedSessionIds, sessionId].slice(0, 20)
+    set({
+      document: {
+        ...patchDraftDocument(current, draft),
+        linkedSessionIds,
+      },
+      connectingFromId: null,
+      error: null,
+    })
+    get().schedulePersist()
+    return node.id
+  },
+
   applyLoopPreset: async (presetId) => {
     const current = get().document
     if (!current) return false
-    const preset: LoopGraphPreset | undefined = getLoopGraphPreset(presetId)
+    const resolved = await useWorkbenchStore.getState().resolveLoopGraphPreset(presetId)
+    const preset: LoopGraphPreset | undefined =
+      resolved ?? getLoopGraphPreset(presetId)
     if (!preset) {
       set({ error: `Unknown preset: ${presetId}` })
       return false
@@ -646,6 +1025,71 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       return null
     }
 
+    const sourceNode = current.draft.nodes.find((node) => node.id === source)
+    const targetNode = current.draft.nodes.find((node) => node.id === target)
+    if (!sourceNode || !targetNode) return null
+
+    const sourceIsConfig = isConfigNode(sourceNode)
+    const targetIsConfig = isConfigNode(targetNode)
+    const targetIsAgent =
+      !isConfigNode(targetNode) && (targetNode.type ?? 'agent') === 'agent'
+    const sourceIsAgent =
+      !isConfigNode(sourceNode) && (sourceNode.type ?? 'agent') === 'agent'
+
+    let kind = ports?.kind
+    let configPort = ports?.configPort
+
+    if (sourceIsConfig && targetIsAgent) {
+      kind = 'provides'
+      configPort =
+        configPort ??
+        (sourceNode.satelliteKind
+          ? configPortForSatelliteKind(sourceNode.satelliteKind)
+          : undefined)
+    } else if (sourceIsAgent && targetIsConfig) {
+      // Normalize direction: config → agent
+      return get().beginAuthorEdge(target, source, {
+        sourcePort: ports?.targetPort ?? 'n',
+        targetPort: ports?.sourcePort ?? 's',
+        configPort:
+          ports?.configPort ??
+          (targetNode.satelliteKind
+            ? configPortForSatelliteKind(targetNode.satelliteKind)
+            : undefined),
+        kind: 'provides',
+      })
+    } else if (sourceIsConfig || targetIsConfig) {
+      set({
+        connectingFromId: null,
+        error: 'Config satellites only connect to Agent nodes via provides',
+      })
+      return null
+    }
+
+    if (kind === 'provides') {
+      if (!configPort) {
+        set({
+          connectingFromId: null,
+          error: 'provides edge needs a config port (Model / Memory / Capability)',
+        })
+        return null
+      }
+      const dupPort = current.draft.edges.some(
+        (edge) =>
+          edge.kind === 'provides' &&
+          edge.target === target &&
+          edge.configPort === configPort &&
+          (configPort === 'model' || configPort === 'memory'),
+      )
+      if (dupPort) {
+        set({
+          connectingFromId: null,
+          error: `Agent already has a ${configPort} wiring`,
+        })
+        return null
+      }
+    }
+
     const sessionId = await ensureAuthoringSession()
     if (!sessionId) return null
 
@@ -653,8 +1097,11 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       id: newLoopEntityId('edge'),
       source,
       target,
+      ...(kind ? { kind } : {}),
+      ...(configPort ? { configPort } : {}),
       ...(ports?.sourcePort ? { sourcePort: ports.sourcePort } : {}),
       ...(ports?.targetPort ? { targetPort: ports.targetPort } : {}),
+      ...(kind === 'provides' ? { prompt: '' } : {}),
       authoringSessionId: sessionId,
     }
     const draft: IntentGraph = {
@@ -845,12 +1292,17 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     if (target.type === 'node') {
       const node = current.draft.nodes.find((item) => item.id === target.id)
       const sessionId = node?.authoringSessionId
+      const orphanIds =
+        node && !isConfigNode(node) && (node.type ?? 'agent') === 'agent'
+          ? collectOrphanConfigNodeIds(current.draft, node.id)
+          : []
+      const removeIds = new Set([target.id, ...orphanIds])
       const draft: IntentGraph = {
         ...current.draft,
         revision: current.draft.revision + 1,
-        nodes: current.draft.nodes.filter((item) => item.id !== target.id),
+        nodes: current.draft.nodes.filter((item) => !removeIds.has(item.id)),
         edges: current.draft.edges.filter(
-          (edge) => edge.source !== target.id && edge.target !== target.id,
+          (edge) => !removeIds.has(edge.source) && !removeIds.has(edge.target),
         ),
       }
       const linkedSessionIds = sessionId
@@ -872,10 +1324,17 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
 
     const edge = current.draft.edges.find((item) => item.id === target.id)
     const sessionId = edge?.authoringSessionId
+    const orphanIds = edge
+      ? collectOrphansAfterEdgeRemoval(current.draft, edge.id)
+      : []
+    const orphanSet = new Set(orphanIds)
     const draft: IntentGraph = {
       ...current.draft,
       revision: current.draft.revision + 1,
-      edges: current.draft.edges.filter((item) => item.id !== target.id),
+      nodes: current.draft.nodes.filter((item) => !orphanSet.has(item.id)),
+      edges: current.draft.edges.filter(
+        (item) => item.id !== target.id && !orphanSet.has(item.source),
+      ),
     }
     const linkedSessionIds = sessionId
       ? current.linkedSessionIds.filter((id) => id !== sessionId)

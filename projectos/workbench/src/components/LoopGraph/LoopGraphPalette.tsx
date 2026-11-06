@@ -1,12 +1,20 @@
 import { useEffect, useState, type DragEvent } from 'react'
+import { createPortal } from 'react-dom'
 import {
-  LOOP_GRAPH_PRESETS,
   LOOP_PALETTE_ITEMS,
+  type AgentDefinition,
+  type LoopGraphPreset,
   type LoopPaletteCategory,
+  type LoopSatelliteKind,
 } from '@contracts/index'
 import { ChevronLeft, ChevronRight, LayoutTemplate } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
+import { useWorkbenchStore } from '../../state/workbenchStore'
+import AgentPicker from '../AgentWorkforce/AgentPicker'
+import LoopConfigAssetPicker, {
+  type ConfigAssetPick,
+} from './LoopConfigAssetPicker'
 import {
   encodePaletteDragPayload,
   LOOP_PALETTE_MIME,
@@ -14,7 +22,22 @@ import {
 } from './loopNodeVisuals'
 import styles from './LoopGraphPalette.module.css'
 
-const CATEGORIES: LoopPaletteCategory[] = ['agent', 'action', 'logic', 'human']
+function configPickerKind(
+  paletteItemId: string,
+): Extract<LoopSatelliteKind, 'model' | 'skill' | 'mcp'> | null {
+  if (paletteItemId === 'config.model') return 'model'
+  if (paletteItemId === 'config.skill') return 'skill'
+  if (paletteItemId === 'config.mcp') return 'mcp'
+  return null
+}
+
+const CATEGORIES: LoopPaletteCategory[] = [
+  'agent',
+  'action',
+  'logic',
+  'human',
+  'config',
+]
 const EXPAND_STORAGE_KEY = 'projectos.loopGraph.paletteExpanded'
 
 interface Props {
@@ -28,6 +51,11 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
   const document = useLoopGraphStore((s) => s.document)
   const beginAuthorNodeFromPalette = useLoopGraphStore((s) => s.beginAuthorNodeFromPalette)
   const applyLoopPreset = useLoopGraphStore((s) => s.applyLoopPreset)
+  const client = useWorkbenchStore((s) => s.client)
+  const project = useWorkbenchStore((s) => s.project)
+  const listLoopGraphPresets = useWorkbenchStore((s) => s.listLoopGraphPresets)
+  const beginCreateAgentComposer = useWorkbenchStore((s) => s.beginCreateAgentComposer)
+  const setComposerMode = useLoopGraphStore((s) => s.setComposerMode)
   const [expanded, setExpanded] = useState(() => {
     try {
       return sessionStorage.getItem(EXPAND_STORAGE_KEY) === '1'
@@ -36,6 +64,16 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
     }
   })
   const [presetsOpen, setPresetsOpen] = useState(false)
+  const [agentPickerFor, setAgentPickerFor] = useState<string | null>(null)
+  const [workforceAgents, setWorkforceAgents] = useState<AgentDefinition[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(false)
+  const [builtinPresets, setBuiltinPresets] = useState<LoopGraphPreset[]>([])
+  const [userPresets, setUserPresets] = useState<LoopGraphPreset[]>([])
+  const [configPicker, setConfigPicker] = useState<{
+    paletteItemId: string
+    kind: Extract<LoopSatelliteKind, 'model' | 'skill' | 'mcp'>
+    anchor: { x: number; y: number }
+  } | null>(null)
 
   useEffect(() => {
     try {
@@ -44,6 +82,38 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
       /* ignore */
     }
   }, [expanded])
+
+  useEffect(() => {
+    let cancelled = false
+    void listLoopGraphPresets().then((result) => {
+      if (cancelled || !result) return
+      setBuiltinPresets(result.builtins)
+      setUserPresets(result.user)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [listLoopGraphPresets, project?.projectId])
+
+  useEffect(() => {
+    if (!agentPickerFor || !client?.listWorkforceAgents || !project) return
+    let cancelled = false
+    setAgentsLoading(true)
+    void client
+      .listWorkforceAgents({ projectId: project.projectId })
+      .then((result) => {
+        if (!cancelled) setWorkforceAgents(result.agents)
+      })
+      .catch(() => {
+        if (!cancelled) setWorkforceAgents([])
+      })
+      .finally(() => {
+        if (!cancelled) setAgentsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [agentPickerFor, client, project])
 
   const defaultClickPosition = () => {
     if (!document) return { x: 80, y: 80 }
@@ -55,10 +125,18 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
     }
   }
 
-  const placeItem = async (paletteItemId: string, position?: { x: number; y: number }) => {
+  const placeItem = async (
+    paletteItemId: string,
+    position?: { x: number; y: number },
+    options?: {
+      agentDefinitionId?: string | null
+      title?: string
+      configRef?: { modelProfileId?: string; skillId?: string; mcpServerId?: string }
+    },
+  ) => {
     if (!document) return
     const at = position ?? resolveClickPosition?.() ?? defaultClickPosition()
-    const id = await beginAuthorNodeFromPalette(paletteItemId, at)
+    const id = await beginAuthorNodeFromPalette(paletteItemId, at, options)
     if (id) onPlaced?.(id)
   }
 
@@ -67,6 +145,79 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
     event.dataTransfer.setData('text/plain', paletteItemId)
     event.dataTransfer.effectAllowed = 'copy'
   }
+
+  const onAgentItemActivate = (paletteItemId: string) => {
+    setAgentPickerFor(paletteItemId)
+  }
+
+  const onConfigItemActivate = (
+    paletteItemId: string,
+    event: { clientX: number; clientY: number },
+  ) => {
+    const kind = configPickerKind(paletteItemId)
+    if (!kind) {
+      void placeItem(paletteItemId)
+      return
+    }
+    setConfigPicker({
+      paletteItemId,
+      kind,
+      anchor: { x: event.clientX, y: event.clientY },
+    })
+  }
+
+  const onConfigAssetPicked = (asset: ConfigAssetPick) => {
+    if (!configPicker) return
+    const { paletteItemId } = configPicker
+    setConfigPicker(null)
+    if (asset.kind === 'model') {
+      void placeItem(paletteItemId, undefined, {
+        title: `Model · ${asset.name}`,
+        configRef: { modelProfileId: asset.id },
+      })
+      return
+    }
+    if (asset.kind === 'skill') {
+      void placeItem(paletteItemId, undefined, {
+        title: `Skill · ${asset.name}`,
+        configRef: { skillId: asset.id },
+      })
+      return
+    }
+    void placeItem(paletteItemId, undefined, {
+      title: `MCP · ${asset.name}`,
+      configRef: { mcpServerId: asset.id },
+    })
+  }
+
+  const renderPresetButton = (preset: LoopGraphPreset, compact = false) =>
+    compact ? (
+      <button
+        key={preset.id}
+        type="button"
+        role="menuitem"
+        className={styles.presetMenuItem}
+        disabled={!document}
+        onClick={() => {
+          setPresetsOpen(false)
+          void applyLoopPreset(preset.id)
+        }}
+      >
+        {preset.title}
+      </button>
+    ) : (
+      <button
+        key={preset.id}
+        type="button"
+        className={styles.presetButton}
+        disabled={!document}
+        title={preset.description}
+        onClick={() => void applyLoopPreset(preset.id)}
+      >
+        <span className={styles.itemTitle}>{preset.title}</span>
+        <span className={styles.itemDesc}>{preset.description}</span>
+      </button>
+    )
 
   return (
     <aside
@@ -99,19 +250,22 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
           <h3 className={styles.sectionTitle}>{ts('chat.loopGraph.presets')}</h3>
         ) : null}
         {expanded ? (
-          LOOP_GRAPH_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className={styles.presetButton}
-              disabled={!document}
-              title={preset.description}
-              onClick={() => void applyLoopPreset(preset.id)}
-            >
-              <span className={styles.itemTitle}>{preset.title}</span>
-              <span className={styles.itemDesc}>{preset.description}</span>
-            </button>
-          ))
+          <>
+            {builtinPresets.length > 0 ? (
+              <>
+                <div className={styles.categoryRailLabel}>{ts('chat.loopGraph.presetsBuiltIn')}</div>
+                {builtinPresets.map((preset) => renderPresetButton(preset))}
+              </>
+            ) : null}
+            {userPresets.length > 0 ? (
+              <>
+                <div className={styles.categoryRailLabel}>
+                  {ts('chat.loopGraph.presetsInstalled')}
+                </div>
+                {userPresets.map((preset) => renderPresetButton(preset))}
+              </>
+            ) : null}
+          </>
         ) : (
           <div className={styles.presetCollapsedWrap}>
             <button
@@ -127,21 +281,8 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
             </button>
             {presetsOpen ? (
               <div className={styles.presetPopover} role="menu">
-                {LOOP_GRAPH_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    role="menuitem"
-                    className={styles.presetMenuItem}
-                    disabled={!document}
-                    onClick={() => {
-                      setPresetsOpen(false)
-                      void applyLoopPreset(preset.id)
-                    }}
-                  >
-                    {preset.title}
-                  </button>
-                ))}
+                {builtinPresets.map((preset) => renderPresetButton(preset, true))}
+                {userPresets.map((preset) => renderPresetButton(preset, true))}
               </div>
             ) : null}
           </div>
@@ -174,7 +315,11 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                         ? styles.catLogic
                         : visual.categoryClass === 'catHuman'
                           ? styles.catHuman
-                          : styles.catDraft
+                          : visual.categoryClass === 'catConfig'
+                            ? styles.catConfig
+                            : styles.catDraft
+                const isAgent = category === 'agent'
+                const needsConfigPicker = Boolean(configPickerKind(item.id))
                 if (!expanded) {
                   return (
                     <button
@@ -184,9 +329,15 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                       disabled={!document}
                       title={item.title}
                       aria-label={`${item.title}. ${item.description}`}
-                      draggable={Boolean(document)}
+                      draggable={Boolean(document) && !isAgent && !needsConfigPicker}
                       onDragStart={(event) => onDragStart(event, item.id)}
-                      onClick={() => void placeItem(item.id)}
+                      onClick={(event) =>
+                        isAgent
+                          ? onAgentItemActivate(item.id)
+                          : needsConfigPicker
+                            ? onConfigItemActivate(item.id, event)
+                            : void placeItem(item.id)
+                      }
                     >
                       <Icon size={16} aria-hidden strokeWidth={1.75} />
                     </button>
@@ -199,9 +350,15 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                     className={`${styles.itemButton} ${categoryClass}`}
                     disabled={!document}
                     title={item.description}
-                    draggable={Boolean(document)}
+                    draggable={Boolean(document) && !isAgent && !needsConfigPicker}
                     onDragStart={(event) => onDragStart(event, item.id)}
-                    onClick={() => void placeItem(item.id)}
+                    onClick={(event) =>
+                      isAgent
+                        ? onAgentItemActivate(item.id)
+                        : needsConfigPicker
+                          ? onConfigItemActivate(item.id, event)
+                          : void placeItem(item.id)
+                    }
                   >
                     <span className={styles.itemHead}>
                       <span className={`${styles.itemIcon} ${categoryClass}`}>
@@ -214,9 +371,55 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                 )
               })}
             </div>
+            {category === 'agent' && agentPickerFor ? (
+              <div className={styles.agentPickerPopover} role="dialog">
+                <AgentPicker
+                  agents={workforceAgents}
+                  selectedDefinitionId={null}
+                  loading={agentsLoading}
+                  onSelectGeneral={() => {
+                    const paletteId = agentPickerFor
+                    setAgentPickerFor(null)
+                    void placeItem(paletteId, undefined, { agentDefinitionId: null })
+                  }}
+                  onSelectAgent={(definitionId) => {
+                    const paletteId = agentPickerFor
+                    const match = workforceAgents.find((agent) => agent.definitionId === definitionId)
+                    setAgentPickerFor(null)
+                    void placeItem(paletteId, undefined, {
+                      agentDefinitionId: definitionId,
+                      title: match?.config.displayName,
+                    })
+                  }}
+                  onCreateAgent={() => {
+                    setAgentPickerFor(null)
+                    beginCreateAgentComposer('loop')
+                    void setComposerMode('create_agent')
+                  }}
+                />
+                <button
+                  type="button"
+                  className={styles.agentPickerDismiss}
+                  onClick={() => setAgentPickerFor(null)}
+                >
+                  {ts('workforce.draftCancel')}
+                </button>
+              </div>
+            ) : null}
           </div>
         )
       })}
+      {configPicker
+        ? createPortal(
+            <LoopConfigAssetPicker
+              kind={configPicker.kind}
+              anchor={configPicker.anchor}
+              onCancel={() => setConfigPicker(null)}
+              onPick={onConfigAssetPicked}
+            />,
+            globalThis.document.body,
+          )
+        : null}
     </aside>
   )
 }

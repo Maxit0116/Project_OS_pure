@@ -2,13 +2,20 @@ import { z } from "zod";
 import { SkillDescriptorSchema } from "./skills.js";
 import type { ProjectOSSettings } from "./settings.js";
 
-export const MarketplaceGitInstallKindSchema = z.enum(["mcp", "skills"]);
+export const MarketplaceGitInstallKindSchema = z.enum([
+  "mcp",
+  "skills",
+  "rules",
+  "agents",
+  "workflows",
+  "stencils",
+]);
 
 export const InstallFromGitUrlInputSchema = z
   .object({
     url: z.string().min(1).max(2_048),
     kind: MarketplaceGitInstallKindSchema,
-    /** When true, overwrite an existing skill / MCP with the same id. */
+    /** When true, overwrite an existing pack / skill / MCP with the same id. */
     replace: z.boolean().optional(),
   })
   .strict();
@@ -51,11 +58,51 @@ export const InstallFromGitUrlMcpOkSchema = z
   })
   .strict();
 
-// Plain union: both skill/mcp success share status "installed", which Zod
+export const InstallFromGitUrlRulesOkSchema = z
+  .object({
+    status: z.literal("installed"),
+    kind: z.literal("rules"),
+    packId: z.string().min(1).max(120),
+    sourceUrl: z.string().min(1).max(2_048),
+  })
+  .strict();
+
+export const InstallFromGitUrlAgentsOkSchema = z
+  .object({
+    status: z.literal("installed"),
+    kind: z.literal("agents"),
+    listingId: z.string().min(1).max(120),
+    sourceUrl: z.string().min(1).max(2_048),
+  })
+  .strict();
+
+export const InstallFromGitUrlWorkflowsOkSchema = z
+  .object({
+    status: z.literal("installed"),
+    kind: z.literal("workflows"),
+    listingId: z.string().min(1).max(120),
+    sourceUrl: z.string().min(1).max(2_048),
+  })
+  .strict();
+
+export const InstallFromGitUrlStencilsOkSchema = z
+  .object({
+    status: z.literal("installed"),
+    kind: z.literal("stencils"),
+    listingId: z.string().min(1).max(120),
+    sourceUrl: z.string().min(1).max(2_048),
+  })
+  .strict();
+
+// Plain union: multiple success variants share status "installed", which Zod
 // discriminatedUnion forbids (duplicate discriminator values).
 export const InstallFromGitUrlResultSchema = z.union([
   InstallFromGitUrlSkillOkSchema,
   InstallFromGitUrlMcpOkSchema,
+  InstallFromGitUrlRulesOkSchema,
+  InstallFromGitUrlAgentsOkSchema,
+  InstallFromGitUrlWorkflowsOkSchema,
+  InstallFromGitUrlStencilsOkSchema,
   InstallFromGitUrlConflictSchema,
   InstallFromGitUrlFailedSchema,
 ]);
@@ -70,8 +117,22 @@ export type InstallFromGitUrlSkillOk = z.infer<typeof InstallFromGitUrlSkillOkSc
 export type InstallFromGitUrlMcpOk = z.infer<typeof InstallFromGitUrlMcpOkSchema> & {
   settings: ProjectOSSettings;
 };
+export type InstallFromGitUrlRulesOk = z.infer<typeof InstallFromGitUrlRulesOkSchema>;
+export type InstallFromGitUrlAgentsOk = z.infer<
+  typeof InstallFromGitUrlAgentsOkSchema
+>;
+export type InstallFromGitUrlWorkflowsOk = z.infer<
+  typeof InstallFromGitUrlWorkflowsOkSchema
+>;
+export type InstallFromGitUrlStencilsOk = z.infer<
+  typeof InstallFromGitUrlStencilsOkSchema
+>;
 export type InstallFromGitUrlResult =
   | InstallFromGitUrlSkillOk
   | InstallFromGitUrlMcpOk
+  | InstallFromGitUrlRulesOk
+  | InstallFromGitUrlAgentsOk
+  | InstallFromGitUrlWorkflowsOk
+  | InstallFromGitUrlStencilsOk
   | InstallFromGitUrlConflict
   | InstallFromGitUrlFailed;

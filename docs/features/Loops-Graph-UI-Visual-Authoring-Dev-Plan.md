@@ -18,6 +18,7 @@
 |------|------|
 | [`Loops-Graph-Workflow-Studio-Dev-Plan.md`](./Loops-Graph-Workflow-Studio-Dev-Plan.md) | Studio 壳 / pause / Fresh·Stale；本计划细化 LG-1.x Palette/Inspector 的**落地 UI** |
 | [`Loops-Graph-Node-Architecture-Dev-Plan.md`](./Loops-Graph-Node-Architecture-Dev-Plan.md) | 四类 Node 语义权威；本计划只做**展示与作者ing UX**，不改 Contract |
+| [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | Agent 底端口 / 虚线卫星 / Config Palette；在本计划图标卡与 Duty 卡之上叠加**配置层连线** |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | 执行底座不变 |
 
 **设计原则（ai-devtool-ui + ui-ux-pro-max，适配本仓）**：

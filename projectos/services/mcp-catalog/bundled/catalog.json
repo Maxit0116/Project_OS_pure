@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "generatedAt": "2026-10-29T13:30:52.765Z",
+  "generatedAt": "2026-11-05T06:37:58.388Z",
   "listings": [
     {
       "id": "curated.playwright",
@@ -69,6 +69,17 @@
       "requiresAuth": false,
       "transport": "http",
       "url": "http://127.0.0.1:6006/mcp"
+    },
+    {
+      "id": "community.elu",
+      "name": "ELU Product Intelligence",
+      "description": "ELU Labs MCP (https://elu.dev/api/mcp) — investigate real-user findings, session evidence, and product friction from ELU. Requires an elu_live_ API key from ELU Settings → API & MCP. Community: review before enabling. Pair with Product Lab for local experience loops; ELU is optional cloud evidence.",
+      "trustTier": "community",
+      "version": "1.0.0",
+      "homepage": "https://elu.dev/",
+      "requiresAuth": true,
+      "transport": "http",
+      "url": "https://elu.dev/api/mcp"
     }
   ]
 }

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  CalendarClock,
   Code2,
   GitBranch,
   GitPullRequest,
   Globe,
   Map,
+  Network,
   Package,
   RefreshCw,
   Scan,
@@ -35,11 +37,15 @@ export default function WorkbenchStageRail() {
   const sessionGraphOpen = useChatSessionStore((s) => s.sessionGraphOpen)
   const loopGraphOpen = useChatSessionStore((s) => s.loopGraphOpen)
   const githubGraphOpen = useChatSessionStore((s) => s.githubGraphOpen)
+  const diagramGraphOpen = useChatSessionStore((s) => s.diagramGraphOpen)
+  const reminderGraphOpen = useChatSessionStore((s) => s.reminderGraphOpen)
   const marketplaceOpen = useChatSessionStore((s) => s.marketplaceOpen)
   const agentFlowOpen = useChatSessionStore((s) => s.agentFlowOpen)
   const toggleSessionGraph = useChatSessionStore((s) => s.toggleSessionGraph)
   const toggleLoopGraph = useChatSessionStore((s) => s.toggleLoopGraph)
   const toggleGithubGraph = useChatSessionStore((s) => s.toggleGithubGraph)
+  const toggleDiagramGraph = useChatSessionStore((s) => s.toggleDiagramGraph)
+  const toggleReminderGraph = useChatSessionStore((s) => s.toggleReminderGraph)
   const toggleMarketplace = useChatSessionStore((s) => s.toggleMarketplace)
   const toggleAgentFlow = useChatSessionStore((s) => s.toggleAgentFlow)
 
@@ -174,6 +180,32 @@ export default function WorkbenchStageRail() {
               onClick={toggleLoopGraph}
             >
               <RefreshCw size={16} aria-hidden />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-chat-tool="diagram-graph"
+              className={diagramGraphOpen ? styles.pressed : undefined}
+              aria-label={ts('chat.diagramGraph.title')}
+              aria-pressed={diagramGraphOpen}
+              title={ts('chat.diagramGraph.title')}
+              onClick={toggleDiagramGraph}
+            >
+              <Network size={16} aria-hidden />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-chat-tool="reminder-graph"
+              className={reminderGraphOpen ? styles.pressed : undefined}
+              aria-label={ts('chat.reminderGraph.title')}
+              aria-pressed={reminderGraphOpen}
+              title={ts('chat.reminderGraph.title')}
+              onClick={toggleReminderGraph}
+            >
+              <CalendarClock size={16} aria-hidden />
             </Button>
             <Button
               type="button"

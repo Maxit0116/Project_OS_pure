@@ -6,6 +6,7 @@
 
 **权威交叉引用**：
 - 现役实现与边界：[`GitHub-Compose-Hub-Dev-Plan.md`](./GitHub-Compose-Hub-Dev-Plan.md)（分区树浮窗已落地；明确「不是 commit Network Graph」）
+- **L2 History UI（时序泳道）**：[`GitHub-Graph-Temporal-Swimlane-Dev-Plan.md`](./GitHub-Graph-Temporal-Swimlane-Dev-Plan.md)——**接管**本计划 T7 默认 UI：总览横 + 时序竖；双击 node 进入；替换 depth-DAG 卡片为 SourceGit 式竖直泳道（2026-11-06 锁定）
 - 认证：[`GitHub-Auth-Dev-Plan.md`](./GitHub-Auth-Dev-Plan.md)
 - Live Graph / Agent×C4：[`Live-Graph-Agent-Observability-Dev-Plan.md`](./Live-Graph-Agent-Observability-Dev-Plan.md)（叠加层模式可类比；勿混入架构图）
 - Agent 活动文字流：[`Agent-Flow-Activity-Dev-Plan.md`](./Agent-Flow-Activity-Dev-Plan.md)
@@ -356,11 +357,11 @@ type RelationKind =
 - **Note**：拖拽改父级 **默认关闭**；若做，须确认+校验（见原则）。
 
 ### T7 — Git History view model + DAG layout
-- **Objective**：commit 节点 + parent 边；branch HEAD 标记；PR/CI 默认关闭的 overlay。  
-- **Create (proposed)**：`layoutGithubCommitDag.ts`（ELK 参考 `layoutSessionGraph` **或** 增量自研；选型在实现前用 ≤200 commits fixture 验证）。  
-- **Acceptance**：菱形合并可见；删 branch 后历史仍在；缩放可读。  
-- **Tests**：parents wiring；layout 无重叠冒烟。  
-- **Risk**：若 ELK 正交边不适合 commit，允许简单贝塞尔 + 分层 y=time。
+- **Objective（原）**：commit 节点 + parent 边；branch HEAD 标记；PR/CI 默认关闭的 overlay。  
+- **Create（过渡）**：`layoutGithubCommitDag.ts` 已落地为 depth 分层卡片（M1 初版）。  
+- **默认 UI 移交（2026-11-06）**：L2 默认阅读面改为竖直时序泳道——见 [`GitHub-Graph-Temporal-Swimlane-Dev-Plan.md`](./GitHub-Graph-Temporal-Swimlane-Dev-Plan.md)（TS-4/TS-5）；depth-DAG **不再**作为产品默认，交付泳道后退役或 DEV-only。  
+- **Acceptance（领域仍有效）**：merge/分叉来自真实 parent SHAs；删 branch 后历史对象仍在；有界 commit 窗口。  
+- **Tests**：parents wiring；泳道布局单测归 Temporal Swimlane 计划。
 
 ### T8 — Dual-mode shell UI
 - **Objective**：Mode toggle、共享 header（repo/dirty/sync）、详情面板骨架。  

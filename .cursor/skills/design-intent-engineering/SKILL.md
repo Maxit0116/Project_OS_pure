@@ -957,16 +957,16 @@ DesignRuleEngine
 └── UserRules
 ```
 
-## 20.1 Gesso anti-slop (Project OS Design tab)
+## 20.1 HTML critique for Diagram Graph wireframes (optional)
 
-Gate authority for exported HTML is the open-source package `@gessobuild/anti-slop` (MIT).
+**Design Tab is abandoned.** Do not plan, document, or route wireframe / sketch work through a Design Tab.
 
-- Run critique on **HTML export** derived from Sketch / Design IR — never treat JSX/TSX as the detector input.
-- Host Intent rules (e.g. unlabeled sketch regions) run alongside official FLAGSHIP_RULES.
-- `design.md` is a **derived** agent handoff; Design IR / design-blocks remain canonical.
-- Propose / Confirm / Hand to agent require PASS, or an explicit `slopOverrideReason`.
-- Optional agent install: `npx skills add Gesso-Build/skills`
-- Docs: `docs/Design-Tab-Gesso-Integration-PRD.md` and `docs/Design-Tab-Gesso-Integration-Dev-Plan.md`
+UI wireframe packs live in **Diagram Graph** (`ui-wireframe` type family). See:
+
+- `docs/features/Diagram-Graph-Dev-Plan.md`
+- `docs/features/UI-Wireframe-Pack-Dev-Plan.md`
+
+If an HTML critique gate is needed later, run it on **exported wireframe / preview HTML** from Diagram Graph — never treat JSX/TSX as the detector input, and never reintroduce Design Tab as the host.
 
 Rules should be deterministic whenever possible.
 

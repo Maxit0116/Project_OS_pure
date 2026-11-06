@@ -1,3 +1,4 @@
+import type { AskSubMode } from '@contracts/index'
 import type {
   AnnotationAnchor,
   AnnotationStroke,
@@ -33,6 +34,11 @@ export interface OverlayRegion {
   id: string
   captureRect: ScreenRect
   mode: SpatialPinMode
+  /** Ask secondary mode; only used when `mode === 'ask'`. */
+  askSubMode?: AskSubMode
+  /** Specialized workforce agent; only used when `mode === 'change'`. */
+  agentDefinitionId?: string | null
+  agentDisplayName?: string | null
   /** Optional region-level note (modes chrome); arrow prompts are primary. */
   regionPrompt: string
   arrows: OverlayArrow[]

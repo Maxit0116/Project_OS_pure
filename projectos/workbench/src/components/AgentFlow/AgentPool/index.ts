@@ -16,6 +16,12 @@ export {
   type AgentPoolSpan,
 } from './projectAgentPool'
 export {
+  formatElapsed,
+  spanDurationLabel,
+  laneElapsedMs,
+  historyRunStatus,
+} from './poolTiming'
+export {
   projectAgentPoolTrace,
   stableDefinitionId,
 } from './projectAgentPoolTrace'

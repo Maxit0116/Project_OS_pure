@@ -1,0 +1,65 @@
+{
+  "version": "1",
+  "generatedAt": "2026-11-04T18:26:56.117Z",
+  "listings": [
+    {
+      "id": "curated.status-pill",
+      "name": "Status Pill",
+      "description": "Compact status / badge chip for dashboards and tables. Brief prefers existing Badge primitives.",
+      "trustTier": "curated",
+      "version": "1.0.0",
+      "stencils": [
+        {
+          "id": "mkt-status-pill",
+          "category": "base",
+          "title": "Status pill",
+          "tags": [
+            "badge",
+            "status",
+            "table"
+          ],
+          "description": "Compact colored status chip (success / warn / danger)",
+          "previewAsset": "stencils/previews/mkt-status-pill.png",
+          "motionAttachable": true,
+          "briefTemplate": "Add a Status pill / Badge. Label: {{label}}. Tone: {{variant}}. Prefer the project's Badge / Tag primitive; otherwise install via shadcn badge. Keep height compact for table cells; ensure contrast for the tone.",
+          "codegen": {
+            "strategy": "shadcn",
+            "packageHints": [
+              "npx shadcn@latest add badge"
+            ],
+            "targetFilesHint": "components/ui/badge"
+          },
+          "licenseNote": "MIT-oriented brief; no third-party asset embedded."
+        }
+      ]
+    },
+    {
+      "id": "community.empty-state",
+      "name": "Empty State Panel",
+      "description": "Community empty-state composition (icon + title + CTA). Review brief before installing — content enters agent input.",
+      "trustTier": "community",
+      "version": "0.1.0",
+      "stencils": [
+        {
+          "id": "mkt-empty-state",
+          "category": "preset",
+          "title": "Empty state",
+          "tags": [
+            "empty",
+            "onboarding",
+            "cta"
+          ],
+          "description": "Centered empty-state with title, body, and primary CTA",
+          "previewAsset": "stencils/previews/mkt-empty-state.png",
+          "composedOf": [],
+          "briefTemplate": "Add an Empty State panel. Title: {{title}}. Body: {{text}}. CTA label: {{label}}. Center vertically in the available region. Prefer existing Empty / Illustration patterns; otherwise compose Card + Button. Keep copy concise.",
+          "codegen": {
+            "strategy": "brief-only",
+            "targetFilesHint": "empty state section"
+          },
+          "licenseNote": "Community pack — review before shipping to customers."
+        }
+      ]
+    }
+  ]
+}

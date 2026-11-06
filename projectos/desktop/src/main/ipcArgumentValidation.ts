@@ -103,6 +103,12 @@ const PROJECTOS_IPC_SIGNATURES = {
   getAgentPoolRun: ['string'],
   listAgentRunsByDefinition: ['record'],
   setAgentRunAcceptance: ['record'],
+  listWorkforceAgents: ['record'],
+  draftWorkforceAgent: ['record'],
+  assembleWorkforceAgent: ['record'],
+  createWorkforceAgent: ['record'],
+  updateWorkforceAgent: ['record'],
+  getWorkforceAgent: ['string', 'string'],
   getDiff: ['string'],
   applyDiff: ['string'],
   runVerification: ['string'],
@@ -140,6 +146,42 @@ const PROJECTOS_IPC_SIGNATURES = {
   uninstallSkillFromCatalog: ['string', 'record'],
   disableSkillCatalogListing: ['string', 'string'],
   reportSkillCatalogListing: ['string', 'record'],
+  listRulesCatalog: ['string', 'record'],
+  refreshRulesCatalog: ['string'],
+  installRulesFromCatalog: ['string', 'record'],
+  uninstallRulesFromCatalog: ['string', 'record'],
+  disableRulesCatalogListing: ['string', 'string'],
+  reportRulesCatalogListing: ['string', 'record'],
+  listInstalledRulesPackIds: ['string'],
+  listAgentCatalog: ['string', 'record'],
+  refreshAgentCatalog: ['string'],
+  installAgentFromCatalog: ['string', 'record'],
+  uninstallAgentFromCatalog: ['string', 'record'],
+  disableAgentCatalogListing: ['string', 'string'],
+  reportAgentCatalogListing: ['string', 'record'],
+  listInstalledMarketplaceAgentListingIds: ['string'],
+  exportCapabilityPack: ['string', 'record'],
+  installAgentFromExportPack: ['string', 'record'],
+  installRulesFromExportPack: ['string', 'record'],
+  listWorkflowCatalog: ['string', 'record'],
+  refreshWorkflowCatalog: ['string'],
+  installWorkflowFromCatalog: ['string', 'record'],
+  uninstallWorkflowFromCatalog: ['string', 'record'],
+  disableWorkflowCatalogListing: ['string', 'string'],
+  reportWorkflowCatalogListing: ['string', 'record'],
+  listInstalledWorkflowListingIds: ['string'],
+  listLoopGraphPresets: ['string'],
+  resolveLoopGraphPreset: ['string', 'string'],
+  installWorkflowFromExportPack: ['string', 'record'],
+  listStencilCatalog: ['string', 'record'],
+  refreshStencilCatalog: ['string'],
+  installStencilFromCatalog: ['string', 'record'],
+  uninstallStencilFromCatalog: ['string', 'record'],
+  disableStencilCatalogListing: ['string', 'string'],
+  reportStencilCatalogListing: ['string', 'record'],
+  listInstalledStencilListingIds: ['string'],
+  listMergedStencilDefinitions: ['string'],
+  installStencilFromExportPack: ['string', 'record'],
   installFromGitUrl: ['string', 'record'],
   setSecret: ['string', 'string'],
   deleteSecret: ['string'],
@@ -203,6 +245,47 @@ const PROJECTOS_IPC_SIGNATURES = {
   dismissLoopGraphEditOffer: ['string', 'string'],
   undoLoopDraft: ['string', 'string'],
   setLoopComposerMode: ['string', 'string', 'string'],
+  ensureDiagramDesignSkill: ['string'],
+  getDiagramSkillPackStatus: ['string'],
+  getDiagramIndex: ['string'],
+  listDiagrams: ['string'],
+  getDiagram: ['string', 'string'],
+  deleteDiagram: ['string', 'string'],
+  updateDiagramNotes: ['string', 'string', 'record'],
+  chooseDiagramStyle: ['string', 'record'],
+  generateDiagram: ['string', 'record'],
+  listWireframePacks: ['string'],
+  getWireframePackIndex: ['string'],
+  getWireframePack: ['string', 'string'],
+  generateWireframePack: ['string', 'record'],
+  updateWireframePackDraft: ['string', 'string', 'record'],
+  deleteWireframeScreen: ['string', 'string', 'string'],
+  freezeWireframePack: ['string', 'string', 'record'],
+  buildImplementAgainstPackBrief: ['string', 'string'],
+  listWireframeGaps: ['string', 'string'],
+  upsertWireframeGap: ['string', 'string', 'record'],
+  scanWireframeStructGaps: ['string', 'string', 'record'],
+  markWireframePackRealized: ['string', 'string'],
+  deleteWireframePack: ['string', 'string'],
+  bindWireframePackFeature: ['string', 'string', 'string'],
+  getLabState: ['string'],
+  upsertLabState: ['string', 'record'],
+  getLabLaunchProfile: ['string'],
+  listTheses: ['string'],
+  getThesisSession: ['string', 'string'],
+  upsertThesisSession: ['string', 'record'],
+  startFirstPrinciplesSession: ['record'],
+  answerFirstPrinciplesTurn: ['record'],
+  resolveFirstPrinciplesConflict: ['record'],
+  writeFirstPrinciplesPlannedFeature: ['record'],
+  getReminderTimeline: ['string'],
+  syncReminderTimeline: ['string'],
+  reorderReminderItem: ['string', 'record'],
+  acceptReminderEditOffer: ['string'],
+  dismissReminderEditOffer: ['string'],
+  setReminderMilestoneStatus: ['string', 'record'],
+  sendReminderAuthoringTurn: ['string', 'record'],
+  setReminderComposerMode: ['string', 'string'],
 } as const satisfies Record<string, readonly IpcArgumentKind[]>
 
 export type ProjectOsIpcMethod = keyof typeof PROJECTOS_IPC_SIGNATURES
@@ -280,13 +363,15 @@ export function parseTerminalResizeArgs(
 export function parseDiffReadyNotificationPayload(input: unknown): {
   title: string
   body: string
+  destination: 'ask' | 'diff' | 'reminder'
   runIds: string[]
 } {
   if (!isRecord(input)) throw new Error('Notification payload is invalid')
-  const { title, body, runIds } = input
+  const { title, body, destination, runIds } = input
   if (
     typeof title !== 'string' || !title.trim() || title.length > 200 ||
     typeof body !== 'string' || !body.trim() || body.length > 2_000 ||
+    (destination !== 'ask' && destination !== 'diff' && destination !== 'reminder') ||
     !Array.isArray(runIds) || runIds.length === 0 || runIds.length > 128 ||
     runIds.some((runId) =>
       typeof runId !== 'string' || !runId || runId.length > 256 || runId.includes('\0')) ||
@@ -294,7 +379,7 @@ export function parseDiffReadyNotificationPayload(input: unknown): {
   ) {
     throw new Error('Notification payload is invalid')
   }
-  return { title, body, runIds: [...runIds] }
+  return { title, body, destination, runIds: [...runIds] }
 }
 
 export function parseWindowTitle(input: unknown): string {

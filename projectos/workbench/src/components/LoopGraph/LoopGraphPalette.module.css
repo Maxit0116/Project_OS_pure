@@ -221,6 +221,12 @@
   background: color-mix(in srgb, #fdba74 10%, var(--tech-bg-elevated));
 }
 
+.catConfig {
+  color: color-mix(in srgb, #c4b5fd 80%, var(--tech-text-primary));
+  border-color: color-mix(in srgb, #c4b5fd 32%, var(--tech-border));
+  background: color-mix(in srgb, #c4b5fd 10%, var(--tech-bg-elevated));
+}
+
 .catDraft {
   color: var(--tech-text-secondary);
 }
@@ -229,6 +235,7 @@
 .itemIcon.catAction,
 .itemIcon.catLogic,
 .itemIcon.catHuman,
+.itemIcon.catConfig,
 .itemIcon.catDraft {
   border: 0;
 }
@@ -236,7 +243,8 @@
 .itemButton.catAgent,
 .itemButton.catAction,
 .itemButton.catLogic,
-.itemButton.catHuman {
+.itemButton.catHuman,
+.itemButton.catConfig {
   color: var(--tech-text-primary);
   background: var(--tech-bg-elevated);
   border-color: var(--tech-border);
@@ -245,9 +253,36 @@
 .itemButton.catAgent:hover:not(:disabled),
 .itemButton.catAction:hover:not(:disabled),
 .itemButton.catLogic:hover:not(:disabled),
-.itemButton.catHuman:hover:not(:disabled) {
+.itemButton.catHuman:hover:not(:disabled),
+.itemButton.catConfig:hover:not(:disabled) {
   border-color: var(--tech-border-strong);
   background: var(--tech-bg-muted);
+}
+
+.agentPickerPopover {
+  margin-top: 6px;
+  padding: 4px;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-sm);
+}
+
+.agentPickerDismiss {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tech-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.agentPickerDismiss:hover {
+  background: var(--color-hover-overlay);
 }
 
 @media (prefers-reduced-motion: reduce) {

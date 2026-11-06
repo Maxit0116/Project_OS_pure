@@ -16,18 +16,20 @@
   --color-border: rgba(255, 255, 255, 0.08);
   --color-border-subtle: rgba(255, 255, 255, 0.05);
 
-  --color-text-primary: rgba(255, 255, 255, 0.92);
-  --color-text-secondary: rgba(255, 255, 255, 0.58);
-  --color-text-muted: rgba(255, 255, 255, 0.48);
+  /* Soft grey text — avoid pure white glare on dark chrome. */
+  --color-text-primary: rgba(220, 220, 222, 0.92);
+  --color-text-secondary: rgba(220, 220, 222, 0.58);
+  --color-text-muted: rgba(220, 220, 222, 0.46);
 
-  /* Accent = selection / primary action — Cursor-style near-white, not SaaS blue. */
-  --color-accent: #ececec;
-  --color-accent-strong: #ffffff;
-  --color-accent-subtle: rgba(255, 255, 255, 0.12);
-  --color-success: #30d158;
-  --color-warning: #ffd60a;
-  --color-error: #ff453a;
-  --color-violet: #bf5af2;
+  /* Accent = selection / primary action — restrained soft grey, not pure white. */
+  --color-accent: #c4c4c8;
+  --color-accent-strong: #d8d8dc;
+  --color-accent-subtle: rgba(196, 196, 200, 0.14);
+  /* Semantic hues — slightly darker / less neon for mature IDE chrome. */
+  --color-success: #3a9a58;
+  --color-warning: #c99214;
+  --color-error: #c94f47;
+  --color-violet: #9570c4;
 
   --glass-saturate: 100%;
   --glass-blur-sm: 0px;
@@ -57,11 +59,11 @@
   --scrim: rgba(0, 0, 0, 0.35);
   --scrim-heavy: rgba(0, 0, 0, 0.6);
   --minimap-mask: rgba(255, 255, 255, 0.08);
-  --color-error-subtle: rgba(255, 69, 58, 0.12);
-  --color-error-border: rgba(255, 69, 58, 0.25);
-  --color-warning-subtle: rgba(255, 214, 10, 0.08);
-  --color-warning-border: rgba(255, 214, 10, 0.2);
-  --color-success-subtle: rgba(48, 209, 88, 0.12);
+  --color-error-subtle: rgba(201, 79, 71, 0.14);
+  --color-error-border: rgba(201, 79, 71, 0.28);
+  --color-warning-subtle: rgba(201, 146, 20, 0.1);
+  --color-warning-border: rgba(201, 146, 20, 0.24);
+  --color-success-subtle: rgba(58, 154, 88, 0.14);
   --color-diff-line-changed: rgba(255, 255, 255, 0.04);
   --color-diff-char-added: var(--color-success);
   --color-diff-char-removed: var(--color-error);
@@ -96,8 +98,8 @@
   --window-rim-chrome: inset 0 0 0 1px var(--border-window-chrome);
 
   --map3d-bg: var(--color-bg-map);
-  --map3d-sun-core: #f8fafc;
-  --map3d-project-anchor-glow: #e2e8f0;
+  --map3d-sun-core: #d4d4d8;
+  --map3d-project-anchor-glow: #a1a1aa;
   --map3d-satellite: #94a3b8;
   --map3d-edge-sibling: #475569;
   --map3d-edge-parent: #94a3b8;
@@ -143,7 +145,7 @@
   --tech-shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.04);
   --tech-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.28);
   --tech-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.4);
-  --tech-shadow-focus: 0 0 0 2px rgba(255, 255, 255, 0.4);
+  --tech-shadow-focus: 0 0 0 2px rgba(196, 196, 200, 0.32);
 }
 
 [data-theme='light'] {
@@ -168,10 +170,10 @@
   --color-accent: #111113;
   --color-accent-strong: #000000;
   --color-accent-subtle: rgba(17, 17, 19, 0.08);
-  --color-success: #34c759;
-  --color-warning: #ff9f0a;
-  --color-error: #ff3b30;
-  --color-violet: #af52de;
+  --color-success: #2f9e4f;
+  --color-warning: #d4890a;
+  --color-error: #d44a42;
+  --color-violet: #8f5fbf;
 
   --glass-bg-regular: var(--color-bg-side-panel);
   --glass-bg-clear: var(--color-bg-elevated);
@@ -351,10 +353,9 @@
   /* Floating stage-front tools — overlays chrome / panels without consuming layout. */
   --z-workbench-stage-rail: 80;
 
-  /* Chat mode brand colors (selected chip + turn markers + mode cards). Agent has no tint. */
+  /* Chat mode brand colors — muted, restrained (selected chip + markers + mode cards). */
   --chat-mode-ask: var(--color-success);
-  /* Plan = warm orange (aligned with overlay / mode chip language). */
-  --chat-mode-plan: #ff9f0a;
+  --chat-mode-plan: #c98518;
   --chat-mode-debug: var(--color-error);
 
   /* Overlay side panels + terminal dock layout (runtime sizes set on .workbenchBody) */

@@ -1,0 +1,113 @@
+/* Visual cousin of DiagramGoalComposer / LoopGoalComposer prompt dock. */
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--tech-border);
+  flex-shrink: 0;
+  background: var(--tech-bg-side-panel);
+}
+
+.promptDock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 12px;
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-muted);
+  line-height: 1.35;
+}
+
+.inputComposer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 8px;
+  background: var(--tech-bg-elevated);
+  overflow: visible;
+  box-shadow: var(--tech-shadow-sm);
+}
+
+.composerBody {
+  position: relative;
+  min-height: 56px;
+  overflow: visible;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  resize: none;
+  box-sizing: border-box;
+  min-height: 56px;
+  max-height: 140px;
+  overflow-y: auto;
+  padding: 12px 14px 8px;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  font-family: inherit;
+  color: var(--tech-text-primary);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.input::placeholder {
+  color: var(--tech-text-muted);
+}
+
+.input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  min-height: 36px;
+  border-top: 1px solid var(--tech-border);
+}
+
+.leftCluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.modeChip {
+  max-width: 100%;
+  pointer-events: none;
+}
+
+.rightCluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.sendButton {
+  flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inputComposer {
+    box-shadow: none;
+  }
+}

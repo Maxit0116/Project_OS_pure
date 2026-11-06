@@ -819,6 +819,55 @@ export class IpcTransport implements ApiTransport {
     >;
   }
 
+  listWorkforceAgents(
+    request: import("../../contracts/agent-workforce.js").ListWorkforceAgentsRequest,
+  ): Promise<import("../../contracts/agent-workforce.js").ListWorkforceAgentsResult> {
+    return this.invoke("listWorkforceAgents", request) as Promise<
+      import("../../contracts/agent-workforce.js").ListWorkforceAgentsResult
+    >;
+  }
+
+  draftWorkforceAgent(
+    request: import("../../contracts/agent-workforce.js").DraftWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-workforce.js").DraftWorkforceAgentResult> {
+    return this.invoke("draftWorkforceAgent", request) as Promise<
+      import("../../contracts/agent-workforce.js").DraftWorkforceAgentResult
+    >;
+  }
+
+  assembleWorkforceAgent(
+    request: import("../../contracts/agent-assembly.js").AssembleWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-assembly.js").AssembleWorkforceAgentResult> {
+    return this.invoke("assembleWorkforceAgent", request) as Promise<
+      import("../../contracts/agent-assembly.js").AssembleWorkforceAgentResult
+    >;
+  }
+
+  createWorkforceAgent(
+    request: import("../../contracts/agent-workforce.js").CreateWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return this.invoke("createWorkforceAgent", request) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentDefinition
+    >;
+  }
+
+  updateWorkforceAgent(
+    request: import("../../contracts/agent-workforce.js").UpdateWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return this.invoke("updateWorkforceAgent", request) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentDefinition
+    >;
+  }
+
+  getWorkforceAgent(
+    projectId: string,
+    definitionId: string,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return this.invoke("getWorkforceAgent", projectId, definitionId) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentDefinition
+    >;
+  }
+
   streamAgentRun(
     runId: string,
     cb: (event: AgentRunEvent) => void,
@@ -1068,6 +1117,241 @@ export class IpcTransport implements ApiTransport {
     input: { listingId: string; note?: string },
   ): Promise<ProjectOSSettings> {
     return this.invoke("reportSkillCatalogListing", projectId, input);
+  }
+
+  listRulesCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/rules-marketplace.js").RulesCatalogView> {
+    return this.invoke("listRulesCatalog", projectId, options ?? {});
+  }
+
+  refreshRulesCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/rules-marketplace.js").RulesCatalogView> {
+    return this.invoke("refreshRulesCatalog", projectId);
+  }
+
+  installRulesFromCatalog(
+    projectId: string,
+    input: import("../../contracts/rules-marketplace.js").InstallRulesFromCatalogInput,
+  ): Promise<{ packId: string; relativeRoot: string }> {
+    return this.invoke("installRulesFromCatalog", projectId, input);
+  }
+
+  uninstallRulesFromCatalog(
+    projectId: string,
+    input: import("../../contracts/rules-marketplace.js").UninstallRulesFromCatalogInput,
+  ): Promise<void> {
+    return this.invoke("uninstallRulesFromCatalog", projectId, input);
+  }
+
+  disableRulesCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableRulesCatalogListing", projectId, listingId);
+  }
+
+  reportRulesCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportRulesCatalogListing", projectId, input);
+  }
+
+  listInstalledRulesPackIds(projectId: string): Promise<string[]> {
+    return this.invoke("listInstalledRulesPackIds", projectId);
+  }
+
+  listAgentCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/agent-marketplace.js").AgentCatalogView> {
+    return this.invoke("listAgentCatalog", projectId, options ?? {});
+  }
+
+  refreshAgentCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/agent-marketplace.js").AgentCatalogView> {
+    return this.invoke("refreshAgentCatalog", projectId);
+  }
+
+  installAgentFromCatalog(
+    projectId: string,
+    input: import("../../contracts/agent-marketplace.js").InstallAgentFromCatalogInput,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return this.invoke("installAgentFromCatalog", projectId, input);
+  }
+
+  uninstallAgentFromCatalog(
+    projectId: string,
+    input: import("../../contracts/agent-marketplace.js").UninstallAgentFromCatalogInput,
+  ): Promise<void> {
+    return this.invoke("uninstallAgentFromCatalog", projectId, input);
+  }
+
+  disableAgentCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableAgentCatalogListing", projectId, listingId);
+  }
+
+  reportAgentCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportAgentCatalogListing", projectId, input);
+  }
+
+  listInstalledMarketplaceAgentListingIds(projectId: string): Promise<string[]> {
+    return this.invoke("listInstalledMarketplaceAgentListingIds", projectId);
+  }
+
+  exportCapabilityPack(
+    projectId: string,
+    input: import("../../contracts/agent-marketplace.js").ExportCapabilityPackInput,
+  ): Promise<import("../../contracts/agent-marketplace.js").ExportCapabilityPackResult> {
+    return this.invoke("exportCapabilityPack", projectId, input);
+  }
+
+  installAgentFromExportPack(
+    projectId: string,
+    input: import("../../contracts/agent-marketplace.js").InstallAgentFromExportPackInput,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return this.invoke("installAgentFromExportPack", projectId, input);
+  }
+
+  installRulesFromExportPack(
+    projectId: string,
+    input: import("../../contracts/agent-marketplace.js").InstallRulesFromExportPackInput,
+  ): Promise<{ packId: string; relativeRoot: string }> {
+    return this.invoke("installRulesFromExportPack", projectId, input);
+  }
+
+  listWorkflowCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/workflow-marketplace.js").WorkflowCatalogView> {
+    return this.invoke("listWorkflowCatalog", projectId, options ?? {});
+  }
+
+  refreshWorkflowCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/workflow-marketplace.js").WorkflowCatalogView> {
+    return this.invoke("refreshWorkflowCatalog", projectId);
+  }
+
+  installWorkflowFromCatalog(
+    projectId: string,
+    input: import("../../contracts/workflow-marketplace.js").InstallWorkflowFromCatalogInput,
+  ): Promise<import("../../contracts/loop-presets.js").LoopGraphPreset> {
+    return this.invoke("installWorkflowFromCatalog", projectId, input);
+  }
+
+  uninstallWorkflowFromCatalog(
+    projectId: string,
+    input: import("../../contracts/workflow-marketplace.js").UninstallWorkflowFromCatalogInput,
+  ): Promise<void> {
+    return this.invoke("uninstallWorkflowFromCatalog", projectId, input);
+  }
+
+  disableWorkflowCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableWorkflowCatalogListing", projectId, listingId);
+  }
+
+  reportWorkflowCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportWorkflowCatalogListing", projectId, input);
+  }
+
+  listInstalledWorkflowListingIds(projectId: string): Promise<string[]> {
+    return this.invoke("listInstalledWorkflowListingIds", projectId);
+  }
+
+  listLoopGraphPresets(projectId: string): Promise<{
+    builtins: import("../../contracts/loop-presets.js").LoopGraphPreset[];
+    user: import("../../contracts/loop-presets.js").LoopGraphPreset[];
+  }> {
+    return this.invoke("listLoopGraphPresets", projectId);
+  }
+
+  resolveLoopGraphPreset(
+    projectId: string,
+    presetId: string,
+  ): Promise<import("../../contracts/loop-presets.js").LoopGraphPreset | null> {
+    return this.invoke("resolveLoopGraphPreset", projectId, presetId);
+  }
+
+  installWorkflowFromExportPack(
+    projectId: string,
+    input: import("../../contracts/workflow-marketplace.js").InstallWorkflowFromExportPackInput,
+  ): Promise<import("../../contracts/loop-presets.js").LoopGraphPreset> {
+    return this.invoke("installWorkflowFromExportPack", projectId, input);
+  }
+
+  listStencilCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/stencil-marketplace.js").StencilCatalogView> {
+    return this.invoke("listStencilCatalog", projectId, options ?? {});
+  }
+
+  refreshStencilCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/stencil-marketplace.js").StencilCatalogView> {
+    return this.invoke("refreshStencilCatalog", projectId);
+  }
+
+  installStencilFromCatalog(
+    projectId: string,
+    input: import("../../contracts/stencil-marketplace.js").InstallStencilFromCatalogInput,
+  ): Promise<import("../../contracts/ui-stencil.js").StencilDefinition[]> {
+    return this.invoke("installStencilFromCatalog", projectId, input);
+  }
+
+  uninstallStencilFromCatalog(
+    projectId: string,
+    input: import("../../contracts/stencil-marketplace.js").UninstallStencilFromCatalogInput,
+  ): Promise<void> {
+    return this.invoke("uninstallStencilFromCatalog", projectId, input);
+  }
+
+  disableStencilCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableStencilCatalogListing", projectId, listingId);
+  }
+
+  reportStencilCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportStencilCatalogListing", projectId, input);
+  }
+
+  listInstalledStencilListingIds(projectId: string): Promise<string[]> {
+    return this.invoke("listInstalledStencilListingIds", projectId);
+  }
+
+  listMergedStencilDefinitions(
+    projectId: string,
+  ): Promise<import("../../contracts/ui-stencil.js").StencilDefinition[]> {
+    return this.invoke("listMergedStencilDefinitions", projectId);
+  }
+
+  installStencilFromExportPack(
+    projectId: string,
+    input: import("../../contracts/stencil-marketplace.js").InstallStencilFromExportPackInput,
+  ): Promise<import("../../contracts/ui-stencil.js").StencilDefinition[]> {
+    return this.invoke("installStencilFromExportPack", projectId, input);
   }
 
   installFromGitUrl(
@@ -1485,6 +1769,277 @@ export class IpcTransport implements ApiTransport {
     mode: import("../../contracts/loop-graph.js").LoopComposerMode,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return this.invoke("setLoopComposerMode", projectId, loopId, mode);
+  }
+
+  ensureDiagramDesignSkill(
+    projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").EnsureDiagramDesignSkillResult> {
+    return this.invoke("ensureDiagramDesignSkill", projectId);
+  }
+
+  getDiagramSkillPackStatus(
+    projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramSkillPackStatus> {
+    return this.invoke("getDiagramSkillPackStatus", projectId);
+  }
+
+  getDiagramIndex(
+    projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramIndex> {
+    return this.invoke("getDiagramIndex", projectId);
+  }
+
+  listDiagrams(
+    projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramArtifactMeta[]> {
+    return this.invoke("listDiagrams", projectId);
+  }
+
+  getDiagram(
+    projectId: string,
+    diagramId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramArtifact | null> {
+    return this.invoke("getDiagram", projectId, diagramId);
+  }
+
+  deleteDiagram(projectId: string, diagramId: string): Promise<boolean> {
+    return this.invoke("deleteDiagram", projectId, diagramId);
+  }
+
+  updateDiagramNotes(
+    projectId: string,
+    diagramId: string,
+    input: import("../../contracts/diagram-graph.js").UpdateDiagramNotesInput,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramNotesDocument> {
+    return this.invoke("updateDiagramNotes", projectId, diagramId, input);
+  }
+
+  chooseDiagramStyle(
+    projectId: string,
+    input: import("../../contracts/diagram-graph.js").ChooseDiagramStyleInput,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramIndex> {
+    return this.invoke("chooseDiagramStyle", projectId, input);
+  }
+
+  generateDiagram(
+    projectId: string,
+    input: import("../../contracts/diagram-graph.js").GenerateDiagramInput,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramArtifact> {
+    return this.invoke("generateDiagram", projectId, input);
+  }
+
+  listWireframePacks(
+    projectId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePackMeta[]> {
+    return this.invoke("listWireframePacks", projectId);
+  }
+
+  getWireframePackIndex(
+    projectId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePackIndex> {
+    return this.invoke("getWireframePackIndex", projectId);
+  }
+
+  getWireframePack(
+    projectId: string,
+    packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack | null> {
+    return this.invoke("getWireframePack", projectId, packId);
+  }
+
+  generateWireframePack(
+    projectId: string,
+    input: import("../../contracts/ui-wireframe-pack.js").GenerateWireframePackInput,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("generateWireframePack", projectId, input);
+  }
+
+  updateWireframePackDraft(
+    projectId: string,
+    packId: string,
+    input: import("../../contracts/ui-wireframe-pack.js").UpdateWireframePackDraftInput,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("updateWireframePackDraft", projectId, packId, input);
+  }
+
+  deleteWireframeScreen(
+    projectId: string,
+    packId: string,
+    screenId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("deleteWireframeScreen", projectId, packId, screenId);
+  }
+
+  freezeWireframePack(
+    projectId: string,
+    packId: string,
+    input: import("../../contracts/ui-wireframe-pack.js").FreezeWireframePackInput = {},
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("freezeWireframePack", projectId, packId, input);
+  }
+
+  buildImplementAgainstPackBrief(
+    projectId: string,
+    packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").ImplementAgainstPackBrief> {
+    return this.invoke("buildImplementAgainstPackBrief", projectId, packId);
+  }
+
+  listWireframeGaps(
+    projectId: string,
+    packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframeGap[]> {
+    return this.invoke("listWireframeGaps", projectId, packId);
+  }
+
+  upsertWireframeGap(
+    projectId: string,
+    packId: string,
+    input: import("../../contracts/ui-wireframe-pack.js").UpsertWireframeGapInput,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframeGap> {
+    return this.invoke("upsertWireframeGap", projectId, packId, input);
+  }
+
+  scanWireframeStructGaps(
+    projectId: string,
+    packId: string,
+    input: import("../../contracts/ui-wireframe-pack.js").ScanWireframeStructGapsInput = {},
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframeGap[]> {
+    return this.invoke("scanWireframeStructGaps", projectId, packId, input);
+  }
+
+  bindWireframePackFeature(
+    projectId: string,
+    packId: string,
+    featureId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("bindWireframePackFeature", projectId, packId, featureId);
+  }
+
+  markWireframePackRealized(
+    projectId: string,
+    packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("markWireframePackRealized", projectId, packId);
+  }
+
+  deleteWireframePack(projectId: string, packId: string): Promise<boolean> {
+    return this.invoke("deleteWireframePack", projectId, packId);
+  }
+
+  getLabState(
+    projectId: string,
+  ): Promise<import("../../contracts/product-lab.js").LabStateDocument> {
+    return this.invoke("getLabState", projectId);
+  }
+
+  upsertLabState(
+    projectId: string,
+    document: import("../../contracts/product-lab.js").LabStateDocument,
+  ): Promise<import("../../contracts/product-lab.js").LabStateDocument> {
+    return this.invoke("upsertLabState", projectId, document);
+  }
+
+  getLabLaunchProfile(
+    projectId: string,
+  ): Promise<import("../../contracts/product-lab.js").LabLaunchProfile> {
+    return this.invoke("getLabLaunchProfile", projectId);
+  }
+
+  listTheses(
+    projectId: string,
+  ): Promise<import("../../contracts/first-principles.js").ThesisIndex> {
+    return this.invoke("listTheses", projectId);
+  }
+
+  getThesisSession(
+    projectId: string,
+    sessionId: string,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession | null> {
+    return this.invoke("getThesisSession", projectId, sessionId);
+  }
+
+  upsertThesisSession(
+    projectId: string,
+    session: import("../../contracts/first-principles.js").FirstPrinciplesSession,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return this.invoke("upsertThesisSession", projectId, session);
+  }
+
+  startFirstPrinciplesSession(
+    request: import("../../contracts/first-principles.js").StartFirstPrinciplesRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return this.invoke("startFirstPrinciplesSession", request);
+  }
+
+  answerFirstPrinciplesTurn(
+    request: import("../../contracts/first-principles.js").AnswerFirstPrinciplesRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return this.invoke("answerFirstPrinciplesTurn", request);
+  }
+
+  resolveFirstPrinciplesConflict(
+    request: import("../../contracts/first-principles.js").ResolveFirstPrinciplesConflictRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return this.invoke("resolveFirstPrinciplesConflict", request);
+  }
+
+  writeFirstPrinciplesPlannedFeature(
+    request: import("../../contracts/first-principles.js").WriteFirstPrinciplesFeatureRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesFeatureWriteResult> {
+    return this.invoke("writeFirstPrinciplesPlannedFeature", request);
+  }
+
+  getReminderTimeline(
+    projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("getReminderTimeline", projectId);
+  }
+
+  syncReminderTimeline(
+    projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("syncReminderTimeline", projectId);
+  }
+
+  reorderReminderItem(
+    projectId: string,
+    input: import("../../contracts/reminder-graph.js").ReminderReorderInput,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("reorderReminderItem", projectId, input);
+  }
+
+  acceptReminderEditOffer(
+    projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("acceptReminderEditOffer", projectId);
+  }
+
+  dismissReminderEditOffer(
+    projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("dismissReminderEditOffer", projectId);
+  }
+
+  setReminderMilestoneStatus(
+    projectId: string,
+    input: import("../../contracts/reminder-graph.js").ReminderMilestoneCompleteInput,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("setReminderMilestoneStatus", projectId, input);
+  }
+
+  sendReminderAuthoringTurn(
+    projectId: string,
+    request: import("../../contracts/reminder-graph.js").ReminderAuthoringTurnRequest,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderAuthoringTurnResult> {
+    return this.invoke("sendReminderAuthoringTurn", projectId, request);
+  }
+
+  setReminderComposerMode(
+    projectId: string,
+    mode: import("../../contracts/reminder-graph.js").ReminderComposerMode,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("setReminderComposerMode", projectId, mode);
   }
 
   initMapArtifactStack(

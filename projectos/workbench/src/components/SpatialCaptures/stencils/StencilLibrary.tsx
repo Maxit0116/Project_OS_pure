@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Search, X } from 'lucide-react'
+import { Search, Share2, X } from 'lucide-react'
 import {
   UI_STENCIL_CATALOG,
   type StencilCategory,
@@ -46,6 +46,9 @@ interface Props {
   /** Increment to force-collapse hover reveal (e.g. Esc). */
   collapseToken?: number
   strings?: StencilUiStrings
+  /** Merged built-in + installed stencils; defaults to built-in catalog. */
+  catalog?: readonly StencilDefinition[]
+  onExportStencil?: (stencilId: string) => void
 }
 
 export default function StencilLibrary({
@@ -57,6 +60,8 @@ export default function StencilLibrary({
   onRevealChange,
   collapseToken = 0,
   strings = STENCIL_UI_STRINGS_EN,
+  catalog = UI_STENCIL_CATALOG,
+  onExportStencil,
 }: Props) {
   const [category, setCategory] = useState<StencilCategory>('base')
   const [query, setQuery] = useState('')
@@ -118,7 +123,7 @@ export default function StencilLibrary({
 
   const items = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return UI_STENCIL_CATALOG.filter((item) => {
+    return catalog.filter((item) => {
       if (item.category !== category) return false
       if (!q) return true
       return (
@@ -128,14 +133,14 @@ export default function StencilLibrary({
         item.tags.some((tag) => tag.includes(q))
       )
     })
-  }, [category, query])
+  }, [catalog, category, query])
 
   const previewItem = useMemo(
     () =>
       previewId
-        ? (UI_STENCIL_CATALOG.find((item) => item.id === previewId) ?? null)
+        ? (catalog.find((item) => item.id === previewId) ?? null)
         : null,
-    [previewId],
+    [catalog, previewId],
   )
 
   const categoryLabel = (id: StencilCategory): string => {
@@ -338,6 +343,21 @@ export default function StencilLibrary({
               >
                 {categoryLabel(previewItem.category)}
               </span>
+              {onExportStencil ? (
+                <button
+                  type="button"
+                  className={styles.iconBtn}
+                  aria-label={strings.exportStencil}
+                  title={strings.exportStencil}
+                  tabIndex={revealed ? 0 : -1}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onExportStencil(previewItem.id)
+                  }}
+                >
+                  <Share2 size={14} strokeWidth={2} aria-hidden />
+                </button>
+              ) : null}
             </div>
             <p className={styles.previewDesc}>{previewItem.description}</p>
             {previewItem.licenseNote ? (

@@ -1,7 +1,9 @@
 import type {
   AgentActionEvent,
+  AgentDelegationEvent,
   AgentFlowStep,
   AgentFlowStepKind,
+  AgentPoolRunKpi,
   AgentRunEvent,
   TraceMajorAction,
   TraceMajorActionStatus,
@@ -54,6 +56,8 @@ export interface AgentPoolTraceProjection {
   spans: TraceSpanView[]
   /** Flat bars for compact track: major actions only. */
   compactBars: AgentPoolTraceBar[]
+  /** Evidence-honest run KPI for expand strip. */
+  kpi: AgentPoolRunKpi
 }
 
 /** UI bar used by MiniWaterfall (Major Action or Span). */
@@ -67,6 +71,8 @@ export interface AgentPoolTraceBar {
   endMs?: number
   timingQuality: TraceTimingQuality
   level: 1 | 2 | 3
+  /** Retry attempt when > 1 (Major Actions / failed siblings). */
+  attempt?: number
 }
 
 function parseEventMs(timestamp: string): number | null {
@@ -467,6 +473,180 @@ function assignSpansToNearestAction(
   })
 }
 
+function isDelegationEvent(event: AgentRunEvent): event is AgentDelegationEvent {
+  return (
+    event.type === 'task_delegated' ||
+    event.type === 'child_run_started' ||
+    event.type === 'child_run_completed' ||
+    event.type === 'plan_created' ||
+    event.type === 'plan_completed' ||
+    event.type === 'plan_partially_completed' ||
+    event.type === 'child_run_outcome'
+  )
+}
+
+function payloadStatus(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null
+  const status = (payload as { status?: unknown }).status
+  return typeof status === 'string' ? status : null
+}
+
+/**
+ * Project wait (awaiting review) and handoff (delegation) spans from lifecycle /
+ * delegation evidence only — never decorative.
+ */
+export function projectWaitAndHandoffSpans(input: {
+  agentRunId: string
+  events: AgentRunEvent[]
+  poolOriginMs: number
+  live?: boolean
+  nowMs?: number
+}): TraceSpanView[] {
+  const { agentRunId, events, poolOriginMs, live = false, nowMs = Date.now() } = input
+  const spans: TraceSpanView[] = []
+  const relativeNow = rel(nowMs, poolOriginMs)
+
+  for (const event of events) {
+    if (!isDelegationEvent(event)) continue
+    const at = parseEventMs(event.timestamp)
+    if (at == null) continue
+    const atRel = rel(at, poolOriginMs)
+
+    if (event.type === 'task_delegated' || event.type === 'child_run_started') {
+      const taskId =
+        'payload' in event && event.payload && typeof event.payload === 'object'
+          ? String((event.payload as { taskId?: string }).taskId ?? '')
+          : ''
+      spans.push({
+        spanId: `span:handoff:${event.eventId}`,
+        agentRunId,
+        name:
+          event.type === 'task_delegated'
+            ? taskId
+              ? `Handoff · ${taskId}`
+              : 'Handoff'
+            : taskId
+              ? `Child start · ${taskId}`
+              : 'Child start',
+        kind: 'handoff',
+        status: 'ok',
+        startMs: atRel,
+        endMs: atRel + POINT_MS,
+        timingQuality: 'exact',
+        attributes: { eventType: event.type, taskId: taskId || undefined },
+        evidenceEventIds: [event.eventId],
+      })
+    }
+
+    if (
+      event.type === 'child_run_completed' &&
+      event.payload.status === 'awaiting_review'
+    ) {
+      spans.push({
+        spanId: `span:wait:${event.eventId}`,
+        agentRunId,
+        name: 'Awaiting review',
+        kind: 'wait',
+        status: live ? 'running' : 'ok',
+        startMs: atRel,
+        endMs: live ? undefined : atRel + POINT_MS,
+        timingQuality: live ? 'exact' : 'derived',
+        attributes: {
+          eventType: event.type,
+          childRunId: event.payload.childRunId,
+          taskId: event.payload.taskId,
+        },
+        evidenceEventIds: [event.eventId],
+      })
+    }
+  }
+
+  for (const event of events) {
+    if (event.type !== 'run_completed') continue
+    const status = payloadStatus(event.payload)
+    if (status !== 'awaiting_review') continue
+    const at = parseEventMs(event.timestamp)
+    if (at == null) continue
+    const atRel = rel(at, poolOriginMs)
+    spans.push({
+      spanId: `span:wait:${event.eventId}`,
+      agentRunId,
+      name: 'Awaiting review',
+      kind: 'wait',
+      status: live ? 'running' : 'ok',
+      startMs: atRel,
+      endMs: live ? undefined : Math.max(atRel + POINT_MS, relativeNow),
+      timingQuality: live ? 'exact' : 'derived',
+      attributes: { eventType: event.type, status },
+      evidenceEventIds: [event.eventId],
+    })
+  }
+
+  return spans
+}
+
+/** Aggregate expand-strip KPIs; omit tokens unless every model call reported usage. */
+export function aggregateAgentPoolRunKpi(
+  projection: Pick<AgentPoolTraceProjection, 'majorActions' | 'spans'>,
+  relativeNowMs: number,
+): AgentPoolRunKpi {
+  const { majorActions, spans } = projection
+  const starts = [
+    ...majorActions.map((m) => m.startMs),
+    ...spans.map((s) => s.startMs),
+  ]
+  const ends = [
+    ...majorActions.map((m) => m.endMs ?? relativeNowMs),
+    ...spans.map((s) => s.endMs ?? relativeNowMs),
+  ]
+  const startMs = starts.length > 0 ? Math.min(...starts) : 0
+  const endMs = ends.length > 0 ? Math.max(...ends) : relativeNowMs
+  const durationMs = Math.max(0, endMs - startMs)
+
+  let modelCallCount = 0
+  let toolCallCount = 0
+  let errorCount = 0
+  let tokensIn = 0
+  let tokensOut = 0
+  let allModelUsageReported = true
+  let sawModel = false
+
+  for (const span of spans) {
+    if (span.status === 'error') errorCount += 1
+    if (span.kind === 'model') {
+      modelCallCount += 1
+      sawModel = true
+      const usage = span.attributes.usage
+      const tokenUsage = span.attributes.tokenUsage as
+        | { input?: number; output?: number }
+        | undefined
+      if (usage === 'reported' && tokenUsage) {
+        tokensIn += typeof tokenUsage.input === 'number' ? tokenUsage.input : 0
+        tokensOut += typeof tokenUsage.output === 'number' ? tokenUsage.output : 0
+      } else {
+        allModelUsageReported = false
+      }
+    }
+    if (span.kind === 'tool') toolCallCount += 1
+  }
+
+  for (const major of majorActions) {
+    if (major.status === 'failed') errorCount += 1
+  }
+
+  const kpi: AgentPoolRunKpi = {
+    durationMs,
+    modelCallCount,
+    toolCallCount,
+    errorCount,
+  }
+  if (sawModel && allModelUsageReported) {
+    kpi.tokensIn = tokensIn
+    kpi.tokensOut = tokensOut
+  }
+  return kpi
+}
+
 /**
  * Project AgentRun events into Major Actions → Sub Actions → Spans.
  * JSONL / event arrays are the source of truth — never invent success.
@@ -555,7 +735,7 @@ export function projectAgentPoolTrace(
     })
   }
 
-  const spans = assignSpansToNearestAction(
+  const actionSpans = assignSpansToNearestAction(
     projectSpansFromActions(agentRunId, actions, poolOriginMs, (event) => {
       if (majorFromSteps.length === 0) {
         return `${agentRunId}:${fallbackBucket(event).id}`
@@ -564,24 +744,51 @@ export function projectAgentPoolTrace(
     }),
     majorActions,
   )
+  const structuralSpans = projectWaitAndHandoffSpans({
+    agentRunId,
+    events,
+    poolOriginMs,
+    live,
+    nowMs,
+  })
+  const spans = [...actionSpans, ...structuralSpans]
 
   majorActions = majorActions.map((major) => ({
     ...major,
-    subActions: groupSubActions(spans, major.actionId),
+    subActions: groupSubActions(
+      spans.filter((span) => span.kind !== 'wait' && span.kind !== 'handoff'),
+      major.actionId,
+    ),
   }))
 
-  const compactBars: AgentPoolTraceBar[] = majorActions.map((major) => ({
-    id: major.actionId,
-    kind: 'major',
-    label: major.name,
-    status: toBarStatus(major.status),
-    startMs: major.startMs,
-    endMs: major.endMs,
-    timingQuality: major.timingQuality,
-    level: 1,
-  }))
+  const compactBars: AgentPoolTraceBar[] = [
+    ...majorActions.map((major) => ({
+      id: major.actionId,
+      kind: 'major' as const,
+      label: major.name,
+      status: toBarStatus(major.status),
+      startMs: major.startMs,
+      endMs: major.endMs,
+      timingQuality: major.timingQuality,
+      level: 1 as const,
+      attempt: major.attempt,
+    })),
+    ...structuralSpans.map((span) => ({
+      id: span.spanId,
+      kind: span.kind,
+      label: span.name,
+      status: toBarStatus(span.status),
+      startMs: span.startMs,
+      endMs: span.endMs,
+      timingQuality: span.timingQuality,
+      level: 1 as const,
+    })),
+  ]
 
-  return { majorActions, spans, compactBars }
+  const relativeNow = Math.max(0, nowMs - poolOriginMs)
+  const kpi = aggregateAgentPoolRunKpi({ majorActions, spans }, relativeNow)
+
+  return { majorActions, spans, compactBars, kpi }
 }
 
 /** Bars for expanded L2/L3 under a selected Major Action. */
@@ -602,6 +809,7 @@ export function barsForMajorAction(
       endMs: major.endMs,
       timingQuality: major.timingQuality,
       level: 1,
+      attempt: major.attempt,
     },
   ]
   for (const sub of major.subActions) {
@@ -630,8 +838,29 @@ export function barsForMajorAction(
           endMs: span.endMs,
           timingQuality: span.timingQuality,
           level: 3,
+          attempt: major.attempt,
         })
       }
+    }
+  }
+  // Surface wait/handoff under this major's window when drilling spans.
+  if (includeSpans) {
+    for (const span of projection.spans) {
+      if (span.kind !== 'wait' && span.kind !== 'handoff') continue
+      const majorEnd = major.endMs ?? Number.POSITIVE_INFINITY
+      if (span.startMs < major.startMs || span.startMs > majorEnd) continue
+      if (bars.some((bar) => bar.id === span.spanId)) continue
+      bars.push({
+        id: span.spanId,
+        parentId: major.actionId,
+        kind: span.kind,
+        label: span.name,
+        status: toBarStatus(span.status),
+        startMs: span.startMs,
+        endMs: span.endMs,
+        timingQuality: span.timingQuality,
+        level: 3,
+      })
     }
   }
   return bars

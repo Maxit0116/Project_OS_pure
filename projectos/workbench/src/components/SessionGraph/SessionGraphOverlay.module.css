@@ -204,6 +204,9 @@
   box-shadow: var(--tech-shadow-sm);
   box-sizing: border-box;
   overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 
 .node:hover {
@@ -767,6 +770,13 @@
 .nodeLifted {
   opacity: 0.35;
   transform: scale(0.98);
+}
+
+.nodeDragging {
+  cursor: grabbing;
+  z-index: 2;
+  box-shadow: var(--tech-shadow-md);
+  border-color: var(--tech-accent);
 }
 
 .miscDropTarget {

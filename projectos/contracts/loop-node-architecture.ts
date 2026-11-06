@@ -6,8 +6,42 @@ export type LegacyIntentNodeRole =
   | "decide"
   | "unknown";
 
+/** Duty / control-flow node types (NA-D4). Config satellites are separate. */
 export const LOOP_NODE_TYPES = ["agent", "action", "logic", "human"] as const;
 export type LoopNodeType = (typeof LOOP_NODE_TYPES)[number];
+
+/**
+ * Intent-canvas node types: duty nodes + Agent wiring satellites (AW-D9).
+ * `config` is never a fifth workflow duty — it only feeds Agent via `provides`.
+ */
+export const LOOP_INTENT_NODE_TYPES = [
+  "agent",
+  "action",
+  "logic",
+  "human",
+  "config",
+] as const;
+export type LoopIntentNodeType = (typeof LOOP_INTENT_NODE_TYPES)[number];
+
+export const LOOP_SATELLITE_KINDS = [
+  "model",
+  "memory",
+  "skill",
+  "mcp",
+  "rules",
+  "pack",
+] as const;
+export type LoopSatelliteKind = (typeof LOOP_SATELLITE_KINDS)[number];
+
+/** Agent bottom config ports (n8n-style). */
+export const LOOP_AGENT_CONFIG_PORTS = ["model", "memory", "capability"] as const;
+export type LoopAgentConfigPort = (typeof LOOP_AGENT_CONFIG_PORTS)[number];
+
+export const LOOP_MEMORY_MODES = ["project", "buffer", "none"] as const;
+export type LoopMemoryMode = (typeof LOOP_MEMORY_MODES)[number];
+
+/** Max `provides` edges into an Agent `capability` port. */
+export const LOOP_CAPABILITY_INDEGREE_MAX = 16;
 
 export const LOOP_AGENT_ROLES = [
   "planner",
@@ -124,10 +158,28 @@ export function legacyRoleFromArchitecture(
   return "implement";
 }
 
+/** Loose node shape so IntentGraphNode (incl. `config`) is assignable under EOPT. */
+export type LoopArchitectureInput = {
+  type?: string | undefined;
+  role?: LegacyIntentNodeRole | undefined;
+  agentRole?: LoopAgentRole | undefined;
+  humanMode?: LoopHumanMode | undefined;
+  actionIntegration?: LoopActionIntegration | undefined;
+  actionOperation?: string | undefined;
+  logicKind?: LoopLogicKind | undefined;
+  maxIterations?: number | undefined;
+  repairMode?: boolean | undefined;
+};
+
 export function resolveNodeArchitecture(
-  node: LoopNodeArchitectureFields & { role?: LegacyIntentNodeRole },
+  node: LoopArchitectureInput,
 ): LoopArchitectureMapping {
-  if (node.type) {
+  if (
+    node.type === "agent" ||
+    node.type === "action" ||
+    node.type === "logic" ||
+    node.type === "human"
+  ) {
     return {
       type: node.type,
       ...(node.agentRole ? { agentRole: node.agentRole } : {}),
@@ -146,9 +198,14 @@ export function resolveNodeArchitecture(
   return architectureFromLegacyRole(node.role);
 }
 
-export function withArchitectureDefaults<
-  T extends LoopNodeArchitectureFields & { role?: LegacyIntentNodeRole },
->(node: T): T & LoopArchitectureMapping & { role: LegacyIntentNodeRole } {
+export function withArchitectureDefaults<T extends LoopArchitectureInput>(
+  node: T,
+): T & LoopArchitectureMapping & { role: LegacyIntentNodeRole } {
+  if (isConfigNode(node)) {
+    // Config satellites are not duty architecture — preserve as-is.
+    // Callers that need duty fields must filter with `isDutyNode` first.
+    return node as T & LoopArchitectureMapping & { role: LegacyIntentNodeRole };
+  }
   const arch = resolveNodeArchitecture(node);
   return {
     ...node,
@@ -160,23 +217,44 @@ export function withArchitectureDefaults<
   };
 }
 
-export function isConditionNode(
-  node: LoopNodeArchitectureFields & { role?: LegacyIntentNodeRole },
-): boolean {
+export function isConditionNode(node: LoopArchitectureInput): boolean {
+  if (isConfigNode(node)) return false;
   const arch = resolveNodeArchitecture(node);
   return arch.type === "logic" && arch.logicKind === "condition";
 }
 
-export function isMergeNode(
-  node: LoopNodeArchitectureFields & { role?: LegacyIntentNodeRole },
-): boolean {
+export function isMergeNode(node: LoopArchitectureInput): boolean {
+  if (isConfigNode(node)) return false;
   const arch = resolveNodeArchitecture(node);
   return arch.type === "logic" && arch.logicKind === "merge";
 }
 
-export function isLoopLogicNode(
-  node: LoopNodeArchitectureFields & { role?: LegacyIntentNodeRole },
-): boolean {
+export function isLoopLogicNode(node: LoopArchitectureInput): boolean {
+  if (isConfigNode(node)) return false;
   const arch = resolveNodeArchitecture(node);
   return arch.type === "logic" && arch.logicKind === "loop";
+}
+
+export function isConfigNode(node: { type?: string | undefined }): boolean {
+  return node.type === "config";
+}
+
+export function isDutyNode(node: { type?: string | undefined }): boolean {
+  return (
+    node.type === "agent" ||
+    node.type === "action" ||
+    node.type === "logic" ||
+    node.type === "human" ||
+    node.type == null ||
+    node.type === undefined
+  );
+}
+
+/** Which Agent config port a satellite kind plugs into. */
+export function configPortForSatelliteKind(
+  kind: LoopSatelliteKind,
+): LoopAgentConfigPort {
+  if (kind === "model") return "model";
+  if (kind === "memory") return "memory";
+  return "capability";
 }

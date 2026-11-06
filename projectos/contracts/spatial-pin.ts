@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { AskSubModeSchema } from "./first-principles.js";
 import { ArchitectureLevelSchema } from "./graph.js";
 import {
   formatHubReferenceContextLines,
@@ -362,6 +363,17 @@ export const PinComposerSchema = z
   .object({
     mode: SpatialPinModeSchema,
     prompt: z.string().max(16_000),
+    /**
+     * Ask secondary mode (Chat vs First Principles). Only meaningful when
+     * `mode === "ask"`; ignored otherwise. Defaults to ordinary Ask chat.
+     */
+    askSubMode: AskSubModeSchema.optional(),
+    /**
+     * Specialized workforce agent for Change/Agent turns. Omit / null = General.
+     */
+    agentDefinitionId: z.string().min(1).nullable().optional(),
+    /** Display name snapshot for chips / activity (optional). */
+    agentDisplayName: z.string().max(120).nullable().optional(),
     snapshotAssetPath: z.string().max(1024).optional(),
     /** User-edited or baked stencil brief carried into submit (UI Stencil on Capture). */
     stencilBrief: z.string().max(16_000).optional(),
@@ -378,6 +390,8 @@ export const PinLinksSchema = z
     refinementId: z.string().min(1).optional(),
     planId: z.string().min(1).optional(),
     debugSessionId: z.string().min(1).optional(),
+    /** Ask · First Principles session started from this pin. */
+    firstPrinciplesSessionId: z.string().min(1).optional(),
     /** Compose-hub subagent slot outcomes (child asks / runs). */
     composeSubagents: z.array(PinComposerHubSubagentLinkSchema).max(12).optional(),
     childRunIds: z.array(z.string().min(1)).max(12).optional(),
@@ -502,6 +516,7 @@ export const SubmitSpatialPinResultSchema = z
     refinementId: z.string().min(1).optional(),
     planId: z.string().min(1).optional(),
     debugSessionId: z.string().min(1).optional(),
+    firstPrinciplesSessionId: z.string().min(1).optional(),
   })
   .strict();
 

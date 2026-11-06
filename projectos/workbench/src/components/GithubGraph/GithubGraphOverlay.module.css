@@ -395,6 +395,14 @@ button.crumbActive {
   background-position: center;
 }
 
+.canvasHistory {
+  overflow: hidden;
+  cursor: default;
+  background: var(--tech-bg-side-panel);
+  display: flex;
+  flex-direction: column;
+}
+
 .focusPicker {
   position: absolute;
   z-index: 8;

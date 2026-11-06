@@ -192,7 +192,11 @@ export function registerSpatialPinOverlay(): void {
       kind !== 'toast' &&
       kind !== 'askAgent' &&
       kind !== 'refreshGithubGraph' &&
-      kind !== 'openGithubGraph'
+      kind !== 'openGithubGraph' &&
+      kind !== 'openFirstPrinciples' &&
+      kind !== 'selectChatModel' &&
+      kind !== 'setThinkingDepth' &&
+      kind !== 'openSettings'
     ) {
       return
     }

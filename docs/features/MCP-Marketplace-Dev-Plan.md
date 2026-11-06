@@ -1,7 +1,8 @@
 # MCP Marketplace Dev Plan
 
 **状态**：Implemented（2026-10-29）— A3 基座（MMP-0–4）+ B2 市场（MMP-5–7）已落地；Chat Marketplace Overlay（MCP tab）见 Skills/Overlay 计划；人工冒烟见 Eval Checklist。  
-**权威邻居**：[`MCP-Dev-Plan.md`](MCP-Dev-Plan.md)、[`Agent-Harness-Tool-Registry.md`](Agent-Harness-Tool-Registry.md)、[`backend/Tools-Integrations-Dev-Plan.md`](backend/Tools-Integrations-Dev-Plan.md)、[`backend/Security-Governance-Dev-Plan.md`](backend/Security-Governance-Dev-Plan.md)
+**演进**：后续品类与 Export/Publish 双通道见 [`Capability-Marketplace-Dev-Plan.md`](Capability-Marketplace-Dev-Plan.md)（本文件仍是 MCP 目录安装的权威实现记录）。  
+**权威邻居**：[`Capability-Marketplace-Dev-Plan.md`](Capability-Marketplace-Dev-Plan.md)、[`MCP-Dev-Plan.md`](MCP-Dev-Plan.md)、[`Agent-Harness-Tool-Registry.md`](Agent-Harness-Tool-Registry.md)、[`backend/Tools-Integrations-Dev-Plan.md`](backend/Tools-Integrations-Dev-Plan.md)、[`backend/Security-Governance-Dev-Plan.md`](backend/Security-Governance-Dev-Plan.md)
 
 **合格线（A）**：Settings 可浏览验签目录 → Install 写入 `mcpServers`（provenance、默认 `enabled: false`）→ Test/Refresh 与手工配置一致 → 无 `permissions.json` allow 时 Ask 不调用。  
 **合格线（B）**：同一目录混排 curated/community；community 可装但强制默认关；本地 disable/report 生效；无上传 API、无自动 permissions。

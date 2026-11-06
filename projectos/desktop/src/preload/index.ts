@@ -26,7 +26,10 @@ type TerminalExitListener = (terminalId: string, exitCode: number) => void
 type ServicesChangedListener = (ports: ServicePort[]) => void
 type LspMessageListener = (message: string) => void
 type FocusChangeListener = (focused: boolean) => void
-type DiffReadyActivatedListener = (payload: { destination: 'ask' | 'diff'; runIds: string[] }) => void
+type DiffReadyActivatedListener = (payload: {
+  destination: 'ask' | 'diff' | 'reminder'
+  runIds: string[]
+}) => void
 const runEventListeners = new Set<RunEventListener>()
 const runTransientTraceListeners = new Set<RunTransientTraceListener>()
 const structureScanEventListeners = new Set<StructureScanEventListener>()
@@ -88,7 +91,10 @@ ipcRenderer.on('window:focusChange', (_event, focused: boolean) => {
   }
 })
 
-ipcRenderer.on('notify:diffReadyActivated', (_event, payload: { destination: 'ask' | 'diff'; runIds: string[] }) => {
+ipcRenderer.on('notify:diffReadyActivated', (_event, payload: {
+  destination: 'ask' | 'diff' | 'reminder'
+  runIds: string[]
+}) => {
   for (const listener of diffReadyActivatedListeners) {
     listener(payload)
   }
@@ -250,7 +256,7 @@ const api = {
     showDiffReady(payload: {
       title: string
       body: string
-      destination: 'ask' | 'diff'
+      destination: 'ask' | 'diff' | 'reminder'
       runIds: string[]
     }): Promise<void> {
       return ipcRenderer.invoke('notify:showDiffReady', payload).then(() => undefined)
@@ -489,34 +495,70 @@ const api = {
       }
     },
     notifyGithubCardHost(payload: {
-      kind: 'toast' | 'askAgent' | 'refreshGithubGraph' | 'openGithubGraph'
+      kind:
+        | 'toast'
+        | 'askAgent'
+        | 'refreshGithubGraph'
+        | 'openGithubGraph'
+        | 'openFirstPrinciples'
+        | 'selectChatModel'
+        | 'setThinkingDepth'
+        | 'openSettings'
       type?: 'info' | 'success' | 'warning' | 'error'
       message?: string
       prompt?: string
       branch?: string | null
       prNumber?: number | null
+      chatSessionId?: string
+      firstPrinciplesSessionId?: string
+      profileId?: string
+      depth?: 'off' | 'low' | 'medium' | 'high'
     }): void {
       ipcRenderer.send('spatial-pin:githubCardHost', payload)
     },
     onGithubCardHost(
       listener: (payload: {
-        kind: 'toast' | 'askAgent' | 'refreshGithubGraph' | 'openGithubGraph'
+        kind:
+          | 'toast'
+          | 'askAgent'
+          | 'refreshGithubGraph'
+          | 'openGithubGraph'
+          | 'openFirstPrinciples'
+          | 'selectChatModel'
+          | 'setThinkingDepth'
+          | 'openSettings'
         type?: 'info' | 'success' | 'warning' | 'error'
         message?: string
         prompt?: string
         branch?: string | null
         prNumber?: number | null
+        chatSessionId?: string
+        firstPrinciplesSessionId?: string
+        profileId?: string
+        depth?: 'off' | 'low' | 'medium' | 'high'
       }) => void,
     ): Disposable {
       const handler = (
         _event: unknown,
         payload: {
-          kind?: 'toast' | 'askAgent' | 'refreshGithubGraph' | 'openGithubGraph'
+          kind?:
+            | 'toast'
+            | 'askAgent'
+            | 'refreshGithubGraph'
+            | 'openGithubGraph'
+            | 'openFirstPrinciples'
+            | 'selectChatModel'
+            | 'setThinkingDepth'
+            | 'openSettings'
           type?: 'info' | 'success' | 'warning' | 'error'
           message?: string
           prompt?: string
           branch?: string | null
           prNumber?: number | null
+          chatSessionId?: string
+          firstPrinciplesSessionId?: string
+          profileId?: string
+          depth?: 'off' | 'low' | 'medium' | 'high'
         },
       ) => {
         if (!payload?.kind) return
@@ -531,6 +573,18 @@ const api = {
           ...(payload.prNumber !== undefined
             ? { prNumber: payload.prNumber }
             : {}),
+          ...(payload.chatSessionId !== undefined
+            ? { chatSessionId: payload.chatSessionId }
+            : {}),
+          ...(payload.firstPrinciplesSessionId !== undefined
+            ? {
+                firstPrinciplesSessionId: payload.firstPrinciplesSessionId,
+              }
+            : {}),
+          ...(payload.profileId !== undefined
+            ? { profileId: payload.profileId }
+            : {}),
+          ...(payload.depth !== undefined ? { depth: payload.depth } : {}),
         })
       }
       ipcRenderer.on('spatial-pin:githubCardHost', handler)

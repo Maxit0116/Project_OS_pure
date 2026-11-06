@@ -1,0 +1,116 @@
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--tech-bg-canvas);
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.viewportPaging {
+  cursor: grabbing;
+}
+
+.track {
+  display: flex;
+  height: 100%;
+  width: 300%;
+  will-change: transform;
+}
+
+.trackAnimated {
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.page {
+  position: relative;
+  flex: 0 0 33.333333%;
+  width: 33.333333%;
+  height: 100%;
+  min-width: 0;
+  overflow: auto;
+  background: var(--tech-bg-canvas);
+}
+
+.iframe {
+  display: block;
+  width: 100%;
+  min-height: 100%;
+  min-width: 960px;
+  border: 0;
+  background: #181818;
+  pointer-events: none;
+}
+
+.placeholder,
+.empty,
+.error,
+.loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--tech-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.error {
+  color: var(--tech-text-primary);
+}
+
+.placeholder {
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-tertiary, var(--tech-text-secondary));
+}
+
+.onboarding {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--tech-bg-canvas) 92%, transparent);
+  z-index: 2;
+}
+
+.onboardingCard {
+  width: min(440px, 100%);
+  padding: 20px;
+  border: 1px solid var(--tech-border);
+  border-radius: 8px;
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.onboardingCard h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--tech-text-primary);
+}
+
+.onboardingCard p {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--tech-text-secondary);
+}
+
+.onboardingActions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trackAnimated {
+    transition: none;
+  }
+}

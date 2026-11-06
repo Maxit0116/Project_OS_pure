@@ -1,8 +1,8 @@
 # Agent Pool × Trace Waterfall v1.0 — Optimization & Upgrade DevPlan
 
-**Status:** Phases 1–4 + Phase 5 durable index/history/acceptance wired (2026-11-03). Remaining polish: Phase 6 load/perf validation; optional richer History span rehydrate on select.  
+**Status:** Phases 1–5 wired (2026-11-03). UX polish / Kobra-grammar motion moved to [`Agent-Pool-Waterfall-UX-Dev-Plan.md`](./Agent-Pool-Waterfall-UX-Dev-Plan.md) **v1.1**. Remaining non-UX: optional Phase 6 load/perf validation; richer History span rehydrate.  
 **Scope:** Upgrade the existing Agent Pool (M0–M4) into a hierarchical execution-observability surface by projecting real `AgentRunEvent` evidence onto a shared-time Waterfall, without rebuilding Agent Runtime or copying Kobra UI wholesale.  
-**Authority:** This document is the v1.0 upgrade plan for Agent Pool Trace Waterfall.  
+**Authority:** This document is the v1.0 upgrade plan for Agent Pool Trace Waterfall (identity, projection, history, acceptance). UX grammar upgrades: see v1.1.  
 **Baseline (implemented):** [`Agent-Pool-Dev-Plan.md`](./Agent-Pool-Dev-Plan.md) — M0–M4 situation surface, mini waterfall, Done → Chat acceptance.  
 **Cross-refs:**
 - [`Agent-Flow-Activity-Dev-Plan.md`](./Agent-Flow-Activity-Dev-Plan.md) — Timeline / Graph deep-read

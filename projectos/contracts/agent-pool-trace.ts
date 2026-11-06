@@ -25,8 +25,25 @@ export const TraceSpanKindSchema = z.enum([
   "apply",
   "verify",
   "wait",
+  "handoff",
   "other",
 ]);
+
+/**
+ * Per-run KPI strip for expanded Agent Pool lanes.
+ * Tokens are present only when every counted model_request reported usage.
+ * costUsd is omitted in v1.1 — no reported cost field on events.
+ */
+export const AgentPoolRunKpiSchema = z
+  .object({
+    durationMs: z.number().finite().nonnegative(),
+    modelCallCount: z.number().int().nonnegative(),
+    toolCallCount: z.number().int().nonnegative(),
+    errorCount: z.number().int().nonnegative(),
+    tokensIn: z.number().int().nonnegative().optional(),
+    tokensOut: z.number().int().nonnegative().optional(),
+  })
+  .strict();
 
 export const TraceSpanStatusSchema = z.enum([
   "running",
@@ -118,21 +135,51 @@ export const AgentPoolRunSchema = z
   })
   .strict();
 
+export const AgentDefinitionKindSchema = z.enum(["workforce", "pool_lane"]);
+
+/** Lightweight provenance for catalog / export installs (Capability Marketplace P2). */
+export const AgentMarketplaceProvenanceSchema = z
+  .object({
+    listingId: z.string().min(1).max(120),
+    catalogVersion: z.string().min(1).max(32),
+    trustTier: z.enum(["curated", "community"]),
+    listingVersion: z.string().min(1).max(64),
+    installedAt: z.string().min(1).max(64),
+    source: z
+      .enum(["catalog", "manual", "git-url", "export-reimport"])
+      .default("catalog"),
+  })
+  .strict();
+
+export const AgentDefinitionConfigSchema = z
+  .object({
+    displayName: z.string().min(1).max(120),
+    /** Observability lane vs user-authored specialized agent. Default pool_lane for back-compat. */
+    kind: AgentDefinitionKindSchema.default("pool_lane"),
+    role: z.string().min(1).max(80).optional(),
+    /** Human-facing role label (e.g. QA Reviewer). */
+    roleLabel: z.string().min(1).max(80).optional(),
+    /** System instructions for workforce agents. */
+    instructions: z.string().max(12_000).optional(),
+    modelProfileId: z.string().nullable().optional(),
+    skillIds: z.array(z.string().min(1).max(120)).max(64).default([]),
+    mcpServerIds: z.array(z.string().min(1).max(80)).max(64).default([]),
+    /** Free-text permission intent; enforcement deferred. */
+    permissionNotes: z.string().max(2000).optional(),
+    composeSlotId: z.string().nullable().optional(),
+    loopNodeId: z.string().nullable().optional(),
+    /** Present when installed from Capability Marketplace agent catalog / export pack. */
+    marketplaceProvenance: AgentMarketplaceProvenanceSchema.optional(),
+  })
+  .strict();
+
 export const AgentDefinitionSchema = z
   .object({
     definitionId: z.string().min(1),
     projectId: z.string().min(1).optional(),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1),
-    config: z
-      .object({
-        displayName: z.string().min(1),
-        role: z.string().min(1).optional(),
-        modelProfileId: z.string().nullable().optional(),
-        composeSlotId: z.string().nullable().optional(),
-        loopNodeId: z.string().nullable().optional(),
-      })
-      .strict(),
+    config: AgentDefinitionConfigSchema,
   })
   .strict();
 
@@ -206,10 +253,13 @@ export type TraceSpanStatus = z.infer<typeof TraceSpanStatusSchema>;
 export type TraceSpanView = z.infer<typeof TraceSpanViewSchema>;
 export type TraceSubAction = z.infer<typeof TraceSubActionSchema>;
 export type TraceMajorAction = z.infer<typeof TraceMajorActionSchema>;
+export type AgentPoolRunKpi = z.infer<typeof AgentPoolRunKpiSchema>;
 export type AgentPoolRun = z.infer<typeof AgentPoolRunSchema>;
 export type AgentPoolRunStatus = z.infer<typeof AgentPoolRunStatusSchema>;
 export type AgentPoolTriggerSource = z.infer<typeof AgentPoolTriggerSourceSchema>;
 export type AgentDefinition = z.infer<typeof AgentDefinitionSchema>;
+export type AgentDefinitionKind = z.infer<typeof AgentDefinitionKindSchema>;
+export type AgentDefinitionConfig = z.infer<typeof AgentDefinitionConfigSchema>;
 export type AgentRunAcceptance = z.infer<typeof AgentRunAcceptanceSchema>;
 export type AgentRunIndexEntry = z.infer<typeof AgentRunIndexEntrySchema>;
 export type AgentRunEventSnapshot = z.infer<typeof AgentRunEventSnapshotSchema>;

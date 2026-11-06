@@ -42,6 +42,34 @@ import type {
   UninstallSkillFromCatalogInput,
 } from "./skill-marketplace.js";
 import type {
+  InstallRulesFromCatalogInput,
+  RulesCatalogView,
+  UninstallRulesFromCatalogInput,
+} from "./rules-marketplace.js";
+import type {
+  AgentCatalogView,
+  ExportCapabilityPackInput,
+  ExportCapabilityPackResult,
+  InstallAgentFromCatalogInput,
+  InstallAgentFromExportPackInput,
+  UninstallAgentFromCatalogInput,
+} from "./agent-marketplace.js";
+import type {
+  InstallWorkflowFromCatalogInput,
+  InstallWorkflowFromExportPackInput,
+  UninstallWorkflowFromCatalogInput,
+  WorkflowCatalogView,
+} from "./workflow-marketplace.js";
+import type {
+  InstallStencilFromCatalogInput,
+  InstallStencilFromExportPackInput,
+  UninstallStencilFromCatalogInput,
+  StencilCatalogView,
+} from "./stencil-marketplace.js";
+import type { AgentDefinition } from "./agent-pool-trace.js";
+import type { LoopGraphPreset } from "./loop-presets.js";
+import type { StencilDefinition } from "./ui-stencil.js";
+import type {
   InstallFromGitUrlInput,
   InstallFromGitUrlResult,
 } from "./marketplace-git-install.js";
@@ -104,6 +132,47 @@ import type {
   LoopInstanceEvent,
   LoopSpec,
 } from "./loop-graph.js";
+import type {
+  ChooseDiagramStyleInput,
+  DiagramArtifact,
+  DiagramArtifactMeta,
+  DiagramIndex,
+  DiagramNotesDocument,
+  DiagramSkillPackStatus,
+  EnsureDiagramDesignSkillResult,
+  GenerateDiagramInput,
+  UpdateDiagramNotesInput,
+} from "./diagram-graph.js";
+import type {
+  BuildImplementAgainstPackInput,
+  FreezeWireframePackInput,
+  GenerateWireframePackInput,
+  ImplementAgainstPackBrief,
+  UpdateWireframePackDraftInput,
+  UpsertWireframeGapInput,
+  WireframeGap,
+  WireframePack,
+  WireframePackIndex,
+  WireframePackMeta,
+} from "./ui-wireframe-pack.js";
+import type {
+  ReminderAuthoringTurnRequest,
+  ReminderAuthoringTurnResult,
+  ReminderComposerMode,
+  ReminderMilestoneCompleteInput,
+  ReminderReorderInput,
+  ReminderTimelineDocument,
+} from "./reminder-graph.js";
+import type { LabLaunchProfile, LabStateDocument } from "./product-lab.js";
+import type {
+  AnswerFirstPrinciplesRequest,
+  FirstPrinciplesFeatureWriteResult,
+  FirstPrinciplesSession,
+  ResolveFirstPrinciplesConflictRequest,
+  StartFirstPrinciplesRequest,
+  ThesisIndex,
+  WriteFirstPrinciplesFeatureRequest,
+} from "./first-principles.js";
 import type { AgentHarnessConfig } from "./agent-harness-config.js";
 import type {
   AgentMemoryDocument,
@@ -154,7 +223,14 @@ export interface ProjectOSApi {
   ): Promise<import("./workspace-git.js").WorkspaceGitBranchList>;
   listWorkspaceGitCommits(
     projectId: string,
-    input?: { limit?: number; tips?: string[] },
+    input?: {
+      limit?: number;
+      tips?: string[];
+      sinceDays?: number;
+      range?: { base: string; head: string };
+      sinceForkBase?: string;
+      firstParentOnly?: boolean;
+    },
   ): Promise<import("./workspace-git.js").WorkspaceGitCommitList>;
   getWorkspaceGitCommit(
     projectId: string,
@@ -454,6 +530,26 @@ export interface ProjectOSApi {
   setAgentRunAcceptance(
     request: import("./agent-pool-trace.js").SetAgentRunAcceptanceRequest,
   ): Promise<import("./agent-pool-trace.js").AgentRunIndexEntry>;
+  listWorkforceAgents(
+    request: import("./agent-workforce.js").ListWorkforceAgentsRequest,
+  ): Promise<import("./agent-workforce.js").ListWorkforceAgentsResult>;
+  draftWorkforceAgent(
+    request: import("./agent-workforce.js").DraftWorkforceAgentRequest,
+  ): Promise<import("./agent-workforce.js").DraftWorkforceAgentResult>;
+  /** Marketplace Installed compose: local ± catalog assembly proposal (no disk writes). */
+  assembleWorkforceAgent(
+    request: import("./agent-assembly.js").AssembleWorkforceAgentRequest,
+  ): Promise<import("./agent-assembly.js").AssembleWorkforceAgentResult>;
+  createWorkforceAgent(
+    request: import("./agent-workforce.js").CreateWorkforceAgentRequest,
+  ): Promise<import("./agent-pool-trace.js").AgentDefinition>;
+  updateWorkforceAgent(
+    request: import("./agent-workforce.js").UpdateWorkforceAgentRequest,
+  ): Promise<import("./agent-pool-trace.js").AgentDefinition>;
+  getWorkforceAgent(
+    projectId: string,
+    definitionId: string,
+  ): Promise<import("./agent-pool-trace.js").AgentDefinition>;
   streamAgentRun(
     runId: string,
     cb: (event: AgentRunEvent) => void,
@@ -551,7 +647,124 @@ export interface ProjectOSApi {
     projectId: string,
     input: { listingId: string; note?: string },
   ): Promise<ProjectOSSettings>;
-  /** Install an MCP or skill from a GitHub / git URL (deterministic; may suggest agent fallback). */
+  listRulesCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<RulesCatalogView>;
+  refreshRulesCatalog(projectId: string): Promise<RulesCatalogView>;
+  installRulesFromCatalog(
+    projectId: string,
+    input: InstallRulesFromCatalogInput,
+  ): Promise<{ packId: string; relativeRoot: string }>;
+  uninstallRulesFromCatalog(
+    projectId: string,
+    input: UninstallRulesFromCatalogInput,
+  ): Promise<void>;
+  disableRulesCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings>;
+  reportRulesCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings>;
+  listInstalledRulesPackIds(projectId: string): Promise<string[]>;
+  listAgentCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<AgentCatalogView>;
+  refreshAgentCatalog(projectId: string): Promise<AgentCatalogView>;
+  installAgentFromCatalog(
+    projectId: string,
+    input: InstallAgentFromCatalogInput,
+  ): Promise<AgentDefinition>;
+  uninstallAgentFromCatalog(
+    projectId: string,
+    input: UninstallAgentFromCatalogInput,
+  ): Promise<void>;
+  disableAgentCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings>;
+  reportAgentCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings>;
+  listInstalledMarketplaceAgentListingIds(projectId: string): Promise<string[]>;
+  exportCapabilityPack(
+    projectId: string,
+    input: ExportCapabilityPackInput,
+  ): Promise<ExportCapabilityPackResult>;
+  installAgentFromExportPack(
+    projectId: string,
+    input: InstallAgentFromExportPackInput,
+  ): Promise<AgentDefinition>;
+  installRulesFromExportPack(
+    projectId: string,
+    input: import("./agent-marketplace.js").InstallRulesFromExportPackInput,
+  ): Promise<{ packId: string; relativeRoot: string }>;
+  listWorkflowCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<WorkflowCatalogView>;
+  refreshWorkflowCatalog(projectId: string): Promise<WorkflowCatalogView>;
+  installWorkflowFromCatalog(
+    projectId: string,
+    input: InstallWorkflowFromCatalogInput,
+  ): Promise<LoopGraphPreset>;
+  uninstallWorkflowFromCatalog(
+    projectId: string,
+    input: UninstallWorkflowFromCatalogInput,
+  ): Promise<void>;
+  disableWorkflowCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings>;
+  reportWorkflowCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings>;
+  listInstalledWorkflowListingIds(projectId: string): Promise<string[]>;
+  listLoopGraphPresets(projectId: string): Promise<{
+    builtins: LoopGraphPreset[];
+    user: LoopGraphPreset[];
+  }>;
+  resolveLoopGraphPreset(
+    projectId: string,
+    presetId: string,
+  ): Promise<LoopGraphPreset | null>;
+  installWorkflowFromExportPack(
+    projectId: string,
+    input: InstallWorkflowFromExportPackInput,
+  ): Promise<LoopGraphPreset>;
+  listStencilCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<StencilCatalogView>;
+  refreshStencilCatalog(projectId: string): Promise<StencilCatalogView>;
+  installStencilFromCatalog(
+    projectId: string,
+    input: InstallStencilFromCatalogInput,
+  ): Promise<StencilDefinition[]>;
+  uninstallStencilFromCatalog(
+    projectId: string,
+    input: UninstallStencilFromCatalogInput,
+  ): Promise<void>;
+  disableStencilCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings>;
+  reportStencilCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings>;
+  listInstalledStencilListingIds(projectId: string): Promise<string[]>;
+  listMergedStencilDefinitions(projectId: string): Promise<StencilDefinition[]>;
+  installStencilFromExportPack(
+    projectId: string,
+    input: InstallStencilFromExportPackInput,
+  ): Promise<StencilDefinition[]>;
+  /** Install MCP / Skill / Rules / Agent / Workflow / Stencil from a GitHub or pack JSON URL. */
   installFromGitUrl(
     projectId: string,
     input: InstallFromGitUrlInput,
@@ -754,5 +967,123 @@ export interface ProjectOSApi {
     loopId: string,
     mode: import("./loop-graph.js").LoopComposerMode,
   ): Promise<LoopGraphDocument>;
+  ensureDiagramDesignSkill(projectId: string): Promise<EnsureDiagramDesignSkillResult>;
+  getDiagramSkillPackStatus(projectId: string): Promise<DiagramSkillPackStatus>;
+  getDiagramIndex(projectId: string): Promise<DiagramIndex>;
+  listDiagrams(projectId: string): Promise<DiagramArtifactMeta[]>;
+  getDiagram(projectId: string, diagramId: string): Promise<DiagramArtifact | null>;
+  deleteDiagram(projectId: string, diagramId: string): Promise<boolean>;
+  updateDiagramNotes(
+    projectId: string,
+    diagramId: string,
+    input: UpdateDiagramNotesInput,
+  ): Promise<DiagramNotesDocument>;
+  chooseDiagramStyle(
+    projectId: string,
+    input: ChooseDiagramStyleInput,
+  ): Promise<DiagramIndex>;
+  generateDiagram(
+    projectId: string,
+    input: GenerateDiagramInput,
+  ): Promise<DiagramArtifact>;
+  listWireframePacks(projectId: string): Promise<WireframePackMeta[]>;
+  getWireframePackIndex(projectId: string): Promise<WireframePackIndex>;
+  getWireframePack(
+    projectId: string,
+    packId: string,
+    version?: number,
+  ): Promise<WireframePack | null>;
+  generateWireframePack(
+    projectId: string,
+    input: GenerateWireframePackInput,
+  ): Promise<WireframePack>;
+  updateWireframePackDraft(
+    projectId: string,
+    packId: string,
+    input: UpdateWireframePackDraftInput,
+  ): Promise<WireframePack>;
+  deleteWireframeScreen(
+    projectId: string,
+    packId: string,
+    screenId: string,
+  ): Promise<WireframePack>;
+  freezeWireframePack(
+    projectId: string,
+    packId: string,
+    input?: FreezeWireframePackInput,
+  ): Promise<WireframePack>;
+  buildImplementAgainstPackBrief(
+    projectId: string,
+    packId: string,
+    input?: BuildImplementAgainstPackInput,
+  ): Promise<ImplementAgainstPackBrief>;
+  listWireframeGaps(projectId: string, packId: string): Promise<WireframeGap[]>;
+  upsertWireframeGap(
+    projectId: string,
+    packId: string,
+    input: UpsertWireframeGapInput,
+  ): Promise<WireframeGap>;
+  scanWireframeStructGaps(
+    projectId: string,
+    packId: string,
+    input?: import("./ui-wireframe-pack.js").ScanWireframeStructGapsInput,
+  ): Promise<WireframeGap[]>;
+  bindWireframePackFeature(
+    projectId: string,
+    packId: string,
+    featureId: string,
+  ): Promise<WireframePack>;
+  markWireframePackRealized(
+    projectId: string,
+    packId: string,
+  ): Promise<WireframePack>;
+  deleteWireframePack(projectId: string, packId: string): Promise<boolean>;
+  getLabState(projectId: string): Promise<LabStateDocument>;
+  upsertLabState(
+    projectId: string,
+    document: LabStateDocument,
+  ): Promise<LabStateDocument>;
+  getLabLaunchProfile(projectId: string): Promise<LabLaunchProfile>;
+  listTheses(projectId: string): Promise<ThesisIndex>;
+  getThesisSession(
+    projectId: string,
+    sessionId: string,
+  ): Promise<FirstPrinciplesSession | null>;
+  upsertThesisSession(
+    projectId: string,
+    session: FirstPrinciplesSession,
+  ): Promise<FirstPrinciplesSession>;
+  startFirstPrinciplesSession(
+    request: StartFirstPrinciplesRequest,
+  ): Promise<FirstPrinciplesSession>;
+  answerFirstPrinciplesTurn(
+    request: AnswerFirstPrinciplesRequest,
+  ): Promise<FirstPrinciplesSession>;
+  resolveFirstPrinciplesConflict(
+    request: ResolveFirstPrinciplesConflictRequest,
+  ): Promise<FirstPrinciplesSession>;
+  writeFirstPrinciplesPlannedFeature(
+    request: WriteFirstPrinciplesFeatureRequest,
+  ): Promise<FirstPrinciplesFeatureWriteResult>;
+  getReminderTimeline(projectId: string): Promise<ReminderTimelineDocument>;
+  syncReminderTimeline(projectId: string): Promise<ReminderTimelineDocument>;
+  reorderReminderItem(
+    projectId: string,
+    input: ReminderReorderInput,
+  ): Promise<ReminderTimelineDocument>;
+  acceptReminderEditOffer(projectId: string): Promise<ReminderTimelineDocument>;
+  dismissReminderEditOffer(projectId: string): Promise<ReminderTimelineDocument>;
+  setReminderMilestoneStatus(
+    projectId: string,
+    input: ReminderMilestoneCompleteInput,
+  ): Promise<ReminderTimelineDocument>;
+  sendReminderAuthoringTurn(
+    projectId: string,
+    request: ReminderAuthoringTurnRequest,
+  ): Promise<ReminderAuthoringTurnResult>;
+  setReminderComposerMode(
+    projectId: string,
+    mode: ReminderComposerMode,
+  ): Promise<ReminderTimelineDocument>;
   transcribeAudio(request: TranscribeAudioRequest): Promise<TranscribeAudioResult>;
 }

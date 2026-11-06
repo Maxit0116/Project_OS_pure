@@ -130,6 +130,13 @@ export class McpCatalogClient {
       if (cached && this.isFresh(cached.fetchedAt)) {
         return cached.view;
       }
+      if (cached) {
+        // Stale-while-revalidate: serve immediately and warm disk cache in background.
+        void this.fetchRemote(catalogUrl).catch(() => undefined);
+        return cached.view;
+      }
+      // Cold start: serve bundled immediately. Callers may forceRefresh in background.
+      return this.loadBundled();
     }
 
     try {

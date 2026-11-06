@@ -15,6 +15,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useWorkbenchStore } from '../../state/workbenchStore'
+import { useProductLabStore } from '../../state/productLabStore'
 import { useI18n } from '../../i18n'
 import { useFunctionMap } from './FunctionMapContext'
 import FeatureNode, { isPurposeFirstArchitectureLevel } from './FeatureNode'
@@ -994,6 +995,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   const flashKey = useWorkbenchStore((s) => s.flashKey)
   const executionOverlay = useWorkbenchStore((s) => s.executionOverlay)
   const liveGraphFocusTaskId = useWorkbenchStore((s) => s.liveGraphFocusTaskId)
+  const labNodeFindingCounts = useProductLabStore((s) => s.nodeFindingCounts)
   const durableGraph = useWorkbenchStore((s) => s.graph)
   const liveFocusNodeIds = useMemo(
     () =>
@@ -1964,6 +1966,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
           focusOpacity,
           flash: n.id === selectedNodeId ? flashKey : 0,
           liveSummary: summarizeNodeLiveActivity(executionOverlay, n.id),
+          labFindingCount: labNodeFindingCounts[n.id] ?? 0,
         },
       }}),
       ...artifactFlowNodes,
@@ -1972,6 +1975,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       workGroupFlowNodes,
       layerBandFlowNodes,
       c4BoundaryFlowNodes,
+      labNodeFindingCounts,
       useC4Visuals,
       c4NodeById,
       displayFeatureNodes,

@@ -92,6 +92,18 @@ const listings = [
     transport: "http",
     url: "http://127.0.0.1:6006/mcp",
   },
+  {
+    id: "community.elu",
+    name: "ELU Product Intelligence",
+    description:
+      "ELU Labs MCP (https://elu.dev/api/mcp) — investigate real-user findings, session evidence, and product friction from ELU. Requires an elu_live_ API key from ELU Settings → API & MCP. Community: review before enabling. Pair with Product Lab for local experience loops; ELU is optional cloud evidence.",
+    trustTier: "community",
+    version: "1.0.0",
+    homepage: "https://elu.dev/",
+    requiresAuth: true,
+    transport: "http",
+    url: "https://elu.dev/api/mcp",
+  },
 ];
 
 function writeBundledAssets({ body, signatureBase64, publicKeySpkiBase64 }) {

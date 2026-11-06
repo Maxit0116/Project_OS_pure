@@ -1,10 +1,15 @@
 import { z } from "zod";
 
 import { GithubPosIdSchema, GithubShaSchema } from "./github-domain.js";
+import {
+  GithubHistoryScopeSchema,
+  type GithubHistoryScope,
+  type GithubHistoryWindow,
+} from "./github-history-scope.js";
 
 /**
  * View layers for GitHub Graph (drill stack, not mutually exclusive data).
- * L0 partition → L1 feature-tree → L2 git-history.
+ * L0 partition → L1 feature-tree → L2 git-history (temporal swimlane).
  */
 export const GithubGraphActiveModeSchema = z.enum([
   "partition",
@@ -53,6 +58,8 @@ export const GithubGraphNavStateSchema = z
     partitionViewport: GithubGraphViewportSchema.optional(),
     featureTreeViewport: GithubGraphViewportSchema.optional(),
     gitHistoryViewport: GithubGraphViewportSchema.optional(),
+    /** Active L2 swimlane scope (set on double-click enter). */
+    historyScope: GithubHistoryScopeSchema.nullable().optional(),
   })
   .strict();
 export type GithubGraphNavState = z.infer<typeof GithubGraphNavStateSchema>;
@@ -69,6 +76,7 @@ export const DEFAULT_GITHUB_GRAPH_NAV: GithubGraphNavState = {
     ciChecks: false,
     fileBadges: false,
   },
+  historyScope: null,
 };
 
 export type GithubGraphNavAction =
@@ -84,6 +92,9 @@ export type GithubGraphNavAction =
       viewport: GithubGraphViewport;
     }
   | { type: "set-overlays"; overlays: Partial<GithubGraphOverlayFlags> }
+  | { type: "set-history-scope"; scope: GithubHistoryScope | null }
+  | { type: "set-history-window"; window: GithubHistoryWindow }
+  | { type: "toggle-history-first-parent" }
   | { type: "clear-stale-selection" };
 
 export function viewportForMode(
@@ -132,6 +143,26 @@ export function reduceGithubGraphNav(
         ...state,
         visibleOverlays: { ...state.visibleOverlays, ...action.overlays },
       };
+    case "set-history-scope":
+      return { ...state, historyScope: action.scope };
+    case "set-history-window":
+      if (!state.historyScope) return state;
+      return {
+        ...state,
+        historyScope: {
+          ...state.historyScope,
+          window: action.window,
+        },
+      };
+    case "toggle-history-first-parent":
+      if (!state.historyScope) return state;
+      return {
+        ...state,
+        historyScope: {
+          ...state.historyScope,
+          firstParentOnly: !state.historyScope.firstParentOnly,
+        },
+      };
     case "clear-stale-selection":
       return {
         ...state,
@@ -145,11 +176,17 @@ export function reduceGithubGraphNav(
   }
 }
 
-/** Parent layer for breadcrumb back (null at L0). */
+/**
+ * Parent layer for breadcrumb back (null at L0).
+ * When leaving git-history, prefer the scope's returnMode (partition vs feature-tree).
+ */
 export function parentGithubGraphMode(
   mode: GithubGraphActiveMode,
+  historyScope?: GithubHistoryScope | null,
 ): GithubGraphActiveMode | null {
-  if (mode === "git-history") return "feature-tree";
+  if (mode === "git-history") {
+    return historyScope?.returnMode ?? "feature-tree";
+  }
   if (mode === "feature-tree") return "partition";
   return null;
 }

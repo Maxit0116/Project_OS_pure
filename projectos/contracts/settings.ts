@@ -8,6 +8,10 @@ import {
   McpServerProvenanceSchema,
 } from "./mcp-catalog.js";
 import { SkillMarketplacePrefsSchema } from "./skill-marketplace.js";
+import { RulesMarketplacePrefsSchema } from "./rules-marketplace.js";
+import { AgentMarketplacePrefsSchema } from "./agent-marketplace.js";
+import { WorkflowMarketplacePrefsSchema } from "./workflow-marketplace.js";
+import { StencilMarketplacePrefsSchema } from "./stencil-marketplace.js";
 export const ExecutionModeSchema = z.enum([
   "auto",
   "fixture",
@@ -179,6 +183,10 @@ export const ProjectOSSettingsSchema = z
       .optional(),
     mcpMarketplace: McpMarketplacePrefsSchema.optional(),
     skillMarketplace: SkillMarketplacePrefsSchema.optional(),
+    rulesMarketplace: RulesMarketplacePrefsSchema.optional(),
+    agentMarketplace: AgentMarketplacePrefsSchema.optional(),
+    workflowMarketplace: WorkflowMarketplacePrefsSchema.optional(),
+    stencilMarketplace: StencilMarketplacePrefsSchema.optional(),
     verification: z.object({
       commands: z.array(ExecCommandSchema).max(10),
     }).strict().optional(),

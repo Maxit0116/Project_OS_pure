@@ -1,17 +1,21 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Box,
+  Brain,
   CircleCheck,
   ClipboardList,
   Code2,
+  Cpu,
   FlaskConical,
   GitBranch,
   GitFork,
   GitPullRequest,
   Merge,
   MessageSquareWarning,
+  Puzzle,
   Repeat,
   SearchCheck,
+  Server,
   ShieldCheck,
   Terminal,
   TextCursorInput,
@@ -40,6 +44,11 @@ export type LoopVisualKey =
   | 'human.approval'
   | 'human.review'
   | 'human.input'
+  | 'config.model'
+  | 'config.memory.project'
+  | 'config.memory.buffer'
+  | 'config.skill'
+  | 'config.mcp'
   | 'draft'
 
 export type LoopNodeVisual = {
@@ -149,6 +158,41 @@ const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
     shortLabel: 'Input',
     categoryClass: 'catHuman',
   },
+  'config.model': {
+    key: 'config.model',
+    category: 'config',
+    Icon: Cpu,
+    shortLabel: 'Model',
+    categoryClass: 'catConfig',
+  },
+  'config.memory.project': {
+    key: 'config.memory.project',
+    category: 'config',
+    Icon: Brain,
+    shortLabel: 'Memory',
+    categoryClass: 'catConfig',
+  },
+  'config.memory.buffer': {
+    key: 'config.memory.buffer',
+    category: 'config',
+    Icon: Brain,
+    shortLabel: 'Buffer',
+    categoryClass: 'catConfig',
+  },
+  'config.skill': {
+    key: 'config.skill',
+    category: 'config',
+    Icon: Puzzle,
+    shortLabel: 'Skill',
+    categoryClass: 'catConfig',
+  },
+  'config.mcp': {
+    key: 'config.mcp',
+    category: 'config',
+    Icon: Server,
+    shortLabel: 'MCP',
+    categoryClass: 'catConfig',
+  },
   draft: {
     key: 'draft',
     category: 'draft',
@@ -170,8 +214,21 @@ export function visualKeyFromArchitecture(node: {
   actionIntegration?: string
   actionOperation?: string
   logicKind?: string
+  satelliteKind?: string
+  configRef?: { memoryMode?: string }
   prompt?: string
 }): LoopVisualKey {
+  if (node.type === 'config') {
+    if (node.satelliteKind === 'model') return 'config.model'
+    if (node.satelliteKind === 'memory') {
+      return node.configRef?.memoryMode === 'buffer'
+        ? 'config.memory.buffer'
+        : 'config.memory.project'
+    }
+    if (node.satelliteKind === 'mcp') return 'config.mcp'
+    if (node.satelliteKind === 'skill') return 'config.skill'
+    return 'config.model'
+  }
   const integration = node.actionIntegration
   const operation = node.actionOperation
   if (integration === 'test') return 'action.test'
@@ -198,6 +255,9 @@ export function visualKeyFromArchitecture(node: {
 }
 
 export function visualForIntentNode(node: IntentGraphNode): LoopNodeVisual {
+  if (node.type === 'config') {
+    return VISUALS[visualKeyFromArchitecture(node)]
+  }
   const arch = withArchitectureDefaults(node)
   const incomplete = !node.prompt?.trim() && !node.type
   if (incomplete && !node.agentRole && !node.actionIntegration && !node.logicKind && !node.humanMode) {

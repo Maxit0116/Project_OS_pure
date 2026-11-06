@@ -1,7 +1,8 @@
 # Skills Marketplace Dev Plan
 
 **状态**：Implemented（2026-10-29）— SMP-0–3 基座 + Marketplace Overlay Skills tab 已落地。  
-**权威邻居**：[`MCP-Marketplace-Dev-Plan.md`](MCP-Marketplace-Dev-Plan.md)、[`MCP-Dev-Plan.md`](MCP-Dev-Plan.md)、Harness skills（`.projectos/skills/**/SKILL.md`）
+**演进**：Capability 六类市场与自创 Export 见 [`Capability-Marketplace-Dev-Plan.md`](Capability-Marketplace-Dev-Plan.md)（本文件仍是 Skill 目录安装的权威实现记录）。  
+**权威邻居**：[`Capability-Marketplace-Dev-Plan.md`](Capability-Marketplace-Dev-Plan.md)、[`MCP-Marketplace-Dev-Plan.md`](MCP-Marketplace-Dev-Plan.md)、[`MCP-Dev-Plan.md`](MCP-Dev-Plan.md)、Harness skills（`.projectos/skills/**/SKILL.md`）
 
 **合格线**：验签目录可列 → Install 写入 `.projectos/skills/<id>/SKILL.md` → `listSkills` 可见；默认不覆盖同 id；不自动切 Custom Mode；Hide/Report 本地生效。
 
@@ -20,7 +21,7 @@
 | SMP-1 | SkillCatalogClient |
 | SMP-2 | Install API / IPC / store |
 | SMP-3 | 安全单测 |
-| MKT-* | 中央悬浮窗（见 Marketplace Overlay 计划） |
+| MKT-* | 中央悬浮窗（已随 SMP 落地；演进见 Capability Marketplace） |
 
 ## 2. 明确不做
 

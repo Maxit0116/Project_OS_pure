@@ -18,6 +18,23 @@
   background: var(--tech-bg-muted);
 }
 
+.cardHighlighted {
+  border-color: color-mix(in srgb, var(--tech-accent) 55%, var(--tech-border));
+  box-shadow:
+    var(--tech-shadow-sm),
+    0 0 0 1px color-mix(in srgb, var(--tech-accent) 35%, transparent);
+  animation: marketplaceHighlight 1.2s var(--ease-out, ease) 1;
+}
+
+@keyframes marketplaceHighlight {
+  0% {
+    background: color-mix(in srgb, var(--tech-accent) 12%, var(--tech-bg-elevated));
+  }
+  100% {
+    background: var(--tech-bg-elevated);
+  }
+}
+
 .hit {
   appearance: none;
   display: flex;

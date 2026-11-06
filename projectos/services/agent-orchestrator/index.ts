@@ -118,6 +118,7 @@ import {
 } from "../create-file-content.js";
 import { childRunFailureCategory } from "./child-failure-category.js";
 import { assembleRunContext } from "../context-assembly.js";
+import { loadReminderCommitmentsMarkdown } from "../reminder-graph/index.js";
 import type { ContextAssembly } from "../../contracts/context-assembly.js";
 import {
   hashMemoryIndex,
@@ -230,6 +231,10 @@ export interface CreateOrchestratorRunOptions {
     sessionMarkdown: string;
     omissions: Array<{ reason: ContextAssemblyOmissionReason; count: number }>;
   };
+  /** Extra system instructions from a workforce AgentDefinition. */
+  workforceInstructions?: string;
+  /** Skill bodies bound to a workforce AgentDefinition. */
+  workforceSkillBodies?: Array<{ name: string; body: string }>;
 }
 
 export type GlobalPlanningContext = GlobalContextBundle;
@@ -893,13 +898,23 @@ export class AgentOrchestrator {
           path: selectedPath,
         })
       : null;
+    const baseSystemPrompt = [resolvedProfile.systemPrompt, options.workforceInstructions]
+      .filter((part) => typeof part === "string" && part.trim().length > 0)
+      .join("\n\n");
+    const reminderCommitments = loadReminderCommitmentsMarkdown(workspace.workspaceRoot);
     const assembled = assembleRunContext({
       harness: {
-        baseSystemPrompt: resolvedProfile.systemPrompt,
+        baseSystemPrompt,
         mode: harnessMode,
         rulesMarkdown,
         ...(walkMarkdown ? { walkMarkdown } : {}),
         ...(memoryInjection.markdown ? { memoryIndexMarkdown: memoryInjection.markdown } : {}),
+        ...(reminderCommitments
+          ? { reminderCommitmentsMarkdown: reminderCommitments }
+          : {}),
+        ...(options.workforceSkillBodies?.length
+          ? { skillBodies: options.workforceSkillBodies }
+          : {}),
         ...(modelDelta ? { modelDelta } : {}),
       },
       bundle: scopeBundle,

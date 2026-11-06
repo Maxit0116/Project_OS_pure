@@ -32,6 +32,8 @@ import {
   type GithubGraphActiveMode,
   type GithubGraphNavState,
   type GithubGraphNode,
+  type GithubHistoryScope,
+  type GithubHistoryWindow,
   type GithubRelation,
   type WorkspaceGitCheckRun,
   type WorkspaceGitCommit,
@@ -59,13 +61,19 @@ import {
   featureNodeId,
   layoutFeatureTreeProjection,
 } from './buildFeatureTreeProjection'
+import { buildGithubSwimlaneModel } from './buildGithubSwimlaneModel'
+import { commitsQueryFromScope } from './commitsQueryFromScope'
 import GithubGraphDetailPanel from './GithubGraphDetailPanel'
-import { layoutGithubCommitDag } from './layoutGithubCommitDag'
+import GithubHistorySwimlane from './GithubHistorySwimlane'
 import {
   resolveFeatureToHistoryFocus,
   resolveHistoryToFeatureFocus,
   type FocusResolution,
 } from './resolveGithubGraphFocus'
+import {
+  resolveDefaultRepoHistoryScope,
+  resolveGithubHistoryScope,
+} from './resolveGithubHistoryScope'
 import {
   buildGithubGraphRecoveryPrompt,
   classifyGithubGraphBlocker,
@@ -520,14 +528,24 @@ export default function GithubGraphOverlay() {
   const showingFeatureProjection = activeMode === 'feature-tree'
   const layout = showingFeatureProjection ? featureLayout : partitionLayout
   const treeModel = showingFeatureProjection ? featureProjection : model
-  // Defer DAG layout until history mode — partition open must stay cheap.
-  const historyLayout = useMemo(
-    () =>
-      activeMode === 'git-history' && domainModel
-        ? layoutGithubCommitDag(domainModel.commits)
-        : null,
-    [activeMode, domainModel],
-  )
+  const historyScope = nav.historyScope ?? null
+  const swimlaneModel = useMemo(() => {
+    if (activeMode !== 'git-history' || !domainModel || !historyScope) return null
+    return buildGithubSwimlaneModel({
+      scope: historyScope,
+      domainModel,
+      commits: modelInput?.commits ?? [],
+      truncated: modelInput?.commitsTruncated ?? false,
+      dirty: modelInput?.dirty ?? false,
+    })
+  }, [
+    activeMode,
+    domainModel,
+    historyScope,
+    modelInput?.commits,
+    modelInput?.commitsTruncated,
+    modelInput?.dirty,
+  ])
   const featureCount = domainModel?.features.length ?? 0
 
   function applyHistoryFocus(option: {
@@ -631,9 +649,94 @@ export default function GithubGraphOverlay() {
   }
 
   function goBackLayer() {
-    const parent = parentGithubGraphMode(activeMode)
+    const parent = parentGithubGraphMode(activeMode, historyScope)
     if (!parent) return
     switchMode(parent, { skipFocusResolve: parent === 'partition' })
+  }
+
+  function enterHistoryWithScope(scope: GithubHistoryScope) {
+    setFocusPicker(null)
+    setPopup(null)
+    setNav((current) => {
+      const withViewport = reduceGithubGraphNav(current, {
+        type: 'set-viewport',
+        mode: current.activeMode,
+        viewport,
+      })
+      let next = reduceGithubGraphNav(withViewport, {
+        type: 'set-history-scope',
+        scope,
+      })
+      if (scope.highlightFeatureId) {
+        next = reduceGithubGraphNav(next, {
+          type: 'focus-feature',
+          id: scope.highlightFeatureId,
+        })
+      }
+      if (scope.branchRefs[0]) {
+        next = reduceGithubGraphNav(next, {
+          type: 'focus-branch',
+          ref: scope.branchRefs[0],
+        })
+      }
+      next = reduceGithubGraphNav(next, {
+        type: 'set-mode',
+        mode: 'git-history',
+      })
+      const stored = viewportForMode(next, 'git-history')
+      if (stored) setViewport(stored)
+      else setViewport({ x: 32, y: 32, scale: 1 })
+      return next
+    })
+  }
+
+  function enterHistoryFromNode(node: GithubGraphNode) {
+    if (!domainModel) return
+    const returnMode =
+      activeMode === 'feature-tree' ? 'feature-tree' : 'partition'
+    if (node.kind === 'default') {
+      enterHistoryWithScope(
+        resolveDefaultRepoHistoryScope(domainModel, returnMode),
+      )
+      return
+    }
+    const worktreeBranch =
+      node.kind === 'worktree'
+        ? modelInput?.worktrees.find((wt) => wt.id === node.worktreeId)?.branch
+        : null
+    enterHistoryWithScope(
+      resolveGithubHistoryScope({
+        node,
+        model: domainModel,
+        returnMode,
+        worktreeBranch,
+        dirty: modelInput?.dirty,
+      }),
+    )
+  }
+
+  async function reloadHistoryCommits(scope: GithubHistoryScope) {
+    if (!client || !project || !modelInput) return
+    const query = commitsQueryFromScope(scope, modelInput.defaultBranch)
+    try {
+      const commits = await client.listWorkspaceGitCommits(
+        project.projectId,
+        query,
+      )
+      setModelInput((prev) =>
+        prev
+          ? {
+              ...prev,
+              commits: commits.commits,
+              commitsTruncated: commits.truncated,
+            }
+          : prev,
+      )
+    } catch {
+      setModelInput((prev) =>
+        prev ? { ...prev, commits: [], commitsTruncated: false } : prev,
+      )
+    }
   }
 
   useEffect(() => {
@@ -665,7 +768,7 @@ export default function GithubGraphOverlay() {
         )
         return
       }
-      if (parentGithubGraphMode(activeMode)) {
+      if (parentGithubGraphMode(activeMode, historyScope)) {
         goBackLayer()
         return
       }
@@ -683,6 +786,32 @@ export default function GithubGraphOverlay() {
     nav.focusedFeatureId,
     selectedId,
     activeMode,
+    historyScope,
+  ])
+
+  // Scoped commit fetch when entering / changing L2 swimlane scope.
+  useEffect(() => {
+    if (!open || activeMode !== 'git-history' || !historyScope) return
+    if (historyScope.emptyReason) {
+      setModelInput((prev) =>
+        prev ? { ...prev, commits: [], commitsTruncated: false } : prev,
+      )
+      return
+    }
+    void reloadHistoryCommits(historyScope)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch on scope identity / window / FP
+  }, [
+    open,
+    activeMode,
+    historyScope?.sourceId,
+    historyScope?.window.kind,
+    historyScope?.window.commitCap,
+    historyScope?.window.sinceDays,
+    historyScope?.firstParentOnly,
+    historyScope?.branchRefs.join('\0'),
+    historyScope?.prBaseRef,
+    historyScope?.prHeadRef,
+    historyScope?.emptyReason,
   ])
 
   useEffect(() => {
@@ -695,7 +824,9 @@ export default function GithubGraphOverlay() {
     let cancelled = false
     setCommitDetailLoading(true)
     void client
-      .getWorkspaceGitCommit(project.projectId, nav.selectedCommitSha)
+      .getWorkspaceGitCommit(project.projectId, nav.selectedCommitSha, {
+        includePatch: true,
+      })
       .then((detail) => {
         if (!cancelled) setCommitDetail(detail)
       })
@@ -925,31 +1056,47 @@ export default function GithubGraphOverlay() {
 
   function openFeatureInHistory(featureId: string) {
     if (!domainModel) return
-    setNav((current) =>
-      reduceGithubGraphNav(current, {
-        type: 'focus-feature',
-        id: featureId,
-      }),
-    )
-    const resolution = resolveFeatureToHistoryFocus(domainModel, featureId)
-    if (resolution.kind === 'none') {
-      setMessage(resolution.reason)
-      return
-    }
-    if (resolution.kind === 'many') {
-      setFocusPicker({ direction: 'to-history', options: resolution.options })
-      return
-    }
-    applyHistoryFocus(resolution)
-    switchMode('git-history', { skipFocusResolve: true })
+    const feature = domainModel.features.find((item) => item.id === featureId)
+    enterHistoryFromNode({
+      id: featureNodeId(featureId),
+      kind: 'feature',
+      name: feature?.title ?? featureId,
+      current: false,
+      remote: false,
+      pending: false,
+    })
   }
 
   function chooseFocusOption(
     option: FocusPickerState['options'][number],
   ) {
     if (focusPicker?.direction === 'to-history') {
-      applyHistoryFocus(option)
-      switchMode('git-history', { skipFocusResolve: true })
+      if (!domainModel) return
+      if (option.branchRef) {
+        enterHistoryFromNode({
+          id: `branch:${option.branchRef}`,
+          kind: 'branch',
+          name: option.branchRef,
+          current: false,
+          remote: false,
+          pending: false,
+        })
+      } else if (option.prNumber) {
+        const pr = domainModel.pullRequests.find(
+          (item) => item.number === option.prNumber,
+        )
+        enterHistoryFromNode({
+          id: `pr:${option.prNumber}`,
+          kind: 'pr',
+          name: pr?.title ?? `PR #${option.prNumber}`,
+          current: false,
+          remote: false,
+          pending: false,
+          prNumber: option.prNumber,
+        })
+      } else if (option.featureId) {
+        openFeatureInHistory(option.featureId)
+      }
     } else if (option.featureId) {
       setNav((current) =>
         reduceGithubGraphNav(current, {
@@ -965,16 +1112,7 @@ export default function GithubGraphOverlay() {
 
   const detailAnchor = useMemo(() => {
     if (popup) return null
-    if (activeMode === 'git-history' && nav.selectedCommitSha && historyLayout) {
-      const node = historyLayout.nodes.find(
-        (item) => item.sha === nav.selectedCommitSha,
-      )
-      if (!node) return null
-      return {
-        left: node.x + GITHUB_NODE_WIDTH + MENU_GAP,
-        top: node.y,
-      }
-    }
+    // Commit details dock inside GithubHistorySwimlane (L2); only feature popovers use anchors.
     if (
       (activeMode === 'feature-tree' || activeMode === 'partition') &&
       selectedFeature &&
@@ -989,16 +1127,11 @@ export default function GithubGraphOverlay() {
       }
     }
     return null
-  }, [
-    popup,
-    activeMode,
-    nav.selectedCommitSha,
-    historyLayout,
-    selectedFeature,
-    layout,
-  ])
+  }, [popup, activeMode, selectedFeature, layout])
 
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {
+    // L2 swimlane uses native list scroll — do not hijack wheel for pan/zoom.
+    if (activeMode === 'git-history') return
     event.preventDefault()
     const nextScale = Math.min(
       1.8,
@@ -1762,7 +1895,7 @@ export default function GithubGraphOverlay() {
           </div>
           <div className={styles.headerActions}>
             <nav className={styles.breadcrumb} aria-label={ts('chat.githubGraph.breadcrumbLabel')}>
-              {parentGithubGraphMode(activeMode) ? (
+              {parentGithubGraphMode(activeMode, historyScope) ? (
                 <button
                   type="button"
                   className={styles.backButton}
@@ -1822,7 +1955,26 @@ export default function GithubGraphOverlay() {
               <button
                 type="button"
                 className={styles.actionButton}
-                onClick={() => switchMode('git-history')}
+                onClick={() => {
+                  if (!domainModel) return
+                  if (nav.focusedFeatureId) {
+                    enterHistoryFromNode({
+                      id: featureNodeId(nav.focusedFeatureId),
+                      kind: 'feature',
+                      name:
+                        domainModel.features.find(
+                          (feature) => feature.id === nav.focusedFeatureId,
+                        )?.title ?? nav.focusedFeatureId,
+                      current: false,
+                      remote: false,
+                      pending: false,
+                    })
+                    return
+                  }
+                  enterHistoryWithScope(
+                    resolveDefaultRepoHistoryScope(domainModel, 'feature-tree'),
+                  )
+                }}
               >
                 {ts('chat.githubGraph.enterHistory')}
               </button>
@@ -1901,7 +2053,7 @@ export default function GithubGraphOverlay() {
 
         <div className={styles.stage}>
         <div
-          className={`${styles.canvas}${dragging ? ` ${styles.canvasDragging}` : ''}`}
+          className={`${styles.canvas}${activeMode === 'git-history' ? ` ${styles.canvasHistory}` : ''}${dragging ? ` ${styles.canvasDragging}` : ''}`}
           onWheel={onWheel}
           onContextMenu={(event) => {
             if (!(event.target as HTMLElement).closest('[data-github-node]')) {
@@ -1910,6 +2062,9 @@ export default function GithubGraphOverlay() {
             }
           }}
           onPointerDown={(event) => {
+            if (activeMode === 'git-history') {
+              return
+            }
             if ((event.target as HTMLElement).closest('[data-github-node]')) {
               return
             }
@@ -1984,7 +2139,7 @@ export default function GithubGraphOverlay() {
               </button>
             </div>
           ) : null}
-          {initialLoading && !layout && !historyLayout ? (
+          {initialLoading && !layout && !swimlaneModel ? (
             <p className={styles.empty}>{ts('chat.githubGraph.loading')}</p>
           ) : activeMode === 'feature-tree' && featureCount === 0 ? (
             <div className={styles.emptyState}>
@@ -2000,209 +2155,83 @@ export default function GithubGraphOverlay() {
               </button>
             </div>
           ) : activeMode === 'git-history' ? (
-            !historyLayout || historyLayout.nodes.length === 0 ? (
-              <p className={styles.empty}>{ts('chat.githubGraph.historyEmpty')}</p>
-            ) : (
-              <div
-                className={styles.world}
-                style={{
-                  width: historyLayout.width,
-                  height: historyLayout.height,
-                  transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
-                  ['--github-world-scale' as string]: String(viewport.scale),
-                }}
-              >
-                <svg
-                  className={styles.edges}
-                  width={historyLayout.width}
-                  height={historyLayout.height}
-                  aria-hidden
-                >
-                  {historyLayout.nodes.flatMap((node) => {
-                    const toX = node.x
-                    const toY = node.y + GITHUB_NODE_HEIGHT / 2
-                    return node.parentShas.map((parentSha) => {
-                      const parent = historyLayout.nodes.find(
-                        (item) => item.sha === parentSha,
-                      )
-                      if (!parent) return null
-                      const x1 = parent.x + GITHUB_NODE_WIDTH
-                      const y1 = parent.y + GITHUB_NODE_HEIGHT / 2
-                      const mid = (x1 + toX) / 2
-                      return (
-                        <path
-                          key={`ce-${node.sha}-${parentSha}`}
-                          className={styles.edge}
-                          d={`M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${toY}, ${toX} ${toY}`}
-                        />
-                      )
-                    })
-                  })}
-                </svg>
-                {historyLayout.nodes.map((node) => {
-                  const selected = nav.selectedCommitSha === node.sha
-                  return (
-                    <button
-                      key={node.sha}
-                      type="button"
-                      data-github-node=""
-                      data-kind="commit"
-                      className={`${styles.node}${selected ? ` ${styles.nodeSelected}` : ''}`}
-                      style={{ left: node.x, top: node.y }}
-                      onClick={() => {
-                        setCommitPopup(null)
-                        setNav((current) =>
-                          reduceGithubGraphNav(current, {
-                            type: 'select-commit',
-                            sha: node.sha,
-                          }),
-                        )
-                      }}
-                      onContextMenu={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        setNav((current) =>
-                          reduceGithubGraphNav(current, {
-                            type: 'select-commit',
-                            sha: node.sha,
-                          }),
-                        )
-                        setCommitPopup({ sha: node.sha, mode: 'menu' })
-                      }}
-                      title={node.message}
-                    >
-                      <div className={styles.nodeTop}>
-                        <span className={styles.kindMark}>
-                          <GitCommitHorizontal size={12} strokeWidth={2} aria-hidden />
-                        </span>
-                        <span className={styles.nodeTitle}>
-                          {node.sha.slice(0, 7)}
-                        </span>
-                      </div>
-                      <div className={styles.nodeMeta}>
-                        <span className={styles.metaBadge}>
-                          {ts('chat.githubGraph.kindCommit')}
-                        </span>
-                        <span className={styles.metaBadge}>
-                          {node.message.slice(0, 28)}
-                          {node.message.length > 28 ? '…' : ''}
-                        </span>
-                      </div>
-                    </button>
-                  )
-                })}
-                {modelInput?.commitsTruncated ? (
-                  <div className={styles.historyCapNote}>
-                    {ts('chat.githubGraph.historyTruncated').replace(
-                      '{n}',
-                      String(GITHUB_HISTORY_COMMIT_CAP),
-                    )}
-                  </div>
-                ) : null}
-                {detailAnchor && nav.selectedCommitSha && !commitPopup ? (
-                  <GithubGraphDetailPanel
-                    kind="commit"
-                    commitDetail={commitDetail}
-                    checkRuns={checkRuns}
-                    loading={commitDetailLoading}
-                    style={{
-                      left: detailAnchor.left,
-                      top: detailAnchor.top,
-                    }}
-                    onSafeRevert={() =>
-                      setCommitPopup({
-                        sha: nav.selectedCommitSha!,
-                        mode: 'confirm-revert',
-                      })
-                    }
-                    onClose={() =>
-                      setNav((current) =>
-                        reduceGithubGraphNav(current, {
-                          type: 'select-commit',
-                          sha: null,
-                        }),
-                      )
-                    }
-                  />
-                ) : null}
-                {commitPopup ? (
-                  <div
-                    data-node-popup=""
-                    className={
-                      commitPopup.mode === 'menu'
-                        ? styles.contextMenu
-                        : styles.createPopover
-                    }
-                    style={{
-                      left:
-                        (historyLayout.nodes.find(
-                          (item) => item.sha === commitPopup.sha,
-                        )?.x ?? 0) +
-                        GITHUB_NODE_WIDTH +
-                        MENU_GAP,
-                      top:
-                        historyLayout.nodes.find(
-                          (item) => item.sha === commitPopup.sha,
-                        )?.y ?? 0,
-                    }}
-                    role={commitPopup.mode === 'menu' ? 'menu' : 'dialog'}
-                    onPointerDown={(event) => event.stopPropagation()}
-                  >
-                    {commitPopup.mode === 'menu' ? (
-                      <button
-                        type="button"
-                        className={styles.contextItem}
-                        role="menuitem"
-                        disabled={mutating}
-                        onClick={() =>
+            historyScope && swimlaneModel ? (
+              <>
+                <GithubHistorySwimlane
+                  scope={historyScope}
+                  model={swimlaneModel}
+                  selectedSha={nav.selectedCommitSha ?? null}
+                  onSelectSha={(sha) => {
+                    setCommitPopup(null)
+                    setNav((current) =>
+                      reduceGithubGraphNav(current, {
+                        type: 'select-commit',
+                        sha,
+                      }),
+                    )
+                  }}
+                  onWindowChange={(window: GithubHistoryWindow) => {
+                    setNav((current) =>
+                      reduceGithubGraphNav(current, {
+                        type: 'set-history-window',
+                        window,
+                      }),
+                    )
+                  }}
+                  onToggleFirstParent={() => {
+                    setNav((current) =>
+                      reduceGithubGraphNav(current, {
+                        type: 'toggle-history-first-parent',
+                      }),
+                    )
+                  }}
+                  onBack={goBackLayer}
+                  commitDetail={commitDetail}
+                  checkRuns={checkRuns}
+                  detailLoading={commitDetailLoading}
+                  onSafeRevert={
+                    nav.selectedCommitSha
+                      ? () =>
                           setCommitPopup({
-                            sha: commitPopup.sha,
+                            sha: nav.selectedCommitSha!,
                             mode: 'confirm-revert',
                           })
-                        }
+                      : undefined
+                  }
+                />
+                {commitPopup?.mode === 'confirm-revert' ? (
+                  <div className={styles.createPopover} style={{ left: 24, top: 72 }}>
+                    <div className={styles.createPopoverTitle}>
+                      {ts('chat.githubGraph.menuSafeRevert')}
+                    </div>
+                    <p className={styles.confirmCopy}>
+                      {ts('chat.githubGraph.safeRevertConfirm').replace(
+                        '{sha}',
+                        commitPopup.sha.slice(0, 12),
+                      )}
+                    </p>
+                    <div className={styles.createPopoverActions}>
+                      <button
+                        type="button"
+                        className={styles.actionButton}
+                        onClick={() => setCommitPopup(null)}
                       >
-                        {ts('chat.githubGraph.menuSafeRevert')}
+                        {ts('chat.githubGraph.menuBack')}
                       </button>
-                    ) : (
-                      <>
-                        <div className={styles.createPopoverTitle}>
-                          {ts('chat.githubGraph.menuSafeRevert')}
-                        </div>
-                        <p className={styles.confirmCopy}>
-                          {ts('chat.githubGraph.safeRevertConfirm').replace(
-                            '{sha}',
-                            commitPopup.sha.slice(0, 12),
-                          )}
-                        </p>
-                        <div className={styles.createPopoverActions}>
-                          <button
-                            type="button"
-                            className={styles.actionButton}
-                            onClick={() =>
-                              setCommitPopup({
-                                sha: commitPopup.sha,
-                                mode: 'menu',
-                              })
-                            }
-                          >
-                            {ts('chat.githubGraph.menuBack')}
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
-                            disabled={mutating}
-                            onClick={() =>
-                              void safeRevertCommit(commitPopup.sha)
-                            }
-                          >
-                            {ts('chat.githubGraph.confirmSafeRevert')}
-                          </button>
-                        </div>
-                      </>
-                    )}
+                      <button
+                        type="button"
+                        className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                        disabled={mutating}
+                        onClick={() => void safeRevertCommit(commitPopup.sha)}
+                      >
+                        {ts('chat.githubGraph.confirmSafeRevert')}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
-              </div>
+              </>
+            ) : (
+              <p className={styles.empty}>{ts('chat.githubGraph.historyEmpty')}</p>
             )
           ) : !layout || layout.nodes.length === 0 ? (
             <p className={styles.empty}>{ts('chat.githubGraph.empty')}</p>
@@ -2271,25 +2300,18 @@ export default function GithubGraphOverlay() {
                       }
                     }}
                     onContextMenu={(event) => openNodeContextMenu(event, node)}
-                    onDoubleClick={() => {
-                      if (featureId) {
-                        if (
-                          nav.expandedFeatureIds.includes(featureId) ||
-                          (domainModel?.features.some(
-                            (feature) => feature.parentFeatureId === featureId,
-                          ) ?? false)
-                        ) {
-                          setNav((current) =>
-                            reduceGithubGraphNav(current, {
-                              type: 'toggle-feature-expanded',
-                              id: featureId,
-                            }),
-                          )
-                        }
-                        return
-                      }
-                      if (node.kind === 'branch' || node.kind === 'default') {
-                        void checkoutSelected(node)
+                    onDoubleClick={(event) => {
+                      event.preventDefault()
+                      // Temporal Swimlane: double-click opens scoped L2 history.
+                      if (
+                        node.kind === 'branch' ||
+                        node.kind === 'default' ||
+                        node.kind === 'group' ||
+                        node.kind === 'pr' ||
+                        node.kind === 'worktree' ||
+                        node.kind === 'feature'
+                      ) {
+                        enterHistoryFromNode(node)
                       }
                     }}
                     disabled={Boolean(node.pending)}
@@ -2384,15 +2406,19 @@ export default function GithubGraphOverlay() {
                           {ts('chat.githubGraph.enterFeatures')}
                         </button>
                       ) : null}
-                      {popupNode.kind === 'feature' ? (
+                      {popupNode.kind === 'feature' ||
+                      popupNode.kind === 'branch' ||
+                      popupNode.kind === 'default' ||
+                      popupNode.kind === 'group' ||
+                      popupNode.kind === 'pr' ||
+                      popupNode.kind === 'worktree' ? (
                         <button
                           type="button"
                           className={styles.contextItem}
                           role="menuitem"
                           onClick={() => {
-                            const id = parseFeatureId(popupNode.id)
                             setPopup(null)
-                            if (id) openFeatureInHistory(id)
+                            enterHistoryFromNode(popupNode)
                           }}
                         >
                           {ts('chat.githubGraph.openInHistory')}

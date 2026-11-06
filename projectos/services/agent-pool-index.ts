@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -11,6 +11,12 @@ import {
   type AgentRunAcceptance,
   type AgentRunIndexEntry,
 } from "../contracts/agent-pool-trace.js";
+import {
+  createWorkforceDefinitionId,
+  isWorkforceAgent,
+  WorkforceAgentDraftSchema,
+  type WorkforceAgentDraft,
+} from "../contracts/agent-workforce.js";
 import type { AgentRun } from "../contracts/agent-run.js";
 import type { AgentRunEvent } from "../contracts/events.js";
 import { writeDurableTextReplacing, createDurableFilePersistencePrimitives } from "../persistence/durable-file.js";
@@ -50,14 +56,14 @@ export function createPoolRunId(): string {
 
 export function upsertAgentDefinition(
   projectOSRoot: string,
-  definition: AgentDefinition,
+  definition: unknown,
 ): AgentDefinition {
-  if (!isSafeId(definition.definitionId)) {
+  const parsed = AgentDefinitionSchema.parse(definition);
+  if (!isSafeId(parsed.definitionId)) {
     throw new Error("invalid definitionId");
   }
   const dir = join(projectOSRoot, "agent-definitions");
   ensureDir(dir);
-  const parsed = AgentDefinitionSchema.parse(definition);
   writeDurableTextReplacing(
     agentDefinitionPath(projectOSRoot, parsed.definitionId),
     `${JSON.stringify(parsed, null, 2)}\n`,
@@ -78,6 +84,100 @@ export function readAgentDefinition(
   } catch {
     return null;
   }
+}
+
+export function listAgentDefinitions(
+  projectOSRoot: string,
+  options?: { kind?: "workforce" | "pool_lane" | "all" },
+): AgentDefinition[] {
+  const dir = join(projectOSRoot, "agent-definitions");
+  if (!existsSync(dir)) return [];
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const kindFilter = options?.kind ?? "all";
+  const out: AgentDefinition[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    const id = name.slice(0, -".json".length);
+    const def = readAgentDefinition(projectOSRoot, id);
+    if (!def) continue;
+    if (kindFilter === "workforce" && !isWorkforceAgent(def)) continue;
+    if (kindFilter === "pool_lane" && isWorkforceAgent(def)) continue;
+    out.push(def);
+  }
+  out.sort((a, b) => a.config.displayName.localeCompare(b.config.displayName));
+  return out;
+}
+
+export function listWorkforceAgents(projectOSRoot: string): AgentDefinition[] {
+  return listAgentDefinitions(projectOSRoot, { kind: "workforce" });
+}
+
+export function createWorkforceAgent(
+  projectOSRoot: string,
+  input: {
+    projectId?: string;
+    draft: WorkforceAgentDraft;
+  },
+): AgentDefinition {
+  const draft = WorkforceAgentDraftSchema.parse(input.draft);
+  const now = new Date().toISOString();
+  return upsertAgentDefinition(projectOSRoot, {
+    definitionId: createWorkforceDefinitionId(),
+    ...(input.projectId ? { projectId: input.projectId } : {}),
+    createdAt: now,
+    updatedAt: now,
+    config: {
+      kind: "workforce",
+      displayName: draft.displayName,
+      ...(draft.roleLabel ? { role: draft.roleLabel, roleLabel: draft.roleLabel } : {}),
+      instructions: draft.instructions,
+      modelProfileId: draft.modelProfileId ?? null,
+      skillIds: draft.skillIds,
+      mcpServerIds: draft.mcpServerIds,
+      ...(draft.permissionNotes ? { permissionNotes: draft.permissionNotes } : {}),
+    },
+  });
+}
+
+export function updateWorkforceAgent(
+  projectOSRoot: string,
+  input: {
+    definitionId: string;
+    draft: WorkforceAgentDraft;
+  },
+): AgentDefinition {
+  const existing = readAgentDefinition(projectOSRoot, input.definitionId);
+  if (!existing || !isWorkforceAgent(existing)) {
+    throw new Error("workforce agent not found");
+  }
+  const draft = WorkforceAgentDraftSchema.parse(input.draft);
+  const now = new Date().toISOString();
+  return upsertAgentDefinition(projectOSRoot, {
+    ...existing,
+    updatedAt: now,
+    config: {
+      ...existing.config,
+      kind: "workforce",
+      displayName: draft.displayName,
+      ...(draft.roleLabel
+        ? { role: draft.roleLabel, roleLabel: draft.roleLabel }
+        : { role: existing.config.role, roleLabel: existing.config.roleLabel }),
+      instructions: draft.instructions,
+      modelProfileId: draft.modelProfileId ?? null,
+      skillIds: draft.skillIds,
+      mcpServerIds: draft.mcpServerIds,
+      ...(draft.permissionNotes
+        ? { permissionNotes: draft.permissionNotes }
+        : existing.config.permissionNotes
+          ? { permissionNotes: existing.config.permissionNotes }
+          : {}),
+    },
+  });
 }
 
 export function writeAgentPoolRun(

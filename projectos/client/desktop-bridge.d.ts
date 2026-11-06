@@ -76,10 +76,10 @@ export interface ProjectOSBridge {
     showDiffReady(payload: {
       title: string
       body: string
-      destination: 'ask' | 'diff'
+      destination: 'ask' | 'diff' | 'reminder'
       runIds: string[]
     }): Promise<void>;
-    onActivated(listener: (payload: { destination: 'ask' | 'diff'; runIds: string[] }) => void): Disposable;
+    onActivated(listener: (payload: { destination: 'ask' | 'diff' | 'reminder'; runIds: string[] }) => void): Disposable;
   };
   keepAwake: {
     getStatus(): Promise<KeepAwakeStatus>;
@@ -190,21 +190,45 @@ export interface ProjectOSBridge {
      * Fire-and-forget; main forwards to non-overlay windows.
      */
     notifyGithubCardHost(payload: {
-      kind: 'toast' | 'askAgent' | 'refreshGithubGraph' | 'openGithubGraph'
+      kind:
+        | 'toast'
+        | 'askAgent'
+        | 'refreshGithubGraph'
+        | 'openGithubGraph'
+        | 'openFirstPrinciples'
+        | 'selectChatModel'
+        | 'setThinkingDepth'
+        | 'openSettings'
       type?: 'info' | 'success' | 'warning' | 'error'
       message?: string
       prompt?: string
       branch?: string | null
       prNumber?: number | null
+      chatSessionId?: string
+      firstPrinciplesSessionId?: string
+      profileId?: string
+      depth?: 'off' | 'low' | 'medium' | 'high'
     }): void;
     onGithubCardHost(
       listener: (payload: {
-        kind: 'toast' | 'askAgent' | 'refreshGithubGraph' | 'openGithubGraph'
+        kind:
+          | 'toast'
+          | 'askAgent'
+          | 'refreshGithubGraph'
+          | 'openGithubGraph'
+          | 'openFirstPrinciples'
+          | 'selectChatModel'
+          | 'setThinkingDepth'
+          | 'openSettings'
         type?: 'info' | 'success' | 'warning' | 'error'
         message?: string
         prompt?: string
         branch?: string | null
         prNumber?: number | null
+        chatSessionId?: string
+        firstPrinciplesSessionId?: string
+        profileId?: string
+        depth?: 'off' | 'low' | 'medium' | 'high'
       }) => void,
     ): Disposable;
     onBeginCapture(

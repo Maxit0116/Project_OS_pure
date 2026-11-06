@@ -9,15 +9,18 @@ import type {
   LoopActionIntegration,
   LoopAgentRole,
   LoopHumanMode,
+  LoopIntentNodeType,
   LoopLogicKind,
-  LoopNodeType,
+  LoopSatelliteKind,
 } from "./loop-node-architecture.js";
+import type { LoopConfigRef } from "./loop-graph.js";
 
 export const LoopPaletteCategorySchema = z.enum([
   "agent",
   "action",
   "logic",
   "human",
+  "config",
 ]);
 
 export const LoopPaletteItemSchema = z
@@ -31,7 +34,7 @@ export const LoopPaletteItemSchema = z
       .object({
         title: z.string().trim().min(1).max(120),
         prompt: z.string().trim().max(4000),
-        type: z.enum(["agent", "action", "logic", "human"]),
+        type: z.enum(["agent", "action", "logic", "human", "config"]),
         agentRole: z
           .enum([
             "planner",
@@ -54,6 +57,20 @@ export const LoopPaletteItemSchema = z
           .optional(),
         maxIterations: z.number().int().positive().max(50).optional(),
         repairMode: z.boolean().optional(),
+        satelliteKind: z
+          .enum(["model", "memory", "skill", "mcp", "rules", "pack"])
+          .optional(),
+        configRef: z
+          .object({
+            modelProfileId: z.string().min(1).max(120).optional(),
+            skillId: z.string().min(1).max(120).optional(),
+            mcpServerId: z.string().min(1).max(80).optional(),
+            memoryMode: z.enum(["project", "buffer", "none"]).optional(),
+            packId: z.string().min(1).max(120).optional(),
+            rulesId: z.string().min(1).max(120).optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
   })
@@ -84,7 +101,7 @@ function seedNode(
     title: seed.title,
     prompt: seed.prompt,
     position,
-    type: seed.type as LoopNodeType,
+    type: seed.type as LoopIntentNodeType,
     ...(seed.agentRole ? { agentRole: seed.agentRole as LoopAgentRole } : {}),
     ...(seed.humanMode ? { humanMode: seed.humanMode as LoopHumanMode } : {}),
     ...(seed.actionIntegration
@@ -96,6 +113,10 @@ function seedNode(
       ? { maxIterations: seed.maxIterations }
       : {}),
     ...(seed.repairMode ? { repairMode: true } : {}),
+    ...(seed.satelliteKind
+      ? { satelliteKind: seed.satelliteKind as LoopSatelliteKind }
+      : {}),
+    ...(seed.configRef ? { configRef: seed.configRef as LoopConfigRef } : {}),
   };
 }
 
@@ -271,6 +292,71 @@ export const LOOP_PALETTE_ITEMS: LoopPaletteItem[] = [
       prompt: "Collect the missing parameters needed to continue.",
       type: "human",
       humanMode: "input",
+    },
+  },
+  {
+    id: "config.model",
+    category: "config",
+    title: "Model",
+    description: "Chat model profile for an Agent (wire to Model*)",
+    seed: {
+      title: "Model",
+      prompt: "",
+      type: "config",
+      satelliteKind: "model",
+      configRef: {},
+    },
+  },
+  {
+    id: "config.memory.project",
+    category: "config",
+    title: "Memory · Project",
+    description: "Project memory mount for an Agent",
+    seed: {
+      title: "Memory · Project",
+      prompt: "",
+      type: "config",
+      satelliteKind: "memory",
+      configRef: { memoryMode: "project" },
+    },
+  },
+  {
+    id: "config.memory.buffer",
+    category: "config",
+    title: "Memory · Buffer",
+    description: "Short buffer memory mount for an Agent",
+    seed: {
+      title: "Memory · Buffer",
+      prompt: "",
+      type: "config",
+      satelliteKind: "memory",
+      configRef: { memoryMode: "buffer" },
+    },
+  },
+  {
+    id: "config.skill",
+    category: "config",
+    title: "Skill",
+    description: "Installed skill capability (wire to Capability)",
+    seed: {
+      title: "Skill",
+      prompt: "",
+      type: "config",
+      satelliteKind: "skill",
+      configRef: {},
+    },
+  },
+  {
+    id: "config.mcp",
+    category: "config",
+    title: "MCP",
+    description: "Installed MCP server capability (wire to Capability)",
+    seed: {
+      title: "MCP",
+      prompt: "",
+      type: "config",
+      satelliteKind: "mcp",
+      configRef: {},
     },
   },
 ].map((item) => LoopPaletteItemSchema.parse(item));

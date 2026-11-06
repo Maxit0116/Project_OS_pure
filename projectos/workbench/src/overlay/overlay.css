@@ -669,6 +669,23 @@
   overflow: visible;
 }
 
+.overlay-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.overlay-voice-error {
+  margin: 0 8px 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--tech-border, var(--color-border-subtle));
+  background: var(--tech-bg-muted, var(--color-bg-muted));
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+  font-size: var(--font-size-xs);
+}
+
 .overlay-send {
   appearance: none;
   display: inline-flex;
@@ -749,16 +766,16 @@
 }
 
 .overlay-mode-ask {
-  --mode-color: #8e8e93;
+  --mode-color: var(--chat-mode-ask, #3a9a58);
 }
 .overlay-mode-change {
-  --mode-color: #ececec;
+  --mode-color: var(--color-accent, #c4c4c8);
 }
 .overlay-mode-plan {
-  --mode-color: #bf5af2;
+  --mode-color: var(--chat-mode-plan, #c98518);
 }
 .overlay-mode-debug {
-  --mode-color: #ff9f0a;
+  --mode-color: var(--chat-mode-debug, #c94f47);
 }
 
 .overlay-dropdown {

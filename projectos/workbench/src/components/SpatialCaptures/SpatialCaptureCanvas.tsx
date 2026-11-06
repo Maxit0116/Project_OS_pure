@@ -1,20 +1,15 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
-  Bug,
-  ChevronDown,
   Eraser,
   LayoutTemplate,
-  ListTree,
-  MessageCircle,
   Minus,
   Pencil,
   Plus,
   Send,
-  SquarePen,
   Trash2,
   X,
 } from 'lucide-react'
+import type { AgentDefinition, AskSubMode } from '@contracts/index'
 import type { SpatialCaptureSession } from '@contracts/spatial-capture-session'
 import {
   createArrowStroke,
@@ -26,7 +21,6 @@ import {
   type PinComposerHubSubagentLink,
   type ScreenRect,
   type SpatialPin,
-  type SpatialPinMode,
 } from '@contracts/spatial-pin'
 import {
   ensureHub,
@@ -40,6 +34,7 @@ import {
 import type { RepoDesignSystemSnapshot } from '@contracts/repo-design-system'
 import {
   MAX_STENCILS_PER_REGION,
+  UI_STENCIL_CATALOG,
   type StencilGenerationScope,
 } from '@contracts/ui-stencil'
 import {
@@ -84,9 +79,18 @@ import {
   toEdgeAnchor,
 } from '../../overlay/regionAnchors'
 import { useI18n } from '../../i18n'
+import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useSpatialCaptureStore } from '../../state/spatialCaptureStore'
 import { syncComposeSubagentsToPool } from '../AgentFlow/AgentPool/syncComposeSubagents'
+import ComposerModeSwitch from '../ChatPanel/composer/ComposerModeSwitch'
+import ComposerModelThinkingMenu from '../ChatPanel/composer/ComposerModelThinkingMenu'
+import { useComposePromptVoice } from '../ChatPanel/composer/useComposePromptVoice'
+import {
+  VoiceInputDock,
+  VoiceInputErrorBanner,
+} from '../ChatPanel/VoiceInputControls'
+import { pinComposerModeFields } from '../../overlay/composerModeFields'
 import {
   CAPTURE_ZOOM_MAX,
   CAPTURE_ZOOM_MIN,
@@ -134,18 +138,6 @@ import styles from './SpatialCaptureOverlay.module.css'
 function randomId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`
 }
-
-const MODES: Array<{
-  id: SpatialPinMode
-  label: string
-  icon: LucideIcon
-  toneClass: string
-}> = [
-  { id: 'ask', label: 'Ask', icon: MessageCircle, toneClass: 'overlay-mode-ask' },
-  { id: 'change', label: 'Agent', icon: SquarePen, toneClass: 'overlay-mode-change' },
-  { id: 'plan', label: 'Plan', icon: ListTree, toneClass: 'overlay-mode-plan' },
-  { id: 'debug', label: 'Debug', icon: Bug, toneClass: 'overlay-mode-debug' },
-]
 
 type PointerMode =
   | { kind: 'idle' }
@@ -230,6 +222,16 @@ export default function SpatialCaptureCanvas({
 }) {
   const project = useWorkbenchStore((s) => s.project)
   const client = useWorkbenchStore((s) => s.client)
+  const locale = useWorkbenchStore((s) => s.locale)
+  const settings = useWorkbenchStore((s) => s.settings)
+  const selectedModelProfileId = useWorkbenchStore((s) => s.selectedModelProfileId)
+  const selectChatModel = useWorkbenchStore((s) => s.selectChatModel)
+  const setThinkingDepth = useWorkbenchStore((s) => s.setThinkingDepth)
+  const setSettingsOpen = useWorkbenchStore((s) => s.setSettingsOpen)
+  const mergedStencilDefinitions = useWorkbenchStore((s) => s.mergedStencilDefinitions)
+  const listMergedStencilDefinitions = useWorkbenchStore((s) => s.listMergedStencilDefinitions)
+  const exportCapabilityPack = useWorkbenchStore((s) => s.exportCapabilityPack)
+  const pushToast = useWorkbenchStore((s) => s.pushToast)
   const upsertActiveSession = useSpatialCaptureStore((s) => s.upsertActiveSession)
   const { ts } = useI18n()
 
@@ -245,7 +247,9 @@ export default function SpatialCaptureCanvas({
   })
   const [draftRect, setDraftRect] = useState<ScreenRect | null>(null)
   const [pointer, setPointer] = useState<PointerMode>({ kind: 'idle' })
-  const [openMenu, setOpenMenu] = useState<'mode' | null>(null)
+  const [workforceAgents, setWorkforceAgents] = useState<AgentDefinition[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(false)
+  const [agentsLoaded, setAgentsLoaded] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [libraryRevealed, setLibraryRevealed] = useState(false)
   const [libraryCollapseToken, setLibraryCollapseToken] = useState(0)
@@ -450,8 +454,46 @@ export default function SpatialCaptureCanvas({
       motionNone: ts('spatialCaptures.stencilMotionNone'),
       motionArmed: ts('spatialCaptures.stencilMotionArmed'),
       licenseNote: ts('spatialCaptures.stencilLicense'),
+      exportStencil: ts('spatialCaptures.exportStencil'),
+      exportStencilCopied: ts('spatialCaptures.exportStencilCopied'),
     }),
     [ts],
+  )
+
+  const stencilCatalog = useMemo(
+    () =>
+      mergedStencilDefinitions.length > 0
+        ? mergedStencilDefinitions
+        : [...UI_STENCIL_CATALOG],
+    [mergedStencilDefinitions],
+  )
+
+  useEffect(() => {
+    if (!libraryOpen) return
+    void listMergedStencilDefinitions()
+  }, [libraryOpen, listMergedStencilDefinitions])
+
+  const handleExportStencil = useCallback(
+    async (stencilId: string) => {
+      const pack = await exportCapabilityPack({
+        kind: 'stencil',
+        stencilIds: [stencilId],
+      })
+      if (!pack || pack.kind !== 'stencil') return
+      try {
+        await navigator.clipboard.writeText(pack.packJson)
+        pushToast({
+          type: 'success',
+          message: ts('spatialCaptures.exportStencilCopied'),
+        })
+      } catch {
+        pushToast({
+          type: 'error',
+          message: ts('chat.marketplace.loadFailed'),
+        })
+      }
+    },
+    [exportCapabilityPack, pushToast, ts],
   )
 
   useEffect(() => {
@@ -496,6 +538,7 @@ export default function SpatialCaptureCanvas({
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
   const regionsRef = useRef(regions)
   const focusedRegionIdsRef = useRef(focusedRegionIds)
+  const activeArrowIdRef = useRef(activeArrowId)
   /** Invalidate in-flight library→canvas pointer listeners (Esc / close). */
   const placeDragSessionRef = useRef(0)
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -503,6 +546,9 @@ export default function SpatialCaptureCanvas({
   const panRef = useRef({ x: 0, y: 0 })
   const fitScaleRef = useRef(1)
   const viewportRef = useRef(viewport)
+  const onSubmitArrowRef = useRef<(regionId: string, arrowId: string) => Promise<void>>(
+    async () => undefined,
+  )
   zoomRef.current = zoom
   panRef.current = pan
   fitScaleRef.current = fitScale
@@ -515,6 +561,55 @@ export default function SpatialCaptureCanvas({
   useEffect(() => {
     focusedRegionIdsRef.current = focusedRegionIds
   }, [focusedRegionIds])
+
+  useEffect(() => {
+    activeArrowIdRef.current = activeArrowId
+  }, [activeArrowId])
+
+  const setActiveArrowPrompt = useCallback((text: string) => {
+    const arrowId = activeArrowIdRef.current
+    if (!arrowId) return
+    setRegions((prev) =>
+      prev.map((region) => ({
+        ...region,
+        arrows: region.arrows.map((arrow) =>
+          arrow.id === arrowId ? { ...arrow, prompt: text } : arrow,
+        ),
+      })),
+    )
+  }, [])
+
+  const getActiveArrowPrompt = useCallback(() => {
+    const arrowId = activeArrowIdRef.current
+    if (!arrowId) return ''
+    for (const region of regionsRef.current) {
+      const arrow = region.arrows.find((item) => item.id === arrowId)
+      if (arrow) return arrow.prompt
+    }
+    return ''
+  }, [])
+
+  const composeVoice = useComposePromptVoice({
+    locale,
+    disabled: !activeArrowId,
+    getText: getActiveArrowPrompt,
+    setText: setActiveArrowPrompt,
+    onSubmit: (text) => {
+      const arrowId = activeArrowIdRef.current
+      if (!arrowId || !text.trim()) return
+      const region = regionsRef.current.find((item) =>
+        item.arrows.some((arrow) => arrow.id === arrowId),
+      )
+      if (!region) return
+      void onSubmitArrowRef.current(region.id, arrowId)
+    },
+  })
+
+  useEffect(() => {
+    composeVoice.syncBaseFromExternalText(getActiveArrowPrompt())
+    // Only re-base when the active arrow changes; typing is owned by voice/setText.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+  }, [activeArrowId])
 
   useEffect(() => {
     setRegions(
@@ -692,10 +787,6 @@ export default function SpatialCaptureCanvas({
       if (event.key !== 'Escape') return
       // Scope Map floater owns Escape while open (compose card must stay).
       if (document.querySelector('[data-scope-map-picker="true"]')) return
-      if (openMenu) {
-        setOpenMenu(null)
-        return
-      }
       if (placeDrag || libraryRevealed || libraryOpen) {
         exitStencilChrome()
         return
@@ -708,7 +799,32 @@ export default function SpatialCaptureCanvas({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onExit, openMenu, placeDrag, libraryOpen, libraryRevealed, activeArrowId])
+  }, [onExit, placeDrag, libraryOpen, libraryRevealed, activeArrowId])
+
+  const loadWorkforceAgents = useCallback(() => {
+    if (!client?.listWorkforceAgents || !project || agentsLoaded || agentsLoading) {
+      return
+    }
+    setAgentsLoading(true)
+    void client
+      .listWorkforceAgents({ projectId: project.projectId })
+      .then((result) => {
+        setWorkforceAgents(result.agents)
+        setAgentsLoaded(true)
+      })
+      .catch(() => {
+        setWorkforceAgents([])
+        setAgentsLoaded(true)
+      })
+      .finally(() => {
+        setAgentsLoading(false)
+      })
+  }, [client, project, agentsLoaded, agentsLoading])
+
+  useEffect(() => {
+    setAgentsLoaded(false)
+    setWorkforceAgents([])
+  }, [project?.projectId])
 
   function stagePoint(event: {
     clientX: number
@@ -842,7 +958,7 @@ export default function SpatialCaptureCanvas({
       updatedAt: new Date().toISOString(),
       captureRect: region.captureRect,
       composer: {
-        mode: region.mode,
+        ...pinComposerModeFields(region),
         prompt: arrow.prompt,
         ...(region.snapshotAssetPath
           ? { snapshotAssetPath: region.snapshotAssetPath }
@@ -1348,8 +1464,8 @@ export default function SpatialCaptureCanvas({
           ...pin,
           composer: {
             ...pin.composer,
+            ...pinComposerModeFields(region),
             prompt: trimmed,
-            mode: region.mode,
             ...(stencilBrief ? { stencilBrief, generationScope } : {}),
             hub,
           },
@@ -1378,23 +1494,60 @@ export default function SpatialCaptureCanvas({
             : a,
         ),
       }))
-      setStatus(result.runId ? 'Agent running…' : 'Submitted')
-      if (!result.runId) {
+      if (result.firstPrinciplesSessionId) {
+        setStatus('First Principles · opening Chat…')
         seedFlow(arrowId, {
           steps: [
             {
-              id: 'done',
-              label: result.planId
-                ? 'Plan ready'
-                : result.debugSessionId
-                  ? 'Debug started'
-                  : 'Answer ready',
+              id: 'fp',
+              label: 'First Principles started — continue in Chat',
               status: 'complete',
             },
           ],
           phase: 'done',
           live: false,
         })
+        useWorkbenchStore.setState({
+          rightPanelTab: 'chat',
+          rightPanelOpen: true,
+        })
+        await useChatSessionStore.getState().switchSession(result.chatSessionId)
+        try {
+          const fpSession = client.getThesisSession
+            ? await client.getThesisSession(
+                project.projectId,
+                result.firstPrinciplesSessionId,
+              )
+            : null
+          useWorkbenchStore.setState({
+            chatMode: 'ask',
+            askSubMode: 'first_principles',
+            pendingFirstPrinciples: fpSession,
+            firstPrinciplesSuggestDismissed: true,
+          })
+        } catch {
+          useWorkbenchStore.getState().setAskSubMode('first_principles')
+          useWorkbenchStore.getState().setChatMode('ask')
+        }
+      } else {
+        setStatus(result.runId ? 'Agent running…' : 'Submitted')
+        if (!result.runId) {
+          seedFlow(arrowId, {
+            steps: [
+              {
+                id: 'done',
+                label: result.planId
+                  ? 'Plan ready'
+                  : result.debugSessionId
+                    ? 'Debug started'
+                    : 'Answer ready',
+                status: 'complete',
+              },
+            ],
+            phase: 'done',
+            live: false,
+          })
+        }
       }
     } catch {
       updateRegion(regionId, (r) => ({
@@ -1411,6 +1564,8 @@ export default function SpatialCaptureCanvas({
       })
     }
   }
+
+  onSubmitArrowRef.current = onSubmitArrow
 
   function beginPan(event: React.PointerEvent) {
     setPointer({
@@ -1538,7 +1693,7 @@ export default function SpatialCaptureCanvas({
       const stroke: AnnotationStroke = {
         id: strokeId,
         kind: 'pen',
-        color: '#ececec',
+        color: '#c4c4c8',
         width: 2,
         points: [rel],
       }
@@ -2119,7 +2274,9 @@ export default function SpatialCaptureCanvas({
         collapseToken={libraryCollapseToken}
         draggingStencilId={placeDrag?.stencilId ?? null}
         repoDesignSystem={repoDesignSystem}
+        catalog={stencilCatalog}
         strings={stencilStrings}
+        onExportStencil={handleExportStencil}
         onRevealChange={setLibraryRevealed}
         onClose={() => {
           exitStencilChrome()
@@ -2405,9 +2562,6 @@ export default function SpatialCaptureCanvas({
               const focused = isRegionFocused(focusedRegionIds, region.id)
               const isActive = arrow.id === activeArrowId
               const layout = layoutArrowCompose(region, arrow)
-              const modeVisual =
-                MODES.find((item) => item.id === region.mode) ?? MODES[1]!
-              const ModeIcon = modeVisual.icon
               const hub = enrichHubForArrow(arrow.id, region)
               return (
                 <SpatialComposeHub
@@ -2499,7 +2653,9 @@ export default function SpatialCaptureCanvas({
                           value={arrow.prompt}
                           placeholder={
                             region.mode === 'ask'
-                              ? 'Ask about this callout…'
+                              ? region.askSubMode === 'first_principles'
+                                ? 'Describe a feature vision to reason from first principles…'
+                                : 'Ask about this callout…'
                               : region.mode === 'plan'
                                 ? 'Describe the plan for this callout…'
                                 : region.mode === 'debug'
@@ -2516,12 +2672,22 @@ export default function SpatialCaptureCanvas({
                                   : a,
                               ),
                             }))
+                            composeVoice.syncBaseFromExternalText(value)
                           }}
                           onFocus={() => {
                             setFocusedRegionIds([region.id])
                             setActiveArrowId(arrow.id)
                           }}
                           onKeyDown={(event) => {
+                            if (
+                              event.key === 'Escape' &&
+                              (composeVoice.voice.isRecording ||
+                                composeVoice.voice.isTranscribing)
+                            ) {
+                              event.preventDefault()
+                              composeVoice.cancelVoice()
+                              return
+                            }
                             if (
                               (event.metaKey || event.ctrlKey) &&
                               event.key === 'Enter'
@@ -2576,78 +2742,94 @@ export default function SpatialCaptureCanvas({
                           />
                         ) : null}
                       </div>
+                      {isActive && composeVoice.voice.state.error ? (
+                        <div className="overlay-voice-error">
+                          <VoiceInputErrorBanner
+                            errorKey={composeVoice.voice.state.error}
+                            onDismiss={composeVoice.voice.dismissError}
+                            labels={composeVoice.voiceLabels}
+                          />
+                        </div>
+                      ) : null}
                       <div className="overlay-composer-footer">
                         <div className="overlay-toolbar-left">
-                          <div className="overlay-menu-wrap">
-                            <button
-                              type="button"
-                              className={`overlay-chip overlay-chip-mode ${modeVisual.toneClass}`}
-                              aria-expanded={openMenu === 'mode' && isActive}
-                              aria-haspopup="listbox"
-                              onClick={() => {
-                                setActiveArrowId(arrow.id)
-                                setFocusedRegionIds([region.id])
-                                setOpenMenu((current) =>
-                                  current === 'mode' && isActive
-                                    ? null
-                                    : 'mode',
-                                )
-                              }}
-                            >
-                              <ModeIcon
-                                size={13}
-                                strokeWidth={2}
-                                aria-hidden
-                              />
-                              <span className="overlay-chip-label">
-                                {modeVisual.label}
-                              </span>
-                              <ChevronDown
-                                size={12}
-                                strokeWidth={2}
-                                className="overlay-chip-caret"
-                                aria-hidden
-                              />
-                            </button>
-                            {openMenu === 'mode' && isActive ? (
-                              <div
-                                className="overlay-dropdown overlay-dropdown-up"
-                                role="listbox"
-                              >
-                                {MODES.map((item) => {
-                                  const Icon = item.icon
-                                  const active = item.id === region.mode
-                                  return (
-                                    <button
-                                      key={item.id}
-                                      type="button"
-                                      role="option"
-                                      aria-selected={active}
-                                      className={`overlay-menu-item ${item.toneClass}${
-                                        active
-                                          ? ' overlay-menu-item-active'
-                                          : ''
-                                      }`}
-                                      onClick={() => {
-                                        updateRegion(region.id, {
-                                          mode: item.id,
-                                        })
-                                        setOpenMenu(null)
-                                      }}
-                                    >
-                                      <Icon
-                                        size={14}
-                                        strokeWidth={2}
-                                        className="overlay-menu-item-icon"
-                                        aria-hidden
-                                      />
-                                      {item.label}
-                                    </button>
-                                  )
-                                })}
-                              </div>
-                            ) : null}
-                          </div>
+                          <ComposerModeSwitch
+                            compact
+                            mode={region.mode}
+                            askSubMode={region.askSubMode ?? 'chat'}
+                            agentDefinitionId={region.agentDefinitionId ?? null}
+                            agentDisplayName={region.agentDisplayName ?? null}
+                            agents={workforceAgents}
+                            agentsLoading={agentsLoading}
+                            onAgentFlyoutOpen={loadWorkforceAgents}
+                            onModeChange={(next) => {
+                              setActiveArrowId(arrow.id)
+                              setFocusedRegionIds([region.id])
+                              if (next === 'anchored') return
+                              updateRegion(region.id, {
+                                mode: next,
+                                ...(next === 'ask'
+                                  ? {}
+                                  : {
+                                      askSubMode: undefined,
+                                      agentDefinitionId:
+                                        next === 'change'
+                                          ? region.agentDefinitionId
+                                          : null,
+                                      agentDisplayName:
+                                        next === 'change'
+                                          ? region.agentDisplayName
+                                          : null,
+                                    }),
+                              })
+                            }}
+                            onAskSubModeChange={(subMode: AskSubMode) => {
+                              setActiveArrowId(arrow.id)
+                              setFocusedRegionIds([region.id])
+                              updateRegion(region.id, {
+                                mode: 'ask',
+                                askSubMode: subMode,
+                                agentDefinitionId: null,
+                                agentDisplayName: null,
+                              })
+                            }}
+                            onSelectGeneralAgent={() => {
+                              setActiveArrowId(arrow.id)
+                              setFocusedRegionIds([region.id])
+                              updateRegion(region.id, {
+                                mode: 'change',
+                                askSubMode: undefined,
+                                agentDefinitionId: null,
+                                agentDisplayName: null,
+                              })
+                            }}
+                            onSelectAgent={(definitionId, displayName) => {
+                              setActiveArrowId(arrow.id)
+                              setFocusedRegionIds([region.id])
+                              updateRegion(region.id, {
+                                mode: 'change',
+                                askSubMode: undefined,
+                                agentDefinitionId: definitionId,
+                                agentDisplayName: displayName,
+                              })
+                            }}
+                          />
+                          <ComposerModelThinkingMenu
+                            compact
+                            modelProfiles={settings?.modelProfiles ?? []}
+                            selectedModelProfileId={selectedModelProfileId}
+                            thinkingDepth={
+                              settings?.execution.thinkingDepth ?? 'medium'
+                            }
+                            presentationMode={settings?.presentationMode ?? false}
+                            onSelectModel={(profileId) => {
+                              void selectChatModel(profileId)
+                            }}
+                            onSelectThinkingDepth={(depth) => {
+                              void setThinkingDepth(depth)
+                            }}
+                            onConfigureModels={() => setSettingsOpen(true)}
+                          />
                           <ResearchToggle
                             enabled={hub.researchEnabled}
                             onChange={(next) =>
@@ -2662,25 +2844,36 @@ export default function SpatialCaptureCanvas({
                             strings={composeHubStrings}
                           />
                         </div>
-                        <button
-                          type="button"
-                          className="overlay-send"
-                          disabled={
-                            arrow.status === 'submitting' ||
-                            !arrow.prompt.trim()
-                          }
-                          aria-label={
-                            arrow.status === 'submitting'
-                              ? 'Sending'
-                              : 'Submit'
-                          }
-                          title="Submit (⌘↵)"
-                          onClick={() =>
-                            void onSubmitArrow(region.id, arrow.id)
-                          }
-                        >
-                          <Send size={14} strokeWidth={2.25} aria-hidden />
-                        </button>
+                        <div className="overlay-toolbar-right">
+                          <VoiceInputDock
+                            {...composeVoice.dockProps}
+                            inline
+                            micDisabled={
+                              composeVoice.dockProps.micDisabled ||
+                              arrow.status === 'submitting' ||
+                              !isActive
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="overlay-send"
+                            disabled={
+                              arrow.status === 'submitting' ||
+                              !arrow.prompt.trim()
+                            }
+                            aria-label={
+                              arrow.status === 'submitting'
+                                ? 'Sending'
+                                : 'Submit'
+                            }
+                            title="Submit (⌘↵)"
+                            onClick={() =>
+                              void onSubmitArrow(region.id, arrow.id)
+                            }
+                          >
+                            <Send size={14} strokeWidth={2.25} aria-hidden />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

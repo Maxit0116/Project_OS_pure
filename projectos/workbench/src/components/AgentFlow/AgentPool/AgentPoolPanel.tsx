@@ -108,7 +108,12 @@ export default function AgentPoolPanel() {
   )
 
   const nowMs = useAgentPoolNow(tasks)
-  const poolOriginMs = tasks[0]?.originMs ?? Date.now()
+  const poolOriginMs = useMemo(() => {
+    const origins = tasks
+      .map((task) => task.originMs)
+      .filter((value): value is number => Number.isFinite(value))
+    return origins.length > 0 ? Math.min(...origins) : Date.now()
+  }, [tasks])
 
   const historyHydrationKey = useMemo(
     () =>
@@ -128,7 +133,6 @@ export default function AgentPoolPanel() {
         activeRunId: task.runId,
       })
     }
-    // Re-hydrate when lane identity / definition / active run changes — not on every span tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by historyHydrationKey
   }, [historyHydrationKey, hydrateTaskHistoryFromDisk])
 
@@ -154,50 +158,79 @@ export default function AgentPoolPanel() {
     )
   }
 
+  const isLive = summary.running > 0
+
   return (
     <div className={styles.panel} aria-label={ts('agentFlow.pool.title')}>
+      <div className={styles.header}>
+        <div className={styles.titleBlock}>
+          <h2 className={styles.title}>{ts('agentFlow.pool.title')}</h2>
+          {isLive ? (
+            <span className={styles.liveBadge} title={ts('agentFlow.pool.liveExecution')}>
+              <span className={styles.liveDot} aria-hidden />
+              {ts('agentFlow.pool.live')}
+            </span>
+          ) : null}
+        </div>
+      </div>
       <p className={styles.hint}>{ts('agentFlow.pool.hint')}</p>
-      <div className={styles.summary} aria-label={ts('agentFlow.pool.summaryAria')}>
-        <span>{ts('agentFlow.pool.summaryTotal', { count: summary.total })}</span>
-        <span>{ts('agentFlow.pool.summaryRunning', { count: summary.running })}</span>
-        <span>{ts('agentFlow.pool.summaryAwaiting', { count: summary.awaiting })}</span>
+      <div
+        className={styles.summary}
+        aria-label={ts('agentFlow.pool.summaryAria')}
+        title={activePoolRunId ?? undefined}
+      >
+        <span className={styles.summaryChip}>
+          <span className={styles.summaryValue}>{summary.total}</span>
+          {ts('agentFlow.pool.summaryTotalLabel')}
+        </span>
+        <span className={styles.summaryChip} data-tone={isLive ? 'live' : undefined}>
+          <span className={styles.summaryValue}>{summary.running}</span>
+          {ts('agentFlow.pool.summaryRunningLabel')}
+        </span>
+        <span className={styles.summaryChip}>
+          <span className={styles.summaryValue}>{summary.awaiting}</span>
+          {ts('agentFlow.pool.summaryAwaitingLabel')}
+        </span>
         {summary.errors > 0 ? (
-          <span data-tone="error">
-            {ts('agentFlow.pool.summaryErrors', { count: summary.errors })}
-          </span>
-        ) : null}
-        {activePoolRunId ? (
-          <span className={styles.poolRun} title={activePoolRunId}>
-            {ts('agentFlow.pool.poolRunLabel')}
+          <span className={styles.summaryChip} data-tone="error">
+            <span className={styles.summaryValue}>{summary.errors}</span>
+            {ts('agentFlow.pool.summaryErrorsLabel')}
           </span>
         ) : null}
       </div>
       <div className={styles.list}>
-        {tasks.map((task) => (
-          <AgentPoolRow
+        {tasks.map((task, index) => (
+          <div
             key={task.taskId}
-            task={task}
-            nowMs={nowMs}
-            poolOriginMs={poolOriginMs}
-            expanded={expandedTaskIds.includes(task.taskId)}
-            historyExpanded={historyExpandedTaskIds.includes(task.taskId)}
-            onToggleExpand={() => {
-              useAgentPoolStore.getState().toggleExpandedTaskId(task.taskId)
+            className={styles.laneEnter}
+            style={{
+              animationDelay: `${Math.min(index, 7) * 30}ms`,
             }}
-            onToggleHistory={() => {
-              useAgentPoolStore.getState().toggleHistoryExpandedTaskId(task.taskId)
-            }}
-            onDone={() => {
-              useAgentPoolStore.getState().startReview(task)
-              useWorkbenchStore.setState({ rightPanelTab: 'chat', rightPanelOpen: true })
-              if (task.chatSessionId) {
-                const sessions = useChatSessionStore.getState()
-                if (sessions.activeSessionId !== task.chatSessionId) {
-                  void sessions.switchSession(task.chatSessionId)
+          >
+            <AgentPoolRow
+              task={task}
+              nowMs={nowMs}
+              poolOriginMs={poolOriginMs}
+              expanded={expandedTaskIds.includes(task.taskId)}
+              historyExpanded={historyExpandedTaskIds.includes(task.taskId)}
+              onToggleExpand={() => {
+                useAgentPoolStore.getState().toggleExpandedTaskId(task.taskId)
+              }}
+              onToggleHistory={() => {
+                useAgentPoolStore.getState().toggleHistoryExpandedTaskId(task.taskId)
+              }}
+              onDone={() => {
+                useAgentPoolStore.getState().startReview(task)
+                useWorkbenchStore.setState({ rightPanelTab: 'chat', rightPanelOpen: true })
+                if (task.chatSessionId) {
+                  const sessions = useChatSessionStore.getState()
+                  if (sessions.activeSessionId !== task.chatSessionId) {
+                    void sessions.switchSession(task.chatSessionId)
+                  }
                 }
-              }
-            }}
-          />
+              }}
+            />
+          </div>
         ))}
       </div>
     </div>

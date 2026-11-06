@@ -36,6 +36,8 @@ export interface LoopAgentRunRequest {
   /** Optional DevPlan task id for tracing. */
   taskId?: string;
   agentRole?: "planner" | "coder" | "reviewer" | string;
+  /** Workforce agent binding from the Loop Spec node. */
+  agentDefinitionId?: string | null;
 }
 
 export interface LoopGithubOperationRequest {

@@ -25,6 +25,8 @@ export interface StencilUiStrings {
   motionNone: string
   motionArmed: string
   licenseNote: string
+  exportStencil: string
+  exportStencilCopied: string
 }
 
 export const STENCIL_UI_STRINGS_EN: StencilUiStrings = {
@@ -53,6 +55,8 @@ export const STENCIL_UI_STRINGS_EN: StencilUiStrings = {
   motionNone: 'None',
   motionArmed: 'Motion: {name}',
   licenseNote: 'License',
+  exportStencil: 'Share stencil pack',
+  exportStencilCopied: 'Stencil pack copied — paste to share or re-import',
 }
 
 export function formatStencilString(

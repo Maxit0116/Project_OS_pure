@@ -9,6 +9,12 @@ import {
   buildSpatialLocatorInjectionSource,
   SPATIAL_LOCATOR_CONSOLE_PREFIX,
 } from './injectSpatialLocator'
+import {
+  buildLabCaptureInjectionSource,
+  LAB_CAPTURE_CONSOLE_PREFIX,
+  parseLabCaptureConsoleMessage,
+} from './injectLabCapture'
+import { useProductLabStore } from '../../state/productLabStore'
 import styles from './BrowserPanel.module.css'
 
 interface FailLoadEvent extends Event {
@@ -27,6 +33,13 @@ export default function BrowserWebview() {
   const onLoadFail = useBrowserStore((s) => s.onLoadFail)
   const onNavigate = useBrowserStore((s) => s.onNavigate)
   const setTabTitle = useBrowserStore((s) => s.setTabTitle)
+  const labActive = useProductLabStore((s) => {
+    const id = s.document.activeSessionId
+    if (!id) return false
+    const status = s.document.sessions.find((session) => session.id === id)?.status
+    return Boolean(status && status !== 'ended')
+  })
+  const ingestAutoCapture = useProductLabStore((s) => s.ingestAutoCapture)
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const url = activeTab?.url ?? 'about:blank'
@@ -51,6 +64,15 @@ export default function BrowserWebview() {
       if (failEvent.isMainFrame === false) return
       if (failEvent.errorCode === -3) return
       onLoadFail(failEvent.errorDescription ?? '')
+      const lab = useProductLabStore.getState().activeSession()
+      if (lab && lab.status !== 'ended' && lab.capture.failedNetwork) {
+        void useProductLabStore.getState().ingestAutoCapture({
+          kind: 'network_failure',
+          title: `Page load failed: ${failEvent.errorDescription ?? 'unknown'}`,
+          detail: `errorCode=${failEvent.errorCode ?? '?'} ${failEvent.errorDescription ?? ''}`,
+          url: el.getURL?.() || undefined,
+        })
+      }
     }
     const handleNavigate = () => {
       const currentUrl = el.getURL()
@@ -71,17 +93,53 @@ export default function BrowserWebview() {
       } catch {
         // Guest injection is best-effort for spatial pins.
       }
+      const lab = useProductLabStore.getState().activeSession()
+      if (lab && lab.status !== 'ended') {
+        try {
+          void el.executeJavaScript(buildLabCaptureInjectionSource(), false)
+        } catch {
+          // Lab capture injection is best-effort.
+        }
+      }
     }
     const handleConsole = (event: Event) => {
-      const message = (event as Event & { message?: string }).message
-      if (!message || !message.startsWith(SPATIAL_LOCATOR_CONSOLE_PREFIX)) return
-      try {
-        const payload = JSON.parse(
-          message.slice(SPATIAL_LOCATOR_CONSOLE_PREFIX.length),
-        )
-        void window.projectOS?.spatialPin.reportBrowserLocation(payload)
-      } catch {
-        // ignore malformed locator payloads
+      const message = (event as Event & { message?: string; level?: number }).message
+      if (!message) return
+
+      if (message.startsWith(SPATIAL_LOCATOR_CONSOLE_PREFIX)) {
+        try {
+          const payload = JSON.parse(
+            message.slice(SPATIAL_LOCATOR_CONSOLE_PREFIX.length),
+          )
+          void window.projectOS?.spatialPin.reportBrowserLocation(payload)
+        } catch {
+          // ignore malformed locator payloads
+        }
+        return
+      }
+
+      if (message.startsWith(LAB_CAPTURE_CONSOLE_PREFIX)) {
+        const parsed = parseLabCaptureConsoleMessage(message)
+        if (parsed) void ingestAutoCapture(parsed)
+        return
+      }
+
+      // Native console.error (Electron level 3) while Lab is active.
+      const level = (event as Event & { level?: number }).level
+      const lab = useProductLabStore.getState().activeSession()
+      if (
+        lab &&
+        lab.status !== 'ended' &&
+        lab.capture.consoleErrors &&
+        level === 3 &&
+        !message.startsWith(SPATIAL_LOCATOR_CONSOLE_PREFIX)
+      ) {
+        void ingestAutoCapture({
+          kind: 'console_error',
+          title: message.slice(0, 120),
+          detail: message,
+          url: el.getURL?.() || undefined,
+        })
       }
     }
     const handleTitleUpdated = (event: Event) => {
@@ -112,7 +170,26 @@ export default function BrowserWebview() {
       ;(el as unknown as HTMLElement).removeEventListener('page-title-updated', handleTitleUpdated)
       registerController(null)
     }
-  }, [onLoadFail, onLoadStart, onLoadStop, onNavigate, registerController, webviewEl, setTabTitle])
+  }, [
+    ingestAutoCapture,
+    onLoadFail,
+    onLoadStart,
+    onLoadStop,
+    onNavigate,
+    registerController,
+    webviewEl,
+    setTabTitle,
+  ])
+
+  // Re-inject capture hooks when Lab starts after the page was already ready.
+  useEffect(() => {
+    if (!webviewEl || !labActive) return
+    try {
+      void webviewEl.executeJavaScript(buildLabCaptureInjectionSource(), false)
+    } catch {
+      // best-effort
+    }
+  }, [labActive, webviewEl, url])
 
   useEffect(() => {
     if (!webviewEl) return

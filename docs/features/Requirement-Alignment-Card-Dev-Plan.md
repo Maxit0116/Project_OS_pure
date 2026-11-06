@@ -4,6 +4,7 @@
 **范围**：Agent（`change`）发送 prompt 后、写文件 / `confirmExecution` 之前的**需求描述对齐卡片**；以及 Debug 在多 bug 场景下的**分项对齐 + 分项结案**。把今日「整卡 Confirm / Revise」的 Prompt Refinement，升级为可勾选、可批注、可答题的**语句级任务契约（task contract）**。  
 **权威交叉引用**：
 - `docs/features/Chat-Modes-Cursor-Parity-Dev-Plan.md` — Change / Plan / Debug 管线；Plan `clarifyingQuestions` 交互是本卡第三区的对标实现
+- [`Ask-First-Principles-Mode-Dev-Plan.md`](./Ask-First-Principles-Mode-Dev-Plan.md) — 更上游的 Why/Whether 立论；结案 Go 后升 Agent **仍**走本 Alignment 闸门，二者不互相替代
 - `docs/Full-Product-Architecture-and-Dev-Plan.md` §10.2 Prompt Refinement — 「execution 前 confirm AI understanding」
 - `docs/features/Agent-Flow-Activity-Dev-Plan.md` — 侧栏过程缩略；对齐卡是**结果/操作卡**，不是过程证据
 - `docs/features/Live-Graph-Agent-Observability-Dev-Plan.md` — 契约条目应可归因到后续文件 / 活动

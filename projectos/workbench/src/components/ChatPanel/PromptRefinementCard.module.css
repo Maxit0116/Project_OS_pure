@@ -149,16 +149,16 @@
   padding: 8px 14px;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-  color: #fff;
-  background: var(--color-accent);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--mode-on-color, var(--tech-accent-foreground));
+  background: var(--mode-color, var(--color-accent));
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+  transition: filter var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
 }
 
 .confirm:hover {
-  background: var(--color-accent-strong);
+  filter: brightness(1.08);
 }
 
 .confirm:active {

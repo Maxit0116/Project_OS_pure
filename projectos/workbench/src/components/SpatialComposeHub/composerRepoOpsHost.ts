@@ -1,3 +1,4 @@
+import type { ThinkingDepth } from '@contracts/index'
 import type { ToastType } from '../ui/Toast'
 import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
@@ -66,6 +67,23 @@ export type GithubCardHostBridgeEvent =
       kind: 'openGithubGraph'
       branch?: string | null
       prNumber?: number | null
+    }
+  | {
+      /** Open Chat on a session and hydrate Ask · First Principles. */
+      kind: 'openFirstPrinciples'
+      chatSessionId: string
+      firstPrinciplesSessionId: string
+    }
+  | {
+      kind: 'selectChatModel'
+      profileId: string
+    }
+  | {
+      kind: 'setThinkingDepth'
+      depth: ThinkingDepth
+    }
+  | {
+      kind: 'openSettings'
     }
 
 /** Overlay window host — IPC to Workbench + LocalApi for auth. */
@@ -139,6 +157,55 @@ export function applyGithubCardHostBridgeEvent(
         branch: event.branch ?? null,
         prNumber: event.prNumber ?? null,
       })
+      return
+    case 'openFirstPrinciples': {
+      const chatSessionId = event.chatSessionId?.trim()
+      const firstPrinciplesSessionId = event.firstPrinciplesSessionId?.trim()
+      if (!chatSessionId || !firstPrinciplesSessionId) return
+      void (async () => {
+        useWorkbenchStore.setState({
+          rightPanelTab: 'chat',
+          rightPanelOpen: true,
+        })
+        await chat.switchSession(chatSessionId)
+        const project = useWorkbenchStore.getState().project
+        const client = useWorkbenchStore.getState().client
+        if (!project || !client?.getThesisSession) {
+          useWorkbenchStore.getState().setAskSubMode('first_principles')
+          useWorkbenchStore.getState().setChatMode('ask')
+          return
+        }
+        try {
+          const session = await client.getThesisSession(
+            project.projectId,
+            firstPrinciplesSessionId,
+          )
+          useWorkbenchStore.setState({
+            chatMode: 'ask',
+            askSubMode: 'first_principles',
+            pendingFirstPrinciples: session,
+            firstPrinciplesSuggestDismissed: true,
+          })
+        } catch {
+          useWorkbenchStore.getState().setAskSubMode('first_principles')
+          useWorkbenchStore.getState().setChatMode('ask')
+        }
+      })()
+      return
+    }
+    case 'selectChatModel': {
+      const profileId = event.profileId?.trim()
+      if (!profileId) return
+      void wb.selectChatModel(profileId)
+      return
+    }
+    case 'setThinkingDepth': {
+      if (!event.depth) return
+      void wb.setThinkingDepth(event.depth)
+      return
+    }
+    case 'openSettings':
+      wb.setSettingsOpen(true)
       return
   }
 }

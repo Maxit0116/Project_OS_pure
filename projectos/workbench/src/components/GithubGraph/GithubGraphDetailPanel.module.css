@@ -15,6 +15,55 @@
   pointer-events: auto;
 }
 
+.docked {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-height: none;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.tab {
+  appearance: none;
+  border: 1px solid var(--tech-border);
+  background: transparent;
+  color: var(--tech-text-secondary);
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.tabActive {
+  border-color: color-mix(in srgb, var(--tech-accent) 40%, var(--tech-border));
+  color: var(--tech-text-primary);
+  background: color-mix(in srgb, var(--tech-accent) 10%, transparent);
+}
+
+.patch {
+  margin: 0;
+  padding: 8px;
+  max-height: 280px;
+  overflow: auto;
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--tech-bg-muted);
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  color: var(--tech-text-secondary);
+}
+
 .header {
   display: flex;
   align-items: center;

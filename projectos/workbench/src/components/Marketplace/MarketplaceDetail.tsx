@@ -3,6 +3,7 @@ import { ArrowLeft, ExternalLink } from 'lucide-react'
 import Button from '../ui/Button'
 import MarketplaceListingIcon from './MarketplaceListingIcon'
 import type { MarketplaceCardAction } from './MarketplaceCard'
+import type { MarketplaceDependencyLink } from './marketplaceDependencies'
 import type { MarketplaceDetailModel, MarketplaceFact } from './marketplaceDetailModel'
 import styles from './MarketplaceDetail.module.css'
 
@@ -34,10 +35,14 @@ interface Props {
   filesTitle: string
   frontmatterTitle: string
   riskTitle: string
+  dependenciesTitle?: string
+  goInstallLabel?: string
+  installedDepLabel?: string
   model: MarketplaceDetailModel
   children?: ReactNode
   onBack: () => void
   onAction: (action: MarketplaceCardAction) => void
+  onNavigateDependency?: (link: MarketplaceDependencyLink) => void
   secondaryActions?: ReactNode
 }
 
@@ -98,13 +103,18 @@ export default function MarketplaceDetail({
   filesTitle,
   frontmatterTitle,
   riskTitle,
+  dependenciesTitle,
+  goInstallLabel,
+  installedDepLabel,
   model,
   children,
   onBack,
   onAction,
+  onNavigateDependency,
   secondaryActions,
 }: Props) {
   const link = homepage ?? model.homepage
+  const dependencyLinks = model.dependencyLinks ?? []
 
   return (
     <div className={styles.detail}>
@@ -200,6 +210,34 @@ export default function MarketplaceDetail({
               <li key={note}>{note}</li>
             ))}
           </ol>
+        </Section>
+      ) : null}
+
+      {dependencyLinks.length > 0 && dependenciesTitle ? (
+        <Section title={dependenciesTitle}>
+          <ul className={styles.depList}>
+            {dependencyLinks.map((dep) => (
+              <li key={`${dep.kind}:${dep.listingId}`} className={styles.depRow}>
+                <span className={styles.depMeta}>
+                  <span className={styles.depKind}>{dep.kind}</span>
+                  <span className={styles.depId}>{dep.listingId}</span>
+                  {!dep.missing && installedDepLabel ? (
+                    <span className={styles.depOk}>{installedDepLabel}</span>
+                  ) : null}
+                </span>
+                {dep.missing && onNavigateDependency && goInstallLabel ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={disabled || busy}
+                    onClick={() => onNavigateDependency(dep)}
+                  >
+                    {goInstallLabel}
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         </Section>
       ) : null}
 

@@ -9,6 +9,7 @@
 |------|------|
 | [`Loops-Graph-Workflow-Studio-Dev-Plan.md`](./Loops-Graph-Workflow-Studio-Dev-Plan.md) | **并行权威**：画布 Studio、真 pause/cancel、Fresh·Stale、重规划提案、参数化/事件触发仍归该文档。本计划**接管并取代**其中「MVP 节点语义映射」对 Condition 永久延期、以及 `implement\|verify\|fix\|decide` 作为唯一产品分类的表述。 |
 | [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | **展示层**：图标识读、右侧 Palette、DnD、浮动 Duty/Inspector 卡；不改本计划 Node Contract / Runtime。 |
+| [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | **Agent 配置可视化**：主卡底端口 + `provides` 虚线挂 Model / Memory / Capabilities；不改四类职责与 NA-D7（Action 不得收成 Agent Tool 卫星）。 |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | **已落地底座**：Spec/Instance 分离、implement→AgentRun、verify→证据、decide→HITL。本计划在其上扩展 Node 类型系统，不重做 P-0–P-3 不变量。 |
 | [`Agent-Harness-Dev-Plan.md`](./Agent-Harness-Dev-Plan.md) | Action / Agent 权限与预算；Human Approval 不得绕过 ToolPolicy。 |
 | [`backend/Verification-Eval-Dev-Plan.md`](./backend/Verification-Eval-Dev-Plan.md) | Test / Validation Action 的通过依据仍是证据，不是 Agent 自述。 |

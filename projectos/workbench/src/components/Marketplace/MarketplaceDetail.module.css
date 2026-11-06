@@ -220,3 +220,52 @@
   border: 1px solid color-mix(in srgb, var(--tech-danger, #c44) 35%, var(--tech-border));
   background: color-mix(in srgb, var(--tech-danger, #c44) 8%, var(--tech-bg-elevated));
 }
+
+.depList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.depRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--tech-border);
+  border-radius: 8px;
+  background: var(--tech-bg-elevated);
+}
+
+.depMeta {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.depKind {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tech-text-secondary);
+}
+
+.depId {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--tech-text-primary);
+  word-break: break-all;
+}
+
+.depOk {
+  font-size: 10px;
+  font-weight: 550;
+  color: var(--tech-accent);
+}

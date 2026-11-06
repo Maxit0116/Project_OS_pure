@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AskSubModeSchema } from "./first-principles.js";
 import {
   AnnotationAnchorSchema,
   AnnotationPointUnboundedSchema,
@@ -55,6 +56,11 @@ export const SpatialCaptureRegionSchema = z
     id: z.string().min(1),
     captureRect: ScreenRectSchema,
     mode: SpatialPinModeSchema,
+    /** Ask secondary mode; only used when `mode === "ask"`. */
+    askSubMode: AskSubModeSchema.optional(),
+    /** Specialized workforce agent; only used when `mode === "change"`. */
+    agentDefinitionId: z.string().min(1).nullable().optional(),
+    agentDisplayName: z.string().max(120).nullable().optional(),
     regionPrompt: z.string().max(16_000).default(""),
     drawStrokes: z.array(AnnotationStrokeSchema).max(200).default([]),
     snapshotAssetPath: z.string().max(1024).optional(),

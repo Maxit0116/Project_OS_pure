@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react'
+import { CircleAlert } from 'lucide-react'
+import type { AgentPoolRunKpi } from '@contracts/index'
 import { useI18n } from '../../../i18n'
 import AgentPoolMiniWaterfall from './AgentPoolMiniWaterfall'
 import AgentPoolSpanInspector from './AgentPoolSpanInspector'
 import { barsForMajorAction } from './projectAgentPoolTrace'
 import type { AgentPoolFlowStep, AgentPoolSpan, AgentPoolTask } from './projectAgentPool'
+import { formatElapsed } from './poolTiming'
 import styles from './AgentPoolRow.module.css'
 
 interface Props {
@@ -13,6 +16,24 @@ interface Props {
   originMs: number
   nowMs: number
   currentAction: string
+}
+
+const LEGEND_KINDS = [
+  'major',
+  'model',
+  'tool',
+  'file',
+  'apply',
+  'verify',
+  'wait',
+  'handoff',
+] as const
+
+function formatKpiTokens(kpi: AgentPoolRunKpi): string | null {
+  if (kpi.tokensIn == null && kpi.tokensOut == null) return null
+  const inn = kpi.tokensIn ?? 0
+  const out = kpi.tokensOut ?? 0
+  return `${inn} / ${out}`
 }
 
 export default function AgentPoolRowExpand({
@@ -30,6 +51,7 @@ export default function AgentPoolRowExpand({
 
   const majors = task.majorActions
   const useTrace = majors.length > 0 || (task.traceSpans?.length ?? 0) > 0
+  const kpi = task.runKpi
 
   const detailBars: AgentPoolSpan[] = useMemo(() => {
     if (!task.trace || !selectedMajorId) {
@@ -45,6 +67,7 @@ export default function AgentPoolRowExpand({
       endMs: bar.endMs,
       timingQuality: bar.timingQuality,
       level: bar.level,
+      attempt: bar.attempt,
     }))
   }, [task.trace, selectedMajorId, drillSpans, spans])
 
@@ -77,51 +100,67 @@ export default function AgentPoolRowExpand({
         </ol>
         <p className={styles.expandCurrent}>
           <span className={styles.expandCurrentLabel}>{ts('agentFlow.pool.currentAction')}</span>
-          {currentAction}
+          <span key={currentAction} className={styles.lifeActionInline}>
+            {currentAction}
+          </span>
         </p>
       </div>
     )
   }
 
+  const tokenText = kpi ? formatKpiTokens(kpi) : null
+
   return (
     <div className={styles.expand} aria-label={ts('agentFlow.pool.miniFlow')}>
-      <div className={styles.majorList} role="list">
-        {majors.map((major) => {
-          const selected = selectedMajorId === major.actionId
-          return (
-            <button
-              key={major.actionId}
-              type="button"
-              role="listitem"
-              className={styles.majorChip}
-              data-status={major.status}
-              data-selected={selected ? 'true' : undefined}
-              aria-pressed={selected}
-              onClick={() => {
-                setSelectedMajorId(selected ? null : major.actionId)
-                setDrillSpans(false)
-                setSelectedSpanId(null)
-              }}
-            >
-              <span className={styles.majorName}>{major.name}</span>
-              <span className={styles.majorMeta}>
-                {major.status}
-                {major.attempt && major.attempt > 1
-                  ? ` · ${ts('agentFlow.pool.attempt', { n: major.attempt })}`
-                  : ''}
-                {major.timingQuality !== 'exact'
-                  ? ` · ${ts('agentFlow.pool.timingDerived')}`
-                  : ''}
+      {kpi ? (
+        <div className={styles.kpiStrip} role="group" aria-label={ts('agentFlow.pool.kpiAria')}>
+          <span className={styles.kpiItem}>
+            <span className={styles.kpiLabel}>{ts('agentFlow.pool.kpiDuration')}</span>
+            <span key={`d-${kpi.durationMs}`} className={styles.kpiValue}>
+              {formatElapsed(kpi.durationMs)}
+            </span>
+          </span>
+          <span className={styles.kpiItem}>
+            <span className={styles.kpiLabel}>{ts('agentFlow.pool.kpiModel')}</span>
+            <span key={`m-${kpi.modelCallCount}`} className={styles.kpiValue}>
+              {kpi.modelCallCount}
+            </span>
+          </span>
+          <span className={styles.kpiItem}>
+            <span className={styles.kpiLabel}>{ts('agentFlow.pool.kpiTool')}</span>
+            <span key={`t-${kpi.toolCallCount}`} className={styles.kpiValue}>
+              {kpi.toolCallCount}
+            </span>
+          </span>
+          <span className={styles.kpiItem} data-warn={kpi.errorCount > 0 ? 'true' : undefined}>
+            <span className={styles.kpiLabel}>{ts('agentFlow.pool.kpiErrors')}</span>
+            <span key={`e-${kpi.errorCount}`} className={styles.kpiValue}>
+              {kpi.errorCount > 0 ? (
+                <span className={styles.kpiError}>
+                  <CircleAlert size={11} aria-hidden />
+                  {kpi.errorCount}
+                </span>
+              ) : (
+                kpi.errorCount
+              )}
+            </span>
+          </span>
+          {tokenText ? (
+            <span className={styles.kpiItem}>
+              <span className={styles.kpiLabel}>{ts('agentFlow.pool.kpiTokens')}</span>
+              <span key={`tok-${tokenText}`} className={styles.kpiValue}>
+                {tokenText}
               </span>
-            </button>
-          )
-        })}
-      </div>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       <AgentPoolMiniWaterfall
         spans={detailBars.length > 0 ? detailBars : spans.filter((s) => s.kind !== 'agent')}
         originMs={originMs}
         nowMs={nowMs}
+        showAxisTicks
         selectedSpanId={selectedSpanId}
         onSelectSpan={(span) => {
           if (!span) {
@@ -143,6 +182,15 @@ export default function AgentPoolRowExpand({
         }}
       />
 
+      <ul className={styles.kindLegend} aria-label={ts('agentFlow.pool.legendAria')}>
+        {LEGEND_KINDS.map((kind) => (
+          <li key={kind} className={styles.kindLegendItem}>
+            <span className={styles.kindSwatch} data-kind={kind} aria-hidden />
+            <span>{ts(`agentFlow.pool.kind.${kind}` as 'agentFlow.pool.kind.major')}</span>
+          </li>
+        ))}
+      </ul>
+
       {selectedMajor ? (
         <div className={styles.expandActions}>
           <button
@@ -154,11 +202,24 @@ export default function AgentPoolRowExpand({
               ? ts('agentFlow.pool.hideSpans')
               : ts('agentFlow.pool.showSpans')}
           </button>
+          {selectedMajor.attempt && selectedMajor.attempt > 1 ? (
+            <span className={styles.retryHint}>
+              {ts('agentFlow.pool.attempt', { n: selectedMajor.attempt })}
+            </span>
+          ) : null}
+          {selectedMajor.status === 'failed' ? (
+            <span className={styles.retryHint} data-failed="true">
+              <CircleAlert size={12} aria-hidden />
+              {ts('agentFlow.pool.spanFailed')}
+            </span>
+          ) : null}
         </div>
       ) : (
         <p className={styles.expandCurrent}>
           <span className={styles.expandCurrentLabel}>{ts('agentFlow.pool.currentAction')}</span>
-          {currentAction}
+          <span key={currentAction} className={styles.lifeActionInline}>
+            {currentAction}
+          </span>
         </p>
       )}
 

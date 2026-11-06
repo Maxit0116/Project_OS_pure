@@ -43,6 +43,8 @@ export interface FeatureNodeData {
   focusOpacity?: number
   flash?: number
   liveSummary?: LiveNodeSummary | null
+  /** Open Product Lab findings mapped to this node. */
+  labFindingCount?: number
 }
 
 const TYPE_ICONS: Record<string, LucideIcon> = {
@@ -66,9 +68,9 @@ export function isPurposeFirstArchitectureLevel(level: string | undefined): bool
   return level === 'context' || level === 'container' || level === 'component'
 }
 
-/** Selection accent — neutral, type is shown by the label. */
+/** Selection accent — soft grey, type is shown by the label. */
 export function featureNodeAccent(_elementType: string | undefined): string {
-  return '#ececec'
+  return '#c4c4c8'
 }
 
 /**
@@ -101,6 +103,15 @@ export function FeatureNodeCard({ data }: { data: FeatureNodeData }) {
       key={data.flash}
     >
       {data.liveSummary ? <LiveNodeBadge summary={data.liveSummary} compact /> : null}
+      {data.labFindingCount && data.labFindingCount > 0 ? (
+        <span
+          className={styles.labFindingBadge}
+          title={`Product Lab · ${data.labFindingCount}`}
+          aria-label={`Product Lab findings ${data.labFindingCount}`}
+        >
+          Lab {data.labFindingCount}
+        </span>
+      ) : null}
       <div className={styles.eyebrow}>
         <span className={styles.typeIcon} aria-hidden>
           <TypeIcon size={12} strokeWidth={1.9} />

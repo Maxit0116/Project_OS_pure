@@ -15,6 +15,7 @@ describe("installFromGitUrl", () => {
       { url: "https://gitlab.com/acme/skill", kind: "skills" },
       {
         workspaceRoot: "/tmp/unused",
+        projectOSRoot: "/tmp/unused/.projectos",
         settings: baseSettings,
         saveMcpServer: vi.fn(),
       },
@@ -31,6 +32,7 @@ describe("installFromGitUrl", () => {
       { url: "not a url", kind: "mcp" },
       {
         workspaceRoot: "/tmp/unused",
+        projectOSRoot: "/tmp/unused/.projectos",
         settings: baseSettings,
         saveMcpServer: vi.fn(),
       },

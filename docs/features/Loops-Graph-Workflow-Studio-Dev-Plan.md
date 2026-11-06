@@ -9,6 +9,7 @@
 |------|------|
 | [`Loops-Graph-Node-Architecture-Dev-Plan.md`](./Loops-Graph-Node-Architecture-Dev-Plan.md) | **并行权威（2026-11-03）**：四类 Node（Agent/Action/Logic/Human）、Node Contract、Artifact 数据流、Condition/有限 Loop、Human 模式；接管本文件 §7「Condition 永久延期」与「仅 implement/verify/fix/decide 产品分类」的表述。本文件仍负责 Studio 壳、真 pause/cancel、Fresh·Stale、重规划与触发。 |
 | [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | **UI 落地（2026-11-03）**：图标+短标题节点、右侧可折叠 Palette、Palette→Canvas DnD、整份 Inspector 改为节点旁浮动 Duty 卡；细化本文件 LG-1.1/1.2 的展示层。 |
+| [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | **Agent 配置层连线（设计中）**：Model/Memory/Capabilities 虚线卫星；不改变本文件 Studio 可靠性与非 iPaaS 边界。 |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | **已落地底座**：P-0–P-3（规格冻结、implement=AgentRun、verify=证据、HITL）。本计划在其上扩展产品与可靠性，不重做 P-0–P-3。 |
 | [`backend/Backend-Dev-Plan.md`](./backend/Backend-Dev-Plan.md) | 后端索引；Loop = 工作流定义，Run = 一次执行。 |
 | [`Live-Graph-Agent-Observability-Dev-Plan.md`](./Live-Graph-Agent-Observability-Dev-Plan.md) | C4 上的执行投影；与 Loop 共享诚实事件源。 |
@@ -1235,7 +1236,7 @@ flowchart TB
 - 参数化/事件触发完整产品化（可先做手动+幂等）  
 - 多 feedback / DAG 并行  
 - 自动应用重规划  
-- 外部 webhook、marketplace  
+- 外部 webhook；Workflow pack 市场已由 [`Capability-Marketplace-Dev-Plan.md`](./Capability-Marketplace-Dev-Plan.md) P3 落地（`.projectos/loop-presets/`；本工作室计划不内嵌市场实现）
 - 全仓 freshness  
 
 ---

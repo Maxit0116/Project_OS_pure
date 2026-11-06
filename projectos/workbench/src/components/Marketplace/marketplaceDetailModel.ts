@@ -1,4 +1,15 @@
-import type { McpCatalogListing, SkillCatalogListing } from '@contracts/index'
+import type {
+  AgentCatalogListing,
+  McpCatalogListing,
+  RulesCatalogListing,
+  SkillCatalogListing,
+  StencilCatalogListing,
+  WorkflowCatalogListing,
+} from '@contracts/index'
+import {
+  collectAgentDependencyLinks,
+  type MarketplaceDependencyLink,
+} from './marketplaceDependencies'
 
 export interface MarketplaceFact {
   label: string
@@ -22,6 +33,10 @@ export interface MarketplaceDetailModel {
   documentationTitle: string
   documentation?: string
   installPath?: string
+  /** Missing Skill / MCP / Rules dependencies (informational). */
+  dependencyNotes?: string[]
+  /** Structured deps for jump-to-tab install (CMP-5.1). */
+  dependencyLinks?: MarketplaceDependencyLink[]
 }
 
 function skillInstallId(listingId: string): string {
@@ -199,6 +214,245 @@ export function buildSkillDetailModel(
     frontmatter: frontmatter.length > 0 ? frontmatter : undefined,
     documentationTitle: labels.documentation,
     documentation: parsed.body || listing.skillMarkdown.trim(),
+    installPath,
+  }
+}
+
+export function buildRulesDetailModel(
+  listing: RulesCatalogListing,
+  labels: {
+    listingId: string
+    installId: string
+    version: string
+    trust: string
+    curated: string
+    community: string
+    installPath: string
+    installConfig: string
+    documentation: string
+    gettingStartedPath: string
+    gettingStartedInvoke: string
+    communityRisk: string
+  },
+): MarketplaceDetailModel {
+  const community = listing.trustTier === 'community'
+  const installId = skillInstallId(listing.id)
+  const installPath = `.projectos/rules/${installId}/`
+  const fileNames = Object.keys(listing.files).sort()
+  const primaryFile = fileNames[0]
+  const documentation = primaryFile ? listing.files[primaryFile] : undefined
+
+  return {
+    facts: [
+      { label: labels.listingId, value: listing.id },
+      { label: labels.installId, value: installId },
+      { label: labels.version, value: listing.version },
+      {
+        label: labels.trust,
+        value: community ? labels.community : labels.curated,
+      },
+      { label: labels.installPath, value: installPath },
+    ],
+    overview: listing.description,
+    homepage: listing.homepage,
+    riskNote: community ? labels.communityRisk : undefined,
+    setupNotes: [labels.gettingStartedPath, labels.gettingStartedInvoke],
+    installConfigTitle: labels.installConfig,
+    installConfig: installPath,
+    companionFiles: fileNames,
+    documentationTitle: labels.documentation,
+    documentation,
+    installPath,
+  }
+}
+
+export function buildAgentDetailModel(
+  listing: AgentCatalogListing,
+  labels: {
+    listingId: string
+    installId: string
+    version: string
+    trust: string
+    curated: string
+    community: string
+    installPath: string
+    installConfig: string
+    documentation: string
+    gettingStartedPath: string
+    gettingStartedInvoke: string
+    communityRisk: string
+    dependsOnSkills: string
+    dependsOnMcp: string
+    dependsOnRules: string
+    dependsOnMissing: string
+    none: string
+  },
+  installed?: {
+    skillIds?: Set<string>
+    mcpListingIds?: Set<string>
+    rulesPackIds?: Set<string>
+  },
+): MarketplaceDetailModel {
+  const community = listing.trustTier === 'community'
+  const installId = `agent_mkt_${skillInstallId(listing.id)}`
+  const installPath = `.projectos/agent-definitions/${installId}.json`
+  const skillDeps = [
+    ...new Set([...(listing.skillIds ?? []), ...(listing.dependsOn?.skills ?? [])]),
+  ]
+  const mcpDeps = listing.dependsOn?.mcpListings ?? []
+  const rulesDeps = listing.dependsOn?.rules ?? []
+  const dependencyLinks = collectAgentDependencyLinks({
+    skillIds: skillDeps,
+    mcpListingIds: mcpDeps,
+    rulesPackIds: rulesDeps,
+    installed,
+  })
+  const missing = dependencyLinks.filter((link) => link.missing)
+  const dependencyNotes = [
+    `${labels.dependsOnSkills}: ${skillDeps.length ? skillDeps.join(', ') : labels.none}`,
+    `${labels.dependsOnMcp}: ${mcpDeps.length ? mcpDeps.join(', ') : labels.none}`,
+    `${labels.dependsOnRules}: ${rulesDeps.length ? rulesDeps.join(', ') : labels.none}`,
+    ...(missing.length
+      ? [
+          `${labels.dependsOnMissing}: ${missing
+            .map((link) => `${link.kind}:${link.listingId}`)
+            .join(', ')}`,
+        ]
+      : []),
+  ]
+
+  return {
+    facts: [
+      { label: labels.listingId, value: listing.id },
+      { label: labels.installId, value: installId },
+      { label: labels.version, value: listing.version },
+      {
+        label: labels.trust,
+        value: community ? labels.community : labels.curated,
+      },
+      { label: labels.installPath, value: installPath },
+    ],
+    overview: listing.description,
+    homepage: listing.homepage,
+    riskNote: community ? labels.communityRisk : undefined,
+    setupNotes: [labels.gettingStartedPath, labels.gettingStartedInvoke],
+    installConfigTitle: labels.installConfig,
+    installConfig: installPath,
+    documentationTitle: labels.documentation,
+    documentation: listing.instructions || undefined,
+    installPath,
+    dependencyNotes,
+    dependencyLinks,
+  }
+}
+
+export function buildWorkflowDetailModel(
+  listing: WorkflowCatalogListing,
+  labels: {
+    listingId: string
+    installId: string
+    version: string
+    trust: string
+    curated: string
+    community: string
+    installPath: string
+    installConfig: string
+    documentation: string
+    gettingStartedPath: string
+    gettingStartedInvoke: string
+    communityRisk: string
+    nodeCount: string
+    edgeCount: string
+  },
+): MarketplaceDetailModel {
+  const community = listing.trustTier === 'community'
+  const installId = skillInstallId(listing.id)
+  const installPath = `.projectos/loop-presets/${installId}.json`
+  const nodeCount = listing.draft.nodes.length
+  const edgeCount = listing.draft.edges.length
+
+  return {
+    facts: [
+      { label: labels.listingId, value: listing.id },
+      { label: labels.installId, value: installId },
+      { label: labels.version, value: listing.version },
+      {
+        label: labels.trust,
+        value: community ? labels.community : labels.curated,
+      },
+      { label: labels.installPath, value: installPath },
+      { label: labels.nodeCount, value: String(nodeCount) },
+      { label: labels.edgeCount, value: String(edgeCount) },
+    ],
+    overview: listing.description,
+    homepage: listing.homepage,
+    riskNote: community ? labels.communityRisk : undefined,
+    setupNotes: [labels.gettingStartedPath, labels.gettingStartedInvoke],
+    installConfigTitle: labels.installConfig,
+    installConfig: installPath,
+    documentationTitle: labels.documentation,
+    documentation: listing.draft.graphPrompt || undefined,
+    installPath,
+  }
+}
+
+export function buildStencilDetailModel(
+  listing: StencilCatalogListing,
+  labels: {
+    listingId: string
+    installId: string
+    version: string
+    trust: string
+    curated: string
+    community: string
+    installPath: string
+    installConfig: string
+    documentation: string
+    gettingStartedPath: string
+    gettingStartedInvoke: string
+    communityRisk: string
+    stencilCount: string
+    licenseNotes: string
+  },
+): MarketplaceDetailModel {
+  const community = listing.trustTier === 'community'
+  const installId = skillInstallId(listing.id)
+  const installPath = `.projectos/stencils/${installId}.json`
+  const licenseLines = [
+    ...new Set(
+      listing.stencils
+        .map((stencil) => stencil.licenseNote?.trim())
+        .filter((note): note is string => Boolean(note)),
+    ),
+  ]
+  const companionFiles = listing.stencils.map((stencil) => stencil.id).sort()
+
+  return {
+    facts: [
+      { label: labels.listingId, value: listing.id },
+      { label: labels.installId, value: installId },
+      { label: labels.version, value: listing.version },
+      {
+        label: labels.trust,
+        value: community ? labels.community : labels.curated,
+      },
+      { label: labels.installPath, value: installPath },
+      { label: labels.stencilCount, value: String(listing.stencils.length) },
+      ...(licenseLines.length
+        ? [{ label: labels.licenseNotes, value: licenseLines.join(' · ') }]
+        : []),
+    ],
+    overview: listing.description,
+    homepage: listing.homepage,
+    riskNote: community ? labels.communityRisk : undefined,
+    setupNotes: [labels.gettingStartedPath, labels.gettingStartedInvoke],
+    installConfigTitle: labels.installConfig,
+    installConfig: installPath,
+    companionFiles,
+    documentationTitle: labels.documentation,
+    documentation: listing.stencils
+      .map((stencil) => `${stencil.title}: ${stencil.description}`)
+      .join('\n\n'),
     installPath,
   }
 }

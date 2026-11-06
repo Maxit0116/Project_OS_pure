@@ -1084,6 +1084,20 @@ export function listGitCommits(
     limit?: number;
     /** Branch / tip names; default: HEAD. */
     tips?: string[];
+    /** Only commits after this many days (git --since). */
+    sinceDays?: number;
+    /**
+     * PR / fork window: `base...head` (reachable from head, not from base).
+     * When set, replaces multi-tip listing.
+     */
+    range?: { base: string; head: string };
+    /**
+     * Since merge-base with `forkBase` (default branch), list commits on tips.
+     * Implemented as `forkBase...tip` for the first tip (or HEAD).
+     */
+    sinceForkBase?: string;
+    /** Pass --first-parent to git log. */
+    firstParentOnly?: boolean;
   } = {},
 ): ListedGitCommitSet {
   const status = readGitRepositoryStatus(workspaceRoot);
@@ -1098,16 +1112,32 @@ export function listGitCommits(
     options.tips && options.tips.length > 0
       ? options.tips.map((tip) => tip.trim()).filter(Boolean)
       : [status.branch || "HEAD"];
-  // Field sep \x1f / record sep \x1e — one process for sha, parents, author, date, body.
-  // Fetch one extra row to detect truncation.
-  const result = tryGit(workspaceRoot, [
+
+  const args: string[] = [
     "log",
     `--max-count=${limit + 1}`,
     "--pretty=format:%H%x1f%P%x1f%an%x1f%aI%x1f%B%x1e",
-    ...tips,
-  ]);
+  ];
+  if (options.firstParentOnly) {
+    args.push("--first-parent");
+  }
+  if (options.sinceDays && options.sinceDays > 0) {
+    args.push(`--since=${options.sinceDays}.days`);
+  }
+
+  let revArgs: string[] = tips;
+  if (options.range?.base && options.range.head) {
+    revArgs = [`${options.range.base.trim()}...${options.range.head.trim()}`];
+  } else if (options.sinceForkBase) {
+    const head = tips[0] || status.branch || "HEAD";
+    revArgs = [`${options.sinceForkBase.trim()}...${head}`];
+  }
+
+  // Field sep \x1f / record sep \x1e — one process for sha, parents, author, date, body.
+  // Fetch one extra row to detect truncation.
+  const result = tryGit(workspaceRoot, [...args, ...revArgs]);
   if (!result.ok) {
-    return { commits: [], truncated: false, tips };
+    return { commits: [], truncated: false, tips: revArgs };
   }
   const records = result.stdout
     .split("\x1e")
@@ -1135,7 +1165,7 @@ export function listGitCommits(
     });
   }
 
-  return { commits, truncated, tips };
+  return { commits, truncated, tips: revArgs };
 }
 
 export interface GitCommitFileChange {

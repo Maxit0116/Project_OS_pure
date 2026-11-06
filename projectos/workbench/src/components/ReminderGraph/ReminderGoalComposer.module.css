@@ -1,0 +1,350 @@
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--tech-border);
+  flex-shrink: 0;
+  background: var(--tech-bg-side-panel);
+  min-height: 0;
+}
+
+.bookmarkStack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-bottom: 1px solid var(--tech-border);
+  background: var(--tech-bg-side-panel);
+}
+
+.bookmarkTabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 6px 10px 0;
+  min-height: 30px;
+}
+
+.bookmarkTab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 6px 12px 7px;
+  border: 1px solid var(--tech-border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: color-mix(in srgb, var(--tech-bg-muted) 70%, transparent);
+  color: var(--tech-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transform: translateY(1px);
+  z-index: 1;
+}
+
+.bookmarkTab:hover {
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
+}
+
+.bookmarkTabActive {
+  z-index: 2;
+  transform: translateY(0);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-canvas);
+  border-color: var(--tech-border-strong);
+  box-shadow: 0 -1px 0 var(--tech-bg-canvas);
+  font-weight: 600;
+}
+
+.bookmarkTabBusy:not(.bookmarkTabActive) {
+  color: var(--tech-accent);
+}
+
+.bookmarkTabActive.bookmarkTabBusy {
+  color: var(--tech-accent);
+}
+
+.bookmarkTabAttention:not(.bookmarkTabActive) {
+  color: var(--tech-accent);
+  border-color: color-mix(in srgb, var(--tech-accent) 35%, var(--tech-border));
+}
+
+.bookmarkChevronOpen {
+  transform: rotate(180deg);
+}
+
+.sheetPanel {
+  max-height: 160px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-top: 1px solid var(--tech-border-strong);
+  background: var(--tech-bg-canvas);
+}
+
+.flowCurrent {
+  margin-bottom: 6px;
+}
+
+.flowSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowStep {
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.contextBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.contextTitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.contextMeta,
+.contextSection {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  line-height: 1.4;
+}
+
+.contextSection strong {
+  color: var(--tech-text-primary);
+}
+
+.contextEmpty {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-muted);
+}
+
+.offerCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+}
+
+.offerCard p {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--tech-text-primary);
+}
+
+.offerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.actionButton {
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.actionButton:hover {
+  color: var(--tech-text-primary);
+  border-color: var(--tech-border-strong);
+}
+
+.actionButtonPrimary {
+  background: color-mix(in srgb, var(--tech-accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--tech-accent) 45%, var(--tech-border));
+  color: var(--tech-text-primary);
+}
+
+.actionButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.promptDock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 12px;
+  flex: 1;
+  min-height: 140px;
+}
+
+.inputComposer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 120px;
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 8px;
+  background: var(--tech-bg-elevated);
+  overflow: visible;
+  box-shadow: var(--tech-shadow-sm);
+}
+
+.composerBody {
+  position: relative;
+  flex: 1;
+  min-height: 72px;
+  overflow: visible;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  resize: none;
+  box-sizing: border-box;
+  min-height: 72px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 12px 14px 8px;
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  font-family: inherit;
+  color: var(--tech-text-primary);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.input::placeholder {
+  color: var(--tech-text-muted);
+}
+
+.input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  min-height: 36px;
+  border-top: 1px solid var(--tech-border);
+}
+
+.leftCluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rightCluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.menuWrap {
+  position: relative;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.modeChip {
+  max-width: 100%;
+}
+
+.dropdownAnchor {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: 80;
+  min-width: 148px;
+  padding: 4px;
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tech-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--tech-bg-muted);
+}
+
+.menuItemActive {
+  background: var(--tech-bg-muted);
+  color: var(--tech-accent);
+}
+
+.metaHint {
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-muted);
+}
+
+.bookmarkTab:focus-visible,
+.menuItem:focus-visible,
+.actionButton:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bookmarkChevronOpen {
+    transform: none;
+  }
+
+  .bookmarkTab,
+  .bookmarkTabActive {
+    transform: none;
+  }
+}

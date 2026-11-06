@@ -629,6 +629,14 @@ describe("contracts schema hardening", () => {
         catalogUrl: "https://catalog.example.test/skills/catalog.json",
         disabledListingIds: ["community.skill"],
       },
+      rulesMarketplace: {
+        catalogUrl: "https://catalog.example.test/rules/catalog.json",
+        disabledListingIds: ["community.verbose-explanations"],
+      },
+      agentMarketplace: {
+        catalogUrl: "https://catalog.example.test/agents/catalog.json",
+        disabledListingIds: ["community.prompt-engineer"],
+      },
     }).success).toBe(true);
   });
 

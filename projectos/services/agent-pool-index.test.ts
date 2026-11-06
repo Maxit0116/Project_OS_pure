@@ -6,9 +6,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentRunEvent } from "../contracts/events.js";
 import {
   appendAgentRunIndexEntry,
+  createWorkforceAgent,
   ensureAgentPoolRun,
   listAgentRunsByDefinition,
+  listWorkforceAgents,
+  readAgentDefinition,
   setAgentRunAcceptance,
+  updateWorkforceAgent,
+  upsertAgentDefinition,
   upsertAgentRunIndexEntry,
   watermarkFromEvents,
 } from "./agent-pool-index.js";
@@ -99,6 +104,45 @@ describe("agent-pool-index", () => {
     expect(row?.poolRunId).toBe("pool_x");
     expect(row?.status).toBe("complete");
     expect(row?.acceptance).toBe("pending");
+  });
+
+  it("creates and lists workforce agents separately from pool lanes", () => {
+    const root = tempRoot();
+    upsertAgentDefinition(root, {
+      definitionId: "def_root_sess",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      config: { displayName: "Root lane" },
+    });
+    const created = createWorkforceAgent(root, {
+      projectId: "proj",
+      draft: {
+        displayName: "QA Reviewer",
+        roleLabel: "QA",
+        instructions: "Review carefully.",
+        skillIds: ["skill-a"],
+        mcpServerIds: ["mcp-a"],
+      },
+    });
+    expect(created.definitionId.startsWith("agent_")).toBe(true);
+    expect(created.config.kind).toBe("workforce");
+    expect(listWorkforceAgents(root)).toHaveLength(1);
+    expect(readAgentDefinition(root, created.definitionId)?.config.skillIds).toEqual([
+      "skill-a",
+    ]);
+
+    const updated = updateWorkforceAgent(root, {
+      definitionId: created.definitionId,
+      draft: {
+        displayName: "QA Lead",
+        roleLabel: "QA",
+        instructions: "Stricter review.",
+        skillIds: ["skill-a", "skill-b"],
+        mcpServerIds: [],
+      },
+    });
+    expect(updated.config.displayName).toBe("QA Lead");
+    expect(updated.config.skillIds).toEqual(["skill-a", "skill-b"]);
   });
 
   it("computes watermarks from runSequence", () => {

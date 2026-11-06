@@ -35,7 +35,7 @@ export interface SessionDragState {
   railDropIndex: number | null
 }
 
-function readDropTarget(element: Element | null): SessionDropTarget | null {
+export function readSessionGraphDropTarget(element: Element | null): SessionDropTarget | null {
   const host = element?.closest?.('[data-session-graph-drop]') as HTMLElement | null
   if (!host) return null
   const kind = host.dataset.sessionGraphDrop as SessionDropKind | undefined
@@ -51,7 +51,7 @@ function readDropTarget(element: Element | null): SessionDropTarget | null {
   return { kind }
 }
 
-function readRailDropIndex(
+export function readRailDropIndex(
   clientY: number,
   draggedGraphId: string | null,
   draggedFolderId: string | null = null,
@@ -176,7 +176,7 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
       const current = dragRef.current
       if (!current) return
       const el = document.elementFromPoint(event.clientX, event.clientY)
-      const target = readDropTarget(el)
+      const target = readSessionGraphDropTarget(el)
       const overRail =
         target?.kind === 'rail' ||
         target?.kind === 'graph' ||
@@ -200,7 +200,7 @@ export function useSessionGraphDrag({ onDragStart, onDragEnd, onDrop }: Options)
       if (activePointerRef.current !== event.pointerId) return
       const current = dragRef.current
       const el = document.elementFromPoint(event.clientX, event.clientY)
-      let target = current?.target ?? readDropTarget(el)
+      let target = current?.target ?? readSessionGraphDropTarget(el)
       if (current && target?.kind === 'rail' && current.railDropIndex != null) {
         target = { ...target, railDropIndex: current.railDropIndex }
       }

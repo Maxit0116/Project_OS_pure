@@ -15,6 +15,8 @@ interface Props {
   community?: boolean
   busy?: boolean
   disabled?: boolean
+  /** CMP-5.1: pulse border after dependency jump. */
+  highlighted?: boolean
   curatedLabel: string
   communityLabel: string
   installedLabel: string
@@ -36,6 +38,7 @@ export default function MarketplaceCard({
   community = false,
   busy = false,
   disabled = false,
+  highlighted = false,
   curatedLabel,
   communityLabel,
   installedLabel,
@@ -47,7 +50,11 @@ export default function MarketplaceCard({
   footer,
 }: Props) {
   return (
-    <article className={styles.card} data-listing-id={id}>
+    <article
+      className={`${styles.card} ${highlighted ? styles.cardHighlighted : ''}`}
+      data-listing-id={id}
+      data-highlighted={highlighted ? 'true' : undefined}
+    >
       <button
         type="button"
         className={styles.hit}

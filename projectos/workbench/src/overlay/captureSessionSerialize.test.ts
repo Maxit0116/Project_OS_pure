@@ -11,6 +11,9 @@ describe('captureSessionSerialize', () => {
     id: 'region_1',
     captureRect: { x: 12, y: 34, width: 200, height: 120 },
     mode: 'ask',
+    askSubMode: 'first_principles',
+    agentDefinitionId: null,
+    agentDisplayName: null,
     regionPrompt: 'note',
     arrows: [
       {

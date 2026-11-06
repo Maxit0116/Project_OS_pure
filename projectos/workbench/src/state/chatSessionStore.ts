@@ -44,6 +44,9 @@ export type CanvasOverlay =
   | 'agent-flow'
   | 'github'
   | 'marketplace'
+  | 'diagram'
+  | 'wireframe'
+  | 'reminder'
   | 'settings'
 
 /** Suppresses auto-open while a run id is not known yet (Ask / Plan still starting). */
@@ -132,6 +135,9 @@ interface ChatSessionStore {
   agentFlowOpen: boolean
   githubGraphOpen: boolean
   marketplaceOpen: boolean
+  diagramGraphOpen: boolean
+  wireframePackOpen: boolean
+  reminderGraphOpen: boolean
   /**
    * Bumped by Compose Hub / Stage Dock git mutations so an open GitHub Graph
    * soft-reloads. Optional focus fields apply on the next reload.
@@ -168,6 +174,12 @@ interface ChatSessionStore {
   clearGithubGraphFocus: () => void
   setMarketplaceOpen: (open: boolean) => void
   toggleMarketplace: () => void
+  setDiagramGraphOpen: (open: boolean) => void
+  toggleDiagramGraph: () => void
+  setWireframePackOpen: (open: boolean) => void
+  toggleWireframePack: () => void
+  setReminderGraphOpen: (open: boolean) => void
+  toggleReminderGraph: () => void
   /** User or command asked to see Agent Flow. Clears a previous dismiss. */
   presentAgentFlow: () => void
   /** Live run start. Stays closed when the user already dismissed this run. */
@@ -283,6 +295,8 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
     activeRunId: hydrated.activeRunId,
     activeCustomModeSkillId: hydrated.activeCustomModeSkillId,
     customModePreviousChatMode: hydrated.customModePreviousChatMode,
+    activeAgentDefinitionId: hydrated.activeAgentDefinitionId,
+    activeAgentDisplayName: null,
     conversationCheckpoints: hydrated.conversationCheckpoints,
     latestContextAssembly: hydrated.latestContextAssembly,
     flowSteps: [],
@@ -317,6 +331,9 @@ function overlayState(overlay: CanvasOverlay) {
     agentFlowOpen: overlay === 'agent-flow',
     githubGraphOpen: overlay === 'github',
     marketplaceOpen: overlay === 'marketplace',
+    diagramGraphOpen: overlay === 'diagram',
+    wireframePackOpen: overlay === 'wireframe',
+    reminderGraphOpen: overlay === 'reminder',
   }
 }
 
@@ -417,6 +434,48 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
 
   toggleGithubGraph: () => {
     setCanvasOverlayState(set, get().canvasOverlay === 'github' ? 'none' : 'github')
+  },
+
+  setDiagramGraphOpen: (open) => {
+    setCanvasOverlayState(set, open ? 'diagram' : 'none')
+  },
+
+  toggleDiagramGraph: () => {
+    setCanvasOverlayState(set, get().canvasOverlay === 'diagram' ? 'none' : 'diagram')
+  },
+
+  setWireframePackOpen: (open) => {
+    // Folded into Diagram Graph · ui-wireframe — never open a parallel overlay.
+    if (open) {
+      setCanvasOverlayState(set, 'diagram')
+      void import('./diagramGraphStore').then(({ useDiagramGraphStore }) => {
+        useDiagramGraphStore.getState().enterWireframeMode()
+      })
+      return
+    }
+    if (get().canvasOverlay === 'diagram' || get().canvasOverlay === 'wireframe') {
+      setCanvasOverlayState(set, 'none')
+    }
+  },
+
+  toggleWireframePack: () => {
+    // Compat shim: treat as Diagram Graph wireframe mode.
+    if (get().canvasOverlay === 'diagram' || get().canvasOverlay === 'wireframe') {
+      setCanvasOverlayState(set, 'none')
+      return
+    }
+    setCanvasOverlayState(set, 'diagram')
+    void import('./diagramGraphStore').then(({ useDiagramGraphStore }) => {
+      useDiagramGraphStore.getState().enterWireframeMode()
+    })
+  },
+
+  setReminderGraphOpen: (open) => {
+    setCanvasOverlayState(set, open ? 'reminder' : 'none')
+  },
+
+  toggleReminderGraph: () => {
+    setCanvasOverlayState(set, get().canvasOverlay === 'reminder' ? 'none' : 'reminder')
   },
 
   requestGithubGraphRefresh: (focus) => {

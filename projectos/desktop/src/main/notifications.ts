@@ -3,7 +3,7 @@ import { Notification, app, type BrowserWindow } from 'electron'
 export type DiffReadyNotificationPayload = {
   title: string
   body: string
-  destination: 'ask' | 'diff'
+  destination: 'ask' | 'diff' | 'reminder'
   runIds: string[]
 }
 
