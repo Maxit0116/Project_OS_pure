@@ -63,6 +63,7 @@ import { verificationFailureAllowsRepair } from "../verification-evidence.js";
 import { writeRunSnapshot } from "../harness/persisted-run.js";
 import { decideHarnessResume } from "../harness/resume-policy.js";
 import { computeLocalContextBundleHash } from "../local-context-assembler.js";
+import { editableCandidates, oversizeNote, type OversizeFile } from "./oversize-files.js";
 import {
   resolveLeafPipelineBudget,
   type LeafPipelineBudget,
@@ -3266,6 +3267,16 @@ export class AgentOrchestrator {
     return { ...target, allowedIds: free };
   }
 
+  /** Files too large to edit are not offered to the planner (see oversize-files.ts). */
+  private excludeOversizeLeafFiles(
+    target: HierarchyPlanTarget,
+    workspace: LoadedProjectOSWorkspace,
+  ): HierarchyPlanTarget {
+    if (target.kind !== "leaf-file" || target.allowedIds.length === 0) return target;
+    const { editable, tooLarge } = editableCandidates(workspace.workspaceRoot, target.allowedIds);
+    return tooLarge.length === 0 ? target : { ...target, allowedIds: editable, tooLarge };
+  }
+
   private reserveHierarchyExpansion(
     state: OrchestratorRunState,
     plan: HierarchyDelegationPlan,
@@ -3482,7 +3493,7 @@ export class AgentOrchestrator {
     for (let attempt = 0; attempt < maxPlanAttempts; attempt += 1) {
       const retrying = attempt >= 1;
       // Recomputed every attempt: a sibling planner may have claimed a file since the last one.
-      target = this.excludeClaimedLeafFiles(baseTarget, state);
+      target = this.excludeOversizeLeafFiles(this.excludeClaimedLeafFiles(baseTarget, state), workspace);
       const response = await this.completeWithTrace(
         workspace,
         state,
@@ -5335,6 +5346,7 @@ export class AgentOrchestrator {
       );
     }
     let firstFailure: DelegationPlanFailureCategory | undefined;
+    const candidates = editableCandidates(workspace.workspaceRoot, context.fileManifest.map((file) => file.path));
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const retrying = attempt === 1;
       const maxOutputTokens = resolveDelegationPlanMaxOutputTokens(
@@ -5353,9 +5365,10 @@ export class AgentOrchestrator {
           systemPrompt: delegationPlanSystemPrompt(
             state.agentProfile.systemPrompt,
             state.run.scope.nodeId,
-            context.fileManifest.map((file) => file.path),
+            candidates.editable,
             context.responseLanguage,
             retrying ? firstFailure : undefined,
+            oversizeNote(candidates.tooLarge),
           ),
           input: {
             mode: "plan_node_delegation",
@@ -9076,7 +9089,7 @@ type HierarchyPlannerScope = Extract<
 >;
 
 export type HierarchyPlanTarget =
-  | { kind: "leaf-file"; allowedIds: string[] }
+  | { kind: "leaf-file"; allowedIds: string[]; tooLarge?: OversizeFile[] }
   | {
       kind: "planner";
       level: "context" | "container" | "component";
@@ -9371,7 +9384,7 @@ function hierarchyDelegationSystemPrompt(
   const targetInstruction = greenfield
     ? "The graph is empty. Produce the complete typed greenfield product hierarchy described below."
     : target.kind === "leaf-file"
-    ? `Delegate only to required files from this server-supplied list: ${JSON.stringify(target.allowedIds)}. Return {"objective":"...","tasks":[{"taskKey":"api","path":"candidate/path","dependencyTaskKeys":[],"interfaceContractIds":[],"objective":"...","acceptanceCriteria":["..."]}],"contracts":[],"rationale":"..."}.`
+    ? `Delegate only to required files from this server-supplied list: ${JSON.stringify(target.allowedIds)}. Return {"objective":"...","tasks":[{"taskKey":"api","path":"candidate/path","dependencyTaskKeys":[],"interfaceContractIds":[],"objective":"...","acceptanceCriteria":["..."]}],"contracts":[],"rationale":"..."}. ${oversizeNote(target.tooLarge)}`
     : `Delegate only to immediate ${target.level} graph children from this server-supplied list: ${JSON.stringify(target.allowedIds)}. Return {"objective":"...","tasks":[{"taskKey":"billing","nodeId":"candidate-node","dependencyTaskKeys":[],"interfaceContractIds":[],"objective":"...","acceptanceCriteria":["..."]}],"contracts":[],"rationale":"..."}.`;
   const contractInstruction = `Use taskKey values only to refer to tasks in this plan. A dependent task names its prerequisites in dependencyTaskKeys; dependencies must be acyclic. When tasks exchange a boundary, define one contracts entry such as {"contractId":"receipt_api","producerTaskKey":"api","consumerTaskKeys":["billing_ui"],"identity":{"kind":"endpoint","name":"POST /api/receipts"},"behavior":"Creates one receipt for one successful payment","units":"receipt id is an opaque string","failureSemantics":"Duplicate payment ids return the original receipt","acceptanceExamples":[{"input":"payment_1","expected":"receipt_1"}]}. identity.kind is exactly one of "symbol" (an exported function, class, type or constant), "endpoint" (an HTTP route) or "message" (an event or queued message); name is the identifier a consumer will use. Reference that contractId from every producer and consumer task. Pass the same contract to both sides. Do not invent a contract when tasks are independent.`;
   const scaffoldInstruction = greenfield || scope.kind === "component"
@@ -9523,10 +9536,11 @@ function delegationPlanSystemPrompt(
   candidatePaths: string[],
   responseLanguage: string,
   retryCategory?: DelegationPlanFailureCategory,
+  oversizeSentence = "",
 ): string {
   return `${agentPrompt}
 Plan a node-scoped change for functional node ${nodeId}. This is a read-only planning phase with zero write capability.
-Choose existing modify targets only from this server-supplied candidate list: ${JSON.stringify(candidatePaths)}.
+Choose existing modify targets only from this server-supplied candidate list: ${JSON.stringify(candidatePaths)}. ${oversizeSentence}
 For an explicitly requested new file, you may instead return exactly one create task beneath the exact parent directory of an existing candidate: {"path":"parent/new-file.ext","operation":"create","responsibility":"...","objective":"...","acceptanceCriteria":["..."]}. Do not mix create and modify tasks. The server independently validates the parent directory, basename, absence, and component ownership.
 For an explicitly requested file deletion, return exactly one target from the candidate list as {"path":"candidate/path","operation":"delete","objective":"...","acceptanceCriteria":["..."]}. Do not choose repair files or mix deletion with other tasks: the server scans the workspace and derives the complete direct-importer repair set.
 Return exactly one JSON object and nothing else: {"objective":"...","tasks":[{"path":"candidate/path","objective":"...","acceptanceCriteria":["..."]}],"rationale":"..."}.
