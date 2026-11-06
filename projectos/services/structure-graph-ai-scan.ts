@@ -8,6 +8,8 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { basename, join } from "node:path";
 
 import {
+  ArchitectureLayerSchema,
+  ArchitectureLevelSchema,
   ProjectGraphSchema,
   type FunctionalEdge,
   type FunctionalNode,
@@ -32,16 +34,20 @@ import {
   assessL2GraphQuality,
   assignFilesToComponents,
   buildFileIndexAndRelations,
-  collectRepoFiles,
   collectWorkspaceTechSignals,
+  componentBudget,
   countSourceFiles,
   defaultArchitecture,
   detectReadmeLanguage,
   enrichNodesForC4Shapes,
   ensureEdgeFields,
+  filesPerComponentCap,
+  listRepoFiles,
   mergeStructureGraphs,
   pruneDanglingEdges,
   rebuildHierarchy,
+  sampleRepoFiles,
+  summarizeRepoDirectories,
   type ScanLanguage,
 } from "./structure-graph-l2.js";
 import { stepEvent } from "./structure-scan-progress-tracker.js";
@@ -149,10 +155,6 @@ function readTextCapped(path: string, maxChars: number): string | null {
   }
 }
 
-function collectFileTree(workspaceRoot: string, limit = 120): string[] {
-  return collectRepoFiles(workspaceRoot, limit);
-}
-
 function pickSnippetPaths(filePaths: string[]): string[] {
   const preferred = [
     "README.md",
@@ -190,9 +192,13 @@ export function buildRepoScanContext(input: {
   displayName: string;
   graph: ProjectGraph;
 }): string {
+  const inventory = listRepoFiles(input.workspaceRoot);
   const fromGraph = input.graph.fileIndex.map((entry) => entry.path).slice(0, 100);
-  const walked = collectFileTree(input.workspaceRoot, 120);
-  const filePaths = Array.from(new Set([...fromGraph, ...walked])).slice(0, 140);
+  const walked = sampleRepoFiles(inventory, 120);
+  // The sample first: the heuristic graph's index is the first files in name order, which in a large
+  // repository are not the ones that tell the model what the system is.
+  const filePaths = Array.from(new Set([...walked, ...fromGraph])).slice(0, 140);
+  const directories = summarizeRepoDirectories(inventory, 50);
   const snippets = pickSnippetPaths(filePaths)
     .map((relativePath) => {
       const body = readTextCapped(join(input.workspaceRoot, relativePath), 2500);
@@ -208,6 +214,9 @@ export function buildRepoScanContext(input: {
 
   return [
     `# Repository: ${input.displayName}`,
+    "",
+    `## Directory overview (${inventory.length} files in all)`,
+    ...directories.map((entry) => `- ${entry}`),
     "",
     "## File paths (sample)",
     ...filePaths.slice(0, 100).map((path) => `- ${path}`),
@@ -1039,7 +1048,11 @@ async function completeJsonRound(
         },
         redactionPolicy: "secrets_and_paths",
         maxOutputTokens,
-        thinkingDepth: "medium",
+        // The scan turns files into JSON; it does not need hidden reasoning. With it on, the model
+        // spent most of the output budget thinking (a 8,192-token reply was cut off, the retry with
+        // a larger budget was slower still) and one request took 34 s, 273 s or never finished.
+        // Off, the same request returns in about 10 s.
+        thinkingDepth: "off",
       },
       input.signal ? { signal: input.signal } : undefined,
     );
@@ -1081,6 +1094,33 @@ function attachFilesToNodes(
   });
 }
 
+/**
+ * The architecture block is boilerplate (notation, default level, layers). A model sometimes fills it
+ * with project metadata instead (`{projectId, repo, name, round, …}`), and taking it verbatim made the
+ * whole assembled graph fail validation and the scan throw away every node it had just produced.
+ * Keep what is usable (valid layers, a valid default level) and take the rest from the defaults.
+ */
+export function resolveArchitecture(
+  raw: unknown,
+  language: ScanLanguage,
+): NonNullable<ProjectGraph["architecture"]> {
+  const fallback = defaultArchitecture(language);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return fallback;
+  const candidate = raw as Record<string, unknown>;
+  const level = ArchitectureLevelSchema.safeParse(candidate["defaultLevel"]);
+  const layers = Array.isArray(candidate["layers"])
+    ? candidate["layers"]
+        .map((layer) => ArchitectureLayerSchema.safeParse(layer))
+        .filter((result) => result.success)
+        .map((result) => result.data)
+    : [];
+  return {
+    notation: "c4",
+    defaultLevel: level.success ? level.data : fallback.defaultLevel,
+    layers: layers.length > 0 ? layers : fallback.layers,
+  };
+}
+
 function assembleFromRounds(input: {
   projectId: string;
   projectName: string;
@@ -1090,11 +1130,8 @@ function assembleFromRounds(input: {
   roundA: Record<string, unknown>;
   roundB: Record<string, unknown>;
 }): ProjectGraph {
-  const architecture =
-    input.roundA.architecture && typeof input.roundA.architecture === "object"
-      ? (input.roundA.architecture as ProjectGraph["architecture"])
-      : defaultArchitecture(input.language);
-  const layers = architecture?.layers ?? defaultArchitecture(input.language).layers;
+  const architecture = resolveArchitecture(input.roundA.architecture, input.language);
+  const layers = architecture.layers;
   const layerIds = new Set(layers.map((layer) => layer.id));
 
   const skeleton = asRecordArray(input.roundA.nodes).map((raw) =>
@@ -1137,8 +1174,14 @@ function assembleFromRounds(input: {
         : [],
   })).filter((hint) => hint.id.length > 0);
 
-  const files = collectRepoFiles(input.workspaceRoot, 400);
-  const assignments = assignFilesToComponents({ files, components: hints });
+  // Every file, not a sample: a file the model never saw still belongs to a component whose path
+  // hint covers it, and a large repository's code used to be mostly left out of the map.
+  const files = listRepoFiles(input.workspaceRoot);
+  const assignments = assignFilesToComponents({
+    files,
+    components: hints,
+    maxFilesPerComponent: filesPerComponentCap(countSourceFiles(files), hints.length),
+  });
   nodes = attachFilesToNodes(nodes, assignments);
   const techSignals = collectWorkspaceTechSignals(input.workspaceRoot, files);
   nodes = enrichNodesForC4Shapes({
@@ -1287,14 +1330,16 @@ export async function runStructureGraphAiScan(
   try {
     emitStep("step_started", "index_repo");
     const language = detectReadmeLanguage(input.workspaceRoot);
-    const files = collectRepoFiles(input.workspaceRoot, 400);
+    const inventory = listRepoFiles(input.workspaceRoot);
+    const sourceFileCount = countSourceFiles(inventory);
+    const files = sampleRepoFiles(inventory, 400);
     const contentHash = computeRepoScanContentHash(input.workspaceRoot, files);
     const cachedHash = readScanCacheHash(input.workspaceRoot);
     const hashUnchanged = cachedHash !== null && cachedHash === contentHash;
     emitStep(
       "step_completed",
       "index_repo",
-      `${files.length} files · ${language === "zh-CN" ? "zh-CN" : "en"}`,
+      `${inventory.length} files · ${language === "zh-CN" ? "zh-CN" : "en"}`,
     );
 
     if (
@@ -1321,7 +1366,9 @@ export async function runStructureGraphAiScan(
       displayName: input.displayName,
       graph: input.graph,
     });
-    const fileList = files.slice(0, 180).map((path) => `- ${path}`).join("\n");
+    const fileList = sampleRepoFiles(inventory, 240).map((path) => `- ${path}`).join("\n");
+    const directoryOverview = summarizeRepoDirectories(inventory, 60);
+    const budget = componentBudget(sourceFileCount);
     const changedNote =
       input.changedFiles && input.changedFiles.length > 0
         ? `Changed files to prioritize (keep unrelated node ids/names stable): ${input.changedFiles
@@ -1394,9 +1441,9 @@ export async function runStructureGraphAiScan(
         "",
         "ROUND B: emit ONLY components with pathHints. No fileIndex, no fileRelations.",
         `Language for names: ${language === "zh-CN" ? "Chinese" : "English"}.`,
-        "Each container needs 2–6 components (about 8–20 total). Product capability names, not directory shells.",
+        `Each container needs 2–6 components; ${budget.min}–${budget.max} in total for this repository (${sourceFileCount} source files). Never more components than half the number of source files, and every component must own at least one real file through its pathHints. Product capability names, not directory shells.`,
         "Each component: { id, name, parentId, description, summary, responsibility, layer, pathHints: string[], technology?, notes?, openQuestions?, owners? }.",
-        "pathHints must be real path prefixes from the file list (e.g. android/app/src, src/auth).",
+        "pathHints must be real path prefixes from the file list or the directory overview (e.g. android/app/src, src/auth). The file list is only a sample; the directory overview shows where all the files are.",
         "Edges between components MUST include technology/protocol when known.",
         deepenNote,
         changedNote,
@@ -1407,6 +1454,7 @@ export async function runStructureGraphAiScan(
       {
         language,
         files: fileList,
+        directories: directoryOverview,
         roundA,
         changedFiles: input.changedFiles?.slice(0, 80) ?? [],
         existingComponents: input.graph.nodes
@@ -1477,7 +1525,7 @@ export async function runStructureGraphAiScan(
     activeStep = "validate_save";
     emitStep("step_started", "validate_save");
     const quality = assessL2GraphQuality(result, {
-      sourceFileCount: countSourceFiles(files),
+      sourceFileCount,
       language,
     });
     if (!quality.complete) {
