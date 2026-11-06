@@ -834,7 +834,7 @@ const zh = {
     fileNotOwnedUnnamed: '该文件不属于任何功能，Agent 暂时无法修改它。请在文件树里选中它并加入某个功能，然后重试。',
     reviewRejected: '改动未应用：独立评审无法确认某项要求（{detail}）。没有写入任何文件。请调整请求，或去掉这项要求，然后重新提出。',
     reviewRejectedBare: '改动未应用：独立评审没有通过。没有写入任何文件。请调整请求后重新提出。',
-    fileTooLarge: 'Agent 无法修改 {file}：文件太大，无法整个发给模型（约 {tokens} 个 token，上限 {limit}）。请先把它拆成较小的文件，或改为请求修改较小的文件。没有写入任何文件。',
+    fileTooLarge: 'Agent 无法修改 {file}：文件太大，无法整个发给模型（约 {tokens} 个 token，上限 {limit}）。请先把它拆成较小的文件，或改为请求修改较小的文件；对这个文件提问仍然可用。没有写入任何文件。',
     subtreeFailed: '改动的一部分无法准备，所以没有写入任何文件：{reason}',
     reviewUnmet: '改动未应用：独立评审认为它没有满足某项要求（{detail}）。请先查看改动，再选择“仍然应用”，或调整请求。',
     reviewUnmetBare: '改动未应用：独立评审认为它没有满足某项要求。请先查看改动，再选择“仍然应用”，或调整请求。',
@@ -2008,7 +2008,7 @@ const zh = {
     },
   },
   toast: {
-    applySuccess: '已应用 {count} 个文件的更改。Google 登录现已启用。',
+    applySuccess: '已应用 {count} 个文件的更改。',
     authError: '检测到认证错误 — 用户认证已标记为错误状态。',
     harnessFixComplete: '调试修复完成 — 功能图已恢复为正常。',
     runComplete: 'Agent 执行完成 — 请审核提议的 Diff。',
