@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { getStoreMessage } from '../i18n/storeMessages'
+
 import type {
   AgentRun,
   AgentRunEvent,
@@ -352,6 +354,254 @@ describe('structure rescan failure', () => {
     expect(state.toasts.some((toast) => toast.type === 'success')).toBe(false)
     expect(state.toasts.some((toast) => toast.type === 'warning' && toast.message.includes('HTTP 503'))).toBe(true)
   })
+
+  it('keeps edits made while a scan is pending when that scan fails', async () => {
+    const scan = deferred<never>()
+    const client = {
+      analyzeWorkspace: vi.fn(() => scan.promise),
+      getSemanticTree: vi.fn(),
+    } as unknown as ProjectOSApi
+    setWorkspace(client)
+    const graphBefore = useWorkbenchStore.getState().graph
+    const context = contextFor('Kept context', { nodeId: 'feat_login' })
+    useWorkbenchStore.setState({ context })
+    const pending = useWorkbenchStore.getState().rescanStructureGraph()
+    expect(useWorkbenchStore.getState().structureRescanLoading).toBe(true)
+
+    const draft = {
+      ...useWorkbenchStore.getState().composerDraft,
+      text: 'Edited while the scan is still running',
+    }
+    useWorkbenchStore.setState({
+      composerDraft: draft,
+      messages: [{
+        id: 'msg_newer',
+        role: 'user',
+        content: 'Sent while the scan is still running',
+        timestamp: '2026-11-06T00:00:01.000Z',
+      }],
+    })
+    scan.reject(new Error('Model provider request failed (HTTP 503)'))
+    await pending
+
+    const state = useWorkbenchStore.getState()
+    expect(state.structureRescanLoading).toBe(false)
+    expect(state.graph).toEqual(graphBefore)
+    expect(state.context).toEqual(context)
+    expect(state.composerDraft).toEqual(draft)
+    expect(state.messages.map((message) => message.content)).toEqual([
+      'Sent while the scan is still running',
+    ])
+    expect(state.error).toBe(getStoreMessage('en', 'map.rescanStructureFailed', {
+      detail: 'Model provider request failed (HTTP 503)',
+    }))
+    expect(state.toasts.some((toast) => toast.type === 'success')).toBe(false)
+    expect(client.getSemanticTree).not.toHaveBeenCalled()
+  })
+
+  it('adopts the scanned graph when only the tree refresh fails', async () => {
+    const workspace = createMockSampleWorkspace()
+    const scannedGraph = {
+      ...workspace.graph,
+      projectName: 'Scanned project',
+    }
+    const tree = deferred<typeof workspace.semanticTree>()
+    const client = {
+      analyzeWorkspace: vi.fn(async () => scannedGraph),
+      getSemanticTree: vi.fn(() => tree.promise),
+    } as unknown as ProjectOSApi
+    setWorkspace(client)
+    const treeBefore = useWorkbenchStore.getState().tree
+    const draft = {
+      ...useWorkbenchStore.getState().composerDraft,
+      text: 'Keep this draft when the tree refresh fails',
+    }
+    useWorkbenchStore.setState({ composerDraft: draft })
+    const pending = useWorkbenchStore.getState().rescanStructureGraph()
+    tree.reject(new Error('semantic tree read failed'))
+    await pending
+
+    const state = useWorkbenchStore.getState()
+    expect(client.analyzeWorkspace).toHaveBeenCalledOnce()
+    expect(client.getSemanticTree).toHaveBeenCalledOnce()
+    expect(state.graph).toEqual(scannedGraph)
+    expect(state.tree).toBe(treeBefore)
+    expect(state.composerDraft).toEqual(draft)
+    expect(state.structureRescanLoading).toBe(false)
+    expect(state.error).toBe(getStoreMessage('en', 'map.rescanTreeRefreshFailed', {
+      detail: 'semantic tree read failed',
+    }))
+    expect(state.error).not.toContain('kept the current map')
+    expect(state.toasts.some((toast) => toast.type === 'success')).toBe(false)
+    expect(state.toasts.some((toast) => toast.type === 'warning')).toBe(true)
+  })
+
+  it('drops a late scan result after the workspace changes', async () => {
+    const workspace = createMockSampleWorkspace()
+    const other = createMockSampleWorkspace()
+    const otherProject = {
+      ...other.project,
+      projectId: 'proj_other_workspace',
+      displayName: 'Other workspace',
+    }
+    const scan = deferred<typeof workspace.graph>()
+    const scanTree = vi.fn()
+    const client = {
+      analyzeWorkspace: vi.fn(() => scan.promise),
+      getSemanticTree: vi.fn(async (projectId: string) => {
+        if (projectId === otherProject.projectId) return other.semanticTree
+        return scanTree()
+      }),
+      openWorkspace: vi.fn(async () => otherProject),
+      getProjectGraph: vi.fn(async () => other.graph),
+      getMapContent: vi.fn(async () => other.mapContent),
+      getCurrentWork: vi.fn(async () => other.currentWork),
+      getProjectDescription: vi.fn(async () => other.projectDescription),
+      getSettings: vi.fn(async () => other.settings),
+      getChatSessionIndex: vi.fn(async () => {
+        throw new Error('sessions unavailable')
+      }),
+    } as unknown as ProjectOSApi
+    setWorkspace(client)
+    useWorkbenchStore.setState({
+      composerDraft: {
+        ...useWorkbenchStore.getState().composerDraft,
+        text: 'Draft in the first workspace',
+      },
+    })
+    const pending = useWorkbenchStore.getState().rescanStructureGraph()
+    await useWorkbenchStore.getState().openWorkspace('/other')
+    const afterOpen = useWorkbenchStore.getState()
+    const poison = { ...workspace.graph, projectName: 'Must not land' }
+    scan.resolve(poison)
+    await pending
+
+    const state = useWorkbenchStore.getState()
+    expect(state.project?.projectId).toBe('proj_other_workspace')
+    expect(state.graph).toEqual(afterOpen.graph)
+    expect(state.tree).toEqual(afterOpen.tree)
+    expect(state.composerDraft).toEqual(afterOpen.composerDraft)
+    expect(state.messages).toEqual(afterOpen.messages)
+    expect(state.context).toEqual(afterOpen.context)
+    expect(state.structureRescanLoading).toBe(false)
+    expect(state.error).toBe(afterOpen.error)
+    expect(state.toasts.filter((toast) => toast.type === 'success')).toEqual(
+      afterOpen.toasts.filter((toast) => toast.type === 'success'),
+    )
+    expect(state.toasts.filter((toast) => toast.type === 'warning')).toEqual(
+      afterOpen.toasts.filter((toast) => toast.type === 'warning'),
+    )
+    expect(scanTree).not.toHaveBeenCalled()
+  })
+
+  it('drops a late scan result after reset and reopen of the same project', async () => {
+    const workspace = createMockSampleWorkspace()
+    const reopenedGraph = { ...workspace.graph, projectName: 'Reopened map' }
+    const scan = deferred<typeof workspace.graph>()
+    const client = {
+      analyzeWorkspace: vi.fn(() => scan.promise),
+      getSemanticTree: vi.fn(async () => workspace.semanticTree),
+      getProjectGraph: vi.fn(async () => reopenedGraph),
+      getMapContent: vi.fn(async () => workspace.mapContent),
+      getCurrentWork: vi.fn(async () => workspace.currentWork),
+      getChatSessionIndex: vi.fn(async () => ({
+        version: '0.2.0',
+        pinnedIds: [],
+        heads: [],
+      })),
+      upsertChatSession: vi.fn(async () => undefined),
+      setLastActiveChatSession: vi.fn(async () => undefined),
+      deleteChatSession: vi.fn(async () => undefined),
+      openWorkspace: vi.fn(async () => workspace.project),
+      getProjectDescription: vi.fn(async () => workspace.projectDescription),
+      getSettings: vi.fn(async () => workspace.settings),
+    } as unknown as ProjectOSApi
+    setWorkspace(client)
+    const sameProject = useWorkbenchStore.getState().project
+    client.openWorkspace.mockImplementation(async () => sameProject)
+    const pending = useWorkbenchStore.getState().rescanStructureGraph()
+    await useWorkbenchStore.getState().resetDemo()
+    const afterReset = useWorkbenchStore.getState()
+    expect(afterReset.project?.projectId).toBe(sameProject?.projectId)
+    expect(afterReset.graph).toEqual(reopenedGraph)
+    expect(afterReset.structureRescanLoading).toBe(false)
+
+    scan.resolve({ ...workspace.graph, projectName: 'Stale scan' })
+    await pending
+    expect(useWorkbenchStore.getState().graph).toEqual(afterReset.graph)
+    expect(useWorkbenchStore.getState().composerDraft).toEqual(afterReset.composerDraft)
+    expect(useWorkbenchStore.getState().messages).toEqual(afterReset.messages)
+    expect(useWorkbenchStore.getState().error).toBe(afterReset.error)
+    expect(useWorkbenchStore.getState().toasts.filter((toast) => toast.type !== 'info')).toEqual(
+      afterReset.toasts.filter((toast) => toast.type !== 'info'),
+    )
+
+    const reopenScan = deferred<typeof workspace.graph>()
+    client.analyzeWorkspace.mockImplementationOnce(() => reopenScan.promise)
+    const reopenedAgain = { ...workspace.graph, projectName: 'Opened again' }
+    client.getProjectGraph.mockResolvedValueOnce(reopenedAgain)
+    client.getSemanticTree.mockResolvedValue(workspace.semanticTree)
+    const second = useWorkbenchStore.getState().rescanStructureGraph()
+    expect(useWorkbenchStore.getState().structureRescanLoading).toBe(true)
+    const opening = useWorkbenchStore.getState().openWorkspace(workspace.project.workspaceRoot)
+    reopenScan.resolve({ ...workspace.graph, projectName: 'In flight during reopen' })
+    await second
+    await opening
+    expect(useWorkbenchStore.getState().project?.projectId).toBe(sameProject?.projectId)
+    expect(useWorkbenchStore.getState().graph?.projectName).toBe('Opened again')
+    expect(useWorkbenchStore.getState().structureRescanLoading).toBe(false)
+    expect(useWorkbenchStore.getState().toasts.some((toast) => toast.type === 'success' && toast.message.includes('updated'))).toBe(false)
+  })
+
+  it('ignores an older scan when a newer scan is in flight', async () => {
+    const workspace = createMockSampleWorkspace()
+    const scans: Array<ReturnType<typeof deferred<typeof workspace.graph>>> = []
+    const trees: Array<ReturnType<typeof deferred<typeof workspace.semanticTree>>> = []
+    let deferTrees = false
+    const client = {
+      analyzeWorkspace: vi.fn(() => {
+        const next = deferred<typeof workspace.graph>()
+        scans.push(next)
+        return next.promise
+      }),
+      getSemanticTree: vi.fn(() => {
+        if (!deferTrees) return Promise.resolve(workspace.semanticTree)
+        const next = deferred<typeof workspace.semanticTree>()
+        trees.push(next)
+        return next.promise
+      }),
+      getProjectGraph: vi.fn(async () => workspace.graph),
+      getMapContent: vi.fn(async () => workspace.mapContent),
+      getCurrentWork: vi.fn(async () => workspace.currentWork),
+      getChatSessionIndex: vi.fn(async () => ({
+        version: '0.2.0',
+        pinnedIds: [],
+        heads: [],
+      })),
+      upsertChatSession: vi.fn(async () => undefined),
+      setLastActiveChatSession: vi.fn(async () => undefined),
+      deleteChatSession: vi.fn(async () => undefined),
+    } as unknown as ProjectOSApi
+    setWorkspace(client)
+    const first = useWorkbenchStore.getState().rescanStructureGraph()
+    await useWorkbenchStore.getState().resetDemo()
+    const second = useWorkbenchStore.getState().rescanStructureGraph()
+    expect(scans).toHaveLength(2)
+    scans[0]?.resolve({ ...workspace.graph, projectName: 'Older scan' })
+    await first
+    expect(useWorkbenchStore.getState().graph?.projectName).not.toBe('Older scan')
+    expect(trees).toHaveLength(0)
+
+    const newerGraph = { ...workspace.graph, projectName: 'Newer scan' }
+    deferTrees = true
+    scans[1]?.resolve(newerGraph)
+    await vi.waitFor(() => expect(trees).toHaveLength(1))
+    trees[0]?.resolve(workspace.semanticTree)
+    await second
+    expect(useWorkbenchStore.getState().graph).toEqual(newerGraph)
+    expect(useWorkbenchStore.getState().structureRescanLoading).toBe(false)
+    expect(useWorkbenchStore.getState().toasts.some((toast) => toast.type === 'success')).toBe(true)
+  })
 })
 
 function setWorkspace(client: ProjectOSApi): void {
@@ -405,12 +655,15 @@ function contextFor(
 function deferred<T>(): {
   promise: Promise<T>
   resolve: (value: T) => void
+  reject: (error: unknown) => void
 } {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((next) => {
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((next, fail) => {
     resolve = next
+    reject = fail
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 function runFixture(runId: string): AgentRun {

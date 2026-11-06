@@ -1073,6 +1073,7 @@ const zh = {
     rescanningStructure: '正在重新扫描结构…',
     rescanStructureDone: '结构图已更新',
     rescanStructureFailed: '结构重扫失败，已保留当前图。{detail}',
+    rescanTreeRefreshFailed: '结构图已更新，但语义树未能刷新。{detail}',
     heuristicHint:
       '当前结构图为启发式结果。可在设置中配置模型后重新分析，以获得更完整的 C4 结构图。',
     legend: '关系类型',

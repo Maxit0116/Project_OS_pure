@@ -1073,6 +1073,7 @@ const en = {
     rescanningStructure: 'Rescanning structure…',
     rescanStructureDone: 'Structure map updated',
     rescanStructureFailed: 'Structure rescan failed; kept the current map. {detail}',
+    rescanTreeRefreshFailed: 'Structure map updated, but the semantic tree could not be refreshed. {detail}',
     heuristicHint:
       'Structure map is heuristic. Configure a model in Settings, then rescan for a richer C4 graph.',
     legend: 'Relations',
