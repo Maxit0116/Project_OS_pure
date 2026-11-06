@@ -491,4 +491,393 @@ describe('structure rescan reliability', () => {
     expect(useWorkbenchStore.getState().graph).toEqual(workspace.graph)
     expect(useWorkbenchStore.getState().structureRescanLoading).toBe(false)
   })
+
+  function resetClient(
+    workspace: ReturnType<typeof createMockSampleWorkspace>,
+    overrides: Record<string, unknown> = {},
+  ): ProjectOSApi {
+    return {
+      cancelStructureScan: vi.fn(async () => true),
+      getProjectGraph: vi.fn(async () => workspace.graph),
+      getSemanticTree: vi.fn(async () => workspace.semanticTree),
+      getMapContent: vi.fn(async () => workspace.mapContent),
+      getCurrentWork: vi.fn(async () => workspace.currentWork),
+      getProjectDescription: vi.fn(async () => workspace.projectDescription),
+      getSettings: vi.fn(async () => workspace.settings),
+      listWorkspaceDirectory: vi.fn(async () => []),
+      openWorkspace: vi.fn(async () => workspace.project),
+      streamStructureScan: vi.fn(() => ({ dispose() {} })),
+      getStructureScanProgress: vi.fn(async () => null),
+      getChatSessionIndex: vi.fn(async () => ({
+        version: '0.2.0',
+        pinnedIds: [],
+        heads: [],
+      })),
+      getChatSession: vi.fn(async () => null),
+      upsertChatSession: vi.fn(async () => undefined),
+      setLastActiveChatSession: vi.fn(async () => undefined),
+      setChatSessionPinned: vi.fn(async () => undefined),
+      deleteChatSession: vi.fn(async () => undefined),
+      ...overrides,
+    } as unknown as ProjectOSApi
+  }
+
+  function keepNewerInputs(): void {
+    const projectId = useWorkbenchStore.getState().project?.projectId ?? 'proj'
+    useWorkbenchStore.setState({
+      composerDraft: {
+        ...useWorkbenchStore.getState().composerDraft,
+        text: 'newer draft',
+      },
+      messages: [{
+        id: 'msg_newer',
+        role: 'user',
+        content: 'newer message',
+        timestamp: '2026-11-06T00:00:00.000Z',
+      }],
+      context: {
+        scope: 'feature',
+        projectId,
+        nodeId: 'feat_login',
+        title: 'Kept context',
+        summary: 'Kept',
+        linkedFiles: [],
+        upstream: [],
+        downstream: [],
+        recentChanges: [],
+        rawContextMarkdown: 'Kept',
+      },
+      error: null,
+    })
+  }
+
+  function expectNewerWorkspaceKept(graphName: string): void {
+    const state = useWorkbenchStore.getState()
+    expect(state.graph?.projectName).toBe(graphName)
+    expect(state.composerDraft.text).toBe('newer draft')
+    expect(state.messages.map((message) => message.content)).toEqual(['newer message'])
+    expect(state.context?.title).toBe('Kept context')
+    expect(state.error).toBeNull()
+    expect(JSON.stringify(state)).not.toContain('sk-proj-')
+  }
+
+  it('does not let a reset waiting on cancel overwrite a workspace opened during the wait', async () => {
+    const workspace = createMockSampleWorkspace()
+    const cancel = deferred<boolean>()
+    const opened = { ...workspace.graph, projectName: 'Opened during cancel' }
+    const stale = { ...workspace.graph, projectName: 'Stale reset' }
+    let graphReads = 0
+    const client = resetClient(workspace, {
+      cancelStructureScan: vi.fn(() => cancel.promise),
+      openWorkspace: vi.fn(async () => ({
+        ...workspace.project,
+        projectId: 'proj_opened',
+        workspaceRoot: '/tmp/opened-during-cancel',
+      })),
+      getProjectGraph: vi.fn(async () => {
+        graphReads += 1
+        return graphReads === 1 ? opened : stale
+      }),
+      getProjectDescription: vi.fn(async () => ({
+        ...workspace.projectDescription,
+        projectId: 'proj_opened',
+      })),
+    })
+    useWorkbenchStore.setState({
+      client,
+      project: workspace.project,
+      graph: { ...workspace.graph, projectName: 'Before reset' },
+      tree: workspace.semanticTree,
+      locale: 'en',
+      error: null,
+      toasts: [],
+    })
+    const pending = useWorkbenchStore.getState().resetDemo()
+    await Promise.resolve()
+    expect(client.cancelStructureScan).toHaveBeenCalledOnce()
+    await useWorkbenchStore.getState().openWorkspace('/tmp/opened-during-cancel')
+    keepNewerInputs()
+    cancel.resolve(true)
+    await pending
+    expect(useWorkbenchStore.getState().project?.projectId).toBe('proj_opened')
+    expectNewerWorkspaceKept('Opened during cancel')
+  })
+
+  it('does not apply reset reads that resolve after a workspace switch', async () => {
+    const workspace = createMockSampleWorkspace()
+    const graphRead = deferred<typeof workspace.graph>()
+    const opened = { ...workspace.graph, projectName: 'Opened during reads' }
+    let graphReads = 0
+    const client = resetClient(workspace, {
+      openWorkspace: vi.fn(async () => ({
+        ...workspace.project,
+        projectId: 'proj_during_reads',
+        workspaceRoot: '/tmp/opened-during-reads',
+      })),
+      getProjectGraph: vi.fn(() => {
+        graphReads += 1
+        if (graphReads === 1) return graphRead.promise
+        return Promise.resolve(opened)
+      }),
+      getProjectDescription: vi.fn(async () => ({
+        ...workspace.projectDescription,
+        projectId: 'proj_during_reads',
+      })),
+    })
+    useWorkbenchStore.setState({
+      client,
+      project: workspace.project,
+      graph: { ...workspace.graph, projectName: 'Before reset' },
+      tree: workspace.semanticTree,
+      locale: 'en',
+      error: null,
+      toasts: [],
+    })
+    const pending = useWorkbenchStore.getState().resetDemo()
+    await vi.waitFor(() => expect(graphReads).toBe(1))
+    await useWorkbenchStore.getState().openWorkspace('/tmp/opened-during-reads')
+    keepNewerInputs()
+    graphRead.resolve({ ...workspace.graph, projectName: 'Stale read' })
+    await pending
+    expect(useWorkbenchStore.getState().project?.projectId).toBe('proj_during_reads')
+    expectNewerWorkspaceKept('Opened during reads')
+  })
+
+  it('does not record a reset cancellation or read failure after the workspace changed', async () => {
+    const workspace = createMockSampleWorkspace()
+    const cancel = deferred<boolean>()
+    const graphRead = deferred<typeof workspace.graph>()
+    const opened = { ...workspace.graph, projectName: 'Opened before rejection' }
+    let graphReads = 0
+    const client = resetClient(workspace, {
+      cancelStructureScan: vi.fn(() => cancel.promise),
+      openWorkspace: vi.fn(async () => ({
+        ...workspace.project,
+        projectId: 'proj_after_reject',
+        workspaceRoot: '/tmp/opened-before-reject',
+      })),
+      getProjectGraph: vi.fn(() => {
+        graphReads += 1
+        if (graphReads === 1) return Promise.resolve(opened)
+        return graphRead.promise
+      }),
+      getProjectDescription: vi.fn(async () => ({
+        ...workspace.projectDescription,
+        projectId: 'proj_after_reject',
+      })),
+    })
+    useWorkbenchStore.setState({
+      client,
+      project: workspace.project,
+      graph: { ...workspace.graph, projectName: 'Before reset' },
+      tree: workspace.semanticTree,
+      locale: 'en',
+      error: null,
+      toasts: [],
+    })
+    const pendingCancel = useWorkbenchStore.getState().resetDemo()
+    await Promise.resolve()
+    await useWorkbenchStore.getState().openWorkspace('/tmp/opened-before-reject')
+    keepNewerInputs()
+    cancel.reject(new Error('cancel failed sk-proj-reset-secret'))
+    await pendingCancel
+    expectNewerWorkspaceKept('Opened before rejection')
+
+    const readClient = resetClient(workspace, {
+      openWorkspace: vi.fn(async () => ({
+        ...workspace.project,
+        projectId: 'proj_read_reject',
+        workspaceRoot: '/tmp/opened-before-read-reject',
+      })),
+      getProjectGraph: vi.fn(() => {
+        graphReads += 1
+        if (graphReads === 2) return graphRead.promise
+        return Promise.resolve({ ...workspace.graph, projectName: 'Opened before read rejection' })
+      }),
+      getProjectDescription: vi.fn(async () => ({
+        ...workspace.projectDescription,
+        projectId: 'proj_read_reject',
+      })),
+    })
+    useWorkbenchStore.setState({
+      client: readClient,
+      project: workspace.project,
+      graph: { ...workspace.graph, projectName: 'Before read reset' },
+      tree: workspace.semanticTree,
+      locale: 'en',
+      error: null,
+      toasts: [],
+      messages: [],
+      context: null,
+    })
+    const pendingRead = useWorkbenchStore.getState().resetDemo()
+    await vi.waitFor(() => expect(graphReads).toBe(2))
+    await useWorkbenchStore.getState().openWorkspace('/tmp/opened-before-read-reject')
+    keepNewerInputs()
+    graphRead.reject(new Error('read failed sk-proj-read-secret'))
+    await pendingRead
+    expect(useWorkbenchStore.getState().project?.projectId).toBe('proj_read_reject')
+    expectNewerWorkspaceKept('Opened before read rejection')
+  })
+
+  it('does not let an older same-project reset overwrite a reopen or a newer reset', async () => {
+    const workspace = createMockSampleWorkspace()
+    const cancel = deferred<boolean>()
+    const reopened = { ...workspace.graph, projectName: 'Same id reopened' }
+    const stale = { ...workspace.graph, projectName: 'Same id stale reset' }
+    let graphReads = 0
+    const client = resetClient(workspace, {
+      cancelStructureScan: vi.fn(() => cancel.promise),
+      getProjectGraph: vi.fn(async () => {
+        graphReads += 1
+        return graphReads === 1 ? reopened : stale
+      }),
+    })
+    useWorkbenchStore.setState({
+      client,
+      project: workspace.project,
+      graph: { ...workspace.graph, projectName: 'Before reset' },
+      tree: workspace.semanticTree,
+      locale: 'en',
+      error: null,
+      toasts: [],
+    })
+    const pending = useWorkbenchStore.getState().resetDemo()
+    await Promise.resolve()
+    await useWorkbenchStore.getState().openWorkspace(workspace.project.workspaceRoot)
+    expect(useWorkbenchStore.getState().project?.projectId).toBe(workspace.project.projectId)
+    keepNewerInputs()
+    cancel.resolve(true)
+    await pending
+    expect(useWorkbenchStore.getState().project?.projectId).toBe(workspace.project.projectId)
+    expectNewerWorkspaceKept('Same id reopened')
+
+    const firstCancel = deferred<boolean>()
+    const secondCancel = deferred<boolean>()
+    let cancelCalls = 0
+    let resetReads = 0
+    const newer = { ...workspace.graph, projectName: 'Newer reset' }
+    const older = { ...workspace.graph, projectName: 'Older reset' }
+    const resetAgain = resetClient(workspace, {
+      cancelStructureScan: vi.fn(() => {
+        cancelCalls += 1
+        return cancelCalls === 1 ? firstCancel.promise : secondCancel.promise
+      }),
+      getProjectGraph: vi.fn(async () => {
+        resetReads += 1
+        return resetReads === 1 ? newer : older
+      }),
+    })
+    useWorkbenchStore.setState({
+      client: resetAgain,
+      project: workspace.project,
+      graph: { ...workspace.graph, projectName: 'Before paired reset' },
+      tree: workspace.semanticTree,
+      locale: 'en',
+      error: null,
+      toasts: [],
+      messages: [],
+      context: null,
+    })
+    const first = useWorkbenchStore.getState().resetDemo()
+    await vi.waitFor(() => expect(cancelCalls).toBe(1))
+    const second = useWorkbenchStore.getState().resetDemo()
+    await vi.waitFor(() => expect(cancelCalls).toBe(2))
+    secondCancel.resolve(true)
+    await second
+    keepNewerInputs()
+    firstCancel.resolve(true)
+    await first
+    expect(useWorkbenchStore.getState().project?.projectId).toBe(workspace.project.projectId)
+    expectNewerWorkspaceKept('Newer reset')
+  })
+
+  it('does not let reset chat hydration overwrite inputs from a workspace switch', async () => {
+    const workspace = createMockSampleWorkspace()
+    const indexRead = deferred<{ version: '0.2.0'; pinnedIds: string[]; heads: [] }>()
+    let indexCalls = 0
+    let graphReads = 0
+    const opened = { ...workspace.graph, projectName: 'Opened during chat reset' }
+    const client = resetClient(workspace, {
+      openWorkspace: vi.fn(async () => ({
+        ...workspace.project,
+        projectId: 'proj_during_chat_reset',
+        workspaceRoot: '/tmp/during-chat-reset',
+      })),
+      getProjectGraph: vi.fn(async () => {
+        graphReads += 1
+        return graphReads === 1
+          ? { ...workspace.graph, projectName: 'Reset map' }
+          : opened
+      }),
+      getProjectDescription: vi.fn(async () => ({
+        ...workspace.projectDescription,
+        projectId: 'proj_during_chat_reset',
+      })),
+      getChatSessionIndex: vi.fn(() => {
+        indexCalls += 1
+        if (indexCalls === 1) return indexRead.promise
+        return Promise.resolve({ version: '0.2.0' as const, pinnedIds: [], heads: [] })
+      }),
+    })
+    useWorkbenchStore.setState({
+      client,
+      project: workspace.project,
+      graph: { ...workspace.graph, projectName: 'Before reset' },
+      tree: workspace.semanticTree,
+      locale: 'en',
+      error: null,
+      toasts: [],
+    })
+    const pending = useWorkbenchStore.getState().resetDemo()
+    await vi.waitFor(() => expect(indexCalls).toBe(1))
+    await useWorkbenchStore.getState().openWorkspace('/tmp/during-chat-reset')
+    keepNewerInputs()
+    indexRead.resolve({ version: '0.2.0', pinnedIds: [], heads: [] })
+    await pending
+    expect(useWorkbenchStore.getState().project?.projectId).toBe('proj_during_chat_reset')
+    expectNewerWorkspaceKept('Opened during chat reset')
+  })
+
+  it('still applies a reset and reports a read failure when the workspace stays current', async () => {
+    const workspace = createMockSampleWorkspace()
+    const reloaded = { ...workspace.graph, projectName: 'Reloaded by reset' }
+    const client = resetClient(workspace, {
+      getProjectGraph: vi.fn(async () => reloaded),
+    })
+    useWorkbenchStore.setState({
+      client,
+      project: workspace.project,
+      graph: { ...workspace.graph, projectName: 'Before reset' },
+      tree: workspace.semanticTree,
+      locale: 'en',
+      error: 'previous error',
+      toasts: [],
+      structureRescanLoading: true,
+    })
+    await useWorkbenchStore.getState().resetDemo()
+    expect(useWorkbenchStore.getState().graph).toEqual(reloaded)
+    expect(useWorkbenchStore.getState().error).toBeNull()
+    expect(useWorkbenchStore.getState().structureRescanLoading).toBe(false)
+    expect(useWorkbenchStore.getState().project?.projectId).toBe(workspace.project.projectId)
+
+    const failing = resetClient(workspace, {
+      getProjectGraph: vi.fn(async () => {
+        throw new Error('disk unavailable')
+      }),
+    })
+    useWorkbenchStore.setState({
+      client: failing,
+      project: workspace.project,
+      graph: reloaded,
+      tree: workspace.semanticTree,
+      locale: 'en',
+      error: null,
+      toasts: [],
+    })
+    await useWorkbenchStore.getState().resetDemo()
+    expect(useWorkbenchStore.getState().graph).toEqual(reloaded)
+    expect(useWorkbenchStore.getState().error).toBe('disk unavailable')
+    expect(useWorkbenchStore.getState().project?.projectId).toBe(workspace.project.projectId)
+  })
 })

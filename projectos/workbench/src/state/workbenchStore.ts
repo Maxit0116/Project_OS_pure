@@ -5301,21 +5301,30 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   resetDemo: async () => {
     const { client, project, runDisposable } = get()
     if (!project) return
+    const projectId = project.projectId
     runDisposable?.dispose()
     invalidateStructureScan(get, set)
+    // Same project id is not enough: reopen and a newer reset keep the id and
+    // bump this generation before the in-flight reset settles.
+    const generation = structureScanGeneration
+    const ownsReset = () => structureScanStillCurrent(generation, projectId, get)
 
     try {
       if (typeof client.cancelStructureScan === 'function') {
-        await client.cancelStructureScan(project.projectId).catch(() => undefined)
+        await client.cancelStructureScan(projectId).catch((error: unknown) => {
+          if (!ownsReset()) throw error
+        })
       }
+      if (!ownsReset()) return
       await useTerminalStore.getState().disposeAllSessions()
+      if (!ownsReset()) return
       const [graph, tree, mapContent, currentWork] = await Promise.all([
-        client.getProjectGraph(project.projectId),
-        client.getSemanticTree(project.projectId),
-        client.getMapContent(project.projectId),
-        client.getCurrentWork(project.projectId),
+        client.getProjectGraph(projectId),
+        client.getSemanticTree(projectId),
+        client.getMapContent(projectId),
+        client.getCurrentWork(projectId),
       ])
-      bumpStructureScanGeneration()
+      if (!ownsReset()) return
       set({
         graph,
         tree,
@@ -5328,9 +5337,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         structureRescanLoading: false,
         structureScanProgress: null,
       })
-      await useChatSessionStore.getState().resetForDemo()
+      await useChatSessionStore.getState().resetForDemo(ownsReset)
+      if (!ownsReset()) return
       await useTerminalStore.getState().syncMapSessions(mapContent.artifacts)
+      if (!ownsReset()) return
+      bumpStructureScanGeneration()
     } catch (err) {
+      if (!ownsReset()) return
       set({ error: errorMessage(err, 'Failed to reset demo') })
     }
   },

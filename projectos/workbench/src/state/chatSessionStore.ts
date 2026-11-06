@@ -224,7 +224,7 @@ interface ChatSessionStore {
   /** Merge every session from one graph into another. */
   mergeGraphs: (fromGraphId: string, toGraphId: string) => Promise<boolean>
   findWithAgent: (query: string) => Promise<void>
-  resetForDemo: () => Promise<void>
+  resetForDemo: (stillCurrent?: () => boolean) => Promise<void>
 }
 
 async function restoreRunFlow(activeRunId: string): Promise<void> {
@@ -968,13 +968,17 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     })
   },
 
-  resetForDemo: async () => {
+  resetForDemo: async (stillCurrent = () => true) => {
     const { client, project, locale } = useWorkbenchStore.getState()
-    if (!client || !project) return
+    if (!client || !project || !stillCurrent()) return
 
-    const index = await client.getChatSessionIndex(project.projectId)
+    const projectId = project.projectId
+    const index = await client.getChatSessionIndex(projectId)
+    if (!stillCurrent()) return
     for (const head of index.heads) {
-      await client.deleteChatSession(project.projectId, head.id)
+      if (!stillCurrent()) return
+      await client.deleteChatSession(projectId, head.id)
+      if (!stillCurrent()) return
     }
 
     const sessionId = `chat_${crypto.randomUUID()}`
@@ -994,10 +998,14 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       messages: buildResetMessages(locale),
       draftComposer: emptyComposerDraft(),
     }
-    await client.upsertChatSession(project.projectId, record)
-    await client.setLastActiveChatSession(project.projectId, sessionId)
+    if (!stillCurrent()) return
+    await client.upsertChatSession(projectId, record)
+    if (!stillCurrent()) return
+    await client.setLastActiveChatSession(projectId, sessionId)
+    if (!stillCurrent()) return
 
-    const nextIndex = await client.getChatSessionIndex(project.projectId)
+    const nextIndex = await client.getChatSessionIndex(projectId)
+    if (!stillCurrent()) return
     set({
       heads: nextIndex.heads,
       pinnedIds: nextIndex.pinnedIds,
