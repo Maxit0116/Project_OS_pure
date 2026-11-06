@@ -1,3 +1,4 @@
+import { validateToken } from '@/lib/auth'
 import { db } from '@/lib/db'
 import {
   getRequestWorkspaceContext,
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
   if (typeof content !== 'string' || content.trim() === '') {
     return Response.json({ error: 'Content is required' }, { status: 400 })
   }
-  await db.notification.create({ data: { userId: user.id, content } })
+  await db.notification.create({ data: { userId: user.id, message: content } })
   return Response.json({ success: true })
 }
 
