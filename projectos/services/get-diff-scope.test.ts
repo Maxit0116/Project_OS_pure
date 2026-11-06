@@ -151,6 +151,57 @@ describe("getDiff authorization", () => {
     expect(snapshot(workspaceRoot)).toEqual(before);
   });
 
+  it("checks a bound child even when the parent already has its own .diff", async () => {
+    const workspaceRoot = copyWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
+    const project = await api.openSampleWorkspace();
+    const parentDiff = modifyDiff("run_parent_own_diff", "app/login/page.tsx", "parent-own");
+    const child = modifyDiff("run_child_under_own_parent", "lib/auth.ts", "child-oos");
+    installRun(api, project.projectId, child);
+    bindModify(api, project.projectId, workspaceRoot, child.runId, "app/login/page.tsx");
+    installRun(api, project.projectId, parentDiff);
+    state(api).orchestrator.runs.get(parentDiff.runId)!.delegatedChildren = [
+      { runId: child.runId },
+    ];
+    bindModify(api, project.projectId, workspaceRoot, parentDiff.runId, "app/login/page.tsx");
+    const before = snapshot(workspaceRoot);
+
+    await expect(api.getDiff(parentDiff.runId)).rejects.toMatchObject({
+      code: "diff_scope_violation",
+    });
+    expect(snapshot(workspaceRoot)).toEqual(before);
+  });
+
+  it("rejects without leaking diff body text in the error object", async () => {
+    const workspaceRoot = copyWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
+    const project = await api.openSampleWorkspace();
+    const sentinel = "SENTINEL_DIFF_BODY_MUST_NOT_ESCAPE_ERROR_" + "X".repeat(32);
+    const diff = {
+      runId: "run_error_no_body",
+      summary: "Must not leak",
+      files: [{
+        path: "lib/auth.ts",
+        changeType: "modify" as const,
+        before: "before",
+        after: sentinel,
+      }],
+    };
+    installRun(api, project.projectId, diff);
+    bindModify(api, project.projectId, workspaceRoot, diff.runId, "app/login/page.tsx");
+
+    let caught: unknown;
+    try {
+      await api.getDiff(diff.runId);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({ code: "diff_scope_violation" });
+    const serialized = JSON.stringify(caught);
+    expect(serialized).not.toContain(sentinel);
+    expect(String((caught as Error).message)).not.toContain(sentinel);
+  });
+
   it("rejects a parent read when the parent and child authorizations select different files", async () => {
     const workspaceRoot = copyWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
@@ -433,6 +484,8 @@ describe("getDiff authorization", () => {
     const workspaceRoot = copyWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
     const project = await api.openSampleWorkspace();
+    // lib/auth.ts is linked to feat_login — without the post-await recheck,
+    // authorizeFixtureDiff would install a fixture binding for this path.
     const outsidePath = "lib/auth.ts";
     const diff = realModifyDiff(workspaceRoot, "run_runtime_race", outsidePath);
     writeScenario(workspaceRoot, project.projectId, diff.runId, diff, [outsidePath]);
@@ -443,6 +496,7 @@ describe("getDiff authorization", () => {
     bindModify(api, project.projectId, workspaceRoot, diff.runId, "app/login/page.tsx");
     const before = snapshot(workspaceRoot);
     const beforeAuthorization = authorizationSnapshot(api);
+    expect(beforeAuthorization.find((row) => row.runId === diff.runId)?.fixture).toEqual([]);
 
     gate.release();
     await expect(pending).rejects.toMatchObject({
@@ -450,7 +504,10 @@ describe("getDiff authorization", () => {
     });
     expect(readFileSync(join(workspaceRoot, outsidePath), "utf8")).toBe(diff.files[0]?.before);
     expect(snapshot(workspaceRoot)).toEqual(before);
+    // True-red property: fixture map must stay empty (not merely apply reject).
     expect(authorizationSnapshot(api)).toEqual(beforeAuthorization);
+    expect(authorizationSnapshot(api).find((row) => row.runId === diff.runId)?.fixture)
+      .toEqual([]);
   });
 
   it("rejects scenario apply that would replace an existing fixture authorization", async () => {
