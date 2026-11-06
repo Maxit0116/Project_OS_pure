@@ -1440,6 +1440,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
       const alreadyCancelled =
         abortController.signal.aborted ||
+        this.structureScanAbortByProjectId.get(projectId) !== abortController ||
         this.structureScanProgress.getProgress(projectId)?.status ===
           "cancelled";
       if (alreadyCancelled) {
@@ -1451,6 +1452,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const reloaded = await this.persistScannedStructureGraph(
         workspace,
         scanned,
+        () =>
+          !abortController.signal.aborted &&
+          this.structureScanAbortByProjectId.get(projectId) === abortController,
       );
       this.workspacesByProjectId.set(projectId, reloaded);
       report({
@@ -1469,10 +1473,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       if (cancelled) {
         // Do not persist — keep the previous graph on disk and in memory.
         // cancelStructureScan may have already emitted scan_cancelled for TTFT.
-        if (
-          this.structureScanProgress.getProgress(projectId)?.status !==
-          "cancelled"
-        ) {
+        // Reopen clears this controller and the tracker; emitting then would
+        // deliver the old scanId to the subscription attached for the new open.
+        const progress = this.structureScanProgress.getProgress(projectId);
+        const stillThisScan =
+          this.structureScanAbortByProjectId.get(projectId) === abortController &&
+          progress?.scanId === scanId &&
+          progress.status !== "cancelled";
+        if (stillThisScan) {
           report({
             type: "scan_cancelled",
             scanId,
@@ -1511,6 +1519,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private async persistScannedStructureGraph(
     workspace: LoadedProjectOSWorkspace,
     scanned: ProjectGraph,
+    stillCurrent: () => boolean,
   ): Promise<LoadedProjectOSWorkspace> {
     assertPersistableProjectGraph(scanned, {
       workspaceRoot: workspace.workspaceRoot,
@@ -1526,10 +1535,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const previousTree = workspace.semanticTree;
 
     try {
-      await this.workspaceStore.writeGraph(workspace.workspaceRoot, scanned);
+      await this.workspaceStore.writeGraph(workspace.workspaceRoot, scanned, {
+        confirm: stillCurrent,
+      });
       await this.workspaceStore.writeSemanticTree(
         workspace.workspaceRoot,
         semanticTree,
+        { confirm: stillCurrent },
       );
       return this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
     } catch (error) {

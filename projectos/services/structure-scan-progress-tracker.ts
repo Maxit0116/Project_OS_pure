@@ -148,8 +148,8 @@ export class StructureScanProgressTracker {
   private applyEvent(event: StructureScanProgressEvent): void {
     const current = this.progressByProjectId.get(event.projectId);
     if (!current || current.scanId !== event.scanId) {
-      // Still fan-out so late subscribers / tests can observe.
-      this.emit(event.projectId, event);
+      // A cleared or replaced scan must not reach listeners attached for the
+      // project after reopen. Those listeners would treat the old scanId as current.
       return;
     }
     // Ignore late step noise after the scan already settled (esp. after cancel).

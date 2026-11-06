@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProjectOSApi, StructureScanProgressEvent } from '@contracts/index'
+import { createPlannedStructureScanSteps } from '@contracts/index'
 import { createMockSampleWorkspace } from '../../../client/mock-project-os-api-client.js'
 import { getStoreMessage } from '../i18n/storeMessages'
 import { useWorkbenchStore } from './workbenchStore'
@@ -315,5 +316,132 @@ describe('structure rescan reliability', () => {
     expect(state.graph).toEqual(scanned)
     expect(state.structureRescanLoading).toBe(false)
     expect(state.toasts.filter((toast) => toast.type === 'success')).toHaveLength(1)
+  })
+
+  it('ignores an old scan id on the subscription attached by same-project reopen', async () => {
+    const workspace = createMockSampleWorkspace()
+    const reopened = { ...workspace.graph, projectName: 'Reopened map' }
+    const fresh = { ...workspace.graph, projectName: 'Fresh scan' }
+    const listeners: Array<(event: StructureScanProgressEvent) => void> = []
+    const analyze = deferred<typeof workspace.graph>()
+    const client = {
+      openWorkspace: vi.fn(async () => workspace.project),
+      analyzeWorkspace: vi.fn(() => analyze.promise),
+      getProjectGraph: vi.fn(async () => reopened),
+      getSemanticTree: vi.fn(async () => workspace.semanticTree),
+      getMapContent: vi.fn(async () => workspace.mapContent),
+      getCurrentWork: vi.fn(async () => workspace.currentWork),
+      getProjectDescription: vi.fn(async () => workspace.projectDescription),
+      getSettings: vi.fn(async () => workspace.settings),
+      listWorkspaceDirectory: vi.fn(async () => []),
+      getStructureScanProgress: vi.fn(async () => null),
+      getChatSessionIndex: vi.fn(async () => ({
+        version: '0.2.0',
+        pinnedIds: [],
+        heads: [],
+      })),
+      getChatSession: vi.fn(async () => null),
+      upsertChatSession: vi.fn(async () => undefined),
+      setLastActiveChatSession: vi.fn(async () => undefined),
+      setChatSessionPinned: vi.fn(async () => undefined),
+      deleteChatSession: vi.fn(async () => undefined),
+      streamStructureScan: vi.fn((_projectId: string, cb: (event: StructureScanProgressEvent) => void) => {
+        listeners.push(cb)
+        return {
+          dispose() {
+            const index = listeners.indexOf(cb)
+            if (index >= 0) listeners.splice(index, 1)
+          },
+        }
+      }),
+    } as unknown as ProjectOSApi
+    useWorkbenchStore.setState({
+      client,
+      project: workspace.project,
+      graph: workspace.graph,
+      tree: workspace.semanticTree,
+      locale: 'en',
+      structureRescanLoading: false,
+      structureScanProgress: null,
+      toasts: [],
+    })
+
+    await useWorkbenchStore.getState().openWorkspace(workspace.project.workspaceRoot)
+    useWorkbenchStore.setState({
+      toasts: [],
+      messages: [{
+        id: 'msg_keep',
+        role: 'user',
+        content: 'draft message',
+        timestamp: '2026-11-06T00:00:00.000Z',
+      }],
+      composerDraft: {
+        ...useWorkbenchStore.getState().composerDraft,
+        text: 'kept draft',
+      },
+    })
+    const attached = listeners.at(-1)
+    expect(attached).toBeTypeOf('function')
+    const projectId = workspace.project.projectId
+    const stamp = new Date().toISOString()
+    for (const type of ['scan_cancelled', 'scan_failed', 'scan_completed'] as const) {
+      attached?.({
+        type,
+        scanId: 'scan_before_reopen',
+        projectId,
+        timestamp: stamp,
+        ...(type === 'scan_failed' ? { message: 'old failure sk-proj-old-secret' } : {}),
+      } as StructureScanProgressEvent)
+    }
+    await Promise.resolve()
+
+    let state = useWorkbenchStore.getState()
+    expect(state.project?.projectId).toBe(projectId)
+    expect(state.graph?.projectName).toBe('Reopened map')
+    expect(state.tree).toBe(workspace.semanticTree)
+    expect(state.composerDraft.text).toBe('kept draft')
+    expect(state.messages.map((message) => message.content)).toEqual(['draft message'])
+    expect(state.structureRescanLoading).toBe(false)
+    expect(state.structureScanProgress).toBeNull()
+    expect(state.error).toBeNull()
+    expect(state.toasts.some((toast) => toast.type === 'info' || toast.type === 'warning' || toast.type === 'success')).toBe(false)
+    expect(JSON.stringify(state.toasts)).not.toContain('sk-proj-old-secret')
+
+    client.getProjectGraph.mockResolvedValue(fresh)
+    const pending = useWorkbenchStore.getState().rescanStructureGraph()
+    expect(useWorkbenchStore.getState().structureRescanLoading).toBe(true)
+    const active = listeners.at(-1)
+    expect(active).not.toBe(attached)
+    active?.({
+      type: 'scan_cancelled',
+      scanId: 'scan_before_reopen',
+      projectId,
+      timestamp: stamp,
+    })
+    expect(useWorkbenchStore.getState().structureRescanLoading).toBe(true)
+    active?.({
+      type: 'scan_planned',
+      scanId: 'scan_fresh',
+      projectId,
+      timestamp: stamp,
+      mode: 'regenerate',
+      steps: createPlannedStructureScanSteps(),
+    })
+    active?.({
+      type: 'scan_completed',
+      scanId: 'scan_fresh',
+      projectId,
+      timestamp: stamp,
+    })
+    analyze.resolve(fresh)
+    await pending
+    await Promise.resolve()
+
+    state = useWorkbenchStore.getState()
+    expect(state.graph).toEqual(fresh)
+    expect(state.structureRescanLoading).toBe(false)
+    expect(state.composerDraft.text).toBe('kept draft')
+    expect(state.toasts.filter((toast) => toast.type === 'success')).toHaveLength(1)
+    expect(state.toasts.some((toast) => toast.message.includes('cancelled'))).toBe(false)
   })
 })

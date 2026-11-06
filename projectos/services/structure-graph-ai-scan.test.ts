@@ -485,21 +485,21 @@ describe("structure-graph-ai-scan", () => {
     const full = validModelGraphJson({ projectId, projectName: "demo" });
     const cutAt = full.indexOf('"fileIndex"');
     const secret = "sk-proj-scan-secret";
-    expect(() => parseProjectGraphFromModelOutput(
-      `${full.slice(0, cutAt + 12)} ${secret}`,
-      { workspaceRoot: root, projectId, projectName: "demo" },
-    )).toThrowError(/cut off before a complete JSON object/u);
+    let thrown: unknown;
     try {
-      parseProjectGraphFromModelOutput(`${full.slice(0, cutAt)} ${secret}`, {
+      parseProjectGraphFromModelOutput(`${full.slice(0, cutAt + 12)} ${secret}`, {
         workspaceRoot: root,
         projectId,
         projectName: "demo",
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      expect(message).not.toContain(secret);
-      expect(message).not.toContain("fileIndex");
+      thrown = error;
     }
+    expect(thrown).toBeInstanceOf(Error);
+    const message = thrown instanceof Error ? thrown.message : "";
+    expect(message).toMatch(/cut off before a complete JSON object/u);
+    expect(message).not.toContain(secret);
+    expect(message).not.toContain("fileIndex");
   });
 
   it("keeps a finished JSON object when a later fragment is cut off", () => {

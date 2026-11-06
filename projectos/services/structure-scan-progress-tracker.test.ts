@@ -97,4 +97,38 @@ describe("StructureScanProgressTracker", () => {
     expect(tracker.getProgress("proj_3")?.status).toBe("cancelled");
     expect(events.filter((type) => type === "scan_cancelled")).toHaveLength(1);
   });
+
+  it("does not deliver a replaced scan id to the listener attached after clear", () => {
+    const tracker = new StructureScanProgressTracker();
+    const first = tracker.begin({ projectId: "proj_4", mode: "regenerate" });
+    tracker.clearProject("proj_4");
+    const seen: string[] = [];
+    tracker.subscribe("proj_4", (event) => {
+      seen.push(`${event.type}:${event.scanId}`);
+    });
+    first.report({
+      type: "scan_cancelled",
+      scanId: first.scanId,
+      projectId: "proj_4",
+      timestamp: new Date().toISOString(),
+    });
+    first.report({
+      type: "scan_completed",
+      scanId: first.scanId,
+      projectId: "proj_4",
+      timestamp: new Date().toISOString(),
+    });
+    expect(seen).toEqual([]);
+
+    const second = tracker.begin({ projectId: "proj_4", mode: "regenerate" });
+    expect(seen.some((item) => item === `scan_planned:${second.scanId}`)).toBe(true);
+    second.report({
+      type: "scan_completed",
+      scanId: second.scanId,
+      projectId: "proj_4",
+      timestamp: new Date().toISOString(),
+    });
+    expect(seen.at(-1)).toBe(`scan_completed:${second.scanId}`);
+    expect(tracker.getProgress("proj_4")?.status).toBe("success");
+  });
 });

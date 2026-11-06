@@ -1268,9 +1268,19 @@ function attachStructureScanSubscription(
 ): void {
   disposeStructureScanSubscription(get, set)
   const isCurrent = () => structureScanStillCurrent(generation, projectId, get)
+  let adoptedScanId: string | null = null
+  const acceptsScanEvent = (event: StructureScanProgressEvent): boolean => {
+    if (!isCurrent()) return false
+    if (event.type === 'scan_planned') {
+      if (adoptedScanId !== null && adoptedScanId !== event.scanId) return false
+      adoptedScanId = event.scanId
+      return true
+    }
+    return adoptedScanId !== null && event.scanId === adoptedScanId
+  }
 
   const applyEvent = (event: StructureScanProgressEvent) => {
-    if (!isCurrent()) return
+    if (!acceptsScanEvent(event)) return
     const prior = get().structureScanProgress
     // Drop success/fail handlers if this scan was already cancelled locally.
     if (
@@ -1394,6 +1404,12 @@ function attachStructureScanSubscription(
   set({ structureScanDisposable: disposable })
   void client.getStructureScanProgress(projectId).then((snapshot) => {
     if (!snapshot || !isCurrent()) return
+    if (adoptedScanId === null) {
+      if (snapshot.status !== 'running') return
+      adoptedScanId = snapshot.scanId
+    } else if (snapshot.scanId !== adoptedScanId) {
+      return
+    }
     set({
       structureScanProgress: snapshot,
       structureRescanLoading: snapshot.status === 'running',

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createDefaultSettings } from "../contracts/settings.js";
 import { ProjectOSWorkspaceStore } from "../persistence/workspace-store.js";
+import type { ProjectGraph } from "../contracts/graph.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
 import type { ModelGateway } from "./model-gateway/index.js";
 import { ensureWorkspaceBootstrapped } from "./workspace-bootstrap.js";
@@ -472,5 +473,74 @@ describe("openWorkspace structure graph AI scan", () => {
     const tree = await api.getSemanticTree(project.projectId);
     expect(tree.roots.length).toBeGreaterThan(0);
     expect(readFileSync(join(root, ".projectos", "graph.json"), "utf8")).toBe(onDisk);
+  });
+
+  it("does not commit a scan write that is aborted by same-project reopen", async () => {
+    const root = makeUnfamiliarRepo();
+    const bootstrap = ensureWorkspaceBootstrapped(root);
+    writeMockModelSettings(root, bootstrap.projectId);
+    const store = new ProjectOSWorkspaceStore();
+    const originalWrite = store.writeGraph.bind(store);
+    let releaseStaleWrite: (() => void) | undefined;
+    const staleWriteEntered = new Promise<void>((resolve) => {
+      releaseStaleWrite = resolve;
+    });
+    let observeStaleWrite: (() => void) | undefined;
+    const staleWriteWaiting = new Promise<void>((resolve) => {
+      observeStaleWrite = resolve;
+    });
+    let pauseStaleWrite = true;
+    store.writeGraph = async (workspaceRoot, graph, options) => {
+      if (pauseStaleWrite && graph.nodes.some((node) => node.name === "Stale scan")) {
+        pauseStaleWrite = false;
+        observeStaleWrite?.();
+        await staleWriteEntered;
+      }
+      return originalWrite(workspaceRoot, graph, options);
+    };
+    let calls = 0;
+    let releaseFresh: (() => void) | undefined;
+    const freshAllowed = new Promise<void>((resolve) => {
+      releaseFresh = resolve;
+    });
+    const complete = vi.fn(async (_profile, request: { input?: { task?: string } }) => {
+      calls += 1;
+      const call = calls;
+      if (call > 2) await freshAllowed;
+      const task = request.input?.task;
+      const name = call <= 2 ? "Stale scan" : "Fresh scan";
+      return {
+        requestId: `req_${call}`,
+        provider: "mock",
+        model: "mock",
+        output: task === "structure_graph_round_a" ? roundA() : roundB(name),
+        usage: { inputTokens: 1, outputTokens: 2 },
+        latencyMs: 1,
+      };
+    });
+    const api = new ProjectOSLocalApi({
+      modelGateway: { complete } as unknown as ModelGateway,
+      workspaceStore: store,
+    });
+
+    const project = await api.openWorkspace(root);
+    await staleWriteWaiting;
+    const duringPause = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
+    expect(duringPause).not.toContain("Stale scan");
+
+    const reopened = api.openWorkspace(root);
+    await reopened;
+    releaseStaleWrite?.();
+    const afterAbort = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
+    expect(afterAbort).not.toContain("Stale scan");
+    releaseFresh?.();
+
+    await api.awaitStructureScan(project.projectId);
+    const finalDisk = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
+    expect(finalDisk).toContain("Fresh scan");
+    expect(finalDisk).not.toContain("Stale scan");
+    expect(
+      (JSON.parse(finalDisk) as ProjectGraph).nodes.some((node) => node.name === "Fresh scan"),
+    ).toBe(true);
   });
 });
