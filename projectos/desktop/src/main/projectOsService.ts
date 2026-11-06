@@ -10,6 +10,7 @@ import * as writeTransactionModule from '../../../services/recoverable-write-tra
 import { WorkspaceTransactionCoordinator } from '../../../services/workspace-transaction-coordinator.js'
 import { DependencyImpactScanner } from '../../../services/dependency-impact-scanner.js'
 import { join } from 'node:path'
+import { assertAllowedExternalUrl } from './externalUrlPolicy.js'
 import { resolveSampleWorkspaceRoot, resolveUserDataPath } from './paths.js'
 
 let service: ProjectOSLocalApi | null = null
@@ -39,8 +40,11 @@ export function getProjectOsService(): ProjectOSLocalApi {
       },
       workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(workspaceStore, kernel),
       dependencyImpactScanner: new DependencyImpactScanner(),
+      // Single desktop egress: catalog report + GitHub OAuth share externalUrlPolicy.
+      // Dangerous schemes never reach shell.openExternal (zero-opener).
       openExternalUrl: async (url) => {
-        await shell.openExternal(url)
+        const allowed = assertAllowedExternalUrl(url)
+        await shell.openExternal(allowed)
       },
       agentMemoryRoot: join(userDataPath, 'agent-memory'),
       mcpCatalogCacheRoot: join(userDataPath, 'mcp-catalog'),

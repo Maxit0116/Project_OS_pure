@@ -3,21 +3,27 @@ export type HubReferenceLike =
   | {
       kind: "image" | "video" | "audio";
       id: string;
-      assetPath?: string;
-      url?: string;
-      label?: string;
+      assetPath?: string | undefined;
+      url?: string | undefined;
+      label?: string | undefined;
     }
-  | { kind: "file"; id: string; path: string; label?: string }
-  | { kind: "url"; id: string; url: string; label?: string; folderId?: string }
+  | { kind: "file"; id: string; path: string; label?: string | undefined }
+  | {
+      kind: "url";
+      id: string;
+      url: string;
+      label?: string | undefined;
+      folderId?: string | undefined;
+    }
   | {
       kind: "github";
       id: string;
       url: string;
-      owner?: string;
-      repo?: string;
-      ref?: string;
-      label?: string;
-      folderId?: string;
+      owner?: string | undefined;
+      repo?: string | undefined;
+      ref?: string | undefined;
+      label?: string | undefined;
+      folderId?: string | undefined;
     };
 
 export interface PickedReferenceFile {
@@ -157,14 +163,15 @@ export function createHubReferenceFromInput(
     } catch {
       return null;
     }
+    const leafLabel = url.split("/").pop() || url;
     if (VIDEO_EXT.test(url)) {
-      return { kind: "video", id, url, label: url.split("/").pop() };
+      return { kind: "video", id, url, label: leafLabel };
     }
     if (AUDIO_EXT.test(url)) {
-      return { kind: "audio", id, url, label: url.split("/").pop() };
+      return { kind: "audio", id, url, label: leafLabel };
     }
     if (IMAGE_EXT.test(url)) {
-      return { kind: "image", id, url, label: url.split("/").pop() };
+      return { kind: "image", id, url, label: leafLabel };
     }
     return {
       kind: "url",

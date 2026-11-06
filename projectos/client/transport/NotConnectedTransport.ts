@@ -656,7 +656,7 @@ export class NotConnectedTransport implements ProjectOSApi {
   async confirmAlignment(
     _request: import("../../contracts/alignment-contract.js").ConfirmAlignmentRequest,
   ): Promise<PromptRefinement> {
-    throw this.notConnected();
+    return transportNotConnected();
   }
 
   async refinePrompt(_request: PromptRefineRequest): Promise<PromptRefinement> {

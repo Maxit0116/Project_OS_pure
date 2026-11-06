@@ -32,4 +32,40 @@ describe('external URL policy', () => {
     await Promise.resolve()
     expect(openExternal).toHaveBeenCalledWith('https://example.com/')
   })
+
+  it('keeps dangerous schemes at zero opener calls for the LocalApi/desktop egress pattern', async () => {
+    const openExternal = vi.fn().mockResolvedValue(undefined)
+    const guarded = async (url: string) => {
+      const allowed = assertAllowedExternalUrl(url)
+      await openExternal(allowed)
+    }
+
+    for (const url of [
+      'javascript:alert(1)',
+      'file:///etc/passwd',
+      'projectos://settings',
+      'data:text/html,hi',
+    ]) {
+      await expect(guarded(url)).rejects.toThrow('External URL protocol is not allowed')
+    }
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  it('allows legitimate catalog-report and GitHub OAuth https URLs through the same guard', async () => {
+    const openExternal = vi.fn().mockResolvedValue(undefined)
+    const guarded = async (url: string) => {
+      const allowed = assertAllowedExternalUrl(url)
+      await openExternal(allowed)
+    }
+
+    await guarded('https://github.com/Maxit0116/Project_OS_pure/issues/new')
+    await guarded('https://github.com/login/oauth/authorize?client_id=abc')
+    await guarded('https://github.com/login/device')
+    expect(openExternal).toHaveBeenCalledTimes(3)
+    expect(openExternal.mock.calls.map((call) => call[0])).toEqual([
+      'https://github.com/Maxit0116/Project_OS_pure/issues/new',
+      'https://github.com/login/oauth/authorize?client_id=abc',
+      'https://github.com/login/device',
+    ])
+  })
 })

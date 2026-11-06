@@ -213,13 +213,13 @@ export function readAgentPoolRun(
 
 export function ensureAgentPoolRun(input: {
   projectOSRoot: string;
-  projectId?: string;
-  rootRunId?: string | null;
-  sessionId?: string | null;
-  loopInstanceId?: string | null;
-  loopSpecId?: string | null;
-  triggerSource?: AgentPoolTriggerSource;
-  existingPoolRunId?: string | null;
+  projectId?: string | undefined;
+  rootRunId?: string | null | undefined;
+  sessionId?: string | null | undefined;
+  loopInstanceId?: string | null | undefined;
+  loopSpecId?: string | null | undefined;
+  triggerSource?: AgentPoolTriggerSource | undefined;
+  existingPoolRunId?: string | null | undefined;
 }): AgentPoolRun {
   if (input.existingPoolRunId) {
     const existing = readAgentPoolRun(input.projectOSRoot, input.existingPoolRunId);
@@ -339,7 +339,7 @@ export function upsertAgentRunIndexEntry(
 export function listAgentRunsByDefinition(
   projectOSRoot: string,
   definitionId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number | undefined; offset?: number | undefined } = {},
 ): AgentRunIndexEntry[] {
   const all = [...loadAgentRunIndex(projectOSRoot).values()]
     .filter((entry) => entry.definitionId === definitionId)

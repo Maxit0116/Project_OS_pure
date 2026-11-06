@@ -257,7 +257,7 @@ function readDiffStats(workspaceRoot: string): ToolResultDiffStats | undefined {
 
 type TryGitOptions = {
   /** When set, injects a one-shot GitHub HTTPS Authorization header (never written to git config). */
-  accessToken?: string;
+  accessToken?: string | undefined;
 };
 
 function tryGit(
@@ -472,7 +472,7 @@ export interface GitMutationResult {
 }
 
 export type GitAuthOptions = {
-  accessToken?: string;
+  accessToken?: string | undefined;
 };
 
 /** Ensure a single remote-tracking ref exists (used before checkout / branch-from). */
@@ -552,10 +552,10 @@ export function createGitBranch(
   workspaceRoot: string,
   branch: string,
   options: {
-    from?: string;
-    checkout?: boolean;
+    from?: string | undefined;
+    checkout?: boolean | undefined;
     /** Push the new branch to origin after local create (GitHub Graph default). */
-    push?: boolean;
+    push?: boolean | undefined;
   } & GitAuthOptions = {},
 ): GitMutationResult {
   const name = branch.trim();
@@ -887,9 +887,9 @@ export function rollbackGitBranch(
   workspaceRoot: string,
   branch: string,
   options: {
-    to?: string;
-    mode?: "hard" | "mixed";
-    push?: boolean;
+    to?: string | undefined;
+    mode?: "hard" | "mixed" | undefined;
+    push?: boolean | undefined;
   } & GitAuthOptions = {},
 ): GitMutationResult {
   const name = branch.trim();
@@ -1086,23 +1086,23 @@ export interface ListedGitCommitSet {
 export function listGitCommits(
   workspaceRoot: string,
   options: {
-    limit?: number;
+    limit?: number | undefined;
     /** Branch / tip names; default: HEAD. */
-    tips?: string[];
+    tips?: string[] | undefined;
     /** Only commits after this many days (git --since). */
-    sinceDays?: number;
+    sinceDays?: number | undefined;
     /**
      * PR / fork window: `base...head` (reachable from head, not from base).
      * When set, replaces multi-tip listing.
      */
-    range?: { base: string; head: string };
+    range?: { base: string; head: string } | undefined;
     /**
      * Since merge-base with `forkBase` (default branch), list commits on tips.
      * Implemented as `forkBase...tip` for the first tip (or HEAD).
      */
-    sinceForkBase?: string;
+    sinceForkBase?: string | undefined;
     /** Pass --first-parent to git log. */
-    firstParentOnly?: boolean;
+    firstParentOnly?: boolean | undefined;
   } = {},
 ): ListedGitCommitSet {
   const status = readGitRepositoryStatus(workspaceRoot);
@@ -1196,7 +1196,10 @@ const COMMIT_PATCH_MAX_CHARS = 100_000;
 export function getGitCommitShow(
   workspaceRoot: string,
   sha: string,
-  options: { includePatch?: boolean; maxPatchChars?: number } = {},
+  options: {
+    includePatch?: boolean | undefined;
+    maxPatchChars?: number | undefined;
+  } = {},
 ): GitCommitDetailResult {
   const name = sha.trim();
   if (!name) return { ok: false, message: "Commit sha is required." };
@@ -1239,20 +1242,23 @@ export function getGitCommitShow(
     "-M",
     fullSha,
   ]);
-  const statusByPath = new Map<string, { status: string; previousPath?: string }>();
+  const statusByPath = new Map<
+    string,
+    { status: string; previousPath?: string | undefined }
+  >();
   if (nameStatus.ok) {
     for (const line of nameStatus.stdout.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       const parts = trimmed.split(/\t/u);
       const code = parts[0] ?? "M";
-      if (code.startsWith("R") && parts.length >= 3) {
-        statusByPath.set(parts[2]!, {
+      if (code.startsWith("R") && parts.length >= 3 && parts[1] && parts[2]) {
+        statusByPath.set(parts[2], {
           status: "renamed",
           previousPath: parts[1],
         });
-      } else if (code.startsWith("C") && parts.length >= 3) {
-        statusByPath.set(parts[2]!, {
+      } else if (code.startsWith("C") && parts.length >= 3 && parts[1] && parts[2]) {
+        statusByPath.set(parts[2], {
           status: "copied",
           previousPath: parts[1],
         });
@@ -1281,11 +1287,19 @@ export function getGitCommitShow(
         parts[1] === "-" ? undefined : Number.parseInt(parts[1]!, 10);
       const path = parts[2]!;
       const mapped = statusByPath.get(path) ?? { status: "modified" };
+      const finiteAdditions =
+        typeof additions === "number" && Number.isFinite(additions)
+          ? additions
+          : undefined;
+      const finiteDeletions =
+        typeof deletions === "number" && Number.isFinite(deletions)
+          ? deletions
+          : undefined;
       files.push({
         path,
         status: mapped.status,
-        ...(Number.isFinite(additions) ? { additions } : {}),
-        ...(Number.isFinite(deletions) ? { deletions } : {}),
+        ...(finiteAdditions !== undefined ? { additions: finiteAdditions } : {}),
+        ...(finiteDeletions !== undefined ? { deletions: finiteDeletions } : {}),
         ...(mapped.previousPath ? { previousPath: mapped.previousPath } : {}),
       });
       statusByPath.delete(path);
@@ -1352,8 +1366,8 @@ export interface ListedPullRequest {
 }
 
 export type GithubApiOptions = {
-  accessToken?: string;
-  fetchImpl?: typeof fetch;
+  accessToken?: string | undefined;
+  fetchImpl?: typeof fetch | undefined;
 };
 
 function listGithubPullRequestsViaGh(workspaceRoot: string): {
@@ -1573,9 +1587,10 @@ export async function createGithubPullRequest(
   }
   const output = (result.stdout || "").trim();
   const urlMatch = output.match(/https:\/\/github\.com\/\S+/);
+  const url = urlMatch?.[0];
   return {
     ok: true,
-    url: urlMatch?.[0],
+    ...(url ? { url } : {}),
     message: output || "Pull request created.",
   };
 }

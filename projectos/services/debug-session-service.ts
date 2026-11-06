@@ -176,8 +176,8 @@ export function applyBugAlignmentPatches(
   patches: Array<{
     id: string;
     selected: boolean;
-    comment?: string;
-    rejected?: boolean;
+    comment?: string | undefined;
+    rejected?: boolean | undefined;
   }>,
 ): DebugSession {
   const bugs = session.bugs ?? buildBugAlignmentItems(session.sessionId, session.bugDescription);

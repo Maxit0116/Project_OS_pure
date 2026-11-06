@@ -10,14 +10,15 @@ import {
 } from "./llm-rewrite-eval.js";
 import type { ReminderTimelineItem } from "../../contracts/reminder-graph.js";
 
-const profile = {
+const profile: ModelProfile = {
   id: "test",
-  label: "test",
+  name: "test",
   provider: "openai",
   model: "gpt-test",
+  apiKeyRef: "test-key",
   apiFormat: "openai_chat",
   isDefault: true,
-} as ModelProfile;
+};
 
 const now = "2026-11-05T00:00:00.000Z";
 

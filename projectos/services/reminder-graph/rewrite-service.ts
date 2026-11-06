@@ -26,8 +26,8 @@ import { applyDueMilestoneStatuses } from "./notify-diff.js";
 import { watchAndPersistBindings } from "./binding-watch.js";
 
 export type ReminderRewriteDeps = {
-  gateway?: ReminderRewriteGateway | null;
-  profile?: ModelProfile | null;
+  gateway?: ReminderRewriteGateway | null | undefined;
+  profile?: ModelProfile | null | undefined;
 };
 
 function now() {

@@ -87,12 +87,12 @@ function loadStyleGuide(workspaceRoot: string): string {
 export type GenerateDiagramDeps = {
   workspaceRoot: string;
   input: GenerateDiagramInput;
-  profile?: ModelProfile | null;
-  gateway?: ModelGateway | null;
-  projectId?: string;
-  vendorRoot?: string;
+  profile?: ModelProfile | null | undefined;
+  gateway?: ModelGateway | null | undefined;
+  projectId?: string | undefined;
+  vendorRoot?: string | undefined;
   /** Force sample HTML (tests / mock). */
-  useSample?: boolean;
+  useSample?: boolean | undefined;
 };
 
 export async function generateDiagramArtifact(

@@ -203,7 +203,7 @@ export const PinComposerHubReferenceFolderSchema = z
 const HubMediaSourceRefine =
   (kind: "image" | "video" | "audio") =>
   (
-    value: { assetPath?: string; url?: string },
+    value: { assetPath?: string | undefined; url?: string | undefined },
     ctx: z.RefinementCtx,
   ): void => {
     if (!value.assetPath && !value.url) {

@@ -84,7 +84,7 @@ function buildUserPayload(
 
 function parseLlmTurn(output: string, reasoning?: string): FirstPrinciplesLlmTurn | null {
   for (const source of orderedModelOutputSources(output, reasoning)) {
-    const cleaned = separateLeadingThinkBlock(source).content.trim();
+    const cleaned = separateLeadingThinkBlock(source).output.trim();
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}");
     if (start < 0 || end <= start) continue;

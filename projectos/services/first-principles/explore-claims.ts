@@ -125,10 +125,10 @@ export function applyExplorationToSession(
 export function mergeClaimUpdates(
   session: FirstPrinciplesSession,
   updates: Array<{
-    id?: string;
+    id?: string | undefined;
     text: string;
     status: AtomicClaim["status"];
-    evidenceRefs?: string[];
+    evidenceRefs?: string[] | undefined;
   }>,
 ): FirstPrinciplesSession {
   if (updates.length === 0) return session;

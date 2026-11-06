@@ -1,13 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { installFromGitUrl } from "./install-from-git-url.js";
-import type { ProjectOSSettings } from "../../contracts/settings.js";
+import { createDefaultSettings } from "../../contracts/settings.js";
 
-const baseSettings: ProjectOSSettings = {
-  projectId: "p1",
-  version: "0.1.0",
-  execution: {},
-  mcpServers: [],
-} as ProjectOSSettings;
+const baseSettings = createDefaultSettings("p1");
 
 describe("installFromGitUrl", () => {
   it("rejects non-github hosts with agent fallback", async () => {

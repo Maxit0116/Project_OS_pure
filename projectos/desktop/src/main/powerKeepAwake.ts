@@ -33,8 +33,8 @@ export interface KeepAwakeMarkerPort {
 export interface PowerKeepAwakeOptions {
   platform?: NodeJS.Platform
   powerSaveBlocker: PowerSaveBlockerPort
-  lidGuard?: LidSleepGuardPort
-  marker?: KeepAwakeMarkerPort
+  lidGuard?: LidSleepGuardPort | undefined
+  marker?: KeepAwakeMarkerPort | undefined
   onStatusChange?: (status: KeepAwakeStatus) => void
 }
 

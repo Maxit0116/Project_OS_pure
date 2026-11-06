@@ -189,7 +189,7 @@ function isImplementRole(role: string): role is "implement" | "fix" {
 export function stepLoopInstance(
   doc: LoopGraphDocument,
   instanceId: string,
-  options?: { execution?: LoopExecutionHooks },
+  options?: { execution?: LoopExecutionHooks | undefined },
 ): LoopGraphDocument {
   const instance = doc.instances.find((item) => item.id === instanceId);
   if (!instance) throw new Error(`Instance not found: ${instanceId}`);
@@ -664,12 +664,15 @@ function stepActionNode(
 
   const approvedPayload = next.pendingActionPayload;
   const approvedDecision = latestArtifact(next, "human_decision");
-  const hasApproval =
-    Boolean(approvedPayload) ||
-    (approvedDecision &&
-      typeof approvedDecision.data === "object" &&
-      approvedDecision.data !== null &&
-      /approve/i.test(String((approvedDecision.data as { choice?: string }).choice ?? "")));
+  const hasApproval = Boolean(
+    approvedPayload ||
+      (approvedDecision &&
+        typeof approvedDecision.data === "object" &&
+        approvedDecision.data !== null &&
+        /approve/i.test(
+          String((approvedDecision.data as { choice?: string }).choice ?? ""),
+        )),
+  );
 
   if (requiresApproval && !hasApproval) {
     next = pushEvent(
@@ -748,7 +751,7 @@ function stepGithubAction(
   }
 
   if (githubResult.deferred) {
-    let next = {
+    const queued = {
       ...instance,
       pendingActionPayload: undefined,
       pendingGithubOp: {
@@ -759,12 +762,17 @@ function stepGithubAction(
       },
       status: "running" as const,
     };
-    next = pushEvent(next, {
+    const withEvent = pushEvent(queued, {
       type: "message",
       nodeId: node.id,
       message: githubResult.message ?? `GitHub ${operation} queued for settle`,
     });
-    return replaceInstance(doc, next);
+    return replaceInstance(doc, {
+      ...withEvent,
+      pendingActionPayload: undefined,
+      pendingGithubOp: queued.pendingGithubOp,
+      status: "running" as const,
+    });
   }
 
   if (!githubResult.ok) {

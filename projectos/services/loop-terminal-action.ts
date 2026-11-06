@@ -38,7 +38,23 @@ export function parseTerminalExecCommand(input: {
 export function evaluateTerminalPolicyDecision(input: {
   command: ExecCommand;
   policy: CapabilityContext;
-  permissionRules?: Array<{ effect: "allow" | "deny" | "ask"; tool: string; match?: string }>;
+  permissionRules?: Array<{
+    effect: "allow" | "deny" | "ask";
+    tool:
+      | "read_file"
+      | "list_files"
+      | "git_status"
+      | "get_context"
+      | "grep_workspace"
+      | "generate_diff"
+      | "apply_diff"
+      | "run_verification"
+      | "shell"
+      | "mcp_tool"
+      | "fetch"
+      | "*";
+    match?: string | undefined;
+  }>;
 }): "allow" | "deny" | "ask" {
   const match = [input.command.command, ...input.command.args].join(" ");
   const decision = evaluateToolCall(
