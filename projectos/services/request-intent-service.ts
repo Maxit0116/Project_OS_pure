@@ -241,6 +241,12 @@ export class RequestIntentService {
       throw new Error("Intent project does not match the graph");
     }
     const nodeIds = new Set(graph.nodes.map((node) => node.id));
+    if (parsed.touches.length === 0 && nodeIds.size > 0) {
+      throw new Error("Intent requires at least one touched node");
+    }
+    if (parsed.touches.length > 0 && nodeIds.size === 0) {
+      throw new Error("Intent cannot touch nodes on an empty product graph");
+    }
     for (const touch of parsed.touches) {
       if (!nodeIds.has(touch.nodeId)) throw new Error(`Intent references unknown node '${touch.nodeId}'`);
       for (const deleteId of touch.allow.deletePartIds) {

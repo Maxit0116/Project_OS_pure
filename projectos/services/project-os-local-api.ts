@@ -4563,7 +4563,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
                 scope: isGlobalPlan
                   ? { kind: "global" }
                   : isNodePlan
-                  ? { kind: requestedNode!.level as "context" | "container" | "component", nodeId: requestedNodeId! }
+                  ? {
+                      // Components use the node-plan pipeline (create/delete/modify
+                      // file tasks). Hierarchy `component` scope is modify-only and
+                      // rejects create/delete plan shapes.
+                      kind: requestedNode!.level === "component"
+                        ? "node-plan"
+                        : requestedNode!.level as "context" | "container",
+                      nodeId: requestedNodeId!,
+                    }
                   : {
                       kind: "leaf-file",
                       nodeId: requestedNodeId!,
@@ -5366,6 +5374,24 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       }
       return;
     }
+    // Greenfield mutates the graph across ordered tranches. The empty-graph
+    // intent is fixed at confirm; tranche publication is gated by greenfield
+    // bindings / expectedGraphHash, not by per-file single-node intent scope.
+    if (state.greenfieldPlan) {
+      if (!this.requestIntentService.isApprovalValid(intent)) {
+        throw new ProjectOSError(
+          "diff_stale",
+          "Approved intent is invalid or the project graph changed before publication",
+        );
+      }
+      if (state.run.scope?.kind !== "global" || intent.touches.length > 0) {
+        throw new ProjectOSError(
+          "diff_scope_violation",
+          "Greenfield graph publication is not supported through a single-node intent",
+        );
+      }
+      return;
+    }
     if (!this.requestIntentService.isApprovalValid(intent) ||
       intent.baseGraphHash !== await computeProjectGraphHash(workspace.graph)) {
       throw new ProjectOSError(
@@ -5399,14 +5425,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     )) {
       throw new ProjectOSError("diff_scope_violation", "Node deletion is outside the approved structural intent");
     }
-    if (state.greenfieldPlan) {
-      throw new ProjectOSError(
-        "diff_scope_violation",
-        "Greenfield graph publication is not supported through a single-node intent",
-      );
-    }
     for (const task of state.delegationPlan?.tasks ?? []) {
       const operation = task.operation === "create" ? "create" : task.operation === "delete" ? "delete" : "modify";
+      const impact = state.delegationPlan?.impactAnalysis;
+      // Server-derived direct-importer repairs are authorized by the impact
+      // scan for an approved delete target, not by re-touching every owner.
+      const isServerDerivedImporterRepair =
+        impact?.kind === "file_delete" &&
+        operation === "modify" &&
+        impact.directImporters.includes(task.filePath);
+      if (isServerDerivedImporterRepair) continue;
       if (!intentAllowsFile(intent, workspace.graph, task.filePath, operation, state.delegationPlan?.nodeId)) {
         throw new ProjectOSError("diff_scope_violation", `Delegated ${operation} for '${task.filePath}' exceeds approved intent`);
       }
@@ -5427,7 +5455,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     if (!scaffold && !deletion) {
       const diff = proposedDiff ?? state.diff;
       if (diff) {
+        const impact = state.delegationPlan?.impactAnalysis;
         for (const file of diff.files) {
+          if (
+            impact?.kind === "file_delete" &&
+            file.changeType === "modify" &&
+            impact.directImporters.includes(file.path)
+          ) {
+            continue;
+          }
           const nodeId = "nodeId" in state.run.scope
             ? state.run.scope.nodeId
             : state.delegationPlan?.nodeId ?? state.wholeTreeTransactionPlan?.leaves.find((leaf) => leaf.filePath === file.path)?.nodeId;
@@ -14274,11 +14310,20 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             currentWorkspace,
             substantiveDiff,
           );
-        } else if (run.kind !== "demo") {
-          throw new ProjectOSError(
-            "run_not_found",
-            `Run '${runId}' is unavailable at the publication boundary`,
-          );
+        } else if (run.kind === "demo") {
+          // Demo scenarios publish without an in-memory orchestrator.
+        } else {
+          // Deterministic scenario prefabs (feature_change / debug_fix) may
+          // publish after authorizeFixtureDiff. Open model feature_change
+          // without an orchestrator still fails closed (R1).
+          try {
+            this.requireScenarioForRun(runId);
+          } catch {
+            throw new ProjectOSError(
+              "run_not_found",
+              `Run '${runId}' is unavailable at the publication boundary`,
+            );
+          }
         }
         await beforeCommit?.();
       },
