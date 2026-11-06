@@ -5301,13 +5301,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async getDiff(runId: string): Promise<GeneratedDiff> {
     const orchestratorRun = this.orchestrator.getRun(runId);
     if (orchestratorRun?.diff) {
-      return GeneratedDiffSchema.parse(cloneJson(orchestratorRun.diff));
+      return this.returnScopedDiff(runId, orchestratorRun.diff);
     }
 
     if (orchestratorRun) {
       const aggregated = this.aggregateOrchestratorRunDiff(orchestratorRun);
       if (aggregated) {
-        return aggregated;
+        return this.returnScopedDiff(runId, aggregated);
       }
       throw new ProjectOSError(
         "diff_not_found",
@@ -5323,7 +5323,28 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       );
     }
 
-    return GeneratedDiffSchema.parse(cloneJson(scenario.diff));
+    return this.returnScopedDiff(runId, scenario.diff);
+  }
+
+  /**
+   * A diff read uses the same scope check as apply when this run already has a
+   * bound authorization. Scenario and orchestrator diffs with no binding stay
+   * readable; getDiff does not invent an authorization for them.
+   * (PR4 reviewed logic — minimal port; does not restore removed private maps.)
+   */
+  private returnScopedDiff(runId: string, diff: GeneratedDiff): GeneratedDiff {
+    const parsed = GeneratedDiffSchema.parse(cloneJson(diff));
+    if (this.runHasDiffAuthorization(runId)) {
+      this.validateGeneratedDiffScope(runId, parsed);
+    }
+    return parsed;
+  }
+
+  private runHasDiffAuthorization(runId: string): boolean {
+    return this.boundFixtureDiffAuthorizations.has(runId)
+      || this.boundCreateRunAuthorizations.has(runId)
+      || this.boundDeleteRunAuthorizations.has(runId)
+      || this.boundRunAuthorizations.has(runId);
   }
 
   private async assertApprovedIntentAllowsPublication(
