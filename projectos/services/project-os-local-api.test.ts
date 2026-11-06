@@ -1,7 +1,7 @@
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultSettings } from "../contracts/settings.js";
 import { ContextPayloadSchema, type CurrentWorkState } from "../contracts/context.js";
@@ -30,6 +30,7 @@ import * as writeTransactionModule from "./recoverable-write-transaction.js";
 import { WorkspaceTransactionCoordinator } from "./workspace-transaction-coordinator.js";
 import { DependencyImpactScanner } from "./dependency-impact-scanner.js";
 import { VerificationRunner } from "./verification-runner.js";
+import { discoveryFinalIntentOutput } from "./test-support/approved-intent-harness.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const temporaryRoots: string[] = [];
@@ -368,10 +369,11 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
     const project = await api.openSampleWorkspace();
     const collidingRun = generatedRun(project.projectId, "run_google_login");
-    getLocalApiInternals(api).externalRunsByRunId.set(collidingRun.runId, {
+    // Occupy the prefab run id through the live registration map (not a removed private map).
+    getLocalApiInternals(api).registeredRunsByRunId.set(collidingRun.runId, {
       run: collidingRun,
       events: [],
-      config: externalAgentConfig(),
+      scenario: { id: "collision", files: [], run: collidingRun } as never,
     });
     const refinement = await api.refinePrompt({
       projectId: project.projectId,
@@ -383,7 +385,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     await expect(api.confirmExecution(refinement.id)).rejects.toMatchObject({
       code: "agent_orchestration_failed",
     });
-    expect(getLocalApiInternals(api).externalRunsByRunId.get(collidingRun.runId)?.run)
+    expect(getLocalApiInternals(api).registeredRunsByRunId.get(collidingRun.runId)?.run)
       .toEqual(collidingRun);
   });
 
@@ -3011,19 +3013,53 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
   it("applies an in-scope modify through the authorized apply path", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
-    const runId = "run_apply_scope_allowed";
     const path = "app/login/page.tsx";
+    const gateway = new ModelGateway({ secretStore: new InMemorySecretStore() });
+    gateway.complete = async (profile) => ({
+      requestId: "apply-scope-allowed",
+      projectId: "sample",
+      provider: profile.provider,
+      model: profile.model,
+      latencyMs: 1,
+      output: discoveryFinalIntentOutput({
+        goal: "Update the login page heading",
+        nodeId: "feat_login",
+        files: [path],
+      }),
+      usage: { inputTokens: 4, outputTokens: 4 },
+    });
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      modelGateway: gateway,
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "review_first");
+    const draft = await api.extractRequestIntent({
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      filePath: path,
+      rawRequest: "Update the login page heading",
+      executorSelection: { kind: "model", modelProfileId: "fixture-model" },
+    });
+    await api.approveRequestIntent(project.projectId, draft.id, draft.revision);
+    vi.spyOn(
+      api as unknown as { maybeStartPendingOrchestratorRun: (runId: string) => void },
+      "maybeStartPendingOrchestratorRun",
+    ).mockImplementation(() => {});
+    const refinement = await api.prepareIntentExecution(project.projectId, draft.id);
+    const run = await api.confirmExecution(refinement.id);
+    expect(run.approvedIntent).toBeDefined();
+
     const before = readFileSync(join(tempWorkspaceRoot, path), "utf8");
     const after = `${before}\n// authorized\n`;
-    authorizeTestRun(api, project.projectId, tempWorkspaceRoot, runId, path);
+    authorizeTestRun(api, project.projectId, tempWorkspaceRoot, run.runId, path);
 
     const result = await applyAuthorizedGeneratedDiff(
       api,
-      generatedRun(project.projectId, runId),
+      run,
       {
-        runId,
+        runId: run.runId,
         summary: "Apply an authorized selected-file edit",
         files: [{ path, changeType: "modify", before, after }],
       },
@@ -3034,39 +3070,53 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects an out-of-scope external diff from getDiff and apply", async () => {
+    // Replaces removed externalRunsByRunId injection: public fixture run + bound
+    // single-file authorization that disagrees with the returned prefab files,
+    // plus applyDiffFromGenerated for an unauthorized path.
     const tempWorkspaceRoot = copySampleWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
-    const runId = "run_external_scope_rejected";
-    const selectedPath = "app/login/page.tsx";
-    const otherPath = "lib/auth.ts";
-    const before = readFileSync(join(tempWorkspaceRoot, otherPath), "utf8");
-    const run = generatedRun(project.projectId, runId);
-    const diff: GeneratedDiff = {
-      runId,
-      summary: "External agent attempted a connected-file edit",
-      files: [{
-        path: otherPath,
-        changeType: "modify",
-        before,
-        after: `${before}\n// unauthorized external edit\n`,
-      }],
-    };
-    authorizeTestRun(api, project.projectId, tempWorkspaceRoot, runId, selectedPath);
-    getLocalApiInternals(api).externalRunsByRunId.set(runId, {
-      run,
-      events: [],
-      diff,
-      config: externalAgentConfig(),
+    const refinement = await api.refinePrompt({
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawPrompt:
+        "Add Google login and redirect users to profile after successful sign in.",
+    });
+    const run = await api.confirmExecution(refinement.id);
+    const boundPath = "app/pricing/page.tsx";
+    const before = readFileSync(join(tempWorkspaceRoot, boundPath), "utf8");
+    const loginBefore = readFileSync(join(tempWorkspaceRoot, "app/login/page.tsx"), "utf8");
+    authorizeTestRun(api, project.projectId, tempWorkspaceRoot, run.runId, boundPath);
+
+    await expect(api.getDiff(run.runId)).rejects.toMatchObject({
+      code: "diff_scope_violation",
     });
 
-    await expect(api.getDiff(runId)).rejects.toMatchObject({
-      code: "diff_scope_violation",
-    });
-    await expect(api.applyDiff(runId)).rejects.toMatchObject({
-      code: "diff_scope_violation",
-    });
-    expect(readFileSync(join(tempWorkspaceRoot, otherPath), "utf8")).toBe(before);
+    const applyRunId = "run_external_scope_apply";
+    authorizeTestRun(
+      api,
+      project.projectId,
+      tempWorkspaceRoot,
+      applyRunId,
+      "app/login/page.tsx",
+    );
+    await expect(applyAuthorizedGeneratedDiff(
+      api,
+      generatedRun(project.projectId, applyRunId),
+      {
+        runId: applyRunId,
+        summary: "External agent attempted a connected-file edit",
+        files: [{
+          path: boundPath,
+          changeType: "modify",
+          before,
+          after: `${before}\n// unauthorized external edit\n`,
+        }],
+      },
+    )).rejects.toMatchObject({ code: "diff_scope_violation" });
+
+    expect(readFileSync(join(tempWorkspaceRoot, boundPath), "utf8")).toBe(before);
+    expect(readFileSync(join(tempWorkspaceRoot, "app/login/page.tsx"), "utf8")).toBe(loginBefore);
     expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
   });
 
@@ -3950,17 +4000,14 @@ type LocalApiTestInternals = {
     runId: string;
   }>;
   fallbackNotices: Map<string, string>;
-  externalRunsByRunId: Map<string, {
+  registeredRunsByRunId: Map<string, {
     run: AgentRun;
     events: AgentRunEvent[];
-    diff?: GeneratedDiff;
-    config: {
-      id: string;
-      name: string;
-      protocol: "http";
-      endpoint: string;
-      authType: "none";
-      eventFormat: "projectos_events";
+    scenario: {
+      id?: string;
+      files: string[];
+      diff?: GeneratedDiff;
+      run?: AgentRun;
     };
   }>;
   orchestrator: {
@@ -4379,17 +4426,6 @@ function authorizeTestRun(
       inode: stats.ino,
     },
   });
-}
-
-function externalAgentConfig() {
-  return {
-    id: "external-test",
-    name: "External Test",
-    protocol: "http" as const,
-    endpoint: "https://agent.example",
-    authType: "none" as const,
-    eventFormat: "projectos_events" as const,
-  };
 }
 
 async function waitForRunStatus(
