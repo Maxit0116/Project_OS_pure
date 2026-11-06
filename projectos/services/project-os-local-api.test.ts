@@ -379,14 +379,21 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects a registered run id already owned by another execution backend", async () => {
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copyLegacyScenarioWorkspace() });
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
-    const collidingRun = generatedRun(project.projectId, "run_google_login");
-    getLocalApiInternals(api).externalRunsByRunId.set(collidingRun.runId, {
-      run: collidingRun,
-      events: [],
-      config: externalAgentConfig(),
-    });
+    const loginPath = join(tempWorkspaceRoot, "app/login/page.tsx");
+    const loginBefore = readFileSync(loginPath, "utf8");
+    authorizeTestRun(
+      api,
+      project.projectId,
+      tempWorkspaceRoot,
+      "run_google_login",
+      "app/login/page.tsx",
+    );
+    const ownedAuthorization = getLocalApiInternals(api).boundRunAuthorizations.get(
+      "run_google_login",
+    );
     const refinement = await api.refinePrompt({
       projectId: project.projectId,
       nodeId: "feat_login",
@@ -397,8 +404,9 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     await expect(api.confirmExecution(refinement.id)).rejects.toMatchObject({
       code: "agent_orchestration_failed",
     });
-    expect(getLocalApiInternals(api).externalRunsByRunId.get(collidingRun.runId)?.run)
-      .toEqual(collidingRun);
+    expect(getLocalApiInternals(api).boundRunAuthorizations.get("run_google_login"))
+      .toEqual(ownedAuthorization);
+    expect(readFileSync(loginPath, "utf8")).toBe(loginBefore);
   });
 
   it("rejects file and map-asset paths that escape their allowed roots", async () => {
@@ -3051,12 +3059,10 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       }],
     };
     authorizeTestRun(api, project.projectId, tempWorkspaceRoot, runId, selectedPath);
-    getLocalApiInternals(api).externalRunsByRunId.set(runId, {
-      run,
-      events: [],
-      diff,
-      config: externalAgentConfig(),
-    });
+    const orchestrator = getLocalApiInternals(api).orchestrator as {
+      runs: Map<string, { run: AgentRun; diff?: GeneratedDiff }>;
+    };
+    orchestrator.runs.set(runId, { run, diff });
 
     await expect(api.getDiff(runId)).rejects.toMatchObject({
       code: "diff_scope_violation",
@@ -3331,6 +3337,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       ),
     ).toBe(false);
 
+    await api.openWorkspace(tempWorkspaceRoot);
     expect(await api.getMapContent(project.projectId)).toEqual(
       await reopenedApi.getMapContent(reopenedProject.projectId),
     );
@@ -3944,19 +3951,6 @@ type LocalApiTestInternals = {
     runId: string;
   }>;
   fallbackNotices: Map<string, string>;
-  externalRunsByRunId: Map<string, {
-    run: AgentRun;
-    events: AgentRunEvent[];
-    diff?: GeneratedDiff;
-    config: {
-      id: string;
-      name: string;
-      protocol: "http";
-      endpoint: string;
-      authType: "none";
-      eventFormat: "projectos_events";
-    };
-  }>;
   orchestrator: {
     runs: Map<string, unknown>;
     startRun(...args: unknown[]): Promise<void>;
@@ -4356,6 +4350,24 @@ async function waitForTerminalRunStatus(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function selectedFileContent(input: Record<string, unknown>, path: string): string | undefined {
+  const localContext = isRecord(input.localContext) ? input.localContext : undefined;
+  const manifest = localContext && Array.isArray(localContext.fileManifest)
+    ? localContext.fileManifest
+    : [];
+  for (const entry of manifest) {
+    if (!isRecord(entry)) continue;
+    if (
+      entry.path === path &&
+      entry.relationship === "selected" &&
+      typeof entry.content === "string"
+    ) {
+      return entry.content;
+    }
+  }
+  return undefined;
 }
 
 function flattenSemanticPaths(tree: Awaited<ReturnType<ProjectOSLocalApi["getSemanticTree"]>>): string[] {
@@ -5288,34 +5300,43 @@ class RecursiveHierarchyGateway extends ModelGateway {
     } else if (mode === "plan_graph_delegation") {
       const immediateTargets = isRecord(input.immediateTargets) ? input.immediateTargets : {};
       const kind = immediateTargets.kind;
-      const level = immediateTargets.level;
+      const level = typeof immediateTargets.level === "string"
+        ? immediateTargets.level
+        : "next";
+      const allowedIds = Array.isArray(immediateTargets.allowedIds)
+        ? immediateTargets.allowedIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+        : [];
+      const loginLeaves = ["app/login/page.tsx", "components/LoginForm.tsx"]
+        .filter((path) => allowedIds.includes(path));
+      const plannerId = allowedIds.find((id) => id.includes("login"))
+        ?? allowedIds.find((id) => id.startsWith("system_"))
+        ?? allowedIds.find((id) => id.startsWith("container_"))
+        ?? allowedIds.find((id) => id.startsWith("component_"))
+        ?? allowedIds.find((id) => id.startsWith("feat_"))
+        ?? allowedIds[0];
+      const chosen = (kind === "leaf-file" && loginLeaves.length > 0
+        ? loginLeaves
+        : plannerId ? [plannerId] : []
+      ).slice(0, 8);
       if (kind === "leaf-file") {
         output = JSON.stringify({
-          objective: "Update both login implementation files",
-          tasks: [
-            "app/login/page.tsx",
-            "components/LoginForm.tsx",
-          ].map((path) => ({
+          objective: "Update the server-authorized leaf files",
+          tasks: chosen.map((path) => ({
             path,
             objective: `Apply the login change in ${path}`,
             acceptanceCriteria: [`Delegated change for ${path} is present`],
           })),
-          rationale: "The component owns both leaf files.",
+          rationale: "The component owns the server-authorized leaf files.",
         });
       } else {
-        const nodeId = level === "context"
-          ? "system_saas_starter"
-          : level === "container"
-            ? "container_next_web"
-            : "feat_login";
         output = JSON.stringify({
-          objective: `Delegate the login change to ${nodeId}`,
-          tasks: [{
+          objective: `Delegate the login change along the ${level} layer`,
+          tasks: chosen.map((nodeId) => ({
             nodeId,
             objective: `Plan the login change in ${nodeId}`,
             acceptanceCriteria: ["The delegated login behavior is updated"],
-          }],
-          rationale: "The task follows one immediate architecture layer.",
+          })),
+          rationale: "The task follows the server-authorized immediate architecture layer.",
         });
       }
     } else if (mode === "locate_plan" && selectedPath) {
@@ -5399,6 +5420,15 @@ class RecursiveHierarchyGateway extends ModelGateway {
           },
         ],
       });
+    } else if (selectedPath) {
+      const snapshot = selectedFileContent(input, selectedPath);
+      output = snapshot === undefined
+        ? JSON.stringify({ summary: "No valid target", files: [] })
+        : JSON.stringify({
+            summary: `Update ${selectedPath}`,
+            path: selectedPath,
+            after: `${snapshot}\n// delegated leaf\n`,
+          });
     } else {
       output = JSON.stringify({ summary: "No valid target", files: [] });
     }

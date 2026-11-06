@@ -34,6 +34,10 @@ const legacySourceRoot = join(supportDirectory, "legacy-scenario-sources");
  * Source paths the legacy graph still names and the current sample no longer
  * contains. They are copied only into the temp workspace, and only when that
  * path is absent, so the authoritative sample is not repaired.
+ *
+ * `projectos-blocks/loaders/dashboard.ts` is the file from commit
+ * 62a901801baeaf405bacd1a93c664292738dc416 at
+ * `sample-graph-saas/projectos-blocks/loaders/dashboard.ts`.
  */
 const LEGACY_SCENARIO_SOURCE_FILES = [
   "projectos-blocks/loaders/dashboard.ts",
@@ -41,6 +45,10 @@ const LEGACY_SCENARIO_SOURCE_FILES = [
 
 export function authoritativeSampleGraphPath(): string {
   return join(authoritativeSampleRoot, ".projectos", "graph.json");
+}
+
+export function authoritativeSampleSemanticTreePath(): string {
+  return join(authoritativeSampleRoot, ".projectos", "semantic-tree.json");
 }
 
 export function createLegacyScenarioWorkspace(): {

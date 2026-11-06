@@ -209,7 +209,6 @@ describe("ProjectOSLocalApi grounded ask", () => {
     expect(state.orchestrator.runs.size).toBe(0);
     expect(state.boundRunAuthorizations.size).toBe(0);
     expect(state.pendingOrchestratorStarts.size).toBe(0);
-    expect(state.externalRunsByRunId.size).toBe(0);
     expect(state.registeredRunsByRunId.size).toBe(0);
     expect(readFileSync(join(workspaceRoot, ".projectos", "current-work.json"), "utf8"))
       .toBe(currentWorkBefore);
@@ -387,7 +386,6 @@ function internals(api: ProjectOSLocalApi) {
     orchestrator: { runs: Map<string, unknown> };
     boundRunAuthorizations: Map<string, unknown>;
     pendingOrchestratorStarts: Map<string, unknown>;
-    externalRunsByRunId: Map<string, unknown>;
     registeredRunsByRunId: Map<string, unknown>;
     refinementsById: Map<string, StoredRefinementForTest>;
     workspacesByProjectId: Map<string, LoadedProjectOSWorkspace>;
