@@ -14291,6 +14291,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           }
         : {}),
     });
+    if (transaction.outcome === "committed") {
+      this.adoptCommittedFileIdentity(runId, transaction.committedFiles ?? []);
+    }
     if (transaction.outcome === "recovery_required") {
       const reason = `Apply failed and ${transaction.filesChanged.length} file(s) could not be restored; recover from backup '${transaction.backupId}'.`;
       return ApplyResultSchema.parse({
@@ -14333,6 +14336,49 @@ export class ProjectOSLocalApi implements ProjectOSApi {
 
   protected commitStagedFile(temporaryPath: string, targetPath: string): void {
     renameSync(temporaryPath, targetPath);
+  }
+
+  /**
+   * After this run's transaction installs a file, remember that file's
+   * identity. The inode comes from the temporary file the transaction wrote,
+   * not from a fresh stat of the path, so a user replacement is not adopted.
+   */
+  private adoptCommittedFileIdentity(
+    runId: string,
+    committedFiles: ReadonlyArray<{
+      path: string;
+      canonicalPath: string;
+      device: number;
+      inode: number;
+    }>,
+  ): void {
+    const committedByPath = new Map(committedFiles.map((file) => [file.path, file]));
+    const modify = this.boundRunAuthorizations.get(runId);
+    const committedModify = modify ? committedByPath.get(modify.selectedFilePath) : undefined;
+    if (
+      modify &&
+      committedModify &&
+      committedModify.canonicalPath === modify.allowedWriteTarget.canonicalPath
+    ) {
+      modify.allowedWriteTarget = {
+        relativePath: modify.allowedWriteTarget.relativePath,
+        canonicalPath: modify.allowedWriteTarget.canonicalPath,
+        device: committedModify.device,
+        inode: committedModify.inode,
+      };
+    }
+    const fixture = this.boundFixtureDiffAuthorizations.get(runId);
+    if (!fixture) return;
+    for (const [path, file] of fixture.files) {
+      const committed = committedByPath.get(path);
+      if (!committed || committed.canonicalPath !== file.canonicalPath) continue;
+      fixture.files.set(path, {
+        relativePath: file.relativePath,
+        canonicalPath: file.canonicalPath,
+        device: committed.device,
+        inode: committed.inode,
+      });
+    }
   }
 
   private getWriteTransactionRuntime(): Promise<WriteTransactionRuntime> {
