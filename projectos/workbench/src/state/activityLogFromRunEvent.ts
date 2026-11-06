@@ -206,7 +206,8 @@ export function logVerificationCommandToActivity(
   runId: string,
   result: VerificationCommandResult,
 ): void {
-  const commandLabel = [result.command.command, ...result.command.args].join(' ')
+  const line = [result.command.command, ...result.command.args].join(' ')
+  const commandLabel = result.command.cwd ? `${line} (in ${result.command.cwd}/)` : line
   logActivity({
     runId,
     channel: 'verification',

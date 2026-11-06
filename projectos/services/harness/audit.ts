@@ -90,9 +90,11 @@ export function hashAuditPath(value: string): string {
 }
 
 export function shellCommandHash(command: ExecCommand): string {
+  // The folder is part of what was approved; a command without one hashes as it always did.
   return hashAuditPath(canonicalJson({
     command: command.command,
     args: command.args,
+    ...(command.cwd !== undefined ? { cwd: command.cwd } : {}),
   }));
 }
 

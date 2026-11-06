@@ -11,7 +11,7 @@ export const MIN_TIMEOUT_SECONDS = 1
 export const MAX_TIMEOUT_SECONDS = 300
 export const DEFAULT_TIMEOUT_SECONDS = 180
 
-export type CommandLineProblem = 'empty' | 'shell_operator' | 'unterminated_quote'
+export type CommandLineProblem = 'empty' | 'shell_operator' | 'unterminated_quote' | 'bad_folder'
 
 export type ParsedCommandLine =
   | { ok: true; command: ExecCommand }
@@ -76,6 +76,50 @@ export interface VerificationSuggestion {
   kind: 'typecheck' | 'lint' | 'test' | 'build'
   line: string
   timeoutSeconds: number
+  /** The project folder it runs in, when not the root: `backend`. */
+  folder?: string | undefined
+}
+
+/**
+ * A folder as a person types it (`./backend/`, `apps\\web`) in the form the runner takes (`backend`,
+ * `apps/web`); `undefined` for the project root, `null` for something that is not a folder inside the
+ * project.
+ */
+export function normalizeFolder(folder: string): string | undefined | null {
+  const cleaned = folder.trim().replace(/\\/gu, '/').replace(/^(?:\.\/)+/u, '').replace(/\/+$/u, '')
+  if (cleaned === '' || cleaned === '.') return undefined
+  if (cleaned.startsWith('/') || /^[A-Za-z]:/u.test(cleaned)) return null
+  const parts = cleaned.split('/')
+  if (parts.some((part) => part === '' || part === '.' || part === '..')) return null
+  return cleaned
+}
+
+/** Top-level folders worth looking into for a project of their own (`backend/`, `frontend/`). */
+const NOT_A_PROJECT_FOLDER = new Set([
+  'node_modules', 'dist', 'build', 'out', 'target', 'vendor', 'coverage', 'docs', 'doc', 'public',
+  'static', 'assets', 'images', 'scripts', 'bin', 'tmp', 'temp', 'logs', '__pycache__', 'venv', 'env',
+])
+export const MAX_SUBFOLDERS_SCANNED = 12
+
+export function subfoldersToScan(entries: ReadonlyArray<{ name: string; kind: string }>): string[] {
+  return entries
+    .filter((entry) => entry.kind === 'directory' && !entry.name.startsWith('.') && !NOT_A_PROJECT_FOLDER.has(entry.name.toLowerCase()))
+    .map((entry) => entry.name)
+    .sort()
+    .slice(0, MAX_SUBFOLDERS_SCANNED)
+}
+
+/** Names that make a folder a project of its own. */
+export function looksLikeProjectFolder(names: ReadonlySet<string>): boolean {
+  return [...names].some((name) =>
+    ['package.json', 'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'go.mod', 'Cargo.toml', 'pom.xml',
+      'build.gradle', 'build.gradle.kts', 'Gemfile'].includes(name) || name.endsWith('.csproj') || name.endsWith('.sln'))
+}
+
+/** The same suggestions, to run in a folder of the project. */
+export function inFolder(suggestions: VerificationSuggestion[], folder: string | undefined): VerificationSuggestion[] {
+  if (!folder) return suggestions
+  return suggestions.map((suggestion) => ({ ...suggestion, id: `${folder}/${suggestion.id}`, folder }))
 }
 
 export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun'
@@ -179,14 +223,17 @@ export function suggestionsNotConfigured(
   suggestions: VerificationSuggestion[],
   configured: ExecCommand[],
 ): VerificationSuggestion[] {
-  const lines = new Set(configured.map(formatCommandLine))
-  return suggestions.filter((suggestion) => !lines.has(suggestion.line))
+  const where = (folder: string | undefined, line: string) => `${folder ?? ''}\u0000${line}`
+  const lines = new Set(configured.map((command) => where(command.cwd, formatCommandLine(command))))
+  return suggestions.filter((suggestion) => !lines.has(where(suggestion.folder, suggestion.line)))
 }
 
 export interface CommandRow {
   key: number
   line: string
   seconds: number
+  /** The project folder to run in; blank for the project root. */
+  folder?: string | undefined
 }
 
 /**
@@ -202,8 +249,16 @@ export function commandsFromRows(rows: CommandRow[]): {
   for (const row of rows) {
     if (row.line.trim() === '') continue
     const parsed = parseCommandLine(row.line, row.seconds)
-    if (parsed.ok) commands.push(parsed.command)
-    else problems[row.key] = parsed.problem
+    if (!parsed.ok) {
+      problems[row.key] = parsed.problem
+      continue
+    }
+    const folder = normalizeFolder(row.folder ?? '')
+    if (folder === null) {
+      problems[row.key] = 'bad_folder'
+      continue
+    }
+    commands.push(folder ? { ...parsed.command, cwd: folder } : parsed.command)
   }
   return { commands, problems }
 }

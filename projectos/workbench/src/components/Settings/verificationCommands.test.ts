@@ -7,7 +7,11 @@ import {
   detectOtherEcosystemSuggestions,
   detectVerificationSuggestions,
   formatCommandLine,
+  inFolder,
+  looksLikeProjectFolder,
+  normalizeFolder,
   parseCommandLine,
+  subfoldersToScan,
   suggestionsNotConfigured,
 } from './verificationCommands'
 
@@ -136,5 +140,56 @@ describe('commandsFromRows', () => {
     ])
     expect(commands).toEqual([{ command: 'npx', args: ['tsc', '--noEmit'], timeoutMs: 180_000 }])
     expect(problems).toEqual({ 3: 'shell_operator', 4: 'unterminated_quote' })
+  })
+})
+
+/**
+ * The FastAPI template keeps pytest in backend/ and npm in frontend/, with nothing to check at the root:
+ * it was offered no suggestion, and a command could only run at the root.
+ */
+describe('commands that run in a folder of the project', () => {
+  it('reads a folder the way a person types it', () => {
+    expect(normalizeFolder('')).toBeUndefined()
+    expect(normalizeFolder(' . ')).toBeUndefined()
+    expect(normalizeFolder('./backend/')).toBe('backend')
+    expect(normalizeFolder('apps\\web')).toBe('apps/web')
+    for (const bad of ['/etc', '../x', 'a/../../b', 'a//b', 'C:/x']) expect(normalizeFolder(bad)).toBeNull()
+  })
+
+  it('keeps the folder with the command, and refuses one outside the project', () => {
+    const { commands, problems } = commandsFromRows([
+      { key: 1, line: 'python3 -m pytest', seconds: 300, folder: './backend' },
+      { key: 2, line: 'npm test', seconds: 300, folder: '' },
+      { key: 3, line: 'npm test', seconds: 300, folder: '../elsewhere' },
+    ])
+    expect(commands).toEqual([
+      { command: 'python3', args: ['-m', 'pytest'], timeoutMs: 300_000, cwd: 'backend' },
+      { command: 'npm', args: ['test'], timeoutMs: 300_000 },
+    ])
+    expect(problems).toEqual({ 3: 'bad_folder' })
+  })
+
+  it('looks into the top-level folders that are projects of their own', () => {
+    const entries = [
+      { name: 'backend', kind: 'directory' },
+      { name: 'frontend', kind: 'directory' },
+      { name: 'node_modules', kind: 'directory' },
+      { name: '.github', kind: 'directory' },
+      { name: 'docs', kind: 'directory' },
+      { name: 'README.md', kind: 'file' },
+    ]
+    expect(subfoldersToScan(entries)).toEqual(['backend', 'frontend'])
+    expect(looksLikeProjectFolder(new Set(['pyproject.toml', 'app']))).toBe(true)
+    expect(looksLikeProjectFolder(new Set(['Api.csproj']))).toBe(true)
+    expect(looksLikeProjectFolder(new Set(['README.md', 'img']))).toBe(false)
+  })
+
+  it('offers a folder\'s suggestions to run there, and not again once configured there', () => {
+    const backend = inFolder(detectOtherEcosystemSuggestions(new Set(['pyproject.toml'])), 'backend')
+    expect(backend).toEqual([{ id: 'backend/test:python3 -m pytest', kind: 'test', line: 'python3 -m pytest', timeoutSeconds: 300, folder: 'backend' }])
+    expect(inFolder(backend, undefined)).toBe(backend)
+    const atRoot = { command: 'python3', args: ['-m', 'pytest'], timeoutMs: 300_000 }
+    expect(suggestionsNotConfigured(backend, [atRoot])).toEqual(backend)
+    expect(suggestionsNotConfigured(backend, [{ ...atRoot, cwd: 'backend' }])).toEqual([])
   })
 })

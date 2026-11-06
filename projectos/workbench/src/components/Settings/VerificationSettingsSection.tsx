@@ -15,6 +15,9 @@ import {
   detectOtherEcosystemSuggestions,
   detectVerificationSuggestions,
   formatCommandLine,
+  inFolder,
+  looksLikeProjectFolder,
+  subfoldersToScan,
   suggestionsNotConfigured,
   type CommandLineProblem,
   type CommandRow,
@@ -30,7 +33,31 @@ function rowsFrom(commands: ExecCommand[]): Row[] {
     key: nextRowKey++,
     line: formatCommandLine(command),
     seconds: Math.round(command.timeoutMs / 1000),
+    folder: command.cwd ?? '',
   }))
+}
+
+type Lister = (relativePath: string) => Promise<Array<{ name: string; kind: string }>>
+type Reader = (relativePath: string) => Promise<string | undefined>
+
+/** Suggestions for one folder of the project ('' is the root). */
+async function suggestionsFor(folder: string, list: Lister, read: Reader): Promise<VerificationSuggestion[]> {
+  const entries = await list(folder)
+  const names = new Set(entries.map((entry) => entry.name))
+  const prefix = folder ? `${folder}/` : ''
+  const packageJson = names.has('package.json') ? await read(`${prefix}package.json`) : undefined
+  return inFolder([
+    ...detectVerificationSuggestions({
+      packageJson,
+      hasTsconfig: names.has('tsconfig.json'),
+      packageManager: detectPackageManager({
+        pnpm: names.has('pnpm-lock.yaml'),
+        yarn: names.has('yarn.lock'),
+        bun: names.has('bun.lockb') || names.has('bun.lock'),
+      }),
+    }),
+    ...detectOtherEcosystemSuggestions(names),
+  ], folder || undefined)
 }
 
 export default function VerificationSettingsSection() {
@@ -51,23 +78,18 @@ export default function VerificationSettingsSection() {
     let cancelled = false
     void (async () => {
       try {
-        const entries = await client.listWorkspaceDirectory(projectId, '')
-        const names = new Set(entries.map((entry) => entry.name))
-        const packageJson = names.has('package.json')
-          ? await client.getFileContent(projectId, 'package.json').catch(() => undefined)
-          : undefined
-        const found = [
-          ...detectVerificationSuggestions({
-            packageJson,
-            hasTsconfig: names.has('tsconfig.json'),
-            packageManager: detectPackageManager({
-              pnpm: names.has('pnpm-lock.yaml'),
-              yarn: names.has('yarn.lock'),
-              bun: names.has('bun.lockb') || names.has('bun.lock'),
-            }),
-          }),
-          ...detectOtherEcosystemSuggestions(names),
-        ]
+        const list: Lister = (path) => client.listWorkspaceDirectory(projectId, path)
+        const read: Reader = (path) => client.getFileContent(projectId, path).catch(() => undefined)
+        const found = await suggestionsFor('', list, read)
+        // A project with its parts in folders (backend/ with pytest, frontend/ with npm) has nothing
+        // to check at its root; each part's commands run in its own folder.
+        const rootEntries = await list('')
+        for (const folder of subfoldersToScan(rootEntries)) {
+          if (cancelled) return
+          const names = new Set((await list(folder).catch(() => [])).map((entry) => entry.name))
+          if (!looksLikeProjectFolder(names)) continue
+          found.push(...await suggestionsFor(folder, list, read).catch(() => []))
+        }
         if (!cancelled) setDetected(found)
       } catch {
         if (!cancelled) setDetected([])
@@ -86,9 +108,9 @@ export default function VerificationSettingsSection() {
 
   if (!settings) return null
 
-  const addRow = (line: string, seconds: number) => {
+  const addRow = (line: string, seconds: number, folder = '') => {
     if (full) return
-    setRows((existing) => [...existing, { key: nextRowKey++, line, seconds }])
+    setRows((existing) => [...existing, { key: nextRowKey++, line, seconds, folder }])
   }
 
   const save = async () => {
@@ -123,6 +145,25 @@ export default function VerificationSettingsSection() {
                 onChange={(event) => {
                   const line = event.target.value
                   setRows((existing) => existing.map((item) => (item.key === row.key ? { ...item, line } : item)))
+                  setProblems((existing) => {
+                    if (!(row.key in existing)) return existing
+                    const { [row.key]: _dropped, ...rest } = existing
+                    return rest
+                  })
+                }}
+              />
+            </div>
+            <div style={{ width: 140 }}>
+              <TextInput
+                id={`verification-folder-${row.key}`}
+                label={ts('settings.verification.folderLabel')}
+                style={{ fontFamily: 'var(--font-mono, monospace)' }}
+                value={row.folder ?? ''}
+                placeholder={ts('settings.verification.folderPlaceholder')}
+                spellCheck={false}
+                onChange={(event) => {
+                  const folder = event.target.value
+                  setRows((existing) => existing.map((item) => (item.key === row.key ? { ...item, folder } : item)))
                   setProblems((existing) => {
                     if (!(row.key in existing)) return existing
                     const { [row.key]: _dropped, ...rest } = existing
@@ -176,8 +217,11 @@ export default function VerificationSettingsSection() {
       {suggestions.map((suggestion) => (
         <div key={suggestion.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
           <span style={{ minWidth: 88 }}>{ts(`settings.verification.kind.${suggestion.kind}`)}</span>
-          <code style={{ flex: 1 }}>{suggestion.line}</code>
-          <Button size="sm" variant="ghost" disabled={full} onClick={() => addRow(suggestion.line, suggestion.timeoutSeconds)}>
+          <code style={{ flex: 1 }}>
+            {suggestion.line}
+            {suggestion.folder && <span className={styles.help}> {ts('settings.verification.inFolder', { folder: suggestion.folder })}</span>}
+          </code>
+          <Button size="sm" variant="ghost" disabled={full} onClick={() => addRow(suggestion.line, suggestion.timeoutSeconds, suggestion.folder ?? '')}>
             {ts('settings.verification.add')}
           </Button>
         </div>

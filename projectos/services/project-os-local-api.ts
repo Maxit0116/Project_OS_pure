@@ -11217,7 +11217,8 @@ function sameStringArray(left: string[], right: string[]): boolean {
 }
 
 function formatExecCommandForDisplay(command: ExecCommand): string {
-  return [command.command, ...command.args.map((arg) => JSON.stringify(arg))].join(" ");
+  const line = [command.command, ...command.args.map((arg) => JSON.stringify(arg))].join(" ");
+  return command.cwd ? `${line} (in ${command.cwd}/)` : line;
 }
 
 function appendRecentChanges(

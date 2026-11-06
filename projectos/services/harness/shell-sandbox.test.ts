@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -415,3 +415,81 @@ async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<v
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
   }
 }
+
+/**
+ * A project with a backend and a frontend keeps each one's tests in its own folder. The runner starts
+ * a program with no shell, so `cd backend &&` cannot be written into the command: the command names
+ * the folder instead.
+ */
+describe("a verification command that runs in a folder of the project", () => {
+  function project(): string {
+    const root = mkdtempSync(join(tmpdir(), "pos-sbx-cwd-"));
+    mkdirSync(join(root, "backend", "app"), { recursive: true });
+    writeFileSync(join(root, "backend", "app", "marker.txt"), "backend marker\n");
+    return root;
+  }
+
+  it("runs in that folder, so its relative paths are the folder's", async () => {
+    const root = project();
+    const result = await runSandboxedCommand({
+      cwd: root,
+      command: {
+        command: process.execPath,
+        args: ["-e", "process.stdout.write(require('fs').readFileSync('app/marker.txt','utf8') + process.cwd())"],
+        timeoutMs: 5_000,
+        cwd: "backend",
+      },
+      approvalResolved: true,
+    });
+    expect(result.status).toBe("passed");
+    expect(result.output).toContain("backend marker");
+    expect(result.output).toContain(`${realpathSync(join(root, "backend"))}`);
+  });
+
+  it("still runs at the root when no folder is given", async () => {
+    const root = project();
+    const result = await runSandboxedCommand({
+      cwd: root,
+      command: { command: process.execPath, args: ["-e", "process.stdout.write(process.cwd())"], timeoutMs: 5_000 },
+      approvalResolved: true,
+    });
+    expect(result.output).toBe(realpathSync(root));
+  });
+
+  it("does not run when the folder is missing, or leads out of the project through a link", async () => {
+    const root = project();
+    const outside = mkdtempSync(join(tmpdir(), "pos-sbx-outside-"));
+    symlinkSync(outside, join(root, "escape"));
+    for (const [cwd, reason] of [
+      ["frontend", "does not exist"],
+      ["escape", "leads outside the project"],
+      ["backend/app/marker.txt", "is not a folder"],
+    ] as const) {
+      const result = await runSandboxedCommand({
+        cwd: root,
+        command: { command: process.execPath, args: ["-e", "process.exit(0)"], timeoutMs: 5_000, cwd },
+        approvalResolved: true,
+      });
+      expect(result.blocked).toBe(true);
+      expect(result.output).toContain("shell_cwd_invalid");
+      expect(result.output).toContain(reason);
+    }
+  });
+
+  it("resolves a relative argument from the folder when it looks for protected files", () => {
+    const root = project();
+    // From backend/, ../.git is the project's own .git.
+    expect(classifyShellInvocation({
+      workspaceRoot: root,
+      command: process.execPath,
+      args: ["../.git/config"],
+      commandDirectory: join(root, "backend"),
+    }).decision).toBe("deny");
+  });
+
+  it("is a different approval from the same command at the root", () => {
+    const atRoot = { command: "python3", args: ["-m", "pytest"], timeoutMs: 300_000 };
+    expect(shellCommandHash({ ...atRoot, cwd: "backend" })).not.toBe(shellCommandHash(atRoot));
+    expect(shellCommandHash({ ...atRoot })).toBe(shellCommandHash({ command: "python3", args: ["-m", "pytest"], timeoutMs: 1_000 }));
+  });
+});
