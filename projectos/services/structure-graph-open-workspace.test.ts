@@ -602,4 +602,66 @@ describe("openWorkspace structure graph AI scan", () => {
       message: "Structure scan failed and the previous map could not be restored.",
     });
   });
+
+  it("does not let an older cancelled scan restore over a newer successful pair", async () => {
+    const root = makeUnfamiliarRepo();
+    const bootstrap = ensureWorkspaceBootstrapped(root);
+    writeMockModelSettings(root, bootstrap.projectId);
+    const store = new ProjectOSWorkspaceStore();
+    const originalPair = store.writeScannedGraphPair.bind(store);
+    let releaseOlder: (() => void) | undefined;
+    const olderHeld = new Promise<void>((resolve) => {
+      releaseOlder = resolve;
+    });
+    let olderEntered: (() => void) | undefined;
+    const olderWaiting = new Promise<void>((resolve) => {
+      olderEntered = resolve;
+    });
+    store.writeScannedGraphPair = async (workspaceRoot, graph, semanticTree, options) => {
+      if (graph.nodes.some((node) => node.name === "Older scan")) {
+        olderEntered?.();
+        await olderHeld;
+      }
+      return originalPair(workspaceRoot, graph, semanticTree, options);
+    };
+    const olderApi = new ProjectOSLocalApi({
+      modelGateway: mockGateway("Older scan").gateway,
+      workspaceStore: store,
+    });
+    const newerApi = new ProjectOSLocalApi({
+      modelGateway: mockGateway("Newer scan").gateway,
+      workspaceStore: store,
+    });
+    const graphPath = join(root, ".projectos", "graph.json");
+    const treePath = join(root, ".projectos", "semantic-tree.json");
+
+    const project = await olderApi.openWorkspace(root);
+    await olderWaiting;
+    const newerProject = await newerApi.openWorkspace(root);
+    await newerApi.awaitStructureScan(newerProject.projectId);
+    expect((await newerApi.getProjectGraph(newerProject.projectId)).nodes
+      .some((node) => node.name === "Newer scan")).toBe(true);
+
+    const cancelPromise = olderApi.cancelStructureScan(project.projectId);
+    releaseOlder?.();
+    expect(await cancelPromise).toBe(true);
+    await olderApi.awaitStructureScan(project.projectId);
+
+    const graphDisk = readFileSync(graphPath, "utf8");
+    const treeDisk = readFileSync(treePath, "utf8");
+    expect(graphDisk).toContain("Newer scan");
+    expect(treeDisk).toContain("Newer scan");
+    expect(graphDisk).not.toContain("Older scan");
+    expect(treeDisk).not.toContain("Older scan");
+    expect(JSON.stringify(await newerApi.getProjectGraph(newerProject.projectId))).toContain("Newer scan");
+    expect(JSON.stringify(await newerApi.getSemanticTree(newerProject.projectId))).toContain("Newer scan");
+
+    await olderApi.openWorkspace(root);
+    const reloaded = await olderApi.getProjectGraph(project.projectId);
+    expect(reloaded.nodes.some((node) => node.name === "Newer scan")).toBe(true);
+    expect(JSON.stringify(reloaded)).not.toContain("Older scan");
+    expect(JSON.stringify(await olderApi.getSemanticTree(project.projectId))).toContain("Newer scan");
+    expect(readFileSync(graphPath, "utf8")).toBe(graphDisk);
+    expect(readFileSync(treePath, "utf8")).toBe(treeDisk);
+  });
 });
