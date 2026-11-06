@@ -147,6 +147,32 @@ describe.runIf(forced)("sample team workspace", () => {
     expect(manifest.dynamicRoutes).not.toHaveProperty("/team");
   }, 60_000);
 
+  it("resolves the dashboard server loader during the production build", () => {
+    const root = createRunnableSample();
+    let output = "";
+    try {
+      output = execFileSync(
+        process.execPath,
+        [join(root, "node_modules/next/dist/bin/next"), "build"],
+        {
+          cwd: root,
+          env: {
+            ...process.env,
+            NEXT_TELEMETRY_DISABLED: "1",
+          },
+          encoding: "utf8",
+        },
+      );
+    } catch (error) {
+      const failure = error as { stdout?: string; stderr?: string };
+      output = `${failure.stdout ?? ""}\n${failure.stderr ?? ""}`;
+    }
+    expect(output).toContain("Compiled successfully");
+    expect(output).not.toContain(
+      "Can't resolve '@/projectos-blocks/loaders/dashboard'",
+    );
+  }, 60_000);
+
   it("changes roles only through live owner authority and atomic activity", async () => {
     const root = createRunnableSample();
     runDatabaseScript(root, `
