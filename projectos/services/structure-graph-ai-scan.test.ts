@@ -479,4 +479,38 @@ describe("structure-graph-ai-scan", () => {
     });
     expect(complete).toHaveBeenCalled();
   });
+
+  it("rejects a cut-off graph instead of closing it as complete", () => {
+    const { root, projectId } = makeTempRepo();
+    const full = validModelGraphJson({ projectId, projectName: "demo" });
+    const cutAt = full.indexOf('"fileIndex"');
+    const secret = "sk-proj-scan-secret";
+    let thrown: unknown;
+    try {
+      parseProjectGraphFromModelOutput(`${full.slice(0, cutAt + 12)} ${secret}`, {
+        workspaceRoot: root,
+        projectId,
+        projectName: "demo",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const message = thrown instanceof Error ? thrown.message : "";
+    expect(message).toMatch(/cut off before a complete JSON object/u);
+    expect(message).not.toContain(secret);
+    expect(message).not.toContain("fileIndex");
+  });
+
+  it("keeps a finished JSON object when a later fragment is cut off", () => {
+    const { root, projectId } = makeTempRepo();
+    const full = validModelGraphJson({ projectId, projectName: "demo" });
+    const parsed = parseProjectGraphFromModelOutput(`${full}\n{"nodes":`, {
+      workspaceRoot: root,
+      projectId,
+      projectName: "demo",
+    });
+    expect(parsed.analysisStatus).toBe("complete");
+    expect(parsed.nodes.some((node) => node.id === "component_core")).toBe(true);
+  });
 });

@@ -1222,7 +1222,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
     if (this.workspacesByProjectId.size > 0) {
       if (this.workspacesByProjectId.has(projectId)) {
+        const inflight = this.structureScanInflight.get(projectId);
+        this.structureScanAbortByProjectId.get(projectId)?.abort();
+        if (inflight) {
+          await inflight.catch(() => undefined);
+        }
         this.clearProjectExecutionState(projectId);
+        workspace = this.workspaceStore.loadWorkspace(path);
       }
     }
     this.workspacesByProjectId.set(projectId, workspace);
@@ -1312,6 +1318,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     this.structureScanProgress.cancelRunning(projectId);
     if (controller && !controller.signal.aborted) {
       controller.abort();
+    }
+    const inflight = this.structureScanInflight.get(projectId);
+    if (inflight) {
+      await inflight.catch(() => undefined);
     }
     return true;
   }
@@ -1440,6 +1450,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
       const alreadyCancelled =
         abortController.signal.aborted ||
+        this.structureScanAbortByProjectId.get(projectId) !== abortController ||
         this.structureScanProgress.getProgress(projectId)?.status ===
           "cancelled";
       if (alreadyCancelled) {
@@ -1451,6 +1462,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const reloaded = await this.persistScannedStructureGraph(
         workspace,
         scanned,
+        () =>
+          !abortController.signal.aborted &&
+          this.structureScanAbortByProjectId.get(projectId) === abortController,
       );
       this.workspacesByProjectId.set(projectId, reloaded);
       report({
@@ -1469,10 +1483,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       if (cancelled) {
         // Do not persist — keep the previous graph on disk and in memory.
         // cancelStructureScan may have already emitted scan_cancelled for TTFT.
-        if (
-          this.structureScanProgress.getProgress(projectId)?.status !==
-          "cancelled"
-        ) {
+        // Reopen clears this controller and the tracker; emitting then would
+        // deliver the old scanId to the subscription attached for the new open.
+        const progress = this.structureScanProgress.getProgress(projectId);
+        const stillThisScan =
+          this.structureScanAbortByProjectId.get(projectId) === abortController &&
+          progress?.scanId === scanId &&
+          progress.status !== "cancelled";
+        if (stillThisScan) {
           report({
             type: "scan_cancelled",
             scanId,
@@ -1486,13 +1504,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           { cause: error instanceof Error ? error : undefined },
         );
       }
-      const message = error instanceof Error ? error.message : String(error);
+      const message = sanitizeErrorMessage(
+        error instanceof Error ? error.message : "Structure scan failed",
+      );
       report({
         type: "scan_failed",
         scanId,
         projectId,
         timestamp: new Date().toISOString(),
-        message,
+        message: message || "Structure scan failed. The current map was not changed.",
       });
       throw error;
     } finally {
@@ -1509,6 +1529,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private async persistScannedStructureGraph(
     workspace: LoadedProjectOSWorkspace,
     scanned: ProjectGraph,
+    stillCurrent: () => boolean,
   ): Promise<LoadedProjectOSWorkspace> {
     assertPersistableProjectGraph(scanned, {
       workspaceRoot: workspace.workspaceRoot,
@@ -1524,26 +1545,54 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const previousTree = workspace.semanticTree;
 
     try {
-      await this.workspaceStore.writeGraph(workspace.workspaceRoot, scanned);
-      await this.workspaceStore.writeSemanticTree(
+      await this.workspaceStore.writeScannedGraphPair(
         workspace.workspaceRoot,
+        scanned,
         semanticTree,
+        { confirm: stillCurrent },
       );
       return this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
     } catch (error) {
-      try {
-        await this.workspaceStore.writeGraph(
-          workspace.workspaceRoot,
-          previousGraph,
-        );
-        await this.workspaceStore.writeSemanticTree(
-          workspace.workspaceRoot,
-          previousTree,
-        );
-      } catch {
-        // Best-effort restore; surface the original failure.
+      if (this.failedScanStillOwnsDisk(workspace.workspaceRoot, scanned)) {
+        try {
+          await this.workspaceStore.writeGraph(
+            workspace.workspaceRoot,
+            previousGraph,
+          );
+          await this.workspaceStore.writeSemanticTree(
+            workspace.workspaceRoot,
+            previousTree,
+          );
+        } catch {
+          throw new ProjectOSError(
+            "persistence_write_failed",
+            "Structure scan failed and the previous map could not be restored.",
+          );
+        }
       }
       throw error;
+    }
+  }
+
+  /**
+   * True when the failed scan's graph publication is still the on-disk graph.
+   * A newer scan or reset may already own the files; restoring then would
+   * overwrite that newer publication. An unreadable torn pair is treated as
+   * still ours so the previous pair can be put back.
+   */
+  private failedScanStillOwnsDisk(
+    workspaceRoot: string,
+    scanned: ProjectGraph,
+  ): boolean {
+    try {
+      const loaded = this.workspaceStore.loadWorkspace(workspaceRoot);
+      return loaded.graph.analyzedAt === scanned.analyzedAt
+        && loaded.graph.nodes.length === scanned.nodes.length
+        && loaded.graph.nodes.every((node, index) =>
+          node.id === scanned.nodes[index]?.id
+          && node.name === scanned.nodes[index]?.name);
+    } catch {
+      return true;
     }
   }
 

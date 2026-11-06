@@ -236,85 +236,31 @@ function loadPromptBundle(workspaceRoot: string): string {
   ].join("\n");
 }
 
-/**
- * Close truncated model JSON when max tokens cut mid-object.
- * Also strips incomplete trailing keys/values that salvage would otherwise
- * leave as invalid JSON (e.g. `"foo` without `:`).
- */
-function salvageTruncatedJsonObject(source: string): string | null {
-  const start = source.indexOf("{");
-  if (start < 0) return null;
-  let fragment = source.slice(start).trim();
-  let inString = false;
-  let escaped = false;
-  for (let index = 0; index < fragment.length; index += 1) {
-    const character = fragment[index]!;
-    if (!inString) {
-      if (character === '"') inString = true;
-      continue;
-    }
-    if (escaped) escaped = false;
-    else if (character === "\\") escaped = true;
-    else if (character === '"') inString = false;
-  }
-  if (inString) {
-    fragment = `${fragment}"`;
-  }
+const STRUCTURE_SCAN_CUTOFF_MESSAGE =
+  "Structure scan model output was cut off before a complete JSON object was returned. The current map was not changed.";
+const STRUCTURE_SCAN_INVALID_JSON_MESSAGE =
+  "Model did not return a valid JSON object. The current map was not changed.";
 
-  // Drop incomplete trailing property: `"key` / `"key":` / `"key": value-cut`
-  // until the tail is a valid structural end (`,` `{` `[` or a complete value).
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const before = fragment;
-    fragment = fragment
-      .replace(/,\s*"[^"]*"\s*:\s*("[^"]*")?\s*$/u, "")
-      .replace(/,\s*"[^"]*"\s*:\s*-?\d+\.?\d*\s*$/u, "")
-      .replace(/,\s*"[^"]*"\s*:\s*(true|false|null)\s*$/u, "")
-      .replace(/,\s*"[^"]*"\s*:?\s*$/u, "")
-      .replace(/,\s*$/u, "");
-    if (fragment === before) break;
-  }
-
-  const stack: string[] = [];
-  inString = false;
-  escaped = false;
-  for (let index = 0; index < fragment.length; index += 1) {
-    const character = fragment[index]!;
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === '"') inString = false;
-      continue;
-    }
-    if (character === '"') inString = true;
-    else if (character === "{" || character === "[") stack.push(character);
-    else if (character === "}" || character === "]") {
-      const expected = character === "}" ? "{" : "[";
-      if (stack[stack.length - 1] === expected) stack.pop();
-    }
-  }
-  if (stack.length === 0) return null;
-  fragment = fragment.replace(/,\s*$/u, "");
-  while (stack.length > 0) {
-    const open = stack.pop();
-    fragment += open === "{" ? "}" : "]";
-  }
-  return fragment;
+interface JsonObjectCandidateScan {
+  closed: string[];
+  sawTruncated: boolean;
 }
 
-function extractJsonObjectCandidates(output: string): string[] {
+function scanJsonObjectCandidates(output: string): JsonObjectCandidateScan {
   const sources = [
     ...Array.from(output.matchAll(/```(?:json)?\s*([\s\S]*?)```/giu)).map(
       (match) => match[1] ?? "",
     ),
     output,
   ];
-  const candidates: string[] = [];
+  const closed: string[] = [];
   const seen = new Set<string>();
+  let sawTruncated = false;
   const push = (candidate: string): void => {
     const trimmed = candidate.trim();
     if (!trimmed || seen.has(trimmed)) return;
     seen.add(trimmed);
-    candidates.push(trimmed);
+    closed.push(trimmed);
   };
   for (const source of sources) {
     let start = -1;
@@ -349,11 +295,21 @@ function extractJsonObjectCandidates(output: string): string[] {
       }
     }
     if (start >= 0) {
-      const salvaged = salvageTruncatedJsonObject(source.slice(start));
-      if (salvaged) push(salvaged);
+      // An unclosed object is not a finished model reply. Do not repair it
+      // into JSON and treat that repair as a successful scan round or graph.
+      sawTruncated = true;
     }
   }
-  return candidates;
+  return { closed, sawTruncated };
+}
+
+function structureScanJsonFailure(scan: JsonObjectCandidateScan): ProjectOSError {
+  return new ProjectOSError(
+    "agent_orchestration_failed",
+    scan.sawTruncated && scan.closed.length === 0
+      ? STRUCTURE_SCAN_CUTOFF_MESSAGE
+      : STRUCTURE_SCAN_INVALID_JSON_MESSAGE,
+  );
 }
 
 function softRepairStructureGraphJson(
@@ -525,9 +481,8 @@ export function parseProjectGraphFromModelOutput(
     projectName: string;
   },
 ): ProjectGraph {
-  const issues: string[] = [];
-  const candidates = extractJsonObjectCandidates(output);
-  for (const candidate of candidates) {
+  const scan = scanJsonObjectCandidates(output);
+  for (const candidate of scan.closed) {
     try {
       const repaired = softRepairStructureGraphJson(JSON.parse(candidate), {
         projectId: options.projectId,
@@ -538,7 +493,6 @@ export function parseProjectGraphFromModelOutput(
         projectId: options.projectId,
       });
       if (!sanitized) {
-        issues.push("sanitize_failed");
         continue;
       }
       const stamped: ProjectGraph = {
@@ -572,26 +526,15 @@ export function parseProjectGraphFromModelOutput(
       };
       const parsed = ProjectGraphSchema.safeParse(stamped);
       if (!parsed.success) {
-        issues.push(
-          parsed.error.issues
-            .slice(0, 4)
-            .map((issue) => `${issue.path.join(".")}:${issue.message}`)
-            .join("; "),
-        );
         continue;
       }
       assertStructureQualityGate(parsed.data);
       return parsed.data;
-    } catch (error) {
-      issues.push(error instanceof Error ? error.message : String(error));
+    } catch {
+      continue;
     }
   }
-  throw new ProjectOSError(
-    "agent_orchestration_failed",
-    `Model did not return a valid ProjectGraph JSON object${
-      issues[0] ? ` (${issues[0]})` : ""
-    }`,
-  );
+  throw structureScanJsonFailure(scan);
 }
 
 export type StructureScanProgressReporter = (
@@ -829,22 +772,18 @@ export function isAuthoredGraph(graph: ProjectGraph): boolean {
 const STRUCTURE_SCAN_MAX_OUTPUT_TOKENS = 8_192;
 
 function parseModelJsonObject(output: string): Record<string, unknown> {
-  const issues: string[] = [];
-  for (const candidate of extractJsonObjectCandidates(output)) {
+  const scan = scanJsonObjectCandidates(output);
+  for (const candidate of scan.closed) {
     try {
       const parsed = JSON.parse(candidate) as unknown;
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return parsed as Record<string, unknown>;
       }
-      issues.push("not_object");
-    } catch (error) {
-      issues.push(error instanceof Error ? error.message : String(error));
+    } catch {
+      continue;
     }
   }
-  throw new ProjectOSError(
-    "agent_orchestration_failed",
-    `Model did not return a valid JSON object${issues[0] ? ` (${issues[0]})` : ""}`,
-  );
+  throw structureScanJsonFailure(scan);
 }
 
 function asRecordArray(value: unknown): Record<string, unknown>[] {

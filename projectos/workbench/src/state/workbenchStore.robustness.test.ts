@@ -29,6 +29,7 @@ afterEach(() => {
     selectedNodeId: null,
     selectedFilePath: null,
     editorBuffers: {},
+    editorSavedBuffers: {},
     activeRunId: null,
     runDisposable: null,
     flowSteps: [],

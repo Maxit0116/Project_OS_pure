@@ -2529,6 +2529,7 @@ const zh = {
     rescanStructureDone: '结构图已更新',
     rescanStructureFailed: '结构扫描失败，已保留当前图',
     rescanStructureFailedDetail: '结构扫描失败，已保留当前图。{{reason}}',
+    rescanTreeRefreshFailed: '结构图已保存，但语义树未能刷新。{{reason}}',
     structureScan: {
       title: '正在生成结构图',
       success: '结构图已生成',
