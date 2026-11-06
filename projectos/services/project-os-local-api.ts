@@ -495,6 +495,25 @@ interface DependencyImpactScanResult {
   scannedFiles: string[];
 }
 
+const STRUCTURE_SCAN_MAP_PRESERVED =
+  "The current map was not changed.";
+
+function publicStructureScanError(error: unknown): ProjectOSError {
+  if (error instanceof ProjectOSError) {
+    const message = sanitizeErrorMessage(error.message);
+    return new ProjectOSError(
+      error.code,
+      message.includes(STRUCTURE_SCAN_MAP_PRESERVED)
+        ? message
+        : `${message} ${STRUCTURE_SCAN_MAP_PRESERVED}`,
+    );
+  }
+  return new ProjectOSError(
+    "agent_orchestration_failed",
+    `Structure scan failed before a complete graph was produced. ${STRUCTURE_SCAN_MAP_PRESERVED}`,
+  );
+}
+
 
 export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly sampleWorkspaceRoot: string | undefined;
@@ -753,7 +772,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
     const profile = this.settingsService.resolveModelProfile(workspace.settings);
     if (!profile) {
-      return cloneJson(workspace.graph);
+      throw new ProjectOSError(
+        "model_connection_failed",
+        `No model profile is configured for a structure scan. ${STRUCTURE_SCAN_MAP_PRESERVED}`,
+      );
     }
     try {
       const scanned = await runStructureGraphAiScan({
@@ -778,8 +800,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const reloaded = this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
       this.workspacesByProjectId.set(projectId, reloaded);
       return cloneJson(reloaded.graph);
-    } catch {
-      return cloneJson(workspace.graph);
+    } catch (error) {
+      throw publicStructureScanError(error);
     }
   }
 

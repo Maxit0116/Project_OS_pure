@@ -310,6 +310,50 @@ describe('IPC invoke deadline', () => {
   })
 })
 
+describe('structure rescan failure', () => {
+  it('keeps the map and composer and does not toast success when analysis fails', async () => {
+    const draft = {
+      ...useWorkbenchStore.getState().composerDraft,
+      text: 'Keep this prompt while the scan fails',
+    }
+    const client = {
+      analyzeWorkspace: vi.fn(async () => {
+        throw Object.assign(new Error('Model provider request failed (HTTP 503)'), {
+          code: 'model_connection_failed',
+        })
+      }),
+      getSemanticTree: vi.fn(),
+    } as unknown as ProjectOSApi
+    setWorkspace(client)
+    const graphBefore = useWorkbenchStore.getState().graph
+    useWorkbenchStore.setState({
+      composerDraft: draft,
+      messages: [{
+        id: 'msg_keep',
+        role: 'user',
+        content: 'Keep this prompt while the scan fails',
+        timestamp: '2026-11-06T00:00:00.000Z',
+      }],
+    })
+
+    await useWorkbenchStore.getState().rescanStructureGraph()
+
+    const state = useWorkbenchStore.getState()
+    expect(client.analyzeWorkspace).toHaveBeenCalledOnce()
+    expect(client.getSemanticTree).not.toHaveBeenCalled()
+    expect(state.structureRescanLoading).toBe(false)
+    expect(state.graph).toEqual(graphBefore)
+    expect(state.composerDraft).toEqual(draft)
+    expect(state.messages.map((message) => message.content)).toEqual([
+      'Keep this prompt while the scan fails',
+    ])
+    expect(state.error).toContain('kept the current map')
+    expect(state.error).toContain('HTTP 503')
+    expect(state.toasts.some((toast) => toast.type === 'success')).toBe(false)
+    expect(state.toasts.some((toast) => toast.type === 'warning' && toast.message.includes('HTTP 503'))).toBe(true)
+  })
+})
+
 function setWorkspace(client: ProjectOSApi): void {
   const workspace = createMockSampleWorkspace()
   useWorkbenchStore.setState({

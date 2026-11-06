@@ -326,4 +326,89 @@ describe("structure-graph-ai-scan", () => {
     });
     expect(complete).toHaveBeenCalledOnce();
   });
+
+  it("rejects a cut-off model graph instead of closing it as complete", () => {
+    const { root, projectId } = makeTempRepo();
+    const full = validModelGraphJson({ projectId, projectName: "demo" });
+    const cutAt = full.indexOf('"fileIndex"');
+    expect(cutAt).toBeGreaterThan(0);
+    const secret = "sk-proj-structure-scan-secret";
+    const truncated = `${full.slice(0, cutAt + 12)} ${secret}`;
+
+    expect(() =>
+      parseProjectGraphFromModelOutput(truncated, {
+        workspaceRoot: root,
+        projectId,
+        projectName: "demo",
+      }),
+    ).toThrowError(/cut off before a complete graph/u);
+    try {
+      parseProjectGraphFromModelOutput(truncated, {
+        workspaceRoot: root,
+        projectId,
+        projectName: "demo",
+      });
+    } catch (error) {
+      expect(error).toMatchObject({ code: "agent_orchestration_failed" });
+      expect(error instanceof Error ? error.message : "").not.toContain(secret);
+      expect(error instanceof Error ? error.message : "").not.toContain("fileIndex");
+    }
+  });
+
+  it("does not send another provider request after a cut-off reply", async () => {
+    const { root, projectId } = makeTempRepo();
+    const heuristic = buildHeuristicProjectGraph({
+      projectId,
+      projectName: "demo",
+      projectType: "node",
+      workspaceRoot: root,
+    });
+    const full = validModelGraphJson({ projectId, projectName: "demo" });
+    const cutAt = full.indexOf('"fileIndex"');
+    const complete = vi.fn(async () => ({
+      requestId: "req_cut",
+      provider: "mock",
+      model: "mock-model",
+      output: full.slice(0, cutAt + 12),
+      usage: { inputTokens: 1, outputTokens: 2 },
+      latencyMs: 1,
+    }));
+    const gateway = { complete } as unknown as ModelGateway;
+    const profile = {
+      id: "model_mock",
+      name: "Mock",
+      provider: "custom",
+      apiFormat: "openai_chat",
+      model: "mock",
+      baseUrl: "http://127.0.0.1:9",
+      apiKeyRef: "secret://mock",
+      isDefault: true,
+    } as ModelProfile;
+
+    await expect(runStructureGraphAiScan({
+      workspaceRoot: root,
+      projectId,
+      displayName: "demo",
+      graph: heuristic,
+      profile,
+      gateway,
+    })).rejects.toMatchObject({
+      code: "agent_orchestration_failed",
+      message: expect.stringMatching(/cut off before a complete graph/u),
+    });
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a finished JSON object when a later fragment is cut off", () => {
+    const { root, projectId } = makeTempRepo();
+    const full = validModelGraphJson({ projectId, projectName: "demo" });
+    const output = `${full}\n{"nodes":`;
+    const parsed = parseProjectGraphFromModelOutput(output, {
+      workspaceRoot: root,
+      projectId,
+      projectName: "demo",
+    });
+    expect(parsed.analysisStatus).toBe("complete");
+    expect(parsed.nodes.some((node) => node.id === "component_core")).toBe(true);
+  });
 });

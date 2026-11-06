@@ -1338,21 +1338,34 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       type: 'info',
       message: getStoreMessage(locale, 'map.rescanningStructure'),
     })
+    const preserved = {
+      composerDraft: get().composerDraft,
+      graph: get().graph,
+      messages: get().messages,
+    }
     try {
       const graph = await client.analyzeWorkspace(project.projectId)
       const tree = await client.getSemanticTree(project.projectId)
-      set({ graph, tree, structureRescanLoading: false })
+      set({ graph, tree, structureRescanLoading: false, error: null })
       pushToast({
         type: 'success',
         message: getStoreMessage(locale, 'map.rescanStructureDone'),
       })
     } catch (err) {
-      set({ structureRescanLoading: false })
+      const message = getStoreMessage(locale, 'map.rescanStructureFailed', {
+        detail: sanitizeErrorMessage(err),
+      })
+      set({
+        structureRescanLoading: false,
+        error: message,
+        composerDraft: preserved.composerDraft,
+        graph: preserved.graph,
+        messages: preserved.messages,
+      })
       pushToast({
         type: 'warning',
-        message: getStoreMessage(locale, 'map.rescanStructureFailed'),
+        message,
       })
-      void err
     }
   },
 
