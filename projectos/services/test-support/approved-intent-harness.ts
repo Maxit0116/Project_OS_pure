@@ -194,9 +194,9 @@ export async function openIntentModelWorkspace(options?: {
     projectId: workspace.project.projectId,
     nodeId,
     filePath,
-    goal: options?.goal,
-    search: options?.search,
-    replace: options?.replace,
+    ...(options?.goal ? { goal: options.goal } : {}),
+    ...(options?.search ? { search: options.search } : {}),
+    ...(options?.replace ? { replace: options.replace } : {}),
   });
 
   const api = new MockProjectOSApiClient({ workspace, modelGateway: gateway });
