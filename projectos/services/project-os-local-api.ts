@@ -1868,6 +1868,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     );
     let resolvedScope: AgentConversationScope;
     let localContext: AgentContextBundle;
+    let largeFileNote: string | undefined;
     if (parsedRequest.scope.kind === "global") {
       resolvedScope = parsedRequest.scope;
       localContext = await this.createGlobalPlanningContext(
@@ -1892,7 +1893,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         nodeId: ownerScope.nodeId,
         selectedFilePath: ownerScope.selectedFilePath,
       };
-      localContext = this.assembleScopedLocalContext(
+      const fileContext = this.assembleReadOnlyFileContext(
         workspace,
         {
           kind: "file",
@@ -1901,6 +1902,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         },
         responseLanguage.tag,
       );
+      localContext = fileContext.localContext;
+      largeFileNote = fileContext.largeFileNote;
     }
     const augmented = await this.augmentComposerContext(
       workspace,
@@ -1918,7 +1921,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ? exploreForAskQuestion(workspace, parsedRequest.question, {
             allowedReadPaths: localContext.allowedReadPaths,
             maxRounds: explorationMaxRounds,
-            maxReads: Math.max(3, explorationMaxRounds + 1),
+            maxReads: Math.max(5, explorationMaxRounds + 3),
           })
         : null;
     const retrieval = retrieveForUtterance(
@@ -1928,6 +1931,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       this.retrievalOptions(workspace),
     );
     const supplementalMarkdown = [
+      largeFileNote ?? "",
       augmented.supplementalMarkdown,
       sessionContext,
       exploration?.supplementalMarkdown ?? "",
@@ -2663,7 +2667,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const planExploration = exploreForAskQuestion(workspace, parsedRequest.objective, {
       allowedReadPaths: localContext.allowedReadPaths,
       maxRounds: 2,
-      maxReads: 3,
+      maxReads: 5,
     });
     const planRetrieval = retrieveForUtterance(
       workspace,
@@ -3010,7 +3014,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             {
               allowedReadPaths: localContext.allowedReadPaths,
               maxRounds: 2,
-              maxReads: 3,
+              maxReads: 4,
             },
           );
           const hypotheses = await this.debugHypothesisService.generateHypotheses({
@@ -7210,11 +7214,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
     return {
       resolvedScope,
-      localContext: this.assembleScopedLocalContext(
+      localContext: this.assembleReadOnlyFileContext(
         workspace,
         resolvedScope,
         responseLanguage.tag,
-      ),
+      ).localContext,
     };
   }
 
@@ -7263,6 +7267,36 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       );
     }
     return stored;
+  }
+
+  /**
+   * The context for a read-only conversation (Ask, Plan, Debug) about one file. A file too large to
+   * send whole used to fail the question ("Agent cannot modify ... split it"), though nothing was to
+   * be written. It now falls back to the feature's own context, and the question is answered from
+   * excerpts that exploration and retrieval find in the file, with a note saying so. Agent edits keep
+   * the strict rule: they need the whole file.
+   */
+  private assembleReadOnlyFileContext(
+    workspace: LoadedProjectOSWorkspace,
+    scope: Extract<AgentConversationScope, { kind: "file" }>,
+    responseLanguage: string,
+  ): { localContext: AgentContextBundle; largeFileNote?: string } {
+    try {
+      return { localContext: this.assembleScopedLocalContext(workspace, scope, responseLanguage) };
+    } catch (error) {
+      const tooLarge = error instanceof ProjectOSError &&
+        error.code === "local_context_unavailable" &&
+        error.message.includes("selected_file_too_large");
+      if (!tooLarge) throw error;
+      const tokens = /about (\d+) tokens/u.exec(error.message)?.[1];
+      return {
+        localContext: this.assembleNodeLocalContext(workspace, scope.nodeId, responseLanguage),
+        largeFileNote:
+          `The selected file \`${scope.selectedFilePath}\` is large${tokens ? ` (about ${tokens} tokens)` : ""} ` +
+          "and was not sent whole. Search results and excerpts around the matches follow; " +
+          "say so when the answer depends on a part of the file that was not shown.",
+      };
+    }
   }
 
   private assembleScopedLocalContext(

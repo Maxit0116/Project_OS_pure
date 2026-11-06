@@ -109,4 +109,86 @@ describe("exploreForAskQuestion", () => {
       "a.ts",
     ]);
   });
+
+  describe("in a large repository", () => {
+    // Observed on excalidraw (1,328 files): "Where is the zoom percentage rendered, and which function
+    // computes the new zoom when zooming in?" read only a debug overlay and answered that it could not
+    // find the code. The first twelve matching lines, in index order, came from files that sort early.
+    const question =
+      "Where is the zoom percentage shown in the UI rendered, and which function computes the new zoom value when the user zooms in with the button?";
+
+    function bigWorkspace(): LoadedProjectOSWorkspace {
+      const root = mkdtempSync(join(tmpdir(), "ask-explore-big-"));
+      const paths: string[] = [];
+      const put = (path: string, body: string) => {
+        const absolute = join(root, path);
+        mkdirSync(join(absolute, ".."), { recursive: true });
+        writeFileSync(absolute, body, "utf8");
+        paths.push(path);
+      };
+      // Early in name order: incidental mentions.
+      put("app/DebugCanvas.tsx", "const zoom = 2;\nconst x = point.x * zoom;\nconst y = point.y * zoom;\n");
+      put("app/Collab.tsx", "// zoom to fit the collaborators\nzoomToFitBounds(bounds);\nconst zoom = fit.zoom;\n");
+      put("docs/yarn.lock", Array.from({ length: 200 }, () => 'd3-zoom@3 "zoom" resolved').join("\n"));
+      put("docs/guide.md", "# Zoom\nThe zoom button zooms the canvas. Zoom percentage is shown.\n");
+      for (let index = 0; index < 250; index += 1) {
+        put(`modules/m${String(index).padStart(3, "0")}/index.ts`, `export const value${index} = ${index};\n`);
+      }
+      // The real code, late in name order.
+      put(
+        "packages/ui/ZoomActions.tsx",
+        [
+          "import { getNormalizedZoom } from './zoom';",
+          "export const ZoomActions = () => (",
+          "  <button onClick={() => zoomIn()}>{Math.round(zoom * 100)}%</button>",
+          ");",
+        ].join("\n"),
+      );
+      put(
+        "packages/ui/zoom.ts",
+        ["export function getNormalizedZoom(zoom: number) { return Math.min(30, Math.max(0.1, zoom)); }", "export function zoomIn(zoom: number) { return getNormalizedZoom(zoom + 0.1); }"].join("\n"),
+      );
+      return { workspaceRoot: root, graph: { fileIndex: paths.map((path) => ({ path, nodeIds: ["n"] })) } } as unknown as LoadedProjectOSWorkspace;
+    }
+
+    it("reads the files that define what was asked about, not the ones that sort first", () => {
+      const result = exploreForAskQuestion(bigWorkspace(), question, { maxRounds: 2, maxReads: 5 });
+      expect(result.trace.readPaths).toEqual(expect.arrayContaining(["packages/ui/ZoomActions.tsx", "packages/ui/zoom.ts"]));
+      expect(result.trace.readPaths.indexOf("packages/ui/zoom.ts")).toBeLessThan(
+        result.trace.readPaths.indexOf("app/DebugCanvas.tsx") === -1 ? 99 : result.trace.readPaths.indexOf("app/DebugCanvas.tsx"),
+      );
+      expect(result.supplementalMarkdown).toContain("export function zoomIn");
+    });
+
+    it("does not spend its reads on a lock file", () => {
+      const result = exploreForAskQuestion(bigWorkspace(), question, { maxReads: 5 });
+      expect(result.trace.readPaths).not.toContain("docs/yarn.lock");
+    });
+
+    it("shows the lines around the match of a large file, not the start of it", () => {
+      const root = mkdtempSync(join(tmpdir(), "ask-explore-window-"));
+      const body = [
+        ...Array.from({ length: 900 }, (_, index) => `// filler line ${index} about nothing in particular`),
+        "export function computeBackoffDelay(attempt) {",
+        "  return Math.min(30000, 2 ** attempt * 100);",
+        "}",
+        ...Array.from({ length: 300 }, (_, index) => `// more filler ${index}`),
+      ].join("\n");
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(join(root, "src/retry.ts"), body, "utf8");
+      const workspace = { workspaceRoot: root, graph: { fileIndex: [{ path: "src/retry.ts", nodeIds: ["n"] }] } } as unknown as LoadedProjectOSWorkspace;
+
+      const result = exploreForAskQuestion(workspace, "How does computeBackoffDelay work?");
+
+      expect(result.supplementalMarkdown).toContain("2 ** attempt * 100");
+      expect(result.supplementalMarkdown).toContain("lines 8");
+      expect(result.supplementalMarkdown).not.toContain("filler line 0 ");
+    });
+
+    it("matches words regardless of case and plurals, and ignores question filler words", () => {
+      const result = exploreForAskQuestion(bigWorkspace(), "Which function zooms in?", { maxReads: 3 });
+      expect(result.trace.queriedSymbols).not.toContain("Which");
+      expect(result.trace.readPaths.some((path) => path.includes("zoom"))).toBe(true);
+    });
+  });
 });
