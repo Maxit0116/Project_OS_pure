@@ -4,6 +4,7 @@ import {
   clampTimeoutSeconds,
   commandsFromRows,
   detectPackageManager,
+  detectOtherEcosystemSuggestions,
   detectVerificationSuggestions,
   formatCommandLine,
   parseCommandLine,
@@ -94,6 +95,34 @@ describe('detectVerificationSuggestions', () => {
     expect(detectPackageManager({ pnpm: true, yarn: false, bun: false })).toBe('pnpm')
     expect(detectPackageManager({ pnpm: false, yarn: true, bun: false })).toBe('yarn')
     expect(detectPackageManager({ pnpm: false, yarn: false, bun: false })).toBe('npm')
+  })
+})
+
+describe('detectOtherEcosystemSuggestions', () => {
+  // A Python, Go, Rust or Java project was offered nothing to verify with, because only package.json was read.
+  const lines = (...names: string[]) => detectOtherEcosystemSuggestions(new Set(names)).map((suggestion) => suggestion.line)
+
+  it('suggests the standard checks for each ecosystem from its marker file', () => {
+    expect(lines('go.mod', 'main.go')).toEqual(['go build ./...', 'go vet ./...', 'go test ./...'])
+    expect(lines('Cargo.toml')).toEqual(['cargo check', 'cargo test'])
+    expect(lines('pyproject.toml')).toEqual(['python3 -m pytest'])
+    expect(lines('Gemfile')).toEqual(['bundle exec rake test'])
+    expect(lines('Gemfile', '.rspec')).toEqual(['bundle exec rspec'])
+    expect(lines('App.sln')).toEqual(['dotnet build', 'dotnet test'])
+  })
+
+  it('uses a project wrapper for Maven and Gradle when there is one', () => {
+    expect(lines('pom.xml', 'mvnw')).toEqual(['./mvnw -q test', './mvnw -q -DskipTests package'])
+    expect(lines('pom.xml')).toEqual(['mvn -q test', 'mvn -q -DskipTests package'])
+    expect(lines('build.gradle.kts', 'gradlew')).toEqual(['./gradlew test', './gradlew build -x test'])
+    expect(lines('build.gradle')).toEqual(['gradle test', 'gradle build -x test'])
+  })
+
+  it('offers nothing for a project it does not recognise, and only plain commands the runner accepts', () => {
+    expect(lines('README.md', 'notes.txt')).toEqual([])
+    for (const marker of ['go.mod', 'Cargo.toml', 'pyproject.toml', 'pom.xml', 'build.gradle', 'App.csproj', 'Gemfile']) {
+      for (const line of lines(marker)) expect(parseCommandLine(line, 60).ok).toBe(true)
+    }
   })
 })
 

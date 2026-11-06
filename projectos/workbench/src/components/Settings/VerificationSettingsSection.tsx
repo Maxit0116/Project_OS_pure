@@ -12,6 +12,7 @@ import {
   MIN_TIMEOUT_SECONDS,
   commandsFromRows,
   detectPackageManager,
+  detectOtherEcosystemSuggestions,
   detectVerificationSuggestions,
   formatCommandLine,
   suggestionsNotConfigured,
@@ -55,15 +56,18 @@ export default function VerificationSettingsSection() {
         const packageJson = names.has('package.json')
           ? await client.getFileContent(projectId, 'package.json').catch(() => undefined)
           : undefined
-        const found = detectVerificationSuggestions({
-          packageJson,
-          hasTsconfig: names.has('tsconfig.json'),
-          packageManager: detectPackageManager({
-            pnpm: names.has('pnpm-lock.yaml'),
-            yarn: names.has('yarn.lock'),
-            bun: names.has('bun.lockb') || names.has('bun.lock'),
+        const found = [
+          ...detectVerificationSuggestions({
+            packageJson,
+            hasTsconfig: names.has('tsconfig.json'),
+            packageManager: detectPackageManager({
+              pnpm: names.has('pnpm-lock.yaml'),
+              yarn: names.has('yarn.lock'),
+              bun: names.has('bun.lockb') || names.has('bun.lock'),
+            }),
           }),
-        })
+          ...detectOtherEcosystemSuggestions(names),
+        ]
         if (!cancelled) setDetected(found)
       } catch {
         if (!cancelled) setDetected([])

@@ -129,6 +129,52 @@ export function detectVerificationSuggestions(input: {
   return suggestions
 }
 
+/**
+ * Suggestions for projects that are not JavaScript, from the marker files in the project folder.
+ * The detection used to know `package.json` only, so a Python, Go, Rust or Java project was offered
+ * nothing to verify with. Same rules as above: suggestions only, nothing is run without approval, and
+ * the runner starts a program with arguments, so each line is a plain command.
+ */
+export function detectOtherEcosystemSuggestions(names: ReadonlySet<string>): VerificationSuggestion[] {
+  const suggestions: VerificationSuggestion[] = []
+  const add = (kind: VerificationSuggestion['kind'], line: string, timeoutSeconds: number) => {
+    suggestions.push({ id: `${kind}:${line}`, kind, line, timeoutSeconds })
+  }
+  const any = (...candidates: string[]): boolean => candidates.some((name) => names.has(name))
+  const endsWith = (suffix: string): boolean => [...names].some((name) => name.endsWith(suffix))
+
+  if (names.has('go.mod')) {
+    add('typecheck', 'go build ./...', 300)
+    add('lint', 'go vet ./...', 180)
+    add('test', 'go test ./...', 300)
+  }
+  if (names.has('Cargo.toml')) {
+    add('typecheck', 'cargo check', 300)
+    add('test', 'cargo test', 300)
+  }
+  if (any('pyproject.toml', 'setup.py', 'setup.cfg', 'pytest.ini', 'tox.ini', 'requirements.txt')) {
+    add('test', 'python3 -m pytest', 300)
+  }
+  if (names.has('pom.xml')) {
+    const maven = names.has('mvnw') ? './mvnw' : 'mvn'
+    add('test', `${maven} -q test`, 300)
+    add('build', `${maven} -q -DskipTests package`, 300)
+  }
+  if (any('build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts')) {
+    const gradle = names.has('gradlew') ? './gradlew' : 'gradle'
+    add('test', `${gradle} test`, 300)
+    add('build', `${gradle} build -x test`, 300)
+  }
+  if (endsWith('.sln') || endsWith('.csproj')) {
+    add('typecheck', 'dotnet build', 300)
+    add('test', 'dotnet test', 300)
+  }
+  if (names.has('Gemfile')) {
+    add('test', names.has('.rspec') ? 'bundle exec rspec' : 'bundle exec rake test', 300)
+  }
+  return suggestions
+}
+
 export function suggestionsNotConfigured(
   suggestions: VerificationSuggestion[],
   configured: ExecCommand[],
