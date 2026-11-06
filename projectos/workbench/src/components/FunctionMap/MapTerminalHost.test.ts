@@ -37,13 +37,14 @@ const terminalDoubles = vi.hoisted(() => ({
 
 vi.mock('react', () => ({
   useEffect: effectHarness.useEffect,
+  useMemo: <T,>(factory: () => T) => factory(),
   useRef: effectHarness.useRef,
 }))
 vi.mock('../../data/clientMode', () => ({ isDesktopApp: () => false }))
 vi.mock('../../i18n', () => ({ useI18n: () => ({ ts: (key: string) => key }) }))
-vi.mock('../../state/workbenchStore', () => ({
-  useWorkbenchStore: (selector: (state: { terminalLines: string[] }) => unknown) =>
-    selector({ terminalLines: [] }),
+vi.mock('../../state/activityStore', () => ({
+  useActivityStore: (selector: (state: { entries: unknown[] }) => unknown) =>
+    selector({ entries: [] }),
 }))
 vi.mock('../../state/terminalStore', () => ({
   useTerminalStore: (selector: (state: unknown) => unknown) =>

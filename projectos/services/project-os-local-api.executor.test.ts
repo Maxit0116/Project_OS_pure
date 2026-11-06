@@ -64,8 +64,9 @@ describe('request executor binding', () => {
     const refinement = await api.prepareIntentExecution(project.projectId, draft.id);
     const run = await api.confirmExecution(refinement.id);
     expect(run.executor).toMatchObject({modelProfileId:'b',model:'model-b',thinkingDepth:'medium'});
-    // Intent touch locks execution to the owning component (feat_login), not a bare global refine.
-    expect(run.scope).toMatchObject({ kind: 'component', nodeId: 'feat_login' });
+    // Intent touch locks execution to the owning component (feat_login) via the
+    // node-plan pipeline (component scope is modify-only and rejects create/delete).
+    expect(run.scope).toMatchObject({ kind: 'node-plan', nodeId: 'feat_login' });
     expect(complete.mock.calls.every(([profile]) => profile.id === 'b')).toBe(true);
   });
 

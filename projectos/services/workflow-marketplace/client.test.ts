@@ -85,7 +85,8 @@ describe("WorkflowCatalogClient", () => {
         return new Response(body, { status: 200 });
       }) as unknown as typeof fetch,
     });
-    const view = await client.getCatalog();
+    // Cold start without forceRefresh serves bundled; remote path requires refresh.
+    const view = await client.getCatalog({ forceRefresh: true });
     expect(view.source).toBe("remote");
     expect(view.document.listings.length).toBeGreaterThan(0);
   });

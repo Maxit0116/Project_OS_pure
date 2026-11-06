@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,7 +9,13 @@ import { PromptRefinementSchema } from "../contracts/prompt-refinement.js";
 import { ProjectOSProjectSchema } from "../contracts/project.js";
 import { SemanticTreeSchema } from "../contracts/semantic-tree.js";
 import { ProjectOSLocalApi } from "../services/index.js";
-import { MockProjectOSApiClient } from "./mock-project-os-api-client.js";
+import {
+  MOCK_SAMPLE_WORKSPACE_ROOT,
+  MockProjectOSApiClient,
+} from "./mock-project-os-api-client.js";
+import settingsFixture from "./sample-projectos-fixtures/settings.json" with {
+  type: "json",
+};
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const googleLoginPrompt =
@@ -62,7 +68,11 @@ describe("MockProjectOSApiClient parity", () => {
       }),
     );
 
-    expect(mockProject).toEqual(realProject);
+    // Mock uses a stable sentinel root; real openSampleWorkspace uses a temp copy.
+    expect(mockProject.workspaceRoot).toBe(MOCK_SAMPLE_WORKSPACE_ROOT);
+    expect({ ...mockProject, workspaceRoot: realProject.workspaceRoot }).toEqual(
+      realProject,
+    );
     expect(mockGraph.nodes.map((node) => node.id)).toEqual(
       realGraph.nodes.map((node) => node.id),
     );
@@ -86,6 +96,35 @@ function copySampleWorkspace(): string {
   temporaryRoots.push(tempRoot);
   const tempWorkspaceRoot = join(tempRoot, "sample-graph-saas");
   cpSync(sampleWorkspaceRoot, tempWorkspaceRoot, { recursive: true });
-  rmSync(join(tempWorkspaceRoot, ".projectos", "settings.json"), { force: true });
+  // Keep refinement on the mock's deterministic fixture path. Deleting settings is
+  // not enough: bootstrap re-seeds model profiles from the sample workspace when
+  // modelProfiles is empty (including local untracked sample settings.json).
+  writeFileSync(
+    join(tempWorkspaceRoot, ".projectos", "settings.json"),
+    JSON.stringify(
+      {
+        ...settingsFixture,
+        execution: {
+          ...settingsFixture.execution,
+          mode: "fixture",
+        },
+        modelProfiles: [
+          {
+            id: "parity-seed-block",
+            name: "Parity Seed Block",
+            provider: "custom",
+            apiFormat: "openai_chat",
+            displayName: "Parity Seed Block",
+            model: "none",
+            baseUrl: "https://example.invalid",
+            apiKeyRef: "model_profile:parity-seed-block",
+            isDefault: true,
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
   return tempWorkspaceRoot;
 }
