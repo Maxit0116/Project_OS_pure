@@ -3,37 +3,36 @@ import { deriveChatSessionTitle, emptyComposerDraft } from '@contracts/index'
 import {
   buildChatSessionRecord,
   resolvePersistedChatSessionTitle,
+  type ChatSessionSyncState,
 } from './chatSessionSync'
-import type { WorkbenchState } from './workbenchStore'
 
-const baseState = {
+const baseState: ChatSessionSyncState = {
   messages: [],
-  chatMode: 'ask' as const,
+  chatMode: 'ask',
   composerDraft: emptyComposerDraft(),
   globalAgentActive: false,
   selectedFilePath: null,
   selectedNodeId: null,
+  pendingFileOwnerChoice: null,
+  fileScopeError: null,
   graph: null,
-  flowStatus: 'idle' as const,
+  flowStatus: 'idle',
   pendingRefinement: null,
   refinementConfirmed: false,
   refineLoading: false,
   activeRunId: null,
-} satisfies Pick<
-  WorkbenchState,
-  | 'messages'
-  | 'chatMode'
-  | 'composerDraft'
-  | 'globalAgentActive'
-  | 'selectedFilePath'
-  | 'selectedNodeId'
-  | 'graph'
-  | 'flowStatus'
-  | 'pendingRefinement'
-  | 'refinementConfirmed'
-  | 'refineLoading'
-  | 'activeRunId'
->
+  latestAskTrace: null,
+  pendingPlan: null,
+  planConfirmed: false,
+  latestPlanTrace: null,
+  debugSession: null,
+  agentFlowSubject: 'run',
+  activeCustomModeSkillId: null,
+  customModePreviousChatMode: null,
+  activeAgentDefinitionId: null,
+  conversationCheckpoints: [],
+  latestContextAssembly: null,
+}
 
 describe('chatSessionSync', () => {
   it('derives title from first user message', () => {

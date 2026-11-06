@@ -27,8 +27,8 @@ const effectHarness = vi.hoisted(() => {
 })
 
 const terminalDoubles = vi.hoisted(() => ({
-  createMapSession: vi.fn(async () => undefined),
-  disposeMapSession: vi.fn(async () => undefined),
+  createMapSession: vi.fn(async (): Promise<void> => {}),
+  disposeMapSession: vi.fn(async (): Promise<void> => {}),
   initIpcListeners: vi.fn(),
   state: {
     mapSessions: {} as Record<string, string>,
@@ -104,7 +104,7 @@ describe('MapTerminalHost session ownership', () => {
     terminalDoubles.createMapSession.mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
-          finishCreation = resolve
+          finishCreation = () => resolve()
         }),
     )
 

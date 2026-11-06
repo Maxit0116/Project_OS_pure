@@ -70,7 +70,7 @@ describe('run decisions state', () => {
   it('discards an out-of-order decision response for a no-longer-inspected run', async () => {
     const workspace = createMockSampleWorkspace()
     const finish = new Map<string, (decisions: RunDecision[]) => void>()
-    const listRunDecisions = vi.fn((projectId: string, rootRunId: string) => new Promise<RunDecision[]>((resolve) => {
+    const listRunDecisions = vi.fn((_projectId: string, rootRunId: string) => new Promise<RunDecision[]>((resolve) => {
       finish.set(rootRunId, resolve)
     }))
     useWorkbenchStore.setState({

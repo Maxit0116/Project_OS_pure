@@ -190,7 +190,7 @@ describe('codeFileUnderstanding', () => {
       version: '0.5.0',
       projectId: 'p1',
       projectName: 'demo',
-      projectType: 'nextjs',
+      projectType: 'nextjs-app',
       analyzedAt: new Date(0).toISOString(),
       analysisStatus: 'complete',
       architecture: {

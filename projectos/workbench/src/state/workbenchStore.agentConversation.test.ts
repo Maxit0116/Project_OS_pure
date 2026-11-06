@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   AgentAnswerResult,
+  AgentAskRequest,
   AgentRun,
   AgentRunEvent,
   AgentTransientTrace,
@@ -174,12 +175,13 @@ describe('agent conversation routing', () => {
 
   it('does not attach a live executor choice in fixture mode', async () => {
     const workspace = createMockSampleWorkspace()
-    const askAgent = vi.fn(async (): Promise<AgentAnswerResult> => ({
+    const askAgent = vi.fn(async (_request: AgentAskRequest): Promise<AgentAnswerResult> => ({
       id: 'answer-fixture',
       projectId: workspace.project.projectId,
       scope: { kind: 'global' },
       answer: 'Fixture answer.',
-      backend: 'fixture',
+      backend: 'model',
+      modelProfileId: 'model-fixture',
       contextBundleHash: `sha256:${'e'.repeat(64)}`,
       contextSummary: {
         files: [],
@@ -1013,6 +1015,7 @@ describe('agent conversation routing', () => {
     const run: AgentRun = {
       runId: 'run-plan-confirmed', projectId: 'sample-graph-saas', kind: 'feature_change',
       status: 'running', relatedNodeIds: ['feat_login'], relatedFiles: ['app/login/page.tsx'],
+      scope: { kind: 'component', nodeId: 'feat_login' },
       startedAt: '2026-10-29T00:00:00.000Z',
     }
     setReadyScope({

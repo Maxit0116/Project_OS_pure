@@ -29,6 +29,7 @@ const sampleTask: AgentPoolTask = {
   majorActions: [],
   traceSpans: [],
   trace: null,
+  runKpi: null,
   originMs: Date.parse('2026-01-01T00:00:00.000Z'),
   poolRunId: 'pool_test',
   loopSpecId: null,

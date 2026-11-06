@@ -169,7 +169,14 @@ interface LoopGraphStore {
   pauseRun: () => Promise<void>
   resumeRun: () => Promise<void>
   advanceRun: () => Promise<void>
-  resolveHitl: (answers: Array<{ questionId: string; answer: string }>) => Promise<void>
+  resolveHitl: (
+    answers: Array<{
+      questionId: string
+      answer: string
+      /** Approval Edit: Action must execute this payload, not the Agent draft. */
+      editedPayload?: Record<string, unknown> | undefined
+    }>,
+  ) => Promise<void>
   linkActiveSession: () => Promise<void>
   unlinkSession: (sessionId: string) => Promise<void>
 }

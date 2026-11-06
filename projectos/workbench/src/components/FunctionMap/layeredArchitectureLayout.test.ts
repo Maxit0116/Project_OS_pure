@@ -103,7 +103,9 @@ function countEdgeHitsOnNodes(
       if (id === edge.source || id === edge.target) continue
       const c = center(id)
       if (!c) continue
-      if (segmentHitsNodeBox(a.x, a.y, b.x, b.y, c.x, c.y, margin)) hits += 1
+      // segmentHitsNodeBox uses a fixed box pad; margin reserved for future tuning.
+      void margin
+      if (segmentHitsNodeBox(a.x, a.y, b.x, b.y, c.x, c.y)) hits += 1
     }
   }
   return hits
@@ -368,7 +370,7 @@ describe('computeLayeredArchitectureLayout', () => {
       graphFixture.edges as FunctionalEdge[],
       'code',
       { parentId: 'feat_database' },
-      graphFixture.files as FileEntry[],
+      graphFixture.fileIndex as FileEntry[],
       graphFixture.fileRelations as FileRelation[],
     )
     const layoutEdges = projected.edges.map((edge) => ({

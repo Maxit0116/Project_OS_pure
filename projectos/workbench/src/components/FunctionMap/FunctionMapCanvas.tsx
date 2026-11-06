@@ -963,7 +963,6 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     selectedNodeId,
     onSelectNode,
     onSelectFile,
-    onClearSelection,
     search,
     mapSearchFocus,
     clearMapSearchFocus,

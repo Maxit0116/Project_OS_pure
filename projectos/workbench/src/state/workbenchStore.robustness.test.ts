@@ -378,6 +378,7 @@ function runFixture(runId: string): AgentRun {
     status: 'running',
     relatedNodeIds: ['feat_login'],
     relatedFiles: ['app/login/page.tsx'],
+    scope: { kind: 'component', nodeId: 'feat_login' },
     startedAt: '2026-07-21T00:00:00.000Z',
   }
 }

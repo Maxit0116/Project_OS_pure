@@ -4,15 +4,18 @@ import { architectureFileNodeId } from './architectureView'
 import { buildMapSearchHits } from './mapSearch'
 
 function note(id: string, title: string, stackId?: string): MapArtifact {
+  const stamp = '2026-01-01T00:00:00.000Z'
   return {
     id,
     type: 'note',
-    scope: 'map',
+    scope: 'project',
     position: { x: 0, y: 0 },
     size: { width: 200, height: 120 },
     note: { title, body: '' },
+    createdAt: stamp,
+    updatedAt: stamp,
     ...(stackId ? { stackId, stackOrder: 0, stackActive: true } : {}),
-  } as MapArtifact
+  }
 }
 
 describe('buildMapSearchHits', () => {
