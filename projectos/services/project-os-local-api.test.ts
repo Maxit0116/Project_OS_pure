@@ -1408,7 +1408,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     );
 
     expect(completedParent).toMatchObject({
-      scope: { kind: "component", nodeId: "feat_login" },
+      scope: { kind: "node-plan", nodeId: "feat_login" },
       role: "node_planner",
       rootRunId: parent.runId,
       relatedFiles: [],
@@ -2634,9 +2634,8 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     });
     await waitForRunStatus(api, parent.runId, "error");
 
-    // Hierarchy rejects delete ops before the impact scanner runs.
     expect(JSON.stringify(await api.getAgentRunEvents(parent.runId))).toContain(
-      "invalid plan shape",
+      "Impact-aware deletion unavailable",
     );
     expect(readFileSync(join(tempWorkspaceRoot, targetPath), "utf8")).toBe(targetBefore);
   });
@@ -2669,9 +2668,8 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     });
     await waitForRunStatus(api, parent.runId, "error");
 
-    // Delete/create ops never bind under component hierarchy planning.
     expect(JSON.stringify(await api.getAgentRunEvents(parent.runId))).toContain(
-      "invalid plan shape",
+      "Impact-aware deletion requires exactly one requested target",
     );
     expect(readFileSync(join(tempWorkspaceRoot, targetPath), "utf8")).toBe(targetBefore);
   });
@@ -2717,37 +2715,25 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
       rawRequest: "Update the login experience across its owned files.",
       deferOrchestratorStart: false,
     });
-    // Whole-tree automatic apply + failed verification ends as error after H5 repair exhaustion.
-    const finished = await waitForTerminalRunStatus(api, parent.runId);
-    expect(finished.status).toBe("error");
+    expect((await waitForRunStatus(api, parent.runId, "complete")).status).toBe("complete");
     const parentState = getLocalApiInternals(api).orchestrator.getRun(parent.runId) as {
       applyResult?: ApplyResult;
     } | undefined;
     expect(parentState?.applyResult).toMatchObject({
       applied: true,
       outcome: "applied",
-      filesChanged: expect.arrayContaining(delegatedPaths),
+      filesChanged: delegatedPaths,
       verificationStatus: "failed",
     });
-    expect(verificationCalls.length).toBeGreaterThanOrEqual(1);
+    expect(verificationCalls).toEqual([tempWorkspaceRoot]);
     const backupId = parentState?.applyResult?.backupId;
     expect(backupId).toBeTruthy();
     const events = await api.getAgentRunEvents(parent.runId);
-    // Whole-tree path may emit plan_completed or only batch/apply outcomes after H5 repair.
-    expect(events.some((event) =>
-      event.type === "plan_completed" ||
-      event.type === "batch_validation_result" ||
-      event.type === "apply_result"
-    )).toBe(true);
+    expect(events.some((event) => event.type === "plan_completed")).toBe(true);
     expect(events.some((event) =>
       event.type === "verification_completed" && event.payload?.status === "failed"
     )).toBe(true);
-    // Whole-tree commits surface child completion via child_run_completed / outcomes interchangeably.
-    expect(
-      events.filter((event) =>
-        event.type === "child_run_outcome" || event.type === "child_run_completed"
-      ).length,
-    ).toBeGreaterThanOrEqual(2);
+    expect(events.filter((event) => event.type === "child_run_outcome")).toHaveLength(2);
 
     writeFileSync(join(tempWorkspaceRoot, delegatedPaths[0]!), "newer user edit", "utf8");
     await expect(api.restoreApplyBackup(project.projectId, backupId!)).rejects.toMatchObject({
@@ -5105,8 +5091,9 @@ class ImpactDeleteGateway extends ModelGateway {
     let output: string;
 
     if (request.requestKind === "request_intent") {
-      // Keep the approved intent on feat_login only; importer repairs are
-      // server-derived from impact analysis, not extra intent touches.
+      // Keep the approved intent on feat_login; server-derived importer repairs
+      // are not intent touches. A model-chosen extra repair path is listed only
+      // so the "exactly one requested target" gate can reject it after intent.
       output = JSON.stringify({
         action: "final",
         intent: {
@@ -5115,7 +5102,9 @@ class ImpactDeleteGateway extends ModelGateway {
           touches: [{
             nodeId: "feat_login",
             reason: "Owns the login page being deleted",
-            files: [this.targetPath],
+            files: this.modelChosenRepairPath
+              ? [this.targetPath, this.modelChosenRepairPath]
+              : [this.targetPath],
             allow: { editExisting: true, addParts: false, deletePartIds: ["feat_login"] },
           }],
           structuralProposals: [],
