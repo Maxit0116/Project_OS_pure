@@ -14,6 +14,7 @@ import {
   ollamaChatUrl,
   openAiChatCompletionsUrl,
   type ModelProviderAdapter,
+  readResponseText,
 } from "./providers.js";
 
 afterEach(() => {
@@ -614,6 +615,23 @@ describe("provider network failures", () => {
     await vi.advanceTimersByTimeAsync(120_000);
 
     expect(await settled).toMatchObject({ code: "model_timeout" });
+  });
+
+  it("ends a read at its deadline even when the stream does not honour cancel", async () => {
+    // A reader whose pending read never settles and whose cancel() does nothing: the deadline has to
+    // end the wait by itself.
+    const stuck = {
+      ok: true,
+      headers: new Headers(),
+      body: { getReader: () => ({ read: () => new Promise<never>(() => undefined), cancel: async () => undefined, releaseLock: () => undefined }) },
+    } as unknown as Response;
+    const deadline = new AbortController();
+    const settled = readResponseText(stuck, deadline.signal).then(() => "returned");
+
+    setTimeout(() => deadline.abort(), 20);
+
+    await expect(Promise.race([settled, new Promise((resolve) => setTimeout(() => resolve("still waiting"), 500))])).resolves.toBe("returned");
+    expect(deadline.signal.aborted).toBe(true);
   });
 
   it("leaves an error that is not about the network as it was", async () => {

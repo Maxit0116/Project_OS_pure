@@ -158,7 +158,7 @@ const OllamaModelsResponseSchema = z.object({
   models: z.array(z.object({ name: z.string().min(1) })),
 });
 
-async function readResponseText(response: Response, signal?: AbortSignal): Promise<string> {
+export async function readResponseText(response: Response, signal?: AbortSignal): Promise<string> {
   if (!response.ok) {
     throw new ProjectOSError(
       "model_connection_failed",
@@ -180,11 +180,22 @@ async function readResponseText(response: Response, signal?: AbortSignal): Promi
   let totalBytes = 0;
   // An aborted read ends the stream early; the caller checks the signal and does not parse a part.
   const stop = () => { void reader.cancel().catch(() => undefined); };
+  // The wait itself is raced against the deadline rather than trusting cancel() to release it. Against
+  // the real provider a "120 s" deadline was once reported after 17 minutes (a replay of the same
+  // request with a short deadline returned on time, so the cause was not established); a stream that
+  // does not honour cancel would otherwise keep the caller waiting for as long as the provider likes.
+  const aborted = new Promise<{ done: true; value: undefined }>((resolve) => {
+    if (signal?.aborted) resolve({ done: true, value: undefined });
+    else signal?.addEventListener("abort", () => resolve({ done: true, value: undefined }), { once: true });
+  });
   if (signal?.aborted) stop();
   else signal?.addEventListener("abort", stop, { once: true });
+  let pendingRead: Promise<unknown> | undefined;
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const read = reader.read();
+      pendingRead = read;
+      const { done, value } = await Promise.race([read, aborted]);
       if (done) break;
       totalBytes += value.byteLength;
       if (totalBytes > PROVIDER_MAX_RESPONSE_BYTES) {
@@ -194,7 +205,13 @@ async function readResponseText(response: Response, signal?: AbortSignal): Promi
     }
   } finally {
     signal?.removeEventListener("abort", stop);
-    reader.releaseLock();
+    // A read abandoned at the deadline settles later, once the stream is cancelled; it is not an error.
+    void pendingRead?.catch(() => undefined);
+    try {
+      reader.releaseLock();
+    } catch {
+      // Still has a read waiting on a cancelled stream; the stream is being discarded anyway.
+    }
   }
 
   const bytes = new Uint8Array(totalBytes);
