@@ -15,6 +15,7 @@ import type { LoadedProjectOSWorkspace } from "../persistence/workspace-store.js
 import { LocalContextAssembler } from "./local-context-assembler.js";
 import { ModelGateway } from "./model-gateway/index.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
+import { createLegacyScenarioWorkspace } from "./test-support/legacy-scenario-workspace.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const temporaryRoots: string[] = [];
@@ -72,7 +73,7 @@ describe("ProjectOSLocalApi grounded ask", () => {
   it("answers at node scope without file-owner resolution or write authorization", async () => {
     const gateway = new AskGateway();
     const api = new ProjectOSLocalApi({
-      sampleWorkspaceRoot: copySampleWorkspace(),
+      sampleWorkspaceRoot: copyLegacyScenarioWorkspace(),
       localContextAssembler: new LocalContextAssembler(),
       modelGateway: gateway,
       runEventPersistence: "memory",
@@ -109,7 +110,7 @@ describe("ProjectOSLocalApi grounded ask", () => {
   });
 
   it("returns a grounded answer without creating execution or write state", async () => {
-    const workspaceRoot = copySampleWorkspace();
+    const workspaceRoot = copyLegacyScenarioWorkspace();
     const gateway = new AskGateway();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: workspaceRoot,
@@ -208,7 +209,6 @@ describe("ProjectOSLocalApi grounded ask", () => {
     expect(state.orchestrator.runs.size).toBe(0);
     expect(state.boundRunAuthorizations.size).toBe(0);
     expect(state.pendingOrchestratorStarts.size).toBe(0);
-    expect(state.externalRunsByRunId.size).toBe(0);
     expect(state.registeredRunsByRunId.size).toBe(0);
     expect(readFileSync(join(workspaceRoot, ".projectos", "current-work.json"), "utf8"))
       .toBe(currentWorkBefore);
@@ -217,7 +217,7 @@ describe("ProjectOSLocalApi grounded ask", () => {
 
   it("rejects ask when no model profile is configured", async () => {
     const api = new ProjectOSLocalApi({
-      sampleWorkspaceRoot: copySampleWorkspace(),
+      sampleWorkspaceRoot: copyLegacyScenarioWorkspace(),
       localContextAssembler: new LocalContextAssembler(),
       modelGateway: new AskGateway(),
     });
@@ -238,7 +238,7 @@ describe("ProjectOSLocalApi grounded ask", () => {
   it("passes a final language mismatch through as a usable answer", async () => {
     const gateway = new AskGateway("The retried answer remains in English.");
     const api = new ProjectOSLocalApi({
-      sampleWorkspaceRoot: copySampleWorkspace(),
+      sampleWorkspaceRoot: copyLegacyScenarioWorkspace(),
       localContextAssembler: new LocalContextAssembler(),
       modelGateway: gateway,
     });
@@ -270,7 +270,7 @@ describe("ProjectOSLocalApi grounded ask", () => {
       "Bearer private-token 分析了 /Users/rui/private.ts",
     );
     const api = new ProjectOSLocalApi({
-      sampleWorkspaceRoot: copySampleWorkspace(),
+      sampleWorkspaceRoot: copyLegacyScenarioWorkspace(),
       localContextAssembler: new LocalContextAssembler(),
       modelGateway: gateway,
       runEventPersistence: "memory",
@@ -301,7 +301,7 @@ describe("ProjectOSLocalApi grounded ask", () => {
   it("uses the same scoped assembly path for ask and live change", async () => {
     const gateway = new AskGateway();
     const api = new ProjectOSLocalApi({
-      sampleWorkspaceRoot: copySampleWorkspace(),
+      sampleWorkspaceRoot: copyLegacyScenarioWorkspace(),
       localContextAssembler: new LocalContextAssembler(),
       modelGateway: gateway,
       runEventPersistence: "memory",
@@ -386,7 +386,6 @@ function internals(api: ProjectOSLocalApi) {
     orchestrator: { runs: Map<string, unknown> };
     boundRunAuthorizations: Map<string, unknown>;
     pendingOrchestratorStarts: Map<string, unknown>;
-    externalRunsByRunId: Map<string, unknown>;
     registeredRunsByRunId: Map<string, unknown>;
     refinementsById: Map<string, StoredRefinementForTest>;
     workspacesByProjectId: Map<string, LoadedProjectOSWorkspace>;
@@ -423,6 +422,12 @@ async function enableModel(api: ProjectOSLocalApi, projectId: string): Promise<v
       isDefault: true,
     }],
   });
+}
+
+function copyLegacyScenarioWorkspace(): string {
+  const created = createLegacyScenarioWorkspace();
+  temporaryRoots.push(created.tempRoot);
+  return created.workspaceRoot;
 }
 
 function copySampleWorkspace(): string {

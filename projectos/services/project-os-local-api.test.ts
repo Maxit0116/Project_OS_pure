@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -22,6 +23,8 @@ import {
 import { ProjectOSError } from "../errors.js";
 import { InMemorySecretStore } from "../persistence/secret-store.js";
 import { ProjectOSWorkspaceStore } from "../persistence/workspace-store.js";
+import { AgentProposalValidationResultSchema } from "../contracts/agent-validation.js";
+import { classifyRunOutcome } from "./harness/run-outcome.js";
 import { validateAgentRunEventSequence } from "../validation/index.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
 import { LocalContextAssembler } from "./local-context-assembler.js";
@@ -30,9 +33,16 @@ import * as writeTransactionModule from "./recoverable-write-transaction.js";
 import { WorkspaceTransactionCoordinator } from "./workspace-transaction-coordinator.js";
 import { DependencyImpactScanner } from "./dependency-impact-scanner.js";
 import { VerificationRunner } from "./verification-runner.js";
+import { createLegacyScenarioWorkspace } from "./test-support/legacy-scenario-workspace.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const temporaryRoots: string[] = [];
+
+function copyLegacyScenarioWorkspace(): string {
+  const created = createLegacyScenarioWorkspace();
+  temporaryRoots.push(created.tempRoot);
+  return created.workspaceRoot;
+}
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -48,15 +58,22 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     const tree = await api.getSemanticTree(project.projectId);
 
     expect(graph.projectId).toBe(project.projectId);
-    expect(graph.nodes.some((node) => node.id === "feat_login")).toBe(true);
+    expect(graph.nodes.some((node) => node.id === "system_root" && node.level === "context")).toBe(true);
+    expect(graph.nodes.some((node) => node.id === "container_app" && node.level === "container")).toBe(true);
+    expect(graph.nodes.some((node) => node.id === "component_app" && node.level === "component")).toBe(true);
+    expect(graph.nodes.some((node) => node.id === "feat_login")).toBe(false);
+    expect(graph.fileIndex.find((file) => file.path === "app/login/page.tsx")?.nodeIds).toEqual([
+      "component_app",
+    ]);
     expect(tree.projectId).toBe(project.projectId);
-    expect(tree.roots.some((root) => root.sourceNodeId === "feat_login")).toBe(
-      true,
-    );
+    expect(tree.roots.some((root) => root.sourceNodeId === "container_app")).toBe(true);
+    expect(tree.roots.some((root) =>
+      root.children.some((child) => child.sourceNodeId === "component_app"),
+    )).toBe(true);
   });
 
   it("clears project-scoped execution state before reopening the same project", async () => {
-    const root = copySampleWorkspace();
+    const root = copyLegacyScenarioWorkspace();
     const workspaceStore = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
     const api = new ProjectOSLocalApi({
@@ -124,7 +141,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("terminalizes and reports an orchestrator startup rejection", async () => {
-    const root = copySampleWorkspace();
+    const root = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: root,
       localContextAssembler: new LocalContextAssembler(),
@@ -161,7 +178,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("assembles feature context for feat_login with auth linked files", async () => {
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot });
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copyLegacyScenarioWorkspace() });
     const project = await api.openSampleWorkspace();
 
     const context = await api.getNodeContext(project.projectId, "feat_login");
@@ -182,7 +199,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("assembles file context from semantic-tree links when graph fileIndex has no node id", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const graphPath = join(tempWorkspaceRoot, ".projectos", "graph.json");
     const graph = JSON.parse(readFileSync(graphPath, "utf8")) as {
       fileIndex: Array<{ path: string; nodeIds: string[] }>;
@@ -229,7 +246,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("binds live model authorization to the requested scope and attached context", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
       localContextAssembler: new LocalContextAssembler(),
@@ -306,7 +323,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects an invalid requested selection before publishing a live run", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
       localContextAssembler: new LocalContextAssembler(),
@@ -331,7 +348,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   it("keeps fixture confirmation independent of local context assembly", async () => {
     let assembleCalls = 0;
     const api = new ProjectOSLocalApi({
-      sampleWorkspaceRoot: copySampleWorkspace(),
+      sampleWorkspaceRoot: copyLegacyScenarioWorkspace(),
       localContextAssembler: {
         assemble() {
           assembleCalls += 1;
@@ -365,14 +382,21 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects a registered run id already owned by another execution backend", async () => {
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
-    const collidingRun = generatedRun(project.projectId, "run_google_login");
-    getLocalApiInternals(api).externalRunsByRunId.set(collidingRun.runId, {
-      run: collidingRun,
-      events: [],
-      config: externalAgentConfig(),
-    });
+    const loginPath = join(tempWorkspaceRoot, "app/login/page.tsx");
+    const loginBefore = readFileSync(loginPath, "utf8");
+    authorizeTestRun(
+      api,
+      project.projectId,
+      tempWorkspaceRoot,
+      "run_google_login",
+      "app/login/page.tsx",
+    );
+    const ownedAuthorization = getLocalApiInternals(api).boundRunAuthorizations.get(
+      "run_google_login",
+    );
     const refinement = await api.refinePrompt({
       projectId: project.projectId,
       nodeId: "feat_login",
@@ -383,8 +407,9 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     await expect(api.confirmExecution(refinement.id)).rejects.toMatchObject({
       code: "agent_orchestration_failed",
     });
-    expect(getLocalApiInternals(api).externalRunsByRunId.get(collidingRun.runId)?.run)
-      .toEqual(collidingRun);
+    expect(getLocalApiInternals(api).boundRunAuthorizations.get("run_google_login"))
+      .toEqual(ownedAuthorization);
+    expect(readFileSync(loginPath, "utf8")).toBe(loginBefore);
   });
 
   it("rejects file and map-asset paths that escape their allowed roots", async () => {
@@ -556,7 +581,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("refines and executes the google-login scenario with deterministic event replay", async () => {
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copyLegacyScenarioWorkspace() });
     const project = await api.openSampleWorkspace();
 
     const refinement = await api.refinePrompt({
@@ -588,7 +613,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("returns a deterministic generic refinement when no scenario matches", async () => {
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copyLegacyScenarioWorkspace() });
     const project = await api.openSampleWorkspace();
 
     const refinement = await api.refinePrompt({
@@ -605,7 +630,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   it("replaces malformed model refinement output with a diagnostic deterministic fallback", async () => {
     const rawModelText = "RAW MODEL TEXT THAT MUST NOT REACH THE REFINEMENT CARD";
     const api = new ProjectOSLocalApi({
-      sampleWorkspaceRoot: copySampleWorkspace(),
+      sampleWorkspaceRoot: copyLegacyScenarioWorkspace(),
       modelGateway: new MalformedRefinementGateway(rawModelText),
     });
     const project = await api.openSampleWorkspace();
@@ -644,7 +669,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("gets and applies the google-login diff against a temp workspace copy", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
     const refinement = await api.refinePrompt({
@@ -736,7 +761,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects a prefab diff that targets a file outside the scenario node", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const scenarioPath = join(
       tempWorkspaceRoot,
       ".projectos",
@@ -778,7 +803,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("leaves prefab targets untouched when the transaction rolls back", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new FailSecondCommitApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
     const refinement = await api.refinePrompt({
@@ -822,7 +847,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("applies the auth-bugfix prefab through the same transaction after google-login", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
     const feature = await api.refinePrompt({
@@ -1036,7 +1061,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("runs only configured structured verification commands and reports honest status", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const calls: Array<{ cwd: string; commands: unknown[] }> = [];
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
@@ -1079,7 +1104,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("requires exact user approval before executing project verification commands", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const firstMarker = join(tempWorkspaceRoot, "verification-approved-first.txt");
     const changedMarker = join(tempWorkspaceRoot, "verification-approved-changed.txt");
     const firstCommand = {
@@ -1167,7 +1192,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("reports verification not_run when no commands are configured", async () => {
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copyLegacyScenarioWorkspace() });
     const project = await api.openSampleWorkspace();
     const refinement = await api.refinePrompt({
       projectId: project.projectId,
@@ -1193,7 +1218,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("automatically validates, applies through the scoped kernel, verifies, and keeps undo", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const selectedPath = "app/login/page.tsx";
     const targetPath = join(tempWorkspaceRoot, selectedPath);
     const before = readFileSync(targetPath, "utf8");
@@ -1252,22 +1277,22 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     expect(refinement.executionPolicy).toBe("automatic");
 
     const run = await api.confirmExecution(refinement.id);
-    const completed = await waitForRunStatus(api, run.runId, "complete");
+    const finished = await waitForRunStatus(api, run.runId, "error");
     const events = await api.getAgentRunEvents(run.runId);
+    const generations = gateway.requests.filter((request) => request.requestKind === "change_generation");
+    const verifications = events.filter((event) => event.type === "verification_completed");
+    const repairDiffs = events.filter((event) =>
+      event.type === "diff_ready" && event.payload?.repair_attempt === 1,
+    );
 
-    expect(completed.status).toBe("complete");
-    expect(readFileSync(targetPath, "utf8")).toContain("<h1>Welcome Back</h1>");
-    expect(verificationCalls).toEqual([tempWorkspaceRoot]);
-    expect(gateway.requests.map((request) =>
-      isRecord(request.input) && typeof request.input.mode === "string"
-        ? request.input.mode
-        : request.requestKind,
-    )).toEqual([
-      "prompt_refinement",
-      "locate_plan",
-      "change_generation",
-      "validate_proposal",
-    ]);
+    expect(finished.status).toBe("error");
+    expect(classifyRunOutcome(events)).toBe("verification_failed");
+    expect(generations).toHaveLength(2);
+    expect(generations[1]?.input).toMatchObject({ verificationRepair: { repair_attempt: 1 } });
+    expect(verificationCalls).toEqual([tempWorkspaceRoot, tempWorkspaceRoot]);
+    expect(verifications).toHaveLength(2);
+    expect(verifications.map((event) => event.payload?.status)).toEqual(["failed", "failed"]);
+    expect(repairDiffs).toHaveLength(1);
     expect(events.filter((event) => event.type === "step_started").map((event) =>
       event.step?.kind,
     )).toEqual([
@@ -1277,23 +1302,47 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       "validate_proposal",
       "apply_change",
       "verify_change",
+      "generate_proposal",
+      "validate_proposal",
+      "apply_change",
+      "verify_change",
     ]);
-    expect(events.find((event) => event.type === "proposal_validation_result"))
-      .toMatchObject({ payload: { verdict: "valid", scopeStatus: "compliant" } });
-    const applyEvent = events.find((event) => event.type === "apply_result");
-    expect(applyEvent).toMatchObject({
-      payload: { outcome: "applied", backupId: expect.any(String) },
+    expect(events.find((event) => event.type === "run_completed")?.payload).toMatchObject({
+      verificationStatus: "failed",
+      repair_attempt: 1,
     });
-    expect(events.find((event) => event.type === "verification_completed")?.payload)
-      .toMatchObject({ status: "failed" });
     expect(events.some((event) => event.type === "step_failed")).toBe(false);
+    expect(readFileSync(targetPath, "utf8")).toContain("<h1>Welcome again</h1>");
     expect(readFileSync(targetPath, "utf8")).not.toBe(before);
 
-    const backupId = applyEvent?.type === "apply_result"
-      ? applyEvent.payload.backupId
-      : undefined;
-    expect(backupId).toBeDefined();
-    await expect(api.restoreApplyBackup(project.projectId, backupId!)).resolves.toMatchObject({
+    const appliedBackups = events
+      .filter((event) => event.type === "apply_result")
+      .map((event) => event.payload.backupId)
+      .filter((backupId): backupId is string => typeof backupId === "string");
+    expect(appliedBackups).toHaveLength(2);
+    expect(readFileSync(join(
+      tempWorkspaceRoot,
+      ".projectos",
+      "apply-backups",
+      appliedBackups[0]!,
+      "0000.original",
+    ), "utf8")).toBe(before);
+    await expect(api.restoreApplyBackup(project.projectId, appliedBackups[0]!)).rejects.toMatchObject({
+      code: "undo_stale",
+    });
+    expect(readFileSync(targetPath, "utf8")).toContain("<h1>Welcome again</h1>");
+    expect(readFileSync(join(
+      tempWorkspaceRoot,
+      ".projectos",
+      "apply-backups",
+      appliedBackups[0]!,
+      "0000.original",
+    ), "utf8")).toBe(before);
+    await expect(api.restoreApplyBackup(project.projectId, appliedBackups[1]!)).resolves.toMatchObject({
+      restored: true,
+      outcome: "restored",
+    });
+    await expect(api.restoreApplyBackup(project.projectId, appliedBackups[0]!)).resolves.toMatchObject({
       restored: true,
       outcome: "restored",
     });
@@ -1301,7 +1350,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("keeps review_first awaiting manual apply after independent validation", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const selectedPath = "app/login/page.tsx";
     const targetPath = join(tempWorkspaceRoot, selectedPath);
     const before = readFileSync(targetPath, "utf8");
@@ -1342,7 +1391,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("batch-validates delegated leaf proposals before an atomic reviewed group apply", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = new Map(delegatedPaths.map((filePath) => [
       filePath,
@@ -1498,7 +1547,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("completes a delegated parent run when one child file already satisfies the plan", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const gateway = new NodeDelegationGateway(delegatedPaths, [], {
       noChangePaths: ["components/LoginForm.tsx"],
@@ -1582,7 +1631,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("auto-applies a delegated group without writing files when every child is already satisfied", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx"];
     const gateway = new NodeDelegationGateway(delegatedPaths, [], {
       noChangePaths: ["app/login/page.tsx"],
@@ -1618,7 +1667,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("creates one component-owned file and graph/tree ownership in one mixed transaction", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const newFile = "app/login/login-copy.ts";
     const store = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
@@ -1725,7 +1774,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("creates a product component, wiring, and validated scaffold files atomically", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const newFile = "app/login/NewLoginPanel.tsx";
     const store = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
@@ -1803,7 +1852,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("automatically commits a validated node scaffold under the automatic policy", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const newFile = "app/login/AutomaticGuidance.tsx";
     const store = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
@@ -2095,7 +2144,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("deletes a leaf node and its owned file atomically, then restores the whole task", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const fixture = addDeletionFixture(tempWorkspaceRoot, "leaf");
     const importerPath = "app/layout.tsx";
     const importLine = "import { disposable } from './delete-leaf';\n";
@@ -2205,7 +2254,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("deletes a subtree only when explicit membership exactly matches server descendants", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const fixture = addDeletionFixture(tempWorkspaceRoot, "recursive");
     const store = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
@@ -2242,7 +2291,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects implicit subtree deletion and blocks node-scoped map artifacts clearly", async () => {
-    const mismatchRoot = copySampleWorkspace();
+    const mismatchRoot = copyLegacyScenarioWorkspace();
     const mismatch = addDeletionFixture(mismatchRoot, "recursive");
     const mismatchApi = new ProjectOSLocalApi({
       sampleWorkspaceRoot: mismatchRoot,
@@ -2266,7 +2315,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       .toContain("membership does not match");
     expect(existsSync(join(mismatchRoot, mismatch.filePaths[0]!))).toBe(true);
 
-    const artifactRoot = copySampleWorkspace();
+    const artifactRoot = copyLegacyScenarioWorkspace();
     const artifactFixture = addDeletionFixture(artifactRoot, "leaf");
     const artifactApi = new ProjectOSLocalApi({
       sampleWorkspaceRoot: artifactRoot,
@@ -2298,7 +2347,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects node deletion when the graph ownership basis changes after authorization", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const fixture = addDeletionFixture(tempWorkspaceRoot, "leaf");
     const store = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
@@ -2332,7 +2381,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("impact-scans, repairs, and deletes one owned file in one reversible transaction", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const targetPath = "app/login/page.tsx";
     const importerPath = "app/layout.tsx";
     const importLine = "import LoginPage from '@/app/login/page'\n";
@@ -2469,7 +2518,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("blocks deletion when materialized repairs leave a direct dependency", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const targetPath = "app/login/page.tsx";
     const importerPath = "app/layout.tsx";
     const importLine = "import LoginPage from '@/app/login/page'\n";
@@ -2517,7 +2566,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects deletion when a new direct importer appears after authorization", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const targetPath = "app/login/page.tsx";
     const importerPath = "app/layout.tsx";
     const lateImporterPath = "app/about/page.tsx";
@@ -2565,7 +2614,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("fails closed when impact-aware deletion cannot scan the workspace", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const targetPath = "app/login/page.tsx";
     const targetBefore = readFileSync(join(tempWorkspaceRoot, targetPath), "utf8");
     const api = new ProjectOSLocalApi({
@@ -2596,7 +2645,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects a model-chosen delete repair set before binding child authorization", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const targetPath = "app/login/page.tsx";
     const targetBefore = readFileSync(join(tempWorkspaceRoot, targetPath), "utf8");
     const api = new ProjectOSLocalApi({
@@ -2630,7 +2679,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("automatically commits a validated delegated group and exposes one stale-safe undo", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = new Map(delegatedPaths.map((filePath) => [
       filePath,
@@ -2704,7 +2753,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("fails malformed batch validation closed before creating a backup or writing files", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = delegatedPaths.map((filePath) =>
       readFileSync(join(tempWorkspaceRoot, filePath), "utf8"));
@@ -2741,7 +2790,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rechecks snapshot freshness after batch validation and commits no agent writes when stale", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const untouchedForm = readFileSync(
       join(tempWorkspaceRoot, "components/LoginForm.tsx"),
@@ -2777,7 +2826,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rolls back a mid-group commit failure and emits recovery metadata if rollback also fails", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = new Map(delegatedPaths.map((filePath) => [
       filePath,
@@ -2823,7 +2872,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rolls back every committed child when a later group commit fails", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = new Map(delegatedPaths.map((filePath) => [
       filePath,
@@ -2858,7 +2907,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects a child proposal mutated after exact batch validation", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = delegatedPaths.map((filePath) =>
       readFileSync(join(tempWorkspaceRoot, filePath), "utf8"));
@@ -2900,7 +2949,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects a node plan that attempts to delegate outside the graph-owned scope", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
       localContextAssembler: new LocalContextAssembler(),
@@ -2928,7 +2977,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("fails node planning closed after one sanitized retry", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const gateway = new NodeDelegationGateway(
       ["app/login/page.tsx"],
       ["MALFORMED_NODE_PLAN_ONE", "MALFORMED_NODE_PLAN_TWO"],
@@ -3017,41 +3066,20 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     expect(readFileSync(join(tempWorkspaceRoot, path), "utf8")).toBe(after);
   });
 
-  it("rejects an out-of-scope external diff from getDiff and apply", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
-    const runId = "run_external_scope_rejected";
-    const selectedPath = "app/login/page.tsx";
-    const otherPath = "lib/auth.ts";
-    const before = readFileSync(join(tempWorkspaceRoot, otherPath), "utf8");
-    const run = generatedRun(project.projectId, runId);
-    const diff: GeneratedDiff = {
-      runId,
-      summary: "External agent attempted a connected-file edit",
-      files: [{
-        path: otherPath,
-        changeType: "modify",
-        before,
-        after: `${before}\n// unauthorized external edit\n`,
-      }],
-    };
-    authorizeTestRun(api, project.projectId, tempWorkspaceRoot, runId, selectedPath);
-    getLocalApiInternals(api).externalRunsByRunId.set(runId, {
-      run,
-      events: [],
-      diff,
-      config: externalAgentConfig(),
+  it("rejects an out-of-scope orchestrator diff from getDiff", async () => {
+    const fixture = await outOfScopeOrchestratorDiff();
+    await expect(fixture.api.getDiff(fixture.runId)).rejects.toMatchObject({
+      code: "diff_scope_violation",
     });
+    expect(outOfScopeSnapshot(fixture.workspaceRoot)).toEqual(fixture.before);
+  });
 
-    await expect(api.getDiff(runId)).rejects.toMatchObject({
+  it("rejects an out-of-scope orchestrator diff from applyDiff", async () => {
+    const fixture = await outOfScopeOrchestratorDiff();
+    await expect(fixture.api.applyDiff(fixture.runId)).rejects.toMatchObject({
       code: "diff_scope_violation",
     });
-    await expect(api.applyDiff(runId)).rejects.toMatchObject({
-      code: "diff_scope_violation",
-    });
-    expect(readFileSync(join(tempWorkspaceRoot, otherPath), "utf8")).toBe(before);
-    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+    expect(outOfScopeSnapshot(fixture.workspaceRoot)).toEqual(fixture.before);
   });
 
   it("rejects a stale generated diff without changing any file", async () => {
@@ -3274,7 +3302,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("persists map artifact create, update, and delete operations", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
 
@@ -3317,6 +3345,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       ),
     ).toBe(false);
 
+    await api.openWorkspace(tempWorkspaceRoot);
     expect(await api.getMapContent(project.projectId)).toEqual(
       await reopenedApi.getMapContent(reopenedProject.projectId),
     );
@@ -3531,7 +3560,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("reports the seeded auth harness record and starts its debug fix stream", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
 
@@ -3562,7 +3591,9 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
   it("recursively delegates a global change and atomically commits all leaf writes once", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const delegatedPaths = ["app/login/page.tsx"];
+    const loginFormPath = "components/LoginForm.tsx";
+    const loginFormBefore = readFileSync(join(tempWorkspaceRoot, loginFormPath), "utf8");
     const before = new Map(delegatedPaths.map((filePath) => [
       filePath,
       readFileSync(join(tempWorkspaceRoot, filePath), "utf8"),
@@ -3600,6 +3631,8 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     expect(rootState?.wholeTreeTransactionPlan?.sourcePlanIds).toHaveLength(4);
     expect(rootState?.wholeTreeTransactionPlan?.leaves.map((leaf) => leaf.filePath))
       .toEqual(delegatedPaths);
+    expect(rootState?.wholeTreeTransactionPlan?.leaves.map((leaf) => leaf.filePath))
+      .not.toContain(loginFormPath);
     expect(rootState?.applyResult).toMatchObject({
       applied: true,
       outcome: "applied",
@@ -3615,7 +3648,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       expect(run.relatedFiles).toEqual([]);
       expect(getLocalApiInternals(api).boundRunAuthorizations.has(run.runId)).toBe(false);
     }
-    expect(getLocalApiInternals(api).boundRunAuthorizations.size).toBe(2);
+    expect(getLocalApiInternals(api).boundRunAuthorizations.size).toBe(delegatedPaths.length);
     const persistedEvents = await Promise.all(
       hierarchyRuns.map((run) => api.getAgentRunEvents(run.runId)),
     );
@@ -3625,20 +3658,19 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     );
     expect(readFileSync(join(tempWorkspaceRoot, delegatedPaths[0]!), "utf8"))
       .toContain("<h1>Welcome Back</h1>");
-    expect(readFileSync(join(tempWorkspaceRoot, delegatedPaths[1]!), "utf8"))
-      .toContain("Open demo workspace");
+    expect(readFileSync(join(tempWorkspaceRoot, loginFormPath), "utf8")).toBe(loginFormBefore);
     const backupId = rootState?.applyResult?.backupId;
     expect(backupId).toBeTruthy();
     const manifest = JSON.parse(readFileSync(
       join(tempWorkspaceRoot, ".projectos", "apply-backups", backupId!, "manifest.json"),
       "utf8",
     )) as { files: unknown[]; transactionGroup?: { childRunIds: string[] } };
-    expect(manifest.files).toHaveLength(3);
+    expect(manifest.files).toHaveLength(delegatedPaths.length + 1);
     expect(manifest.files).toContainEqual(expect.objectContaining({
       operation: "internal",
       resource: "current_work",
     }));
-    expect(manifest.transactionGroup?.childRunIds).toHaveLength(2);
+    expect(manifest.transactionGroup?.childRunIds).toHaveLength(delegatedPaths.length);
     expect(gateway.requests.filter((request) =>
       isRecord(request.input) && request.input.mode === "plan_graph_delegation"
     )).toHaveLength(4);
@@ -3655,7 +3687,9 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
   it("pauses a zero-write global hierarchy before applying when review-first is configured", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const delegatedPaths = ["app/login/page.tsx"];
+    const loginFormPath = "components/LoginForm.tsx";
+    const loginFormBefore = readFileSync(join(tempWorkspaceRoot, loginFormPath), "utf8");
     const before = new Map(delegatedPaths.map((filePath) => [
       filePath,
       readFileSync(join(tempWorkspaceRoot, filePath), "utf8"),
@@ -3686,17 +3720,22 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     expect(rootState?.wholeTreeTransactionPlan?.leaves.map((leaf) => leaf.filePath))
       .toEqual(delegatedPaths);
+    expect(rootState?.wholeTreeTransactionPlan?.leaves.map((leaf) => leaf.filePath))
+      .not.toContain(loginFormPath);
     expect(rootState?.applyResult).toBeUndefined();
     expect(internals.boundRunAuthorizations.has(root.runId)).toBe(false);
     expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
     for (const filePath of delegatedPaths) {
       expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before.get(filePath));
     }
+    expect(readFileSync(join(tempWorkspaceRoot, loginFormPath), "utf8")).toBe(loginFormBefore);
   });
 
   it("keeps a failed whole-tree verification applied and undoable while erroring every run", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const delegatedPaths = ["app/login/page.tsx"];
+    const loginFormPath = "components/LoginForm.tsx";
+    const loginFormBefore = readFileSync(join(tempWorkspaceRoot, loginFormPath), "utf8");
     const before = new Map(delegatedPaths.map((filePath) => [
       filePath,
       readFileSync(join(tempWorkspaceRoot, filePath), "utf8"),
@@ -3772,8 +3811,9 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     expect(validateAgentRunEventSequence(events)).toEqual([]);
     expect(readFileSync(join(tempWorkspaceRoot, delegatedPaths[0]!), "utf8"))
       .toContain("<h1>Welcome Back</h1>");
-    expect(readFileSync(join(tempWorkspaceRoot, delegatedPaths[1]!), "utf8"))
-      .toContain("Open demo workspace");
+    expect(rootState?.wholeTreeTransactionPlan?.leaves.map((leaf) => leaf.filePath))
+      .not.toContain(loginFormPath);
+    expect(readFileSync(join(tempWorkspaceRoot, loginFormPath), "utf8")).toBe(loginFormBefore);
 
     const backupId = rootState?.applyResult?.backupId;
     if (!backupId) throw new Error("Missing whole-tree backup after failed verification");
@@ -3784,6 +3824,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     for (const filePath of delegatedPaths) {
       expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before.get(filePath));
     }
+    expect(readFileSync(join(tempWorkspaceRoot, loginFormPath), "utf8")).toBe(loginFormBefore);
   });
 
   it("rechecks every recursive leaf snapshot before the one whole-tree commit", async () => {
@@ -3816,8 +3857,139 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
   });
 
-  it("rejects graph-layer skipping even when a caller invokes delegation directly", async () => {
+  it("commits two linked sample leaves and undoes both from one backup", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "app/page.tsx"] as const;
+    const loginFormBefore = readFileSync(join(tempWorkspaceRoot, "components/LoginForm.tsx"), "utf8");
+    const before = new Map(delegatedPaths.map((filePath) => [
+      filePath,
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"),
+    ]));
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new RecursiveHierarchyGateway({ authorizedLeafPaths: delegatedPaths }),
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const root = await api.confirmExecution((await api.refinePrompt({
+      projectId: project.projectId,
+      rawPrompt: "Update login consistently across the product.",
+    })).id);
+    expect((await waitForRunStatus(api, root.runId, "complete")).status).toBe("complete");
+    const rootState = getLocalApiInternals(api).orchestrator.getRun(root.runId);
+    expect(rootState?.wholeTreeTransactionPlan?.leaves.map((leaf) => leaf.filePath)).toEqual([
+      ...delegatedPaths,
+    ]);
+    expect(rootState?.wholeTreeTransactionPlan?.leaves.map((leaf) => leaf.filePath))
+      .not.toContain("components/LoginForm.tsx");
+    expect(rootState?.applyResult).toMatchObject({
+      applied: true,
+      filesChanged: [...delegatedPaths],
+    });
+    expect(getLocalApiInternals(api).boundRunAuthorizations.size).toBe(delegatedPaths.length);
+    expect(readFileSync(join(tempWorkspaceRoot, delegatedPaths[0]), "utf8"))
+      .toContain("<h1>Welcome Back</h1>");
+    expect(readFileSync(join(tempWorkspaceRoot, delegatedPaths[1]), "utf8"))
+      .toContain("// delegated leaf");
+    expect(readFileSync(join(tempWorkspaceRoot, "components/LoginForm.tsx"), "utf8"))
+      .toBe(loginFormBefore);
+    const backupId = rootState?.applyResult?.backupId;
+    if (!backupId) throw new Error("Missing two-leaf backup");
+    await expect(api.restoreApplyBackup(project.projectId, backupId)).resolves.toMatchObject({
+      restored: true,
+      filesRestored: [...delegatedPaths],
+    });
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before.get(filePath));
+    }
+  });
+
+  it("undoes two linked leaves after failed whole-tree verification", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "app/page.tsx"] as const;
+    const before = new Map(delegatedPaths.map((filePath) => [
+      filePath,
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"),
+    ]));
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new RecursiveHierarchyGateway({ authorizedLeafPaths: delegatedPaths }),
+      runEventPersistence: "memory",
+      verificationRunner: {
+        async run(commands) {
+          return commands.map((command) => ({
+            command,
+            status: "failed" as const,
+            exitCode: 1,
+            durationMs: 5,
+            timedOut: false,
+            outputTruncated: false,
+          }));
+        },
+      },
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    await api.updateSettings(project.projectId, {
+      verification: { commands: [{ command: "npm", args: ["test"], timeoutMs: 10_000 }] },
+    });
+    await approveConfiguredVerification(api, project.projectId);
+    const root = await api.confirmExecution((await api.refinePrompt({
+      projectId: project.projectId,
+      rawPrompt: "Update login consistently across the product.",
+    })).id);
+    const terminal = await waitForTerminalRunStatus(api, root.runId);
+    const rootState = getLocalApiInternals(api).orchestrator.getRun(root.runId);
+    expect(terminal.status).toBe("error");
+    expect(rootState?.applyResult).toMatchObject({
+      applied: true,
+      filesChanged: [...delegatedPaths],
+      verificationStatus: "failed",
+    });
+    const backupId = rootState?.applyResult?.backupId;
+    if (!backupId) throw new Error("Missing two-leaf verification backup");
+    await expect(api.restoreApplyBackup(project.projectId, backupId)).resolves.toMatchObject({
+      restored: true,
+      filesRestored: [...delegatedPaths],
+    });
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before.get(filePath));
+    }
+  });
+
+  it("protects every linked leaf when one changes before the whole-tree commit", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "app/page.tsx"] as const;
+    const pagePath = join(tempWorkspaceRoot, delegatedPaths[0]);
+    const otherBefore = readFileSync(join(tempWorkspaceRoot, delegatedPaths[1]), "utf8");
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new RecursiveHierarchyGateway({
+        authorizedLeafPaths: delegatedPaths,
+        onWholeTreeValidation: () => {
+          writeFileSync(pagePath, "concurrent user edit", "utf8");
+        },
+      }),
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const root = await api.confirmExecution((await api.refinePrompt({
+      projectId: project.projectId,
+      rawPrompt: "Update login consistently across the product.",
+    })).id);
+    expect((await waitForRunStatus(api, root.runId, "error")).status).toBe("error");
+    expect(readFileSync(pagePath, "utf8")).toBe("concurrent user edit");
+    expect(readFileSync(join(tempWorkspaceRoot, delegatedPaths[1]), "utf8")).toBe(otherBefore);
+    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+  });
+
+  it("rejects graph-layer skipping even when a caller invokes delegation directly", async () => {
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
       localContextAssembler: new LocalContextAssembler(),
@@ -3867,7 +4039,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("throws typed errors for unknown diff, error, and harness ids", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
 
@@ -3930,19 +4102,6 @@ type LocalApiTestInternals = {
     runId: string;
   }>;
   fallbackNotices: Map<string, string>;
-  externalRunsByRunId: Map<string, {
-    run: AgentRun;
-    events: AgentRunEvent[];
-    diff?: GeneratedDiff;
-    config: {
-      id: string;
-      name: string;
-      protocol: "http";
-      endpoint: string;
-      authType: "none";
-      eventFormat: "projectos_events";
-    };
-  }>;
   orchestrator: {
     runs: Map<string, unknown>;
     startRun(...args: unknown[]): Promise<void>;
@@ -4279,6 +4438,82 @@ async function applyGeneratedDiffTransaction(
   return generatedApplyApi.commitGeneratedDiffTransaction(run.runId, diff, run);
 }
 
+async function outOfScopeOrchestratorDiff(): Promise<{
+  api: ProjectOSLocalApi;
+  runId: string;
+  workspaceRoot: string;
+  before: {
+    other: string;
+    login: string;
+    currentWork: string;
+    backup: boolean;
+  };
+}> {
+  const workspaceRoot = copySampleWorkspace();
+  const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
+  const project = await api.openSampleWorkspace();
+  const runId = "run_external_scope_rejected";
+  const selectedPath = "app/login/page.tsx";
+  const otherPath = "lib/auth.ts";
+  const other = readFileSync(join(workspaceRoot, otherPath), "utf8");
+  const diff: GeneratedDiff = {
+    runId,
+    summary: "External agent attempted a connected-file edit",
+    files: [{
+      path: otherPath,
+      changeType: "modify",
+      before: other,
+      after: `${other}\n// unauthorized external edit\n`,
+    }],
+  };
+  const selectedSha = createHash("sha256").update(readFileSync(join(workspaceRoot, selectedPath))).digest("hex");
+  authorizeTestRun(api, project.projectId, workspaceRoot, runId, selectedPath);
+  getLocalApiInternals(api).orchestrator.runs.set(runId, {
+    run: generatedRun(project.projectId, runId),
+    diff,
+    validationResult: AgentProposalValidationResultSchema.parse({
+      version: "0.1.0",
+      runId,
+      path: selectedPath,
+      contextBundleHash: `sha256:${"ab".repeat(32)}`,
+      selectedFileSha256: `sha256:${selectedSha}`,
+      verdict: "valid",
+      criteria: [{
+        criterion: "The proposal stays on the authorized login page",
+        status: "satisfied",
+        explanation: "Independent validation accepts this exact proposal.",
+      }],
+      scopeAssessment: {
+        status: "compliant",
+        explanation: "Validation is present so apply can reach the scope check.",
+      },
+      summary: "The proposal has an independent validation result.",
+      rationale: "The scope check still has to reject a different file.",
+    }),
+    validatedDiffJson: JSON.stringify(diff),
+  });
+  return {
+    api,
+    runId,
+    workspaceRoot,
+    before: outOfScopeSnapshot(workspaceRoot),
+  };
+}
+
+function outOfScopeSnapshot(workspaceRoot: string): {
+  other: string;
+  login: string;
+  currentWork: string;
+  backup: boolean;
+} {
+  return {
+    other: readFileSync(join(workspaceRoot, "lib/auth.ts"), "utf8"),
+    login: readFileSync(join(workspaceRoot, "app/login/page.tsx"), "utf8"),
+    currentWork: readFileSync(join(workspaceRoot, ".projectos", "current-work.json"), "utf8"),
+    backup: existsSync(join(workspaceRoot, ".projectos", "apply-backups")),
+  };
+}
+
 function authorizeTestRun(
   api: ProjectOSLocalApi,
   projectId: string,
@@ -4342,6 +4577,24 @@ async function waitForTerminalRunStatus(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function selectedFileContent(input: Record<string, unknown>, path: string): string | undefined {
+  const localContext = isRecord(input.localContext) ? input.localContext : undefined;
+  const manifest = localContext && Array.isArray(localContext.fileManifest)
+    ? localContext.fileManifest
+    : [];
+  for (const entry of manifest) {
+    if (!isRecord(entry)) continue;
+    if (
+      entry.path === path &&
+      entry.relationship === "selected" &&
+      typeof entry.content === "string"
+    ) {
+      return entry.content;
+    }
+  }
+  return undefined;
 }
 
 function flattenSemanticPaths(tree: Awaited<ReturnType<ProjectOSLocalApi["getSemanticTree"]>>): string[] {
@@ -5023,7 +5276,7 @@ class AutomaticChangeGateway extends ModelGateway {
         criteria: [{
           criterion: "The login heading welcomes returning users",
           status: "satisfied",
-          explanation: "The proposed heading says Welcome Back.",
+          explanation: "The proposed heading stays on the authorized login page.",
         }],
         scopeAssessment: {
           status: "compliant",
@@ -5031,6 +5284,15 @@ class AutomaticChangeGateway extends ModelGateway {
         },
         summary: "The scoped proposal meets its acceptance criterion.",
         rationale: "The exact heading replacement implements the requested outcome.",
+      });
+    } else if (isRecord(request.input) && request.input.verificationRepair) {
+      output = JSON.stringify({
+        summary: "Revise the applied login heading after verification failed",
+        path: "app/login/page.tsx",
+        edits: [{
+          search: "<h1>Welcome Back</h1>",
+          replace: "<h1>Welcome again</h1>",
+        }],
       });
     } else {
       output = JSON.stringify({
@@ -5242,7 +5504,10 @@ class NodeDelegationGateway extends ModelGateway {
 class RecursiveHierarchyGateway extends ModelGateway {
   readonly requests: ModelGatewayRequest[] = [];
 
-  constructor(private readonly options: { onWholeTreeValidation?: () => void } = {}) {
+  constructor(private readonly options: {
+    onWholeTreeValidation?: () => void;
+    authorizedLeafPaths?: readonly string[];
+  } = {}) {
     super({ secretStore: new InMemorySecretStore() });
   }
 
@@ -5274,34 +5539,44 @@ class RecursiveHierarchyGateway extends ModelGateway {
     } else if (mode === "plan_graph_delegation") {
       const immediateTargets = isRecord(input.immediateTargets) ? input.immediateTargets : {};
       const kind = immediateTargets.kind;
-      const level = immediateTargets.level;
+      const level = typeof immediateTargets.level === "string"
+        ? immediateTargets.level
+        : "next";
+      const allowedIds = Array.isArray(immediateTargets.allowedIds)
+        ? immediateTargets.allowedIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+        : [];
+      const requestedLeaves = this.options.authorizedLeafPaths
+        ?? ["app/login/page.tsx", "components/LoginForm.tsx"];
+      const loginLeaves = requestedLeaves.filter((path) => allowedIds.includes(path));
+      const plannerId = allowedIds.find((id) => id.includes("login"))
+        ?? allowedIds.find((id) => id.startsWith("system_"))
+        ?? allowedIds.find((id) => id.startsWith("container_"))
+        ?? allowedIds.find((id) => id.startsWith("component_"))
+        ?? allowedIds.find((id) => id.startsWith("feat_"))
+        ?? allowedIds[0];
+      const chosen = (kind === "leaf-file" && loginLeaves.length > 0
+        ? loginLeaves
+        : plannerId ? [plannerId] : []
+      ).slice(0, 8);
       if (kind === "leaf-file") {
         output = JSON.stringify({
-          objective: "Update both login implementation files",
-          tasks: [
-            "app/login/page.tsx",
-            "components/LoginForm.tsx",
-          ].map((path) => ({
+          objective: "Update the server-authorized leaf files",
+          tasks: chosen.map((path) => ({
             path,
             objective: `Apply the login change in ${path}`,
             acceptanceCriteria: [`Delegated change for ${path} is present`],
           })),
-          rationale: "The component owns both leaf files.",
+          rationale: "The component owns the server-authorized leaf files.",
         });
       } else {
-        const nodeId = level === "context"
-          ? "system_saas_starter"
-          : level === "container"
-            ? "container_next_web"
-            : "feat_login";
         output = JSON.stringify({
-          objective: `Delegate the login change to ${nodeId}`,
-          tasks: [{
+          objective: `Delegate the login change along the ${level} layer`,
+          tasks: chosen.map((nodeId) => ({
             nodeId,
             objective: `Plan the login change in ${nodeId}`,
             acceptanceCriteria: ["The delegated login behavior is updated"],
-          }],
-          rationale: "The task follows one immediate architecture layer.",
+          })),
+          rationale: "The task follows the server-authorized immediate architecture layer.",
         });
       }
     } else if (mode === "locate_plan" && selectedPath) {
@@ -5385,6 +5660,15 @@ class RecursiveHierarchyGateway extends ModelGateway {
           },
         ],
       });
+    } else if (selectedPath) {
+      const snapshot = selectedFileContent(input, selectedPath);
+      output = snapshot === undefined
+        ? JSON.stringify({ summary: "No valid target", files: [] })
+        : JSON.stringify({
+            summary: `Update ${selectedPath}`,
+            path: selectedPath,
+            after: `${snapshot}\n// delegated leaf\n`,
+          });
     } else {
       output = JSON.stringify({ summary: "No valid target", files: [] });
     }

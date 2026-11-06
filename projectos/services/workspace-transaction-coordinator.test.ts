@@ -1,14 +1,11 @@
 import {
-  cpSync,
   existsSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { GraphChangeSet } from "../contracts/index.js";
@@ -22,8 +19,8 @@ import {
 import { computeProjectGraphHash } from "./graph-change-set-engine.js";
 import { WorkspaceTransactionCoordinator } from "./workspace-transaction-coordinator.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
+import { createLegacyScenarioWorkspace } from "./test-support/legacy-scenario-workspace.js";
 
-const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const temporaryRoots: string[] = [];
 const idFactory = {
   nodeId: (tempRef: string) => `server_node_${tempRef}`,
@@ -417,12 +414,7 @@ async function renameLoginChangeSet(
 }
 
 function copySampleWorkspace(): string {
-  const tempRoot = mkdtempSync(join(tmpdir(), "projectos-workspace-transaction-"));
-  temporaryRoots.push(tempRoot);
-  const workspaceRoot = join(tempRoot, "sample-graph-saas");
-  cpSync(sampleWorkspaceRoot, workspaceRoot, { recursive: true });
-  rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
-  rmSync(join(workspaceRoot, ".projectos", "apply-backups"), { recursive: true, force: true });
-  rmSync(join(workspaceRoot, ".projectos", "graph-product-overlay.json"), { force: true });
-  return workspaceRoot;
+  const created = createLegacyScenarioWorkspace();
+  temporaryRoots.push(created.tempRoot);
+  return created.workspaceRoot;
 }
