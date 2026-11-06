@@ -351,15 +351,173 @@ describe("getDiff authorization", () => {
       "run_bound_scenario_apply",
       "app/login/page.tsx",
     );
+    bindModify(api, project.projectId, workspaceRoot, "run_other_binding", "lib/auth.ts");
     const before = snapshot(workspaceRoot);
+    const beforeAuthorization = authorizationSnapshot(api);
 
-    // The run is already bound to app/login/page.tsx. Scenario apply still
-    // installs a fixture authorization from this diff and writes the other file.
     await expect(api.applyDiff("run_bound_scenario_apply")).rejects.toMatchObject({
       code: "diff_scope_violation",
     });
     expect(readFileSync(join(workspaceRoot, outsidePath), "utf8")).toBe(current);
     expect(snapshot(workspaceRoot)).toEqual(before);
+    expect(authorizationSnapshot(api)).toEqual(beforeAuthorization);
+  });
+
+  it("applies a bound scenario diff that stays inside the existing authorization", async () => {
+    const workspaceRoot = copyWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
+    const project = await api.openSampleWorkspace();
+    const path = "app/login/page.tsx";
+    const diff = realModifyDiff(workspaceRoot, "run_bound_scenario_legal", path);
+    writeScenario(workspaceRoot, project.projectId, diff.runId, diff, [path]);
+    await api.openWorkspace(workspaceRoot);
+    bindModify(api, project.projectId, workspaceRoot, diff.runId, path);
+    bindModify(api, project.projectId, workspaceRoot, "run_other_binding", "lib/auth.ts");
+    const beforeAuthorization = authorizationSnapshot(api);
+
+    await expect(api.applyDiff(diff.runId)).resolves.toMatchObject({
+      applied: true,
+      filesChanged: [path],
+    });
+    expect(readFileSync(join(workspaceRoot, path), "utf8")).toBe(diff.files[0]?.after);
+    expect(authorizationSnapshot(api)).toEqual(beforeAuthorization);
+  });
+
+  it("lets an unbound scenario apply establish its own fixture authorization", async () => {
+    const workspaceRoot = copyWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
+    const project = await api.openSampleWorkspace();
+    const path = "app/login/page.tsx";
+    const diff = realModifyDiff(workspaceRoot, "run_unbound_scenario_apply", path);
+    writeScenario(workspaceRoot, project.projectId, diff.runId, diff, [path]);
+    await api.openWorkspace(workspaceRoot);
+    bindModify(api, project.projectId, workspaceRoot, "run_other_binding", "lib/auth.ts");
+
+    await expect(api.applyDiff(diff.runId)).resolves.toMatchObject({
+      applied: true,
+      filesChanged: [path],
+    });
+    expect(readFileSync(join(workspaceRoot, path), "utf8")).toBe(diff.files[0]?.after);
+    expect(authorizationSnapshot(api)).toEqual([
+      {
+        runId: "run_other_binding",
+        modify: "lib/auth.ts",
+        fixture: [],
+        create: null,
+        delete: null,
+      },
+      {
+        runId: diff.runId,
+        modify: null,
+        fixture: [path],
+        create: null,
+        delete: null,
+      },
+    ]);
+  });
+
+  it("rejects scenario apply that would replace an existing fixture authorization", async () => {
+    const workspaceRoot = copyWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
+    const project = await api.openSampleWorkspace();
+    const outsidePath = "app/about/page.tsx";
+    const diff = realModifyDiff(workspaceRoot, "run_bound_fixture_scenario", outsidePath);
+    writeScenario(workspaceRoot, project.projectId, diff.runId, diff, [outsidePath]);
+    await api.openWorkspace(workspaceRoot);
+    const { authorization } = await fixtureFiles(project.projectId, workspaceRoot, ["app/login/page.tsx"]);
+    state(api).boundFixtureDiffAuthorizations.set(diff.runId, {
+      projectId: project.projectId,
+      nodeId: "component_app",
+      files: authorization,
+    });
+    bindModify(api, project.projectId, workspaceRoot, "run_other_binding", "lib/auth.ts");
+    const before = snapshot(workspaceRoot);
+    const beforeAuthorization = authorizationSnapshot(api);
+
+    await expect(api.applyDiff(diff.runId)).rejects.toMatchObject({
+      code: "diff_scope_violation",
+    });
+    expect(snapshot(workspaceRoot)).toEqual(before);
+    expect(authorizationSnapshot(api)).toEqual(beforeAuthorization);
+  });
+
+  it("rejects scenario apply that would override an existing create authorization", async () => {
+    const workspaceRoot = copyWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
+    const project = await api.openSampleWorkspace();
+    const diff = realModifyDiff(workspaceRoot, "run_bound_create_scenario", "app/login/page.tsx");
+    writeScenario(workspaceRoot, project.projectId, diff.runId, diff, ["app/login/page.tsx"]);
+    await api.openWorkspace(workspaceRoot);
+    bindCreate(api, project.projectId, workspaceRoot, diff.runId, "app/get-diff-scope-scenario.ts");
+    bindModify(api, project.projectId, workspaceRoot, "run_other_binding", "lib/auth.ts");
+    const before = snapshot(workspaceRoot);
+    const beforeAuthorization = authorizationSnapshot(api);
+
+    await expect(api.applyDiff(diff.runId)).rejects.toMatchObject({
+      code: "diff_scope_violation",
+    });
+    expect(existsSync(join(workspaceRoot, "app/get-diff-scope-scenario.ts"))).toBe(false);
+    expect(snapshot(workspaceRoot)).toEqual(before);
+    expect(authorizationSnapshot(api)).toEqual(beforeAuthorization);
+  });
+
+  it("rejects scenario apply that would override an existing delete authorization", async () => {
+    const workspaceRoot = copyWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
+    const project = await api.openSampleWorkspace();
+    const diff = realModifyDiff(workspaceRoot, "run_bound_delete_scenario", "app/login/page.tsx");
+    writeScenario(workspaceRoot, project.projectId, diff.runId, diff, ["app/login/page.tsx"]);
+    await api.openWorkspace(workspaceRoot);
+    bindDelete(api, project.projectId, workspaceRoot, diff.runId, "lib/auth.ts");
+    bindModify(api, project.projectId, workspaceRoot, "run_other_binding", "app/login/page.tsx");
+    const before = snapshot(workspaceRoot);
+    const beforeAuthorization = authorizationSnapshot(api);
+
+    await expect(api.applyDiff(diff.runId)).rejects.toMatchObject({
+      code: "diff_scope_violation",
+    });
+    expect(snapshot(workspaceRoot)).toEqual(before);
+    expect(authorizationSnapshot(api)).toEqual(beforeAuthorization);
+  });
+
+  it("rejects a wider fixture diff when a narrower modify binding is also present", async () => {
+    const { api, project, workspaceRoot, files, authorization } = await openFixtureWorkspace();
+    const diff = twoFileDiff("run_priority", files);
+    state(api).boundFixtureDiffAuthorizations.set(diff.runId, {
+      projectId: project.projectId,
+      nodeId: "component_app",
+      files: authorization,
+    });
+    bindModify(api, project.projectId, workspaceRoot, diff.runId, files[0]);
+    installRun(api, project.projectId, diff);
+    const before = snapshot(workspaceRoot);
+    const beforeAuthorization = authorizationSnapshot(api);
+
+    await expect(api.getDiff(diff.runId)).rejects.toMatchObject({
+      code: "diff_scope_violation",
+    });
+    expect(snapshot(workspaceRoot)).toEqual(before);
+    expect(authorizationSnapshot(api)).toEqual(beforeAuthorization);
+  });
+
+  it("rejects apply of a wider fixture diff when a narrower modify binding is also present", async () => {
+    const { api, project, workspaceRoot, files, authorization } = await openFixtureWorkspace();
+    const diff = twoFileDiff("run_priority_apply", files);
+    state(api).boundFixtureDiffAuthorizations.set(diff.runId, {
+      projectId: project.projectId,
+      nodeId: "component_app",
+      files: authorization,
+    });
+    bindModify(api, project.projectId, workspaceRoot, diff.runId, files[0]);
+    installRun(api, project.projectId, diff);
+    const before = snapshot(workspaceRoot);
+    const beforeAuthorization = authorizationSnapshot(api);
+
+    await expect(api.applyDiff(diff.runId)).rejects.toMatchObject({
+      code: "diff_scope_violation",
+    });
+    expect(snapshot(workspaceRoot)).toEqual(before);
+    expect(authorizationSnapshot(api)).toEqual(beforeAuthorization);
   });
 
   it("returns a fixture diff that matches the authorized file set", async () => {
@@ -539,6 +697,74 @@ function snapshot(workspaceRoot: string): {
     auth: readFileSync(join(workspaceRoot, "lib/auth.ts"), "utf8"),
     currentWork: readFileSync(join(workspaceRoot, ".projectos", "current-work.json"), "utf8"),
     backup: existsSync(join(workspaceRoot, ".projectos", "apply-backups")),
+  };
+}
+
+function realModifyDiff(workspaceRoot: string, runId: string, path: string): GeneratedDiff {
+  const before = readFileSync(join(workspaceRoot, path), "utf8");
+  return {
+    runId,
+    summary: `Modify ${path}`,
+    files: [{
+      path,
+      changeType: "modify",
+      before,
+      after: `${before}\n// scoped ${runId}\n`,
+    }],
+  };
+}
+
+function authorizationSnapshot(api: ProjectOSLocalApi): Array<{
+  runId: string;
+  modify: string | null;
+  fixture: string[];
+  create: string | null;
+  delete: string | null;
+}> {
+  const current = state(api);
+  const runIds = new Set<string>([
+    ...current.boundRunAuthorizations.keys(),
+    ...current.boundFixtureDiffAuthorizations.keys(),
+    ...current.boundCreateRunAuthorizations.keys(),
+    ...current.boundDeleteRunAuthorizations.keys(),
+  ]);
+  return [...runIds].sort().map((runId) => ({
+    runId,
+    modify: current.boundRunAuthorizations.get(runId)?.selectedFilePath ?? null,
+    fixture: [...(current.boundFixtureDiffAuthorizations.get(runId)?.files.keys() ?? [])].sort(),
+    create: current.boundCreateRunAuthorizations.get(runId)?.intendedFilePath ?? null,
+    delete: current.boundDeleteRunAuthorizations.get(runId)?.targetPath ?? null,
+  }));
+}
+
+function fixtureFiles(
+  projectId: string,
+  workspaceRoot: string,
+  paths: readonly string[],
+): {
+  authorization: Map<string, {
+    relativePath: string;
+    canonicalPath: string;
+    device: number;
+    inode: number;
+  }>;
+} {
+  return {
+    authorization: new Map(paths.map((path) => {
+      const bound = bindExistingFileAuthorization({
+        operation: "modify",
+        projectId,
+        nodeId: "component_app",
+        workspaceRoot,
+        relativePath: path,
+      });
+      return [path, {
+        relativePath: bound.relativePath,
+        canonicalPath: bound.canonicalPath,
+        device: bound.device,
+        inode: bound.inode,
+      }] as const;
+    })),
   };
 }
 
