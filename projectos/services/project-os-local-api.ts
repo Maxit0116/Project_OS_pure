@@ -5734,7 +5734,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
 
     const diff = GeneratedDiffSchema.parse(cloneJson(scenario.diff));
     const run = this.registeredRunsByRunId.get(runId)?.run ?? scenario.run;
-    await this.authorizeFixtureDiff(runId, workspace, run, scenario.files, diff);
+    if (this.runHasDiffAuthorization(runId)) {
+      // Existing create/delete/modify/fixture binding wins; scenario metadata
+      // must not widen or replace it (PR4 reviewed).
+      this.validateGeneratedDiffScope(runId, diff);
+    } else {
+      await this.authorizeFixtureDiff(runId, workspace, run, scenario.files, diff);
+    }
     return this.applyDiffFromGenerated(runId, diff, run);
   }
 
@@ -10583,6 +10589,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const childState = this.orchestrator.getRun(childRunId);
       if (!childState) return;
       if (childState.diff?.files.length) {
+        if (this.runHasDiffAuthorization(childRunId)) {
+          this.validateGeneratedDiffScope(childRunId, childState.diff);
+        }
         for (const file of childState.diff.files) {
           if (seenPaths.has(file.path)) continue;
           seenPaths.add(file.path);
@@ -10592,6 +10601,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       }
       const nested = this.aggregateOrchestratorRunDiff(childState);
       if (!nested) return;
+      if (this.runHasDiffAuthorization(childRunId)) {
+        this.validateGeneratedDiffScope(childRunId, nested);
+      }
       for (const file of nested.files) {
         if (seenPaths.has(file.path)) continue;
         seenPaths.add(file.path);
@@ -13820,6 +13832,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     scenarioFiles: readonly string[],
     diff: GeneratedDiff,
   ): Promise<void> {
+    if (this.runHasDiffAuthorization(runId)) {
+      throw diffScopeViolation(
+        runId,
+        "already has a bound write authorization that scenario metadata cannot replace",
+      );
+    }
     const nodeId = fixtureAuthorizationNodeId(runId, run);
     const node = workspace.graph.nodes.find((item) => item.id === nodeId);
     if (!node) {
@@ -13883,6 +13901,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
     }
 
+    // Recheck after the runtime await: a binding that arrived while loading must
+    // win; do not install fixture authorization over it (PR4 reviewed).
+    if (this.runHasDiffAuthorization(runId)) {
+      throw diffScopeViolation(
+        runId,
+        "already has a bound write authorization that scenario metadata cannot replace",
+      );
+    }
     this.boundFixtureDiffAuthorizations.set(runId, {
       projectId: workspace.project.projectId,
       nodeId,
@@ -13897,7 +13923,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const fixtureAuthorization = this.boundFixtureDiffAuthorizations.get(runId);
     if (fixtureAuthorization) {
       this.validateFixtureDiffScope(runId, diff, fixtureAuthorization);
-      return;
     }
     const createAuthorization = this.boundCreateRunAuthorizations.get(runId);
     if (createAuthorization) {
@@ -13937,7 +13962,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           { cause: error },
         );
       }
-      return;
     }
     const deleteAuthorization = this.boundDeleteRunAuthorizations.get(runId);
     if (deleteAuthorization) {
@@ -13980,11 +14004,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           `delete target '${deleteAuthorization.targetPath}' no longer matches its authorized file identity`,
         );
       }
-      return;
     }
     const authorization = this.boundRunAuthorizations.get(runId);
     if (!authorization) {
-      throw diffScopeViolation(runId, "has no bound write authorization");
+      if (!fixtureAuthorization && !createAuthorization && !deleteAuthorization) {
+        throw diffScopeViolation(runId, "has no bound write authorization");
+      }
+      return;
     }
     if (diff.runId !== runId) {
       throw diffScopeViolation(
