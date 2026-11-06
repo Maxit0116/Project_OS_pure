@@ -28,8 +28,8 @@ import { InMemorySecretStore } from "../persistence/secret-store.js";
 import type {
   ModelGatewayRequest,
   ModelGatewayResponse,
-} from "./model-gateway/types.js";
-import { ModelGateway } from "./model-gateway/gateway.js";
+} from "../contracts/model-gateway.js";
+import { ModelGateway } from "./model-gateway/index.js";
 import { LocalContextAssembler } from "./local-context-assembler.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
 import { bindExistingFileAuthorization } from "./recoverable-write-transaction.js";
