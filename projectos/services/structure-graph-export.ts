@@ -54,25 +54,6 @@ function resolvedViews(graph: ProjectGraph): ArchitectureView[] {
   });
 }
 
-function nodesForView(
-  graph: ProjectGraph,
-  view: ArchitectureView,
-): FunctionalNode[] {
-  let nodes = graph.nodes.filter((node) => node.level === view.level);
-  if (view.parentId) {
-    nodes = nodes.filter((node) => node.parentId === view.parentId);
-  }
-  if (view.includeNodeIds?.length) {
-    const include = new Set(view.includeNodeIds);
-    nodes = nodes.filter((node) => include.has(node.id));
-  }
-  if (view.excludeNodeIds?.length) {
-    const exclude = new Set(view.excludeNodeIds);
-    nodes = nodes.filter((node) => !exclude.has(node.id));
-  }
-  return nodes;
-}
-
 function edgesForVisible(
   graph: ProjectGraph,
   visible: FunctionalNode[],

@@ -75,7 +75,7 @@ export function buildVerificationEvidence(input: {
   );
   const suggestedTests = suggestRelatedTests({
     symbolIndexAvailable: input.symbolIndexAvailable === true,
-    relatedTestPaths: input.relatedTestPaths,
+    ...(input.relatedTestPaths !== undefined ? { relatedTestPaths: input.relatedTestPaths } : {}),
   });
   const acceptanceCriteria = input.acceptanceCriteria
     ? [...input.acceptanceCriteria]

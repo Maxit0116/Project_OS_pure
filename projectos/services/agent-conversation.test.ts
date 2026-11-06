@@ -232,7 +232,7 @@ describe("ProjectOSLocalApi grounded ask", () => {
       },
       question: "What does this file do?",
       language: { mode: "auto" },
-    })).rejects.toMatchObject({ code: "agent_answer_unavailable" });
+    })).rejects.toMatchObject({ code: "model_not_configured" });
   });
 
   it("passes a final language mismatch through as a usable answer", async () => {

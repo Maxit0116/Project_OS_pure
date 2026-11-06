@@ -198,7 +198,7 @@ export function inferSpatialPinPath(
     const preferred = markers.find((marker) => marker.side === side);
     if (preferred) {
       return {
-        inferredPath: preferred.path || undefined,
+        ...(preferred.path ? { inferredPath: preferred.path } : {}),
         textHint: `Host ${side} → ${preferred.path}`,
       };
     }
@@ -206,7 +206,7 @@ export function inferSpatialPinPath(
 
   const first = markers[0]!;
   return {
-    inferredPath: first.path || undefined,
+    ...(first.path ? { inferredPath: first.path } : {}),
     textHint: `Repo marker → ${first.path}`,
   };
 }

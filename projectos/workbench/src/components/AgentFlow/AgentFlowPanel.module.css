@@ -207,6 +207,7 @@
 }
 
 .statusBadge[data-run-status='error'],
+.statusBadge[data-run-status='blocked'],
 .statusBadge[data-run-status='recovery_required'],
 .statusBadge[data-run-status='not_applied'] {
   color: var(--color-error);

@@ -1361,12 +1361,10 @@ export function enrichNodesForC4Shapes(input: {
       elementType !== "software_system" &&
       (elementType === "external_system" || looksLikeExternal(blob))
     ) {
-      // Only promote when already external or clearly named as such — do not
-      // reclassify the primary software_system.
-      if (elementType !== "software_system" && elementType !== "person") {
-        elementType = "external_system";
-        level = "context";
-      }
+      // Only promote when already external or clearly named as such — the
+      // branch condition already excludes the primary software_system and people.
+      elementType = "external_system";
+      level = "context";
     } else if (isContainerish && looksLikeQueue(blob)) {
       technology = technology ?? signals.queueTechnologies[0] ?? "Kafka";
       elementType = elementType === "data_store" ? elementType : "container";

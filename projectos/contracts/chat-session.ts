@@ -13,7 +13,6 @@ import { ImplementationPlanSchema, LatestPlanTraceSchema } from "./implementatio
 import { PromptRefinementSchema } from "./prompt-refinement.js";
 import {
   ComposerDraftSchema,
-  normalizeComposerDraft,
   PromptAttachmentSchema,
 } from "./prompt-composer.js";
 

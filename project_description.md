@@ -1,56 +1,67 @@
-# Project Description
+# Project OS
 
-## What It Is
+## What it is
 
-Project OS is a graph-driven AI IDE concept. It turns a codebase into a visual Project Space with a Function Map, Semantic File Tree, Agent Flow, context-aware chat, Prompt Refinement, and Debug Harness.
+Project OS is a graph-centered AI development environment. It connects a product's architecture, code, visual intent, agent work, and verification in one local workspace so people can direct software changes and understand their effects.
 
-## Who It Serves
+## Who it serves
 
-The first target user is a builder with little or no software-engineering experience who needs to understand or change an unfamiliar TypeScript/Next.js product. The product explains the system in product language first, then reveals technical detail gradually so users can reason at the feature level without getting lost in files, engineering jargon, chat history, or raw stack traces.
+The initial focus is individual builders and small product teams working with AI: founders, product-minded developers, and designers who need a better way to move from an observed product problem to a reviewed implementation. The long-term ambition is to make building software accessible to more people while preserving their ability to understand and shape what AI creates.
 
-## Why It Exists
+## Why it exists
 
-Linear chat and traditional file trees make it hard to see where a change belongs, what the AI is doing, and whether a bug fix addresses the root cause. Project OS makes codebase structure, AI execution, and debug reasoning visible and controllable.
+Code is distributed across files, while architecture and intent are often held in people's heads or scattered across conversations. A graph can make the system and its relationships easier to navigate. Visual captures can connect a proposed change to the relevant experience. Recorded agent activity and verification can help the builder follow the work.
 
-## Current Strategy
+## Current product direction
 
-- Rebuild from the product docs rather than extending the archived implementation.
-- Use a Void fork as the preferred Electron IDE foundation, pending an adoption spike.
-- Treat the MVP as a presentation-grade showcase, not a fully generalized production product.
-- Keep the full-product architecture in a separate plan that extends the MVP interfaces into production local services, cloud services, database schemas, and API contracts.
-- Use the Stage 1 plan to build the first complete product loop on `sample-graph-saas/` before expanding to real arbitrary projects.
-- Use `sample-graph-saas/` as the controlled workspace for demonstrating development through graphs.
-- Grow `sample-graph-saas/` as a small, coherent team project workspace with real Prisma-backed relations and interactions, while keeping its server-owned demo identity explicitly distinct from production authentication.
-- Keep the sample's checked-in graph and semantic-tree JSON authoritative; deterministic fixture tooling may check, scaffold candidates, and byte-sync explicit mirrors but must not infer or overwrite curated product meaning.
-- Keep demo behavior deterministic where needed, but preserve production-shaped schemas and service boundaries.
-- Store local project state in inspectable `.projectos/` files: graph, semantic tree, current work, agent runs, and harness records.
-- Model the Function Map as a beginner-guided architecture zoom (`产品全景`, `系统组成`, `功能模块`, then `内部文件`) crossed with visible software-engineering layers; at the file level, make the Chinese purpose the primary card content, keep paths secondary, and reveal specific import content/reasons progressively when a graph is dense. Keep C4 identifiers in the contract, not in the primary UI language.
-- Keep files as evidence behind higher-level architectural responsibilities, then project the selected module's real files and file relationships at the internal-file level; never use the folder tree itself as graph topology.
-- Keep graph/file mutations server-authoritative and atomic: node deletion derives subtree and ownership closure on the server, requires impact-aware dependency repair, and binds authorization to the graph structural revision.
+- Status (2026-11-04): gate S0 (type checks and builds) passes; the node-harness gate SH is partly done; the sample project is reproducible from the committed fixture mirror and the graph sanitizer keeps authored content; gate S1 (first run with a live DeepSeek model) passes on the built app; gate S2 (a single-file Agent change with intent approval, validated apply, honest verification and undo, plus a model-built map of the sample) passes on the built app; gate S3 (a change across components) works on the built app (a three-capability change applied, verified and undone) except a question that pauses and resumes a run mid-run, which is not built, and a clean run with the answers visible in code, not yet observed; Stop works. Test triage is open: 1782 pass / 80 fail / 24 skipped of 1886 core-package tests, all older drift (approval-rule tests, old intent-stub tests, sample real-preview suites that need `npm install` in the sample).
+- Governing priority (2026-11-03): shipability. The whole product must work on the built desktop app, proven gate by gate on observed runs; [`build_plan.md` §0](build_plan.md#0-shipability--the-current-priority-2026-11-03) defines the gates S0–S6. The hackathon demonstration below is gate S3.
 
-## Constraints
+- Current milestone: a working hackathon demonstration of project-wide agent orchestration. Prioritize the master exploring the graph, delegating node tasks, consuming child reports, coordinating changes and showing the working app result. Use the existing model loop first; lock/journal hardening, crash recovery and full external-runtime support follow the demo. [`build_plan.md` §15](build_plan.md#15-active-hackathon-build-plan--make-orchestration-work-first) defines the current execution order.
 
-- The MVP must showcase the full product loop reliably in a live presentation.
-- The demo must not depend on network/model availability for its core path.
-- The sample project must produce clear graph nodes, edges, demo diffs, and Debug Harness evidence.
-- The active repo should stay focused on docs, architecture, and the sample workspace until the Void adoption spike is complete.
+- Use the Pure repository as the active implementation: `Maxit0116/Project_OS_pure`, branch `graph`.
+- Build a local-first Electron workbench around a project structure graph, focused conversation, agent execution, and reviewable code changes.
+- Active architecture work: a stable harness around every node for both Project OS model execution and complete agent runtimes. The current branch binds explicit model choices per request, records shared decision/checkpoint/budget data, starts iterative inspect/list/read/consult discovery from the immediate graph, and shows waiting decisions in chat and on the map. The discovery loop still needs deep-graph evidence and Ask/Plan reuse. As of 2026-11-04 a request can choose a registered runtime executor (a dev-only scripted one exists), its proposal is validated by an independent model fixed on the approved intent before it can be applied, and the built-in model's single-file proposal goes through the same adapter, scoped host and staging checks; planning, `inspectNode`, `consultNode`, `requestDecision` and external runtimes are not on the harness yet. Restart-safe orchestration, notification links, standalone-node migration, and desktop acceptance remain open. The [node-harness design](docs/features/Hierarchical-Agent-Protocol-Dev-Plan.md) records the longer-term architecture; `build_plan.md` §15 sets the current demo-first implementation order.
+- Treat graph descriptions as navigation and context. Backend policy, current files, and explicit verification remain authoritative for writes and completion.
+- Start with individual builders and small teams. Shared collaboration, organizational governance, and hosted services are later product directions, not claims about the current release.
+- Keep the older `ProjectOS` checkout as a local historical archive during the transition. Transfer specific decisions or implementation work after comparing them with Pure.
 
-## Non-Goals
+## What exists in the active branch
 
-- The MVP does not need to support arbitrary repositories end to end.
-- The MVP does not require production cloud auth, billing, sync, or team workspace features.
-- The MVP does not require a universal Debug Harness.
-- The archived Electron implementation is not the active build target.
+The `graph` branch includes a React/TypeScript workbench, Electron desktop shell, a C4-style structure map, AI-assisted structure scanning, model-backed agent workflows, context assembly, a local agent harness, code and diff review, spatial capture sessions, annotations, UI stencils, and a live overlay of agent activity on project nodes. It also includes persisted execution records, verification evidence, and local workspace state.
 
-## Key Decisions
+The repository includes a Next.js/Prisma sample workspace. The latest branch has backend plans for a local single-user desktop product and explicitly defers multi-tenancy, team permissions, hosted execution, vector search and operating-system-level sandboxing. The built-in model executor retains its fixed pipeline initially; the revised node-harness plan includes external runtimes with their own loops behind a shared execution contract.
 
-- Active MVP plan: `docs/MVP-Showcase-Architecture-and-Dev-Plan.md`.
-- Active full-product plan: `docs/Full-Product-Architecture-and-Dev-Plan.md`.
-- Active Stage 1 execution plan: `docs/Stage-1-Whole-Product-Execution-Plan.md`.
-- Active two-person MVP workload plan: `docs/MVP-Two-Person-Frontend-Backend-Workload-Plan.md`.
-- Active sample project: `sample-graph-saas/`.
-- Architecture-map notation requires meaningful elements (type, responsibility, technology, level, and layer) plus directed, labelled relationships with evidence.
-- Every feature module owns a scoped internal graph whose nodes are real files with Chinese purpose descriptions and whose directed lines explain imports, calls, redirects, or data flow in human-readable Chinese.
-- Legacy implementation and stale contracts are preserved under `archive/legacy-20260705/`.
-- Presentation mode is acceptable when backed by durable local schemas and replaceable service interfaces.
-- Product graph deletion uses provenance tombstones and one recoverable mixed transaction so files, repairs, edges, ownership, and semantic-tree state share one undo boundary.
+## Technology and entry points
+
+- Workbench: React, TypeScript, Vite, Zustand, CSS Modules, and React Flow in `projectos/workbench/`.
+- Desktop: Electron main process, preload, and renderer integration in `projectos/desktop/`.
+- Shared contracts and domain services: `projectos/contracts/`, `projectos/services/`, and `projectos/persistence/`.
+- Sample application: Next.js, React, and Prisma in `sample-graph-saas/`.
+- Product and engineering plans: `docs/`, especially `docs/features/backend/Backend-Dev-Plan.md` and `docs/features/Agent-Harness-Eval-Checklist.md`.
+
+Typical development commands, from a fresh dependency install:
+
+```bash
+cd projectos
+npm run typecheck
+npm run test:unit
+npm run fixtures:check      # sample fixtures consistent with the sample source
+npm run fixtures:restore    # seed sample-graph-saas/.projectos from the committed mirror (add -- --force to overwrite)
+```
+
+```bash
+cd projectos/workbench
+npm run dev
+```
+
+```bash
+cd projectos/desktop
+npm run dev
+```
+
+## Current status and next gate
+
+The Pure `graph` branch is the active starting point, not a production-ready release. Its backend plan marks implementation slices as landed; its agent harness checklist still requires desktop verification. Before broadening the platform, demonstrate one real repository change from workspace open through scoped apply, command-backed verification, interruption or restart, and review or undo. Record what succeeds and where a person still has to intervene.
+
+The local archive, transferred investor overview, and repository transition are documented in [`TRANSFER-HANDOFF.md`](TRANSFER-HANDOFF.md). The investor-facing product vision is in [`docs/Project-OS-Investor-Overview.md`](docs/Project-OS-Investor-Overview.md).

@@ -1,4 +1,10 @@
-type IpcArgumentKind = 'string' | 'record' | 'boolean' | 'array'
+type IpcArgumentKind =
+  | 'string'
+  | 'number'
+  | 'record'
+  | 'boolean'
+  | 'array'
+  | 'decision_status'
 
 const PROJECTOS_IPC_SIGNATURES = {
   openSampleWorkspace: [],
@@ -43,6 +49,11 @@ const PROJECTOS_IPC_SIGNATURES = {
   importGitHubAuthFromGhCli: [],
   getNodeContext: ['string', 'string'],
   getFileContext: ['string', 'string'],
+  getGlobalAgentContext: ['string', 'string'],
+  inspectAgentNode: ['string', 'string', 'string'],
+  extractRequestIntent: ['record'],
+  approveRequestIntent: ['string', 'string', 'number', 'array'],
+  prepareIntentExecution: ['string', 'string'],
   getFileContent: ['string', 'string'],
   getWorkspaceFileDataUrl: ['string', 'string'],
   writeFileContent: ['string', 'string', 'string'],
@@ -68,6 +79,7 @@ const PROJECTOS_IPC_SIGNATURES = {
   ensureCodeFileUnderstanding: ['string', 'string'],
   askAgent: ['record'],
   listSkills: ['string'],
+  listExecutors: ['string'],
   getComposerMentions: ['string', 'string'],
   getSkill: ['string', 'string'],
   listAgentWorktrees: ['string'],
@@ -97,6 +109,9 @@ const PROJECTOS_IPC_SIGNATURES = {
   pauseAgentRun: ['string'],
   continueAgentRun: ['string'],
   getAgentRun: ['string'],
+  listRunDecisions: ['string', 'string'],
+  resolveRunDecision: ['string', 'string', 'number', 'record', 'decision_status'],
+  getRunCheckpoint: ['string', 'string'],
   getAgentRunEvents: ['string'],
   getAgentRunEventSnapshot: ['string'],
   ensureAgentPoolRun: ['record'],
@@ -306,6 +321,10 @@ export function assertProjectOsIpcArgs(
     if (
       kind === 'string'
         ? typeof value !== 'string'
+        : kind === 'number'
+          ? typeof value !== 'number' || !Number.isFinite(value)
+          : kind === 'decision_status'
+            ? value !== undefined && value !== 'resolved' && value !== 'declined'
         : kind === 'boolean'
           ? typeof value !== 'boolean'
           : kind === 'array'
@@ -363,23 +382,34 @@ export function parseTerminalResizeArgs(
 export function parseDiffReadyNotificationPayload(input: unknown): {
   title: string
   body: string
-  destination: 'ask' | 'diff' | 'reminder'
+  destination: 'ask' | 'diff' | 'reminder' | 'decisions'
   runIds: string[]
+  decisionId?: string
 } {
   if (!isRecord(input)) throw new Error('Notification payload is invalid')
-  const { title, body, destination, runIds } = input
+  const { title, body, runIds } = input
+  const destination = input.destination ?? 'diff'
+  const decisionId = input.decisionId
   if (
     typeof title !== 'string' || !title.trim() || title.length > 200 ||
     typeof body !== 'string' || !body.trim() || body.length > 2_000 ||
-    (destination !== 'ask' && destination !== 'diff' && destination !== 'reminder') ||
+    (destination !== 'ask' && destination !== 'diff' && destination !== 'reminder' && destination !== 'decisions') ||
     !Array.isArray(runIds) || runIds.length === 0 || runIds.length > 128 ||
     runIds.some((runId) =>
       typeof runId !== 'string' || !runId || runId.length > 256 || runId.includes('\0')) ||
-    new Set(runIds).size !== runIds.length
+    new Set(runIds).size !== runIds.length ||
+    destination === 'decisions' && (typeof decisionId !== 'string' || !decisionId || decisionId.length > 256 || decisionId.includes('\0')) ||
+    destination !== 'decisions' && decisionId !== undefined
   ) {
     throw new Error('Notification payload is invalid')
   }
-  return { title, body, destination, runIds: [...runIds] }
+  return {
+    title,
+    body,
+    destination,
+    runIds: [...runIds],
+    ...(typeof decisionId === 'string' ? { decisionId } : {}),
+  }
 }
 
 export function parseWindowTitle(input: unknown): string {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { encodeIpcError } from "../../shared/ipc-error/index.js";
 import { IpcTransport } from "./IpcTransport.js";
 import { NotConnectedTransport } from "./NotConnectedTransport.js";
 
@@ -56,6 +57,44 @@ describe("IpcTransport low-level error handling", () => {
         code: "transport_not_connected",
         message: "notice failed",
       });
+  });
+
+  it("rebuilds the code and details from the message, which is all Electron delivers", async () => {
+    const wrapped = (inner: string) =>
+      new Error(`Error invoking remote method 'projectos:askAgent': Error: ${inner}`);
+    vi.stubGlobal("window", {
+      projectOS: {
+        invoke: vi.fn(async () => {
+          throw wrapped(encodeIpcError({
+            code: "model_not_configured",
+            message: "Configure a model first",
+            details: { hint: "settings" },
+          }));
+        }),
+      },
+    });
+
+    const rejection = await new IpcTransport(1_000).consumeFallbackNotice("project_one")
+      .then(() => undefined, (error: unknown) => error);
+    expect(rejection).toMatchObject({
+      name: "ProjectOSError",
+      code: "model_not_configured",
+      message: "Configure a model first",
+      details: { hint: "settings" },
+    });
+  });
+
+  it("removes Electron's wrapper from errors that carry no structured payload", async () => {
+    vi.stubGlobal("window", {
+      projectOS: {
+        invoke: vi.fn(async () => {
+          throw new Error("Error invoking remote method 'projectos:x': Error: disk is full");
+        }),
+      },
+    });
+
+    await expect(new IpcTransport(1_000).consumeFallbackNotice("project_one"))
+      .rejects.toThrow(/^disk is full$/u);
   });
 
   it("treats a fallback notice as absent when no transport is connected", async () => {

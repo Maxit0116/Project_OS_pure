@@ -5,12 +5,13 @@ import type { DebugSession } from "../contracts/debug-session.js";
 import type { ModelProfile } from "../contracts/settings.js";
 import { DebugHypothesisService } from "./debug-hypothesis-service.js";
 
-const profile = {
+const profile: ModelProfile = {
   id: "model-1",
-  label: "Test",
+  name: "Test",
   provider: "openai",
   model: "gpt-test",
-} as ModelProfile;
+  apiKeyRef: "test-key",
+};
 
 const localContext = {
   bundleHash: `sha256:${"a".repeat(64)}`,
@@ -31,7 +32,7 @@ describe("DebugHypothesisService", () => {
       bugDescription: "Login redirect loops forever",
       localContext,
       profile,
-      thinkingDepth: "standard",
+      thinkingDepth: "medium",
     });
     expect(hypotheses.length).toBeGreaterThan(0);
     expect(hypotheses[0]?.summary).toContain("Login redirect");
@@ -69,7 +70,7 @@ describe("DebugHypothesisService", () => {
         },
       ],
       profile,
-      thinkingDepth: "standard",
+      thinkingDepth: "medium",
     });
     expect(result.chosenRootCauseId).toBe("hyp_a");
     expect(result.proposedFix.summary).toContain("Null owner");

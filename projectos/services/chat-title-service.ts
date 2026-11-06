@@ -82,7 +82,9 @@ export class ChatTitleService {
       systemPrompt: `${CONTEXT_SYSTEM_PROMPT}\n${responseLanguageInstruction(input.responseLanguage)}`,
       input: { transcript: formatChatTranscript(input.messages) },
       redactionPolicy: "secrets_and_paths",
-      maxOutputTokens: 400,
+      // The digest is JSON with a title, decisions and open questions. 400 cut it off mid-string for
+      // a Chinese conversation with a few decisions, and the whole summary was then discarded.
+      maxOutputTokens: 1200,
       thinkingDepth: "off",
     });
     const parsed = parseSessionContextModelOutput(response.output, throughMessageId);

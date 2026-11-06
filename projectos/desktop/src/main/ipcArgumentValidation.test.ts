@@ -59,6 +59,16 @@ describe('privileged IPC argument validation', () => {
       destination: 'reminder',
       runIds: ['reminder:r1'],
     }).destination).toBe('reminder')
+    expect(parseDiffReadyNotificationPayload({
+      title: 'Decision needed',
+      body: 'Choose whether to continue',
+      destination: 'decisions',
+      runIds: ['run_one'],
+      decisionId: 'decision_one',
+    })).toMatchObject({ destination: 'decisions', decisionId: 'decision_one' })
+    expect(() => parseDiffReadyNotificationPayload({
+      title: 'Decision needed', body: 'Choose', destination: 'decisions', runIds: ['run_one'],
+    })).toThrow('Notification payload is invalid')
     expect(() => parseDiffReadyNotificationPayload({
       title: 'Diff ready', body: 'Review', destination: 'diff', runIds: ['run_one', 'run_one'],
     })).toThrow('Notification payload is invalid')

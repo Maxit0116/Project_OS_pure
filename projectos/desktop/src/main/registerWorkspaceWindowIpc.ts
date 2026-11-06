@@ -36,7 +36,7 @@ export function registerWorkspaceWindowIpc(): void {
     const created = createMainWindow(path)
     const source = BrowserWindow.fromWebContents(event.sender)
     if (source && !source.isDestroyed()) {
-      const [x, y] = source.getPosition()
+      const [x = 0, y = 0] = source.getPosition()
       created.setPosition(x + NEW_WINDOW_OFFSET, y + NEW_WINDOW_OFFSET)
     }
   })

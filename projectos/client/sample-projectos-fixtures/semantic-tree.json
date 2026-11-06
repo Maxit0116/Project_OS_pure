@@ -642,6 +642,15 @@
           "sourceNodeId": "feat_notifications",
           "status": "normal",
           "children": []
+        },
+        {
+          "id": "tree_file_lib_hooks_usenotifications_ts_7b7cd94f6f",
+          "label": "lib/hooks/useNotifications.ts",
+          "kind": "file",
+          "path": "lib/hooks/useNotifications.ts",
+          "sourceNodeId": "feat_notifications",
+          "status": "normal",
+          "children": []
         }
       ]
     },
@@ -965,22 +974,6 @@
               "children": []
             }
           ]
-        }
-      ]
-    },
-    {
-      "id": "tree_docs",
-      "label": "项目文档",
-      "kind": "feature",
-      "status": "active",
-      "children": [
-        {
-          "id": "tree_file_docs_readme",
-          "label": "docs/README.md",
-          "kind": "file",
-          "path": "docs/README.md",
-          "status": "normal",
-          "children": []
         }
       ]
     }

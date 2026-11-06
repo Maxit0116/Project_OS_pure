@@ -2,10 +2,11 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ProjectOSSettingsSchema } from "../../contracts/settings.js";
+import { ProjectOSSettingsSchema, type ModelProfile } from "../../contracts/settings.js";
 import type { PromptRefinement } from "../../contracts/prompt-refinement.js";
+import type { RequestIntent } from "../../contracts/request-intent.js";
 import type {
   GlobalContextBundle,
   LocalContextBundle,
@@ -24,12 +25,18 @@ import { SettingsService } from "../settings-service.js";
 import { ProjectOSLocalApi } from "../project-os-local-api.js";
 import {
   AgentOrchestrator,
+  boundUpstreamProposals,
   type AgentRunEventPersistence,
   type AutomaticLeafExecutionDependency,
   type GreenfieldInitializationDependency,
   type HierarchyDelegationDependency,
 } from "./index.js";
 import type { LeafPipelineBudget } from "../harness/pipeline-budget.js";
+import type { ExecutorProposal } from "../../contracts/executor-adapter.js";
+import { ExecutorRegistry } from "../harness/executor-registry.js";
+import type { NodeExecutorAdapter } from "../harness/executor-adapter.js";
+import type { ExecutorTask } from "../../contracts/executor-adapter.js";
+import { FakeExecutorAdapter, type FakeExecutorScenario } from "../harness/fake-executor.js";
 import { buildVerificationEvidence } from "../verification-evidence.js";
 import { CREATE_FILE_MAX_BYTES } from "../create-file-content.js";
 
@@ -43,6 +50,97 @@ afterEach(() => {
 });
 
 describe("AgentOrchestrator generated diff truthfulness", () => {
+  it("passes approved clarification answers into the actual model task input", async () => {
+    const output = JSON.stringify({
+      summary: "Use the selected receipt recipient",
+      path: "app/login/page.tsx",
+      edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "APPROVED_RECIPIENT_MARKER" }],
+    });
+    const { orchestrator, workspace, requests } = createModelOrchestrator(output);
+    const approvedIntent: RequestIntent = {
+      version: "0.1.0",
+      id: "intent_answer_flow",
+      projectId: workspace.project.projectId,
+      rawRequest: "Send a receipt after payment",
+      goal: "Send a receipt to the chosen address",
+      kind: "change",
+      entryNodeId: "feat_login",
+      touches: [{
+        nodeId: "feat_login",
+        reason: "Owns the requested flow",
+        allow: { editExisting: true, addParts: false, deletePartIds: [] },
+      }],
+      structuralEffects: [],
+      assumptions: [],
+      outOfScope: [],
+      acceptance: ["Send exactly one receipt to the approved address"],
+      questions: [{
+        id: "recipient",
+        text: "Which address should receive the receipt?",
+        options: [{ id: "account", label: "Account email" }, { id: "custom", label: "A different address" }],
+        answer: "receipts@example.test",
+        selectedOptionId: "custom",
+      }],
+      executorSelection: { kind: "model", modelProfileId: "test-model" },
+      baseGraphHash: "sha256:approved_graph",
+      revision: 1,
+      status: "approved",
+      approvalHash: "sha256:approved_intent",
+      approvedAt: new Date().toISOString(),
+    };
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+      approvedIntent,
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    const generation = requests.find((request) => request.requestKind === "change_generation");
+    expect(generation?.input).toMatchObject({
+      approvedIntentContext: {
+        answers: [{
+          questionId: "recipient",
+          answer: "receipts@example.test",
+          selectedOptionId: "custom",
+          selectedOptionLabel: "A different address",
+        }],
+      },
+    });
+  });
+
+  it("passes the shared producer-consumer contract into the actual model task input", async () => {
+    const output = JSON.stringify({
+      summary: "Update login heading",
+      path: "app/login/page.tsx",
+      edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "CONTRACT_CONTEXT_MARKER" }],
+    });
+    const { orchestrator, workspace, requests } = createModelOrchestrator(output);
+    const interfaceContract = {
+      contractId: "contract_receipt",
+      producerTaskId: "task_api",
+      consumerTaskIds: ["task_ui"],
+      identity: { kind: "endpoint" as const, name: "POST /api/receipts" },
+      behavior: "Creates one receipt after a successful payment",
+      units: "receipt id is an opaque string",
+      failureSemantics: "Duplicate payment ids return the original receipt",
+      acceptanceExamples: [{ input: "payment_1", expected: "receipt_1" }],
+    };
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+      interfaceContracts: [interfaceContract],
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    const generation = requests.find((request) => request.requestKind === "change_generation");
+    expect(generation?.input).toMatchObject({
+      nodeTaskContext: {
+        taskId: state.run.runId,
+        interfaceContracts: [interfaceContract],
+      },
+    });
+  });
+
   it("fails the run and produces no diff for malformed model output", async () => {
     const rejectedOutputs = [
       "not valid json SECRET_REJECTED_ONE",
@@ -847,6 +945,68 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     });
   });
 
+  describe("verification that throws before it runs a command", () => {
+    async function runAutomaticWith(verifyError: Error) {
+      const automaticLeafExecution: AutomaticLeafExecutionDependency = {
+        async apply(_workspace, run) {
+          return {
+            runId: run.runId,
+            applied: true,
+            filesChanged: ["app/login/page.tsx"],
+            verificationStatus: "not_run",
+            outcome: "applied",
+            backupId: "backup-automatic",
+          };
+        },
+        async verify() { throw verifyError; },
+      };
+      const { orchestrator, workspace } = createModelOrchestrator(
+        JSON.stringify({
+          summary: "Automatic validated change",
+          path: "app/login/page.tsx",
+          edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "AUTOMATIC_MARKER" }],
+        }),
+        [],
+        sampleWorkspaceRoot,
+        [{ output: validFileEditPlanOutput() }],
+        "memory",
+        [{ output: validProposalValidationOutput() }],
+        automaticLeafExecution,
+      );
+      const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+        localContext: localContextBundle(workspace),
+        executionPolicy: "automatic",
+      });
+      await orchestrator.startRun(workspace, state.run.runId, toolContext());
+      return state;
+    }
+
+    it.each([
+      ["verification_approval_required", "Verification commands require explicit user approval"],
+      ["verification_unavailable", "Verification execution is not available in this runtime"],
+      ["tool_policy_denied", "run_verification is not allowed here"],
+    ] as const)("reports %s as not_run and keeps the applied change, instead of failing the run", async (code, message) => {
+      const state = await runAutomaticWith(new ProjectOSError(code, message));
+
+      expect(state.verificationResult?.status).toBe("not_run");
+      expect(state.applyResult).toMatchObject({ applied: true, verificationStatus: "not_run" });
+      expect(state.events.find((event) => event.type === "verification_completed")?.payload)
+        .toMatchObject({ status: "not_run", message: expect.stringContaining(message.slice(0, 20)) });
+      expect(state.events.some((event) => event.type === "step_failed")).toBe(false);
+      expect(state.run.status).toBe("complete");
+      expect(state.events.find((event) => event.type === "run_completed")?.payload)
+        .not.toMatchObject({ failureReason: "verification_failed" });
+    });
+
+    it("still reports an unexpected verifier crash as a failed verification", async () => {
+      const state = await runAutomaticWith(new Error("spawn ENOENT"));
+
+      expect(state.verificationResult?.status).toBe("failed");
+      expect(state.events.find((event) => event.type === "verification_completed")?.payload)
+        .toMatchObject({ status: "failed" });
+    });
+  });
+
   it("automatically applies a validated proposal, reports failed verification, and completes", async () => {
     const calls: string[] = [];
     const automaticLeafExecution: AutomaticLeafExecutionDependency = {
@@ -887,7 +1047,9 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     await orchestrator.startRun(workspace, state.run.runId, toolContext());
 
     expect(calls).toEqual(["apply:app/login/page.tsx", "verify"]);
-    expect(scopeValidationCalls).toHaveLength(2);
+    // Scope is checked when the model generates the diff, when the harness stages it
+    // (the same check a runtime executor's proposal gets), and again at apply.
+    expect(scopeValidationCalls).toHaveLength(3);
     expect(state.run.status).toBe("complete");
     expect(state.status).toBe("complete");
     expect(state.applyResult).toMatchObject({
@@ -1606,6 +1768,186 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     expect(JSON.stringify(harness.allEvents())).toContain("64-planner");
   });
 
+  it("starts dependent graph tasks after their producer and shares the same interface contract", async () => {
+    const harness = createHierarchyBudgetHarness("dependency-contract");
+
+    await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+    const rootChildStarts = harness.root.events.flatMap((event) =>
+      event.type === "child_run_started" ? [event.payload.taskId] : []);
+    const producerTaskId = harness.root.hierarchyPlan!.tasks[0]!.taskId;
+    const consumerTaskId = harness.root.hierarchyPlan!.tasks[1]!.taskId;
+    const producerCompleted = harness.root.events.findIndex((event) =>
+      event.type === "child_run_completed" && event.payload.taskId === producerTaskId);
+    const consumerStarted = harness.root.events.findIndex((event) =>
+      event.type === "child_run_started" && event.payload.taskId === consumerTaskId);
+    const directChildren = harness.allStates().filter((state) => state.run.parentRunId === harness.root.run.runId);
+
+    expect(harness.root.hierarchyPlan?.tasks.map((task) => task.dependencyTaskIds)).toEqual([[], [producerTaskId]]);
+    expect(harness.root.hierarchyPlan?.contracts).toHaveLength(1);
+    const contractId = harness.root.hierarchyPlan!.contracts![0]!.contractId;
+    expect(harness.root.interfaceContracts?.map((item) => item.contractId)).toEqual([contractId]);
+    expect(rootChildStarts.slice(0, 2)).toEqual([producerTaskId, consumerTaskId]);
+    expect(producerCompleted).toBeGreaterThanOrEqual(0);
+    expect(consumerStarted).toBeGreaterThan(producerCompleted);
+    expect(directChildren).toHaveLength(2);
+    expect(directChildren.map((child) => child.interfaceContracts?.map((item) => item.contractId)))
+      .toEqual([[contractId], [contractId]]);
+  });
+
+  describe("a plan whose interface contract uses a kind the schema does not know", () => {
+    it("tells the planner which kinds exist, and on retry which field was wrong", async () => {
+      // Observed live: the model wrote identity.kind "function" (the prompt only showed "endpoint"),
+      // the plan was rejected as an "invalid plan shape", and the retry was told nothing more, so it
+      // repeated the mistake and the whole cross-component run failed.
+      const harness = createHierarchyBudgetHarness("contract-kind-retry");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      const [first, retry] = harness.planRequests;
+      expect(first?.systemPrompt).toMatch(/identity\.kind is exactly one of "symbol".*"endpoint".*"message"/u);
+      expect(first?.planRetry).toBeUndefined();
+      expect(retry?.planRetry).toMatchObject({ reason: "invalid_plan_shape" });
+      expect(JSON.stringify(retry?.planRetry)).toMatch(/contracts\.0\.identity\.kind/u);
+      expect(JSON.stringify(retry?.planRetry)).toMatch(/symbol.*endpoint.*message/u);
+      expect(harness.root.hierarchyPlan?.contracts).toHaveLength(1);
+      expect(harness.root.hierarchyPlan?.contracts?.[0]?.identity.kind).toBe("endpoint");
+    });
+
+    it("drops keys the plan schema does not know instead of failing a correct plan", async () => {
+      // Observed live: a stray "^" key, then "taskKeyNote" on each task, failed a sound two-task plan twice.
+      const harness = createHierarchyBudgetHarness("plan-extra-keys");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      // Nothing needed a retry: child planners ask too, but none was told its plan was invalid.
+      expect(harness.planRequests.every((request) => request.planRetry === undefined)).toBe(true);
+      expect(harness.root.hierarchyPlan?.tasks).toHaveLength(2);
+      expect(JSON.stringify(harness.root.hierarchyPlan)).not.toMatch(/taskKeyNote|stray/u);
+    });
+
+    it("gives a contract's producer and consumer the contract even when the plan did not repeat it on the tasks", async () => {
+      // Observed live: two tasks joined by a declared contract, neither listing it; the plan schema
+      // rejected "Task ... must reference contract ..." and the retry did not fix it.
+      const harness = createHierarchyBudgetHarness("plan-unreferenced-contract");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.every((request) => request.planRetry === undefined)).toBe(true);
+      const plan = harness.root.hierarchyPlan!;
+      const contractId = plan.contracts![0]!.contractId;
+      expect(plan.tasks.map((task) => task.interfaceContractIds)).toEqual([[contractId], [contractId]]);
+    });
+
+    it("ignores a contract id the plan does not define, such as one inherited from the parent plan", async () => {
+      // Observed live: a component planner copied its parent's namespaced contract id onto its tasks,
+      // and the plan failed twice. Inherited contracts reach every child anyway.
+      const harness = createHierarchyBudgetHarness("plan-inherited-contract-id");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.every((request) => request.planRetry === undefined)).toBe(true);
+      const plan = harness.root.hierarchyPlan!;
+      const contractId = plan.contracts![0]!.contractId;
+      expect(plan.tasks.map((task) => task.interfaceContractIds)).toEqual([[contractId], [contractId]]);
+    });
+
+    it("accepts a number or boolean as the expected value of a contract example", async () => {
+      // Observed live: `"expected": 3` for "the count is 3" failed a sound plan as an invalid shape.
+      const harness = createHierarchyBudgetHarness("plan-numeric-examples");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.every((request) => request.planRetry === undefined)).toBe(true);
+      expect(harness.root.hierarchyPlan!.contracts![0]!.acceptanceExamples).toEqual([
+        { input: "2 todo and 1 in_progress", expected: "3" },
+        { input: "no team", expected: "0" },
+        { input: "closed", expected: "false" },
+      ]);
+    });
+
+    it("fits a long model rationale and objective into the plan limits instead of failing the plan", async () => {
+      // Observed live: a 500+ character rationale was cut to 501 characters (500 plus an ellipsis) and
+      // then rejected by the plan's own limit of 500, on the first attempt and on the retry.
+      const harness = createHierarchyBudgetHarness("plan-long-text");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.every((request) => request.planRetry === undefined)).toBe(true);
+      const plan = harness.root.hierarchyPlan!;
+      expect(plan.rationale.length).toBeLessThanOrEqual(500);
+      expect(plan.objective.length).toBeLessThanOrEqual(500);
+      expect(plan.rationale.endsWith("…")).toBe(true);
+    });
+
+    it("gives the one-layer planner more room than the gateway default, so reasoning cannot cut the plan off", async () => {
+      const harness = createHierarchyBudgetHarness("dependency-contract");
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      expect(harness.planRequests[0]?.maxOutputTokens).toBeGreaterThanOrEqual(4096);
+    });
+
+    it("still fails after the retry, and names the field in the error details", async () => {
+      const harness = createHierarchyBudgetHarness("contract-kind-always-wrong");
+
+      const failure = await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId)
+        .catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({
+        code: "agent_orchestration_failed",
+        message: expect.stringContaining("invalid plan shape"),
+        details: { failureCategory: "retry_also_invalid", problem: expect.stringContaining("identity.kind") },
+      });
+      expect(harness.planRequests).toHaveLength(2);
+    });
+  });
+
+  it("shows a consumer the files its producer proposed, before anything is applied", async () => {
+    // Observed live: the profile task only had the contract. It re-implemented the shared predicate in
+    // its own file and forced types with `as unknown as`, and the independent validator rejected it.
+    const harness = createHierarchyBudgetHarness("dependency-contract");
+
+    await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+    const consumerRequests = harness.taskContextSeen.filter((seen) => seen.path === "src/consumer/index.ts");
+    const producerRequests = harness.taskContextSeen.filter((seen) => seen.path === "src/producer/index.ts");
+    expect(consumerRequests.length).toBeGreaterThan(0);
+    expect(producerRequests.length).toBeGreaterThan(0);
+    // The producer depends on nothing; every model call for the consumer carries the producer's proposal.
+    expect(producerRequests.every((seen) => seen.upstream === undefined)).toBe(true);
+    for (const seen of consumerRequests) {
+      expect(seen.upstream).toEqual([expect.objectContaining({
+        objective: "Expose the receipt endpoint",
+        files: [expect.objectContaining({
+          path: "src/producer/index.ts",
+          changeType: "modify",
+          after: "UPDATED:src/producer/index.ts",
+        })],
+      })]);
+      expect(seen.systemPrompt).toMatch(/upstreamProposals lists files that tasks you depend on have already proposed/u);
+    }
+  });
+
+  it("does not start consumers when their producer subtree fails", async () => {
+    const harness = createHierarchyBudgetHarness("dependency-failed");
+
+    await expect(harness.orchestrator.startRun(harness.workspace, harness.root.run.runId))
+      .rejects.toMatchObject({ code: "agent_orchestration_failed" });
+
+    const rootChildStarts = harness.root.events.flatMap((event) =>
+      event.type === "child_run_started" ? [event.payload.taskId] : []);
+    const producerTaskId = harness.root.hierarchyPlan!.tasks[0]!.taskId;
+    const consumerTaskId = harness.root.hierarchyPlan!.tasks[1]!.taskId;
+    const blockedConsumer = harness.root.events.find((event) =>
+      event.type === "child_run_completed" && event.payload.taskId === consumerTaskId);
+    const consumerState = harness.allStates().find((state) =>
+      state.run.parentRunId === harness.root.run.runId && state.interfaceContracts?.some((item) =>
+        item.consumerTaskIds.includes(consumerTaskId)));
+
+    expect(rootChildStarts).toEqual([producerTaskId]);
+    expect(blockedConsumer).toMatchObject({ payload: { status: "blocked", failureCategory: "dependency_failed" } });
+    expect(consumerState?.run.status).toBe("error");
+  });
+
   it("rejects a delegated planner whose actual scope is not deeper than its parent", async () => {
     const harness = createHierarchyBudgetHarness("misleveled-child");
 
@@ -1937,6 +2279,428 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
   });
 });
 
+describe("AgentOrchestrator runtime executor dispatch", () => {
+  const runId = "run_runtime_leaf";
+  const runtimeIntent = (workspace: { project: { projectId: string } }): RequestIntent => ({
+    version: "0.1.0",
+    id: "intent_runtime_leaf",
+    projectId: workspace.project.projectId,
+    rawRequest: "Change the login page",
+    goal: "Change the login page",
+    kind: "change",
+    entryNodeId: null,
+    touches: [{
+      nodeId: "feat_login",
+      reason: "Owns the login page",
+      allow: { editExisting: true, addParts: false, deletePartIds: [] },
+    }],
+    structuralEffects: [],
+    assumptions: [],
+    outOfScope: [],
+    acceptance: ["The login page is changed"],
+    questions: [],
+    executorSelection: { kind: "runtime", runtimeProfileId: "fake" },
+    baseGraphHash: "sha256:approved_graph",
+    revision: 1,
+    status: "approved",
+    approvalHash: "sha256:approved_intent",
+    approvedAt: new Date().toISOString(),
+  });
+  const proposalFor = (path: string): ExecutorProposal => ({
+    proposalId: "proposal_runtime_leaf",
+    taskId: runId,
+    diff: {
+      runId,
+      summary: "Scripted change",
+      files: [{
+        path,
+        changeType: "modify",
+        before: "SELECTED_CONTEXT_MARKER",
+        after: "SCRIPTED_MARKER",
+      }],
+    },
+  });
+
+  function createRuntimeOrchestrator(scenario: FakeExecutorScenario) {
+    const workspace = new ProjectOSWorkspaceStore().loadWorkspace(sampleWorkspaceRoot);
+    const modelRequests: ModelGatewayRequest[] = [];
+    const gateway = {
+      async complete(_profile: unknown, request: ModelGatewayRequest) {
+        modelRequests.push(request);
+        throw new Error("The model gateway must not be used by a runtime executor");
+      },
+    } as unknown as ModelGateway;
+    const executors = new ExecutorRegistry();
+    executors.register(new FakeExecutorAdapter(scenario));
+    const orchestrator = new AgentOrchestrator({
+      gateway,
+      settingsService: new SettingsService(new InMemorySecretStore()),
+      eventPersistence: "memory",
+      executors,
+      validateGeneratedDiffScope(candidateRunId, diff) {
+        const file = diff.files[0];
+        if (
+          diff.runId !== candidateRunId ||
+          diff.files.length !== 1 ||
+          file?.changeType !== "modify" ||
+          file.path !== "app/login/page.tsx"
+        ) {
+          throw new ProjectOSError("diff_scope_violation", `Diff for '${candidateRunId}' violates its scope`);
+        }
+      },
+    });
+    return { orchestrator, workspace, modelRequests };
+  }
+
+  it("runs a leaf task through the adapter and scoped host without calling the model", async () => {
+    const proposal = proposalFor("app/login/page.tsx");
+    const { orchestrator, workspace, modelRequests } = createRuntimeOrchestrator({ proposal });
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      runId,
+      runtimeExecutor: { executorId: "fake", label: "Scripted executor" },
+      approvedIntent: runtimeIntent(workspace),
+      localContext: localContextBundle(workspace),
+      executionPolicy: "automatic",
+    });
+
+    await orchestrator.startRun(workspace, runId, toolContext());
+
+    expect(state.run.executor).toEqual({
+      kind: "runtime",
+      executorId: "fake",
+      runtimeProfileId: "fake",
+      label: "Scripted executor",
+      thinkingDepth: expect.any(String),
+    });
+    expect(modelRequests).toHaveLength(0);
+    expect(state.diff).toEqual(proposal.diff);
+    // No independent validation exists for a runtime proposal, so it stops at review
+    // even though the request asked for automatic execution, and it cannot be applied.
+    expect(state.run.status).toBe("awaiting_review");
+    expect(state.events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["diff_ready", "run_completed"]),
+    );
+    expect(validateAgentRunEventSequence(state.events)).toEqual([]);
+    expect(() => orchestrator.requireValidatedProposal(runId, proposal.diff)).toThrow(
+      /independent validation/,
+    );
+  });
+
+  it("fails the run and stages nothing when the executor proposes a file outside its task", async () => {
+    const { orchestrator, workspace } = createRuntimeOrchestrator({
+      proposal: proposalFor("lib/auth.ts"),
+    });
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      runId,
+      runtimeExecutor: { executorId: "fake" },
+      approvedIntent: runtimeIntent(workspace),
+      localContext: localContextBundle(workspace),
+    });
+
+    await expect(orchestrator.startRun(workspace, runId, toolContext())).rejects.toThrow(
+      /cannot propose 'lib\/auth\.ts'/,
+    );
+    expect(state.run.status).toBe("error");
+    expect(state.diff).toBeUndefined();
+  });
+
+  it("marks the proposal review-only and refuses a runtime run that has no approved intent", async () => {
+    const { orchestrator, workspace } = createRuntimeOrchestrator({ proposal: proposalFor("app/login/page.tsx") });
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      runId,
+      runtimeExecutor: { executorId: "fake" },
+      approvedIntent: runtimeIntent(workspace),
+      localContext: localContextBundle(workspace),
+    });
+    await orchestrator.startRun(workspace, runId, toolContext());
+    expect(state.events.find((event) => event.type === "diff_ready")?.payload).toMatchObject({
+      reviewOnly: true,
+      reviewOnlyReason: expect.stringMatching(/not be applied|not applied|but not applied/u),
+    });
+    expect(() =>
+      orchestrator.createRun(workspace, refinement(), "feature_change", {
+        runId: "run_runtime_no_intent",
+        runtimeExecutor: { executorId: "fake" },
+        localContext: localContextBundle(workspace),
+      })).toThrow(/approved request intent/u);
+  });
+
+  it("refuses a proposal whose `before` is not the file the task was given", async () => {
+    const forged = proposalFor("app/login/page.tsx");
+    forged.diff.files[0]!.before = "SOMETHING THE EXECUTOR INVENTED";
+    const { orchestrator, workspace } = createRuntimeOrchestrator({ proposal: forged });
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      runId,
+      runtimeExecutor: { executorId: "fake" },
+      approvedIntent: runtimeIntent(workspace),
+      localContext: localContextBundle(workspace),
+    });
+    await expect(orchestrator.startRun(workspace, runId, toolContext())).rejects.toThrow(
+      /does not start from the file the task was given/u,
+    );
+    expect(state.diff).toBeUndefined();
+  });
+
+  function startRuntimeRun(adapter: NodeExecutorAdapter) {
+    const base = createRuntimeOrchestrator({});
+    const executors = new ExecutorRegistry();
+    executors.register(adapter);
+    const orchestrator = new AgentOrchestrator({
+      gateway: { complete: async () => { throw new Error("no model"); } } as unknown as ModelGateway,
+      settingsService: new SettingsService(new InMemorySecretStore()),
+      eventPersistence: "memory",
+      executors,
+      validateGeneratedDiffScope() {},
+    });
+    const state = orchestrator.createRun(base.workspace, refinement(), "feature_change", {
+      runId,
+      runtimeExecutor: { executorId: adapter.id },
+      approvedIntent: runtimeIntent(base.workspace),
+      localContext: localContextBundle(base.workspace),
+    });
+    return { orchestrator, workspace: base.workspace, state };
+  }
+  const neverSettles = (cancelled: { called: boolean }): NodeExecutorAdapter => ({
+    id: "hang",
+    describe: () => new FakeExecutorAdapter().describe(),
+    start: async () => ({
+      events: (async function* () { /* no events */ })(),
+      result: new Promise<never>(() => undefined),
+      cancel: async () => { cancelled.called = true; },
+    }),
+  });
+
+  it("stops an adapter that ignores cancellation instead of hanging the run", async () => {
+    const cancelled = { called: false };
+    const { orchestrator, workspace, state } = startRuntimeRun(neverSettles(cancelled));
+    const started = orchestrator.startRun(workspace, runId, toolContext());
+    await vi.waitFor(() => expect(state.run.status).toBe("running"));
+    orchestrator.cancelRun(runId);
+    // A cancelled run settles quietly; the point is that it does not hang.
+    await started;
+    expect(cancelled.called).toBe(true);
+    expect(state.run.status).toBe("cancelled");
+  });
+
+  it("closes the step when the adapter throws", async () => {
+    const { orchestrator, workspace, state } = startRuntimeRun({
+      id: "throws",
+      describe: () => new FakeExecutorAdapter().describe(),
+      start: async () => { throw new Error("adapter exploded"); },
+    });
+    await expect(orchestrator.startRun(workspace, runId, toolContext())).rejects.toThrow(/adapter exploded/u);
+    expect(state.run.status).toBe("error");
+    expect(state.events.map((event) => event.type)).toEqual(expect.arrayContaining(["step_started", "step_failed"]));
+    expect(validateAgentRunEventSequence(state.events)).toEqual([]);
+  });
+
+  describe("independent validation of a runtime proposal", () => {
+    const validatorProfile = {
+      id: "validator-model", name: "Validator", provider: "ollama", model: "validator-model", apiKeyRef: "",
+    } as unknown as ModelProfile;
+    const verdictFor = (overrides: Record<string, unknown> = {}) =>
+      validProposalValidationOutput({
+        criteria: [{ criterion: "The login page is changed", status: "satisfied", explanation: "Done." }],
+        ...overrides,
+      });
+
+    function startValidated(input: {
+      adapter: NodeExecutorAdapter;
+      validator: boolean;
+      output?: string;
+    }) {
+      const requests: ModelGatewayRequest[] = [];
+      const base = createRuntimeOrchestrator({});
+      const executors = new ExecutorRegistry();
+      executors.register(input.adapter);
+      const orchestrator = new AgentOrchestrator({
+        gateway: {
+          async complete(_profile: unknown, request: ModelGatewayRequest) {
+            requests.push(request);
+            return {
+              requestId: `validator_${requests.length}`,
+              projectId: base.workspace.project.projectId,
+              provider: "ollama",
+              model: "validator-model",
+              latencyMs: 1,
+              output: input.output ?? verdictFor(),
+              usage: { inputTokens: 1, outputTokens: 1 },
+            };
+          },
+        } as unknown as ModelGateway,
+        settingsService: new SettingsService(new InMemorySecretStore()),
+        eventPersistence: "memory",
+        executors,
+        validateGeneratedDiffScope() {},
+      });
+      const state = orchestrator.createRun(base.workspace, refinement(), "feature_change", {
+        runId,
+        runtimeExecutor: { executorId: input.adapter.id },
+        ...(input.validator ? { validatorExecution: { profile: validatorProfile, thinkingDepth: "low" as const } } : {}),
+        approvedIntent: runtimeIntent(base.workspace),
+        localContext: localContextBundle(base.workspace),
+      });
+      return { orchestrator, workspace: base.workspace, state, requests };
+    }
+    const proposal = () => proposalFor("app/login/page.tsx");
+    const diffReady = (state: { events: Array<{ type: string; payload?: unknown }> }) =>
+      state.events.find((event) => event.type === "diff_ready")?.payload as Record<string, unknown>;
+
+    it("makes the proposal applicable once the validator model accepts it", async () => {
+      const fake = new FakeExecutorAdapter({ proposal: proposal() });
+      const { orchestrator, workspace, state, requests } = startValidated({ adapter: fake, validator: true });
+      await orchestrator.startRun(workspace, runId, toolContext());
+      expect(state.run.status).toBe("awaiting_review");
+      expect(diffReady(state)?.reviewOnly).toBeUndefined();
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({ modelPreference: "validator-model", thinkingDepth: "low" });
+      // The validator judges against the user's approved criteria, not text the executor wrote.
+      const input = requests[0]!.input as { fileEditPlan: { acceptanceCriteria: string[] }; proposal: { summary: string } };
+      expect(input.fileEditPlan.acceptanceCriteria).toEqual(["The login page is changed"]);
+      expect(input.proposal.summary).toBe("Proposed change to app/login/page.tsx");
+      expect(input.proposal.summary).not.toBe(state.diff!.summary);
+      expect(() => orchestrator.requireValidatedProposal(runId, state.diff!)).not.toThrow();
+      expect(validateAgentRunEventSequence(state.events)).toEqual([]);
+    });
+
+    it("fails the run, without restarting the executor, when the validator rejects the proposal", async () => {
+      const fake = new FakeExecutorAdapter({ proposal: proposal() });
+      const invalid = verdictFor({
+        verdict: "invalid",
+        criteria: [{ criterion: "The login page is changed", status: "unsatisfied", explanation: "It is not." }],
+      });
+      const { orchestrator, workspace, state, requests } = startValidated({ adapter: fake, validator: true, output: invalid });
+      await expect(orchestrator.startRun(workspace, runId, toolContext())).rejects.toThrow(/rejected the generated proposal/u);
+      expect(requests).toHaveLength(1);
+      expect(state.run.status).toBe("error");
+      expect(() => orchestrator.requireValidatedProposal(runId, state.diff!)).toThrow(/independent validation/u);
+    });
+
+    it("keeps the proposal review-only when no validator model was chosen", async () => {
+      const fake = new FakeExecutorAdapter({ proposal: proposal() });
+      const { orchestrator, workspace, state, requests } = startValidated({ adapter: fake, validator: false });
+      await orchestrator.startRun(workspace, runId, toolContext());
+      expect(requests).toHaveLength(0);
+      expect(diffReady(state)).toMatchObject({ reviewOnly: true, reviewOnlyReason: expect.stringMatching(/No validator model/u) });
+      expect(() => orchestrator.requireValidatedProposal(runId, state.diff!)).toThrow(/independent validation/u);
+    });
+
+    it("never validates or applies a dev stand-in, even when a validator is configured", async () => {
+      const fake = new FakeExecutorAdapter({ proposal: proposal() });
+      const standIn: NodeExecutorAdapter = {
+        id: "fake", devOnly: true, label: "Stand-in",
+        describe: () => fake.describe(), start: (task, host) => fake.start(task, host),
+      };
+      const { orchestrator, workspace, state, requests } = startValidated({ adapter: standIn, validator: true });
+      await orchestrator.startRun(workspace, runId, toolContext());
+      expect(requests).toHaveLength(0);
+      expect(diffReady(state)).toMatchObject({ reviewOnly: true, reviewOnlyReason: expect.stringMatching(/development stand-in/u) });
+      expect(() => orchestrator.requireValidatedProposal(runId, state.diff!)).toThrow(/independent validation/u);
+    });
+  });
+
+  describe("host operations and child tasks", () => {
+    const contract = {
+      contractId: "plan_1:profile_api",
+      producerTaskId: "plan_1:api",
+      consumerTaskIds: ["plan_1:ui"],
+      identity: { kind: "endpoint" as const, name: "GET /api/profile" },
+      behavior: "Returns the signed-in user's profile",
+      failureSemantics: "401 when signed out",
+      acceptanceExamples: [{ input: "signed in", expected: "200 with profile" }],
+    };
+    const bundleFor = (workspace: Parameters<typeof localContextBundle>[0]) => {
+      const bundle = localContextBundle(workspace);
+      return { ...bundle, scope: { ...bundle.scope, nodeId: "feat_login" } } as typeof bundle;
+    };
+
+    function probeRun(parent: boolean, withValidator = parent) {
+      const seen: { task?: ExecutorTask; inside?: unknown; outside?: string } = {};
+      const probe: NodeExecutorAdapter = {
+        id: "probe",
+        describe: () => new FakeExecutorAdapter().describe(),
+        start: async (task, host) => {
+          seen.task = task;
+          seen.inside = await host.listChildren({ taskId: task.taskId, nodeId: "feat_login" });
+          try {
+            await host.listChildren({ taskId: task.taskId, nodeId: "container_saas_database" });
+          } catch (error) {
+            seen.outside = error instanceof Error ? error.message : String(error);
+          }
+          return new FakeExecutorAdapter({ proposal: {
+            proposalId: `proposal_${task.taskId}`,
+            taskId: task.taskId,
+            diff: { runId: task.runId, summary: "x", files: [{
+              path: "app/login/page.tsx", changeType: "modify", before: "SELECTED_CONTEXT_MARKER", after: "AFTER",
+            }] },
+          } }).start(task, host);
+        },
+      };
+      const base = createRuntimeOrchestrator({});
+      const executors = new ExecutorRegistry();
+      executors.register(probe);
+      const orchestrator = new AgentOrchestrator({
+        gateway: { complete: async () => { throw new Error("no model"); } } as unknown as ModelGateway,
+        settingsService: new SettingsService(new InMemorySecretStore()),
+        eventPersistence: "memory",
+        executors,
+        validateGeneratedDiffScope() {},
+      });
+      const validator = { profile: { id: "validator-model", name: "V", provider: "ollama", model: "v", apiKeyRef: "" } as unknown as ModelProfile, thinkingDepth: "low" as const };
+      const root = orchestrator.createRun(base.workspace, refinement(), "feature_change", {
+        runId,
+        runtimeExecutor: { executorId: "probe" },
+        ...(withValidator ? { validatorExecution: validator } : {}),
+        approvedIntent: runtimeIntent(base.workspace),
+        localContext: bundleFor(base.workspace),
+      });
+      // The parent's plan names the child by its plan task id, which is what contracts refer to.
+      if (parent) {
+        (root as { hierarchyPlan?: unknown }).hierarchyPlan = { planId: "plan_1" };
+        root.delegatedHierarchyChildren = [{ taskId: "ui", runId: "run_runtime_child", targetKind: "leaf-file" }];
+      }
+      const child = parent
+        ? orchestrator.createRun(base.workspace, refinement(), "feature_change", {
+            runId: "run_runtime_child",
+            parentRunId: runId,
+            rootRunId: runId,
+            interfaceContracts: [contract],
+            localContext: bundleFor(base.workspace),
+          })
+        : undefined;
+      return { orchestrator, workspace: base.workspace, root, child, seen, validator };
+    }
+
+    it("lets a task list only the nodes inside its own subtree", async () => {
+      const { orchestrator, workspace, seen } = probeRun(false);
+      await orchestrator.startRun(workspace, runId, toolContext());
+      expect(seen.inside).toEqual({ nodeIds: [], totalCount: 0 });
+      expect(seen.outside).toMatch(/outside this task's subtree/u);
+    });
+
+    it("gives a child its parent's executor and validator, and its own contracts in the task", async () => {
+      const { orchestrator, workspace, child, seen, validator } = probeRun(true);
+      expect(child!.run.executor).toMatchObject({ kind: "runtime", executorId: "probe" });
+      expect(child!.validatorExecution).toEqual(validator);
+      // The validator is not stubbed here, so the run fails after the executor has produced its task.
+      await orchestrator.startRun(workspace, "run_runtime_child", toolContext()).catch(() => undefined);
+      expect(seen.task?.taskId).toBe("plan_1:ui");
+      expect(seen.task?.runId).toBe("run_runtime_child");
+      expect(seen.task?.interfaceContracts).toEqual([contract]);
+      expect(seen.task?.interfaceContractIds).toEqual([contract.contractId]);
+    });
+  });
+
+  it("rejects a run bound to an executor that is not registered", () => {
+    const { orchestrator, workspace } = createRuntimeOrchestrator({});
+    expect(() =>
+      orchestrator.createRun(workspace, refinement(), "feature_change", {
+        runtimeExecutor: { executorId: "missing" },
+        localContext: localContextBundle(workspace),
+      })).toThrow(/not registered/);
+  });
+});
+
 function createModelOrchestrator(
   output: string | StubModelResponse | StubModelResponse[],
   stepSequence: AgentFlowStepKind[] = [],
@@ -2039,10 +2803,31 @@ function createModelOrchestrator(
   return { orchestrator, workspace, requests, scopeValidationCalls };
 }
 
+const DEPENDENCY_PLAN_MODES: ReadonlySet<string> = new Set([
+  "dependency-contract",
+  "dependency-failed",
+  "contract-kind-retry",
+  "contract-kind-always-wrong",
+  "plan-extra-keys",
+  "plan-long-text",
+  "plan-unreferenced-contract",
+  "plan-inherited-contract-id",
+  "plan-numeric-examples",
+]);
+
 type HierarchyBudgetHarnessMode =
   | "leaf-cap"
   | "planner-cap"
-  | "misleveled-child";
+  | "misleveled-child"
+  | "dependency-contract"
+  | "dependency-failed"
+  | "contract-kind-retry"
+  | "contract-kind-always-wrong"
+  | "plan-extra-keys"
+  | "plan-long-text"
+  | "plan-unreferenced-contract"
+  | "plan-inherited-contract-id"
+  | "plan-numeric-examples";
 
 interface HierarchyBudgetNode {
   id: string;
@@ -2081,7 +2866,18 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
 
   const nodes = new Map<string, HierarchyBudgetNode>();
   const contextIds: string[] = [];
-  if (mode === "leaf-cap") {
+  if (DEPENDENCY_PLAN_MODES.has(mode)) {
+    for (const name of ["producer", "consumer"]) {
+      const contextId = `dependency_context_${name}`;
+      const containerId = `dependency_container_${name}`;
+      const componentId = `dependency_component_${name}`;
+      const file = `src/${name}/index.ts`;
+      contextIds.push(contextId);
+      nodes.set(contextId, { id: contextId, level: "context", children: [containerId], files: [] });
+      nodes.set(containerId, { id: containerId, level: "container", children: [componentId], files: [] });
+      nodes.set(componentId, { id: componentId, level: "component", children: [], files: [file] });
+    }
+  } else if (mode === "leaf-cap") {
     for (let branch = 0; branch < 5; branch += 1) {
       const contextId = `budget_context_${branch}`;
       const containerId = `budget_container_${branch}`;
@@ -2144,6 +2940,8 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
     });
   }
 
+  const planRequests: Array<{ planRetry: unknown; systemPrompt: string; maxOutputTokens?: number }> = [];
+  const taskContextSeen: Array<{ mode: string | undefined; path: string | undefined; upstream: unknown; systemPrompt: string }> = [];
   const counters = {
     plannerChildrenCreated: 0,
     leafChildrenCreated: 0,
@@ -2164,15 +2962,100 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
         ? localContext.scope
         : undefined;
       const fileEditPlan = isRecord(input.fileEditPlan) ? input.fileEditPlan : undefined;
+      const transactionPlan = isRecord(input.transactionPlan) ? input.transactionPlan : undefined;
       const selectedPath = typeof localScope?.selectedFilePath === "string"
         ? localScope.selectedFilePath
         : typeof fileEditPlan?.path === "string"
           ? fileEditPlan.path
           : undefined;
+      const nodeTaskContext = isRecord(input.nodeTaskContext) ? input.nodeTaskContext : undefined;
+      taskContextSeen.push({
+        mode: requestMode,
+        path: selectedPath,
+        upstream: nodeTaskContext?.upstreamProposals,
+        systemPrompt: request.systemPrompt ?? "",
+      });
       let output: string;
 
-      if (requestMode === "plan_graph_delegation") {
-        if (immediateTargets?.kind === "planner" && allowedIds.length > 0) {
+      if (requestMode === "validate_whole_tree_batch" && Array.isArray(transactionPlan?.leaves)) {
+        output = JSON.stringify({
+          verdict: "valid",
+          tasks: transactionPlan.leaves.filter(isRecord).map((leaf) => ({
+            taskId: leaf.transactionTaskId,
+            childRunId: leaf.childRunId,
+            path: leaf.filePath,
+            status: "consistent",
+            criteria: Array.isArray(leaf.acceptanceCriteria)
+              ? leaf.acceptanceCriteria.map((criterion) => ({ criterion, status: "satisfied", explanation: "The delegated receipt contract is satisfied." }))
+              : [],
+            summary: "The delegated proposal satisfies its task contract.",
+          })),
+          crossFileAssessment: { status: "consistent", summary: "The shared receipt interface is consistent." },
+          summary: "The complete receipt change is consistent.",
+          rationale: "The producer and consumer use the same interface contract.",
+        });
+      } else if (requestMode === "plan_graph_delegation") {
+        planRequests.push({
+          planRetry: input.planRetry,
+          systemPrompt: request.systemPrompt ?? "",
+          ...(request.maxOutputTokens !== undefined ? { maxOutputTokens: request.maxOutputTokens } : {}),
+        });
+        // The model's natural word for a function is "function"; the contract schema only knows
+        // symbol, endpoint and message. "contract-kind-retry" corrects itself once it is told why.
+        const contractKind = mode === "contract-kind-always-wrong" || (mode === "contract-kind-retry" && !input.planRetry)
+          ? "function"
+          : "endpoint";
+        if ((DEPENDENCY_PLAN_MODES.has(mode)) &&
+          immediateTargets?.kind === "planner" && allowedIds.length === 2) {
+          const extra = mode === "plan-extra-keys";
+          const longText = mode === "plan-long-text";
+          // The contract names its producer and consumer, but the tasks do not repeat its id.
+          const contractRefs = mode === "plan-unreferenced-contract"
+            ? []
+            : mode === "plan-inherited-contract-id"
+              ? ["contract_receipt", "plan_parent:inherited_contract"]
+              : ["contract_receipt"];
+          output = JSON.stringify({
+            ...(extra ? { "^": "stray" } : {}),
+            objective: longText ? `Coordinate the receipt producer and consumer. ${"Detail. ".repeat(120)}` : "Coordinate the receipt producer and consumer",
+            tasks: [
+              {
+                ...(extra ? { taskKeyNote: "ignored" } : {}),
+                taskKey: "producer",
+                nodeId: allowedIds[0],
+                dependencyTaskKeys: [],
+                interfaceContractIds: contractRefs,
+                objective: "Expose the receipt endpoint",
+                acceptanceCriteria: ["The endpoint returns a receipt id"],
+              },
+              {
+                ...(extra ? { taskKeyNote: "ignored" } : {}),
+                taskKey: "consumer",
+                nodeId: allowedIds[1],
+                dependencyTaskKeys: ["producer"],
+                interfaceContractIds: contractRefs,
+                objective: "Display the receipt id",
+                acceptanceCriteria: ["The confirmation shows the endpoint receipt id"],
+              },
+            ],
+            contracts: [{
+              contractId: "contract_receipt",
+              producerTaskKey: "producer",
+              consumerTaskKeys: ["consumer"],
+              ...(extra ? { note: "ignored" } : {}),
+              identity: { kind: contractKind, name: "POST /api/receipts" },
+              behavior: "Creates one receipt for one successful payment",
+              units: "receipt id is an opaque string",
+              failureSemantics: "Duplicate payment ids return the original receipt",
+              acceptanceExamples: mode === "plan-numeric-examples"
+                ? [{ input: "2 todo and 1 in_progress", expected: 3 }, { input: "no team", expected: 0 }, { input: "closed", expected: false }]
+                : [{ input: "payment_1", expected: "receipt_1" }],
+            }],
+            rationale: longText
+              ? `The consumer depends on the receipt id contract produced by the API. ${"Because. ".repeat(120)}`
+              : "The consumer depends on the receipt id contract produced by the API.",
+          });
+        } else if (immediateTargets?.kind === "planner" && allowedIds.length > 0) {
           output = JSON.stringify({
             objective: "Expand the bounded synthetic hierarchy",
             tasks: allowedIds.map((nodeId) => ({
@@ -2197,7 +3080,9 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
         }
       } else if (requestMode === "locate_plan" && selectedPath) {
         counters.leafRunsStarted += 1;
-        output = JSON.stringify({
+        output = mode === "dependency-failed" && selectedPath.includes("/producer/")
+          ? "invalid producer task plan"
+          : JSON.stringify({
           path: selectedPath,
           objective: `Change ${selectedPath}`,
           targetDescription: "The exact synthetic source marker",
@@ -2205,7 +3090,7 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
           constraints: ["Modify only the authorized synthetic file"],
           acceptanceCriteria: [`${selectedPath} is updated`],
           rationale: "The synthetic leaf owns its exact marker.",
-        });
+          });
       } else if (requestMode === "validate_proposal" && selectedPath) {
         const criteria = Array.isArray(fileEditPlan?.acceptanceCriteria)
           ? fileEditPlan.acceptanceCriteria.filter(
@@ -2268,6 +3153,8 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
           mode: "model",
           executionPolicy: "review_first",
         };
+        const interfaceContracts = (plan.contracts ?? []).filter((contract) =>
+          contract.producerTaskId === task.taskId || contract.consumerTaskIds.includes(task.taskId));
         if (task.targetKind === "planner") {
           counters.plannerChildrenCreated += 1;
           const node = nodes.get(task.nodeId);
@@ -2291,6 +3178,7 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
             parentRunId: parentRun.runId,
             rootRunId: parentRun.rootRunId ?? parentRun.runId,
             role,
+            interfaceContracts,
           });
           childStates.push(childState);
         } else {
@@ -2307,6 +3195,7 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
             parentRunId: parentRun.runId,
             rootRunId: parentRun.rootRunId ?? parentRun.runId,
             role: "leaf_file_editor",
+            interfaceContracts,
           });
           childStates.push(childState);
         }
@@ -2352,6 +3241,8 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
     workspace,
     root,
     counters,
+    planRequests,
+    taskContextSeen,
     allStates: () => [root, ...childStates],
     allEvents: () => [root, ...childStates].flatMap((state) => state.events),
   };
@@ -2641,3 +3532,40 @@ function toolContext() {
     },
   } as never;
 }
+
+describe("what a consumer is shown of its producers' proposals", () => {
+  const proposal = (taskId: string, after: string) => ({
+    taskId,
+    nodeId: `node_${taskId}`,
+    objective: `Objective of ${taskId}`,
+    files: [{ path: `src/${taskId}.ts`, changeType: "modify" as const, after }],
+  });
+
+  it("passes small proposals through untouched", () => {
+    const input = [proposal("a", "export const a = 1;")];
+    expect(boundUpstreamProposals(input)).toEqual(input);
+  });
+
+  it("cuts a very large file to its limit and says so, keeping the path and change type exact", () => {
+    const [bounded] = boundUpstreamProposals([proposal("a", "x".repeat(40_000))]);
+    const file = bounded!.files[0]!;
+    expect(file.after).toHaveLength(16_000);
+    expect(file.truncated).toBe(true);
+    expect(file).toMatchObject({ path: "src/a.ts", changeType: "modify" });
+  });
+
+  it("stops handing out content once the total budget is spent, but still names every file", () => {
+    const bounded = boundUpstreamProposals(
+      ["a", "b", "c", "d"].map((id) => proposal(id, "y".repeat(16_000))),
+    );
+    const lengths = bounded.map((item) => item.files[0]!.after?.length ?? 0);
+    expect(lengths).toEqual([16_000, 16_000, 16_000, 0]);
+    expect(bounded[3]!.files[0]).toMatchObject({ path: "src/d.ts", truncated: true });
+    expect(bounded.map((item) => item.files[0]!.path)).toEqual(["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"]);
+  });
+
+  it("leaves a deletion as just its path", () => {
+    const deletion = { taskId: "a", nodeId: "n", objective: "o", files: [{ path: "src/old.ts", changeType: "delete" as const }] };
+    expect(boundUpstreamProposals([deletion])).toEqual([deletion]);
+  });
+});

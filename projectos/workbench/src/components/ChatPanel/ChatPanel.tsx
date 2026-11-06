@@ -9,10 +9,13 @@ import {
 } from '../../state/pendingChangesDrawer'
 import PendingChangesDrawer from '../PendingChangesDrawer/PendingChangesDrawer'
 import { useI18n } from '../../i18n'
+import { modelProfileLabel } from '@contracts/index'
 import PromptRefinementCard from './PromptRefinementCard'
+import RequestIntentCard from './RequestIntentCard'
 import PlanReviewCard from './PlanReviewCard'
 import AgentPoolAcceptanceCard from './AgentPoolAcceptanceCard'
 import { useAgentPoolStore } from '../AgentFlow/AgentPool/agentPoolStore'
+import PendingRunDecisions from './PendingRunDecisions'
 import DebugSessionPanel from './DebugSessionPanel'
 import { cycleChatMode } from './ChatModeSelector'
 import ChatMessageContent from './ChatMessageContent'
@@ -69,6 +72,11 @@ export default function ChatPanel() {
   const setChatInput = useWorkbenchStore((s) => s.setChatInput)
   const sendPrompt = useWorkbenchStore((s) => s.sendPrompt)
   const pendingRefinement = useWorkbenchStore((s) => s.pendingRefinement)
+  const pendingIntent = useWorkbenchStore((s) => s.pendingIntent)
+  const settings = useWorkbenchStore((s) => s.settings)
+  const executorOptions = useWorkbenchStore((s) => s.executorOptions)
+  const approveRequestIntent = useWorkbenchStore((s) => s.approveRequestIntent)
+  const reviseRequestIntent = useWorkbenchStore((s) => s.reviseRequestIntent)
   const pendingPlan = useWorkbenchStore((s) => s.pendingPlan)
   const activeChatSessionId = useChatSessionStore((s) => s.activeSessionId)
   const labChatSessionId = useProductLabStore((s) => {
@@ -85,6 +93,10 @@ export default function ChatPanel() {
   const pendingDiagramSummary = useDiagramGraphStore((s) => s.pendingSummary)
   const pendingWireframeSummary = useWireframePackStore((s) => s.pendingSummary)
   const reviewingPoolTask = useAgentPoolStore((s) => s.reviewingTaskSnapshot)
+  const runDecisions = useWorkbenchStore((s) => s.runDecisions)
+  const focusedDecisionId = useWorkbenchStore((s) => s.focusedDecisionId)
+  const decisionResolvingIds = useWorkbenchStore((s) => s.decisionResolvingIds)
+  const resolveRunDecision = useWorkbenchStore((s) => s.resolveRunDecision)
   const planConfirmed = useWorkbenchStore((s) => s.planConfirmed)
   const debugSession = useWorkbenchStore((s) => s.debugSession)
   const refinementConfirmed = useWorkbenchStore((s) => s.refinementConfirmed)
@@ -292,7 +304,7 @@ export default function ChatPanel() {
     if (!el) return
     if (pendingRevealMessageId) return
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-  }, [messages, pendingRefinement, pendingPlan, debugSession, refineLoading, pendingRevealMessageId])
+  }, [messages, pendingRefinement, pendingIntent, pendingPlan, debugSession, refineLoading, pendingRevealMessageId])
 
   useEffect(() => {
     if (!pendingRevealMessageId) return
@@ -370,16 +382,37 @@ export default function ChatPanel() {
   const showGlobalAgentHint =
     (globalAgentActive || (!selectedNodeId && !selectedFilePath)) &&
     (chatMode === 'change' || chatMode === 'plan')
+  const pendingIntentRuntimeId =
+    pendingIntent?.executorSelection.kind === 'runtime' ? pendingIntent.executorSelection.runtimeProfileId : null
+  const pendingIntentExecutorLabel = (() => {
+    if (!pendingIntent) return ''
+    const snapshot = pendingIntent.executorSnapshot
+    if (snapshot) return snapshot.profile.displayName ?? snapshot.profile.name
+    const selection = pendingIntent.executorSelection
+    if (selection.kind === 'runtime') {
+      return executorOptions.find((option) => option.executorId === selection.runtimeProfileId)?.label ??
+        selection.runtimeProfileId
+    }
+    return settings?.modelProfiles.find((profile) => profile.id === selection.modelProfileId)?.name ??
+      selection.modelProfileId
+  })()
 
   return (
     <div className={styles.panel} ref={panelRef}>
       <div className={styles.messagesShell}>
         <div className={styles.messages} ref={messagesRef}>
         {showGlobalAgentHint ? (
-          <div className={styles.suggestPlanBanner}>{ts('chat.globalAgentEmptyHint')}</div>
+          <div className={styles.suggestPlanBanner}>{ts('context.globalAgentEmptyHint')}</div>
         ) : null}
         {inheritedDigest ? <InheritedSessionCard digest={inheritedDigest} /> : null}
         {showLabCard ? <ProductLabCard /> : null}
+        <PendingRunDecisions
+          decisions={runDecisions}
+          resolvingIds={decisionResolvingIds}
+          focusedDecisionId={focusedDecisionId}
+          onResolve={(decision, optionId, text, status) =>
+            void resolveRunDecision(decision, optionId, text, status)}
+        />
         {messages.map((msg) => {
           const spatialPin = msg.role === 'user' && parseSpatialPinChatContent(msg.content)
           const attachments = spatialPin
@@ -450,7 +483,25 @@ export default function ChatPanel() {
             </div>
           )
         })}
-        {chatMode === 'change' && pendingRefinement && !refinementConfirmed && (
+        {chatMode === 'change' && pendingIntent && (
+          <RequestIntentCard
+            intent={pendingIntent}
+            busy={refineLoading}
+            executorLabel={pendingIntentExecutorLabel}
+            {...(pendingIntentRuntimeId !== null
+              ? {
+                  validation: pendingIntent.validatorSnapshot
+                    ? { kind: 'model' as const, label: modelProfileLabel(pendingIntent.validatorSnapshot.profile) }
+                    : executorOptions.find((option) => option.executorId === pendingIntentRuntimeId)?.devOnly
+                      ? { kind: 'devOnly' as const }
+                      : { kind: 'none' as const },
+                }
+              : {})}
+            onApprove={(answers) => void approveRequestIntent(answers)}
+            onRevise={reviseRequestIntent}
+          />
+        )}
+        {chatMode === 'change' && pendingRefinement && !pendingIntent && !refinementConfirmed && (
           <PromptRefinementCard
             refinement={pendingRefinement}
             targetFile={selectedFilePath}

@@ -3,8 +3,9 @@ import { Notification, app, type BrowserWindow } from 'electron'
 export type DiffReadyNotificationPayload = {
   title: string
   body: string
-  destination: 'ask' | 'diff' | 'reminder'
+  destination: 'ask' | 'diff' | 'reminder' | 'decisions'
   runIds: string[]
+  decisionId?: string
 }
 
 export function showDiffReadyNotification(
@@ -41,6 +42,7 @@ export function showDiffReadyNotification(
       win.webContents.send('notify:diffReadyActivated', {
         destination: payload.destination,
         runIds: payload.runIds,
+        ...(payload.decisionId ? { decisionId: payload.decisionId } : {}),
       })
     }
   })

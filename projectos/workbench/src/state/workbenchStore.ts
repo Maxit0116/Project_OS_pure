@@ -6,6 +6,7 @@ import type {
   AgentActionEvent,
   AgentDelegationEvent,
   AgentProfile,
+  AgentRun,
   AgentRunRole,
   AgentRunScope,
   AgentRunEvent,
@@ -25,6 +26,8 @@ import type {
   ProjectOSProject,
   Disposable,
   ProjectOSSettings,
+  RunDecision,
+  RequestIntent,
   PromptRefinement,
   MemoryWriteNotice,
   McpServerConfig,
@@ -101,6 +104,7 @@ import {
 } from '@contracts/index'
 import { appendComposerHubToPrompt } from '../components/SpatialComposeHub/composerHubPrompt'
 import type { MapWorkGroupMutationInput, UpdateMapWorkGroupPatch, WorkGroupSelectionItem } from '@contracts/index'
+import type { ExecutorOption, ExecutorSelection } from '@contracts/index'
 import { FileOwnershipErrorDetailsSchema, MAP_ARTIFACT_DEFAULT_SIZES, emptyNoteDocument } from '@contracts/index'
 import { getActiveStackMember, getStackMembers, syncStackGeometry } from '@contracts/index'
 import {
@@ -183,6 +187,7 @@ import type { MapArtifactRenameFlow } from './mapArtifactRenameFlow'
 export type { MapArtifactRenameFlow } from './mapArtifactRenameFlow'
 import type { PickedMapImageFile } from '../components/FunctionMap/pickMapImageFile'
 import { sanitizeErrorMessage } from '../../../utils/sanitize-error-message'
+import { userFacingErrorMessage, userFacingProviderText } from '../errors/userFacingError'
 import {
   collectDirectoryAncestorPaths,
   collectSemanticAncestorIdsForPaths,
@@ -194,6 +199,12 @@ import {
   loadNotifyOnDiffReadyPreference,
   saveNotifyOnDiffReadyPreference,
 } from '../preferences/diffReadyNotifications'
+import {
+  loadNotifyOnPendingDecisionPreference,
+  markRunDecisionNotificationSeen,
+  saveNotifyOnPendingDecisionPreference,
+  wasRunDecisionNotificationSeen,
+} from '../preferences/pendingDecisionNotifications'
 import {
   loadChatModeSwitchPreference,
   saveChatModeSwitchPreference,
@@ -339,6 +350,31 @@ export function isGlobalAgentScope(state: {
   return true
 }
 
+/**
+ * The executor a request carries. A chosen runtime applies to Agent-mode changes
+ * only; Ask, Plan and Debug always use the selected model. Fixture and
+ * presentation modes never carry a live choice.
+ */
+export function selectExecutorForRequest(state: {
+  chatMode: ChatMode
+  selectedModelProfileId: string | null
+  selectedRuntimeId: string | null
+  executorOptions: ExecutorOption[]
+  settings: ProjectOSSettings | null
+}): ExecutorSelection | undefined {
+  if (state.settings?.presentationMode || state.settings?.execution.mode === 'fixture') return undefined
+  if (
+    state.chatMode === 'change' &&
+    state.selectedRuntimeId !== null &&
+    state.executorOptions.some((option) => option.executorId === state.selectedRuntimeId)
+  ) {
+    return { kind: 'runtime', runtimeProfileId: state.selectedRuntimeId }
+  }
+  return state.selectedModelProfileId
+    ? { kind: 'model', modelProfileId: state.selectedModelProfileId }
+    : undefined
+}
+
 export function canSubmitAgentPrompt(state: {
   chatMode: ChatMode
   globalAgentActive: boolean
@@ -347,7 +383,11 @@ export function canSubmitAgentPrompt(state: {
   pendingFileOwnerChoice: PendingFileOwnerChoice | null
   fileScopeError: 'not_mapped' | null
   pendingPlan: import('@contracts/index').ImplementationPlan | null
+  pendingIntent: RequestIntent | null
+  modelSelectionPending?: boolean
 }): boolean {
+  if (state.modelSelectionPending) return false
+  if (state.pendingIntent) return false
   if (isGlobalAgentScope(state)) {
     // M3.B: Ask/Debug/Anchored + Plan/Agent (global planner → leaf child runs)
     return (
@@ -399,7 +439,7 @@ export function createAskFailureChatMessage(
     id: msgId(),
     role: 'system',
     content: getStoreMessage(locale, 'chat.askFailure', {
-      message: sanitizeErrorMessage(error),
+      message: userFacingErrorMessage(error, locale),
     }),
     timestamp: new Date().toISOString(),
   }
@@ -466,6 +506,7 @@ export interface WorkbenchState {
   themePreference: ThemePreference
   resolvedTheme: ResolvedTheme
   notifyOnDiffReady: boolean
+  notifyOnPendingDecision: boolean
   /** When switching chat modes: open a fresh session (Cursor-like) or keep the same thread. */
   chatModeSwitch: ChatModeSwitchPreference
   /** Mac desktop: keep machine awake (incl. lid close) for agent work. */
@@ -495,6 +536,7 @@ export interface WorkbenchState {
 
   messages: ChatMessage[]
   pendingRefinement: PromptRefinement | null
+  pendingIntent: RequestIntent | null
   refinementConfirmed: boolean
   pendingPlan: import('@contracts/index').ImplementationPlan | null
   /** Last plan that was built — used by Return to plan. */
@@ -536,6 +578,10 @@ export interface WorkbenchState {
   agentFlowSubject: AgentFlowSubject
 
   activeRunId: string | null
+  decisionRootRunId: string | null
+  runDecisions: RunDecision[]
+  focusedDecisionId: string | null
+  decisionResolvingIds: string[]
   flowSteps: AgentFlowStep[]
   flowActions: AgentActionEvent[]
   flowDelegationEvents: AgentDelegationEvent[]
@@ -550,6 +596,8 @@ export interface WorkbenchState {
   /** Phase 3: run id paused from the graph (interrupted); Resume calls continueAgentRun. */
   liveGraphPausedRunId: string | null
   diffReady: boolean
+  /** Set when the run's proposal can be reviewed but not applied (no independent validation). */
+  diffReviewOnlyReason: string | null
   generatedDiff: GeneratedDiff | null
   applyResult: ApplyResult | null
   verificationResult: VerificationRunResult | null
@@ -599,6 +647,11 @@ export interface WorkbenchState {
   /** Marketplace catalog prefetch / refresh lifecycle. */
   marketplaceCatalogStatus: 'idle' | 'loading' | 'ready' | 'error'
   selectedModelProfileId: string | null
+  /** Agent runtimes this build offers for single-file changes; empty in a production build. */
+  executorOptions: ExecutorOption[]
+  /** A chosen runtime replaces the model for Agent-mode changes only. */
+  selectedRuntimeId: string | null
+  modelSelectionPending: boolean
   mapContent: MapContentDocument | null
   features: FeaturesFile | null
   featuresBaseline: FeaturesFile | null
@@ -641,6 +694,7 @@ export interface WorkbenchState {
   setThemePreference: (theme: ThemePreference) => void
   setResolvedTheme: (theme: ResolvedTheme) => void
   setNotifyOnDiffReady: (enabled: boolean) => void
+  setNotifyOnPendingDecision: (enabled: boolean) => void
   setChatModeSwitch: (value: ChatModeSwitchPreference) => void
   setKeepAwakeMode: (mode: KeepAwakeMode) => Promise<void>
   setKeepAwakeStatus: (status: KeepAwakeStatus | null) => void
@@ -653,7 +707,11 @@ export interface WorkbenchState {
   setPendingChangesDrawerExpanded: (expanded: boolean) => void
   dismissPendingChanges: () => void
   undoAllPendingChanges: () => Promise<void>
-  navigateFromAgentNotification: (destination: 'ask' | 'diff' | 'reminder') => Promise<void>
+  navigateFromAgentNotification: (
+    destination: 'ask' | 'diff' | 'reminder' | 'decisions',
+    runId?: string,
+    decisionId?: string,
+  ) => Promise<void>
   /** Fire Reminder Graph due/ready/conflict alerts (system or in-app banner). */
   notifyReminderEvents: (
     events: import('@contracts/index').ReminderNotifyEvent[],
@@ -770,6 +828,7 @@ export interface WorkbenchState {
   sendPrompt: (input: string | ComposerDraft) => Promise<void>
   confirmRefinement: (
     alignment?: import('@contracts/index').ConfirmAlignmentRequest,
+    onStarted?: (run: AgentRun) => void,
   ) => Promise<void>
   reviseRefinement: () => void
   confirmBugAlignment: (
@@ -837,7 +896,16 @@ export interface WorkbenchState {
     }>
   >
   restoreConversationCheckpoint: (checkpointId: string) => Promise<void>
+  loadRunDecisions: (rootRunId?: string) => Promise<void>
+  resolveRunDecision: (
+    decision: RunDecision,
+    optionId: string,
+    text?: string,
+    status?: 'resolved' | 'declined',
+  ) => Promise<void>
   submitDebugRepro: () => Promise<void>
+  approveRequestIntent: (answers?: Array<{ questionId: string; answer: string; selectedOptionId?: string }>) => Promise<void>
+  reviseRequestIntent: () => void
   confirmDebugFix: () => Promise<void>
   markDebugFixed: () => Promise<void>
   loadDiff: (runId?: string) => Promise<void>
@@ -947,7 +1015,9 @@ export interface WorkbenchState {
   setSettingsOpen: (open: boolean, focusView?: string | null) => void
   clearSettingsFocusView: () => void
   setSelectedModelProfileId: (profileId: string | null) => void
-  selectChatModel: (profileId: string) => Promise<void>
+  loadExecutorOptions: () => Promise<void>
+  selectRuntimeExecutor: (executorId: string | null) => void
+  selectChatModel: (profileId: string) => Promise<boolean>
   setThinkingDepth: (depth: ThinkingDepth) => Promise<void>
   setPresentationMode: (enabled: boolean) => Promise<void>
   loadMapContent: () => Promise<void>
@@ -1079,8 +1149,15 @@ async function reconcileStaleFlowStatus(
   }
 }
 
+/**
+ * The sentence a person sees for a failed request: coded errors in their language, provider
+ * failures explained, wrapper text stripped. The raw message used to reach the banner, so a Chinese
+ * UI showed "The model did not return a usable planning step after a retry".
+ */
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback
+  return error instanceof Error
+    ? userFacingErrorMessage(error, useWorkbenchStore.getState().locale)
+    : fallback
 }
 
 /** Compact, user-visible reason for structure rescan failures (IPC preserves message). */
@@ -1398,6 +1475,9 @@ async function loadWorkspaceIntoStore(
     storyFocusedFeatureId: null,
     settings,
     selectedModelProfileId: defaultModelProfileId,
+    executorOptions: [] as ExecutorOption[],
+    selectedRuntimeId: null as string | null,
+    modelSelectionPending: false,
     context: null,
     ...initialTransientState,
     // Reset marketplace cache for the new workspace so prefetch cannot skip on stale ready.
@@ -1455,6 +1535,7 @@ const initialTransientState = {
   >,
   messages: [] as ChatMessage[],
   pendingRefinement: null as PromptRefinement | null,
+  pendingIntent: null as RequestIntent | null,
   refinementConfirmed: false,
   pendingPlan: null as import('@contracts/index').ImplementationPlan | null,
   lastBuiltPlan: null as import('@contracts/index').ImplementationPlan | null,
@@ -1483,6 +1564,10 @@ const initialTransientState = {
   latestContextAssembly: null as import('@contracts/index').ContextAssembly | null,
   agentFlowSubject: 'run' as AgentFlowSubject,
   activeRunId: null as string | null,
+  decisionRootRunId: null as string | null,
+  runDecisions: [] as RunDecision[],
+  focusedDecisionId: null as string | null,
+  decisionResolvingIds: [] as string[],
   flowSteps: [] as AgentFlowStep[],
   flowActions: [] as AgentActionEvent[],
   flowDelegationEvents: [] as AgentDelegationEvent[],
@@ -1494,6 +1579,7 @@ const initialTransientState = {
   liveGraphFocusTaskId: null as string | null,
   liveGraphPausedRunId: null as string | null,
   diffReady: false,
+  diffReviewOnlyReason: null,
   generatedDiff: null as GeneratedDiff | null,
   applyResult: null as ApplyResult | null,
   verificationResult: null as VerificationRunResult | null,
@@ -1574,6 +1660,7 @@ function queueStructureRefineForChangedFilesImpl(
 export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   let nodeContextRequestSequence = 0
   let fileContextRequestSequence = 0
+  let decisionRequestSequence = 0
 
   const loadSelectedNodeContext = async (nodeId: string) => {
     const { client, project } = get()
@@ -1692,6 +1779,44 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     showInAppBanner(channel)
   }
 
+  const notifyPendingDecision = (decision: RunDecision) => {
+    const state = get()
+    if (!state.notifyOnPendingDecision || decision.status !== 'pending' ||
+      wasRunDecisionNotificationSeen(decision.id)) return
+    markRunDecisionNotificationSeen(decision.id)
+    const body = getStoreMessage(state.locale, 'decisions.notificationBody', {
+      question: truncateDiffReadySummary(decision.question, 160),
+    })
+    if (!state.windowFocused && isDesktopApp() && window.projectOS?.notify) {
+      void window.projectOS.notify.showDiffReady({
+        title: getStoreMessage(state.locale, 'decisions.notificationTitle'),
+        body,
+        destination: 'decisions',
+        runIds: [decision.rootRunId],
+        decisionId: decision.id,
+      }).catch((error) => {
+        console.error('[workbench] failed to show decision notification', error)
+        get().pushToast({
+          type: 'info',
+          message: getStoreMessage(get().locale, 'decisions.notificationToast', { question: body }),
+        })
+      })
+      return
+    }
+    useChatSessionStore.getState().presentAgentFlow()
+    set({
+      decisionRootRunId: decision.rootRunId,
+      agentFlowSubject: 'run',
+      rightPanelTab: 'chat',
+      rightPanelOpen: true,
+      focusedDecisionId: decision.id,
+    })
+    get().pushToast({
+      type: 'info',
+      message: getStoreMessage(state.locale, 'decisions.notificationToast', { question: body }),
+    })
+  }
+
   const maybeNotifyAgentComplete = (
     item: Omit<DiffReadyCompletion, 'context'> & { context?: DiffReadyCompletion['context'] },
   ) => {
@@ -1743,6 +1868,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   themePreference: loadThemePreference(),
   resolvedTheme: resolveTheme(loadThemePreference()),
   notifyOnDiffReady: loadNotifyOnDiffReadyPreference(),
+  notifyOnPendingDecision: loadNotifyOnPendingDecisionPreference(),
   chatModeSwitch: loadChatModeSwitchPreference(),
   keepAwakeMode: loadKeepAwakeModePreference(),
   keepAwakeStatus: null,
@@ -1765,6 +1891,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   settingsOpen: false,
   settingsFocusView: null,
   selectedModelProfileId: null,
+  executorOptions: [],
+  selectedRuntimeId: null,
+  modelSelectionPending: false,
   mapContent: null,
   features: null,
   featuresBaseline: null,
@@ -1799,6 +1928,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       return
     }
     set({ notifyOnDiffReady: enabled })
+  },
+
+  setNotifyOnPendingDecision: (enabled) => {
+    saveNotifyOnPendingDecisionPreference(enabled)
+    set({ notifyOnPendingDecision: enabled })
   },
 
   setChatModeSwitch: (value) => {
@@ -1886,7 +2020,21 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     get().dismissPendingChanges()
   },
 
-  navigateFromAgentNotification: async (destination) => {
+  navigateFromAgentNotification: async (destination, runId, decisionId) => {
+    if (destination === 'decisions') {
+      if (!runId || !decisionId) return
+      useChatSessionStore.getState().presentAgentFlow()
+      set({
+        decisionRootRunId: runId,
+        agentFlowSubject: 'run',
+        rightPanelTab: 'chat',
+        rightPanelOpen: true,
+        focusedDecisionId: decisionId,
+        diffReadyBanner: null,
+      })
+      await get().loadRunDecisions(runId)
+      return
+    }
     if (destination === 'diff') {
       await get().navigateToDiffReviewFile()
       return
@@ -2153,6 +2301,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       useChatSessionStore.getState().presentAgentFlow()
       set({
         activeRunId: run.runId,
+        decisionRootRunId: run.rootRunId ?? run.runId,
+        runDecisions: [],
+        focusedDecisionId: null,
+        decisionResolvingIds: [],
         liveGraphPausedRunId: null,
         flowStatus: 'running',
         agentFlowSubject: 'run',
@@ -2849,6 +3001,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       message: getStoreMessage(locale, 'chat.agentStopped'),
       autoDismiss: 2500,
     })
+    // The toast disappears; the chat is where the person looks for what happened to the run.
+    if (runId) {
+      set((s) => ({
+        messages: [
+          ...s.messages,
+          {
+            id: msgId(),
+            role: 'system' as const,
+            content: getStoreMessage(locale, 'chat.agentStoppedMessage'),
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }))
+    }
     scheduleChatSessionPersist()
   },
 
@@ -3146,6 +3312,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       draft.invokedSkillId ?? get().activeCustomModeSkillId ?? undefined
     const composerFieldsWithMode = {
       ...composerFields,
+      ...(selectExecutorForRequest(state) ? { executorSelection: selectExecutorForRequest(state)! } : {}),
       ...(effectiveSkillId ? { invokedSkillId: effectiveSkillId } : {}),
     }
 
@@ -3626,7 +3793,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           latestPlanTrace: {
             status: 'error',
             scope: planScope,
-            message: sanitizeErrorMessage(error),
+            message: userFacingErrorMessage(error, current.locale),
           },
           messages: [
             ...current.messages,
@@ -3634,7 +3801,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
               id: msgId(),
               role: 'assistant' as const,
               content: getStoreMessage(current.locale, 'plan.failure', {
-                message: sanitizeErrorMessage(error),
+                message: userFacingErrorMessage(error, current.locale),
               }),
               timestamp: new Date().toISOString(),
             },
@@ -3698,6 +3865,52 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       return
     }
 
+    if (chatMode === 'change') {
+      const executorSelection = composerFieldsWithMode.executorSelection
+      if (!executorSelection) {
+        pushToast({ type: 'warning', message: getStoreMessage(state.locale, 'chat.configureModel') })
+        return
+      }
+      get().runDisposable?.dispose()
+      resetDiffReadyBatch()
+      const userMsg = buildUserMessage()
+      set((current) => ({
+        messages: [...current.messages, userMsg],
+        composerDraft: clearedDraft,
+        pendingIntent: null,
+        pendingRefinement: null,
+        refinementConfirmed: false,
+        refineLoading: true,
+        activeRunId: null,
+        flowStatus: 'idle',
+        executionOverlay: null,
+        runDecisions: [],
+        focusedDecisionId: null,
+      }))
+      try {
+        const intent = await client.extractRequestIntent({
+          projectId: project.projectId,
+          rawRequest: rawPrompt.trim(),
+          nodeId: selectedNodeId ?? undefined,
+          filePath: selectedFilePath ?? undefined,
+          ...composerFieldsWithMode,
+          executorSelection,
+        })
+        set({
+          pendingIntent: intent,
+          rightPanelTab: 'chat',
+          refineLoading: false,
+        })
+      } catch (error) {
+        set({
+          refineLoading: false,
+          error: errorMessage(error, 'Failed to prepare request intent'),
+        })
+      }
+      scheduleChatSessionPersist()
+      return
+    }
+
     get().runDisposable?.dispose()
     resetDiffReadyBatch()
 
@@ -3721,6 +3934,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       liveGraphFocusTaskId: null,
         liveGraphPausedRunId: null,
       diffReady: false,
+      diffReviewOnlyReason: null,
       diffReadyBanner: null,
       pendingChangesDrawerDismissedRunId: null,
       diffFileStats: [],
@@ -3772,7 +3986,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     scheduleChatSessionPersist()
   },
 
-  confirmRefinement: async (alignment) => {
+  confirmRefinement: async (alignment, onStarted) => {
     const { client, pendingRefinement, pushToast, locale } = get()
     if (!pendingRefinement) return
     const subscriptionProjectId = get().project?.projectId
@@ -3797,6 +4011,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         refinementConfirmed: true,
         latestContextAssembly: delivered.contextAssembly ?? get().latestContextAssembly,
         activeRunId: run.runId,
+        decisionRootRunId: run.rootRunId ?? run.runId,
+        runDecisions: [],
+        focusedDecisionId: null,
         flowSteps: [],
         flowActions: [],
         flowDelegationEvents: [],
@@ -3809,6 +4026,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         liveGraphPausedRunId: null,
         agentFlowSubject: 'run',
         diffReady: false,
+        diffReviewOnlyReason: null,
         generatedDiff: null,
         applyResult: null,
         verificationResult: null,
@@ -3823,6 +4041,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         diffFileStats: [],
         selectedDiffFilePath: null,
       })
+      onStarted?.(run)
+      void get().loadRunDecisions(run.rootRunId ?? run.runId)
 
       const isCurrentRunSubscription = () => {
         const current = get()
@@ -3833,6 +4053,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       const handledRunEventIds = new Set<string>()
       /** Snapshot watermark — live events with runSequence <= this are ignored (DevPlan §7.4). */
       let snapshotWatermark: number | null = null
+      let lastDecisionRefreshAt = 0
+      const refreshRunDecisionsIfDue = () => {
+        const rootRunId = run.rootRunId ?? run.runId
+        const inspectedRootRunId = get().decisionRootRunId
+        if (inspectedRootRunId && inspectedRootRunId !== rootRunId) return
+        const now = Date.now()
+        if (now - lastDecisionRefreshAt < 1_500) return
+        lastDecisionRefreshAt = now
+        void get().loadRunDecisions(rootRunId)
+      }
       const applyRunEvent = (event: AgentRunEvent) => {
         if (!isCurrentRunSubscription()) return
         if (handledRunEventIds.has(event.eventId)) return
@@ -3851,6 +4081,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         } catch (error) {
           console.error('[workbench] failed to apply agent run event', event.type, error)
         }
+        refreshRunDecisionsIfDue()
         if (event.type === 'task_delegated') {
           ensureChildSubscription(event, run.runId, run.runId)
         }
@@ -3951,6 +4182,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
                 ),
               }
             })
+            refreshRunDecisionsIfDue()
             if (childEvent.type === 'task_delegated') {
               ensureChildSubscription(childEvent, childRunId, rootRunId)
             }
@@ -4088,8 +4320,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   confirmPlanBuild: async () => {
-    const { client, pendingPlan, pushToast, locale } = get()
-    if (!pendingPlan || pendingPlan.status !== 'ready') return
+    const { client, project, pendingPlan, refineLoading, pushToast, locale } = get()
+    if (!pendingPlan || pendingPlan.status !== 'ready' || refineLoading) return
     if (pendingPlan.steps.length === 0) {
       pushToast({
         type: 'warning',
@@ -4098,27 +4330,45 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       })
       return
     }
-    set({ refineLoading: true, planConfirmed: true })
+    const isCurrentBuild = () => get().project?.projectId === project?.projectId &&
+      get().pendingPlan?.id === pendingPlan.id
+    set({ refineLoading: true, planConfirmed: false, error: null })
     try {
       const refinement = await client.buildPlan(pendingPlan.id)
-      useChatSessionStore.getState().presentAgentFlow()
-      set({
-        refineLoading: false,
-        lastBuiltPlan: pendingPlan,
-        pendingPlan: null,
-        pendingRefinement: refinement,
-        refinementConfirmed: true,
-        chatMode: 'change',
-        agentFlowSubject: 'run',
-        rightPanelTab: 'chat',
+      if (!isCurrentBuild()) return
+      set({ pendingRefinement: refinement, refinementConfirmed: false })
+      let started = false
+      await get().confirmRefinement(undefined, () => {
+        if (!isCurrentBuild()) return
+        started = true
+        set({
+          refineLoading: false,
+          lastBuiltPlan: pendingPlan,
+          pendingPlan: null,
+          planConfirmed: true,
+          chatMode: 'change',
+          agentFlowSubject: 'run',
+          rightPanelTab: 'chat',
+        })
+        pushToast({ type: 'info', message: getStoreMessage(locale, 'plan.buildStarted') })
       })
-      pushToast({ type: 'info', message: getStoreMessage(locale, 'plan.buildStarted') })
-      await get().confirmRefinement()
+      if (!started && isCurrentBuild()) {
+        set({
+          refineLoading: false,
+          planConfirmed: false,
+          refinementConfirmed: false,
+          pendingRefinement: null,
+          chatMode: 'plan',
+          agentFlowSubject: 'plan',
+        })
+      }
     } catch (error) {
+      if (!isCurrentBuild()) return
       set({
         refineLoading: false,
         planConfirmed: false,
         refinementConfirmed: false,
+        pendingRefinement: null,
         error: errorMessage(error, 'Failed to build plan'),
       })
     }
@@ -4515,6 +4765,105 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
   },
 
+  loadRunDecisions: async (requestedRootRunId) => {
+    const { client, project, activeRunId, decisionRootRunId } = get()
+    const rootRunId = requestedRootRunId ?? decisionRootRunId ?? activeRunId
+    if (!project || !rootRunId) return
+    const projectId = project.projectId
+    const requestSequence = ++decisionRequestSequence
+    set({ decisionRootRunId: rootRunId })
+    try {
+      const decisions = await client.listRunDecisions(projectId, rootRunId)
+      const current = get()
+      if (current.project?.projectId !== projectId ||
+        current.decisionRootRunId !== rootRunId ||
+        requestSequence !== decisionRequestSequence) return
+      const previousPendingIds = new Set(get().runDecisions
+        .filter((item) => item.rootRunId === rootRunId && item.status === 'pending')
+        .map((item) => item.id))
+      const focusedDecisionId = get().focusedDecisionId
+      set({
+        runDecisions: decisions,
+        ...(focusedDecisionId && !decisions.some((item) => item.id === focusedDecisionId)
+          ? { focusedDecisionId: null }
+          : {}),
+      })
+      decisions
+        .filter((item) => item.status === 'pending' && !previousPendingIds.has(item.id))
+        .forEach(notifyPendingDecision)
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        set({ error: errorMessage(error, 'Failed to load run decisions') })
+      }
+    }
+  },
+
+  approveRequestIntent: async (answers = []) => {
+    const { client, project, pendingIntent, pushToast, locale } = get()
+    if (!project || !pendingIntent || pendingIntent.status !== 'draft') return
+    const projectId = project.projectId
+    set({ refineLoading: true, error: null })
+    try {
+      const approved = await client.approveRequestIntent(
+        projectId,
+        pendingIntent.id,
+        pendingIntent.revision,
+        answers,
+      )
+      if (get().project?.projectId !== projectId) return
+      const refinement = await client.prepareIntentExecution(projectId, approved.id)
+      if (get().project?.projectId !== projectId) return
+      set({ pendingIntent: null, pendingRefinement: refinement, refinementConfirmed: false, refineLoading: false })
+      await get().confirmRefinement()
+      pushToast({ type: 'info', message: getStoreMessage(locale, 'toast.agentRunning') })
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        set({ refineLoading: false, error: errorMessage(error, 'Failed to approve request intent') })
+      }
+    }
+  },
+
+  reviseRequestIntent: () => {
+    const intent = get().pendingIntent
+    if (!intent) return
+    set((state) => ({
+      pendingIntent: null,
+      composerDraft: setComposerText(state.composerDraft, intent.rawRequest),
+    }))
+  },
+
+  resolveRunDecision: async (decision, optionId, text, status = 'resolved') => {
+    const { client, project, decisionResolvingIds } = get()
+    if (!project || decisionResolvingIds.includes(decision.id)) return
+    const projectId = project.projectId
+    set({ decisionResolvingIds: [...decisionResolvingIds, decision.id] })
+    try {
+      const resolved = await client.resolveRunDecision(
+        projectId,
+        decision.id,
+        decision.revision,
+        { optionId, ...(text ? { text } : {}) },
+        status,
+      )
+      if (get().project?.projectId !== projectId) return
+      set((current) => ({
+        runDecisions: current.runDecisions.map((item) =>
+          item.id === resolved.id ? resolved : item),
+        error: null,
+      }))
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        set({ error: errorMessage(error, 'Failed to resolve run decision') })
+      }
+    } finally {
+      if (get().project?.projectId === projectId) {
+        set((current) => ({
+          decisionResolvingIds: current.decisionResolvingIds.filter((id) => id !== decision.id),
+        }))
+      }
+    }
+  },
+
   submitPlanClarification: async (answers) => {
     const { client, pendingPlan, project } = get()
     if (!project || !pendingPlan || pendingPlan.status !== 'needs_clarification') return
@@ -4649,6 +4998,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       liveGraphFocusTaskId: null,
         liveGraphPausedRunId: null,
       diffReady: false,
+      diffReviewOnlyReason: null,
       generatedDiff: null,
       applyResult: null,
       verificationResult: null,
@@ -4667,6 +5017,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       set((current) => ({
         refineLoading: false,
         activeRunId: run.runId,
+        decisionRootRunId: run.rootRunId ?? run.runId,
         flowStatus: 'running',
         agentFlowSubject: 'run',
         harnessFixRunId: null,
@@ -4846,6 +5197,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         }
         set({
           diffReady: false,
+          diffReviewOnlyReason: null,
           error: getStoreMessage(locale, 'diff.notAvailable', { status: runStatus }),
         })
         maybeNotifyDiffReady(targetRunId, 0)
@@ -4857,8 +5209,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   applyCurrentDiff: async () => {
-    const { client, project, activeRunId, generatedDiff, editorBuffers, pushToast, locale, selectedNodeId } = get()
+    const { client, project, activeRunId, generatedDiff, editorBuffers, pushToast, locale, selectedNodeId, diffReviewOnlyReason } = get()
     if (!project || !activeRunId) return
+    if (diffReviewOnlyReason) {
+      pushToast({ type: 'warning', message: diffReviewOnlyReason })
+      return
+    }
     try {
       const applyResult = await client.applyDiff(activeRunId)
       const [graph, tree, currentWork] = await Promise.all([
@@ -5137,6 +5493,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       set({
         harnessFixRunId: run.runId,
         activeRunId: run.runId,
+        decisionRootRunId: run.rootRunId ?? run.runId,
         flowSteps: [],
         flowActions: [],
         flowDelegationEvents: [],
@@ -5167,7 +5524,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   resetDemo: async () => {
-    const { client, project, runDisposable, locale } = get()
+    const { client, project, runDisposable } = get()
     if (!project) return
     runDisposable?.dispose()
 
@@ -5492,7 +5849,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         type: result.ok ? 'success' : 'warning',
         message: result.ok
           ? getStoreMessage(locale, 'settings.connectionOk', { ms: result.latencyMs })
-          : result.message ?? getStoreMessage(locale, 'settings.connectionFailed'),
+          : (result.message && (userFacingProviderText(result.message, locale) ?? result.message)) ||
+            getStoreMessage(locale, 'settings.connectionFailed'),
       })
     } catch (error) {
       if (get().project?.projectId === projectId) {
@@ -6976,23 +7334,53 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   clearSettingsFocusView: () => set({ settingsFocusView: null }),
   setSelectedModelProfileId: (profileId) => set({ selectedModelProfileId: profileId }),
 
-  selectChatModel: async (profileId) => {
-    const { client, project, settings } = get()
-    if (!project || !settings) return
+  loadExecutorOptions: async () => {
+    const { client, project } = get()
+    if (!project) {
+      set({ executorOptions: [], selectedRuntimeId: null })
+      return
+    }
     const projectId = project.projectId
+    let options: ExecutorOption[] = []
     try {
-      const updated = await persistDefaultModelProfile(
-        client,
-        projectId,
-        settings,
-        profileId,
-      )
-      if (get().project?.projectId !== projectId) return
+      options = await client.listExecutors(projectId)
+    } catch {
+      options = []
+    }
+    if (get().project?.projectId !== projectId) return
+    set((current) => ({
+      executorOptions: options,
+      selectedRuntimeId: options.some((option) => option.executorId === current.selectedRuntimeId)
+        ? current.selectedRuntimeId
+        : null,
+    }))
+  },
+
+  selectRuntimeExecutor: (executorId) =>
+    set((current) => ({
+      selectedRuntimeId:
+        executorId !== null && current.executorOptions.some((option) => option.executorId === executorId)
+          ? executorId
+          : null,
+    })),
+
+  selectChatModel: async (profileId) => {
+    const { client, project, settings, modelSelectionPending } = get()
+    if (!project || !settings || modelSelectionPending) return false
+    const projectId = project.projectId
+    set({ modelSelectionPending: true })
+    try {
+      const updated = await persistDefaultModelProfile(client, projectId, settings, profileId)
+      if (get().project?.projectId !== projectId) return false
       set({ settings: updated, selectedModelProfileId: profileId, error: null })
+      return true
     } catch (error) {
       if (get().project?.projectId === projectId) {
         reportSettingsMutationFailure(error, 'Failed to select chat model')
       }
+      return false
+    } finally {
+      if (get().project?.projectId === projectId) set({ modelSelectionPending: false })
     }
   },
 

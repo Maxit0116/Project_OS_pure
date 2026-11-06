@@ -6,6 +6,10 @@ import { useBottomDockStore } from '../../state/bottomDockStore'
 import { useI18n } from '../../i18n'
 import type { PanelPresence } from '../../hooks/usePanelPresence'
 import PanelResizeHandle from '../layout/PanelResizeHandle'
+import {
+  TERMINAL_MIN_HEIGHT,
+  maxTerminalHeight,
+} from '../../layout/panelLayout'
 import TerminalPaneView from '../Terminal/TerminalPaneView'
 import BottomDockViewTabs from './BottomDockViewTabs'
 import ActivityView from './ActivityView'
@@ -135,6 +139,9 @@ export default function BottomDockPanel({ centerSideInset, presence }: Props) {
         <PanelResizeHandle
           edge="north"
           onDelta={adjustTerminalHeight}
+          value={terminalHeight}
+          min={TERMINAL_MIN_HEIGHT}
+          max={maxTerminalHeight(typeof window === 'undefined' ? 800 : window.innerHeight)}
           ariaLabel={ts('resize.terminal')}
           disabled={settingsOpen}
         />

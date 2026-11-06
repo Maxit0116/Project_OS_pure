@@ -23,10 +23,14 @@
     "../services/**/*",
     "../utils/**/*",
     "../validation/**/*",
+    "../shared/**/*",
+    "../workbench/vite/**/*",
+    "../workbench/src/components/ChatPanel/voice/whisperModelFiles.ts",
     "../errors.ts"
   ],
   "exclude": [
     "../**/*.test.ts",
-    "../**/*.test.tsx"
+    "../**/*.test.tsx",
+    "../validation/node-compat.d.ts"
   ]
 }

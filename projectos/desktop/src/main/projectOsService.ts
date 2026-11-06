@@ -1,8 +1,9 @@
-import { shell } from 'electron'
+import { app } from 'electron'
 import { FileSecretStore } from '../../../persistence/file-secret-store.js'
 import { FileVerificationCommandApprovalStore } from '../../../persistence/verification-command-approval-store.js'
 import { ProjectOSWorkspaceStore } from '../../../persistence/workspace-store.js'
 import { ProjectOSLocalApi } from '../../../services/project-os-local-api.js'
+import { createExecutorRegistry } from '../../../services/harness/default-executors.js'
 import { LocalContextAssembler } from '../../../services/local-context-assembler.js'
 import { VerificationRunner } from '../../../services/verification-runner.js'
 import * as writeTransactionModule from '../../../services/recoverable-write-transaction.js'
@@ -19,6 +20,11 @@ export function getProjectOsService(): ProjectOSLocalApi {
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel()
     const userDataPath = resolveUserDataPath()
     service = new ProjectOSLocalApi({
+      // The scripted executor needs no model, so it ships only in development
+      // builds, or in a demo build that sets PROJECTOS_SCRIPTED_EXECUTOR=1.
+      executors: createExecutorRegistry({
+        scripted: !app.isPackaged || process.env.PROJECTOS_SCRIPTED_EXECUTOR === '1',
+      }),
       sampleWorkspaceRoot: resolveSampleWorkspaceRoot(),
       secretStore: new FileSecretStore(userDataPath),
       verificationCommandApprovalStore: new FileVerificationCommandApprovalStore(userDataPath),
@@ -33,9 +39,6 @@ export function getProjectOsService(): ProjectOSLocalApi {
       },
       workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(workspaceStore, kernel),
       dependencyImpactScanner: new DependencyImpactScanner(),
-      openExternalUrl: async (url) => {
-        await shell.openExternal(url)
-      },
       agentMemoryRoot: join(userDataPath, 'agent-memory'),
       mcpCatalogCacheRoot: join(userDataPath, 'mcp-catalog'),
       skillCatalogCacheRoot: join(userDataPath, 'skill-catalog'),

@@ -1,4 +1,6 @@
 import type { AgentRun } from "../contracts/agent-run.js";
+import type { RunCheckpoint, RunDecision } from "../contracts/run-state.js";
+import type { GlobalContextBundle, NodeContextBundle } from "../contracts/local-context.js";
 import type {
   AgentAnswerResult,
   AgentAskRequest,
@@ -49,6 +51,7 @@ import type {
   MapContentDocument,
   UpdateMapArtifactPatch,
 } from "../contracts/map-content.js";
+import type { ExecutorOption } from "../contracts/executor-selection.js";
 import type { ListSkillsResult, SkillContent } from "../contracts/skills.js";
 import type { AgentHarnessConfig } from "../contracts/agent-harness-config.js";
 import type {
@@ -322,6 +325,43 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.getFileContext(projectId, path);
   }
 
+  getGlobalAgentContext(
+    projectId: string,
+    responseLanguage: string,
+  ): Promise<GlobalContextBundle> {
+    return this.transport.getGlobalAgentContext(projectId, responseLanguage);
+  }
+
+  extractRequestIntent(
+    request: import("../contracts/request-intent.js").ExtractRequestIntentRequest,
+  ): Promise<import("../contracts/request-intent.js").RequestIntent> {
+    return this.transport.extractRequestIntent(request);
+  }
+
+  approveRequestIntent(
+    projectId: string,
+    intentId: string,
+    expectedRevision: number,
+    answers?: Array<{ questionId: string; answer: string; selectedOptionId?: string }>,
+  ): Promise<import("../contracts/request-intent.js").RequestIntent> {
+    return this.transport.approveRequestIntent(projectId, intentId, expectedRevision, answers);
+  }
+
+  prepareIntentExecution(
+    projectId: string,
+    intentId: string,
+  ): Promise<PromptRefinement> {
+    return this.transport.prepareIntentExecution(projectId, intentId);
+  }
+
+  inspectAgentNode(
+    projectId: string,
+    nodeId: string,
+    responseLanguage: string,
+  ): Promise<NodeContextBundle> {
+    return this.transport.inspectAgentNode(projectId, nodeId, responseLanguage);
+  }
+
   getFileContent(projectId: string, path: string): Promise<string> {
     return this.transport.getFileContent(projectId, path);
   }
@@ -460,6 +500,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   listSkills(projectId: string): Promise<ListSkillsResult> {
     return this.transport.listSkills(projectId);
+  }
+
+  listExecutors(projectId: string): Promise<ExecutorOption[]> {
+    return this.transport.listExecutors(projectId);
   }
 
   getComposerMentions(
@@ -607,6 +651,30 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   getAgentRun(runId: string): Promise<AgentRun> {
     return this.transport.getAgentRun(runId);
+  }
+
+  listRunDecisions(projectId: string, rootRunId: string): Promise<RunDecision[]> {
+    return this.transport.listRunDecisions(projectId, rootRunId);
+  }
+
+  resolveRunDecision(
+    projectId: string,
+    decisionId: string,
+    expectedRevision: number,
+    answer: { optionId: string; text?: string },
+    status?: "resolved" | "declined",
+  ): Promise<RunDecision> {
+    return this.transport.resolveRunDecision(
+      projectId,
+      decisionId,
+      expectedRevision,
+      answer,
+      status,
+    );
+  }
+
+  getRunCheckpoint(projectId: string, checkpointId: string): Promise<RunCheckpoint | null> {
+    return this.transport.getRunCheckpoint(projectId, checkpointId);
   }
 
   getAgentRunEvents(runId: string): Promise<AgentRunEvent[]> {

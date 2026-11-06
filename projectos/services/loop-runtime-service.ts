@@ -1297,10 +1297,6 @@ function advanceCursor(
   return replaceInstance(doc, { ...instance, cursorNodeId: nextId, updatedAt: nowIso() });
 }
 
-function upsertable(doc: LoopGraphDocument, instance: LoopInstance): LoopGraphDocument {
-  return replaceInstance(doc, instance);
-}
-
 export function startLoopInstance(
   workspaceRoot: string,
   loopId: string,
@@ -1347,7 +1343,7 @@ export function startLoopInstance(
     ...doc,
     instances: [...doc.instances, instance],
   };
-  nextDoc = stepLoopInstance(nextDoc, instance.id, { execution });
+  nextDoc = stepLoopInstance(nextDoc, instance.id, execution !== undefined ? { execution } : {});
   return upsertLoopGraph(workspaceRoot, nextDoc);
 }
 
@@ -1390,7 +1386,7 @@ export function resumeLoopInstance(
     message: "Resumed by user",
   });
   let nextDoc = replaceInstance(doc, next);
-  nextDoc = stepLoopInstance(nextDoc, instanceId, { execution });
+  nextDoc = stepLoopInstance(nextDoc, instanceId, execution !== undefined ? { execution } : {});
   return upsertLoopGraph(workspaceRoot, nextDoc);
 }
 
@@ -1636,7 +1632,7 @@ export function resolveLoopHitl(
   }
 
   let nextDoc = replaceInstance(doc, next);
-  nextDoc = stepLoopInstance(nextDoc, instanceId, { execution });
+  nextDoc = stepLoopInstance(nextDoc, instanceId, execution !== undefined ? { execution } : {});
   return upsertLoopGraph(workspaceRoot, nextDoc);
 }
 
@@ -1658,6 +1654,6 @@ export function advanceLoopInstance(
 ): LoopGraphDocument {
   const doc = getLoopGraph(workspaceRoot, loopId);
   if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
-  const next = stepLoopInstance(doc, instanceId, { execution });
+  const next = stepLoopInstance(doc, instanceId, execution !== undefined ? { execution } : {});
   return upsertLoopGraph(workspaceRoot, next);
 }

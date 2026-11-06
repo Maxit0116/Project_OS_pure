@@ -49,4 +49,22 @@ describe("ensureWorkspaceBootstrapped", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("keeps a copy of a graph.json it has to replace, and does not overwrite that copy", () => {
+    const root = mkdtempSync(join(tmpdir(), "projectos-bootstrap-backup-"));
+    try {
+      mkdirSync(join(root, ".projectos"), { recursive: true });
+      writeFileSync(join(root, ".projectos", "project.json"), "{}");
+      writeFileSync(join(root, ".projectos", "graph.json"), "{ authored: by hand");
+      ensureWorkspaceBootstrapped(root);
+      const backup = join(root, ".projectos", "graph.json.bak");
+      expect(readFileSync(backup, "utf8")).toBe("{ authored: by hand");
+      // A second repair must keep the oldest copy, not replace it.
+      writeFileSync(join(root, ".projectos", "graph.json"), "{ something else");
+      ensureWorkspaceBootstrapped(root);
+      expect(readFileSync(backup, "utf8")).toBe("{ authored: by hand");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

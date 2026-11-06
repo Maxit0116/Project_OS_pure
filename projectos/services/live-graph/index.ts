@@ -6,6 +6,7 @@ export {
   summarizeNodeLiveActivity,
   listUnmappedActivities,
 } from "./overlay.js";
+export { summarizeNodeLiveActivityWithDecisions } from "./decisions.js";
 export {
   deriveExecutionEdges,
   resolveCurrentTaskId,

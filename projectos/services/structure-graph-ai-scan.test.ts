@@ -391,6 +391,68 @@ describe("structure-graph-ai-scan", () => {
     expect(scanned.nodes.some((node) => node.tags.includes("bootstrap"))).toBe(false);
   });
 
+  describe("a model reply cut off at its output limit", () => {
+    const cutOff = (output: string) => ({
+      ...gatewayResponse(output),
+      finishReason: "length",
+      usage: { inputTokens: 10, outputTokens: 8_192 },
+    });
+    const run = async (complete: ReturnType<typeof vi.fn>) => {
+      const { root, projectId } = makeTempRepo();
+      const heuristic = buildHeuristicProjectGraph({ projectId, projectName: "demo", projectType: "node", workspaceRoot: root });
+      return runStructureGraphAiScan({
+        workspaceRoot: root,
+        projectId,
+        displayName: "demo",
+        graph: heuristic,
+        profile: mockProfile(),
+        gateway: { complete } as unknown as ModelGateway,
+      });
+    };
+
+    it("asks again with a larger budget instead of patching the cut-off JSON shut", async () => {
+      let roundBCalls = 0;
+      const complete = vi.fn(async (_profile, request) => {
+        const task = (request.input as { task?: string }).task;
+        if (task === "structure_graph_round_a") return gatewayResponse(roundAJson());
+        roundBCalls += 1;
+        // First answer: cut mid-object, as a reasoning model that spent its budget thinking leaves it.
+        return roundBCalls === 1 ? cutOff(roundBJson().slice(0, 140)) : gatewayResponse(roundBJson());
+      });
+
+      const scanned = await run(complete);
+
+      expect(roundBCalls).toBe(2);
+      const budgets = complete.mock.calls
+        .filter((call) => (call[1].input as { task?: string }).task !== "structure_graph_round_a")
+        .map((call) => call[1].maxOutputTokens);
+      expect(budgets).toEqual([8_192, 16_384]);
+      expect(scanned.nodes.filter((node) => node.level === "component")).toHaveLength(3);
+    });
+
+    it("fails, so the current graph is kept, when the larger budget is cut off too", async () => {
+      const complete = vi.fn(async (_profile, request) => {
+        const task = (request.input as { task?: string }).task;
+        if (task === "structure_graph_round_a") return gatewayResponse(roundAJson());
+        return {
+          ...cutOff(roundBJson().slice(0, 140)),
+          usage: { inputTokens: 10, outputTokens: 16_384 },
+        };
+      });
+
+      await expect(run(complete)).rejects.toMatchObject({ code: "model_output_invalid" });
+    });
+
+    it("does not retry a reply that finished normally", async () => {
+      const complete = vi.fn(async (_profile, request) => {
+        const task = (request.input as { task?: string }).task;
+        return gatewayResponse(task === "structure_graph_round_a" ? roundAJson() : roundBJson());
+      });
+      await run(complete);
+      expect(complete).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("preserves data_store / external_system and enriches technology from repo signals", async () => {
     const { root, projectId } = makeTempRepo({
       packageJson: JSON.stringify({

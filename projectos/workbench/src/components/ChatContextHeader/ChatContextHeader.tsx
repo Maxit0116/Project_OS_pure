@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
+import type { ContextAssembly } from '@contracts/index'
 import { isGlobalAgentScope, useWorkbenchStore } from '../../state/workbenchStore'
 import { useI18n } from '../../i18n'
 import Chip from '../ui/Chip'
@@ -22,6 +23,7 @@ export default function ChatContextHeader() {
   const chatMode = useWorkbenchStore((s) => s.chatMode)
   const lastAnchoredAnswer = useWorkbenchStore((s) => s.lastAnchoredAnswer)
   const writeAnchoredAnswerAsDecision = useWorkbenchStore((s) => s.writeAnchoredAnswerAsDecision)
+  const latestContextAssembly = useWorkbenchStore((s) => s.latestContextAssembly)
   const { ts } = useI18n()
   const [expanded, setExpanded] = useState(false)
   const [filesExpanded, setFilesExpanded] = useState(false)
@@ -84,6 +86,13 @@ export default function ChatContextHeader() {
           )}
         </div>
       )}
+    </div>
+  )
+
+  // Send stays disabled until a file has an owner. The reason and the choice must not sit inside the
+  // collapsed dropdown, whose label only says that no context is loaded.
+  const blockingScope = (pendingFileOwnerChoice || fileScopeError === 'not_mapped') && (
+    <div className={styles.boundScope} role="status">
       {pendingFileOwnerChoice && (
         <div className={styles.ownerChoice}>
           <strong>{ts('context.ownershipChooser')}</strong>
@@ -165,6 +174,8 @@ export default function ChatContextHeader() {
     !wholeProjectScope && <div className={styles.empty}>{ts('context.empty')}</div>
   )
 
+  const assembly = latestContextAssembly ?? undefined
+
   return (
     <div className={styles.header}>
       <button
@@ -195,6 +206,8 @@ export default function ChatContextHeader() {
           <span className={styles.triggerScope}>{scopeLabel}</span>
         )}
       </button>
+      {blockingScope}
+      {assembly && <ContextUsage assembly={assembly} />}
 
       {expanded && (
         <div id={DROPDOWN_PANEL_ID} className={styles.dropdownPanel}>
@@ -202,6 +215,39 @@ export default function ChatContextHeader() {
           {contextDetails}
         </div>
       )}
+    </div>
+  )
+}
+
+const USAGE_SLOTS = ['instructions', 'scope', 'pins', 'retrieval', 'memory', 'session'] as const
+
+function ContextUsage({ assembly }: { assembly: ContextAssembly }) {
+  const { ts } = useI18n()
+  const total = USAGE_SLOTS.reduce((sum, slot) => sum + assembly.slots[slot].chars, 0)
+  return (
+    <div className={styles.usage}>
+      <div className={styles.usageTitle}>{ts('context.usageTitle')}</div>
+      {USAGE_SLOTS.map((slot) => {
+        const record = assembly.slots[slot]
+        const width = total > 0 ? Math.round((record.chars / total) * 100) : 0
+        const detail = slot === 'retrieval' && !assembly.slots.retrieval.searched
+          ? ts('context.usageNotSearched')
+          : String(record.chars)
+        return (
+          <div className={styles.usageRow} key={slot}>
+            <span>{ts(`context.usageSlots.${slot}`)}</span>
+            <span className={styles.usageTrack}>
+              <span className={styles.usageFill} style={{ width: `${width}%` }} />
+            </span>
+            <span>{detail}</span>
+          </div>
+        )
+      })}
+      {assembly.omissions.map((item) => (
+        <div className={styles.usageOmission} key={item.reason}>
+          {ts(`context.usageOmissions.${item.reason}`)} · {item.count}
+        </div>
+      ))}
     </div>
   )
 }

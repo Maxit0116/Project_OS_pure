@@ -24,7 +24,7 @@ if (typeof window !== 'undefined') {
 }
 
 let preloaded = false
-let preloadPromise: ReturnType<typeof loader.init> | null = null
+let preloadPromise: Promise<void> | null = null
 
 export function isMonacoPreloaded(): boolean {
   return preloaded

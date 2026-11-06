@@ -3,8 +3,10 @@
   "exclude": [
     "**/*.test.ts",
     "**/test-fixtures/**",
+    "test-support",
     "dist",
     "node_modules",
-    "workbench"
+    "workbench",
+    "validation/node-compat.d.ts"
   ]
 }

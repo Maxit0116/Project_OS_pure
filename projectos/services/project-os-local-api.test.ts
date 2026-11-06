@@ -925,6 +925,22 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
   });
 
+  it("keeps current work readable across consecutive history saves", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
+    const project = await api.openSampleWorkspace();
+
+    await api.saveFileWithHistory(project.projectId, "app/login/page.tsx", "// first save\n");
+    await api.saveFileWithHistory(project.projectId, "app/login/page.tsx", "// second save\n");
+
+    const currentWork = await api.getCurrentWork(project.projectId);
+    expect(currentWork.projectId).toBe(project.projectId);
+    expect(currentWork.recentChanges.slice(-2)).toEqual([
+      expect.objectContaining({ path: "app/login/page.tsx", action: "modified" }),
+      expect.objectContaining({ path: "app/login/page.tsx", action: "modified" }),
+    ]);
+  });
+
   it("keeps only the most recent 50 current-work changes across apply and undo", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
     const currentWorkPath = join(tempWorkspaceRoot, ".projectos", "current-work.json");
@@ -3418,8 +3434,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     );
     expect(persisted.workGroups).toHaveLength(1);
     expect(persisted.workGroups[0]?.memberNodeIds).toEqual([stackId]);
+    // Only the artifacts this test grouped: the sample ships seed artifacts that belong to no group.
+    const grouped = persisted.artifacts.filter((artifact) =>
+      artifact.id === first.id || artifact.id === second.id);
+    expect(grouped).toHaveLength(2);
     expect(
-      persisted.artifacts.every((artifact) => artifact.workGroupId === persisted.workGroups[0]?.id),
+      grouped.every((artifact) => artifact.workGroupId === persisted.workGroups[0]?.id),
     ).toBe(true);
   });
 
@@ -3959,6 +3979,58 @@ type LocalApiTestInternals = {
   validateGeneratedDiffScope(runId: string, diff: GeneratedDiff): void;
 };
 
+describe("ProjectOSLocalApi model mutation approval", () => {
+  it("rejects a legacy model-backed mutation before dispatch when no intent was approved", async () => {
+    const root = copySampleWorkspace();
+    const sourcePath = join(root, "app/login/page.tsx");
+    const sourceBefore = readFileSync(sourcePath, "utf8");
+    const gateway = new ModelGateway({ secretStore: new InMemorySecretStore() });
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: root,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: gateway,
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    gateway.complete = async (profile, _request) => {
+      const graph = await api.getProjectGraph(project.projectId);
+      const nodeId = graph.fileIndex.find((file) => file.path === "app/login/page.tsx")?.nodeIds[0];
+      if (!nodeId) throw new Error("The login file has no graph owner");
+      return {
+        requestId: "unapproved-intent-refinement",
+        projectId: project.projectId,
+        provider: profile.provider,
+        model: profile.model,
+        latencyMs: 1,
+        output: JSON.stringify({
+          understood: "Change the login heading to welcome returning users.",
+          ambiguities: [],
+          suggestions: [],
+          affectedNodeIds: [nodeId],
+          affectedFiles: ["app/login/page.tsx"],
+          confidence: 1,
+        }),
+        usage: { inputTokens: 10, outputTokens: 10 },
+      };
+    };
+    await enableModelExecution(api, project.projectId);
+    const refinement = await api.refinePrompt({
+      projectId: project.projectId,
+      nodeId: "component_app",
+      filePath: "app/login/page.tsx",
+      rawPrompt: "Change the login heading to welcome returning users.",
+    });
+
+    await expect(api.confirmExecution(refinement.id)).rejects.toMatchObject({
+      code: "diff_scope_violation",
+      message: expect.stringMatching(/approved request intent/u),
+    });
+    expect(getLocalApiInternals(api).activeOrchestratorRuns.size).toBe(0);
+    expect(getLocalApiInternals(api).pendingOrchestratorStarts.size).toBe(0);
+    expect(readFileSync(sourcePath, "utf8")).toBe(sourceBefore);
+  });
+});
+
 function getLocalApiInternals(api: ProjectOSLocalApi): LocalApiTestInternals {
   return api as unknown as LocalApiTestInternals;
 }
@@ -4116,6 +4188,13 @@ function copyEmptyGraphWorkspace(): string {
   currentWork.recentChanges = [];
   currentWork.unresolvedErrors = [];
   writeFileSync(currentWorkPath, `${JSON.stringify(currentWork, null, 2)}\n`, "utf8");
+  // Map artifacts pinned to a node cannot outlive the nodes this workspace just lost.
+  const mapContentPath = join(root, ".projectos", "map-content.json");
+  const mapContent = JSON.parse(readFileSync(mapContentPath, "utf8")) as {
+    artifacts: Array<{ scope?: string }>;
+  };
+  mapContent.artifacts = mapContent.artifacts.filter((artifact) => artifact.scope !== "node");
+  writeFileSync(mapContentPath, `${JSON.stringify(mapContent, null, 2)}\n`, "utf8");
   rmSync(join(root, ".projectos", "demo-scenarios"), { recursive: true, force: true });
   rmSync(join(root, ".projectos", "harness"), { recursive: true, force: true });
   rmSync(join(root, ".projectos", "agent-runs"), { recursive: true, force: true });

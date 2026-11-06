@@ -2,6 +2,9 @@ import path from 'node:path'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  test: {
+    globalSetup: ['./test-support/sample-fixture-global-setup.ts'],
+  },
   resolve: {
     alias: {
       '@contracts': path.resolve(__dirname, 'contracts'),

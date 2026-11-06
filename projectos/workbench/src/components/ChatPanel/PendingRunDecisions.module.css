@@ -1,0 +1,96 @@
+.card {
+  margin: 10px 12px;
+  padding: 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel);
+}
+
+.header, .options, .historyItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header {
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.count, .kind, .rootRun {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.rootRun {
+  margin-left: auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decision {
+  padding-top: 12px;
+}
+
+.decision[data-focused='true'], .historyItem[data-focused='true'] {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
+
+.decision + .decision {
+  margin-top: 12px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.decision p {
+  margin: 6px 0;
+}
+
+.recommendation, .noteLabel, .history {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.noteLabel {
+  display: grid;
+  gap: 5px;
+  margin: 9px 0;
+}
+
+.noteLabel input {
+  padding: 7px 9px;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+}
+
+.options {
+  flex-wrap: wrap;
+}
+
+.options button {
+  padding: 6px 10px;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.options button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.history {
+  margin-top: 12px;
+}
+
+.historyItem {
+  justify-content: space-between;
+  padding-top: 7px;
+}

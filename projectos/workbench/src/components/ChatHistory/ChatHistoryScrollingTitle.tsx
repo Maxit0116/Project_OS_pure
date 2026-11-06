@@ -94,7 +94,7 @@ export default function ChatHistoryScrollingTitle({
 
   const scrollDurationSec = Math.max(MIN_SCROLL_DURATION_SEC, scrollDistance / SCROLL_SPEED_PX_PER_SEC)
 
-  const textStyle: CSSProperties =
+  const textStyle: CSSProperties | undefined =
     canScroll && isScrolling
       ? {
           transform: `translateX(-${scrollDistance}px)`,

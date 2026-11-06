@@ -27,3 +27,6 @@ api_key.md
 
 # Local REA/Node tooling (not for commit)
 .tooling/
+
+# Local provider credentials (never commit)
+deepseek_api.md

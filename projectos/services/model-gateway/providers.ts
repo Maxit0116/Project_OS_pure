@@ -288,8 +288,9 @@ async function fetchWithTimeout(
 }
 
 function providerUsage(usage: {
-  input?: number;
-  output?: number;
+  // Raw provider usage counters; either may be missing from a response.
+  input?: number | undefined;
+  output?: number | undefined;
 } | undefined): Pick<ProviderCompleteResult, "inputTokens" | "outputTokens" | "usageReported"> {
   if (!usage) {
     return { inputTokens: 0, outputTokens: 0, usageReported: false };

@@ -11,14 +11,17 @@ interface Props {
   filePath: string | null
 }
 
-const KIND_ICON: Partial<Record<DocumentSymbolKind, typeof Box>> = {
-  class: Box,
-  interface: Box,
-  function: FunctionSquare,
-  method: FunctionSquare,
-  variable: Variable,
-  constant: Variable,
-}
+// A Map, not an object literal: DocumentSymbolKind includes "constructor", and a
+// plain object would resolve that key to Object.prototype.constructor instead of
+// falling back to the default icon.
+const KIND_ICON: ReadonlyMap<DocumentSymbolKind, typeof Box> = new Map([
+  ['class', Box],
+  ['interface', Box],
+  ['function', FunctionSquare],
+  ['method', FunctionSquare],
+  ['variable', Variable],
+  ['constant', Variable],
+])
 
 function SymbolNode({
   symbol,
@@ -31,7 +34,7 @@ function SymbolNode({
 }) {
   const [expanded, setExpanded] = useState(depth < 2)
   const hasChildren = symbol.children.length > 0
-  const Icon = KIND_ICON[symbol.kind] ?? Box
+  const Icon = KIND_ICON.get(symbol.kind) ?? Box
 
   return (
     <div className={styles.node}>

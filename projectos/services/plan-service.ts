@@ -3,10 +3,13 @@ import { z } from "zod";
 import type { AgentContextBundle } from "../contracts/local-context.js";
 import type {
   ClarifyingQuestion,
+  CreatePlanRequest,
   ImplementationPlan,
   ImplementationPlanStep,
   ImplementationPlanTodo,
 } from "../contracts/implementation-plan.js";
+
+type ClarifyingAnswer = NonNullable<CreatePlanRequest["clarifyingAnswers"]>[number];
 import type { AgentConversationScope } from "../contracts/agent-conversation.js";
 import type { ModelProfile, ThinkingDepth } from "../contracts/settings.js";
 import { ProjectOSError } from "../errors.js";
@@ -101,7 +104,7 @@ export interface PlanServiceInput {
   localContext: AgentContextBundle;
   profile: ModelProfile;
   thinkingDepth: ThinkingDepth;
-  clarifyingAnswers?: Array<{ questionId: string; answer: string; selectedOptionId?: string }>;
+  clarifyingAnswers?: ClarifyingAnswer[] | undefined;
   existingQuestions?: ClarifyingQuestion[];
   existingPlanId?: string;
   existingCreatedAt?: string;
@@ -170,7 +173,7 @@ export class PlanService {
 
 export function mergeClarifyingQuestions(
   questions: ClarifyingQuestion[],
-  answers: Array<{ questionId: string; answer: string; selectedOptionId?: string }>,
+  answers: ClarifyingAnswer[],
   existing: ClarifyingQuestion[],
 ): ClarifyingQuestion[] {
   const answerById = new Map(answers.map((item) => [item.questionId, item]));

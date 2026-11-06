@@ -62,7 +62,10 @@ function sha256(content: string): string {
 function truncateContent(
   content: string,
   maxChars: number,
-): Pick<ResolvedAttachmentPayload, "content" | "disposition" | "byteLength" | "includedByteLength"> {
+): Pick<
+  ResolvedAttachmentPayload,
+  "content" | "disposition" | "byteLength" | "includedByteLength" | "omissionReason"
+> {
   const byteLength = Buffer.byteLength(content, "utf8");
   if (content.length <= maxChars) {
     return {

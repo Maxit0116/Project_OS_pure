@@ -309,3 +309,37 @@ function delegatedTrace(
 ) {
   return { taskId, filePath, scopeKind, role, events, transientTraces }
 }
+
+describe('AgentFlowPanel delegated run tree after Stop', () => {
+  const startedOnly: AgentRunEvent[] = [
+    hierarchyPlanEvent('run_root', 'plan_root', { kind: 'container', nodeId: 'container_web' }, 'Plan the change'),
+    leafDelegatedEvent('run_root', 'plan_root', 'task_1', 'run_leaf', 'component_login', 'app/login/page.tsx'),
+    {
+      eventId: 'evt_started',
+      runId: 'run_root',
+      timestamp: '2026-07-20T00:00:03.000Z',
+      type: 'child_run_started',
+      payload: { planId: 'plan_root', taskId: 'task_1', childRunId: 'run_leaf' },
+    } as AgentRunEvent,
+  ]
+  const render = (live: boolean, locale: 'en' | 'zh') => {
+    useWorkbenchStore.setState({ locale })
+    return renderToStaticMarkup(
+      <DelegatedRunTree events={startedOnly as never} tracesByRun={{}} live={live} />,
+    )
+  }
+
+  it('shows a task that started but never finished as running while the run is live', () => {
+    expect(render(true, 'en')).toContain('data-child-outcome="running"')
+  })
+
+  it('shows it as stopped once the run is no longer live', () => {
+    // Observed live: after Stop every task kept reading "executing" because the stream was closed
+    // and nothing ever said otherwise. (Static rendering reads the store's initial locale, zh; the
+    // English label is covered by the locale parity test.)
+    const html = render(false, 'zh')
+    expect(html).toContain('data-child-outcome="stopped"')
+    expect(html).toContain('已停止')
+    expect(html).not.toContain('执行中')
+  })
+})

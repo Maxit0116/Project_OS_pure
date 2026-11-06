@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Monaco } from '@monaco-editor/react'
+import type { editor } from 'monaco-editor'
 
 import { languageForPath } from '../../data/sampleFileContents'
 import { codeEditorOptions } from '../CodeEditor/editorPresentation'
@@ -25,8 +26,8 @@ type MonacoEditorInstance = ReturnType<Monaco['editor']['create']>
 function buildBeforeDecorations(
   rows: SideBySideRow[],
   monaco: Monaco,
-): Monaco.editor.IModelDeltaDecoration[] {
-  const decorations: Monaco.editor.IModelDeltaDecoration[] = []
+): editor.IModelDeltaDecoration[] {
+  const decorations: editor.IModelDeltaDecoration[] = []
 
   for (const row of rows) {
     const line = row.before
@@ -56,8 +57,8 @@ function buildBeforeDecorations(
 function buildAfterDecorations(
   rows: SideBySideRow[],
   monaco: Monaco,
-): Monaco.editor.IModelDeltaDecoration[] {
-  const decorations: Monaco.editor.IModelDeltaDecoration[] = []
+): editor.IModelDeltaDecoration[] {
+  const decorations: editor.IModelDeltaDecoration[] = []
 
   for (const row of rows) {
     const line = row.after

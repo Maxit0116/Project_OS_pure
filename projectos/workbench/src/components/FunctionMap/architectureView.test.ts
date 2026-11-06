@@ -83,6 +83,18 @@ describe('projectArchitectureView', () => {
     expect(projected.edges.map((item) => item.id)).toEqual(['component_edge'])
   })
 
+  it('shows explicitly standalone capabilities in the root context graph only', () => {
+    const nodes = [
+      node('system', 'context'),
+      { ...node('about'), standalone: true },
+      node('legacy-orphan'),
+    ]
+    expect(projectArchitectureView(nodes, [], 'context').nodes.map((item) => item.id))
+      .toEqual(['system', 'about'])
+    expect(projectArchitectureView(nodes, [], 'context', { parentId: 'system' }).nodes)
+      .toEqual([])
+  })
+
   it('falls back to the existing graph when no architecture metadata exists', () => {
     const nodes = [node('legacy-a'), node('legacy-b')]
     const edges = [edge('legacy', 'legacy-a', 'legacy-b')]

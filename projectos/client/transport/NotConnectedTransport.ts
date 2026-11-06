@@ -350,6 +350,43 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async getGlobalAgentContext(
+    _projectId: string,
+    _responseLanguage: string,
+  ): Promise<import("../../contracts/local-context.js").GlobalContextBundle> {
+    return transportNotConnected();
+  }
+
+  async extractRequestIntent(
+    _request: import("../../contracts/request-intent.js").ExtractRequestIntentRequest,
+  ): Promise<import("../../contracts/request-intent.js").RequestIntent> {
+    return transportNotConnected();
+  }
+
+  async approveRequestIntent(
+    _projectId: string,
+    _intentId: string,
+    _expectedRevision: number,
+    _answers?: Array<{ questionId: string; answer: string; selectedOptionId?: string }>,
+  ): Promise<import("../../contracts/request-intent.js").RequestIntent> {
+    return transportNotConnected();
+  }
+
+  async prepareIntentExecution(
+    _projectId: string,
+    _intentId: string,
+  ): Promise<PromptRefinement> {
+    return transportNotConnected();
+  }
+
+  async inspectAgentNode(
+    _projectId: string,
+    _nodeId: string,
+    _responseLanguage: string,
+  ): Promise<import("../../contracts/local-context.js").NodeContextBundle> {
+    return transportNotConnected();
+  }
+
   async getFileContent(_projectId: string, _path: string): Promise<string> {
     return transportNotConnected();
   }
@@ -496,6 +533,10 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async listExecutors(_projectId: string) {
+    return transportNotConnected();
+  }
+
   async getComposerMentions(_projectId: string, _query: string) {
     return transportNotConnected();
   }
@@ -639,6 +680,30 @@ export class NotConnectedTransport implements ProjectOSApi {
   }
 
   async getAgentRun(_runId: string): Promise<AgentRun> {
+    return transportNotConnected();
+  }
+
+  async listRunDecisions(
+    _projectId: string,
+    _rootRunId: string,
+  ): Promise<import("../../contracts/run-state.js").RunDecision[]> {
+    return transportNotConnected();
+  }
+
+  async resolveRunDecision(
+    _projectId: string,
+    _decisionId: string,
+    _expectedRevision: number,
+    _answer: { optionId: string; text?: string },
+    _status?: "resolved" | "declined",
+  ): Promise<import("../../contracts/run-state.js").RunDecision> {
+    return transportNotConnected();
+  }
+
+  async getRunCheckpoint(
+    _projectId: string,
+    _checkpointId: string,
+  ): Promise<import("../../contracts/run-state.js").RunCheckpoint | null> {
     return transportNotConnected();
   }
 
