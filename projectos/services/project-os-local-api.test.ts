@@ -30,9 +30,16 @@ import * as writeTransactionModule from "./recoverable-write-transaction.js";
 import { WorkspaceTransactionCoordinator } from "./workspace-transaction-coordinator.js";
 import { DependencyImpactScanner } from "./dependency-impact-scanner.js";
 import { VerificationRunner } from "./verification-runner.js";
+import { createLegacyScenarioWorkspace } from "./test-support/legacy-scenario-workspace.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const temporaryRoots: string[] = [];
+
+function copyLegacyScenarioWorkspace(): string {
+  const created = createLegacyScenarioWorkspace();
+  temporaryRoots.push(created.tempRoot);
+  return created.workspaceRoot;
+}
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -48,15 +55,22 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     const tree = await api.getSemanticTree(project.projectId);
 
     expect(graph.projectId).toBe(project.projectId);
-    expect(graph.nodes.some((node) => node.id === "feat_login")).toBe(true);
+    expect(graph.nodes.some((node) => node.id === "system_root" && node.level === "context")).toBe(true);
+    expect(graph.nodes.some((node) => node.id === "container_app" && node.level === "container")).toBe(true);
+    expect(graph.nodes.some((node) => node.id === "component_app" && node.level === "component")).toBe(true);
+    expect(graph.nodes.some((node) => node.id === "feat_login")).toBe(false);
+    expect(graph.fileIndex.find((file) => file.path === "app/login/page.tsx")?.nodeIds).toEqual([
+      "component_app",
+    ]);
     expect(tree.projectId).toBe(project.projectId);
-    expect(tree.roots.some((root) => root.sourceNodeId === "feat_login")).toBe(
-      true,
-    );
+    expect(tree.roots.some((root) => root.sourceNodeId === "container_app")).toBe(true);
+    expect(tree.roots.some((root) =>
+      root.children.some((child) => child.sourceNodeId === "component_app"),
+    )).toBe(true);
   });
 
   it("clears project-scoped execution state before reopening the same project", async () => {
-    const root = copySampleWorkspace();
+    const root = copyLegacyScenarioWorkspace();
     const workspaceStore = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
     const api = new ProjectOSLocalApi({
@@ -124,7 +138,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("terminalizes and reports an orchestrator startup rejection", async () => {
-    const root = copySampleWorkspace();
+    const root = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: root,
       localContextAssembler: new LocalContextAssembler(),
@@ -161,7 +175,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("assembles feature context for feat_login with auth linked files", async () => {
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot });
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copyLegacyScenarioWorkspace() });
     const project = await api.openSampleWorkspace();
 
     const context = await api.getNodeContext(project.projectId, "feat_login");
@@ -182,7 +196,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("assembles file context from semantic-tree links when graph fileIndex has no node id", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const graphPath = join(tempWorkspaceRoot, ".projectos", "graph.json");
     const graph = JSON.parse(readFileSync(graphPath, "utf8")) as {
       fileIndex: Array<{ path: string; nodeIds: string[] }>;
@@ -229,7 +243,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("binds live model authorization to the requested scope and attached context", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
       localContextAssembler: new LocalContextAssembler(),
@@ -306,7 +320,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects an invalid requested selection before publishing a live run", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
       localContextAssembler: new LocalContextAssembler(),
@@ -331,7 +345,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   it("keeps fixture confirmation independent of local context assembly", async () => {
     let assembleCalls = 0;
     const api = new ProjectOSLocalApi({
-      sampleWorkspaceRoot: copySampleWorkspace(),
+      sampleWorkspaceRoot: copyLegacyScenarioWorkspace(),
       localContextAssembler: {
         assemble() {
           assembleCalls += 1;
@@ -365,7 +379,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects a registered run id already owned by another execution backend", async () => {
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copyLegacyScenarioWorkspace() });
     const project = await api.openSampleWorkspace();
     const collidingRun = generatedRun(project.projectId, "run_google_login");
     getLocalApiInternals(api).externalRunsByRunId.set(collidingRun.runId, {
@@ -556,7 +570,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("refines and executes the google-login scenario with deterministic event replay", async () => {
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copyLegacyScenarioWorkspace() });
     const project = await api.openSampleWorkspace();
 
     const refinement = await api.refinePrompt({
@@ -588,7 +602,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("returns a deterministic generic refinement when no scenario matches", async () => {
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copyLegacyScenarioWorkspace() });
     const project = await api.openSampleWorkspace();
 
     const refinement = await api.refinePrompt({
@@ -605,7 +619,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   it("replaces malformed model refinement output with a diagnostic deterministic fallback", async () => {
     const rawModelText = "RAW MODEL TEXT THAT MUST NOT REACH THE REFINEMENT CARD";
     const api = new ProjectOSLocalApi({
-      sampleWorkspaceRoot: copySampleWorkspace(),
+      sampleWorkspaceRoot: copyLegacyScenarioWorkspace(),
       modelGateway: new MalformedRefinementGateway(rawModelText),
     });
     const project = await api.openSampleWorkspace();
@@ -644,7 +658,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("gets and applies the google-login diff against a temp workspace copy", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
     const refinement = await api.refinePrompt({
@@ -736,7 +750,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects a prefab diff that targets a file outside the scenario node", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const scenarioPath = join(
       tempWorkspaceRoot,
       ".projectos",
@@ -778,7 +792,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("leaves prefab targets untouched when the transaction rolls back", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new FailSecondCommitApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
     const refinement = await api.refinePrompt({
@@ -822,7 +836,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("applies the auth-bugfix prefab through the same transaction after google-login", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
     const feature = await api.refinePrompt({
@@ -1036,7 +1050,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("runs only configured structured verification commands and reports honest status", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const calls: Array<{ cwd: string; commands: unknown[] }> = [];
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
@@ -1079,7 +1093,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("requires exact user approval before executing project verification commands", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const firstMarker = join(tempWorkspaceRoot, "verification-approved-first.txt");
     const changedMarker = join(tempWorkspaceRoot, "verification-approved-changed.txt");
     const firstCommand = {
@@ -1167,7 +1181,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("reports verification not_run when no commands are configured", async () => {
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copyLegacyScenarioWorkspace() });
     const project = await api.openSampleWorkspace();
     const refinement = await api.refinePrompt({
       projectId: project.projectId,
@@ -1193,7 +1207,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("automatically validates, applies through the scoped kernel, verifies, and keeps undo", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const selectedPath = "app/login/page.tsx";
     const targetPath = join(tempWorkspaceRoot, selectedPath);
     const before = readFileSync(targetPath, "utf8");
@@ -1301,7 +1315,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("keeps review_first awaiting manual apply after independent validation", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const selectedPath = "app/login/page.tsx";
     const targetPath = join(tempWorkspaceRoot, selectedPath);
     const before = readFileSync(targetPath, "utf8");
@@ -1342,7 +1356,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("batch-validates delegated leaf proposals before an atomic reviewed group apply", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = new Map(delegatedPaths.map((filePath) => [
       filePath,
@@ -1498,7 +1512,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("completes a delegated parent run when one child file already satisfies the plan", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const gateway = new NodeDelegationGateway(delegatedPaths, [], {
       noChangePaths: ["components/LoginForm.tsx"],
@@ -1582,7 +1596,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("auto-applies a delegated group without writing files when every child is already satisfied", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx"];
     const gateway = new NodeDelegationGateway(delegatedPaths, [], {
       noChangePaths: ["app/login/page.tsx"],
@@ -1618,7 +1632,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("creates one component-owned file and graph/tree ownership in one mixed transaction", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const newFile = "app/login/login-copy.ts";
     const store = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
@@ -1725,7 +1739,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("creates a product component, wiring, and validated scaffold files atomically", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const newFile = "app/login/NewLoginPanel.tsx";
     const store = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
@@ -1803,7 +1817,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("automatically commits a validated node scaffold under the automatic policy", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const newFile = "app/login/AutomaticGuidance.tsx";
     const store = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
@@ -2095,7 +2109,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("deletes a leaf node and its owned file atomically, then restores the whole task", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const fixture = addDeletionFixture(tempWorkspaceRoot, "leaf");
     const importerPath = "app/layout.tsx";
     const importLine = "import { disposable } from './delete-leaf';\n";
@@ -2205,7 +2219,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("deletes a subtree only when explicit membership exactly matches server descendants", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const fixture = addDeletionFixture(tempWorkspaceRoot, "recursive");
     const store = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
@@ -2242,7 +2256,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects implicit subtree deletion and blocks node-scoped map artifacts clearly", async () => {
-    const mismatchRoot = copySampleWorkspace();
+    const mismatchRoot = copyLegacyScenarioWorkspace();
     const mismatch = addDeletionFixture(mismatchRoot, "recursive");
     const mismatchApi = new ProjectOSLocalApi({
       sampleWorkspaceRoot: mismatchRoot,
@@ -2266,7 +2280,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       .toContain("membership does not match");
     expect(existsSync(join(mismatchRoot, mismatch.filePaths[0]!))).toBe(true);
 
-    const artifactRoot = copySampleWorkspace();
+    const artifactRoot = copyLegacyScenarioWorkspace();
     const artifactFixture = addDeletionFixture(artifactRoot, "leaf");
     const artifactApi = new ProjectOSLocalApi({
       sampleWorkspaceRoot: artifactRoot,
@@ -2298,7 +2312,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects node deletion when the graph ownership basis changes after authorization", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const fixture = addDeletionFixture(tempWorkspaceRoot, "leaf");
     const store = new ProjectOSWorkspaceStore();
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
@@ -2332,7 +2346,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("impact-scans, repairs, and deletes one owned file in one reversible transaction", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const targetPath = "app/login/page.tsx";
     const importerPath = "app/layout.tsx";
     const importLine = "import LoginPage from '@/app/login/page'\n";
@@ -2469,7 +2483,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("blocks deletion when materialized repairs leave a direct dependency", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const targetPath = "app/login/page.tsx";
     const importerPath = "app/layout.tsx";
     const importLine = "import LoginPage from '@/app/login/page'\n";
@@ -2517,7 +2531,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects deletion when a new direct importer appears after authorization", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const targetPath = "app/login/page.tsx";
     const importerPath = "app/layout.tsx";
     const lateImporterPath = "app/about/page.tsx";
@@ -2565,7 +2579,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("fails closed when impact-aware deletion cannot scan the workspace", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const targetPath = "app/login/page.tsx";
     const targetBefore = readFileSync(join(tempWorkspaceRoot, targetPath), "utf8");
     const api = new ProjectOSLocalApi({
@@ -2596,7 +2610,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects a model-chosen delete repair set before binding child authorization", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const targetPath = "app/login/page.tsx";
     const targetBefore = readFileSync(join(tempWorkspaceRoot, targetPath), "utf8");
     const api = new ProjectOSLocalApi({
@@ -2630,7 +2644,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("automatically commits a validated delegated group and exposes one stale-safe undo", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = new Map(delegatedPaths.map((filePath) => [
       filePath,
@@ -2704,7 +2718,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("fails malformed batch validation closed before creating a backup or writing files", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = delegatedPaths.map((filePath) =>
       readFileSync(join(tempWorkspaceRoot, filePath), "utf8"));
@@ -2741,7 +2755,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rechecks snapshot freshness after batch validation and commits no agent writes when stale", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const untouchedForm = readFileSync(
       join(tempWorkspaceRoot, "components/LoginForm.tsx"),
@@ -2777,7 +2791,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rolls back a mid-group commit failure and emits recovery metadata if rollback also fails", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = new Map(delegatedPaths.map((filePath) => [
       filePath,
@@ -2823,7 +2837,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rolls back every committed child when a later group commit fails", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = new Map(delegatedPaths.map((filePath) => [
       filePath,
@@ -2858,7 +2872,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects a child proposal mutated after exact batch validation", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
     const before = delegatedPaths.map((filePath) =>
       readFileSync(join(tempWorkspaceRoot, filePath), "utf8"));
@@ -2900,7 +2914,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects a node plan that attempts to delegate outside the graph-owned scope", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
       localContextAssembler: new LocalContextAssembler(),
@@ -2928,7 +2942,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("fails node planning closed after one sanitized retry", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const gateway = new NodeDelegationGateway(
       ["app/login/page.tsx"],
       ["MALFORMED_NODE_PLAN_ONE", "MALFORMED_NODE_PLAN_TWO"],
@@ -3274,7 +3288,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("persists map artifact create, update, and delete operations", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
 
@@ -3531,7 +3545,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("reports the seeded auth harness record and starts its debug fix stream", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
 
@@ -3817,7 +3831,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects graph-layer skipping even when a caller invokes delegation directly", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
       localContextAssembler: new LocalContextAssembler(),
@@ -3867,7 +3881,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("throws typed errors for unknown diff, error, and harness ids", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
+    const tempWorkspaceRoot = copyLegacyScenarioWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
 
