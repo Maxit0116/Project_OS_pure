@@ -35,12 +35,16 @@ const legacySourceRoot = join(supportDirectory, "legacy-scenario-sources");
  * contains. They are copied only into the temp workspace, and only when that
  * path is absent, so the authoritative sample is not repaired.
  *
- * `projectos-blocks/loaders/dashboard.ts` is the file from commit
- * 62a901801baeaf405bacd1a93c664292738dc416 at
- * `sample-graph-saas/projectos-blocks/loaders/dashboard.ts`.
+ * The bytes are commit 62a901801baeaf405bacd1a93c664292738dc416 at
+ * `sample-graph-saas/projectos-blocks/loaders/dashboard.ts`. They are stored
+ * as a fixture resource so the root TypeScript program does not compile them,
+ * then copied to `projectos-blocks/loaders/dashboard.ts` in the temp workspace.
  */
 const LEGACY_SCENARIO_SOURCE_FILES = [
-  "projectos-blocks/loaders/dashboard.ts",
+  {
+    source: "projectos-blocks/loaders/dashboard.loader.fixture",
+    target: "projectos-blocks/loaders/dashboard.ts",
+  },
 ] as const;
 
 export function authoritativeSampleGraphPath(): string {
@@ -72,11 +76,11 @@ export function createLegacyScenarioWorkspace(): {
     mkdirSync(dirname(target), { recursive: true });
     cpSync(join(legacyFixtureRoot, relativePath), target);
   }
-  for (const relativePath of LEGACY_SCENARIO_SOURCE_FILES) {
-    const target = join(workspaceRoot, relativePath);
+  for (const entry of LEGACY_SCENARIO_SOURCE_FILES) {
+    const target = join(workspaceRoot, entry.target);
     if (existsSync(target)) continue;
     mkdirSync(dirname(target), { recursive: true });
-    cpSync(join(legacySourceRoot, relativePath), target);
+    cpSync(join(legacySourceRoot, entry.source), target);
   }
 
   rmSync(join(workspaceRoot, ".projectos", "apply-backups"), {
