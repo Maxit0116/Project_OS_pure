@@ -192,3 +192,49 @@ describe("exploreForAskQuestion", () => {
     });
   });
 });
+
+/**
+ * "Where is auth enforced across all routes?" was answered from the five best files, and nothing in the
+ * prompt said there were thirty more; the answer read as complete.
+ */
+describe("how much of the project an answer looked at", () => {
+  function routes(count: number): LoadedProjectOSWorkspace {
+    const paths = Array.from({ length: count }, (_, index) => `app/routes/route${String(index).padStart(2, "0")}.py`);
+    const root = mkdtempSync(join(tmpdir(), "ask-broad-"));
+    for (const path of paths) {
+      mkdirSync(join(root, path, ".."), { recursive: true });
+      writeFileSync(
+        join(root, path),
+        [`from app.auth import require_user`, ...Array.from({ length: 300 }, (_, line) => `x${line} = ${line}`), `@router.get("/")`, `def handler(user = require_user()):`, `    return user`].join("\n"),
+        "utf8",
+      );
+    }
+    return { workspaceRoot: root, graph: { fileIndex: paths.map((path) => ({ path, nodeIds: ["n1"] })) } } as unknown as LoadedProjectOSWorkspace;
+  }
+
+  it("names the matching files it did not read, and asks the answer to say so", () => {
+    const result = exploreForAskQuestion(routes(30), "How does require_user protect a route?", { maxReads: 5 });
+    expect(result.trace.readPaths).toHaveLength(5);
+    expect(result.trace.matchingFileCount).toBe(30);
+    expect(result.trace.unreadMatchingPaths).toHaveLength(15);
+    expect(result.supplementalMarkdown).toContain("Coverage: 5 of 30 files that match the question's words were read.");
+    expect(result.supplementalMarkdown).toContain("(+10 more)");
+    expect(result.supplementalMarkdown).toContain("do not present a partial search as complete");
+  });
+
+  it("reads more files for a question about the whole project, in shorter excerpts", () => {
+    const narrow = exploreForAskQuestion(routes(30), "How does require_user protect a route?", { maxReads: 5 });
+    const broad = exploreForAskQuestion(routes(30), "Which routes use require_user? List all of them.", { maxReads: 5 });
+    expect(broad.trace.readPaths).toHaveLength(10);
+    expect(broad.supplementalMarkdown).toContain("Coverage: 10 of 30");
+    // Twice the files in about the same room.
+    expect(broad.supplementalMarkdown.length).toBeLessThan(narrow.supplementalMarkdown.length * 1.6);
+    expect(exploreForAskQuestion(routes(30), "列出所有使用 require_user 的路由", { maxReads: 5 }).trace.readPaths).toHaveLength(10);
+  });
+
+  it("says when every matching file was read", () => {
+    const result = exploreForAskQuestion(routes(3), "How does require_user protect a route?", { maxReads: 5 });
+    expect(result.trace.unreadMatchingPaths).toEqual([]);
+    expect(result.supplementalMarkdown).toContain("Coverage: all 3 files that match the question's words were read.");
+  });
+});

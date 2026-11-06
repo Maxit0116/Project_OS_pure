@@ -80,17 +80,22 @@ export const AskExplorationTraceSchema = z
     queriedSymbols: z.array(z.string()),
     hits: z.array(AskExplorationHitSchema),
     readPaths: z.array(z.string()),
-    reads: z.array(AskExplorationReadSchema).max(8).optional(),
+    // A question about the whole project reads up to ten files (ask-exploration-service.ts).
+    reads: z.array(AskExplorationReadSchema).max(12).optional(),
     rounds: z.array(z.object({
       index: z.number().int().min(1).max(5),
       symbols: z.array(z.string()),
       hits: z.array(AskExplorationHitSchema),
-      reads: z.array(AskExplorationReadSchema).max(8),
+      reads: z.array(AskExplorationReadSchema).max(12),
     }).strict()).max(5).optional(),
     truncated: z.boolean(),
     /** Actual exploration passes executed (≤ requested maxRounds). */
     roundsUsed: z.number().int().min(0).max(5).optional(),
     maxRounds: z.number().int().min(0).max(5).optional(),
+    /** Files that match the question's words, read or not. */
+    matchingFileCount: z.number().int().nonnegative().optional(),
+    /** The best of the matching files that were not read. */
+    unreadMatchingPaths: z.array(z.string()).max(15).optional(),
   })
   .strict();
 

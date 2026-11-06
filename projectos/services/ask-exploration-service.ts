@@ -41,6 +41,10 @@ export interface AskExplorationTrace {
   truncated: boolean;
   roundsUsed: number;
   maxRounds: number;
+  /** Files that match the question's words, read or not. */
+  matchingFileCount?: number;
+  /** The best of the matching files that were not read. */
+  unreadMatchingPaths?: string[];
 }
 
 export interface AskExplorationResult {
@@ -76,6 +80,22 @@ const MAX_SYMBOLS = 10;
 const MAX_HITS_PER_FILE = 3;
 const WINDOW_RADIUS = 24;
 const FILE_EXCERPT_CHARS = 4_000;
+/** What all excerpts together may take: more files read means shorter excerpts, not a longer prompt. */
+const TOTAL_EXCERPT_CHARS = 20_000;
+const BROAD_MAX_READS = 10;
+const BROAD_MAX_HITS = 32;
+const UNREAD_LISTED = 15;
+
+/**
+ * A question about the whole project ("where is auth enforced across all routes?", "列出所有…") is
+ * not answered by the five best files: read more of them, in shorter excerpts.
+ */
+const BROAD_QUESTION =
+  /\b(?:all|every|each|everywhere|across|throughout|list|how many|whole|entire|which (?:files|places|routes|endpoints|components|modules|pages|services))\b|所有|全部|哪些|每个|每一个|各个|整个|列出/iu;
+
+export function isBroadQuestion(question: string): boolean {
+  return BROAD_QUESTION.test(question);
+}
 
 /**
  * Heuristic read-only exploration (DevPlan M1.A / Harness H1.B middle-ground).
@@ -86,8 +106,10 @@ export function exploreForAskQuestion(
   question: string,
   options?: AskExplorationOptions,
 ): AskExplorationResult {
-  const maxHits = options?.maxHits ?? 16;
-  const maxReads = options?.maxReads ?? 5;
+  const broad = isBroadQuestion(question);
+  const maxHits = Math.max(options?.maxHits ?? 16, broad ? BROAD_MAX_HITS : 0);
+  const maxReads = Math.max(options?.maxReads ?? 5, broad ? BROAD_MAX_READS : 0);
+  const excerptChars = Math.min(FILE_EXCERPT_CHARS, Math.floor(TOTAL_EXCERPT_CHARS / maxReads));
   const maxRounds = Math.max(1, Math.min(options?.maxRounds ?? 1, 5));
   const allowList = resolveExplorationAllowList(
     workspace,
@@ -110,6 +132,8 @@ export function exploreForAskQuestion(
   const hits: AskExplorationHit[] = [];
   const rounds: AskExplorationRound[] = [];
   const seenHitKeys = new Set<string>();
+  /** Every file that matched in any round, with its best score. */
+  const matching = new Map<string, number>();
   let roundSymbols = extractSymbols(question);
   let roundsUsed = 0;
 
@@ -128,6 +152,7 @@ export function exploreForAskQuestion(
       hits,
       seenHitKeys,
       maxHits,
+      matching,
     });
     roundsUsed = round + 1;
     const roundRecord: AskExplorationRound = {
@@ -168,8 +193,12 @@ export function exploreForAskQuestion(
     const read = { path: hit.path, ...window };
     reads.push(read);
     roundByPath.get(hit.path)?.reads.push(read);
-    supplementalChunks.push(renderFileExcerpt(hit.path, content, fileHits));
+    supplementalChunks.push(renderFileExcerpt(hit.path, content, fileHits, excerptChars));
   }
+  const unread = [...matching.entries()]
+    .filter(([path]) => !readPaths.includes(path))
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([path]) => path);
 
   const trace: AskExplorationTrace = {
     queriedSymbols,
@@ -177,16 +206,27 @@ export function exploreForAskQuestion(
     readPaths,
     reads,
     rounds,
-    truncated: hits.length >= maxHits || readPaths.length >= maxReads,
+    truncated: hits.length >= maxHits || readPaths.length >= maxReads || unread.length > 0,
     roundsUsed,
     maxRounds,
+    matchingFileCount: matching.size,
+    unreadMatchingPaths: unread.slice(0, UNREAD_LISTED),
   };
 
+  // Say how much was looked at: an answer from five of forty matching files used to read as complete.
+  const coverage = unread.length > 0
+    ? [
+        `Coverage: ${readPaths.length} of ${matching.size} files that match the question's words were read.`,
+        `Matching files not read (best first): ${unread.slice(0, UNREAD_LISTED).join(", ")}${unread.length > UNREAD_LISTED ? ` (+${unread.length - UNREAD_LISTED} more)` : ""}.`,
+        "When the answer depends on files that were not read, say so and name them; do not present a partial search as complete.",
+      ].join("\n")
+    : `Coverage: all ${matching.size} files that match the question's words were read.`;
   const supplementalMarkdown = supplementalChunks.length
     ? [
         "## Ask exploration (read-only)",
         `Rounds used: ${roundsUsed}/${maxRounds}; symbols: ${queriedSymbols.join(", ") || "(none)"}`,
         `Hits: ${hits.length}; files read: ${readPaths.join(", ") || "(none)"}`,
+        coverage,
         ...supplementalChunks,
       ].join("\n\n")
     : "";
@@ -237,6 +277,7 @@ function collectHits(input: {
   hits: AskExplorationHit[];
   seenHitKeys: Set<string>;
   maxHits: number;
+  matching?: Map<string, number>;
 }): void {
   const termSets = input.symbols.map((symbol) => ({ symbol, terms: termsFor(symbol) }));
   const allTerms = [...new Set(termSets.flatMap((entry) => entry.terms))];
@@ -323,6 +364,9 @@ function collectHits(input: {
     ranked.push({ path: file.path, score, lines: lineScores.slice(0, MAX_HITS_PER_FILE) });
   }
   ranked.sort((left, right) => right.score - left.score || left.path.localeCompare(right.path));
+  for (const file of ranked) {
+    input.matching?.set(file.path, Math.max(input.matching.get(file.path) ?? 0, file.score));
+  }
 
   for (const file of ranked) {
     if (input.hits.length >= input.maxHits) return;
@@ -340,8 +384,8 @@ function collectHits(input: {
 }
 
 /** The lines around the best hits of a file, not its first lines: a large file's head says nothing about the match. */
-function renderFileExcerpt(path: string, content: string, hitLines: readonly number[]): string {
-  if (content.length <= FILE_EXCERPT_CHARS) return `### ${path}\n\`\`\`\n${content}\n\`\`\``;
+function renderFileExcerpt(path: string, content: string, hitLines: readonly number[], excerptChars = FILE_EXCERPT_CHARS): string {
+  if (content.length <= excerptChars) return `### ${path}\n\`\`\`\n${content}\n\`\`\``;
   const lines = content.split("\n");
   const windows: Array<[number, number]> = [];
   for (const hit of [...hitLines].sort((left, right) => left - right)) {
@@ -355,7 +399,7 @@ function renderFileExcerpt(path: string, content: string, hitLines: readonly num
   let used = 0;
   for (const [start, end] of windows) {
     const body = lines.slice(start - 1, end).map((text, index) => `${start + index}: ${text}`).join("\n");
-    const remaining = FILE_EXCERPT_CHARS - used;
+    const remaining = excerptChars - used;
     if (remaining <= 200) break;
     const clipped = body.length > remaining ? `${body.slice(0, remaining)}\n…` : body;
     parts.push(`lines ${start}-${end}\n${clipped}`);
