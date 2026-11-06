@@ -12973,6 +12973,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
     }
 
+    if (this.runHasDiffAuthorization(runId)) {
+      throw diffScopeViolation(
+        runId,
+        "already has a bound write authorization that scenario metadata cannot replace",
+      );
+    }
     this.boundFixtureDiffAuthorizations.set(runId, {
       projectId: workspace.project.projectId,
       nodeId,

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentRun } from "../contracts/agent-run.js";
 import type { GeneratedDiff } from "../contracts/diff.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
+import * as writeTransactionModule from "./recoverable-write-transaction.js";
 import {
   bindCreateAuthorization,
   bindExistingFileAuthorization,
@@ -158,7 +159,7 @@ describe("getDiff authorization", () => {
     expect(snapshot(workspaceRoot)).toEqual(before);
   });
 
-  it("does not apply a parent aggregate whose child file differs from the parent authorization", async () => {
+  it("returns run_not_found for a parent aggregate apply and writes nothing", async () => {
     const workspaceRoot = copyWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
     const project = await api.openSampleWorkspace();
@@ -169,6 +170,7 @@ describe("getDiff authorization", () => {
     bindModify(api, project.projectId, workspaceRoot, "run_apply_parent_a", "app/login/page.tsx");
     const before = snapshot(workspaceRoot);
 
+    // No parent diff and no scenario: apply stops at run_not_found. This does not reach the scope check.
     await expect(api.applyDiff("run_apply_parent_a")).rejects.toMatchObject({
       code: "run_not_found",
     });
@@ -191,7 +193,7 @@ describe("getDiff authorization", () => {
     expect(snapshot(workspaceRoot)).toEqual(before);
   });
 
-  it("does not apply an aggregated parent when its unbound child is outside the parent authorization", async () => {
+  it("returns run_not_found for a bound parent aggregate apply and writes nothing", async () => {
     const workspaceRoot = copyWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
     const project = await api.openSampleWorkspace();
@@ -201,6 +203,7 @@ describe("getDiff authorization", () => {
     bindModify(api, project.projectId, workspaceRoot, "run_apply_bound_parent", "app/login/page.tsx");
     const before = snapshot(workspaceRoot);
 
+    // No parent diff and no scenario: apply stops at run_not_found. This does not reach the scope check.
     await expect(api.applyDiff("run_apply_bound_parent")).rejects.toMatchObject({
       code: "run_not_found",
     });
@@ -414,6 +417,30 @@ describe("getDiff authorization", () => {
         delete: null,
       },
     ]);
+  });
+
+  it("does not attach fixture authorization when a binding arrives while the runtime is loading", async () => {
+    const workspaceRoot = copyWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
+    const project = await api.openSampleWorkspace();
+    const outsidePath = "app/about/page.tsx";
+    const diff = realModifyDiff(workspaceRoot, "run_runtime_race", outsidePath);
+    writeScenario(workspaceRoot, project.projectId, diff.runId, diff, [outsidePath]);
+    await api.openWorkspace(workspaceRoot);
+    bindModify(api, project.projectId, workspaceRoot, "run_other_binding", "lib/auth.ts");
+    const gate = installDeferredRuntime(api);
+    const pending = api.applyDiff(diff.runId);
+    bindModify(api, project.projectId, workspaceRoot, diff.runId, "app/login/page.tsx");
+    const before = snapshot(workspaceRoot);
+    const beforeAuthorization = authorizationSnapshot(api);
+
+    gate.release();
+    await expect(pending).rejects.toMatchObject({
+      code: "diff_scope_violation",
+    });
+    expect(readFileSync(join(workspaceRoot, outsidePath), "utf8")).toBe(diff.files[0]?.before);
+    expect(snapshot(workspaceRoot)).toEqual(before);
+    expect(authorizationSnapshot(api)).toEqual(beforeAuthorization);
   });
 
   it("rejects scenario apply that would replace an existing fixture authorization", async () => {
@@ -1020,8 +1047,34 @@ function bindModify(
   });
 }
 
+function installDeferredRuntime(api: ProjectOSLocalApi): { release: () => void } {
+  let releaseRuntime: ((runtime: {
+    module: typeof writeTransactionModule;
+    kernel: writeTransactionModule.RecoverableWriteTransactionKernel;
+  }) => void) | undefined;
+  const promise = new Promise<{
+    module: typeof writeTransactionModule;
+    kernel: writeTransactionModule.RecoverableWriteTransactionKernel;
+  }>((resolve) => {
+    releaseRuntime = resolve;
+  });
+  state(api).writeTransactionRuntime = promise;
+  return {
+    release: () => {
+      releaseRuntime?.({
+        module: writeTransactionModule,
+        kernel: new writeTransactionModule.RecoverableWriteTransactionKernel(),
+      });
+    },
+  };
+}
+
 function state(api: ProjectOSLocalApi) {
   return api as unknown as {
+    writeTransactionRuntime?: Promise<{
+      module: typeof writeTransactionModule;
+      kernel: writeTransactionModule.RecoverableWriteTransactionKernel;
+    }>;
     boundRunAuthorizations: Map<string, {
       projectId: string;
       nodeId: string;
