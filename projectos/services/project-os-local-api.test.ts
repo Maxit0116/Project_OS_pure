@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -22,6 +23,8 @@ import {
 import { ProjectOSError } from "../errors.js";
 import { InMemorySecretStore } from "../persistence/secret-store.js";
 import { ProjectOSWorkspaceStore } from "../persistence/workspace-store.js";
+import { AgentProposalValidationResultSchema } from "../contracts/agent-validation.js";
+import { classifyRunOutcome } from "./harness/run-outcome.js";
 import { validateAgentRunEventSequence } from "../validation/index.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
 import { LocalContextAssembler } from "./local-context-assembler.js";
@@ -1274,22 +1277,22 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     expect(refinement.executionPolicy).toBe("automatic");
 
     const run = await api.confirmExecution(refinement.id);
-    const completed = await waitForRunStatus(api, run.runId, "complete");
+    const finished = await waitForRunStatus(api, run.runId, "error");
     const events = await api.getAgentRunEvents(run.runId);
+    const generations = gateway.requests.filter((request) => request.requestKind === "change_generation");
+    const verifications = events.filter((event) => event.type === "verification_completed");
+    const repairDiffs = events.filter((event) =>
+      event.type === "diff_ready" && event.payload?.repair_attempt === 1,
+    );
 
-    expect(completed.status).toBe("complete");
-    expect(readFileSync(targetPath, "utf8")).toContain("<h1>Welcome Back</h1>");
-    expect(verificationCalls).toEqual([tempWorkspaceRoot]);
-    expect(gateway.requests.map((request) =>
-      isRecord(request.input) && typeof request.input.mode === "string"
-        ? request.input.mode
-        : request.requestKind,
-    )).toEqual([
-      "prompt_refinement",
-      "locate_plan",
-      "change_generation",
-      "validate_proposal",
-    ]);
+    expect(finished.status).toBe("error");
+    expect(classifyRunOutcome(events)).toBe("verification_failed");
+    expect(generations).toHaveLength(2);
+    expect(generations[1]?.input).toMatchObject({ verificationRepair: { repair_attempt: 1 } });
+    expect(verificationCalls).toEqual([tempWorkspaceRoot, tempWorkspaceRoot]);
+    expect(verifications).toHaveLength(2);
+    expect(verifications.map((event) => event.payload?.status)).toEqual(["failed", "failed"]);
+    expect(repairDiffs).toHaveLength(1);
     expect(events.filter((event) => event.type === "step_started").map((event) =>
       event.step?.kind,
     )).toEqual([
@@ -1299,22 +1302,21 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       "validate_proposal",
       "apply_change",
       "verify_change",
+      "generate_proposal",
+      "validate_proposal",
+      "apply_change",
+      "verify_change",
     ]);
-    expect(events.find((event) => event.type === "proposal_validation_result"))
-      .toMatchObject({ payload: { verdict: "valid", scopeStatus: "compliant" } });
-    const applyEvent = events.find((event) => event.type === "apply_result");
-    expect(applyEvent).toMatchObject({
-      payload: { outcome: "applied", backupId: expect.any(String) },
+    expect(events.find((event) => event.type === "run_completed")?.payload).toMatchObject({
+      verificationStatus: "failed",
+      repair_attempt: 1,
     });
-    expect(events.find((event) => event.type === "verification_completed")?.payload)
-      .toMatchObject({ status: "failed" });
     expect(events.some((event) => event.type === "step_failed")).toBe(false);
+    expect(readFileSync(targetPath, "utf8")).toContain("<h1>Welcome again</h1>");
     expect(readFileSync(targetPath, "utf8")).not.toBe(before);
 
-    const backupId = applyEvent?.type === "apply_result"
-      ? applyEvent.payload.backupId
-      : undefined;
-    expect(backupId).toBeDefined();
+    const backupId = events.find((event) => event.type === "apply_result")?.payload.backupId;
+    expect(backupId).toEqual(expect.any(String));
     await expect(api.restoreApplyBackup(project.projectId, backupId!)).resolves.toMatchObject({
       restored: true,
       outcome: "restored",
@@ -3039,39 +3041,20 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     expect(readFileSync(join(tempWorkspaceRoot, path), "utf8")).toBe(after);
   });
 
-  it("rejects an out-of-scope external diff from getDiff and apply", async () => {
-    const tempWorkspaceRoot = copySampleWorkspace();
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
-    const runId = "run_external_scope_rejected";
-    const selectedPath = "app/login/page.tsx";
-    const otherPath = "lib/auth.ts";
-    const before = readFileSync(join(tempWorkspaceRoot, otherPath), "utf8");
-    const run = generatedRun(project.projectId, runId);
-    const diff: GeneratedDiff = {
-      runId,
-      summary: "External agent attempted a connected-file edit",
-      files: [{
-        path: otherPath,
-        changeType: "modify",
-        before,
-        after: `${before}\n// unauthorized external edit\n`,
-      }],
-    };
-    authorizeTestRun(api, project.projectId, tempWorkspaceRoot, runId, selectedPath);
-    const orchestrator = getLocalApiInternals(api).orchestrator as {
-      runs: Map<string, { run: AgentRun; diff?: GeneratedDiff }>;
-    };
-    orchestrator.runs.set(runId, { run, diff });
+  it("rejects an out-of-scope orchestrator diff from getDiff", async () => {
+    const fixture = await outOfScopeOrchestratorDiff();
+    await expect(fixture.api.getDiff(fixture.runId)).rejects.toMatchObject({
+      code: "diff_scope_violation",
+    });
+    expect(outOfScopeSnapshot(fixture.workspaceRoot)).toEqual(fixture.before);
+  });
 
-    await expect(api.getDiff(runId)).rejects.toMatchObject({
+  it("rejects an out-of-scope orchestrator diff from applyDiff", async () => {
+    const fixture = await outOfScopeOrchestratorDiff();
+    await expect(fixture.api.applyDiff(fixture.runId)).rejects.toMatchObject({
       code: "diff_scope_violation",
     });
-    await expect(api.applyDiff(runId)).rejects.toMatchObject({
-      code: "diff_scope_violation",
-    });
-    expect(readFileSync(join(tempWorkspaceRoot, otherPath), "utf8")).toBe(before);
-    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+    expect(outOfScopeSnapshot(fixture.workspaceRoot)).toEqual(fixture.before);
   });
 
   it("rejects a stale generated diff without changing any file", async () => {
@@ -4287,6 +4270,82 @@ async function applyGeneratedDiffTransaction(
   return generatedApplyApi.commitGeneratedDiffTransaction(run.runId, diff, run);
 }
 
+async function outOfScopeOrchestratorDiff(): Promise<{
+  api: ProjectOSLocalApi;
+  runId: string;
+  workspaceRoot: string;
+  before: {
+    other: string;
+    login: string;
+    currentWork: string;
+    backup: boolean;
+  };
+}> {
+  const workspaceRoot = copySampleWorkspace();
+  const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
+  const project = await api.openSampleWorkspace();
+  const runId = "run_external_scope_rejected";
+  const selectedPath = "app/login/page.tsx";
+  const otherPath = "lib/auth.ts";
+  const other = readFileSync(join(workspaceRoot, otherPath), "utf8");
+  const diff: GeneratedDiff = {
+    runId,
+    summary: "External agent attempted a connected-file edit",
+    files: [{
+      path: otherPath,
+      changeType: "modify",
+      before: other,
+      after: `${other}\n// unauthorized external edit\n`,
+    }],
+  };
+  const selectedSha = createHash("sha256").update(readFileSync(join(workspaceRoot, selectedPath))).digest("hex");
+  authorizeTestRun(api, project.projectId, workspaceRoot, runId, selectedPath);
+  getLocalApiInternals(api).orchestrator.runs.set(runId, {
+    run: generatedRun(project.projectId, runId),
+    diff,
+    validationResult: AgentProposalValidationResultSchema.parse({
+      version: "0.1.0",
+      runId,
+      path: selectedPath,
+      contextBundleHash: `sha256:${"ab".repeat(32)}`,
+      selectedFileSha256: `sha256:${selectedSha}`,
+      verdict: "valid",
+      criteria: [{
+        criterion: "The proposal stays on the authorized login page",
+        status: "satisfied",
+        explanation: "Independent validation accepts this exact proposal.",
+      }],
+      scopeAssessment: {
+        status: "compliant",
+        explanation: "Validation is present so apply can reach the scope check.",
+      },
+      summary: "The proposal has an independent validation result.",
+      rationale: "The scope check still has to reject a different file.",
+    }),
+    validatedDiffJson: JSON.stringify(diff),
+  });
+  return {
+    api,
+    runId,
+    workspaceRoot,
+    before: outOfScopeSnapshot(workspaceRoot),
+  };
+}
+
+function outOfScopeSnapshot(workspaceRoot: string): {
+  other: string;
+  login: string;
+  currentWork: string;
+  backup: boolean;
+} {
+  return {
+    other: readFileSync(join(workspaceRoot, "lib/auth.ts"), "utf8"),
+    login: readFileSync(join(workspaceRoot, "app/login/page.tsx"), "utf8"),
+    currentWork: readFileSync(join(workspaceRoot, ".projectos", "current-work.json"), "utf8"),
+    backup: existsSync(join(workspaceRoot, ".projectos", "apply-backups")),
+  };
+}
+
 function authorizeTestRun(
   api: ProjectOSLocalApi,
   projectId: string,
@@ -5049,7 +5108,7 @@ class AutomaticChangeGateway extends ModelGateway {
         criteria: [{
           criterion: "The login heading welcomes returning users",
           status: "satisfied",
-          explanation: "The proposed heading says Welcome Back.",
+          explanation: "The proposed heading stays on the authorized login page.",
         }],
         scopeAssessment: {
           status: "compliant",
@@ -5057,6 +5116,15 @@ class AutomaticChangeGateway extends ModelGateway {
         },
         summary: "The scoped proposal meets its acceptance criterion.",
         rationale: "The exact heading replacement implements the requested outcome.",
+      });
+    } else if (isRecord(request.input) && request.input.verificationRepair) {
+      output = JSON.stringify({
+        summary: "Revise the applied login heading after verification failed",
+        path: "app/login/page.tsx",
+        edits: [{
+          search: "<h1>Welcome Back</h1>",
+          replace: "<h1>Welcome again</h1>",
+        }],
       });
     } else {
       output = JSON.stringify({
