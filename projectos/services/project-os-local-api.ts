@@ -5301,6 +5301,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async getDiff(runId: string): Promise<GeneratedDiff> {
     const orchestratorRun = this.orchestrator.getRun(runId);
     if (orchestratorRun?.diff) {
+      // Parent-owned diffs must still fail closed on bound child mismatches;
+      // otherwise a child binding would be skipped whenever the parent has .diff.
+      this.assertBoundChildDiffScopes(orchestratorRun);
       return this.returnScopedDiff(runId, orchestratorRun.diff);
     }
 
@@ -10577,6 +10580,44 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       this.fallbackNotices.delete(projectId);
     }
     return notice;
+  }
+
+  /**
+   * Re-validate every bound child reachable from this run. Used when the parent
+   * already has its own `.diff` so aggregation is skipped.
+   */
+  private assertBoundChildDiffScopes(state: OrchestratorRunState): void {
+    const visit = (childRunId: string) => {
+      const childState = this.orchestrator.getRun(childRunId);
+      if (!childState) return;
+      if (childState.diff?.files.length) {
+        if (this.runHasDiffAuthorization(childRunId)) {
+          this.validateGeneratedDiffScope(childRunId, childState.diff);
+        }
+      } else {
+        const nested = this.aggregateOrchestratorRunDiff(childState);
+        if (nested && this.runHasDiffAuthorization(childRunId)) {
+          this.validateGeneratedDiffScope(childRunId, nested);
+        }
+      }
+      for (const child of childState.delegatedChildren ?? []) visit(child.runId);
+      for (const child of childState.delegatedHierarchyChildren ?? []) visit(child.runId);
+      for (const child of childState.scaffoldChildren ?? []) visit(child.runId);
+      for (const child of childState.deletionChildren ?? []) visit(child.runId);
+      for (const child of childState.greenfieldChildren ?? []) visit(child.runId);
+      for (const leaf of childState.wholeTreeTransactionPlan?.leaves ?? []) {
+        visit(leaf.childRunId);
+      }
+    };
+
+    for (const child of state.delegatedChildren ?? []) visit(child.runId);
+    for (const child of state.delegatedHierarchyChildren ?? []) visit(child.runId);
+    for (const child of state.scaffoldChildren ?? []) visit(child.runId);
+    for (const child of state.deletionChildren ?? []) visit(child.runId);
+    for (const child of state.greenfieldChildren ?? []) visit(child.runId);
+    for (const leaf of state.wholeTreeTransactionPlan?.leaves ?? []) {
+      visit(leaf.childRunId);
+    }
   }
 
   private aggregateOrchestratorRunDiff(
