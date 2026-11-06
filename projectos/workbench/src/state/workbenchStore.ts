@@ -774,6 +774,15 @@ function disposeActiveRunSubscriptions(
   disposable?.dispose()
 }
 
+let structureRescanRequestSequence = 0
+
+function bumpStructureRescanGeneration(
+  set: (partial: Partial<WorkbenchState>) => void,
+): void {
+  structureRescanRequestSequence += 1
+  set({ structureRescanLoading: false })
+}
+
 async function loadWorkspaceIntoStore(
   project: ProjectOSProject,
   client: ProjectOSApi,
@@ -783,6 +792,7 @@ async function loadWorkspaceIntoStore(
   options: { shouldStartOnboarding?: boolean } = {},
 ) {
   disposeActiveRunSubscriptions(get, set)
+  bumpStructureRescanGeneration(set)
   await useTerminalStore.getState().disposeAllSessions()
   await useDiagnosticsStore.getState().dispose()
   useOutlineStore.getState().clear()
@@ -819,6 +829,7 @@ async function loadWorkspaceIntoStore(
       /* ignore */
     }
   }
+  bumpStructureRescanGeneration(set)
   set({
     phase: 'ready',
     loadingMessage: null,
@@ -1289,6 +1300,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   openSampleWorkspace: async () => {
     const { client, locale } = get()
     disposeActiveRunSubscriptions(get, set)
+    bumpStructureRescanGeneration(set)
     set({
       phase: 'loading',
       error: null,
@@ -1312,6 +1324,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const trimmed = path.trim()
     if (!trimmed) return
     disposeActiveRunSubscriptions(get, set)
+    bumpStructureRescanGeneration(set)
     set({
       phase: 'loading',
       error: null,
@@ -1331,28 +1344,52 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   rescanStructureGraph: async () => {
-    const { client, project, locale, structureRescanLoading, pushToast } = get()
+    const started = get()
+    const { client, project, locale, structureRescanLoading, pushToast } = started
     if (!project || structureRescanLoading) return
+    const projectId = project.projectId
+    const requestSequence = ++structureRescanRequestSequence
+    const isCurrentScan = () =>
+      requestSequence === structureRescanRequestSequence &&
+      get().project?.projectId === projectId
     set({ structureRescanLoading: true })
     pushToast({
       type: 'info',
       message: getStoreMessage(locale, 'map.rescanningStructure'),
     })
     try {
-      const graph = await client.analyzeWorkspace(project.projectId)
-      const tree = await client.getSemanticTree(project.projectId)
-      set({ graph, tree, structureRescanLoading: false })
-      pushToast({
-        type: 'success',
-        message: getStoreMessage(locale, 'map.rescanStructureDone'),
-      })
+      const graph = await client.analyzeWorkspace(projectId)
+      if (!isCurrentScan()) return
+      try {
+        const tree = await client.getSemanticTree(projectId)
+        if (!isCurrentScan()) return
+        set({ graph, tree, structureRescanLoading: false, error: null })
+        get().pushToast({
+          type: 'success',
+          message: getStoreMessage(get().locale, 'map.rescanStructureDone'),
+        })
+      } catch (refreshError) {
+        if (!isCurrentScan()) return
+        const message = getStoreMessage(get().locale, 'map.rescanTreeRefreshFailed', {
+          detail: sanitizeErrorMessage(refreshError),
+        })
+        set({
+          graph,
+          structureRescanLoading: false,
+          error: message,
+        })
+        get().pushToast({ type: 'warning', message })
+      }
     } catch (err) {
-      set({ structureRescanLoading: false })
-      pushToast({
-        type: 'warning',
-        message: getStoreMessage(locale, 'map.rescanStructureFailed'),
+      if (!isCurrentScan()) return
+      const message = getStoreMessage(get().locale, 'map.rescanStructureFailed', {
+        detail: sanitizeErrorMessage(err),
       })
-      void err
+      set({
+        structureRescanLoading: false,
+        error: message,
+      })
+      get().pushToast({ type: 'warning', message })
     }
   },
 
@@ -2988,9 +3025,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   resetDemo: async () => {
-    const { client, project, runDisposable, locale } = get()
+    const { client, project, runDisposable } = get()
     if (!project) return
     runDisposable?.dispose()
+    bumpStructureRescanGeneration(set)
 
     try {
       await useTerminalStore.getState().disposeAllSessions()
@@ -3000,6 +3038,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         client.getMapContent(project.projectId),
         client.getCurrentWork(project.projectId),
       ])
+      bumpStructureRescanGeneration(set)
       set({
         graph,
         tree,

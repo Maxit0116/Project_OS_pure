@@ -351,20 +351,30 @@ function salvageTruncatedJsonObject(source: string): string | null {
   return fragment;
 }
 
-function extractJsonObjectCandidates(output: string): string[] {
+const STRUCTURE_SCAN_TRUNCATED_MESSAGE =
+  "Structure scan model output was cut off before a complete graph was returned. The current map was not changed.";
+const STRUCTURE_SCAN_INVALID_MESSAGE =
+  "Model did not return a valid ProjectGraph JSON object. The current map was not changed.";
+
+interface JsonObjectCandidate {
+  text: string;
+  salvaged: boolean;
+}
+
+function extractJsonObjectCandidates(output: string): JsonObjectCandidate[] {
   const sources = [
     ...Array.from(output.matchAll(/```(?:json)?\s*([\s\S]*?)```/giu)).map(
       (match) => match[1] ?? "",
     ),
     output,
   ];
-  const candidates: string[] = [];
+  const candidates: JsonObjectCandidate[] = [];
   const seen = new Set<string>();
-  const push = (candidate: string): void => {
+  const push = (candidate: string, salvaged: boolean): void => {
     const trimmed = candidate.trim();
     if (!trimmed || seen.has(trimmed)) return;
     seen.add(trimmed);
-    candidates.push(trimmed);
+    candidates.push({ text: trimmed, salvaged });
   };
   for (const source of sources) {
     let start = -1;
@@ -393,14 +403,14 @@ function extractJsonObjectCandidates(output: string): string[] {
       else if (character === "}") {
         depth -= 1;
         if (depth === 0 && start >= 0) {
-          push(source.slice(start, index + 1));
+          push(source.slice(start, index + 1), false);
           start = -1;
         }
       }
     }
     if (start >= 0) {
       const salvaged = salvageTruncatedJsonObject(source.slice(start));
-      if (salvaged) push(salvaged);
+      if (salvaged) push(salvaged, true);
     }
   }
   return candidates;
@@ -570,10 +580,18 @@ export function parseProjectGraphFromModelOutput(
   },
 ): ProjectGraph {
   const issues: string[] = [];
+  let sawTruncatedCandidate = false;
   const candidates = extractJsonObjectCandidates(output);
   for (const candidate of candidates) {
+    if (candidate.salvaged) {
+      // A closed-by-parser fragment is not a finished model graph. Accepting
+      // it marks analysis complete and can drop nodes that were cut off.
+      sawTruncatedCandidate = true;
+      issues.push("response_truncated");
+      continue;
+    }
     try {
-      const repaired = softRepairStructureGraphJson(JSON.parse(candidate), {
+      const repaired = softRepairStructureGraphJson(JSON.parse(candidate.text), {
         projectId: options.projectId,
         projectName: options.projectName,
       });
@@ -619,7 +637,7 @@ export function parseProjectGraphFromModelOutput(
         issues.push(
           parsed.error.issues
             .slice(0, 4)
-            .map((issue) => `${issue.path.join(".")}:${issue.message}`)
+            .map((issue) => `${issue.path.join(".") || "<root>"}:${issue.code}`)
             .join("; "),
         );
         continue;
@@ -627,14 +645,20 @@ export function parseProjectGraphFromModelOutput(
       assertStructureQualityGate(parsed.data);
       return parsed.data;
     } catch (error) {
-      issues.push(error instanceof Error ? error.message : String(error));
+      if (error instanceof ProjectOSError) {
+        issues.push(error.code);
+      } else {
+        issues.push("malformed_json");
+      }
     }
   }
   throw new ProjectOSError(
     "agent_orchestration_failed",
-    `Model did not return a valid ProjectGraph JSON object${
-      issues[0] ? ` (${issues[0]})` : ""
-    }`,
+    sawTruncatedCandidate && issues.every((issue) =>
+      issue === "response_truncated" || issue === "malformed_json",
+    )
+      ? STRUCTURE_SCAN_TRUNCATED_MESSAGE
+      : STRUCTURE_SCAN_INVALID_MESSAGE,
   );
 }
 
@@ -741,6 +765,15 @@ export async function runStructureGraphAiScan(
       return await completeStructureScanOnce(input, mode);
     } catch (error) {
       lastError = error;
+      // A cut-off reply is not reconciled provider state. Do not spend a
+      // second model call until the user retries after the map is confirmed
+      // unchanged. Other failures still use the existing compact attempt.
+      if (
+        error instanceof ProjectOSError &&
+        error.message === STRUCTURE_SCAN_TRUNCATED_MESSAGE
+      ) {
+        break;
+      }
     }
   }
   throw lastError instanceof Error

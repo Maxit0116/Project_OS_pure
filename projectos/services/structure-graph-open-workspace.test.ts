@@ -250,4 +250,84 @@ describe("openWorkspace structure graph AI scan", () => {
     expect(complete).toHaveBeenCalledTimes(2);
     expect(rescanned.nodes.some((node) => node.name === "Rescanned module")).toBe(true);
   });
+
+  it("does not report success or replace the map when the model call fails", async () => {
+    const root = makeUnfamiliarRepo();
+    const bootstrap = ensureWorkspaceBootstrapped(root);
+    writeMockModelSettings(root, bootstrap.projectId);
+    const before = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
+    const complete = vi.fn(async () => {
+      throw new Error("provider down sk-proj-analyze-secret");
+    });
+    const api = new ProjectOSLocalApi({
+      modelGateway: { complete } as unknown as ModelGateway,
+    });
+    const project = await api.openWorkspace(root);
+    const callsAfterOpen = complete.mock.calls.length;
+    const loaded = await api.getProjectGraph(project.projectId);
+
+    await expect(api.analyzeWorkspace(project.projectId)).rejects.toMatchObject({
+      code: "agent_orchestration_failed",
+    });
+    try {
+      await api.analyzeWorkspace(project.projectId);
+    } catch (error) {
+      expect(error instanceof Error ? error.message : "").not.toContain("sk-proj-analyze-secret");
+      expect(error instanceof Error ? error.message : "").toContain("not changed");
+    }
+
+    expect(complete.mock.calls.length).toBeGreaterThan(callsAfterOpen);
+    expect(await api.getProjectGraph(project.projectId)).toEqual(loaded);
+    expect(readFileSync(join(root, ".projectos", "graph.json"), "utf8")).toBe(before);
+    expect(loaded.analysisStatus).toBe("partial");
+  });
+
+  it("does not persist a cut-off structure scan as a complete graph", async () => {
+    const root = makeUnfamiliarRepo();
+    const bootstrap = ensureWorkspaceBootstrapped(root);
+    writeMockModelSettings(root, bootstrap.projectId);
+    const before = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
+    const complete = vi.fn(async (_profile, request) => {
+      const projectId =
+        typeof request.projectId === "string" ? request.projectId : bootstrap.projectId;
+      const full = modelGraphOutput(projectId, "stranger");
+      const cutAt = full.indexOf('"fileIndex"');
+      return {
+        requestId: "req_cut",
+        provider: "mock",
+        model: "mock",
+        output: full.slice(0, cutAt + 12),
+        usage: { inputTokens: 1, outputTokens: 2 },
+        latencyMs: 1,
+      };
+    });
+    const api = new ProjectOSLocalApi({
+      modelGateway: { complete } as unknown as ModelGateway,
+    });
+
+    const project = await api.openWorkspace(root);
+    expect(await api.getProjectGraph(project.projectId)).toMatchObject({
+      analysisStatus: "partial",
+    });
+    expect(readFileSync(join(root, ".projectos", "graph.json"), "utf8")).toBe(before);
+
+    await expect(api.analyzeWorkspace(project.projectId)).rejects.toMatchObject({
+      code: "agent_orchestration_failed",
+    });
+    expect(readFileSync(join(root, ".projectos", "graph.json"), "utf8")).toBe(before);
+    expect((await api.getProjectGraph(project.projectId)).analysisStatus).toBe("partial");
+  });
+
+  it("does not claim a rescan succeeded when no model profile is configured", async () => {
+    const root = makeUnfamiliarRepo();
+    ensureWorkspaceBootstrapped(root);
+    const before = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
+    const api = new ProjectOSLocalApi();
+    const project = await api.openWorkspace(root);
+
+    await expect(api.analyzeWorkspace(project.projectId)).rejects.toMatchObject({
+      code: "model_connection_failed",
+    });
+    expect(readFileSync(join(root, ".projectos", "graph.json"), "utf8")).toBe(before);
+  });
 });
