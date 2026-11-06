@@ -612,6 +612,7 @@ export interface ProjectOSLocalApiOptions {
   workspaceTransactionCoordinator?: WorkspaceTransactionCoordinatorDependency;
   dependencyImpactScanner?: DependencyImpactScannerDependency;
   /** Desktop main injects shell.openExternal; tests may omit. */
+  openExternalUrl?: (url: string) => Promise<void>;
   /**
    * Directory for personal agent memory (`<userData>/agent-memory`).
    * Omit in tests that are not exercising memory.
@@ -927,6 +928,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly auditDirectory: string | undefined;
   private readonly workspaceTransactionCoordinator: WorkspaceTransactionCoordinatorDependency | undefined;
   private readonly dependencyImpactScanner: DependencyImpactScannerDependency | undefined;
+  private readonly openExternalUrl: ((url: string) => Promise<void>) | undefined;
   private readonly agentMemoryRoot: string | undefined;
   private readonly memoryProposalDelayMs: number;
   private readonly memoryProposalTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1115,6 +1117,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     this.auditDirectory = options.auditDirectory;
     this.workspaceTransactionCoordinator = options.workspaceTransactionCoordinator;
     this.dependencyImpactScanner = options.dependencyImpactScanner;
+    this.openExternalUrl = options.openExternalUrl;
     this.agentMemoryRoot = options.agentMemoryRoot;
     this.memoryProposalDelayMs = options.memoryProposalDelayMs ?? 1_200;
     if (options.writeTransactionRuntime) {

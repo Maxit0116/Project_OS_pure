@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, shell } from 'electron'
 import { FileSecretStore } from '../../../persistence/file-secret-store.js'
 import { FileVerificationCommandApprovalStore } from '../../../persistence/verification-command-approval-store.js'
 import { ProjectOSWorkspaceStore } from '../../../persistence/workspace-store.js'
@@ -39,6 +39,9 @@ export function getProjectOsService(): ProjectOSLocalApi {
       },
       workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(workspaceStore, kernel),
       dependencyImpactScanner: new DependencyImpactScanner(),
+      openExternalUrl: async (url) => {
+        await shell.openExternal(url)
+      },
       agentMemoryRoot: join(userDataPath, 'agent-memory'),
       mcpCatalogCacheRoot: join(userDataPath, 'mcp-catalog'),
       skillCatalogCacheRoot: join(userDataPath, 'skill-catalog'),
