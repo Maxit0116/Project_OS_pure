@@ -7,7 +7,7 @@ import {
   SEMANTIC_TOKEN_TYPES,
   type SemanticTokensLegend,
 } from './lspInitialize'
-import { createNotification, createRequest, pathToUri } from './lspProtocol'
+import { createNotification, createRequest, lspLanguageId, pathToUri } from './lspProtocol'
 import { mapLspDocumentSymbols } from './lspSymbolMapping'
 
 type MessageHandler = (message: Record<string, unknown>) => void
@@ -248,8 +248,9 @@ export const lspClient = {
     return mapLspDocumentSymbols(result as Parameters<typeof mapLspDocumentSymbols>[0])
   },
 
-  openDocument(filePath: string, languageId: string, content: string): void {
+  openDocument(filePath: string, editorLanguage: string, content: string): void {
     if (!workspaceRoot || !started) return
+    const languageId = lspLanguageId(filePath, editorLanguage)
     const uri = pathToUri(workspaceRoot, filePath)
     const existing = openDocuments.get(uri)
     if (existing) {
