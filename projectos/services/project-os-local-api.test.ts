@@ -670,16 +670,71 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
       expect(beforeApply.get(file.path)).toBe(file.before);
     }
 
-    // google-login sample kind is feature_change. Public apply without an
-    // orchestrator run fails closed at the publication boundary (R1).
-    await expect(api.applyDiff(run.runId)).rejects.toMatchObject({
-      code: "run_not_found",
+    const applyResult = await api.applyDiff(run.runId);
+    const currentWork = JSON.parse(
+      readFileSync(
+        join(tempWorkspaceRoot, ".projectos", "current-work.json"),
+        "utf8",
+      ),
+    ) as {
+      focusedNodeId?: string;
+      recentChanges: Array<{ path: string; action: string; runId?: string }>;
+    };
+    const reopenedApi = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
     });
+    const reopenedProject = await reopenedApi.openSampleWorkspace();
+    const reopenedContext = await reopenedApi.getNodeContext(
+      reopenedProject.projectId,
+      "feat_login",
+    );
+
+    expect(applyResult).toMatchObject({
+      runId: "run_google_login",
+      applied: true,
+      filesChanged: diff.files.map((file) => file.path),
+      verificationStatus: "not_run",
+      outcome: "applied",
+    });
+    expect(applyResult.backupId).toEqual(expect.any(String));
+    expect(applyResult.verificationStatus).not.toBe("demo_passed");
     for (const file of diff.files) {
-      expect(readFileSync(join(tempWorkspaceRoot, file.path), "utf8"))
-        .toBe(beforeApply.get(file.path));
+      expect(readFileSync(join(tempWorkspaceRoot, file.path), "utf8")).toBe(file.after);
     }
-    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+    const manifest = JSON.parse(
+      readFileSync(join(
+        tempWorkspaceRoot,
+        ".projectos",
+        "apply-backups",
+        applyResult.backupId!,
+        "manifest.json",
+      ), "utf8"),
+    ) as {
+      restoreAuthority: { kind: string };
+      files: Array<{ path: string; operation: string }>;
+    };
+    expect(manifest.restoreAuthority).toEqual({ kind: "project_api" });
+    expect(manifest.files.filter((file) => file.path !== ".projectos/current-work.json")
+      .map((file) => file.path)).toEqual(diff.files.map((file) => file.path));
+    expect(manifest.files).toContainEqual(expect.objectContaining({
+      path: ".projectos/current-work.json",
+      operation: "internal",
+    }));
+    expect(currentWork.focusedNodeId).toBe("feat_login");
+    expect(currentWork.recentChanges).toEqual(
+      expect.arrayContaining(
+        diff.files.map((file) =>
+          expect.objectContaining({
+            path: file.path,
+            action: "modified",
+            runId: "run_google_login",
+          }),
+        ),
+      ),
+    );
+    expect(
+      reopenedContext.recentChanges.filter((change) => change.runId === run.runId),
+    ).toHaveLength(diff.files.length);
   });
 
   it("rejects a prefab diff that targets a file outside the scenario node", async () => {
@@ -743,9 +798,8 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     const currentWorkPath = join(tempWorkspaceRoot, ".projectos", "current-work.json");
     const currentWork = readFileSync(currentWorkPath, "utf8");
 
-    // feature_change prefab without orchestrator: R1 publication boundary.
     await expect(api.applyDiff(run.runId)).rejects.toMatchObject({
-      code: "run_not_found",
+      code: "diff_apply_failed",
     });
 
     for (const file of diff.files) {
@@ -753,7 +807,15 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
         .toBe(originals.get(file.path));
     }
     expect(readFileSync(currentWorkPath, "utf8")).toBe(currentWork);
-    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+    const backups = readdirSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"));
+    expect(backups).toHaveLength(1);
+    expect(existsSync(join(
+      tempWorkspaceRoot,
+      ".projectos",
+      "apply-backups",
+      backups[0]!,
+      "manifest.json",
+    ))).toBe(true);
   });
 
   it("does not keep a demo_passed shortcut in the local apply path", () => {
@@ -772,30 +834,30 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
         "Add Google login and redirect users to profile after successful sign in.",
     });
     const featureRun = await api.confirmExecution(feature.id);
-    // google-login is feature_change → R1 fail-closed without orchestrator.
-    await expect(api.applyDiff(featureRun.runId)).rejects.toMatchObject({
-      code: "run_not_found",
-    });
-    // Materialize the prefab after-state so the debug_fix scenario's before
-    // bytes match, without widening the public feature_change apply path.
-    const featureDiff = await api.getDiff(featureRun.runId);
-    for (const file of featureDiff.files) {
-      if (typeof file.after === "string") {
-        writeFileSync(join(tempWorkspaceRoot, file.path), file.after, "utf8");
-      }
-    }
+    await api.applyDiff(featureRun.runId);
 
     const fix = await api.startHarnessFix("err_auth_provider_callback");
     const diff = await api.getDiff(fix.runId);
-    expect(diff.files.length).toBeGreaterThan(0);
-    // debug_fix prefab without orchestrator also fails closed at R1.
-    await expect(api.applyDiff(fix.runId)).rejects.toMatchObject({
-      code: "run_not_found",
+    const applied = await api.applyDiff(fix.runId);
+
+    expect(applied).toMatchObject({
+      runId: fix.runId,
+      applied: true,
+      filesChanged: diff.files.map((file) => file.path),
+      verificationStatus: "not_run",
+      outcome: "applied",
     });
+    expect(applied.verificationStatus).not.toBe("demo_passed");
     for (const file of diff.files) {
-      expect(readFileSync(join(tempWorkspaceRoot, file.path), "utf8")).toBe(file.before);
+      expect(readFileSync(join(tempWorkspaceRoot, file.path), "utf8")).toBe(file.after);
     }
-    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+    expect(existsSync(join(
+      tempWorkspaceRoot,
+      ".projectos",
+      "apply-backups",
+      applied.backupId!,
+      "manifest.json",
+    ))).toBe(true);
   });
 
   it("transactionally applies generated modifications and persists a recovery manifest", async () => {
@@ -1619,16 +1681,88 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
       rawRequest: "Create a component-owned helper for reusable login copy.",
       deferOrchestratorStart: false,
     });
-    // Approved-intent confirm binds component hierarchy planning; leaf create
-    // operations are rejected as an invalid plan shape (fail closed).
-    const failed = await waitForRunStatus(api, parent.runId, "error");
-    const events = await api.getAgentRunEvents(parent.runId);
-    expect(failed.status, JSON.stringify(events)).toBe("error");
-    expect(JSON.stringify(events)).toContain("invalid plan shape");
-    expect(existsSync(join(tempWorkspaceRoot, newFile))).toBe(false);
-    expect((await api.getAgentRunEvents(parent.runId)).some(
+    await waitForRunStatus(api, parent.runId, "awaiting_review");
+    const delegated = (await api.getAgentRunEvents(parent.runId)).find(
       (event) => event.type === "task_delegated",
+    );
+    if (delegated?.type !== "task_delegated") throw new Error("Missing create delegation");
+    const child = await api.getAgentRun(delegated.payload.childRunId);
+    const childState = getLocalApiInternals(api).orchestrator.getRun(child.runId) as {
+      createContext?: {
+        scope: { intendedFilePath: string; responsibility: string };
+        nodeContext: { fileManifest: Array<{ relationship: string }> };
+        allowedWritePaths: string[];
+      };
+      diff?: GeneratedDiff;
+      validationResult?: { verdict: string; createdFileSha256?: string };
+    } | undefined;
+    expect(child).toMatchObject({
+      scope: { kind: "leaf-create", nodeId: "feat_login", filePath: newFile },
+      role: "leaf_file_creator",
+      parentRunId: parent.runId,
+      status: "awaiting_review",
+    });
+    expect(childState?.createContext).toMatchObject({
+      scope: {
+        intendedFilePath: newFile,
+        responsibility: "Provide reusable login copy for the login component",
+      },
+      allowedWritePaths: [newFile],
+    });
+    expect(childState?.createContext?.nodeContext.fileManifest.every(
+      (file) => file.relationship === "connected",
+    )).toBe(true);
+    expect(childState?.diff?.files).toEqual([expect.objectContaining({
+      path: newFile,
+      changeType: "create",
+      after: expect.stringContaining("LOGIN_COPY"),
+    })]);
+    expect(childState?.diff?.files[0]).not.toHaveProperty("before");
+    expect(childState?.validationResult).toMatchObject({
+      verdict: "valid",
+      createdFileSha256: expect.stringMatching(/^sha256:/u),
+    });
+    expect(JSON.stringify(await api.getAgentRunEvents(child.runId))).not.toContain("LOGIN_COPY");
+    expect(existsSync(join(tempWorkspaceRoot, newFile))).toBe(false);
+
+    const applied = await api.applyDiff(parent.runId);
+    expect(applied).toMatchObject({
+      applied: true,
+      outcome: "applied",
+      filesChanged: [newFile],
+      backupId: expect.any(String),
+    });
+    expect(readFileSync(join(tempWorkspaceRoot, newFile), "utf8"))
+      .toContain("LOGIN_COPY");
+    expect((await api.getProjectGraph(project.projectId)).fileIndex.find(
+      (file) => file.path === newFile,
+    )?.nodeIds).toEqual(["feat_login"]);
+    expect((await api.getProjectGraph(project.projectId)).nodes.find(
+      (node) => node.id === "feat_login",
+    )?.linkedFiles).toContainEqual(expect.objectContaining({ path: newFile }));
+    expect(flattenSemanticPaths(await api.getSemanticTree(project.projectId))).toContain(newFile);
+    const manifest = JSON.parse(readFileSync(join(
+      tempWorkspaceRoot,
+      ".projectos",
+      "apply-backups",
+      applied.backupId!,
+      "manifest.json",
+    ), "utf8")) as { files: Array<{ operation: string; path: string }> };
+    expect(manifest.files.map((file) => [file.operation, file.path])).toEqual([
+      ["create", newFile],
+      ["internal", ".projectos/graph-product-overlay.json"],
+      ["internal", ".projectos/semantic-tree.json"],
+      ["internal", ".projectos/current-work.json"],
+    ]);
+
+    await expect(api.restoreApplyBackup(project.projectId, applied.backupId!))
+      .resolves.toMatchObject({ restored: true, filesRestored: [newFile] });
+    expect(existsSync(join(tempWorkspaceRoot, newFile))).toBe(false);
+    expect((await api.getProjectGraph(project.projectId)).fileIndex.some(
+      (file) => file.path === newFile,
     )).toBe(false);
+    expect(flattenSemanticPaths(await api.getSemanticTree(project.projectId)))
+      .not.toContain(newFile);
   });
 
   it("creates a product component, wiring, and validated scaffold files atomically", async () => {
@@ -1750,87 +1884,259 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
 
   it("executes greenfield initialization as ordered atomic tranches and undoes all atomically", async () => {
     const tempWorkspaceRoot = copyEmptyGraphWorkspace();
+    const store = new ProjectOSWorkspaceStore();
+    const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
+    const gateway = new GreenfieldInitializationGateway();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
+      workspaceStore: store,
       localContextAssembler: new LocalContextAssembler(),
-      modelGateway: new GreenfieldInitializationGateway(),
+      modelGateway: gateway,
       runEventPersistence: "memory",
+      writeTransactionRuntime: { module: writeTransactionModule, kernel },
+      workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(store, kernel),
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Initialize the complete product graph and scaffold its files.",
+      rawRequest: "Initialize the complete product graph and scaffold its files.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-    // Model-backed confirm requires an approved request intent; greenfield stays gated.
-    await expect(api.confirmExecution(refinement.id)).rejects.toMatchObject({
-      code: "diff_scope_violation",
-      message: expect.stringContaining("approved request intent"),
+    expect(
+      (await waitForRunStatus(api, run.runId, "complete")).status,
+      JSON.stringify(await api.getAgentRunEvents(run.runId)),
+    ).toBe("complete");
+
+    const graph = await api.getProjectGraph(project.projectId);
+    expect(graph.nodes).toHaveLength(11);
+    expect(graph.fileIndex).toHaveLength(8);
+    expect(graph.nodes.every((node) => node.tags.includes("product-authored"))).toBe(true);
+    expect(graph.edges).toHaveLength(1);
+    for (const path of greenfieldFilePaths()) {
+      expect(readFileSync(join(tempWorkspaceRoot, path), "utf8")).toContain("GREENFIELD_FILE");
+    }
+    expect(flattenSemanticPaths(await api.getSemanticTree(project.projectId)).sort())
+      .toEqual(greenfieldFilePaths().sort());
+    const overlay = JSON.parse(readFileSync(
+      join(tempWorkspaceRoot, ".projectos", "graph-product-overlay.json"),
+      "utf8",
+    )) as { createdNodes: unknown[] };
+    expect(overlay.createdNodes).toHaveLength(11);
+
+    const events = await api.getAgentRunEvents(run.runId);
+    events.forEach((event) => expect(AgentRunEventSchema.safeParse(event).success).toBe(true));
+    const progress = events.filter((event) => event.type === "initialization_tranche_progress");
+    const committed = progress.filter((event) => event.payload.status === "committed");
+    expect(committed).toHaveLength(2);
+    expect(committed.map((event) => ({
+      order: event.payload.order,
+      nodes: event.payload.nodesCreated,
+      files: event.payload.filesCreated,
+      committedIds: event.payload.committedTrancheIds.length,
+      backup: Boolean(event.payload.backupId),
+    }))).toEqual([
+      { order: 1, nodes: 8, files: 5, committedIds: 1, backup: true },
+      { order: 2, nodes: 3, files: 3, committedIds: 2, backup: true },
+    ]);
+    expect(events.some((event) => event.type === "plan_completed")).toBe(true);
+
+    await expect(api.undoGreenfieldInitialization(project.projectId, run.runId)).resolves.toMatchObject({
+      restored: true,
+      filesRestored: expect.arrayContaining(greenfieldFilePaths()),
     });
     expect((await api.getProjectGraph(project.projectId)).nodes).toEqual([]);
+    expect((await api.getProjectGraph(project.projectId)).fileIndex).toEqual([]);
+    expect((await api.getSemanticTree(project.projectId)).roots).toEqual([]);
+    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "graph-product-overlay.json"))).toBe(false);
+    expect(greenfieldFilePaths().every((path) => !existsSync(join(tempWorkspaceRoot, path)))).toBe(true);
   });
 
   it("requires explicit review before each greenfield tranche commit", async () => {
     const tempWorkspaceRoot = copyEmptyGraphWorkspace();
+    const store = new ProjectOSWorkspaceStore();
+    const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
+      workspaceStore: store,
       localContextAssembler: new LocalContextAssembler(),
       modelGateway: new GreenfieldInitializationGateway(),
       runEventPersistence: "memory",
+      writeTransactionRuntime: { module: writeTransactionModule, kernel },
+      workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(store, kernel),
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "review_first");
-    const refinement = await api.refinePrompt({
+    const { run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Initialize the complete product graph with explicit tranche review.",
+      rawRequest: "Initialize the complete product graph with explicit tranche review.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-    await expect(api.confirmExecution(refinement.id)).rejects.toMatchObject({
-      code: "diff_scope_violation",
-      message: expect.stringContaining("approved request intent"),
-    });
+
+    expect((await waitForRunStatus(api, run.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
     expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(0);
+    expect((await api.getAgentRunEvents(run.runId)).filter(
+      (event) => event.type === "initialization_tranche_progress" &&
+        event.payload.status === "committed",
+    )).toHaveLength(0);
+
+    await expect(api.applyDiff(run.runId)).resolves.toMatchObject({
+      applied: true,
+      filesChanged: expect.any(Array),
+      backupId: expect.any(String),
+    });
+    expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(8);
+    expect((await api.getAgentRun(run.runId)).status).toBe("awaiting_review");
+    const afterFirstApprovalEvents = await api.getAgentRunEvents(run.runId);
+    expect(afterFirstApprovalEvents.filter(
+      (event) => event.type === "initialization_tranche_progress" &&
+        event.payload.status === "committed",
+    )).toHaveLength(1);
+    expect([...afterFirstApprovalEvents].reverse().find(
+      (event) => event.type === "run_completed",
+    )?.payload).toMatchObject({
+      outcome: "greenfield_tranche_validated_awaiting_apply",
+      trancheOrder: 2,
+      filesApplied: 5,
+    });
+
+    await expect(api.applyDiff(run.runId)).resolves.toMatchObject({
+      applied: true,
+      filesChanged: expect.arrayContaining(greenfieldFilePaths()),
+      backupId: expect.any(String),
+    });
+    expect((await waitForRunStatus(api, run.runId, "complete")).status).toBe("complete");
+    expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(11);
+    expect((await api.getAgentRunEvents(run.runId)).filter(
+      (event) => event.type === "initialization_tranche_progress" &&
+        event.payload.status === "committed",
+    )).toHaveLength(2);
   });
 
   it("stops after committed greenfield checkpoints when a later graph revision turns stale", async () => {
     const tempWorkspaceRoot = copyEmptyGraphWorkspace();
+    const store = new ProjectOSWorkspaceStore();
+    const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
+    const gateway = new GreenfieldInitializationGateway();
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
+      workspaceStore: store,
       localContextAssembler: new LocalContextAssembler(),
-      modelGateway: new GreenfieldInitializationGateway(),
+      modelGateway: gateway,
       runEventPersistence: "memory",
+      writeTransactionRuntime: { module: writeTransactionModule, kernel },
+      workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(store, kernel),
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Initialize the product with checkpoints.",
+      rawRequest: "Initialize the product with checkpoints.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-    await expect(api.confirmExecution(refinement.id)).rejects.toMatchObject({
-      code: "diff_scope_violation",
-      message: expect.stringContaining("approved request intent"),
+    let overlayModified = false;
+    api.streamAgentRun(run.runId, (event) => {
+      if (
+        !overlayModified &&
+        event.type === "initialization_tranche_progress" &&
+        event.payload.status === "committed"
+      ) {
+        overlayModified = true;
+        const overlayPath = join(tempWorkspaceRoot, ".projectos", "graph-product-overlay.json");
+        const overlay = JSON.parse(readFileSync(overlayPath, "utf8")) as {
+          createdNodes: Array<{ name: string }>;
+        };
+        overlay.createdNodes[0]!.name = "Concurrent product rename";
+        writeFileSync(overlayPath, `${JSON.stringify(overlay, null, 2)}\n`, "utf8");
+      }
     });
-    expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(0);
+    await waitForRunStatus(api, run.runId, "error");
+    const events = await api.getAgentRunEvents(run.runId);
+    const progress = events.filter((event) => event.type === "initialization_tranche_progress");
+    expect(
+      progress.filter((event) => event.payload.status === "committed"),
+      JSON.stringify(events),
+    ).toHaveLength(1);
+    const failed = [...progress].reverse().find((event) => event.payload.status === "failed");
+    expect(failed?.payload).toMatchObject({
+      order: 2,
+      nodesCreated: 0,
+      filesCreated: 0,
+      committedTrancheIds: [expect.any(String)],
+    });
+    expect(failed?.payload.reason).toContain("graph");
+    expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(8);
+    expect(greenfieldFilePaths().filter((path) => existsSync(join(tempWorkspaceRoot, path))))
+      .toHaveLength(5);
+    expect(events.some((event) => event.type === "plan_completed")).toBe(false);
+
+    const firstBackup = progress.find((event) => event.payload.status === "committed")?.payload.backupId;
+    await expect(api.restoreApplyBackup(project.projectId, firstBackup!)).rejects.toMatchObject({
+      code: "undo_stale",
+    });
+    expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(8);
   });
 
   it("keeps an earlier greenfield checkpoint individually reversible after a later validation failure", async () => {
     const tempWorkspaceRoot = copyEmptyGraphWorkspace();
+    const store = new ProjectOSWorkspaceStore();
+    const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
+    let firstTrancheCommitted = false;
+    const gateway = new GreenfieldInitializationGateway(undefined, () => {
+      if (firstTrancheCommitted) {
+        throw new Error("Second tranche validation unavailable");
+      }
+    });
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
+      workspaceStore: store,
       localContextAssembler: new LocalContextAssembler(),
-      modelGateway: new GreenfieldInitializationGateway(),
+      modelGateway: gateway,
       runEventPersistence: "memory",
+      writeTransactionRuntime: { module: writeTransactionModule, kernel },
+      workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(store, kernel),
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Initialize the product with reversible checkpoints.",
+      rawRequest: "Initialize the product with reversible checkpoints.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-    await expect(api.confirmExecution(refinement.id)).rejects.toMatchObject({
-      code: "diff_scope_violation",
-      message: expect.stringContaining("approved request intent"),
+    api.streamAgentRun(run.runId, (event) => {
+      if (
+        event.type === "initialization_tranche_progress" &&
+        event.payload.status === "committed"
+      ) {
+        firstTrancheCommitted = true;
+      }
+    });
+    await waitForRunStatus(api, run.runId, "error");
+    const progress = (await api.getAgentRunEvents(run.runId)).filter(
+      (event) => event.type === "initialization_tranche_progress",
+    );
+    const committed = progress.filter((event) => event.payload.status === "committed");
+    expect(committed).toHaveLength(1);
+    expect(progress.at(-1)?.payload).toMatchObject({
+      status: "failed",
+      order: 2,
+      committedTrancheIds: [committed[0]!.payload.trancheId],
+    });
+    expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(8);
+
+    await expect(
+      api.restoreApplyBackup(project.projectId, committed[0]!.payload.backupId!),
+    ).resolves.toMatchObject({
+      restored: true,
+      filesRestored: expect.arrayContaining(greenfieldFilePaths().slice(0, 5)),
     });
     expect((await api.getProjectGraph(project.projectId)).nodes).toEqual([]);
+    expect(greenfieldFilePaths().every((path) => !existsSync(join(tempWorkspaceRoot, path)))).toBe(true);
   });
 
   it("deletes a leaf node and its owned file atomically, then restores the whole task", async () => {
@@ -2117,19 +2423,94 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
       rawRequest: "Delete the login page and repair its direct importers.",
       deferOrchestratorStart: false,
     });
-    // Component hierarchy planning rejects leaf `operation:"delete"` as invalid plan shape
-    // (impact-aware delete remains bound to the legacy node-plan path).
-    const deleteRun = await waitForRunStatus(api, parent.runId, "error");
-    const events = await api.getAgentRunEvents(parent.runId);
-    expect(deleteRun.status, JSON.stringify(events)).toBe("error");
-    expect(JSON.stringify(events)).toContain("invalid plan shape");
-    expect(existsSync(join(tempWorkspaceRoot, targetPath))).toBe(true);
+    const deleteRun = await waitForRunStatus(api, parent.runId, "complete");
+    expect(deleteRun.status, JSON.stringify(await api.getAgentRunEvents(parent.runId)))
+      .toBe("complete");
+    const parentState = getLocalApiInternals(api).orchestrator.getRun(parent.runId) as {
+      delegationPlan?: {
+        impactAnalysis?: { directImporters: string[]; reverseTransitiveClosure: string[] };
+      };
+      applyResult?: ApplyResult;
+    } | undefined;
+    const delegated = (await api.getAgentRunEvents(parent.runId)).filter(
+      (event) => event.type === "task_delegated",
+    );
+    expect(parentState?.delegationPlan?.impactAnalysis).toEqual({
+      kind: "file_delete",
+      scanner: "typescript_javascript_static_imports_v1",
+      targetPath,
+      directImporters: [importerPath],
+      reverseTransitiveClosure: [importerPath],
+    });
+    expect(delegated).toHaveLength(2);
+    expect(gateway.requests.find((request) =>
+      isRecord(request.input) && request.input.mode === "validate_delegated_batch"
+    )?.input).toMatchObject({ writeCapability: false });
+    expect(JSON.stringify(await api.getAgentRunEvents(parent.runId))).not.toContain(
+      "export default function LoginPage",
+    );
+    const childRuns = await Promise.all(delegated.map((event) => {
+      if (event.type !== "task_delegated" || !("filePath" in event.payload)) {
+        throw new Error("Expected leaf deletion tasks");
+      }
+      return api.getAgentRun(event.payload.childRunId);
+    }));
+    expect(childRuns).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        scope: { kind: "leaf-delete", nodeId: "feat_login", filePath: targetPath },
+        role: "leaf_file_deleter",
+      }),
+      expect.objectContaining({
+        scope: { kind: "leaf-file", nodeId: "feat_home", filePath: importerPath },
+        role: "leaf_file_editor",
+      }),
+    ]));
+    const applied = parentState?.applyResult;
+    if (!applied) throw new Error("Missing automatic delete apply result");
+    expect(applied).toMatchObject({
+      applied: true,
+      outcome: "applied",
+      filesChanged: [targetPath, importerPath],
+      verificationStatus: "failed",
+      backupId: expect.any(String),
+    });
+    expect(verificationCalls).toEqual([tempWorkspaceRoot]);
+    expect(existsSync(join(tempWorkspaceRoot, targetPath))).toBe(false);
+    expect(readFileSync(join(tempWorkspaceRoot, importerPath), "utf8")).not.toContain(importLine);
+    expect((await api.getProjectGraph(project.projectId)).fileIndex.some(
+      (file) => file.path === targetPath,
+    )).toBe(false);
+    expect((await api.getProjectGraph(project.projectId)).nodes.find(
+      (node) => node.id === "feat_login",
+    )?.linkedFiles.some((file) => file.path === targetPath)).toBe(false);
+    expect(flattenSemanticPaths(await api.getSemanticTree(project.projectId)))
+      .not.toContain(targetPath);
+    const manifest = JSON.parse(readFileSync(join(
+      tempWorkspaceRoot,
+      ".projectos",
+      "apply-backups",
+      applied.backupId!,
+      "manifest.json",
+    ), "utf8")) as { files: Array<{ operation: string; path: string }> };
+    expect(manifest.files.map((file) => [file.operation, file.path])).toEqual([
+      ["delete", targetPath],
+      ["modify", importerPath],
+      ["internal", ".projectos/graph-product-overlay.json"],
+      ["internal", ".projectos/semantic-tree.json"],
+      ["internal", ".projectos/current-work.json"],
+    ]);
+
+    await expect(api.restoreApplyBackup(project.projectId, applied.backupId!))
+      .resolves.toMatchObject({
+        restored: true,
+        filesRestored: [targetPath, importerPath],
+      });
     expect(readFileSync(join(tempWorkspaceRoot, targetPath), "utf8")).toBe(targetBefore);
     expect(readFileSync(join(tempWorkspaceRoot, importerPath), "utf8")).toBe(importerBefore);
-    expect(verificationCalls).toEqual([]);
-    expect(gateway.requests.some((request) =>
-      isRecord(request.input) && request.input.mode === "plan_graph_delegation",
-    )).toBe(true);
+    expect((await api.getProjectGraph(project.projectId)).fileIndex.find(
+      (file) => file.path === targetPath,
+    )?.nodeIds).toContain("feat_login");
+    expect(flattenSemanticPaths(await api.getSemanticTree(project.projectId))).toContain(targetPath);
   });
 
   it("blocks deletion when materialized repairs leave a direct dependency", async () => {
@@ -2160,13 +2541,20 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
       rawRequest: "Delete the login page.",
       deferOrchestratorStart: false,
     });
-    // Hierarchy leaf plans cannot carry delete operations — fail closed before review/apply.
-    const blockedDeleteRun = await waitForRunStatus(api, parent.runId, "error");
+    const blockedDeleteRun = await waitForRunStatus(api, parent.runId, "awaiting_review");
     const blockedParentEvents = await api.getAgentRunEvents(parent.runId);
-    expect(blockedDeleteRun.status, JSON.stringify(blockedParentEvents)).toBe("error");
-    expect(JSON.stringify(blockedParentEvents)).toContain("invalid plan shape");
+    const repairDelegation = blockedParentEvents.find(
+      (event) => event.type === "task_delegated" &&
+        "filePath" in event.payload && event.payload.filePath === importerPath,
+    );
+    const blockedDiagnostics = repairDelegation?.type === "task_delegated"
+      ? await api.getAgentRunEvents(repairDelegation.payload.childRunId)
+      : blockedParentEvents;
+    expect(blockedDeleteRun.status, JSON.stringify(blockedDiagnostics))
+      .toBe("awaiting_review");
+
     await expect(api.applyDiff(parent.runId)).rejects.toMatchObject({
-      code: "run_not_found",
+      code: "proposal_validation_failed",
     });
     expect(readFileSync(join(tempWorkspaceRoot, targetPath), "utf8")).toBe(targetBefore);
     expect(readFileSync(join(tempWorkspaceRoot, importerPath), "utf8")).toBe(importerBefore);
@@ -2213,9 +2601,9 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
       rawRequest: "Delete the login page.",
       deferOrchestratorStart: false,
     });
-    // Delete never reaches awaiting_review under component hierarchy — R1 fail-closed at apply.
-    await waitForRunStatus(api, parent.runId, "error");
-    await expect(api.applyDiff(parent.runId)).rejects.toMatchObject({ code: "run_not_found" });
+    await waitForRunStatus(api, parent.runId, "awaiting_review");
+
+    await expect(api.applyDiff(parent.runId)).rejects.toMatchObject({ code: "diff_stale" });
     expect(existsSync(join(tempWorkspaceRoot, targetPath))).toBe(true);
     expect(readFileSync(join(tempWorkspaceRoot, importerPath), "utf8")).toBe(importerBefore);
     expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
@@ -4291,7 +4679,22 @@ class GreenfieldInitializationGateway extends ModelGateway {
     const input = isRecord(request.input) ? request.input : {};
     const mode = typeof input.mode === "string" ? input.mode : undefined;
     let output: string;
-    if (request.requestKind === "prompt_refinement") {
+    if (request.requestKind === "request_intent") {
+      // Empty-graph greenfield: no existing nodes to touch.
+      output = JSON.stringify({
+        action: "final",
+        intent: {
+          goal: "Initialize the complete product graph and scaffold its files.",
+          kind: "change",
+          touches: [],
+          structuralProposals: [],
+          assumptions: ["The project graph starts empty and must be initialized."],
+          outOfScope: ["Do not preserve a prior product graph"],
+          acceptance: ["The product graph and scaffold files are initialized"],
+          questions: [],
+        },
+      });
+    } else if (request.requestKind === "prompt_refinement") {
       output = JSON.stringify({
         understood: "Initialize the complete product graph and files.",
         ambiguities: [],
