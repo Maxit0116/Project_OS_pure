@@ -4641,13 +4641,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async getDiff(runId: string): Promise<GeneratedDiff> {
     const orchestratorRun = this.orchestrator.getRun(runId);
     if (orchestratorRun?.diff) {
-      return GeneratedDiffSchema.parse(cloneJson(orchestratorRun.diff));
+      return this.returnScopedDiff(runId, orchestratorRun.diff);
     }
 
     if (orchestratorRun) {
       const aggregated = this.aggregateOrchestratorRunDiff(orchestratorRun);
       if (aggregated) {
-        return aggregated;
+        return this.returnScopedDiff(runId, aggregated);
       }
       throw new ProjectOSError(
         "diff_not_found",
@@ -4663,7 +4663,27 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       );
     }
 
-    return GeneratedDiffSchema.parse(cloneJson(scenario.diff));
+    return this.returnScopedDiff(runId, scenario.diff);
+  }
+
+  /**
+   * A diff read uses the same scope check as apply when this run already has a
+   * bound authorization. Scenario and orchestrator diffs with no binding stay
+   * readable; getDiff does not invent an authorization for them.
+   */
+  private returnScopedDiff(runId: string, diff: GeneratedDiff): GeneratedDiff {
+    const parsed = GeneratedDiffSchema.parse(cloneJson(diff));
+    if (this.runHasDiffAuthorization(runId)) {
+      this.validateGeneratedDiffScope(runId, parsed);
+    }
+    return parsed;
+  }
+
+  private runHasDiffAuthorization(runId: string): boolean {
+    return this.boundFixtureDiffAuthorizations.has(runId)
+      || this.boundCreateRunAuthorizations.has(runId)
+      || this.boundDeleteRunAuthorizations.has(runId)
+      || this.boundRunAuthorizations.has(runId);
   }
 
   async applyDiff(runId: string): Promise<ApplyResult> {
@@ -9765,6 +9785,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const childState = this.orchestrator.getRun(childRunId);
       if (!childState) return;
       if (childState.diff?.files.length) {
+        if (this.runHasDiffAuthorization(childRunId)) {
+          this.validateGeneratedDiffScope(childRunId, childState.diff);
+        }
         for (const file of childState.diff.files) {
           if (seenPaths.has(file.path)) continue;
           seenPaths.add(file.path);
@@ -9774,6 +9797,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       }
       const nested = this.aggregateOrchestratorRunDiff(childState);
       if (!nested) return;
+      if (this.runHasDiffAuthorization(childRunId)) {
+        this.validateGeneratedDiffScope(childRunId, nested);
+      }
       for (const file of nested.files) {
         if (seenPaths.has(file.path)) continue;
         seenPaths.add(file.path);
