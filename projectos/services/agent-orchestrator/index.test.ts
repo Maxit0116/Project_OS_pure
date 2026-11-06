@@ -4243,3 +4243,168 @@ describe("matching a reviewer's reply to the plan", () => {
       .toThrow(expect.objectContaining({ category: "invalid_validation_shape" }));
   });
 });
+
+/**
+ * A file too large to send whole is edited through regions. Before, the context assembler refused it
+ * and the planner left it out: excalidraw's 93,000-token App.tsx could not be changed at all.
+ */
+describe("editing a file too large to send whole", () => {
+  function largeComponent(): string {
+    const lines: string[] = [];
+    for (let index = 0; index < 40; index += 1) lines.push(`import { helper${index} } from "./helpers/helper${index}";`);
+    lines.push("", "export class App extends React.Component<AppProps, AppState> {");
+    for (let index = 0; index < 2_400; index += 1) {
+      if (index === 1_200) {
+        lines.push(
+          "  private handleCanvasDoubleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {",
+          "    const sceneX = this.state.zoom.value * event.clientX;",
+          "    this.startTextEditing(sceneX);",
+          "  };",
+          "",
+        );
+      }
+      lines.push(
+        `  private handleThing${index} = (event: Event) => {`,
+        `    const value = helper${index % 40}(event, ${index});`,
+        `    this.setState({ counter${index}: value });`,
+        "  };",
+        "",
+      );
+    }
+    lines.push("}", "");
+    return lines.join("\n");
+  }
+
+  function largeContext(workspace: ReturnType<ProjectOSWorkspaceStore["loadWorkspace"]>, content: string): LocalContextBundle {
+    const bundle = localContextBundle(workspace);
+    return {
+      ...bundle,
+      fileManifest: bundle.fileManifest.map((file) =>
+        file.relationship === "selected"
+          ? { ...file, content, byteLength: content.length, includedByteLength: content.length }
+          : file,
+      ),
+      budget: { ...bundle.budget, selectedEstimatedTokens: Math.ceil(content.length / 4) },
+    };
+  }
+
+  const plan = validFileEditPlanOutput({
+    objective: "Select all text when the canvas is double-clicked",
+    targetDescription: "The canvas double-click handler",
+    anchors: ["App.handleCanvasDoubleClick"],
+  });
+  const edit = JSON.stringify({
+    summary: "Select all text on double-click",
+    path: "app/login/page.tsx",
+    edits: [{
+      search: "    this.startTextEditing(sceneX);",
+      replace: "    this.startTextEditing(sceneX, { selectAll: true });",
+    }],
+  });
+  const promptTokens = (request: ModelGatewayRequest | undefined) => Math.ceil(JSON.stringify(request?.input).length / 4);
+
+  it("locates, edits and validates it from regions, and applies the edit to the whole file", async () => {
+    const content = largeComponent();
+    expect(Math.ceil(content.length / 4)).toBeGreaterThan(60_000);
+    const { orchestrator, workspace, requests } = createModelOrchestrator(edit, [], sampleWorkspaceRoot, [{ output: plan }]);
+    const state = orchestrator.createRun(workspace, { ...refinement(), understood: "Double-clicking the canvas should select all text" }, "feature_change", {
+      localContext: largeContext(workspace, content),
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    expect(state.run.status).toBe("awaiting_review");
+    expect(requests).toHaveLength(3);
+    // No model call carries the file whole.
+    for (const request of requests) {
+      expect(JSON.stringify(request.input)).not.toContain("handleThing2000 =");
+      expect(promptTokens(request)).toBeLessThan(20_000);
+    }
+    const [locate, generate, validate] = requests;
+    expect(locate?.systemPrompt).toContain("too large to show whole");
+    const locateEntry = (locate?.input as { localContext: LocalContextBundle }).localContext.fileManifest[0] as unknown as Record<string, unknown>;
+    expect(locateEntry).toMatchObject({ relationship: "selected", disposition: "windowed" });
+    expect(JSON.stringify(locateEntry.view)).toContain("handleCanvasDoubleClick");
+
+    expect(generate?.systemPrompt).toContain('"edits":[{"search"');
+    expect(generate?.systemPrompt).toContain("Do not return the whole file");
+    expect(JSON.stringify(generate?.input)).toContain("    this.startTextEditing(sceneX);\\n  };");
+
+    const validation = validate?.input as { proposal: { files: Array<Record<string, unknown>> }; snapshot: Record<string, unknown> };
+    expect(validation.proposal.files[0]).toMatchObject({ representation: "hunks" });
+    expect(validation.proposal.files[0]).not.toHaveProperty("after");
+    expect(validation.snapshot).not.toHaveProperty("selectedFileContent");
+    expect(validation.snapshot).toHaveProperty("selectedFileView");
+
+    expect(state.diff?.files[0]?.before).toBe(content);
+    expect(state.diff?.files[0]?.after).toBe(
+      content.replace("    this.startTextEditing(sceneX);", "    this.startTextEditing(sceneX, { selectAll: true });"),
+    );
+  });
+
+  it("does not accept a whole file the model could not have seen, and asks again for edits", async () => {
+    const content = largeComponent();
+    const wholeFile = JSON.stringify({
+      summary: "Rewritten",
+      files: [{ path: "app/login/page.tsx", changeType: "modify", after: "export class App {}\n" }],
+    });
+    const { orchestrator, workspace, requests } = createModelOrchestrator(
+      [{ output: wholeFile }, { output: edit }],
+      [],
+      sampleWorkspaceRoot,
+      [{ output: plan }],
+    );
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: largeContext(workspace, content),
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    expect(requests).toHaveLength(4);
+    expect(requests[2]?.input).toMatchObject({
+      generationRetry: { reason: "invalid_edit_shape", instruction: expect.stringContaining("search/replace") },
+    });
+    expect(state.diff?.files[0]?.after).toContain("this.startTextEditing(sceneX, { selectAll: true });");
+    expect(state.diff?.files[0]?.after?.length).toBeGreaterThan(content.length);
+  });
+
+  it("tells the model when a search is not unique in the whole file, though it looked unique where it was shown", async () => {
+    const content = largeComponent();
+    const ambiguous = JSON.stringify({
+      summary: "Too short a search",
+      path: "app/login/page.tsx",
+      edits: [{ search: "  };", replace: "  }; // changed" }],
+    });
+    const { orchestrator, workspace, requests } = createModelOrchestrator(
+      [{ output: ambiguous }, { output: edit }],
+      [],
+      sampleWorkspaceRoot,
+      [{ output: plan }],
+    );
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: largeContext(workspace, content),
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    expect(requests[2]?.input).toMatchObject({
+      generationRetry: { reason: "search_ambiguous", instruction: expect.stringContaining("more than once") },
+    });
+    expect(requests[2]?.systemPrompt).toContain("search_ambiguous");
+    expect(state.run.status).toBe("awaiting_review");
+  });
+
+  it("still sends a file that fits whole, and asks for the complete file as before", async () => {
+    const { orchestrator, workspace, requests } = createModelOrchestrator(edit.replace("    this.startTextEditing(sceneX);", "SELECTED_CONTEXT_MARKER"));
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    expect(requests[0]?.systemPrompt).not.toContain("too large to show whole");
+    expect(JSON.stringify(requests[0]?.input)).toContain('"content":"SELECTED_CONTEXT_MARKER"');
+    expect(requests[1]?.systemPrompt).toContain("The after value must be the complete modified file source");
+    expect(requests[2]?.input).toMatchObject({ snapshot: { selectedFileContent: "SELECTED_CONTEXT_MARKER" } });
+  });
+});

@@ -2,13 +2,14 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { ProjectOSError } from "../../errors.js";
-import { SELECTED_FILE_MAX_ESTIMATED_TOKENS } from "../local-context-assembler.js";
+import { WINDOWED_SELECTED_FILE_MAX_ESTIMATED_TOKENS as EDITABLE_FILE_MAX_ESTIMATED_TOKENS } from "../local-context-assembler.js";
 
 /**
- * Files an edit cannot be planned on: an edit sends the whole file to the model, so one above the
- * limit fails when its turn comes, after the plan was made and the other files were done, and takes
- * the whole request with it (observed on excalidraw: a 93,000-token App.tsx was planned as one of
- * two tasks, and the task that was fine was thrown away with it).
+ * Files an edit cannot be planned on. One above the limit fails when its turn comes, after the plan was
+ * made and the other files were done, and takes the whole request with it (observed on excalidraw: a
+ * 93,000-token App.tsx was planned as one of two tasks, when the limit was 12,000 because an edit sent
+ * the whole file). A file that large is now edited through regions (large-file-view.ts), so the limit is
+ * the windowed one, about 1 MB.
  */
 export interface OversizeFile {
   path: string;
@@ -26,9 +27,9 @@ export function oversizeFileTokens(workspaceRoot: string, relativePath: string):
     const absolute = join(workspaceRoot, relativePath);
     const bytes = statSync(absolute).size;
     // Bytes are never fewer than characters, so a file that fits by bytes fits by characters.
-    if (Math.ceil(bytes / 4) <= SELECTED_FILE_MAX_ESTIMATED_TOKENS) return undefined;
+    if (Math.ceil(bytes / 4) <= EDITABLE_FILE_MAX_ESTIMATED_TOKENS) return undefined;
     const tokens = estimatedTokens(readFileSync(absolute, "utf8"));
-    return tokens > SELECTED_FILE_MAX_ESTIMATED_TOKENS ? tokens : undefined;
+    return tokens > EDITABLE_FILE_MAX_ESTIMATED_TOKENS ? tokens : undefined;
   } catch {
     return undefined;
   }
@@ -53,7 +54,7 @@ export function editableCandidates(
     const first = tooLarge[0]!;
     throw new ProjectOSError(
       "local_context_unavailable",
-      `Selected file '${first.path}' cannot be used for local context: selected_file_too_large (about ${first.estimatedTokens} tokens; the limit is ${SELECTED_FILE_MAX_ESTIMATED_TOKENS})`,
+      `Selected file '${first.path}' cannot be used for local context: selected_file_too_large (about ${first.estimatedTokens} tokens; the limit is ${EDITABLE_FILE_MAX_ESTIMATED_TOKENS})`,
     );
   }
   return { editable, tooLarge };
@@ -63,5 +64,5 @@ export function editableCandidates(
 export function oversizeNote(tooLarge: readonly OversizeFile[] | undefined): string {
   if (!tooLarge || tooLarge.length === 0) return "";
   const listed = tooLarge.slice(0, 8).map((file) => `${file.path} (about ${file.estimatedTokens} tokens)`).join(", ");
-  return `These files of this scope are too large to be edited (over ${SELECTED_FILE_MAX_ESTIMATED_TOKENS} tokens) and are not in the list: ${listed}. Choose other files that can carry the change; if the change genuinely needs one of them, return the tasks that can be done and say so in the rationale.`;
+  return `These files of this scope are too large to be edited (over ${EDITABLE_FILE_MAX_ESTIMATED_TOKENS} tokens) and are not in the list: ${listed}. Choose other files that can carry the change; if the change genuinely needs one of them, return the tasks that can be done and say so in the rationale.`;
 }

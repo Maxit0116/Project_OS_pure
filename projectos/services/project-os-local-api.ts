@@ -431,6 +431,7 @@ export interface LocalContextAssemblerDependency {
     selectedFilePath: string;
     responseLanguage: string;
     assembledAt: string;
+    windowLargeSelectedFile?: boolean | undefined;
   }): LocalContextBundle;
   assembleNode(input: {
     workspace: LoadedProjectOSWorkspace;
@@ -6323,6 +6324,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       workspace,
       { kind: "file", nodeId, selectedFilePath: filePath },
       responseLanguage.tag,
+      true,
     );
     const selectedFile = bundle.fileManifest.find(
       (file) => file.relationship === "selected",
@@ -7299,10 +7301,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
   }
 
+  /**
+   * `forEdit` lets the selected file be larger than a prompt holds: the orchestrator shows such a file
+   * to the model as an outline and regions. Read-only conversations send the bundle as it is and keep
+   * the smaller limit (and assembleReadOnlyFileContext's fallback).
+   */
   private assembleScopedLocalContext(
     workspace: LoadedProjectOSWorkspace,
     scope: Extract<AgentConversationScope, { kind: "file" }>,
     responseLanguage: string,
+    forEdit = false,
   ): LocalContextBundle {
     if (!this.localContextAssembler) {
       throw new ProjectOSError(
@@ -7317,6 +7325,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         selectedFilePath: scope.selectedFilePath,
         responseLanguage,
         assembledAt: new Date().toISOString(),
+        windowLargeSelectedFile: forEdit,
       }),
     );
     if (
@@ -7470,6 +7479,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       workspace,
       { kind: "file", nodeId, selectedFilePath },
       stored.responseLanguage,
+      true,
     );
     const selectedFile = bundle.fileManifest.find(
       (file) => file.relationship === "selected",

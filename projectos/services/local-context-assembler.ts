@@ -54,6 +54,12 @@ import { containsHighConfidenceSecret } from "./high-confidence-secret-patterns.
  * of an ordinary 40-file Express app (12.7 KB), and only after planning had spent its model calls.
  */
 export const SELECTED_FILE_MAX_ESTIMATED_TOKENS = 12_000;
+/**
+ * An Agent edit may target a file up to this size. Above SELECTED_FILE_MAX_ESTIMATED_TOKENS the bundle
+ * still holds the exact file, but the model is shown an outline and regions of it instead
+ * (agent-orchestrator/large-file-view.ts). About 1 MB, the most this assembler reads.
+ */
+export const WINDOWED_SELECTED_FILE_MAX_ESTIMATED_TOKENS = 250_000;
 export const CONNECTED_CONTEXT_TOKEN_LIMIT = 8_000;
 export const CONNECTED_FILE_TOKEN_LIMIT = 2_000;
 export const CONNECTED_FILE_LIMIT = 8;
@@ -137,6 +143,12 @@ export interface AssembleLocalContextInput {
   selectedFilePath: string;
   responseLanguage: string;
   assembledAt: string;
+  /**
+   * Accept a selected file above SELECTED_FILE_MAX_ESTIMATED_TOKENS (up to the windowed limit). Only an
+   * Agent edit sets it: the orchestrator shows such a file to the model as regions. Read-only
+   * conversations send the bundle as it is, so they keep the smaller limit and their own fallback.
+   */
+  windowLargeSelectedFile?: boolean | undefined;
 }
 
 export interface AssembleNodeContextInput {
@@ -250,7 +262,7 @@ export class LocalContextAssembler {
       manifest,
       selectedEstimatedTokens,
       connectedEstimatedTokensIncluded,
-    } = this.assembleManifest(workspace, candidates);
+    } = this.assembleManifest(workspace, candidates, input.windowLargeSelectedFile === true);
 
     const selectedManifest = manifest.find(
       (file) => file.relationship === "selected",
@@ -646,7 +658,11 @@ export class LocalContextAssembler {
   private assembleManifest(
     workspace: LoadedProjectOSWorkspace,
     candidates: FileCandidate[],
+    windowLargeSelectedFile = false,
   ): ManifestAssemblyResult {
+    const selectedTokenLimit = windowLargeSelectedFile
+      ? WINDOWED_SELECTED_FILE_MAX_ESTIMATED_TOKENS
+      : SELECTED_FILE_MAX_ESTIMATED_TOKENS;
     const ignoredPaths = this.ignorePolicy.ignoredPaths(
       workspace.workspaceRoot,
       candidates.map((candidate) => candidate.path),
@@ -717,11 +733,11 @@ export class LocalContextAssembler {
 
       const estimatedTokens = estimateTokens(inspected.content);
       if (candidate.relationship === "selected") {
-        if (estimatedTokens > SELECTED_FILE_MAX_ESTIMATED_TOKENS) {
+        if (estimatedTokens > selectedTokenLimit) {
           // Say how far over it is: "could not be used" does not tell a person whether to split the file.
           throw new ProjectOSError(
             "local_context_unavailable",
-            `Selected file '${candidate.path}' cannot be used for local context: selected_file_too_large (about ${estimatedTokens} tokens; the limit is ${SELECTED_FILE_MAX_ESTIMATED_TOKENS})`,
+            `Selected file '${candidate.path}' cannot be used for local context: selected_file_too_large (about ${estimatedTokens} tokens; the limit is ${selectedTokenLimit})`,
           );
         }
         selectedEstimatedTokens = estimatedTokens;

@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { SELECTED_FILE_MAX_ESTIMATED_TOKENS } from "../local-context-assembler.js";
+import {
+  SELECTED_FILE_MAX_ESTIMATED_TOKENS,
+  WINDOWED_SELECTED_FILE_MAX_ESTIMATED_TOKENS,
+} from "../local-context-assembler.js";
 import { editableCandidates, oversizeFileTokens, oversizeNote } from "./oversize-files.js";
 
 function repo(files: Record<string, number>): string {
@@ -15,14 +18,16 @@ function repo(files: Record<string, number>): string {
   return root;
 }
 
-const LIMIT_CHARS = SELECTED_FILE_MAX_ESTIMATED_TOKENS * 4;
+// The planner's limit is the windowed one: a file above the prompt limit is edited through regions.
+const LIMIT = WINDOWED_SELECTED_FILE_MAX_ESTIMATED_TOKENS;
+const LIMIT_CHARS = LIMIT * 4;
 
 describe("files too large for an edit", () => {
   it("measures only what is over the limit, by the same estimate the context assembler uses", () => {
     const root = repo({ "small.ts": 1_000, "edge.ts": LIMIT_CHARS, "big.ts": LIMIT_CHARS + 4 });
     expect(oversizeFileTokens(root, "small.ts")).toBeUndefined();
     expect(oversizeFileTokens(root, "edge.ts")).toBeUndefined();
-    expect(oversizeFileTokens(root, "big.ts")).toBe(SELECTED_FILE_MAX_ESTIMATED_TOKENS + 1);
+    expect(oversizeFileTokens(root, "big.ts")).toBe(LIMIT + 1);
     expect(oversizeFileTokens(root, "missing.ts")).toBeUndefined();
   });
 
@@ -32,18 +37,25 @@ describe("files too large for an edit", () => {
     expect(oversizeFileTokens(root, "zh.md")).toBeUndefined();
   });
 
+  it("keeps a file above the prompt limit as a candidate: it is edited through regions", () => {
+    // excalidraw: App.tsx is about 93,000 tokens; it was left out while an edit needed the whole file.
+    const root = repo({ "src/App.tsx": SELECTED_FILE_MAX_ESTIMATED_TOKENS * 4 * 8, "src/util.ts": 500 });
+    const { editable, tooLarge } = editableCandidates(root, ["src/App.tsx", "src/util.ts"]);
+    expect(editable).toEqual(["src/App.tsx", "src/util.ts"]);
+    expect(tooLarge).toEqual([]);
+  });
+
   it("splits a planner's candidates into editable files and the ones left out", () => {
-    // excalidraw: App.tsx is about 93,000 tokens and was planned as one of two tasks.
-    const root = repo({ "src/ZoomActions.tsx": 2_000, "src/App.tsx": LIMIT_CHARS * 8, "src/util.ts": 500 });
-    const { editable, tooLarge } = editableCandidates(root, ["src/App.tsx", "src/ZoomActions.tsx", "src/util.ts"]);
+    const root = repo({ "src/ZoomActions.tsx": 2_000, "src/huge.json.ts": LIMIT_CHARS + 400, "src/util.ts": 500 });
+    const { editable, tooLarge } = editableCandidates(root, ["src/huge.json.ts", "src/ZoomActions.tsx", "src/util.ts"]);
     expect(editable).toEqual(["src/ZoomActions.tsx", "src/util.ts"]);
-    expect(tooLarge).toEqual([{ path: "src/App.tsx", estimatedTokens: SELECTED_FILE_MAX_ESTIMATED_TOKENS * 8 }]);
+    expect(tooLarge).toEqual([{ path: "src/huge.json.ts", estimatedTokens: LIMIT + 100 }]);
   });
 
   it("fails with the message the person already understands when nothing editable is left", () => {
-    const root = repo({ "a.py": LIMIT_CHARS * 3 });
+    const root = repo({ "a.py": LIMIT_CHARS + 4_000 });
     expect(() => editableCandidates(root, ["a.py"])).toThrowError(
-      /Selected file 'a\.py' cannot be used for local context: selected_file_too_large \(about 36000 tokens; the limit is 12000\)/u,
+      /Selected file 'a\.py' cannot be used for local context: selected_file_too_large \(about 251000 tokens; the limit is 250000\)/u,
     );
     expect(() => editableCandidates(root, [])).not.toThrow();
   });

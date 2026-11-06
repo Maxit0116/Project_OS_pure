@@ -471,6 +471,33 @@ describe("LocalContextAssembler", () => {
     );
   });
 
+  it("keeps a file too large for a prompt exactly when an edit asks for it, up to the windowed limit", () => {
+    // An Agent edit shows such a file to the model as regions (agent-orchestrator/large-file-view.ts);
+    // the bundle still holds it whole, for the snapshot hash and for applying the edit.
+    const fixture = createFixture([linked("src/big.ts", "primary")]);
+    writeText(fixture.root, "src/big.ts", "x".repeat(372_000));
+    const forEdit = () => new LocalContextAssembler().assemble({
+      workspace: fixture.workspace,
+      nodeId: "node_selected",
+      selectedFilePath: "src/big.ts",
+      responseLanguage: "en",
+      assembledAt: ASSEMBLED_AT,
+      windowLargeSelectedFile: true,
+    });
+    const selected = forEdit().fileManifest.find((entry) => entry.relationship === "selected");
+    expect(selected).toMatchObject({ disposition: "exact", byteLength: 372_000 });
+    expect(selected?.content).toHaveLength(372_000);
+    // Without the flag (Ask, Plan, Debug send the bundle as it is) the prompt limit holds.
+    expect(() => assemble(fixture.workspace, undefined, "src/big.ts")).toThrowError(
+      expect.objectContaining({ message: expect.stringContaining("(about 93000 tokens; the limit is 12000)") }),
+    );
+
+    writeText(fixture.root, "src/big.ts", "x".repeat(1_000_400));
+    expect(forEdit).toThrowError(
+      expect.objectContaining({ message: expect.stringContaining("(about 250100 tokens; the limit is 250000)") }),
+    );
+  });
+
   it("rejects a selected file that does not belong to the selected node", () => {
     const fixture = createFixture([linked("src/member.ts", "primary")]);
     writeText(fixture.root, "src/member.ts", "member\n");
