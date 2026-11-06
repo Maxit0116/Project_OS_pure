@@ -14314,8 +14314,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           // Demo scenarios publish without an in-memory orchestrator.
         } else {
           // Deterministic scenario prefabs (feature_change / debug_fix) may
-          // publish after authorizeFixtureDiff. Open model feature_change
-          // without an orchestrator still fails closed (R1).
+          // publish only after fixture authorization is bound. Presence of a
+          // registered scenario alone is not enough (re-check at commit).
+          // Open model feature_change without an orchestrator still fails
+          // closed as run_not_found (R1) — not a missing-intent code.
           try {
             this.requireScenarioForRun(runId);
           } catch {
@@ -14324,6 +14326,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
               `Run '${runId}' is unavailable at the publication boundary`,
             );
           }
+          if (!this.runHasDiffAuthorization(runId)) {
+            throw new ProjectOSError(
+              "diff_scope_violation",
+              `Scenario publication for run '${runId}' requires bound fixture authorization`,
+            );
+          }
+          this.validateGeneratedDiffScope(runId, substantiveDiff);
         }
         await beforeCommit?.();
       },
