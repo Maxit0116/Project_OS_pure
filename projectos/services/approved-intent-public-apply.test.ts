@@ -123,10 +123,7 @@ class ReviewFirstLoginGateway extends ModelGateway {
       ? request.input.mode
       : undefined;
     let output: string;
-    if (
-      request.requestKind === "request_intent"
-      || request.requestKind === "request_intent_discovery"
-    ) {
+    if (request.requestKind === "request_intent") {
       output = JSON.stringify({
         action: "final",
         intent: {
