@@ -1205,16 +1205,72 @@ function disposeStructureScanSubscription(
   disposable?.dispose()
 }
 
+let structureScanGeneration = 0
+let structureScanSuccessToastGeneration = -1
+let structureScanFailureToastGeneration = -1
+let structureScanTreeToastGeneration = -1
+
+function bumpStructureScanGeneration(): number {
+  structureScanGeneration += 1
+  return structureScanGeneration
+}
+
+function structureScanStillCurrent(generation: number, projectId: string, get: () => WorkbenchState): boolean {
+  return generation === structureScanGeneration && get().project?.projectId === projectId
+}
+
+function toastStructureScanSuccess(
+  generation: number,
+  message: string,
+  pushToast: WorkbenchState['pushToast'],
+): void {
+  if (structureScanSuccessToastGeneration === generation) return
+  structureScanSuccessToastGeneration = generation
+  pushToast({ type: 'success', message })
+}
+
+function toastStructureScanFailure(
+  generation: number,
+  message: string,
+  pushToast: WorkbenchState['pushToast'],
+): void {
+  if (structureScanFailureToastGeneration === generation) return
+  structureScanFailureToastGeneration = generation
+  pushToast({ type: 'warning', message })
+}
+
+function toastStructureScanTreeFailure(
+  generation: number,
+  message: string,
+  pushToast: WorkbenchState['pushToast'],
+): void {
+  if (structureScanTreeToastGeneration === generation) return
+  structureScanTreeToastGeneration = generation
+  pushToast({ type: 'warning', message })
+}
+
+function invalidateStructureScan(
+  get: () => WorkbenchState,
+  set: (partial: Partial<WorkbenchState>) => void,
+): void {
+  disposeStructureScanSubscription(get, set)
+  bumpStructureScanGeneration()
+  set({ structureRescanLoading: false, structureScanProgress: null })
+}
+
 function attachStructureScanSubscription(
   projectId: string,
+  generation: number,
   client: ProjectOSApi,
   locale: Locale,
   get: () => WorkbenchState,
   set: (partial: Partial<WorkbenchState> | ((s: WorkbenchState) => Partial<WorkbenchState>)) => void,
 ): void {
   disposeStructureScanSubscription(get, set)
+  const isCurrent = () => structureScanStillCurrent(generation, projectId, get)
 
   const applyEvent = (event: StructureScanProgressEvent) => {
+    if (!isCurrent()) return
     const prior = get().structureScanProgress
     // Drop success/fail handlers if this scan was already cancelled locally.
     if (
@@ -1227,36 +1283,56 @@ function attachStructureScanSubscription(
     }
 
     set((state) => {
+      if (!structureScanStillCurrent(generation, projectId, get)) return {}
       const next = applyStructureScanProgressEvent(state.structureScanProgress, event)
       return {
         structureScanProgress: next,
         structureRescanLoading: next.status === 'running',
       }
     })
+    if (!isCurrent()) return
     if (event.type === 'scan_completed') {
       if (get().structureScanProgress?.status === 'cancelled') return
       void (async () => {
         try {
-          const [graph, tree] = await Promise.all([
-            client.getProjectGraph(projectId),
-            client.getSemanticTree(projectId),
-          ])
-          if (get().project?.projectId !== projectId) return
+          const graph = await client.getProjectGraph(projectId)
+          if (!isCurrent()) return
+          if (get().structureScanProgress?.status === 'cancelled') return
+          let tree: Awaited<ReturnType<ProjectOSApi['getSemanticTree']>>
+          try {
+            tree = await client.getSemanticTree(projectId)
+          } catch (refreshError) {
+            if (!isCurrent()) return
+            const message = getStoreMessage(get().locale, 'map.rescanTreeRefreshFailed', {
+              reason: formatStructureRescanFailure(refreshError) ?? '',
+            })
+            set({
+              graph,
+              structureRescanLoading: false,
+              error: message,
+            })
+            toastStructureScanTreeFailure(generation, message, get().pushToast)
+            return
+          }
+          if (!isCurrent()) return
           if (get().structureScanProgress?.status === 'cancelled') return
           set({
             graph,
             tree,
             structureRescanLoading: false,
+            error: null,
             structureScanProgress: applyStructureScanProgressEvent(
               get().structureScanProgress,
               event,
             ),
           })
-          get().pushToast({
-            type: 'success',
-            message: getStoreMessage(locale, 'map.structureScan.success'),
-          })
+          toastStructureScanSuccess(
+            generation,
+            getStoreMessage(get().locale, 'map.structureScan.success'),
+            get().pushToast,
+          )
           window.setTimeout(() => {
+            if (!isCurrent()) return
             const current = get().structureScanProgress
             if (
               current?.scanId === event.scanId &&
@@ -1265,22 +1341,34 @@ function attachStructureScanSubscription(
               set({ structureScanProgress: null })
             }
           }, 4_500)
-        } catch {
+        } catch (error) {
+          if (!isCurrent()) return
           set({ structureRescanLoading: false })
+          const reason = formatStructureRescanFailure(error)
+          toastStructureScanFailure(
+            generation,
+            reason
+              ? getStoreMessage(get().locale, 'map.rescanStructureFailedDetail', { reason })
+              : getStoreMessage(get().locale, 'map.rescanStructureFailed'),
+            get().pushToast,
+          )
         }
       })()
     }
     if (event.type === 'scan_failed') {
+      if (!isCurrent()) return
       if (get().structureScanProgress?.status === 'cancelled') return
       set({ structureRescanLoading: false })
-      get().pushToast({
-        type: 'warning',
-        message: getStoreMessage(locale, 'map.structureScan.failedDetail', {
-          reason: event.message,
+      toastStructureScanFailure(
+        generation,
+        getStoreMessage(locale, 'map.structureScan.failedDetail', {
+          reason: formatStructureRescanFailure(new Error(event.message)) ?? event.message,
         }),
-      })
+        get().pushToast,
+      )
     }
     if (event.type === 'scan_cancelled') {
+      if (!isCurrent()) return
       set({ structureRescanLoading: false })
       // Avoid duplicate toasts when cancelStructureScan already notified.
       if (prior?.status !== 'cancelled') {
@@ -1290,6 +1378,7 @@ function attachStructureScanSubscription(
         })
       }
       window.setTimeout(() => {
+        if (!isCurrent()) return
         const current = get().structureScanProgress
         if (
           current?.scanId === event.scanId &&
@@ -1304,7 +1393,7 @@ function attachStructureScanSubscription(
   const disposable = client.streamStructureScan(projectId, applyEvent)
   set({ structureScanDisposable: disposable })
   void client.getStructureScanProgress(projectId).then((snapshot) => {
-    if (!snapshot || get().project?.projectId !== projectId) return
+    if (!snapshot || !isCurrent()) return
     set({
       structureScanProgress: snapshot,
       structureRescanLoading: snapshot.status === 'running',
@@ -1337,8 +1426,7 @@ async function loadWorkspaceIntoStore(
   options: { shouldStartOnboarding?: boolean } = {},
 ) {
   disposeActiveRunSubscriptions(get, set)
-  disposeStructureScanSubscription(get, set)
-  set({ structureScanProgress: null, structureRescanLoading: false })
+  invalidateStructureScan(get, set)
   await useTerminalStore.getState().disposeAllSessions()
   await useDiagnosticsStore.getState().dispose()
   useOutlineStore.getState().clear()
@@ -1425,7 +1513,16 @@ async function loadWorkspaceIntoStore(
       autoDismiss: 8000,
     })
   }
-  attachStructureScanSubscription(project.projectId, client, locale, get, set)
+  bumpStructureScanGeneration()
+  set({ structureRescanLoading: false, structureScanProgress: null })
+  attachStructureScanSubscription(
+    project.projectId,
+    structureScanGeneration,
+    client,
+    locale,
+    get,
+    set,
+  )
   await useChatSessionStore.getState().loadForWorkspace()
   await useTerminalStore.getState().syncMapSessions(mapContent.artifacts)
   await useDiagnosticsStore.getState().init(project.workspaceRoot)
@@ -2233,6 +2330,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   openSampleWorkspace: async () => {
     const { client, locale } = get()
     disposeActiveRunSubscriptions(get, set)
+    invalidateStructureScan(get, set)
     set({
       phase: 'loading',
       error: null,
@@ -2256,6 +2354,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const trimmed = path.trim()
     if (!trimmed) return
     disposeActiveRunSubscriptions(get, set)
+    invalidateStructureScan(get, set)
     set({
       phase: 'loading',
       error: null,
@@ -2275,11 +2374,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   rescanStructureGraph: async (options) => {
-    const { client, project, locale, structureRescanLoading, pushToast } = get()
+    const started = get()
+    const { client, project, locale, structureRescanLoading, pushToast } = started
     if (!project || structureRescanLoading) return
+    const projectId = project.projectId
+    const generation = bumpStructureScanGeneration()
+    const isCurrent = () => structureScanStillCurrent(generation, projectId, get)
     const mode = options?.mode ?? 'regenerate'
     set({ structureRescanLoading: true })
-    attachStructureScanSubscription(project.projectId, client, locale, get, set)
+    attachStructureScanSubscription(projectId, generation, client, locale, get, set)
     const loadingKey =
       mode === 'refine' || mode === 'acceptRefine'
         ? 'map.refiningStructure'
@@ -2293,7 +2396,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       message: getStoreMessage(locale, loadingKey),
     })
     try {
-      const graph = await client.analyzeWorkspace(project.projectId, {
+      const graph = await client.analyzeWorkspace(projectId, {
         mode,
         ...(options?.nodeIds ? { nodeIds: options.nodeIds } : {}),
         ...(options?.changedFiles ? { changedFiles: options.changedFiles } : {}),
@@ -2303,39 +2406,51 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         // Authored graphs are only overwritten when the caller sets force.
         ...(options?.force === true ? { force: true } : {}),
       })
-      const tree = await client.getSemanticTree(project.projectId)
-      set((current) => ({
-        graph,
-        tree,
-        structureRescanLoading: false,
-        // Promote ephemeral unmapped activities onto nodes when fileIndex grows.
-        // Never triggers architecture re-layout by itself.
-        executionOverlay: current.executionOverlay
-          ? remapExecutionOverlay(current.executionOverlay, graph.fileIndex ?? [])
-          : current.executionOverlay,
-      }))
-      // Progress stream already toasts success on scan_completed; avoid duplicate
-      // when the stream delivered first. Still toast if progress UI was idle.
-      if (get().structureScanProgress?.status !== 'success') {
-        pushToast({
-          type: 'success',
-          message: getStoreMessage(locale, 'map.rescanStructureDone'),
+      if (!isCurrent()) return
+      try {
+        const tree = await client.getSemanticTree(projectId)
+        if (!isCurrent()) return
+        set((current) => ({
+          graph,
+          tree,
+          structureRescanLoading: false,
+          error: null,
+          // Promote ephemeral unmapped activities onto nodes when fileIndex grows.
+          // Never triggers architecture re-layout by itself.
+          executionOverlay: current.executionOverlay
+            ? remapExecutionOverlay(current.executionOverlay, graph.fileIndex ?? [])
+            : current.executionOverlay,
+        }))
+        toastStructureScanSuccess(
+          generation,
+          getStoreMessage(get().locale, 'map.rescanStructureDone'),
+          get().pushToast,
+        )
+      } catch (refreshError) {
+        if (!isCurrent()) return
+        const reason = formatStructureRescanFailure(refreshError) ?? ''
+        const message = getStoreMessage(get().locale, 'map.rescanTreeRefreshFailed', { reason })
+        set({
+          graph,
+          structureRescanLoading: false,
+          error: message,
         })
+        toastStructureScanTreeFailure(generation, message, get().pushToast)
       }
     } catch (err) {
-      set({ structureRescanLoading: false })
+      if (!isCurrent()) return
       const progressStatus = get().structureScanProgress?.status
+      set({ structureRescanLoading: false })
       if (progressStatus === 'failed' || progressStatus === 'cancelled') return
       if (isStructureScanCancellation(err)) return
       const reason = formatStructureRescanFailure(err)
-      pushToast({
-        type: 'warning',
-        message: reason
-          ? getStoreMessage(locale, 'map.rescanStructureFailedDetail', {
-              reason,
-            })
-          : getStoreMessage(locale, 'map.rescanStructureFailed'),
-      })
+      toastStructureScanFailure(
+        generation,
+        reason
+          ? getStoreMessage(get().locale, 'map.rescanStructureFailedDetail', { reason })
+          : getStoreMessage(get().locale, 'map.rescanStructureFailed'),
+        get().pushToast,
+      )
     }
   },
 
@@ -2358,6 +2473,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       structureRescanLoading: false,
       ...(cancelledProgress ? { structureScanProgress: cancelledProgress } : {}),
     })
+    bumpStructureScanGeneration()
     get().pushToast({
       type: 'info',
       message: getStoreMessage(locale, 'map.structureScan.cancelled'),
@@ -5167,9 +5283,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   resetDemo: async () => {
-    const { client, project, runDisposable, locale } = get()
+    const { client, project, runDisposable } = get()
     if (!project) return
     runDisposable?.dispose()
+    invalidateStructureScan(get, set)
 
     try {
       await useTerminalStore.getState().disposeAllSessions()
@@ -5179,6 +5296,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         client.getMapContent(project.projectId),
         client.getCurrentWork(project.projectId),
       ])
+      bumpStructureScanGeneration()
       set({
         graph,
         tree,
@@ -5188,6 +5306,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         currentWork,
         error: null,
         terminalLines: [],
+        structureRescanLoading: false,
+        structureScanProgress: null,
       })
       await useChatSessionStore.getState().resetForDemo()
       await useTerminalStore.getState().syncMapSessions(mapContent.artifacts)

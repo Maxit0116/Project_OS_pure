@@ -2570,6 +2570,7 @@ const en = {
     rescanStructureDone: 'Structure map updated',
     rescanStructureFailed: 'Structure scan failed; kept the current map',
     rescanStructureFailedDetail: 'Structure scan failed; kept the current map. {{reason}}',
+    rescanTreeRefreshFailed: 'Structure map saved, but the semantic tree could not be refreshed. {{reason}}',
     structureScan: {
       title: 'Generating structure map',
       success: 'Structure map generated',

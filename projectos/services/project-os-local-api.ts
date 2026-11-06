@@ -1486,13 +1486,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           { cause: error instanceof Error ? error : undefined },
         );
       }
-      const message = error instanceof Error ? error.message : String(error);
+      const message = sanitizeErrorMessage(
+        error instanceof Error ? error.message : "Structure scan failed",
+      );
       report({
         type: "scan_failed",
         scanId,
         projectId,
         timestamp: new Date().toISOString(),
-        message,
+        message: message || "Structure scan failed. The current map was not changed.",
       });
       throw error;
     } finally {

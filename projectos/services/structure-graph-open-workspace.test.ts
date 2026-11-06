@@ -418,4 +418,59 @@ describe("openWorkspace structure graph AI scan", () => {
     expect(deepened.nodes.some((node) => node.id === "system_root")).toBe(true);
     expect(deepened.nodes.some((node) => node.level === "component")).toBe(true);
   });
+
+  it("does not persist a cut-off regenerate and omits model text from the error", async () => {
+    const root = makeUnfamiliarRepo();
+    const bootstrap = ensureWorkspaceBootstrapped(root);
+    writeMockModelSettings(root, bootstrap.projectId);
+    const secret = "sk-proj-disk-secret";
+    const complete = vi.fn(async () => ({
+      requestId: "req_cut",
+      provider: "mock",
+      model: "mock",
+      output: `{"nodes":[{"id":"cut","name":"${secret}`,
+      usage: { inputTokens: 1, outputTokens: 1 },
+      latencyMs: 1,
+    }));
+    const api = new ProjectOSLocalApi({
+      modelGateway: { complete } as unknown as ModelGateway,
+    });
+    const project = await api.openWorkspace(root);
+    await api.awaitStructureScan(project.projectId);
+    const before = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
+
+    await expect(api.analyzeWorkspace(project.projectId, {
+      mode: "regenerate",
+      force: true,
+    })).rejects.toMatchObject({
+      code: "agent_orchestration_failed",
+      message: expect.stringMatching(/cut off before a complete JSON object/u),
+    });
+    expect(readFileSync(join(root, ".projectos", "graph.json"), "utf8")).toBe(before);
+    await expect(api.analyzeWorkspace(project.projectId, {
+      mode: "regenerate",
+      force: true,
+    })).rejects.toThrowError(expect.not.stringContaining(secret));
+  });
+
+  it("writes the finished graph to disk before a later semantic-tree read", async () => {
+    const root = makeUnfamiliarRepo();
+    const bootstrap = ensureWorkspaceBootstrapped(root);
+    writeMockModelSettings(root, bootstrap.projectId);
+    const api = new ProjectOSLocalApi({ modelGateway: mockGateway("Disk identity").gateway });
+    const project = await api.openWorkspace(root);
+    await api.awaitStructureScan(project.projectId);
+    const before = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
+    const scanned = await api.analyzeWorkspace(project.projectId, {
+      mode: "regenerate",
+      force: true,
+    });
+    const onDisk = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
+    expect(onDisk).not.toBe(before);
+    expect(onDisk).toContain("Disk identity");
+    expect(scanned.nodes.some((node) => node.name === "Disk identity")).toBe(true);
+    const tree = await api.getSemanticTree(project.projectId);
+    expect(tree.roots.length).toBeGreaterThan(0);
+    expect(readFileSync(join(root, ".projectos", "graph.json"), "utf8")).toBe(onDisk);
+  });
 });
