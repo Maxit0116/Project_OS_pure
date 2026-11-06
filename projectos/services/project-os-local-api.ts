@@ -1222,7 +1222,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
     if (this.workspacesByProjectId.size > 0) {
       if (this.workspacesByProjectId.has(projectId)) {
+        const inflight = this.structureScanInflight.get(projectId);
+        this.structureScanAbortByProjectId.get(projectId)?.abort();
+        if (inflight) {
+          await inflight.catch(() => undefined);
+        }
         this.clearProjectExecutionState(projectId);
+        workspace = this.workspaceStore.loadWorkspace(path);
       }
     }
     this.workspacesByProjectId.set(projectId, workspace);
@@ -1312,6 +1318,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     this.structureScanProgress.cancelRunning(projectId);
     if (controller && !controller.signal.aborted) {
       controller.abort();
+    }
+    const inflight = this.structureScanInflight.get(projectId);
+    if (inflight) {
+      await inflight.catch(() => undefined);
     }
     return true;
   }
@@ -1535,29 +1545,54 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const previousTree = workspace.semanticTree;
 
     try {
-      await this.workspaceStore.writeGraph(workspace.workspaceRoot, scanned, {
-        confirm: stillCurrent,
-      });
-      await this.workspaceStore.writeSemanticTree(
+      await this.workspaceStore.writeScannedGraphPair(
         workspace.workspaceRoot,
+        scanned,
         semanticTree,
         { confirm: stillCurrent },
       );
       return this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
     } catch (error) {
-      try {
-        await this.workspaceStore.writeGraph(
-          workspace.workspaceRoot,
-          previousGraph,
-        );
-        await this.workspaceStore.writeSemanticTree(
-          workspace.workspaceRoot,
-          previousTree,
-        );
-      } catch {
-        // Best-effort restore; surface the original failure.
+      if (this.failedScanStillOwnsDisk(workspace.workspaceRoot, scanned)) {
+        try {
+          await this.workspaceStore.writeGraph(
+            workspace.workspaceRoot,
+            previousGraph,
+          );
+          await this.workspaceStore.writeSemanticTree(
+            workspace.workspaceRoot,
+            previousTree,
+          );
+        } catch {
+          throw new ProjectOSError(
+            "persistence_write_failed",
+            "Structure scan failed and the previous map could not be restored.",
+          );
+        }
       }
       throw error;
+    }
+  }
+
+  /**
+   * True when the failed scan's graph publication is still the on-disk graph.
+   * A newer scan or reset may already own the files; restoring then would
+   * overwrite that newer publication. An unreadable torn pair is treated as
+   * still ours so the previous pair can be put back.
+   */
+  private failedScanStillOwnsDisk(
+    workspaceRoot: string,
+    scanned: ProjectGraph,
+  ): boolean {
+    try {
+      const loaded = this.workspaceStore.loadWorkspace(workspaceRoot);
+      return loaded.graph.analyzedAt === scanned.analyzedAt
+        && loaded.graph.nodes.length === scanned.nodes.length
+        && loaded.graph.nodes.every((node, index) =>
+          node.id === scanned.nodes[index]?.id
+          && node.name === scanned.nodes[index]?.name);
+    } catch {
+      return true;
     }
   }
 

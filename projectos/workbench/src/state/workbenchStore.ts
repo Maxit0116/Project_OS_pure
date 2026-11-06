@@ -5305,6 +5305,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     invalidateStructureScan(get, set)
 
     try {
+      if (typeof client.cancelStructureScan === 'function') {
+        await client.cancelStructureScan(project.projectId).catch(() => undefined)
+      }
       await useTerminalStore.getState().disposeAllSessions()
       const [graph, tree, mapContent, currentWork] = await Promise.all([
         client.getProjectGraph(project.projectId),

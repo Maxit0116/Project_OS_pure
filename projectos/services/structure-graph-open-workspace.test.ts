@@ -475,28 +475,26 @@ describe("openWorkspace structure graph AI scan", () => {
     expect(readFileSync(join(root, ".projectos", "graph.json"), "utf8")).toBe(onDisk);
   });
 
-  it("does not commit a scan write that is aborted by same-project reopen", async () => {
+  it("keeps graph and tree paired when reopen aborts before the locked publish", async () => {
     const root = makeUnfamiliarRepo();
     const bootstrap = ensureWorkspaceBootstrapped(root);
     writeMockModelSettings(root, bootstrap.projectId);
     const store = new ProjectOSWorkspaceStore();
-    const originalWrite = store.writeGraph.bind(store);
-    let releaseStaleWrite: (() => void) | undefined;
-    const staleWriteEntered = new Promise<void>((resolve) => {
-      releaseStaleWrite = resolve;
+    const originalPair = store.writeScannedGraphPair.bind(store);
+    let observe: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => {
+      observe = resolve;
     });
-    let observeStaleWrite: (() => void) | undefined;
-    const staleWriteWaiting = new Promise<void>((resolve) => {
-      observeStaleWrite = resolve;
-    });
-    let pauseStaleWrite = true;
-    store.writeGraph = async (workspaceRoot, graph, options) => {
-      if (pauseStaleWrite && graph.nodes.some((node) => node.name === "Stale scan")) {
-        pauseStaleWrite = false;
-        observeStaleWrite?.();
-        await staleWriteEntered;
+    let pause = true;
+    store.writeScannedGraphPair = async (workspaceRoot, graph, semanticTree, options) => {
+      if (pause && graph.nodes.some((node) => node.name === "Stale scan")) {
+        pause = false;
+        observe?.();
+        while (options?.confirm?.() !== false) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
       }
-      return originalWrite(workspaceRoot, graph, options);
+      return originalPair(workspaceRoot, graph, semanticTree, options);
     };
     let calls = 0;
     let releaseFresh: (() => void) | undefined;
@@ -522,25 +520,86 @@ describe("openWorkspace structure graph AI scan", () => {
       modelGateway: { complete } as unknown as ModelGateway,
       workspaceStore: store,
     });
+    const graphPath = join(root, ".projectos", "graph.json");
+    const treePath = join(root, ".projectos", "semantic-tree.json");
 
     const project = await api.openWorkspace(root);
-    await staleWriteWaiting;
-    const duringPause = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
-    expect(duringPause).not.toContain("Stale scan");
+    await waiting;
+    expect(readFileSync(graphPath, "utf8")).not.toContain("Stale scan");
+    expect(readFileSync(treePath, "utf8")).not.toContain("Stale scan");
 
     const reopened = api.openWorkspace(root);
     await reopened;
-    releaseStaleWrite?.();
-    const afterAbort = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
-    expect(afterAbort).not.toContain("Stale scan");
-    releaseFresh?.();
+    const afterAbortGraph = readFileSync(graphPath, "utf8");
+    const afterAbortTree = readFileSync(treePath, "utf8");
+    expect(afterAbortGraph).not.toContain("Stale scan");
+    expect(afterAbortTree).not.toContain("Stale scan");
+    const memory = await api.getProjectGraph(project.projectId);
+    const memoryTree = await api.getSemanticTree(project.projectId);
+    expect(JSON.stringify(memory)).not.toContain("Stale scan");
+    expect(JSON.stringify(memoryTree)).not.toContain("Stale scan");
+    expect(memory.analysisStatus).toBe("partial");
 
+    releaseFresh?.();
+    const fresh = await api.analyzeWorkspace(project.projectId, {
+      mode: "regenerate",
+      force: true,
+    });
+    const graphDisk = readFileSync(graphPath, "utf8");
+    const treeDisk = readFileSync(treePath, "utf8");
+    expect(fresh.nodes.some((node) => node.name === "Fresh scan")).toBe(true);
+    expect(graphDisk).toContain("Fresh scan");
+    expect(treeDisk).toContain("Fresh scan");
+    expect(graphDisk).not.toContain("Stale scan");
+    expect((await api.getProjectGraph(project.projectId)).nodes.some((node) => node.name === "Fresh scan")).toBe(true);
+    expect(JSON.stringify(await api.getSemanticTree(project.projectId))).toContain("Fresh scan");
+  });
+
+  it("reports an honest error when restoring the previous map fails", async () => {
+    const root = makeUnfamiliarRepo();
+    const bootstrap = ensureWorkspaceBootstrapped(root);
+    writeMockModelSettings(root, bootstrap.projectId);
+    const store = new ProjectOSWorkspaceStore();
+    const originalPair = store.writeScannedGraphPair.bind(store);
+    const originalGraph = store.writeGraph.bind(store);
+    store.writeScannedGraphPair = async (workspaceRoot, graph, semanticTree, options) => {
+      if (graph.nodes.some((node) => node.name === "Broken scan")) {
+        await originalGraph(workspaceRoot, graph, options);
+        throw new Error("tree device sk-proj-tree-secret");
+      }
+      return originalPair(workspaceRoot, graph, semanticTree, options);
+    };
+    store.writeGraph = async (workspaceRoot, graph, options) => {
+      if (!graph.nodes.some((node) => node.name === "Broken scan")) {
+        throw new Error("restore sk-proj-restore-secret");
+      }
+      return originalGraph(workspaceRoot, graph, options);
+    };
+    let calls = 0;
+    const complete = vi.fn(async (_profile, request: { input?: { task?: string } }) => {
+      calls += 1;
+      const task = request.input?.task;
+      return {
+        requestId: `req_${calls}`,
+        provider: "mock",
+        model: "mock",
+        output: task === "structure_graph_round_a" ? roundA() : roundB("Broken scan"),
+        usage: { inputTokens: 1, outputTokens: 2 },
+        latencyMs: 1,
+      };
+    });
+    const api = new ProjectOSLocalApi({
+      modelGateway: { complete } as unknown as ModelGateway,
+      workspaceStore: store,
+    });
+    const project = await api.openWorkspace(root);
     await api.awaitStructureScan(project.projectId);
-    const finalDisk = readFileSync(join(root, ".projectos", "graph.json"), "utf8");
-    expect(finalDisk).toContain("Fresh scan");
-    expect(finalDisk).not.toContain("Stale scan");
-    expect(
-      (JSON.parse(finalDisk) as ProjectGraph).nodes.some((node) => node.name === "Fresh scan"),
-    ).toBe(true);
+    await expect(api.analyzeWorkspace(project.projectId, {
+      mode: "regenerate",
+      force: true,
+    })).rejects.toMatchObject({
+      code: "persistence_write_failed",
+      message: "Structure scan failed and the previous map could not be restored.",
+    });
   });
 });

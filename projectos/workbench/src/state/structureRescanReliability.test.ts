@@ -444,4 +444,51 @@ describe('structure rescan reliability', () => {
     expect(state.toasts.filter((toast) => toast.type === 'success')).toHaveLength(1)
     expect(state.toasts.some((toast) => toast.message.includes('cancelled'))).toBe(false)
   })
+
+  it('waits for server scan cancellation before reset reads the map', async () => {
+    const workspace = createMockSampleWorkspace()
+    let releaseCancel: (() => void) | undefined
+    const cancel = new Promise<boolean>((resolve) => {
+      releaseCancel = () => resolve(true)
+    })
+    let graphReads = 0
+    const client = {
+      cancelStructureScan: vi.fn(() => cancel),
+      getProjectGraph: vi.fn(async () => {
+        graphReads += 1
+        return workspace.graph
+      }),
+      getSemanticTree: vi.fn(async () => workspace.semanticTree),
+      getMapContent: vi.fn(async () => workspace.mapContent),
+      getCurrentWork: vi.fn(async () => workspace.currentWork),
+      getChatSessionIndex: vi.fn(async () => ({
+        version: '0.2.0',
+        pinnedIds: [],
+        heads: [],
+      })),
+      getChatSession: vi.fn(async () => null),
+      upsertChatSession: vi.fn(async () => undefined),
+      setLastActiveChatSession: vi.fn(async () => undefined),
+      setChatSessionPinned: vi.fn(async () => undefined),
+      deleteChatSession: vi.fn(async () => undefined),
+    } as unknown as ProjectOSApi
+    useWorkbenchStore.setState({
+      client,
+      project: workspace.project,
+      graph: { ...workspace.graph, projectName: 'Before reset' },
+      tree: workspace.semanticTree,
+      locale: 'en',
+      structureRescanLoading: true,
+      toasts: [],
+    })
+    const pending = useWorkbenchStore.getState().resetDemo()
+    await Promise.resolve()
+    expect(client.cancelStructureScan).toHaveBeenCalledOnce()
+    expect(graphReads).toBe(0)
+    releaseCancel?.()
+    await pending
+    expect(graphReads).toBe(1)
+    expect(useWorkbenchStore.getState().graph).toEqual(workspace.graph)
+    expect(useWorkbenchStore.getState().structureRescanLoading).toBe(false)
+  })
 })

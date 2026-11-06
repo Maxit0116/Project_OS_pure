@@ -401,6 +401,45 @@ export class ProjectOSWorkspaceStore {
     return parsed;
   }
 
+  /**
+   * Publish a scanned graph and its derived semantic tree as one locked pair.
+   * The confirm check runs after the lock is held and before either file is replaced.
+   */
+  async writeScannedGraphPair(
+    workspaceRoot: string,
+    graph: ProjectGraph,
+    semanticTree: SemanticTree,
+    options?: { confirm?: () => boolean },
+  ): Promise<void> {
+    const resolvedWorkspaceRoot = validateWorkspacePath(workspaceRoot);
+    const canonicalWorkspaceRoot = resolveContainedPath(resolvedWorkspaceRoot, ".");
+    const parsedGraph = ProjectGraphSchema.parse(graph);
+    const parsedTree = SemanticTreeSchema.parse(semanticTree);
+    const graphPath = join(canonicalWorkspaceRoot, ".projectos", "graph.json");
+    const treePath = join(canonicalWorkspaceRoot, ".projectos", "semantic-tree.json");
+    try {
+      await withProjectWriteTransactionLock(canonicalWorkspaceRoot, async () => {
+        if (options?.confirm && !options.confirm()) {
+          throw new ProjectOSError(
+            "operation_cancelled",
+            "Structure map generation was cancelled",
+          );
+        }
+        writeDurableJsonReplacing(graphPath, parsedGraph, this.persistencePrimitives);
+        writeDurableJsonReplacing(treePath, parsedTree, this.persistencePrimitives);
+      });
+    } catch (error) {
+      if (error instanceof ProjectOSError && error.code === "operation_cancelled") {
+        throw error;
+      }
+      throw new ProjectOSError(
+        "persistence_write_failed",
+        `Failed to write scanned graph for '${canonicalWorkspaceRoot}'`,
+        { cause: error },
+      );
+    }
+  }
+
   async writeProjectDescription(
     workspaceRoot: string,
     projectDescription: ProjectDescription,
