@@ -15,6 +15,17 @@ function now(): string {
   return new Date().toISOString();
 }
 
+export type ProjectOSModelExecutorOptions = {
+  /**
+   * When true (default), block on the production waiting-decision card via
+   * `host.requestDecision` before generating. The built-in model path previously
+   * skipped this host op entirely, so H3 could only be proven with scripted/fake
+   * adapters. If the host has no decision store (`not_implemented`), generation
+   * continues without pausing.
+   */
+  askBeforeGenerate?: boolean;
+};
+
 /**
  * The built-in model as an executor. It produces the diff with Project OS's own model loop
  * and hands it to the harness host exactly as any other executor does, so the server's
@@ -29,8 +40,14 @@ export class ProjectOSModelExecutor implements NodeExecutorAdapter {
   readonly label = "Project OS model";
   private failure: unknown;
   private failed = false;
+  private readonly askBeforeGenerate: boolean;
 
-  constructor(private readonly generate: () => Promise<GeneratedDiff>) {}
+  constructor(
+    private readonly generate: () => Promise<GeneratedDiff>,
+    options: ProjectOSModelExecutorOptions = {},
+  ) {
+    this.askBeforeGenerate = options.askBeforeGenerate !== false;
+  }
 
   describe() {
     return ExecutorCapabilitiesSchema.parse({
@@ -61,6 +78,50 @@ export class ProjectOSModelExecutor implements NodeExecutorAdapter {
     const result = (async (): Promise<ExecutorResult> => {
       queue.push({ type: "task_started", taskId: task.taskId, timestamp: now() });
       try {
+        if (this.askBeforeGenerate) {
+          const question =
+            `Continue generating the authorized edit?\n\n${task.objective}`.slice(0, 500);
+          try {
+            const requested = await waitForHost(
+              host.requestDecision(
+                { taskId: task.taskId, question },
+                { signal: controller.signal },
+              ),
+              controller.signal,
+            );
+            if (controller.signal.aborted || requested.kind === "cancelled") {
+              queue.push({
+                type: "task_cancelled",
+                taskId: task.taskId,
+                reason: cancelReason || "cancelled",
+                timestamp: now(),
+              });
+              return ExecutorResultSchema.parse({
+                outcome: "cancelled",
+                taskId: task.taskId,
+                reason: cancelReason || "cancelled",
+              });
+            }
+            queue.push({
+              type: "decision_requested",
+              taskId: task.taskId,
+              decisionId: requested.value.decisionId,
+              question,
+              timestamp: now(),
+            });
+          } catch (error) {
+            // Host without a durable decision store (tests / legacy) — continue.
+            const code =
+              typeof error === "object" && error !== null && "code" in error
+                ? String((error as { code?: unknown }).code ?? "")
+                : "";
+            if (code !== "not_implemented") throw error;
+          }
+        }
+        if (controller.signal.aborted) {
+          queue.push({ type: "task_cancelled", taskId: task.taskId, reason: cancelReason || "cancelled", timestamp: now() });
+          return ExecutorResultSchema.parse({ outcome: "cancelled", taskId: task.taskId, reason: cancelReason || "cancelled" });
+        }
         const diff = await this.generate();
         if (controller.signal.aborted) {
           queue.push({ type: "task_cancelled", taskId: task.taskId, reason: cancelReason || "cancelled", timestamp: now() });
