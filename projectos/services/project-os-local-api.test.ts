@@ -5590,8 +5590,8 @@ function flattenSemanticPaths(tree: Awaited<ReturnType<ProjectOSLocalApi["getSem
 class GreenfieldInitializationGateway extends ModelGateway {
   readonly requests: ModelGatewayRequest[] = [];
   private batchCount = 0;
-  private readonly beforeSecondTrancheCommit?: () => void;
-  private readonly onValidateCreatedFile?: () => void;
+  private readonly beforeSecondTrancheCommit: (() => void) | undefined;
+  private readonly onValidateCreatedFile: (() => void) | undefined;
   private readonly uncertainCriteriaOnBatch: boolean;
 
   constructor(
