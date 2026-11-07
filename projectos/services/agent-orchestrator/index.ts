@@ -109,6 +109,7 @@ import { AgentRunSchema } from "../../contracts/agent-run.js";
 import { GeneratedDiffSchema } from "../../contracts/diff.js";
 import { ProjectOSError } from "../../errors.js";
 import { childValidationCoversParentAcceptance } from "./single-file-batch-coverage.js";
+import { mayAttemptBatchSynthesisAfterError } from "./batch-validation-error-policy.js";
 import type { LoadedProjectOSWorkspace } from "../../persistence/workspace-store.js";
 import { cloneJson } from "../../utils/json.js";
 import { resolveContainedPath } from "../../utils/path-containment.js";
@@ -5263,7 +5264,7 @@ export class AgentOrchestrator {
       } catch (error) {
         // Budget exhaustion / other ProjectOSError must NOT promote an unverified
         // batch to valid — that would skip full parent acceptance coverage.
-        if (error instanceof ProjectOSError) throw error;
+        if (!mayAttemptBatchSynthesisAfterError(error)) throw error;
         const failure = error instanceof BatchValidationError
           ? error.category
           : "invalid_validation_shape";

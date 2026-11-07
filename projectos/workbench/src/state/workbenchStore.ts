@@ -112,6 +112,7 @@ import {
   handleRunEvent,
   type FlowCorrection,
 } from './handleRunEvent'
+import { delegatedParentBatchAllowsApply } from './parentBatchApplyAuthorization'
 import { createWorkbenchClient } from '../data/workbenchClient'
 import { enrichGeneratedDiffFiles } from '../components/DiffReview/resolveDiffFileContent'
 import { computeDiffFileStats } from '../components/PendingChangesDrawer/diffFileStats'
@@ -598,6 +599,8 @@ export interface WorkbenchState {
   diffReady: boolean
   /** Set when the run's proposal can be reviewed but not applied (no independent validation). */
   diffReviewOnlyReason: string | null
+  /** Run ids whose Apply auth was revoked (cancel/interrupt); late valid must not unlock. */
+  revokedApplyRunIds: string[]
   generatedDiff: GeneratedDiff | null
   applyResult: ApplyResult | null
   verificationResult: VerificationRunResult | null
@@ -1580,6 +1583,7 @@ const initialTransientState = {
   liveGraphPausedRunId: null as string | null,
   diffReady: false,
   diffReviewOnlyReason: null,
+  revokedApplyRunIds: [] as string[],
   generatedDiff: null as GeneratedDiff | null,
   applyResult: null as ApplyResult | null,
   verificationResult: null as VerificationRunResult | null,
@@ -2986,6 +2990,17 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       refineLoading: false,
       activeRunId: null,
       executionOverlay: settledOverlay,
+      ...(runId
+        ? {
+            revokedApplyRunIds: [
+              ...new Set([...(get().revokedApplyRunIds ?? []), runId]),
+            ],
+            diffReviewOnlyReason: getStoreMessage(
+              locale,
+              'diff.applyBlockedAfterCancel',
+            ),
+          }
+        : {}),
     })
 
     if (client && runId && typeof client.cancelAgentRun === 'function') {
@@ -4029,6 +4044,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         agentFlowSubject: 'run',
         diffReady: false,
         diffReviewOnlyReason: null,
+        revokedApplyRunIds: [],
         generatedDiff: null,
         applyResult: null,
         verificationResult: null,
@@ -5039,6 +5055,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         liveGraphPausedRunId: null,
       diffReady: false,
       diffReviewOnlyReason: null,
+      revokedApplyRunIds: [],
       generatedDiff: null,
       applyResult: null,
       verificationResult: null,
@@ -5267,6 +5284,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       delegatedRunTraces,
       flowDelegationEvents,
       flowActions,
+      flowStatus,
+      revokedApplyRunIds,
     } = get()
     if (!project || !activeRunId) return
     if (diffReviewOnlyReason) {
@@ -5276,13 +5295,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const hasDelegatedChildren =
       Object.keys(delegatedRunTraces ?? {}).length > 0 ||
       (flowDelegationEvents ?? []).some((event) => event.type === 'task_delegated')
-    const parentBatchValid = (flowActions ?? []).some(
-      (event) =>
-        event.type === 'batch_validation_result' &&
-        event.payload?.verdict === 'valid',
-    )
-    if (hasDelegatedChildren && !parentBatchValid) {
-      const message = getStoreMessage(locale, 'diff.awaitingParentBatchValidation')
+    const auth = delegatedParentBatchAllowsApply({
+      activeRunId,
+      hasDelegatedChildren,
+      flowActions: flowActions ?? [],
+      revokedApplyRunIds,
+      flowStatus,
+    })
+    if (!auth.allowed) {
+      const message = getStoreMessage(
+        locale,
+        auth.reason === 'revoked'
+          ? 'diff.applyBlockedAfterCancel'
+          : 'diff.awaitingParentBatchValidation',
+      )
       pushToast({ type: 'warning', message })
       set({ diffReviewOnlyReason: message })
       return

@@ -2539,6 +2539,8 @@ const en = {
     validatingProposal: 'Proposal generated — independent validation still running; Apply stays blocked until validation finishes',
     awaitingParentBatchValidation:
       'Child proposal is ready for preview — Apply stays blocked until parent batch validation completes',
+    applyBlockedAfterCancel:
+      'Run was cancelled — Apply stays blocked even if a late parent batch validation arrives',
     willChange: 'Will change {count} file(s)',
     applied: 'Applied',
     appliedFiles: 'Applied ({count} files)',

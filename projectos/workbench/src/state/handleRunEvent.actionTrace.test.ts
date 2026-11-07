@@ -49,6 +49,7 @@ function baseState(): RunEventStoreSlice {
     highlightedFilePaths: [],
     executionOverlay: null,
     diffReady: false,
+    revokedApplyRunIds: [],
     messages: [],
     graph: null,
   }
@@ -233,6 +234,48 @@ describe('Agent Flow action trace state', () => {
     expect(afterValid.diffReviewOnlyReason).toBeNull()
     expect(afterValid.diffReady).toBe(true)
     expect(afterValid.flowStatus).toBe('awaiting_review')
+  })
+
+  it('keeps Apply blocked when late parent batch valid arrives after cancel', () => {
+    const cancelled = AgentRunEventSchema.parse({
+      eventId: 'evt_cancel',
+      runId: 'run_parent',
+      timestamp: '2026-11-07T00:00:04.000Z',
+      type: 'run_cancelled',
+    })
+    const afterCancel = reduceRunEventState(baseState(), cancelled)
+    expect(afterCancel.flowStatus).toBe('error')
+    expect(afterCancel.revokedApplyRunIds).toContain('run_parent')
+    expect(afterCancel.diffReviewOnlyReason).toMatch(/cancel/i)
+
+    const lateValid = AgentRunEventSchema.parse({
+      eventId: 'evt_batch_late',
+      runId: 'run_parent',
+      timestamp: '2026-11-07T00:00:05.000Z',
+      type: 'batch_validation_result',
+      payload: {
+        planId: 'plan_1',
+        verdict: 'valid',
+        tasks: [
+          {
+            taskId: 'task_1',
+            childRunId: 'run_child',
+            path: 'macos/Package.swift',
+            status: 'consistent',
+            criteria: [{ criterion: 'Append comment', status: 'satisfied' }],
+          },
+        ],
+        crossFileStatus: 'consistent',
+        summary: 'Late valid',
+        rationale: 'Must not unlock after cancel',
+      },
+    })
+    const afterLate = reduceRunEventState(
+      { ...baseState(), ...afterCancel },
+      lateValid,
+    )
+    expect(afterLate.diffReviewOnlyReason).toMatch(/cancel/i)
+    expect(afterLate.flowStatus).not.toBe('awaiting_review')
   })
 
   it('returns no metadata for an unknown future action type', () => {

@@ -25,6 +25,7 @@ import { truncateDiffReadySummary } from '../notifications/diffReadyNotification
 import type { CenterTab, ChatMessage, CodeSubTab } from './workbenchStore'
 import { logRunEventToActivity } from './activityLogFromRunEvent'
 import { useChatSessionStore } from './chatSessionStore'
+import { shouldUnlockApplyOnParentBatchValid } from './parentBatchApplyAuthorization'
 
 export interface FlowCorrection {
   id: string
@@ -57,6 +58,8 @@ export interface RunEventStoreSlice {
   executionOverlay: ExecutionOverlay | null
   diffReady: boolean
   diffReviewOnlyReason?: string | null
+  /** Run ids whose Apply authorization was revoked (cancel / interrupt). */
+  revokedApplyRunIds?: string[]
   messages: ChatMessage[]
   conversationCheckpoints?: ConversationCheckpointDraft[]
   applyResult?: ApplyResult | null
@@ -156,6 +159,14 @@ export function reduceRunEventState(
 
   if (event.type === 'run_interrupted' || event.type === 'run_cancelled') {
     patch.flowStatus = 'error'
+    const revoked = new Set(state.revokedApplyRunIds ?? [])
+    revoked.add(event.runId)
+    patch.revokedApplyRunIds = [...revoked]
+    // Sticky block: late parent batch `valid` must not unlock Apply after cancel.
+    patch.diffReviewOnlyReason = getStoreMessage(
+      state.locale,
+      'diff.applyBlockedAfterCancel',
+    )
   }
 
   if (event.type === 'step_failed') {
@@ -214,9 +225,24 @@ export function reduceRunEventState(
   if (event.type === 'batch_validation_result') {
     const verdict = (event.payload as { verdict?: unknown } | undefined)?.verdict
     if (verdict === 'valid') {
-      patch.diffReviewOnlyReason = null
-      patch.diffReady = true
-      patch.flowStatus = 'awaiting_review'
+      if (
+        shouldUnlockApplyOnParentBatchValid({
+          runId: event.runId,
+          revokedApplyRunIds: state.revokedApplyRunIds,
+          flowStatus: state.flowStatus,
+        })
+      ) {
+        patch.diffReviewOnlyReason = null
+        patch.diffReady = true
+        patch.flowStatus = 'awaiting_review'
+      } else {
+        // Cancel/interrupt already revoked Apply for this run — keep blocked.
+        patch.diffReviewOnlyReason = getStoreMessage(
+          state.locale,
+          'diff.applyBlockedAfterCancel',
+        )
+        patch.diffReady = true // preview may still show; Apply stays gated
+      }
     } else {
       // Invalid / incomplete parent batch must not unlock Apply.
       patch.diffReviewOnlyReason = getStoreMessage(

@@ -36,6 +36,8 @@ function baseDelegatedState(overrides: Record<string, unknown> = {}) {
     locale: 'en' as const,
     diffReviewOnlyReason: null as string | null,
     diffReady: true,
+    flowStatus: 'awaiting_review' as const,
+    revokedApplyRunIds: [] as string[],
     generatedDiff: {
       runId: 'run_child',
       summary: 'preview',
@@ -51,6 +53,29 @@ function baseDelegatedState(overrides: Record<string, unknown> = {}) {
     selectedNodeId: null,
     ...overrides,
   }
+}
+
+const parentBatchValid = {
+  eventId: 'evt_batch',
+  runId: 'run_parent',
+  timestamp: '2026-11-07T00:00:01.000Z',
+  type: 'batch_validation_result' as const,
+  payload: {
+    planId: 'plan_1',
+    verdict: 'valid' as const,
+    tasks: [
+      {
+        taskId: 'task_1',
+        childRunId: 'run_child',
+        path: 'a.ts',
+        status: 'consistent' as const,
+        criteria: [{ criterion: 'c', status: 'satisfied' as const }],
+      },
+    ],
+    crossFileStatus: 'consistent' as const,
+    summary: 'ok',
+    rationale: 'ok',
+  },
 }
 
 describe('delegated Apply authorization (SYNTHETIC)', () => {
@@ -139,6 +164,49 @@ describe('delegated Apply authorization (SYNTHETIC)', () => {
 
     await useWorkbenchStore.getState().applyCurrentDiff()
     expect(applyDiff).not.toHaveBeenCalled()
+  })
+
+  it('blocks Apply when cancel revoked the run even if late valid is present', async () => {
+    const applyDiff = vi.fn(async () => {
+      throw new Error('must not apply')
+    })
+    useWorkbenchStore.setState({
+      ...baseDelegatedState({
+        diffReviewOnlyReason: null,
+        flowActions: [parentBatchValid],
+        revokedApplyRunIds: ['run_parent'],
+        flowStatus: 'awaiting_review',
+      }),
+      client: { applyDiff } as unknown as ProjectOSApi,
+    })
+
+    await useWorkbenchStore.getState().applyCurrentDiff()
+    expect(applyDiff).not.toHaveBeenCalled()
+    expect(useWorkbenchStore.getState().diffReviewOnlyReason).toMatch(/cancel/i)
+  })
+
+  it('blocks Apply when cross-run residual valid belongs to a previous parent', async () => {
+    const applyDiff = vi.fn(async () => {
+      throw new Error('must not apply')
+    })
+    useWorkbenchStore.setState({
+      ...baseDelegatedState({
+        activeRunId: 'run_new_parent',
+        flowActions: [
+          {
+            ...parentBatchValid,
+            eventId: 'evt_old',
+            runId: 'run_old_parent',
+          },
+        ],
+        revokedApplyRunIds: [],
+      }),
+      client: { applyDiff } as unknown as ProjectOSApi,
+    })
+
+    await useWorkbenchStore.getState().applyCurrentDiff()
+    expect(applyDiff).not.toHaveBeenCalled()
+    expect(useWorkbenchStore.getState().diffReviewOnlyReason).toMatch(/batch/i)
   })
 
   it('allows applyCurrentDiff only after a late valid parent batch_validation_result', async () => {
