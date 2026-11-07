@@ -69,6 +69,15 @@ export interface OutboundBudgetGate {
   reserve(): { reservationId: string };
   /** Record outcome; never frees the reserved slot. */
   settle(reservationId: string, outcome: OutboundBudgetSettleInput): void;
+  /**
+   * Upgrade the newest settled-ok row that still has usageStatus=missing with
+   * provider-reported tokens (fetch settles before body parse; gateway fills).
+   * Never adds/frees slots.
+   */
+  annotateLatestMissingOkUsage(usage: {
+    inputTokens: number;
+    outputTokens: number;
+  }): boolean;
   snapshot(): OutboundBudgetLedger;
 }
 
@@ -310,6 +319,29 @@ export function createFileOutboundBudget(
         row.inputTokens = outcome.inputTokens;
         row.outputTokens = outcome.outputTokens;
         writeLedgerUnlocked(ledger);
+      });
+    },
+    annotateLatestMissingOkUsage(usage: {
+      inputTokens: number;
+      outputTokens: number;
+    }): boolean {
+      return withLock(() => {
+        const ledger = readLedgerUnlocked();
+        for (let i = ledger.reservations.length - 1; i >= 0; i -= 1) {
+          const row = ledger.reservations[i]!;
+          if (
+            row.state === "settled" &&
+            row.status === "ok" &&
+            row.usageStatus === "missing"
+          ) {
+            row.usageStatus = "reported";
+            row.inputTokens = usage.inputTokens;
+            row.outputTokens = usage.outputTokens;
+            writeLedgerUnlocked(ledger);
+            return true;
+          }
+        }
+        return false;
       });
     },
     snapshot(): OutboundBudgetLedger {

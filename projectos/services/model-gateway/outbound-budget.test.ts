@@ -99,6 +99,26 @@ describe("FileOutboundBudget", () => {
     expect(row.status).toBe("failed");
   });
 
+  it("annotates provider-reported usage onto the latest missing ok settle without adding slots", () => {
+    const path = tempLedger();
+    const budget = createFileOutboundBudget(path, 2);
+    const a = budget.reserve();
+    budget.settle(a.reservationId, {
+      status: "ok",
+      usageStatus: "missing",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    expect(
+      budget.annotateLatestMissingOkUsage({ inputTokens: 12, outputTokens: 3 }),
+    ).toBe(true);
+    const row = budget.snapshot().reservations[0]!;
+    expect(row.usageStatus).toBe("reported");
+    expect(row.inputTokens).toBe(12);
+    expect(row.outputTokens).toBe(3);
+    expect(budget.snapshot().reservations).toHaveLength(1);
+  });
+
   it("survives process restart by reading the same durable ledger", () => {
     const path = tempLedger();
     const first = createFileOutboundBudget(path, 3);

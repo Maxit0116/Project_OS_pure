@@ -182,6 +182,12 @@ export class ModelGateway {
       provider: modelProfileLabel(profile),
       model: profile.model,
     });
+    if (usageReported && this.outboundBudget) {
+      this.outboundBudget.annotateLatestMissingOkUsage({
+        inputTokens,
+        outputTokens,
+      });
+    }
 
     return {
       requestId,
@@ -307,6 +313,12 @@ export class ModelGateway {
         provider: modelProfileLabel(profile),
         model: profile.model,
       });
+      if (roundReported && this.outboundBudget) {
+        this.outboundBudget.annotateLatestMissingOkUsage({
+          inputTokens: roundIn,
+          outputTokens: roundOut,
+        });
+      }
       inputTokens += result.usageReported === false ? 0 : result.inputTokens;
       outputTokens += result.usageReported === false ? 0 : result.outputTokens;
       lastOutput = result.output;
