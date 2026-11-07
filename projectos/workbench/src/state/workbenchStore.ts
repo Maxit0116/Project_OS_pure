@@ -4081,10 +4081,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         lastDecisionRefreshAt = now
         void get().loadRunDecisions(rootRunId)
       }
-      const applyRunEvent = (event: AgentRunEvent) => {
+      const applyRunEvent = (
+        event: AgentRunEvent,
+        options?: { fromSnapshot?: boolean },
+      ) => {
         if (!isCurrentRunSubscription()) return
         if (handledRunEventIds.has(event.eventId)) return
+        // Live-only filter (Agent-Pool §7.4): after a snapshot is applied, ignore
+        // overlapping live deliveries. Snapshot events themselves must still apply.
         if (
+          !options?.fromSnapshot &&
           typeof event.runSequence === 'number' &&
           snapshotWatermark != null &&
           event.runSequence <= snapshotWatermark
@@ -4255,11 +4261,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         try {
           const snapshot = await client.getAgentRunEventSnapshot(run.runId)
           if (!isCurrentRunSubscription()) return
-          snapshotWatermark = snapshot.watermark
-          if (snapshot.events.length === 0) return
+          // Apply snapshot first, then raise watermark — never the reverse.
+          // Fast synthetic/model runs finish before live subscribe; reversing
+          // left flowStatus stuck on "running" with an empty Diff panel.
           for (const event of snapshot.events) {
-            applyRunEvent(event as AgentRunEvent)
+            applyRunEvent(event as AgentRunEvent, { fromSnapshot: true })
           }
+          snapshotWatermark = snapshot.watermark
         } catch (error) {
           // Fallback for older transports / partial mocks.
           try {

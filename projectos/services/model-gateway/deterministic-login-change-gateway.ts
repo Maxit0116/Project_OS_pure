@@ -42,9 +42,11 @@ function discoveryFinalIntentOutput(input: {
 
 export class DeterministicLoginChangeGateway extends ModelGateway {
   readonly synthetic = true as const;
+  private readonly uncertainCriteria: boolean;
 
-  constructor() {
+  constructor(options: { uncertainCriteria?: boolean } = {}) {
     super({ secretStore: new InMemorySecretStore() });
+    this.uncertainCriteria = options.uncertainCriteria === true;
   }
 
   override async complete(
@@ -124,20 +126,27 @@ export class DeterministicLoginChangeGateway extends ModelGateway {
       const criterion = path === "app/login/page.tsx"
         ? "The login heading welcomes returning users"
         : `Delegated change for ${path} is present`;
+      const criterionStatus = this.uncertainCriteria ? "uncertain" : "satisfied";
       output = JSON.stringify({
         path,
         verdict: "valid",
         criteria: [{
           criterion,
-          status: "satisfied",
-          explanation: "The scoped proposal implements the delegated objective.",
+          status: criterionStatus,
+          explanation: this.uncertainCriteria
+            ? "Criteria remain uncertain; human review must authorize apply."
+            : "The scoped proposal implements the delegated objective.",
         }],
         scopeAssessment: {
           status: "compliant",
           explanation: "Only the authorized file is modified.",
         },
-        summary: "The delegated proposal is scoped and satisfies its criterion.",
-        rationale: "The proposed exact replacement matches the delegated task.",
+        summary: this.uncertainCriteria
+          ? "Proposal is reviewable with uncertain criteria."
+          : "The delegated proposal is scoped and satisfies its criterion.",
+        rationale: this.uncertainCriteria
+          ? "Synthetic uncertain-criteria path for desktop review/apply proof."
+          : "The proposed exact replacement matches the delegated task.",
       });
     } else if (mode === "validate_delegated_batch" || mode === "validate_whole_tree_batch") {
       const plan = mode === "validate_whole_tree_batch"
@@ -148,6 +157,7 @@ export class DeterministicLoginChangeGateway extends ModelGateway {
           ? input.delegationPlan.tasks as unknown[]
           : []);
       const evidence = Array.isArray(input.childEvidence) ? input.childEvidence : [];
+      const criterionStatus = this.uncertainCriteria ? "uncertain" : "satisfied";
       output = JSON.stringify({
         verdict: "valid",
         tasks: plan.map((rawTask, index) => {
@@ -163,18 +173,26 @@ export class DeterministicLoginChangeGateway extends ModelGateway {
             status: "consistent",
             criteria: criteria.map((item) => ({
               criterion: item,
-              status: "satisfied",
-              explanation: "The independently validated proposal satisfies this criterion.",
+              status: criterionStatus,
+              explanation: this.uncertainCriteria
+                ? "Criteria remain uncertain; human review must authorize apply."
+                : "The independently validated proposal satisfies this criterion.",
             })),
-            summary: "The child proposal is consistent with its delegated task.",
+            summary: this.uncertainCriteria
+              ? "Child proposal is reviewable with uncertain criteria."
+              : "The child proposal is consistent with its delegated task.",
           };
         }),
         crossFileAssessment: {
           status: "consistent",
           summary: "The delegated proposals are mutually consistent.",
         },
-        summary: "The complete delegated batch is valid.",
-        rationale: "All tasks and interfaces were reviewed together.",
+        summary: this.uncertainCriteria
+          ? "Delegated batch is reviewable with uncertain criteria."
+          : "The complete delegated batch is valid.",
+        rationale: this.uncertainCriteria
+          ? "Synthetic uncertain-criteria path for desktop review/apply proof."
+          : "All tasks and interfaces were reviewed together.",
       });
     } else if (selectedPath === "app/login/page.tsx" || (!selectedPath && mode === undefined)) {
       output = JSON.stringify({
@@ -214,5 +232,9 @@ export function createDeterministicAgentGatewayFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): ModelGateway | undefined {
   if (env.PROJECTOS_DETERMINISTIC_AGENT_GATEWAY !== "1") return undefined;
-  return new DeterministicLoginChangeGateway();
+  return new DeterministicLoginChangeGateway({
+    // Opt-in only: synthetic Electron/desktop proof of automatic→awaiting_review
+    // when criteria are uncertain. Does not invent mid-run Continue cards.
+    uncertainCriteria: env.PROJECTOS_DETERMINISTIC_UNCERTAIN_CRITERIA === "1",
+  });
 }
