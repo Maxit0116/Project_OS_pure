@@ -80,7 +80,7 @@ export interface ModelToolLoopOptions {
 
 export class ModelGateway {
   private readonly secretStore: SecretStore;
-  private readonly onSettled?: (event: ModelGatewaySettledEvent) => void;
+  private readonly onSettled: ((event: ModelGatewaySettledEvent) => void) | undefined;
 
   constructor(options: ModelGatewayOptions) {
     this.secretStore = options.secretStore;
