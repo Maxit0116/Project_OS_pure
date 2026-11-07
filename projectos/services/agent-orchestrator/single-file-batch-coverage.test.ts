@@ -81,4 +81,20 @@ describe("childValidationCoversParentAcceptance", () => {
       }),
     ).toBe(false);
   });
+
+  it("rejects when child verdict is not valid (budget/JSON failure must not promote)", () => {
+    expect(
+      childValidationCoversParentAcceptance({
+        parentAcceptanceCriteria: parent,
+        childCriteria: [
+          { criterion: "Keep package name", status: "satisfied" },
+          { criterion: "Append only one comment", status: "satisfied" },
+        ],
+        childVerdict: "invalid",
+        childPath: "macos/Package.swift",
+        parentPath: "macos/Package.swift",
+        scopeStatus: "compliant",
+      }),
+    ).toBe(false);
+  });
 });

@@ -5383,13 +5383,19 @@ export class AgentOrchestrator {
       const child = children.find((candidate) => candidate.taskId === task.taskId);
       const childState = child ? this.runs.get(child.runId) : undefined;
       const validation = childState?.validationResult;
+      // Same parent-acceptance coverage as single-file synthesis — incomplete
+      // child criteria must never elevate a multi-file JSON fallback to valid.
       if (
         !child ||
         !validation ||
-        validation.verdict !== "valid" ||
-        validation.path !== task.filePath ||
-        validation.scopeAssessment.status !== "compliant" ||
-        !validation.criteria.every((criterion) => criterion.status === "satisfied")
+        !childValidationCoversParentAcceptance({
+          parentAcceptanceCriteria: task.acceptanceCriteria,
+          childCriteria: validation.criteria,
+          childVerdict: validation.verdict,
+          childPath: validation.path,
+          parentPath: task.filePath,
+          scopeStatus: validation.scopeAssessment.status,
+        })
       ) {
         return undefined;
       }
@@ -5398,9 +5404,9 @@ export class AgentOrchestrator {
         childRunId: child.runId,
         path: task.filePath,
         status: "consistent" as const,
-        criteria: validation.criteria.map((criterion) => ({
-          criterion: sanitizePlanText(criterion.criterion, 300, "Acceptance criterion"),
-          status: criterion.status,
+        criteria: task.acceptanceCriteria.map((parentCriterion) => ({
+          criterion: sanitizePlanText(parentCriterion, 300, "Acceptance criterion"),
+          status: "satisfied" as const,
         })),
         summary: sanitizeValidationNarrative(
           validation.summary,

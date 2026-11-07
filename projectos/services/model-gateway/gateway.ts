@@ -21,7 +21,6 @@ import {
   type ProviderMessage,
 } from "./providers.js";
 import type { OutboundBudgetGate } from "./outbound-budget.js";
-import { runWithOutboundBudgetGate } from "./outbound-budget-context.js";
 
 /** One settled provider-facing gateway call (success, failure, or cancel). */
 export interface ModelGatewaySettledEvent {
@@ -138,12 +137,11 @@ export class ModelGateway {
     const input: ProviderCompleteInput = {
       ...this.buildProviderInput(request),
       ...(deadline.signal ? { signal: deadline.signal } : {}),
+      ...(this.outboundBudget ? { outboundBudget: this.outboundBudget } : {}),
     };
     let result;
     try {
-      result = await runWithOutboundBudgetGate(this.outboundBudget, () =>
-        adapter.complete(resolved, apiKey, input),
-      );
+      result = await adapter.complete(resolved, apiKey, input);
     } catch (error) {
       const cancelled = Boolean(options?.signal?.aborted);
       this.settle({
@@ -262,12 +260,11 @@ export class ModelGateway {
         messages,
         tools: options.tools,
         ...(deadline.signal ? { signal: deadline.signal } : {}),
+        ...(this.outboundBudget ? { outboundBudget: this.outboundBudget } : {}),
       };
       let result;
       try {
-        result = await runWithOutboundBudgetGate(this.outboundBudget, () =>
-          adapter.complete(resolved, apiKey, providerInput),
-        );
+        result = await adapter.complete(resolved, apiKey, providerInput);
       } catch (error) {
         const cancelled = Boolean(options.signal?.aborted);
         this.settle({
@@ -442,8 +439,10 @@ export class ModelGateway {
       };
     }
     try {
-      const result = await runWithOutboundBudgetGate(this.outboundBudget, () =>
-        adapter.testConnection(resolved, apiKey),
+      const result = await adapter.testConnection(
+        resolved,
+        apiKey,
+        this.outboundBudget,
       );
       return {
         ...result,
@@ -461,9 +460,7 @@ export class ModelGateway {
       return [{ id: profile.model, name: profile.model }];
     }
     const apiKey = await resolveApiKey(this.secretStore, resolved);
-    return runWithOutboundBudgetGate(this.outboundBudget, () =>
-      adapter.listModels!(resolved, apiKey),
-    );
+    return adapter.listModels(resolved, apiKey, this.outboundBudget);
   }
 
   private buildProviderInput(request: ModelGatewayRequest): ProviderCompleteInput {

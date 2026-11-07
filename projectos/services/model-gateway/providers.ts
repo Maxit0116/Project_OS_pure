@@ -10,7 +10,7 @@ import type { ModelToolCall, ModelToolDefinition } from "../../contracts/model-g
 import { normalizeModelProfile } from "../../contracts/settings.js";
 import { ProjectOSError } from "../../errors.js";
 import type { SecretStore } from "../../persistence/secret-store.js";
-import { getOutboundBudgetGate } from "./outbound-budget-context.js";
+import type { OutboundBudgetGate } from "./outbound-budget.js";
 
 export interface ProviderImagePart {
   mimeType: "image/png" | "image/jpeg";
@@ -26,6 +26,8 @@ export interface ProviderCompleteInput {
   maxOutputTokens?: number;
   thinkingDepth?: ThinkingDepth;
   images?: ProviderImagePart[];
+  /** Opt-in: reserve one ledger slot before each HTTP attempt (incl. retries). */
+  outboundBudget?: OutboundBudgetGate;
 }
 
 export function buildOpenAiUserContent(
@@ -89,10 +91,12 @@ export interface ModelProviderAdapter {
   listModels?(
     profile: ResolvedModelProfile,
     apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<Array<{ id: string; name: string }>>;
   testConnection(
     profile: ResolvedModelProfile,
     apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<{ ok: boolean; message?: string }>;
 }
 
@@ -259,12 +263,11 @@ async function fetchWithTimeout(
   init: RequestInit,
   timeoutMs = PROVIDER_FETCH_TIMEOUT_MS,
   signal?: AbortSignal,
+  budget?: OutboundBudgetGate,
 ): Promise<Response> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= PROVIDER_FETCH_TRANSIENT_RETRIES; attempt += 1) {
-    const budget = getOutboundBudgetGate();
     // One durable reservation per HTTP attempt (including transient retries).
-    // No reserve ⇒ no fetch when a budget gate is active.
     const reservationId = budget ? budget.reserve().reservationId : undefined;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -608,7 +611,7 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       },
       body: JSON.stringify(buildOpenAiChatBody(profile, input)),
-    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget);
 
     const body = parseProviderJson(
       await readResponseText(response),
@@ -636,11 +639,13 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
   async testConnection(
     profile: ResolvedModelProfile,
     apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<{ ok: boolean; message?: string }> {
     return testProviderConnection(() =>
       this.complete(profile, apiKey, {
         userPrompt: "Reply with OK",
         maxOutputTokens: 8,
+        ...(outboundBudget ? { outboundBudget } : {}),
       }),
     );
   }
@@ -660,7 +665,7 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
         ...(apiKey ? { "x-api-key": apiKey } : {}),
       },
       body: JSON.stringify(buildAnthropicMessagesBody(profile, input)),
-    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget);
 
     const body = parseProviderJson(
       await readResponseText(response),
@@ -694,11 +699,13 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
   async testConnection(
     profile: ResolvedModelProfile,
     apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<{ ok: boolean; message?: string }> {
     return testProviderConnection(() =>
       this.complete(profile, apiKey, {
         userPrompt: "Reply with OK",
         maxOutputTokens: 8,
+        ...(outboundBudget ? { outboundBudget } : {}),
       }),
     );
   }
@@ -742,7 +749,7 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
         ],
         ...(input.tools?.length ? { tools: input.tools } : {}),
       }),
-    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget);
 
     const body = parseProviderJson(
       await readResponseText(response),
@@ -769,10 +776,14 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
   async listModels(
     profile: ResolvedModelProfile,
     _apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<Array<{ id: string; name: string }>> {
     const response = await fetchWithTimeout(
       `${normalizeBaseUrl(profile.baseUrl)}/api/tags`,
       { method: "GET" },
+      PROVIDER_FETCH_TIMEOUT_MS,
+      undefined,
+      outboundBudget,
     );
     const body = parseProviderJson(
       await readResponseText(response),
@@ -787,11 +798,13 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
   async testConnection(
     profile: ResolvedModelProfile,
     apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<{ ok: boolean; message?: string }> {
     return testProviderConnection(() =>
       this.complete(profile, apiKey, {
         userPrompt: "Reply with OK",
         maxOutputTokens: 8,
+        ...(outboundBudget ? { outboundBudget } : {}),
       }),
     );
   }
