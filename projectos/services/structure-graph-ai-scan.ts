@@ -1027,6 +1027,31 @@ function asScanCancellationError(error: unknown): ProjectOSError | null {
   return null;
 }
 
+/** Gate failures a second round B can fix: components without code, too few files, directory shells. */
+export function isRetryableGateFailure(reasons: readonly string[]): boolean {
+  return reasons.some((reason) =>
+    reason.startsWith("components_without_code") ||
+    reason.startsWith("thin_file_mounts") ||
+    reason.startsWith("dir_shell_names"),
+  );
+}
+
+/** What the retry is told: why the components were refused, and which ones owned no files. */
+export function gateRetryNote(reasons: readonly string[], graph: ProjectGraph): string {
+  const empty = graph.nodes
+    .filter((node) => node.level === "component" && node.linkedFiles.length === 0 &&
+      !graph.fileIndex.some((file) => file.nodeIds.includes(node.id)))
+    .map((node) => node.name)
+    .slice(0, 12);
+  const thin = reasons.some((reason) => reason.startsWith("thin_file_mounts"));
+  return [
+    `PREVIOUS ATTEMPT REFUSED by the quality gate (${reasons.join(", ")}).`,
+    empty.length > 0 ? `These components owned no source files: ${empty.join(", ")}.` : "",
+    thin ? "There were too many components for this repository's source files: use fewer, each owning at least two source files." : "",
+    "Do not emit components for CI, documentation or project metadata; every component must own source files through pathHints that match files in the list.",
+  ].filter(Boolean).join(" ");
+}
+
 async function completeJsonRound(
   input: RunStructureGraphAiScanInput,
   systemPrompt: string,
@@ -1433,102 +1458,112 @@ export async function runStructureGraphAiScan(
           ? "Keep existing node ids when possible; add missing components."
           : "Create a full component set.";
 
-    activeStep = "map_components";
-    emitStep("step_started", "map_components");
-    const roundB = await completeJsonRound(
-      input,
-      [
-        bundle,
-        "",
-        "ROUND B: emit ONLY components with pathHints. No fileIndex, no fileRelations.",
-        `Language for names: ${language === "zh-CN" ? "Chinese" : "English"}.`,
-        `Each container needs 2–6 components; ${budget.min}–${budget.max} in total for this repository (${sourceFileCount} source files). Never more components than half the number of source files, and every component must own at least one real file through its pathHints. Product capability names, not directory shells.`,
-        "Each component: { id, name, parentId, description, summary, responsibility, layer, pathHints: string[], technology?, notes?, openQuestions?, owners? }.",
-        "pathHints must be real path prefixes from the file list or the directory overview (e.g. android/app/src, src/auth). The file list is only a sample; the directory overview shows where all the files are.",
-        "Edges between components MUST include technology/protocol when known.",
-        deepenNote,
-        changedNote,
-        "Return one JSON object: { components, edges }.",
-        `projectId: ${input.projectId}`,
-      ].join("\n"),
-      "structure_graph_round_b",
-      {
+    // One more round B when the quality gate refuses the components (seen live: a 39-file library got
+    // CI, docs and metadata "components" that own no code, and the whole map fell back to a placeholder).
+    let gateFeedback: string | undefined;
+    let result!: ProjectGraph;
+    let quality!: ReturnType<typeof assessL2GraphQuality>;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      activeStep = "map_components";
+      emitStep("step_started", "map_components");
+      const roundB = await completeJsonRound(
+        input,
+        [
+          bundle,
+          "",
+          "ROUND B: emit ONLY components with pathHints. No fileIndex, no fileRelations.",
+          `Language for names: ${language === "zh-CN" ? "Chinese" : "English"}.`,
+          `Each container needs 2–6 components; ${budget.min}–${budget.max} in total for this repository (${sourceFileCount} source files). Never more components than half the number of source files, and every component must own at least one real file through its pathHints. Product capability names, not directory shells.`,
+          "Each component: { id, name, parentId, description, summary, responsibility, layer, pathHints: string[], technology?, notes?, openQuestions?, owners? }.",
+          "pathHints must be real path prefixes from the file list or the directory overview (e.g. android/app/src, src/auth). The file list is only a sample; the directory overview shows where all the files are.",
+          "Edges between components MUST include technology/protocol when known.",
+          deepenNote,
+          changedNote,
+          "Return one JSON object: { components, edges }.",
+          ...(gateFeedback ? [gateFeedback] : []),
+          `projectId: ${input.projectId}`,
+        ].join("\n"),
+        "structure_graph_round_b",
+        {
+          language,
+          files: fileList,
+          directories: directoryOverview,
+          roundA,
+          changedFiles: input.changedFiles?.slice(0, 80) ?? [],
+          existingComponents: input.graph.nodes
+            .filter((node) => node.level === "component")
+            .map((node) => ({ id: node.id, name: node.name, parentId: node.parentId })),
+        },
+      );
+      const componentCount = Array.isArray(roundB.components)
+        ? roundB.components.length
+        : Array.isArray(roundB.nodes)
+          ? roundB.nodes.length
+          : 0;
+      emitStep(
+        "step_completed",
+        "map_components",
+        componentCount > 0 ? `${componentCount} components` : undefined,
+      );
+
+      activeStep = "link_code";
+      emitStep("step_started", "link_code");
+      const assembled = assembleFromRounds({
+        projectId: input.projectId,
+        projectName: input.displayName,
+        workspaceRoot: input.workspaceRoot,
         language,
-        files: fileList,
-        directories: directoryOverview,
+        projectType: input.graph.projectType,
         roundA,
-        changedFiles: input.changedFiles?.slice(0, 80) ?? [],
-        existingComponents: input.graph.nodes
-          .filter((node) => node.level === "component")
-          .map((node) => ({ id: node.id, name: node.name, parentId: node.parentId })),
-      },
-    );
-    const componentCount = Array.isArray(roundB.components)
-      ? roundB.components.length
-      : Array.isArray(roundB.nodes)
-        ? roundB.nodes.length
-        : 0;
-    emitStep(
-      "step_completed",
-      "map_components",
-      componentCount > 0 ? `${componentCount} components` : undefined,
-    );
+        roundB,
+      });
 
-    activeStep = "link_code";
-    emitStep("step_started", "link_code");
-    const assembled = assembleFromRounds({
-      projectId: input.projectId,
-      projectName: input.displayName,
-      workspaceRoot: input.workspaceRoot,
-      language,
-      projectType: input.graph.projectType,
-      roundA,
-      roundB,
-    });
+      const merged = mergeStructureGraphs({
+        base: input.graph,
+        incoming: assembled,
+        mode: scanMode,
+        ...(input.nodeIds !== undefined ? { deepenIds: input.nodeIds } : {}),
+      });
 
-    const merged = mergeStructureGraphs({
-      base: input.graph,
-      incoming: assembled,
-      mode: scanMode,
-      ...(input.nodeIds !== undefined ? { deepenIds: input.nodeIds } : {}),
-    });
+      const enrichedNodes = enrichNodesForC4Shapes({
+        nodes: merged.nodes,
+        workspaceRoot: input.workspaceRoot,
+        files,
+      });
+      const generatedViews = synthesizeDefaultArchitectureViews(enrichedNodes, {
+        sourceKind: "ai",
+        fileIndex: merged.fileIndex,
+      });
+      const existingViews =
+        scanMode === "regenerate" ? merged.views : (input.graph.views ?? merged.views);
+      const views = mergeArchitectureViews({
+        ...(existingViews !== undefined ? { existing: existingViews } : {}),
+        generated: generatedViews,
+        mode: scanMode === "regenerate" ? "regenerate" : "refine",
+      });
 
-    const enrichedNodes = enrichNodesForC4Shapes({
-      nodes: merged.nodes,
-      workspaceRoot: input.workspaceRoot,
-      files,
-    });
-    const generatedViews = synthesizeDefaultArchitectureViews(enrichedNodes, {
-      sourceKind: "ai",
-      fileIndex: merged.fileIndex,
-    });
-    const existingViews =
-      scanMode === "regenerate" ? merged.views : (input.graph.views ?? merged.views);
-    const views = mergeArchitectureViews({
-      ...(existingViews !== undefined ? { existing: existingViews } : {}),
-      generated: generatedViews,
-      mode: scanMode === "regenerate" ? "regenerate" : "refine",
-    });
+      result = {
+        ...merged,
+        version: "0.5.0",
+        authored: input.force ? false : merged.authored === true ? true : false,
+        nodes: enrichedNodes,
+        views,
+      };
+      emitStep(
+        "step_completed",
+        "link_code",
+        `${result.fileIndex.length} files · ${result.fileRelations?.length ?? 0} relations`,
+      );
 
-    const result: ProjectGraph = {
-      ...merged,
-      version: "0.5.0",
-      authored: input.force ? false : merged.authored === true ? true : false,
-      nodes: enrichedNodes,
-      views,
-    };
-    emitStep(
-      "step_completed",
-      "link_code",
-      `${result.fileIndex.length} files · ${result.fileRelations?.length ?? 0} relations`,
-    );
-
-    activeStep = "validate_save";
-    emitStep("step_started", "validate_save");
-    const quality = assessL2GraphQuality(result, {
-      sourceFileCount,
-      language,
-    });
+      activeStep = "validate_save";
+      emitStep("step_started", "validate_save");
+      quality = assessL2GraphQuality(result, {
+        sourceFileCount,
+        language,
+      });
+      if (quality.complete || !isRetryableGateFailure(quality.reasons)) break;
+      gateFeedback = gateRetryNote(quality.reasons, result);
+    }
     if (!quality.complete) {
       throw new ProjectOSError(
         "agent_orchestration_failed",

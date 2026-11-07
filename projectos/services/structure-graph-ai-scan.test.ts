@@ -12,6 +12,7 @@ import {
   graphNeedsAiScan,
   parseProjectGraphFromModelOutput,
   resolveArchitecture,
+  isRetryableGateFailure,
   runStructureGraphAiScan,
 } from "./structure-graph-ai-scan.js";
 import { buildHeuristicProjectGraph } from "./workspace-bootstrap.js";
@@ -390,6 +391,47 @@ describe("structure-graph-ai-scan", () => {
     expect(auth.linkedFiles.length).toBeGreaterThanOrEqual(2);
     expect(scanned.fileIndex.some((entry) => entry.imports.length > 0)).toBe(true);
     expect(scanned.nodes.some((node) => node.tags.includes("bootstrap"))).toBe(false);
+  });
+
+  it("asks for the components once more when the quality gate refuses them, saying why", async () => {
+    // more-itertools, packaged app: round B gave CI, docs and metadata components that own no code
+    // and the whole map fell back to a placeholder.
+    const { root, projectId } = makeTempRepo();
+    const heuristic = buildHeuristicProjectGraph({ projectId, projectName: "demo", projectType: "node", workspaceRoot: root });
+    const noCode = JSON.stringify({
+      // More components than the repository can give two files each: the gate refuses (thin_file_mounts).
+      components: ["CI pipeline", "Documentation site", "Project metadata", "Issue templates", "Release notes", "Changelog", "Funding", "Code of conduct"].map((name, index) => ({
+        id: `component_${index}`, name, parentId: "container_app", description: name, summary: name,
+        responsibility: name, layer: "application", pathHints: [`.github/${index}`],
+      })),
+      edges: [],
+    });
+    const prompts: string[] = [];
+    let roundBCalls = 0;
+    const complete = vi.fn(async (_profile, request) => {
+      const task = (request.input as { task?: string }).task;
+      if (task === "structure_graph_round_a") return gatewayResponse(roundAJson());
+      roundBCalls += 1;
+      prompts.push(String(request.systemPrompt ?? "") + JSON.stringify(request.input ?? ""));
+      return gatewayResponse(roundBCalls === 1 ? noCode : roundBJson());
+    });
+    const scanned = await runStructureGraphAiScan({
+      workspaceRoot: root, projectId, displayName: "demo", graph: heuristic, profile: mockProfile(),
+      gateway: { complete } as unknown as ModelGateway,
+    });
+    expect(complete).toHaveBeenCalledTimes(3);
+    expect(scanned.analysisStatus).toBe("complete");
+    expect(scanned.nodes.some((node) => node.name === "Identity access")).toBe(true);
+    expect(prompts[0]).not.toContain("PREVIOUS ATTEMPT REFUSED");
+    expect(prompts[1]).toContain("PREVIOUS ATTEMPT REFUSED");
+    expect(prompts[1]).toContain("thin_file_mounts");
+    expect(prompts[1]).toContain("use fewer, each owning at least two source files");
+  });
+
+  it("asks only once more, and not at all for a failure another round cannot fix", () => {
+    expect(isRetryableGateFailure(["components_without_code:3"])).toBe(true);
+    expect(isRetryableGateFailure(["thin_file_mounts:1<4"])).toBe(true);
+    expect(isRetryableGateFailure(["language_mismatch_expected_en", "invalid_edges:2"])).toBe(false);
   });
 
   describe("what the scan asks of the model, and what it shows it", () => {
