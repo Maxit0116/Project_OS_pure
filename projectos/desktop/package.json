@@ -11,7 +11,7 @@
     "build": "electron-vite build",
     "preview": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "dist:mac": "node scripts/ensure-native-binaries.js && npm run build && electron-builder --mac",
+    "dist:mac": "node scripts/ensure-native-binaries.js && npm run build && electron-builder --mac --config electron-builder.config.cjs",
     "rebuild:native": "electron-builder install-app-deps"
   },
   "dependencies": {
