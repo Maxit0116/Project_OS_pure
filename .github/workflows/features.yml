@@ -4,6 +4,7 @@ on:
     paths:
       - 'projectos/contracts/features.ts'
       - 'projectos/contracts/features.test.ts'
+      - 'projectos/contracts/features-cli.integration.test.ts'
       - 'projectos/scripts/features-check.ts'
       - 'projectos/services/first-principles/features-write.ts'
       - 'projectos/services/first-principles/fp-extensions.test.ts'
@@ -15,6 +16,7 @@ on:
     paths:
       - 'projectos/contracts/features.ts'
       - 'projectos/contracts/features.test.ts'
+      - 'projectos/contracts/features-cli.integration.test.ts'
       - 'projectos/scripts/features-check.ts'
       - 'projectos/services/first-principles/features-write.ts'
       - 'projectos/services/first-principles/fp-extensions.test.ts'
