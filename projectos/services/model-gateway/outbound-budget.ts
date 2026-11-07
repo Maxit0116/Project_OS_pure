@@ -19,7 +19,6 @@ import {
   openSync,
   readFileSync,
   renameSync,
-  statSync,
   unlinkSync,
   writeFileSync,
   writeSync,
@@ -145,16 +144,24 @@ export function createFileOutboundBudget(
           );
         }
         // Stale lock reclaim: dead pid or aged lock file.
+        // Prefer lock-file payload timestamps (pid\\nepochMs) over Stats.mtimeMs —
+        // workbench's narrowed fs typings omit mtimeMs.
         try {
           if (existsSync(lockPath)) {
-            const st = statSync(lockPath);
-            const age = Date.now() - st.mtimeMs;
             let pid = 0;
+            let stampedAt = 0;
             try {
-              pid = Number(readFileSync(lockPath, "utf8").split("\n")[0] ?? "0");
+              const lines = readFileSync(lockPath, "utf8").split("\n");
+              pid = Number(lines[0] ?? "0");
+              stampedAt = Number(lines[1] ?? "0");
             } catch {
               pid = 0;
+              stampedAt = 0;
             }
+            const age =
+              Number.isFinite(stampedAt) && stampedAt > 0
+                ? Date.now() - stampedAt
+                : LOCK_STALE_MS + 1;
             if (age > LOCK_STALE_MS || (pid > 0 && !isPidAlive(pid))) {
               try {
                 unlinkSync(lockPath);
