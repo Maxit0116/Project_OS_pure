@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { app } from 'electron'
 
@@ -41,16 +41,59 @@ export function resolveUserDataPath(): string {
   return app.getPath('userData')
 }
 
-/**
- * Directory for FileSecretStore only. Defaults to Electron userData.
- * Set PROJECTOS_SECRETS_USER_DATA to reuse an existing secrets root (e.g. the
- * daily profile's secrets.json location) without pointing Chromium userData
- * at that profile. Values are never logged.
- */
-export function resolveSecretsUserDataPath(): string {
-  const fromEnv = process.env.PROJECTOS_SECRETS_USER_DATA?.trim()
-  if (fromEnv) {
-    return resolve(fromEnv)
+export interface SecretsUserDataResolution {
+  /** Canonical directory that contains secrets.json */
+  path: string
+  /**
+   * True when secrets are reused from an external root (PROJECTOS_SECRETS_USER_DATA
+   * different from Chromium userData) or when PROJECTOS_SECRETS_READ_ONLY is set.
+   * External reuse is always read-only so isolate processes cannot mutate shared credentials.
+   */
+  readOnly: boolean
+  source: 'env' | 'userData'
+}
+
+function canonicalizeExistingDir(path: string): string {
+  const absolute = resolve(path)
+  if (!existsSync(absolute)) {
+    return absolute
   }
-  return resolveUserDataPath()
+  return realpathSync(absolute)
+}
+
+/**
+ * Resolve the FileSecretStore root. Defaults to Electron userData (writable).
+ * Set PROJECTOS_SECRETS_USER_DATA to reuse an existing secrets directory without
+ * pointing Chromium userData at that profile. Values are never logged.
+ *
+ * External reuse is always read-only. Force read-only on the default path with
+ * PROJECTOS_SECRETS_READ_ONLY=1.
+ */
+export function resolveSecretsUserDataPath(
+  env: NodeJS.ProcessEnv = process.env,
+  userDataPath: string = resolveUserDataPath(),
+): SecretsUserDataResolution {
+  const fromEnv = env.PROJECTOS_SECRETS_USER_DATA?.trim()
+  const forceReadOnly = isTruthy(env.PROJECTOS_SECRETS_READ_ONLY)
+  if (fromEnv) {
+    const configured = canonicalizeExistingDir(fromEnv)
+    const userDataCanonical = canonicalizeExistingDir(userDataPath)
+    const external = configured.toLowerCase() !== userDataCanonical.toLowerCase()
+    return {
+      path: configured,
+      readOnly: external || forceReadOnly,
+      source: 'env',
+    }
+  }
+  return {
+    path: userDataPath,
+    readOnly: forceReadOnly,
+    source: 'userData',
+  }
+}
+
+function isTruthy(value: string | undefined): boolean {
+  if (!value) return false
+  const normalized = value.trim().toLowerCase()
+  return normalized === '1' || normalized === 'true' || normalized === 'yes'
 }
