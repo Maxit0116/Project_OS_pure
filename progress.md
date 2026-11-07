@@ -1,5 +1,14 @@
 # Progress
 
+## 2026-11-07 (S9) - merging origin/graph, Keychain storage, Developer ID build prepared
+
+- **Asked:** "1,3, yes. 2 after merging": run external repositories' own tests (1), merge `origin/graph` (3), then signing, Keychain and a second Mac (2). Details are in `build_plan.md` §0 ("S9").
+- **Merged:** `origin/graph` into `graph` as `962b584` (local, not pushed). 47 conflict blocks in 27 files kept from both sides; two dropped pieces of theirs restored; their type errors under our strict settings fixed (types only, plus one real bug); their empty-conversation clean-up keeps a conversation that waits on the person.
+- **After the merge:** keys encrypted with a Keychain-held key (`e4a4cc5`); a Developer ID and notarized build configured, with a build that asked for one and did not get it now failing (`becda6d`); the map reads a node's type from `type`, `kind` or its id and retries the component round once when the gate refuses it (`d8a65bf`, `63b9b1a`), found when the packaged app mapped more-itertools as a placeholder twice.
+- **Verified:** five typechecks 0; full run 2,660 tests: 2,550 pass, 86 fail (78 our standing failures, 8 that fail on origin/graph alone, none new), 24 skipped; `dist:mac` arm64 and x64 verify; merged app: map, Ask and an Agent change with apply on the FastAPI template; packaged app: key migrated into the Keychain, three complete more-itertools maps in a row, one quit ends every process in 2 s.
+- **Blocked or the owner's:** running external repositories' tests and installing their packages is declined by this machine's permission check even after the owner's yes (needs an allow rule in the Claude Code settings, or the owner runs them); Go, Rust, .NET and Java 17 are not installed (Homebrew, several GB, owner's call); a real Developer ID signature needs the owner's certificate and Apple credentials; the second-Mac run needs a second Mac.
+- Next step: the owner's allow rule (or commands) for item 1 and the toolchain decision; then configure verification commands on the external repositories and let Agent's changes be checked by their own tests.
+
 ## 2026-11-07 (S8) - fixing the gaps S7 left, and a second round of repositories
 
 - **Asked:** "explain what is the gaps", then "let's fix them". Details, numbers and what each fix does are in `build_plan.md` §0 ("S8, fixing the gaps").
