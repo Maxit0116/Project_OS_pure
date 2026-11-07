@@ -58,6 +58,7 @@ export function deriveChatSessionSubtitle(state: WorkbenchState): string | undef
 
 export function deriveChatSessionStatus(state: WorkbenchState): ChatSessionStatus {
   if (state.flowStatus === 'awaiting_review') return 'awaiting_review'
+  if (state.pendingIntent?.status === 'draft') return 'awaiting_review'
   if (state.pendingRefinement && !state.refinementConfirmed) return 'awaiting_review'
   if (state.pendingPlan && !state.planConfirmed) return 'awaiting_review'
   // An active run id stays set after the run ends (the review and undo work from it), so it is not
@@ -87,6 +88,8 @@ export function buildChatSessionSnapshot(state: WorkbenchState): ChatSessionSnap
     ...(state.latestContextAssembly
       ? { latestContextAssembly: state.latestContextAssembly }
       : {}),
+    // An intent card waiting for approval was dropped when the person left the conversation.
+    ...(state.pendingIntent?.status === 'draft' ? { pendingIntent: state.pendingIntent } : {}),
   }
 }
 
@@ -165,6 +168,7 @@ export interface HydratedChatSessionState {
   customModePreviousChatMode: ChatMode | null
   conversationCheckpoints: WorkbenchState['conversationCheckpoints']
   latestContextAssembly: WorkbenchState['latestContextAssembly']
+  pendingIntent: WorkbenchState['pendingIntent']
 }
 
 export function hydrateChatSessionState(record: ChatSessionRecord): HydratedChatSessionState {
@@ -189,5 +193,6 @@ export function hydrateChatSessionState(record: ChatSessionRecord): HydratedChat
       previousMode && previousMode !== 'team_memory' ? previousMode : null,
     conversationCheckpoints: snapshot?.conversationCheckpoints ?? [],
     latestContextAssembly: snapshot?.latestContextAssembly ?? null,
+    pendingIntent: snapshot?.pendingIntent?.status === 'draft' ? snapshot.pendingIntent : null,
   }
 }

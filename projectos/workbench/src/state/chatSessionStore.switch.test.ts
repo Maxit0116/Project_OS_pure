@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectOSApi, RequestIntent, RunDecision } from '@contracts/index'
 import { canSubmitAgentPrompt, useWorkbenchStore } from './workbenchStore'
 import { useChatSessionStore } from './chatSessionStore'
+import { buildChatSessionSnapshot, deriveChatSessionStatus } from './chatSessionSync'
 
 /**
  * What belongs to a conversation must not follow the person into another one. Found live: after an
@@ -113,6 +114,32 @@ describe('leaving a conversation', () => {
     await useChatSessionStore.getState().switchSession('chat_done')
     await vi.waitFor(() => expect(getAgentRunEvents).toHaveBeenCalled())
     await vi.waitFor(() => expect(useWorkbenchStore.getState().flowStatus).toBe(expected))
+  })
+
+  it('brings back an intent card the conversation was waiting on, and not one already approved', async () => {
+    // Leaving an Agent conversation with its card unanswered used to lose the card for good.
+    const waiting = { ...staleIntent, id: 'intent_waiting' }
+    useWorkbenchStore.setState({
+      client: clientFor({
+        chat_waiting: record('chat_waiting', 'change', { pendingIntent: waiting }),
+        chat_approved: record('chat_approved', 'change', { pendingIntent: { ...waiting, status: 'approved' } }),
+      }),
+    })
+
+    await useChatSessionStore.getState().switchSession('chat_waiting')
+    expect(useWorkbenchStore.getState().pendingIntent).toEqual(waiting)
+    expect(canSubmitAgentPrompt(useWorkbenchStore.getState())).toBe(false)
+
+    await useChatSessionStore.getState().switchSession('chat_approved')
+    expect(useWorkbenchStore.getState().pendingIntent).toBeNull()
+  })
+
+  it('saves an unanswered intent card with the conversation, and lists the conversation as waiting', () => {
+    const state = { ...useWorkbenchStore.getState(), pendingIntent: staleIntent, flowStatus: 'idle' as const }
+    expect(buildChatSessionSnapshot(state).pendingIntent).toEqual(staleIntent)
+    expect(deriveChatSessionStatus(state)).toBe('awaiting_review')
+    const approved = { ...state, pendingIntent: { ...staleIntent, status: 'approved' } as RequestIntent }
+    expect(buildChatSessionSnapshot(approved)).not.toHaveProperty('pendingIntent')
   })
 
   it('brings back the questions of the run a conversation is still in', async () => {

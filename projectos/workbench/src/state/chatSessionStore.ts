@@ -244,10 +244,10 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
     applyResult: null,
     verificationResult: null,
     refineLoading: false,
-    // Belongs to the conversation that was left. An intent card still pending there would otherwise
-    // keep Send disabled here (the card shows only in Agent mode), and a question card from its run
-    // would appear in a conversation that never asked it.
-    pendingIntent: null,
+    // The conversation's own intent card, if it was waiting for approval. The one of the conversation
+    // that was left must not come along: it would keep Send disabled here (the card shows only in
+    // Agent mode). Question cards belong to a run and are reloaded from it below.
+    pendingIntent: hydrated.pendingIntent,
     runDecisions: [],
     decisionRootRunId: null,
     focusedDecisionId: null,

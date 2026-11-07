@@ -11,6 +11,7 @@ import { RetrievalSummarySchema } from "./retrieval.js";
 import { DebugSessionSnapshotSchema } from "./debug-session.js";
 import { ImplementationPlanSchema, LatestPlanTraceSchema } from "./implementation-plan.js";
 import { PromptRefinementSchema } from "./prompt-refinement.js";
+import { RequestIntentSchema } from "./request-intent.js";
 import {
   ComposerDraftSchema,
   PromptAttachmentSchema,
@@ -148,6 +149,8 @@ export const ChatSessionSnapshotSchema = z
     conversationCheckpoints: z.array(ConversationCheckpointSchema).optional(),
     /** Hashes of the last delivered six-slot assembly. No slot bodies. */
     latestContextAssembly: ContextAssemblySchema.optional(),
+    /** An Agent request's intent card that was not yet approved; it comes back with the conversation. */
+    pendingIntent: RequestIntentSchema.nullable().optional(),
   })
   .strict();
 
