@@ -21,8 +21,25 @@ import {
   type ProviderMessage,
 } from "./providers.js";
 
+/** One settled provider-facing gateway call (success, failure, or cancel). */
+export interface ModelGatewaySettledEvent {
+  requestId: string;
+  status: "ok" | "failed" | "cancelled";
+  /** `missing` when the provider omitted usage; token fields are then 0, not estimates. */
+  usageStatus: "reported" | "missing";
+  inputTokens: number;
+  outputTokens: number;
+  provider?: string;
+  model?: string;
+}
+
 export interface ModelGatewayOptions {
   secretStore: SecretStore;
+  /**
+   * Fired once per settled `complete` / `completeWithTools` attempt (and once per
+   * provider round-trip inside a tool loop). Never includes secret values.
+   */
+  onSettled?: (event: ModelGatewaySettledEvent) => void;
 }
 
 export interface ModelToolExecutionResult {
@@ -63,9 +80,19 @@ export interface ModelToolLoopOptions {
 
 export class ModelGateway {
   private readonly secretStore: SecretStore;
+  private readonly onSettled?: (event: ModelGatewaySettledEvent) => void;
 
   constructor(options: ModelGatewayOptions) {
     this.secretStore = options.secretStore;
+    this.onSettled = options.onSettled;
+  }
+
+  private settle(event: ModelGatewaySettledEvent): void {
+    try {
+      this.onSettled?.(event);
+    } catch {
+      // Observers must not break model calls.
+    }
   }
 
   async complete(
@@ -85,10 +112,20 @@ export class ModelGateway {
     }
 
     if (options?.signal?.aborted) {
+      const requestId = newModelRequestId();
+      this.settle({
+        requestId,
+        status: "cancelled",
+        usageStatus: "missing",
+        inputTokens: 0,
+        outputTokens: 0,
+        provider: modelProfileLabel(profile),
+        model: profile.model,
+      });
       throw new ProjectOSError(
         "operation_cancelled",
         "Model request cancelled",
-        { details: { requestId: newModelRequestId() } },
+        { details: { requestId } },
       );
     }
 
@@ -103,7 +140,17 @@ export class ModelGateway {
     try {
       result = await adapter.complete(resolved, apiKey, input);
     } catch (error) {
-      if (options?.signal?.aborted) {
+      const cancelled = Boolean(options?.signal?.aborted);
+      this.settle({
+        requestId,
+        status: cancelled ? "cancelled" : "failed",
+        usageStatus: "missing",
+        inputTokens: 0,
+        outputTokens: 0,
+        provider: modelProfileLabel(profile),
+        model: profile.model,
+      });
+      if (cancelled) {
         throw new ProjectOSError(
           "operation_cancelled",
           "Model request cancelled",
@@ -120,6 +167,16 @@ export class ModelGateway {
       ? redactText(result.reasoning, request.redactionPolicy)
       : undefined;
     const usageReported = result.usageReported !== false;
+
+    this.settle({
+      requestId,
+      status: "ok",
+      usageStatus: usageReported ? "reported" : "missing",
+      inputTokens: usageReported ? result.inputTokens : 0,
+      outputTokens: usageReported ? result.outputTokens : 0,
+      provider: modelProfileLabel(profile),
+      model: profile.model,
+    });
 
     return {
       requestId,
@@ -179,7 +236,17 @@ export class ModelGateway {
     let lastFinishReason: string | undefined;
 
     for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+      const roundId = `${requestId}#${iteration}`;
       if (Date.now() - started >= maxTotalDurationMs) {
+        this.settle({
+          requestId: roundId,
+          status: "failed",
+          usageStatus: "missing",
+          inputTokens: 0,
+          outputTokens: 0,
+          provider: modelProfileLabel(profile),
+          model: profile.model,
+        });
         throw new ProjectOSError(
           "external_agent_failed",
           `Model exceeded the ${maxTotalDurationMs}ms MCP tool-loop time limit`,
@@ -187,6 +254,15 @@ export class ModelGateway {
         );
       }
       if (options.signal?.aborted) {
+        this.settle({
+          requestId: roundId,
+          status: "cancelled",
+          usageStatus: "missing",
+          inputTokens: 0,
+          outputTokens: 0,
+          provider: modelProfileLabel(profile),
+          model: profile.model,
+        });
         throw new ProjectOSError(
           "external_agent_failed",
           "MCP tool loop was cancelled",
@@ -204,7 +280,17 @@ export class ModelGateway {
       try {
         result = await adapter.complete(resolved, apiKey, providerInput);
       } catch (error) {
-        if (options.signal?.aborted) {
+        const cancelled = Boolean(options.signal?.aborted);
+        this.settle({
+          requestId: roundId,
+          status: cancelled ? "cancelled" : "failed",
+          usageStatus: "missing",
+          inputTokens: 0,
+          outputTokens: 0,
+          provider: modelProfileLabel(profile),
+          model: profile.model,
+        });
+        if (cancelled) {
           throw new ProjectOSError(
             "external_agent_failed",
             "MCP tool loop was cancelled",
@@ -223,6 +309,16 @@ export class ModelGateway {
         deadline.stop();
       }
       if (result.usageReported === false) usageMissing = true;
+      const roundReported = result.usageReported !== false;
+      this.settle({
+        requestId: roundId,
+        status: "ok",
+        usageStatus: roundReported ? "reported" : "missing",
+        inputTokens: roundReported ? result.inputTokens : 0,
+        outputTokens: roundReported ? result.outputTokens : 0,
+        provider: modelProfileLabel(profile),
+        model: profile.model,
+      });
       inputTokens += result.usageReported === false ? 0 : result.inputTokens;
       outputTokens += result.usageReported === false ? 0 : result.outputTokens;
       lastOutput = result.output;
@@ -334,6 +430,15 @@ export class ModelGateway {
       }
     }
 
+    this.settle({
+      requestId: `${requestId}#limit`,
+      status: "failed",
+      usageStatus: usageMissing ? "missing" : "reported",
+      inputTokens: 0,
+      outputTokens: 0,
+      provider: modelProfileLabel(profile),
+      model: profile.model,
+    });
     throw new ProjectOSError(
       "external_agent_failed",
       `Model exceeded the ${maxIterations} MCP tool-loop iteration limit`,

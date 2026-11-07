@@ -1,15 +1,17 @@
 import { app, shell } from 'electron'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { FileSecretStore } from '../../../persistence/file-secret-store.js'
 import { FileVerificationCommandApprovalStore } from '../../../persistence/verification-command-approval-store.js'
 import { ProjectOSWorkspaceStore } from '../../../persistence/workspace-store.js'
 import { ProjectOSLocalApi } from '../../../services/project-os-local-api.js'
 import { createExecutorRegistry } from '../../../services/harness/default-executors.js'
 import { LocalContextAssembler } from '../../../services/local-context-assembler.js'
+import { ModelGateway } from '../../../services/model-gateway/gateway.js'
 import { VerificationRunner } from '../../../services/verification-runner.js'
 import * as writeTransactionModule from '../../../services/recoverable-write-transaction.js'
 import { WorkspaceTransactionCoordinator } from '../../../services/workspace-transaction-coordinator.js'
 import { DependencyImpactScanner } from '../../../services/dependency-impact-scanner.js'
-import { join } from 'node:path'
 import { assertAllowedExternalUrl } from './externalUrlPolicy.js'
 import {
   resolveSampleWorkspaceRoot,
@@ -28,6 +30,21 @@ export function getProjectOsService(): ProjectOSLocalApi {
     // External reuse is always read-only so isolate Chromium profiles cannot
     // mutate shared credentials; approvals/audit/memory stay on userDataPath.
     const secrets = resolveSecretsUserDataPath(process.env, userDataPath)
+    const secretStore = new FileSecretStore(secrets.path, { readOnly: secrets.readOnly })
+    const logsDir = join(userDataPath, 'logs')
+    mkdirSync(logsDir, { recursive: true })
+    const completesLog = join(logsDir, 'model-gateway-completes.jsonl')
+    const modelGateway = new ModelGateway({
+      secretStore,
+      onSettled: (event) => {
+        // Metadata only — never secret values. Isolate Chromium userData only.
+        appendFileSync(
+          completesLog,
+          `${JSON.stringify({ ...event, at: new Date().toISOString() })}\n`,
+          'utf8',
+        )
+      },
+    })
     service = new ProjectOSLocalApi({
       // The scripted executor needs no model, so it ships only in development
       // builds, or in a demo build that sets PROJECTOS_SCRIPTED_EXECUTOR=1.
@@ -35,7 +52,8 @@ export function getProjectOsService(): ProjectOSLocalApi {
         scripted: !app.isPackaged || process.env.PROJECTOS_SCRIPTED_EXECUTOR === '1',
       }),
       sampleWorkspaceRoot: resolveSampleWorkspaceRoot(),
-      secretStore: new FileSecretStore(secrets.path, { readOnly: secrets.readOnly }),
+      secretStore,
+      modelGateway,
       verificationCommandApprovalStore: new FileVerificationCommandApprovalStore(userDataPath),
       auditDirectory: join(userDataPath, 'governance-audit'),
       requireDurableApprovals: true,
