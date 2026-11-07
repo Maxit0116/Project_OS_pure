@@ -182,8 +182,12 @@ export class ModelGateway {
       provider: modelProfileLabel(profile),
       model: profile.model,
     });
-    if (usageReported && this.outboundBudget) {
-      this.outboundBudget.annotateLatestMissingOkUsage({
+    if (
+      usageReported &&
+      this.outboundBudget &&
+      result.outboundReservationId
+    ) {
+      this.outboundBudget.annotateReservationUsage(result.outboundReservationId, {
         inputTokens,
         outputTokens,
       });
@@ -313,8 +317,12 @@ export class ModelGateway {
         provider: modelProfileLabel(profile),
         model: profile.model,
       });
-      if (roundReported && this.outboundBudget) {
-        this.outboundBudget.annotateLatestMissingOkUsage({
+      if (
+        roundReported &&
+        this.outboundBudget &&
+        result.outboundReservationId
+      ) {
+        this.outboundBudget.annotateReservationUsage(result.outboundReservationId, {
           inputTokens: roundIn,
           outputTokens: roundOut,
         });

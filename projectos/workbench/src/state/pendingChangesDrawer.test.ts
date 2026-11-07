@@ -35,7 +35,16 @@ describe('pendingChangesDrawer selectors', () => {
   it('keeps visible after apply in automatic mode', () => {
     expect(selectPendingChangesDrawerVisible({
       ...base,
-      applyResult: { applied: true },
+      applyResult: { applied: true, backupId: 'backup_1' },
+      settings: { execution: { changeExecutionPolicy: 'automatic' } },
+    })).toBe(true)
+  })
+
+  it('keeps Undo/restore visible after automatic apply even without generatedDiff', () => {
+    expect(selectPendingChangesDrawerVisible({
+      ...base,
+      generatedDiff: null,
+      applyResult: { applied: true, backupId: 'backup_1' },
       settings: { execution: { changeExecutionPolicy: 'automatic' } },
     })).toBe(true)
   })

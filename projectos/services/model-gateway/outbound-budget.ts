@@ -70,14 +70,14 @@ export interface OutboundBudgetGate {
   /** Record outcome; never frees the reserved slot. */
   settle(reservationId: string, outcome: OutboundBudgetSettleInput): void;
   /**
-   * Upgrade the newest settled-ok row that still has usageStatus=missing with
-   * provider-reported tokens (fetch settles before body parse; gateway fills).
+   * Upgrade a specific settled reservation with provider-reported tokens.
+   * Fetch settles before body parse (usageStatus=missing); gateway fills by id.
    * Never adds/frees slots.
    */
-  annotateLatestMissingOkUsage(usage: {
-    inputTokens: number;
-    outputTokens: number;
-  }): boolean;
+  annotateReservationUsage(
+    reservationId: string,
+    usage: { inputTokens: number; outputTokens: number },
+  ): boolean;
   snapshot(): OutboundBudgetLedger;
 }
 
@@ -321,27 +321,21 @@ export function createFileOutboundBudget(
         writeLedgerUnlocked(ledger);
       });
     },
-    annotateLatestMissingOkUsage(usage: {
-      inputTokens: number;
-      outputTokens: number;
-    }): boolean {
+    annotateReservationUsage(
+      reservationId: string,
+      usage: { inputTokens: number; outputTokens: number },
+    ): boolean {
       return withLock(() => {
         const ledger = readLedgerUnlocked();
-        for (let i = ledger.reservations.length - 1; i >= 0; i -= 1) {
-          const row = ledger.reservations[i]!;
-          if (
-            row.state === "settled" &&
-            row.status === "ok" &&
-            row.usageStatus === "missing"
-          ) {
-            row.usageStatus = "reported";
-            row.inputTokens = usage.inputTokens;
-            row.outputTokens = usage.outputTokens;
-            writeLedgerUnlocked(ledger);
-            return true;
-          }
-        }
-        return false;
+        const row = ledger.reservations.find((item) => item.id === reservationId);
+        if (!row || row.state !== "settled" || row.status !== "ok") return false;
+        // Only fill tokens that were deferred as missing at fetch settle time.
+        if (row.usageStatus !== "missing") return false;
+        row.usageStatus = "reported";
+        row.inputTokens = usage.inputTokens;
+        row.outputTokens = usage.outputTokens;
+        writeLedgerUnlocked(ledger);
+        return true;
       });
     },
     snapshot(): OutboundBudgetLedger {

@@ -254,5 +254,18 @@ describe("ModelGateway onSettled", () => {
       "failed",
       "ok",
     ]);
+    // Usage annotates the successful reservation id (not the failed retry slot).
+    expect(budget.snapshot().reservations[0]).toMatchObject({
+      status: "failed",
+      usageStatus: "missing",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    expect(budget.snapshot().reservations[1]).toMatchObject({
+      status: "ok",
+      usageStatus: "reported",
+      inputTokens: 1,
+      outputTokens: 1,
+    });
   });
 });

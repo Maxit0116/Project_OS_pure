@@ -2783,6 +2783,141 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
   });
 
+  it("automatic path: budget exhaustion on validate_batch emits no valid batch and writes nothing", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const before = delegatedPaths.map((filePath) =>
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"));
+    const gateway = new NodeDelegationGateway(delegatedPaths, [], {
+      exhaustBudgetOnBatch: true,
+    });
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: gateway,
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
+    });
+    expect((await waitForRunStatus(api, parent.runId, "error")).status).toBe("error");
+    const events = await api.getAgentRunEvents(parent.runId);
+    expect(events.some((event) =>
+      event.type === "batch_validation_result" && event.payload?.verdict === "valid"
+    )).toBe(false);
+    expect(events.some((event) => event.type === "apply_result")).toBe(false);
+    expect(events.some((event) => event.type === "task_delegated")).toBe(true);
+    expect(gateway.requests.filter((request) =>
+      isRecord(request.input) && request.input.mode === "validate_delegated_batch"
+    ).length).toBeGreaterThan(0);
+    delegatedPaths.forEach((filePath, index) => {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before[index]);
+    });
+    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+  });
+
+  it("automatic path: successful apply backup restores via product restoreApplyBackup", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const before = new Map(delegatedPaths.map((filePath) => [
+      filePath,
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"),
+    ]));
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new NodeDelegationGateway(delegatedPaths),
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
+    });
+    expect((await waitForRunStatus(api, parent.runId, "complete")).status).toBe("complete");
+    const parentState = getLocalApiInternals(api).orchestrator.getRun(parent.runId) as {
+      applyResult?: ApplyResult;
+    } | undefined;
+    const backupId = parentState?.applyResult?.backupId;
+    expect(backupId).toBeTruthy();
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8"))
+        .not.toBe(before.get(filePath));
+    }
+    const restored = await api.restoreApplyBackup(project.projectId, backupId!);
+    expect(restored.restored).toBe(true);
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8"))
+        .toBe(before.get(filePath));
+    }
+  });
+
+  it("automatic path: cancel during parent batch validation writes nothing", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const before = delegatedPaths.map((filePath) =>
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"));
+    let apiRef: ProjectOSLocalApi | undefined;
+    const gateway = new NodeDelegationGateway(delegatedPaths, [], {
+      onBatchValidation: () => {
+        if (!apiRef) return;
+        const orch = getLocalApiInternals(apiRef).orchestrator as {
+          runs: Map<string, { run: { status: string } }>;
+          cancelRun(id: string): unknown;
+        };
+        for (const [runId, state] of orch.runs) {
+          if (state.run.status === "running" || state.run.status === "queued") {
+            orch.cancelRun(runId);
+          }
+        }
+      },
+    });
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: gateway,
+      runEventPersistence: "memory",
+    });
+    apiRef = api;
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
+    });
+    const deadline = Date.now() + 20_000;
+    let settled = await api.getAgentRun(parent.runId);
+    while (
+      settled.status !== "cancelled" &&
+      settled.status !== "error" &&
+      settled.status !== "complete" &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      settled = await api.getAgentRun(parent.runId);
+    }
+    // Cancel during validate must not leave a successful complete+write path.
+    expect(["cancelled", "error"]).toContain(settled.status);
+    const events = await api.getAgentRunEvents(parent.runId);
+    expect(events.some((event) =>
+      event.type === "apply_result" && event.payload?.outcome === "applied"
+    )).toBe(false);
+    delegatedPaths.forEach((filePath, index) => {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before[index]);
+    });
+    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+  });
+
   it("rechecks snapshot freshness after batch validation and commits no agent writes when stale", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
@@ -5504,6 +5639,8 @@ class NodeDelegationGateway extends ModelGateway {
       onBatchValidation?: () => void;
       noChangePaths?: string[];
       invalidProposalPaths?: string[];
+      /** SYNTHETIC: throw budget exhaustion when parent validate_batch is attempted. */
+      exhaustBudgetOnBatch?: boolean;
     } = {},
   ) {
     super({ secretStore: new InMemorySecretStore() });
@@ -5516,6 +5653,12 @@ class NodeDelegationGateway extends ModelGateway {
     this.requests.push(request);
     const input = isRecord(request.input) ? request.input : {};
     const mode = typeof input.mode === "string" ? input.mode : undefined;
+    if (this.options.exhaustBudgetOnBatch && mode === "validate_delegated_batch") {
+      throw new ProjectOSError(
+        "model_outbound_budget_exhausted",
+        "Model outbound budget exhausted (synthetic); request not sent",
+      );
+    }
     const localContext = isRecord(input.localContext) ? input.localContext : undefined;
     const scope = localContext && isRecord(localContext.scope)
       ? localContext.scope

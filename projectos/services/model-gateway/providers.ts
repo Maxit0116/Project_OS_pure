@@ -80,6 +80,11 @@ export interface ProviderCompleteResult {
   outputTokens: number;
   /** False when the provider omitted usage. Tokens are then 0, not an estimate. */
   usageReported?: boolean;
+  /**
+   * Opt-in budget reservation id for the successful HTTP attempt that produced
+   * this result (settled missing at fetch; gateway annotates by this id).
+   */
+  outboundReservationId?: string;
 }
 
 export interface ModelProviderAdapter {
@@ -258,13 +263,18 @@ function isTransientProviderFetchError(error: unknown): boolean {
   );
 }
 
+type FetchWithBudgetResult = {
+  response: Response;
+  reservationId?: string;
+};
+
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs = PROVIDER_FETCH_TIMEOUT_MS,
   signal?: AbortSignal,
   budget?: OutboundBudgetGate,
-): Promise<Response> {
+): Promise<FetchWithBudgetResult> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= PROVIDER_FETCH_TRANSIENT_RETRIES; attempt += 1) {
     // One durable reservation per HTTP attempt (including transient retries).
@@ -283,7 +293,7 @@ async function fetchWithTimeout(
           outputTokens: 0,
         });
       }
-      return response;
+      return { response, ...(reservationId ? { reservationId } : {}) };
     } catch (error) {
       const cancelled = Boolean(signal?.aborted);
       if (budget && reservationId) {
@@ -604,7 +614,7 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
     apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
-    const response = await fetchWithTimeout(openAiChatCompletionsUrl(profile.baseUrl), {
+    const { response, reservationId } = await fetchWithTimeout(openAiChatCompletionsUrl(profile.baseUrl), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -633,6 +643,7 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
       ...providerUsage(body.usage
         ? { input: body.usage.prompt_tokens, output: body.usage.completion_tokens }
         : undefined),
+      ...(reservationId ? { outboundReservationId: reservationId } : {}),
     };
   }
 
@@ -657,7 +668,7 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
     apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
-    const response = await fetchWithTimeout(anthropicMessagesUrl(profile.baseUrl), {
+    const { response, reservationId } = await fetchWithTimeout(anthropicMessagesUrl(profile.baseUrl), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -693,6 +704,7 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
       ...providerUsage(body.usage
         ? { input: body.usage.input_tokens, output: body.usage.output_tokens }
         : undefined),
+      ...(reservationId ? { outboundReservationId: reservationId } : {}),
     };
   }
 
@@ -717,7 +729,7 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
     _apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
-    const response = await fetchWithTimeout(ollamaChatUrl(profile.baseUrl), {
+    const { response, reservationId } = await fetchWithTimeout(ollamaChatUrl(profile.baseUrl), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -770,6 +782,7 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
           }
         : {}),
       ...providerUsage(undefined),
+      ...(reservationId ? { outboundReservationId: reservationId } : {}),
     };
   }
 
@@ -778,7 +791,7 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
     _apiKey: string | undefined,
     outboundBudget?: OutboundBudgetGate,
   ): Promise<Array<{ id: string; name: string }>> {
-    const response = await fetchWithTimeout(
+    const { response } = await fetchWithTimeout(
       `${normalizeBaseUrl(profile.baseUrl)}/api/tags`,
       { method: "GET" },
       PROVIDER_FETCH_TIMEOUT_MS,

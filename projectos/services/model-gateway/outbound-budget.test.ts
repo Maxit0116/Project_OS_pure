@@ -99,24 +99,64 @@ describe("FileOutboundBudget", () => {
     expect(row.status).toBe("failed");
   });
 
-  it("annotates provider-reported usage onto the latest missing ok settle without adding slots", () => {
+  it("annotates provider-reported usage onto the matching reservation id (not latest-wins)", () => {
     const path = tempLedger();
-    const budget = createFileOutboundBudget(path, 2);
-    const a = budget.reserve();
-    budget.settle(a.reservationId, {
+    const budget = createFileOutboundBudget(path, 3);
+    const first = budget.reserve();
+    const second = budget.reserve();
+    budget.settle(first.reservationId, {
       status: "ok",
       usageStatus: "missing",
       inputTokens: 0,
       outputTokens: 0,
     });
+    budget.settle(second.reservationId, {
+      status: "ok",
+      usageStatus: "missing",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    // Interleaved completion: annotate the earlier attempt after the later one settled.
     expect(
-      budget.annotateLatestMissingOkUsage({ inputTokens: 12, outputTokens: 3 }),
+      budget.annotateReservationUsage(first.reservationId, {
+        inputTokens: 11,
+        outputTokens: 2,
+      }),
     ).toBe(true);
-    const row = budget.snapshot().reservations[0]!;
-    expect(row.usageStatus).toBe("reported");
-    expect(row.inputTokens).toBe(12);
-    expect(row.outputTokens).toBe(3);
-    expect(budget.snapshot().reservations).toHaveLength(1);
+    expect(
+      budget.annotateReservationUsage(second.reservationId, {
+        inputTokens: 99,
+        outputTokens: 7,
+      }),
+    ).toBe(true);
+    const rows = budget.snapshot().reservations;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      id: first.reservationId,
+      usageStatus: "reported",
+      inputTokens: 11,
+      outputTokens: 2,
+    });
+    expect(rows[1]).toMatchObject({
+      id: second.reservationId,
+      usageStatus: "reported",
+      inputTokens: 99,
+      outputTokens: 7,
+    });
+    // Failed attempts stay missing/zero and cannot be upgraded as ok usage.
+    const failed = budget.reserve();
+    budget.settle(failed.reservationId, {
+      status: "failed",
+      usageStatus: "missing",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    expect(
+      budget.annotateReservationUsage(failed.reservationId, {
+        inputTokens: 5,
+        outputTokens: 5,
+      }),
+    ).toBe(false);
   });
 
   it("survives process restart by reading the same durable ledger", () => {
