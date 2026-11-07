@@ -1,0 +1,48 @@
+{
+  "ISOLATE": {
+    "settings": {
+      "start": "672457f01926a75c",
+      "end": "672457f01926a75c",
+      "equal": true
+    },
+    "graph": {
+      "start": "a05a885a888c4d54",
+      "end": "a05a885a888c4d54",
+      "equal": true
+    },
+    "semantic_tree_file": {
+      "start": "b36f354651971f89",
+      "end": "b36f354651971f89",
+      "equal": true
+    },
+    "cv_ContentView_swift": {
+      "start": "ed8eeeada6000ba7",
+      "end": "ed8eeeada6000ba7",
+      "equal": true
+    }
+  },
+  "SOURCE": {
+    "settings": {
+      "start": "f4614b36efdfbe91",
+      "end": "f4614b36efdfbe91",
+      "equal": true
+    },
+    "graph": {
+      "start": "a05a885a888c4d54",
+      "end": "a05a885a888c4d54",
+      "equal": true
+    },
+    "semantic_tree_file": {
+      "start": "b36f354651971f89",
+      "end": "b36f354651971f89",
+      "equal": true
+    },
+    "cv_ContentView_swift": {
+      "start": "ed8eeeada6000ba7",
+      "end": "ed8eeeada6000ba7",
+      "equal": true
+    }
+  },
+  "exit0": true,
+  "at": "2026-11-07T18:44:17.031456+00:00"
+}

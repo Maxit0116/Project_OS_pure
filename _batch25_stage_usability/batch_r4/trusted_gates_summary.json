@@ -1,0 +1,19 @@
+{
+  "head": "072793b9717e6af46adff728604a28b9619b8bb4",
+  "exits": {
+    "npm_ci": 0,
+    "core_tsc": 0,
+    "wb_tsc": 0,
+    "wb_test_tsc": 0,
+    "desktop_tsc": 0,
+    "desktop_build": 0,
+    "fixtures": 0,
+    "fullgate": 1
+  },
+  "tsconfig_test": "workbench/tsconfig.test.json",
+  "fullgate_files_line": "2 failed | 482 passed (484)",
+  "fullgate_tests_line": "3 failed | 2516 passed (2519)",
+  "log": "/Users/terran/Projects/_projectos_isolates/Project_OS_pure_wt_batch2/_batch25_stage_usability/trusted_gates_072793b/trusted_gates.log",
+  "console": "/Users/terran/Projects/_projectos_isolates/Project_OS_pure_wt_batch2/_batch25_stage_usability/trusted_gates_072793b/trusted_gates_console.txt",
+  "known_ux_red_expected_fullgate_nonzero": true
+}
