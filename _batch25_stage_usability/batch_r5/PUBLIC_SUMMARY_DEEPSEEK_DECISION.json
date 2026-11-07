@@ -1,0 +1,36 @@
+{
+  "probe": "electron_deepseek_decision",
+  "headHint": "ff70bf2",
+  "coverage": {
+    "processStartIsolated": true,
+    "deepseekProfileSelected": true,
+    "agentMode": true,
+    "loginFileSelected": true,
+    "composerSend": true,
+    "intentApproveUi": true,
+    "modelHttpUsed": true,
+    "pendingDecisionCardDom": true,
+    "continueClickedOnCard": true,
+    "sameRunAwaitingReview": true,
+    "proposalPresent": true,
+    "diffVerifyUiLabelsSeen": false,
+    "fileUnchanged": true
+  },
+  "budget": {
+    "pre": {
+      "limit": 50,
+      "reserved": 38,
+      "remaining": 12
+    },
+    "post": {
+      "limit": 50,
+      "reserved": 47,
+      "remaining": 3
+    },
+    "delta": 9
+  },
+  "secretsUnchanged": true,
+  "dailyUserDataStable": true,
+  "errors": [],
+  "finishedAt": "2026-11-07T20:00:05.689Z"
+}

@@ -13,6 +13,10 @@ Head: `37204ac` (cleanup) + private probe after that tip.
 - Restart: history visible; no auto-write
 - Daily Chromium userData meta stable
 
+## Follow-up
+
+See `PUBLIC_SUMMARY_T61_PRODUCT_ENTRIES.md` for T61 DeepSeek decision + product preview/settings evidence.
+
 ## Not claimed
 
-Stage 交验; managed preview UX entry; uncertain desktop apply/undo; live DeepSeek.
+Stage 交验; full Product Lab page loop; Diff post-apply verification badges; uncertain desktop apply/undo.
