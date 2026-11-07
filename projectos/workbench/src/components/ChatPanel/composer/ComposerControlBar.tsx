@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowUp, Square } from 'lucide-react'
 import type { AgentDefinition } from '@contracts/index'
 import { useWorkbenchStore, type ChatMode } from '../../../state/workbenchStore'
@@ -50,8 +50,14 @@ export default function ComposerControlBar({
   onUsageToggle,
 }: ComposerControlBarProps) {
   const settings = useWorkbenchStore((s) => s.settings)
+  const modelSelectionPending = useWorkbenchStore((s) => s.modelSelectionPending)
   const selectedModelProfileId = useWorkbenchStore((s) => s.selectedModelProfileId)
   const selectChatModel = useWorkbenchStore((s) => s.selectChatModel)
+  const executorOptions = useWorkbenchStore((s) => s.executorOptions)
+  const selectedRuntimeId = useWorkbenchStore((s) => s.selectedRuntimeId)
+  const loadExecutorOptions = useWorkbenchStore((s) => s.loadExecutorOptions)
+  const selectRuntimeExecutor = useWorkbenchStore((s) => s.selectRuntimeExecutor)
+  const projectId = useWorkbenchStore((s) => s.project?.projectId)
   const setThinkingDepth = useWorkbenchStore((s) => s.setThinkingDepth)
   const setSettingsOpen = useWorkbenchStore((s) => s.setSettingsOpen)
   const client = useWorkbenchStore((s) => s.client)
@@ -70,6 +76,10 @@ export default function ComposerControlBar({
   const [workforceAgents, setWorkforceAgents] = useState<AgentDefinition[]>([])
   const [agentsLoading, setAgentsLoading] = useState(false)
   const [agentsLoaded, setAgentsLoaded] = useState(false)
+
+  useEffect(() => {
+    void loadExecutorOptions()
+  }, [projectId, loadExecutorOptions])
   const barRef = useRef<HTMLDivElement>(null)
 
   const loadWorkforceAgents = () => {
@@ -150,9 +160,11 @@ export default function ComposerControlBar({
           selectedModelProfileId={selectedModelProfileId}
           thinkingDepth={thinkingDepth}
           presentationMode={presentationMode}
-          onSelectModel={(profileId) => {
-            void selectChatModel(profileId)
-          }}
+          onSelectModel={(profileId) => selectChatModel(profileId)}
+          modelSelectionPending={modelSelectionPending}
+          runtimes={chatMode === 'change' ? executorOptions : []}
+          selectedRuntimeId={selectedRuntimeId}
+          onSelectRuntime={selectRuntimeExecutor}
           onSelectThinkingDepth={(depth) => {
             void setThinkingDepth(depth)
           }}
@@ -182,7 +194,7 @@ export default function ComposerControlBar({
           <button
             type="submit"
             className={`${styles.iconAction} ${styles.sendAction}`}
-            disabled={submitDisabled}
+            disabled={submitDisabled || modelSelectionPending}
             aria-label={ts('common.send')}
             title={ts('common.send')}
           >

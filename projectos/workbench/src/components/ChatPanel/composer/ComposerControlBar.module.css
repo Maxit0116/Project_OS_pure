@@ -65,8 +65,69 @@
 }
 
 .dropdownWide {
-  min-width: 200px;
-  max-width: min(280px, 72vw);
+  min-width: 220px;
+  max-width: min(320px, 80vw);
+  max-height: min(520px, 65vh);
+  overflow-y: auto;
+}
+
+.modelSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.modelSearch input {
+  width: 100%;
+  min-width: 0;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  border: 0;
+  outline: none;
+  background: transparent;
+}
+
+.modelSearch:focus-within {
+  outline: 1px solid var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+}
+
+.modelList {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.modelCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.modelDetail, .modelHint, .modelEmpty {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.modelHint, .modelEmpty {
+  margin: 0;
+  padding: 8px 10px;
+  line-height: 1.5;
+}
+
+.modelCheck {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.menuItem:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 /**

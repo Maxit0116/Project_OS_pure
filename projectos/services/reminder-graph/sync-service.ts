@@ -14,11 +14,11 @@ import { normalizeTimeline, readReminderTimeline, writeReminderTimeline } from "
 type ExtractedGate = {
   title: string;
   kind: "milestone" | "reminder";
-  dependsOnTitle?: string;
-  targetDate?: string;
+  dependsOnTitle?: string | undefined;
+  targetDate?: string | undefined;
   excerpt: string;
   path: string;
-  heading?: string;
+  heading?: string | undefined;
 };
 
 const DATE_RE = /\b(20\d{2}-\d{2}-\d{2})\b/;

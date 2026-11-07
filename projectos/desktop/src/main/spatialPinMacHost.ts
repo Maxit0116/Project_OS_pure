@@ -79,8 +79,8 @@ export async function probeSpatialPinMacHost(opts?: {
   if (!probed.appName && !probed.windowTitle) return {}
   const classified = classifyMacHostApp(probed.appName, probed.windowTitle)
   const inferred = inferSpatialPinPath(opts?.workspacePath, {
-    appName: probed.appName,
-    windowTitle: probed.windowTitle,
+    ...(probed.appName !== undefined ? { appName: probed.appName } : {}),
+    ...(probed.windowTitle !== undefined ? { windowTitle: probed.windowTitle } : {}),
     deviceKind: classified.deviceKind,
   })
   return {
@@ -192,7 +192,9 @@ export async function captureSpatialPinSelection(opts: {
 }): Promise<SpatialPinCaptureResult> {
   const [capture, host] = await Promise.all([
     captureScreenRect(opts.rect),
-    probeSpatialPinMacHost({ workspacePath: opts.workspacePath }),
+    probeSpatialPinMacHost(
+      opts.workspacePath !== undefined ? { workspacePath: opts.workspacePath } : {},
+    ),
   ])
   return {
     pngBase64: capture.png ? capture.png.toString('base64') : null,

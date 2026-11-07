@@ -62,7 +62,7 @@ export function assembleExplicitContext(
   return {
     bundle: input.autoBundle,
     supplementalMarkdown,
-    activeSkillMarkdown,
+    ...(activeSkillMarkdown !== undefined ? { activeSkillMarkdown } : {}),
     attachmentSummary,
   };
 }

@@ -1,4 +1,7 @@
 import type { AgentRun } from "./agent-run.js";
+import type { RunCheckpoint, RunDecision } from "./run-state.js";
+import type { GlobalContextBundle, NodeContextBundle } from "./local-context.js";
+import type { ExtractRequestIntentRequest, RequestIntent } from "./request-intent.js";
 import type {
   AgentAnswerResult,
   AgentAskRequest,
@@ -111,6 +114,7 @@ import type {
   ChatSessionIndex,
   ChatSessionRecord,
 } from "./chat-session.js";
+import type { ExecutorOption } from "./executor-selection.js";
 import type { ListSkillsResult, SkillContent } from "./skills.js";
 import type {
   LocationHint,
@@ -376,6 +380,23 @@ export interface ProjectOSApi {
   >;
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload>;
   getFileContext(projectId: string, path: string): Promise<ContextPayload>;
+  getGlobalAgentContext(
+    projectId: string,
+    responseLanguage: string,
+  ): Promise<GlobalContextBundle>;
+  inspectAgentNode(
+    projectId: string,
+    nodeId: string,
+    responseLanguage: string,
+  ): Promise<NodeContextBundle>;
+  extractRequestIntent(request: ExtractRequestIntentRequest): Promise<RequestIntent>;
+  approveRequestIntent(
+    projectId: string,
+    intentId: string,
+    expectedRevision: number,
+    answers?: Array<{ questionId: string; answer: string; selectedOptionId?: string }>,
+  ): Promise<RequestIntent>;
+  prepareIntentExecution(projectId: string, intentId: string): Promise<PromptRefinement>;
   getFileContent(projectId: string, path: string): Promise<string>;
   getWorkspaceFileDataUrl(projectId: string, path: string): Promise<string>;
   writeFileContent(projectId: string, path: string, content: string): Promise<void>;
@@ -441,6 +462,8 @@ export interface ProjectOSApi {
   ): Promise<CodeFileUnderstandingEntry>;
   askAgent(request: AgentAskRequest): Promise<AgentAnswerResult>;
   listSkills(projectId: string): Promise<ListSkillsResult>;
+  /** Agent runtimes registered in this build that a request may choose instead of a model profile. */
+  listExecutors(projectId: string): Promise<ExecutorOption[]>;
   getComposerMentions(
     projectId: string,
     query: string,
@@ -514,6 +537,15 @@ export interface ProjectOSApi {
    */
   continueAgentRun(runId: string): Promise<AgentRun>;
   getAgentRun(runId: string): Promise<AgentRun>;
+  listRunDecisions(projectId: string, rootRunId: string): Promise<RunDecision[]>;
+  resolveRunDecision(
+    projectId: string,
+    decisionId: string,
+    expectedRevision: number,
+    answer: { optionId: string; text?: string },
+    status?: "resolved" | "declined",
+  ): Promise<RunDecision>;
+  getRunCheckpoint(projectId: string, checkpointId: string): Promise<RunCheckpoint | null>;
   getAgentRunEvents(runId: string): Promise<AgentRunEvent[]>;
   /**
    * Snapshot + watermark for Agent Pool reconnect.

@@ -30,8 +30,8 @@ type ScreenPlan = {
   regions: Array<{
     label: string;
     intentBrief: string;
-    fields?: string[];
-    cta?: string;
+    fields?: string[] | undefined;
+    cta?: string | undefined;
   }>;
 };
 

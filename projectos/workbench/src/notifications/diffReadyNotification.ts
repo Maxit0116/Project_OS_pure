@@ -114,7 +114,6 @@ export function mergeDiffReadyCompletions(
 ): { title: string; body: string; destination: AgentCompletionKind; runIds: string[] } {
   const runIds = items.flatMap((item) => (item.runId ? [item.runId] : []))
   const title = getStoreMessage(locale, 'diffReadyNotify.title')
-  const destination = items.some((item) => item.kind === 'diff') ? 'diff' : 'ask'
 
   if (items.length === 1) {
     const item = items[0]!

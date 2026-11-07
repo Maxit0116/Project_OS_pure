@@ -23,6 +23,7 @@ import {
   createDefaultFixtureLayout,
   discoverManagedFixtureInventoryForTest,
   FixtureReconcilerError,
+  restoreAuthoritativeFixtures,
   scaffoldFixtures,
   syncFixtureMirrors,
   type FixtureLayout,
@@ -51,8 +52,8 @@ describe("sample fixture reconciler", () => {
     expect(checkFixtures(layout)).toMatchObject({
       ok: true,
       issues: [],
-      indexedFileCount: 100,
-      graphNodeCount: 23,
+      indexedFileCount: 106,
+      graphNodeCount: 24,
       mirrorCount: 1,
     });
   });
@@ -63,8 +64,8 @@ describe("sample fixture reconciler", () => {
     expect(checkFixtures(layout)).toMatchObject({
       ok: true,
       issues: [],
-      indexedFileCount: 100,
-      graphNodeCount: 23,
+      indexedFileCount: 106,
+      graphNodeCount: 24,
       mirrorCount: 1,
     });
   });
@@ -1782,6 +1783,48 @@ describe("sample fixture reconciler", () => {
     );
   });
 
+
+  it("restores the git-ignored authoritative state from the committed mirror without clobbering local edits", () => {
+    const layout = createSandbox();
+    const mirrorRoot = layout.mirrorRoots[0]!;
+    const realMirror = createDefaultFixtureLayout(resolve(".")).mirrorRoots[0]!;
+    cpSync(realMirror, mirrorRoot, { recursive: true });
+    const mirrored = (function list(directory: string): string[] {
+      return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? list(join(directory, entry.name))
+          : [relative(mirrorRoot, join(directory, entry.name)).split("\\").join("/")]);
+    })(mirrorRoot);
+
+    // A fresh clone: no authoritative state yet.
+    rmSync(layout.authoritativeRoot, { recursive: true, force: true });
+    const fresh = restoreAuthoritativeFixtures(layout);
+    expect([...fresh.restored].sort()).toEqual([...mirrored].sort());
+    expect(mirrored).toEqual(expect.arrayContaining([
+      "graph.json",
+      "semantic-tree.json",
+      "settings.json",
+      "demo-scenarios/auth-bugfix.json",
+    ]));
+    expect(fresh.divergent).toEqual([]);
+    expect(checkFixtures(layout).issues).toEqual([]);
+
+    // A scan overwrote the curated graph: reported, not silently replaced.
+    writeFileSync(join(layout.authoritativeRoot, "graph.json"), "{}\n", "utf8");
+    writeFileSync(join(layout.authoritativeRoot, "settings.json"), '{"local":true}\n', "utf8");
+    const kept = restoreAuthoritativeFixtures(layout);
+    expect(kept.restored).toEqual([]);
+    expect(kept.divergent).toEqual(["graph.json"]);
+    expect(readFileSync(join(layout.authoritativeRoot, "settings.json"), "utf8")).toContain("local");
+
+    // Force repairs every mirrored file.
+    const forced = restoreAuthoritativeFixtures(layout, { force: true });
+    expect(forced.restored).toContain("graph.json");
+    expect(readFileSync(join(layout.authoritativeRoot, "graph.json"), "utf8"))
+      .toBe(readFileSync(join(mirrorRoot, "graph.json"), "utf8"));
+    expect(readFileSync(join(layout.authoritativeRoot, "settings.json"), "utf8"))
+      .toBe(readFileSync(join(mirrorRoot, "settings.json"), "utf8"));
+  });
 });
 
 function createSandbox(): FixtureLayout {

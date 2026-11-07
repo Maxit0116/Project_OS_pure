@@ -17,6 +17,7 @@ import {
 import type { StructureScanProgressEvent } from "../contracts/structure-scan-progress.js";
 import type { ModelProfile } from "../contracts/settings.js";
 import { ProjectOSError } from "../errors.js";
+import { isTruncatedModelOutput } from "./model-json-output.js";
 import {
   mergeArchitectureViews,
   synthesizeDefaultArchitectureViews,
@@ -708,7 +709,7 @@ function acceptRefinedGraph(
       version: "0.5.0",
       projectId: base.projectId,
       views: mergeArchitectureViews({
-        existing: base.views,
+        ...(base.views !== undefined ? { existing: base.views } : {}),
         generated:
           incoming.views ??
           synthesizeDefaultArchitectureViews(incoming.nodes, {
@@ -753,7 +754,7 @@ function acceptRefinedGraph(
       };
     }),
     views: mergeArchitectureViews({
-      existing: base.views,
+      ...(base.views !== undefined ? { existing: base.views } : {}),
       generated:
         incoming.views ??
         synthesizeDefaultArchitectureViews(nodes, {
@@ -827,6 +828,8 @@ export function isAuthoredGraph(graph: ProjectGraph): boolean {
 }
 
 const STRUCTURE_SCAN_MAX_OUTPUT_TOKENS = 8_192;
+/** A reasoning model can spend most of the first budget thinking and leave the JSON cut mid-string. */
+const STRUCTURE_SCAN_RETRY_MAX_OUTPUT_TOKENS = 16_384;
 
 function parseModelJsonObject(output: string): Record<string, unknown> {
   const issues: string[] = [];
@@ -857,7 +860,7 @@ function asRecordArray(value: unknown): Record<string, unknown>[] {
 
 function normalizeNode(
   raw: Record<string, unknown>,
-  language: ScanLanguage,
+  _language: ScanLanguage,
 ): FunctionalNode {
   const id = String(raw.id ?? "node_unknown");
   const name = String(raw.name ?? id);
@@ -882,7 +885,7 @@ function normalizeNode(
           : raw.elementType === "component"
             ? "component"
             : undefined;
-  let elementType =
+  let elementType: FunctionalNode["elementType"] =
     raw.elementType === "person" ||
     raw.elementType === "software_system" ||
     raw.elementType === "external_system" ||
@@ -1022,7 +1025,7 @@ async function completeJsonRound(
 ): Promise<Record<string, unknown>> {
   throwIfScanAborted(input.signal);
   try {
-    const response = await input.gateway.complete(
+    const complete = (maxOutputTokens: number) => input.gateway.complete(
       input.profile,
       {
         projectId: input.projectId,
@@ -1035,12 +1038,26 @@ async function completeJsonRound(
           ...extra,
         },
         redactionPolicy: "secrets_and_paths",
-        maxOutputTokens: STRUCTURE_SCAN_MAX_OUTPUT_TOKENS,
+        maxOutputTokens,
         thinkingDepth: "medium",
       },
       input.signal ? { signal: input.signal } : undefined,
     );
+    let response = await complete(STRUCTURE_SCAN_MAX_OUTPUT_TOKENS);
     throwIfScanAborted(input.signal);
+    // A reply cut off at the token limit used to be patched shut and carried on as if complete, so a
+    // component could lose its name and parent while the scan reported success. Ask once with a
+    // larger budget; if it is still cut off, fail and keep the current graph.
+    if (isTruncatedModelOutput(response, STRUCTURE_SCAN_MAX_OUTPUT_TOKENS)) {
+      response = await complete(STRUCTURE_SCAN_RETRY_MAX_OUTPUT_TOKENS);
+      throwIfScanAborted(input.signal);
+      if (isTruncatedModelOutput(response, STRUCTURE_SCAN_RETRY_MAX_OUTPUT_TOKENS)) {
+        throw new ProjectOSError(
+          "model_output_invalid",
+          "The model's structure answer was cut off at its output limit, even after a retry with a larger one",
+        );
+      }
+    }
     return parseModelJsonObject(response.output);
   } catch (error) {
     throw asScanCancellationError(error) ?? error;
@@ -1094,7 +1111,7 @@ function assembleFromRounds(input: {
     return node;
   });
 
-  let nodes = [...skeleton, ...components].map((node) => ({
+  let nodes: FunctionalNode[] = [...skeleton, ...components].map((node) => ({
     ...node,
     layer: node.layer && layerIds.has(node.layer) ? node.layer : layers[1]?.id ?? layers[0]!.id,
   }));
@@ -1195,7 +1212,12 @@ export async function runStructureGraphAiScan(
     stepId: Parameters<typeof stepEvent>[1]["stepId"],
     detail?: string,
   ): void => {
-    report?.(stepEvent(type, { scanId, projectId, stepId, detail }));
+    report?.(stepEvent(type, {
+      scanId,
+      projectId,
+      stepId,
+      ...(detail !== undefined ? { detail } : {}),
+    }));
   };
 
   if (
@@ -1419,7 +1441,7 @@ export async function runStructureGraphAiScan(
       base: input.graph,
       incoming: assembled,
       mode: scanMode,
-      deepenIds: input.nodeIds,
+      ...(input.nodeIds !== undefined ? { deepenIds: input.nodeIds } : {}),
     });
 
     const enrichedNodes = enrichNodesForC4Shapes({
@@ -1431,8 +1453,10 @@ export async function runStructureGraphAiScan(
       sourceKind: "ai",
       fileIndex: merged.fileIndex,
     });
+    const existingViews =
+      scanMode === "regenerate" ? merged.views : (input.graph.views ?? merged.views);
     const views = mergeArchitectureViews({
-      existing: scanMode === "regenerate" ? merged.views : (input.graph.views ?? merged.views),
+      ...(existingViews !== undefined ? { existing: existingViews } : {}),
       generated: generatedViews,
       mode: scanMode === "regenerate" ? "regenerate" : "refine",
     });
@@ -1447,7 +1471,7 @@ export async function runStructureGraphAiScan(
     emitStep(
       "step_completed",
       "link_code",
-      `${result.fileIndex.length} files · ${result.fileRelations.length} relations`,
+      `${result.fileIndex.length} files · ${result.fileRelations?.length ?? 0} relations`,
     );
 
     activeStep = "validate_save";

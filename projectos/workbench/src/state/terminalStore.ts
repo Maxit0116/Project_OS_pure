@@ -83,10 +83,6 @@ function findMapArtifactIdByTabId(
   return Object.entries(mapSessions).find(([, id]) => id === tabId)?.[0]
 }
 
-function hasDockTabs(state: ReturnType<typeof initialState>): boolean {
-  return state.panes.some((pane) => pane.tabIds.length > 0)
-}
-
 function isTabVisible(
   state: ReturnType<typeof initialState>,
   tabId: string,

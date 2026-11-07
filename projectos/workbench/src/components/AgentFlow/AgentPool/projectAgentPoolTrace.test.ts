@@ -198,7 +198,8 @@ describe('projectAgentPoolTrace', () => {
           payload: {
             serverId: 's',
             toolName: 'search',
-            status: 'ok',
+            callId: 'call-1',
+            status: 'completed',
             durationMs: 50,
           },
         },

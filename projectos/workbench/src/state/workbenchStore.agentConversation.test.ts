@@ -2,10 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   AgentAnswerResult,
+  AgentAskRequest,
   AgentRun,
   AgentRunEvent,
   AgentTransientTrace,
   ProjectOSApi,
+  RunDecision,
+  RequestIntent,
 } from '@contracts/index'
 import { emptyComposerDraft } from '@contracts/index'
 import { createMockSampleWorkspace, MockProjectOSApiClient } from '../../../client/mock-project-os-api-client.js'
@@ -23,12 +26,24 @@ afterEach(() => {
     project: null,
     graph: null,
     tree: null,
+    settings: null,
+    pendingIntent: null,
+    selectedModelProfileId: null,
+    modelSelectionPending: false,
     messages: [],
     pendingRefinement: null,
     refinementConfirmed: false,
     refineLoading: false,
     composerDraft: emptyComposerDraft(),
     activeRunId: null,
+    decisionRootRunId: null,
+    runDecisions: [],
+    focusedDecisionId: null,
+    decisionResolvingIds: [],
+    toasts: [],
+    rightPanelOpen: false,
+    notifyOnPendingDecision: true,
+    windowFocused: true,
     selectedNodeId: null,
     selectedFilePath: null,
     globalAgentActive: false,
@@ -51,6 +66,16 @@ afterEach(() => {
 
 function setReadyScope(client: ProjectOSApi, mode: 'ask' | 'change' | 'plan' | 'debug' = 'ask') {
   const workspace = createMockSampleWorkspace()
+  const settings = mode === 'change'
+    ? {
+        ...workspace.settings,
+        presentationMode: false,
+        execution: { ...workspace.settings.execution, mode: 'model' as const, defaultModelProfileId: 'model-1' },
+        modelProfiles: [{
+          id: 'model-1', name: 'Test model', provider: 'ollama' as const, model: 'test-model', apiKeyRef: '',
+        }],
+      }
+    : null
   useWorkbenchStore.setState({
     client,
     project: workspace.project,
@@ -62,12 +87,130 @@ function setReadyScope(client: ProjectOSApi, mode: 'ask' | 'change' | 'plan' | '
     pendingFileOwnerChoice: null,
     fileScopeError: null,
     chatMode: mode,
+    ...(settings ? { settings, selectedModelProfileId: 'model-1' } : {}),
     messages: [],
     locale: 'en',
   })
 }
 
+function requestIntent(projectId: string, id: string, rawRequest: string, nodeId = 'feat_login'): RequestIntent {
+  return {
+    version: '0.1.0',
+    id,
+    projectId,
+    rawRequest,
+    goal: 'Update the login heading',
+    kind: 'change',
+    entryNodeId: nodeId,
+    touches: [{
+      nodeId,
+      reason: 'Owns the requested login experience',
+      allow: { editExisting: true, addParts: false, deletePartIds: [] },
+    }],
+    structuralEffects: [],
+    assumptions: [],
+    outOfScope: [],
+    acceptance: ['The heading changes'],
+    questions: [],
+    executorSelection: { kind: 'model', modelProfileId: 'model-1' },
+    executorSnapshot: {
+      kind: 'model',
+      profile: { id: 'model-1', name: 'Test model', provider: 'ollama', model: 'test-model', apiKeyRef: '' },
+      thinkingDepth: 'medium',
+    },
+    baseGraphHash: 'sha256:graph',
+    revision: 1,
+    status: 'draft',
+  }
+}
+
 describe('agent conversation routing', () => {
+  it('sends the selected model as an explicit per-turn executor choice', async () => {
+    const workspace = createMockSampleWorkspace()
+    const askAgent = vi.fn(async (): Promise<AgentAnswerResult> => ({
+      id: 'answer-explicit-model',
+      projectId: workspace.project.projectId,
+      scope: { kind: 'global' },
+      answer: 'Selected model answer.',
+      backend: 'model',
+      modelProfileId: 'model-b',
+      contextBundleHash: `sha256:${'e'.repeat(64)}`,
+      contextSummary: {
+        files: [],
+        synopsisPresent: true,
+        bundleHash: `sha256:${'e'.repeat(64)}`,
+      },
+      responseLanguage: { tag: 'und', source: 'undetermined', validation: 'not_checkable' },
+      createdAt: '2026-07-19T00:00:00.000Z',
+    }))
+    useWorkbenchStore.setState({
+      client: { askAgent } as unknown as ProjectOSApi,
+      project: workspace.project,
+      settings: {
+        ...workspace.settings,
+        presentationMode: false,
+        execution: {
+          ...workspace.settings.execution,
+          mode: 'model',
+          defaultModelProfileId: 'model-a',
+        },
+        modelProfiles: [
+          { id: 'model-a', name: 'A', provider: 'ollama', model: 'a', apiKeyRef: '' },
+          { id: 'model-b', name: 'B', provider: 'ollama', model: 'b', apiKeyRef: '' },
+        ],
+      },
+      selectedModelProfileId: 'model-b',
+      globalAgentActive: true,
+      selectedNodeId: null,
+      selectedFilePath: null,
+      chatMode: 'ask',
+    })
+
+    await useWorkbenchStore.getState().sendPrompt('Use the selected model')
+
+    expect(askAgent).toHaveBeenCalledWith(expect.objectContaining({
+      executorSelection: { kind: 'model', modelProfileId: 'model-b' },
+    }))
+  })
+
+  it('does not attach a live executor choice in fixture mode', async () => {
+    const workspace = createMockSampleWorkspace()
+    const askAgent = vi.fn(async (_request: AgentAskRequest): Promise<AgentAnswerResult> => ({
+      id: 'answer-fixture',
+      projectId: workspace.project.projectId,
+      scope: { kind: 'global' },
+      answer: 'Fixture answer.',
+      backend: 'model',
+      modelProfileId: 'model-fixture',
+      contextBundleHash: `sha256:${'e'.repeat(64)}`,
+      contextSummary: {
+        files: [],
+        synopsisPresent: true,
+        bundleHash: `sha256:${'e'.repeat(64)}`,
+      },
+      responseLanguage: { tag: 'und', source: 'undetermined', validation: 'not_checkable' },
+      createdAt: '2026-07-19T00:00:00.000Z',
+    }))
+    useWorkbenchStore.setState({
+      client: { askAgent } as unknown as ProjectOSApi,
+      project: workspace.project,
+      settings: {
+        ...workspace.settings,
+        presentationMode: false,
+        execution: { ...workspace.settings.execution, mode: 'fixture' },
+      },
+      selectedModelProfileId: 'model-b',
+      globalAgentActive: true,
+      selectedNodeId: null,
+      selectedFilePath: null,
+      chatMode: 'ask',
+    })
+
+    await useWorkbenchStore.getState().sendPrompt('Use the demo')
+
+    expect(askAgent.mock.calls[0]?.[0]).not.toHaveProperty('executorSelection')
+  })
+
   it('treats clearSelection as whole-project scope for Ask', async () => {
     const workspace = createMockSampleWorkspace()
     const askAgent = vi.fn(async (): Promise<AgentAnswerResult> => ({
@@ -316,101 +459,73 @@ describe('agent conversation routing', () => {
     })
   })
 
-  it('keeps Change on the existing refinement path', async () => {
+  it('routes Change through request intent extraction and includes scope hints', async () => {
     const askAgent = vi.fn()
-    const refinePrompt = vi.fn(async () => ({
-      id: 'ref-1',
-      understood: 'Change the login heading',
-      ambiguities: [],
-      suggestions: [],
-      affectedNodeIds: ['feat_login'],
-      affectedFiles: ['app/login/page.tsx'],
-      confidence: 1,
-      mode: 'model' as const,
-    }))
-    setReadyScope({ askAgent, refinePrompt } as unknown as ProjectOSApi, 'change')
+    const extractRequestIntent = vi.fn(async () => requestIntent('sample-graph-saas', 'intent-1', 'Change the heading'))
+    setReadyScope({ askAgent, extractRequestIntent } as unknown as ProjectOSApi, 'change')
 
     await useWorkbenchStore.getState().sendPrompt('Change the heading')
 
-    expect(refinePrompt).toHaveBeenCalledOnce()
+    expect(extractRequestIntent).toHaveBeenCalledOnce()
+    expect(extractRequestIntent).toHaveBeenCalledWith(expect.objectContaining({
+      rawRequest: 'Change the heading',
+      nodeId: 'feat_login',
+      filePath: 'app/login/page.tsx',
+      executorSelection: { kind: 'model', modelProfileId: 'model-1' },
+    }))
     expect(askAgent).not.toHaveBeenCalled()
-    expect(useWorkbenchStore.getState().pendingRefinement?.id).toBe('ref-1')
+    expect(useWorkbenchStore.getState().pendingIntent?.id).toBe('intent-1')
+    expect(useWorkbenchStore.getState().pendingRefinement).toBeNull()
   })
 
-  it('starts an automatic Change without leaving a confirmation card', async () => {
-    const run = {
-      runId: 'run-automatic',
-      projectId: 'sample-graph-saas',
-      kind: 'feature_change' as const,
-      status: 'running' as const,
-      relatedNodeIds: ['feat_login'],
-      relatedFiles: ['app/login/page.tsx'],
-      startedAt: '2026-07-19T00:00:00.000Z',
-    }
-    const firstEvent: AgentRunEvent = {
-      eventId: 'event-automatic',
-      runId: run.runId,
-      timestamp: run.startedAt,
-      type: 'step_started',
-      step: {
-        id: 'step-context',
-        label: 'Context prepared',
-        kind: 'context_prepared',
-        status: 'running',
-        relatedNodeIds: ['feat_login'],
-        relatedFiles: ['app/login/page.tsx'],
-      },
-    }
-    const refinePrompt = vi.fn(async () => ({
-      id: 'ref-automatic',
-      understood: 'Change the login heading',
-      ambiguities: [],
-      suggestions: [],
-      affectedNodeIds: ['feat_login'],
-      affectedFiles: ['app/login/page.tsx'],
-      confidence: 1,
-      mode: 'model' as const,
-      executionPolicy: 'automatic' as const,
-    }))
-    const confirmExecution = vi.fn(async () => run)
+  it.each([
+    ['zh', /无法被 Project OS 解析/u],
+    ['en', /could not use, even after one retry/u],
+  ] as const)('shows a failed intent extraction in the person\'s language (%s), not the raw English error', async (locale, expected) => {
+    const failure = Object.assign(
+      new Error('The model did not return a usable planning step after a retry'),
+      { code: 'model_output_invalid' },
+    )
+    const extractRequestIntent = vi.fn(async () => { throw failure })
+    setReadyScope({ extractRequestIntent } as unknown as ProjectOSApi, 'change')
+    useWorkbenchStore.setState({ locale })
+
+    await useWorkbenchStore.getState().sendPrompt('Change the heading')
+
+    expect(useWorkbenchStore.getState().error).toMatch(expected)
+    expect(useWorkbenchStore.getState().error).not.toMatch(/did not return a usable planning step/u)
+    expect(useWorkbenchStore.getState().refineLoading).toBe(false)
+  })
+
+  it('keeps the intent card as the only human gate before starting a Change', async () => {
+    const intent = requestIntent('sample-graph-saas', 'intent-approved', 'Change the heading')
+    const extractRequestIntent = vi.fn(async () => intent)
+    const confirmExecution = vi.fn()
     const client = {
-      refinePrompt,
+      extractRequestIntent,
+      approveRequestIntent: vi.fn(async () => ({ ...intent, status: 'approved' as const, approvalHash: 'sha256:approved', approvedAt: '2026-10-27T00:00:00Z' })),
+      prepareIntentExecution: vi.fn(async () => ({ id: 'ref-automatic', understood: intent.goal, ambiguities: [], suggestions: [], affectedNodeIds: ['feat_login'], affectedFiles: [], confidence: 1, mode: 'model' as const })),
       confirmExecution,
-      getAgentRunEvents: vi.fn(async () => [firstEvent]),
-      streamAgentRun: vi.fn(() => ({ dispose: vi.fn() })),
     } as unknown as ProjectOSApi
     setReadyScope(client, 'change')
 
     await useWorkbenchStore.getState().sendPrompt('Change the heading')
 
-    expect(confirmExecution).toHaveBeenCalledWith('ref-automatic')
-    expect(useChatSessionStore.getState().agentFlowOpen).toBe(true)
-    expect(useWorkbenchStore.getState()).toMatchObject({
-      pendingRefinement: null,
-      activeRunId: 'run-automatic',
-      agentFlowSubject: 'run',
-    })
+    expect(confirmExecution).not.toHaveBeenCalled()
+    expect(useWorkbenchStore.getState().pendingIntent?.status).toBe('draft')
   })
 
   it('revises the original request without confirming or starting a run', async () => {
     const confirmExecution = vi.fn()
-    const refinePrompt = vi.fn(async () => ({
-      id: 'ref-revise',
-      understood: 'Change the login heading',
-      ambiguities: [],
-      suggestions: ['Keep the heading level'],
-      affectedNodeIds: ['feat_login'],
-      affectedFiles: ['app/login/page.tsx'],
-      confidence: 1,
-      mode: 'model' as const,
-    }))
-    setReadyScope({ refinePrompt, confirmExecution } as unknown as ProjectOSApi, 'change')
+    const extractRequestIntent = vi.fn(async () => requestIntent('sample-graph-saas', 'intent-revise', 'Use a friendlier login heading'))
+    setReadyScope({ extractRequestIntent, confirmExecution } as unknown as ProjectOSApi, 'change')
     await useWorkbenchStore.getState().sendPrompt('Use a friendlier login heading')
 
-    useWorkbenchStore.getState().reviseRefinement()
+    useWorkbenchStore.getState().reviseRequestIntent()
 
     expect(useWorkbenchStore.getState()).toMatchObject({
       composerDraft: emptyComposerDraft('Use a friendlier login heading'),
+      pendingIntent: null,
       pendingRefinement: null,
       refinementConfirmed: false,
       refineLoading: false,
@@ -455,22 +570,19 @@ describe('agent conversation routing', () => {
     }))
   })
 
-  it('allows node-scoped Change to enter the planner without inventing a file scope', async () => {
-    const refinePrompt = vi.fn(async () => ({
-      id: 'refinement-node-plan',
-      understood: 'Change the node',
-      ambiguities: [],
-      suggestions: [],
-      affectedNodeIds: ['feat_login'],
-      affectedFiles: [],
-      confidence: 1,
-      mode: 'model' as const,
-      executionPolicy: 'review_first' as const,
-    }))
+  it('keeps node scope as a discovery hint for Change intent extraction', async () => {
+    const extractRequestIntent = vi.fn(async () => requestIntent('sample-graph-saas', 'intent-node', 'Change it'))
     const workspace = createMockSampleWorkspace()
     useWorkbenchStore.setState({
-      client: { refinePrompt } as unknown as ProjectOSApi,
+      client: { extractRequestIntent } as unknown as ProjectOSApi,
       project: workspace.project,
+      settings: {
+        ...workspace.settings,
+        presentationMode: false,
+        execution: { ...workspace.settings.execution, mode: 'model', defaultModelProfileId: 'model-1' },
+        modelProfiles: [{ id: 'model-1', name: 'Model', provider: 'ollama', model: 'model', apiKeyRef: '' }],
+      },
+      selectedModelProfileId: 'model-1',
       selectedNodeId: 'feat_login',
       selectedFilePath: null,
       pendingFileOwnerChoice: null,
@@ -480,10 +592,10 @@ describe('agent conversation routing', () => {
 
     expect(canSubmitAgentPrompt(useWorkbenchStore.getState())).toBe(true)
     await useWorkbenchStore.getState().sendPrompt('Change it')
-    expect(refinePrompt).toHaveBeenCalledWith(expect.objectContaining({
+    expect(extractRequestIntent).toHaveBeenCalledWith(expect.objectContaining({
       nodeId: 'feat_login',
       filePath: undefined,
-      rawPrompt: 'Change it',
+      rawRequest: 'Change it',
     }))
   })
 
@@ -509,22 +621,19 @@ describe('agent conversation routing', () => {
       createdAt: '2026-07-18T00:00:00.000Z',
       updatedAt: '2026-07-18T00:00:00.000Z',
     }))
-    const refinePrompt = vi.fn(async () => ({
-      id: 'refinement-global',
-      understood: 'Change globally',
-      ambiguities: [],
-      suggestions: [],
-      affectedNodeIds: [],
-      affectedFiles: [],
-      confidence: 1,
-      mode: 'model' as const,
-      executionPolicy: 'review_first' as const,
-    }))
     const workspace = createMockSampleWorkspace()
+    const extractRequestIntent = vi.fn(async () => requestIntent(workspace.project.projectId, 'intent-global', 'Apply a small global improvement'))
     useWorkbenchStore.setState({
-      client: { createPlan, refinePrompt } as unknown as ProjectOSApi,
+      client: { createPlan, extractRequestIntent } as unknown as ProjectOSApi,
       project: workspace.project,
       graph: workspace.graph,
+      settings: {
+        ...workspace.settings,
+        presentationMode: false,
+        execution: { ...workspace.settings.execution, mode: 'model', defaultModelProfileId: 'model-1' },
+        modelProfiles: [{ id: 'model-1', name: 'Test model', provider: 'ollama', model: 'test-model', apiKeyRef: '' }],
+      },
+      selectedModelProfileId: 'model-1',
       selectedNodeId: null,
       selectedFilePath: null,
       pendingFileOwnerChoice: null,
@@ -539,9 +648,9 @@ describe('agent conversation routing', () => {
     useWorkbenchStore.setState({ chatMode: 'change', pendingPlan: null })
     expect(canSubmitAgentPrompt(useWorkbenchStore.getState())).toBe(true)
     await useWorkbenchStore.getState().sendPrompt('Apply a small global improvement')
-    expect(refinePrompt).toHaveBeenCalledWith(
+    expect(extractRequestIntent).toHaveBeenCalledWith(
       expect.objectContaining({
-        rawPrompt: 'Apply a small global improvement',
+        rawRequest: 'Apply a small global improvement',
       }),
     )
   })
@@ -833,6 +942,8 @@ describe('agent conversation routing', () => {
   it('clears the transient Ask trace when loading and resetting a workspace', async () => {
     useWorkbenchStore.setState({
       client: originalClient,
+      editorBuffers: {},
+      editorSavedBuffers: {},
       latestAskTrace: {
         status: 'running',
         scope: { kind: 'node', nodeId: 'feat_login' },
@@ -901,8 +1012,23 @@ describe('agent conversation routing', () => {
       sourcePlanId: 'plan_1',
       executionPolicy: 'review_first' as const,
     }))
+    const run: AgentRun = {
+      runId: 'run-plan-confirmed', projectId: 'sample-graph-saas', kind: 'feature_change',
+      status: 'running', relatedNodeIds: ['feat_login'], relatedFiles: ['app/login/page.tsx'],
+      scope: { kind: 'component', nodeId: 'feat_login' },
+      startedAt: '2026-10-29T00:00:00.000Z',
+    }
+    setReadyScope({
+      buildPlan,
+      confirmExecution: vi.fn(async () => run),
+      streamAgentRun: vi.fn(() => ({ dispose() {} })),
+      listRunDecisions: vi.fn(async () => []),
+      getAgentRunEvents: vi.fn(async () => [{
+        eventId: 'plan-step', runId: run.runId, timestamp: run.startedAt, type: 'step_started',
+        step: { id: 'step-plan', kind: 'understand', label: 'Understand', status: 'running', relatedNodeIds: [], relatedFiles: [] },
+      }]),
+    } as unknown as ProjectOSApi, 'plan')
     useWorkbenchStore.setState({
-      client: { buildPlan } as unknown as ProjectOSApi,
       pendingPlan: {
         version: '0.1.0',
         id: 'plan_1',
@@ -970,6 +1096,103 @@ describe('agent conversation routing', () => {
     expect(startDebugSession).toHaveBeenCalledOnce()
     expect(useWorkbenchStore.getState().debugSession?.sessionId).toBe('debug_1')
     expect(useWorkbenchStore.getState().agentFlowSubject).toBe('debug')
+  })
+
+  it('keeps pending decision notifications silent when disabled', async () => {
+    const client = new MockProjectOSApiClient()
+    setReadyScope(client)
+    const projectId = useWorkbenchStore.getState().project!.projectId
+    const decision: RunDecision = {
+      version: '0.1.0',
+      id: `decision_disabled_${crypto.randomUUID()}`,
+      projectId,
+      rootRunId: 'run_decision_disabled',
+      runId: 'run_decision_disabled',
+      kind: 'clarification',
+      question: 'Should the report include archived records?',
+      options: [{ id: 'include', label: 'Include' }, { id: 'exclude', label: 'Exclude' }],
+      status: 'pending',
+      revision: 1,
+      createdAt: new Date().toISOString(),
+    }
+    vi.spyOn(client, 'listRunDecisions').mockResolvedValue([decision])
+    useWorkbenchStore.setState({ notifyOnPendingDecision: false })
+
+    await useWorkbenchStore.getState().loadRunDecisions(decision.rootRunId)
+
+    expect(useWorkbenchStore.getState().runDecisions).toEqual([decision])
+    expect(useWorkbenchStore.getState().focusedDecisionId).toBeNull()
+    expect(useWorkbenchStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('routes a newly pending decision to chat and deduplicates its notification', async () => {
+    const client = new MockProjectOSApiClient()
+    setReadyScope(client)
+    const decision: RunDecision = {
+      version: '0.1.0',
+      id: `decision_pending_${crypto.randomUUID()}`,
+      projectId: 'sample-graph-saas',
+      rootRunId: 'run_decision_pending',
+      runId: 'run_decision_pending',
+      kind: 'scope_change',
+      question: 'Should this update include the settings block?',
+      options: [{ id: 'yes', label: 'Include it' }, { id: 'no', label: 'Keep current scope' }],
+      status: 'pending',
+      revision: 1,
+      createdAt: new Date().toISOString(),
+    }
+    const list = vi.spyOn(client, 'listRunDecisions').mockResolvedValue([decision])
+    useWorkbenchStore.setState({ notifyOnPendingDecision: true, windowFocused: true })
+
+    await useWorkbenchStore.getState().loadRunDecisions(decision.rootRunId)
+    const firstToastCount = useWorkbenchStore.getState().toasts.length
+    await useWorkbenchStore.getState().loadRunDecisions(decision.rootRunId)
+
+    expect(useWorkbenchStore.getState()).toMatchObject({
+      focusedDecisionId: decision.id,
+      activeRunId: null,
+      decisionRootRunId: decision.rootRunId,
+      rightPanelTab: 'chat',
+      rightPanelOpen: true,
+    })
+    expect(firstToastCount).toBe(1)
+    expect(useWorkbenchStore.getState().toasts).toHaveLength(1)
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('opens a stale decision notification on its recorded history without resolving it', async () => {
+    const client = new MockProjectOSApiClient()
+    setReadyScope(client)
+    useWorkbenchStore.setState({ activeRunId: 'still_running_run' })
+    const projectId = useWorkbenchStore.getState().project!.projectId
+    const decision: RunDecision = {
+      version: '0.1.0',
+      id: `decision_resolved_${crypto.randomUUID()}`,
+      projectId,
+      rootRunId: 'run_decision_resolved',
+      runId: 'run_decision_resolved',
+      kind: 'clarification',
+      question: 'Use the existing retry policy?',
+      options: [{ id: 'yes', label: 'Use it' }],
+      status: 'resolved',
+      revision: 2,
+      answer: { optionId: 'yes' },
+      createdAt: new Date().toISOString(),
+      resolvedAt: new Date().toISOString(),
+    }
+    const list = vi.spyOn(client, 'listRunDecisions').mockResolvedValue([decision])
+    const resolve = vi.spyOn(client, 'resolveRunDecision')
+
+    await useWorkbenchStore.getState().navigateFromAgentNotification(
+      'decisions', decision.rootRunId, decision.id,
+    )
+
+    expect(list).toHaveBeenCalledWith(decision.projectId, decision.rootRunId)
+    expect(useWorkbenchStore.getState().runDecisions).toEqual([decision])
+    expect(useWorkbenchStore.getState().focusedDecisionId).toBe(decision.id)
+    expect(useWorkbenchStore.getState().decisionRootRunId).toBe(decision.rootRunId)
+    expect(useWorkbenchStore.getState().activeRunId).toBe('still_running_run')
+    expect(resolve).not.toHaveBeenCalled()
   })
 })
 
@@ -1041,3 +1264,17 @@ function leafDelegation(
     },
   }
 }
+
+it('keeps the ready plan available when run confirmation fails',async()=>{
+ const client={buildPlan:vi.fn(async()=>({id:'h0-ref',understood:'Edit checkout',ambiguities:[],suggestions:[],affectedNodeIds:['feat_checkout'],affectedFiles:[],confidence:1,mode:'model',sourcePlanId:'h0-plan'})),confirmExecution:vi.fn(async()=>{throw new Error('H0 start rejected')})} as unknown as ProjectOSApi;
+ setReadyScope(client,'plan');
+ useWorkbenchStore.setState({pendingPlan:{version:'0.1.0',id:'h0-plan',projectId:'sample-graph-saas',scope:{kind:'global'},objective:'Edit checkout',steps:[{id:'s1',description:'Edit checkout',affectedFiles:[],acceptanceCriteria:['Updated']}],todos:[],ambiguities:[],rationale:'Requested',status:'ready',createdAt:'2026-10-29',updatedAt:'2026-10-29'},planConfirmed:false,flowStatus:'idle',error:null});
+ await useWorkbenchStore.getState().confirmPlanBuild();
+ expect(useWorkbenchStore.getState().pendingPlan?.id).toBe('h0-plan');
+ expect(useWorkbenchStore.getState().planConfirmed).toBe(false);
+ expect(useWorkbenchStore.getState().chatMode).toBe('plan');
+ expect(useWorkbenchStore.getState().refinementConfirmed).toBe(false);
+ expect(useWorkbenchStore.getState().toasts).toHaveLength(0);
+ expect(useWorkbenchStore.getState().flowStatus).toBe('error');
+ expect(useWorkbenchStore.getState().error).toContain('H0 start rejected');
+});

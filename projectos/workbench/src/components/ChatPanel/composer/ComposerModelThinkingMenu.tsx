@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ModelProfile, ThinkingDepth } from '@contracts/index'
+import type { ExecutorOption, ModelProfile, ThinkingDepth } from '@contracts/index'
 import { modelProfileLabel } from '@contracts/index'
 import { useI18n } from '../../../i18n'
 import { GlassLens } from '../../Glass'
 import Chip from '../../ui/Chip'
+import ModelPickerMenu from './ModelPickerMenu'
 import styles from './ComposerControlBar.module.css'
 
 const THINKING_DEPTHS: ThinkingDepth[] = ['off', 'low', 'medium', 'high']
@@ -16,7 +17,13 @@ export interface ComposerModelThinkingMenuProps {
   presentationMode?: boolean
   compact?: boolean
   disabled?: boolean
-  onSelectModel: (profileId: string) => void
+  /** May resolve to `false` when selection failed (menu stays open). */
+  onSelectModel: (profileId: string) => void | boolean | Promise<void | boolean>
+  modelSelectionPending?: boolean
+  /** Registered agent runtimes; omitted or empty in a production build. */
+  runtimes?: ExecutorOption[]
+  selectedRuntimeId?: string | null
+  onSelectRuntime?: (executorId: string | null) => void
   onSelectThinkingDepth: (depth: ThinkingDepth) => void
   /** When there are no model profiles — open Settings (Chat) or bridge (Overlay). */
   onConfigureModels?: () => void
@@ -31,6 +38,10 @@ export default function ComposerModelThinkingMenu({
   compact = false,
   disabled = false,
   onSelectModel,
+  modelSelectionPending = false,
+  runtimes = [],
+  selectedRuntimeId = null,
+  onSelectRuntime,
   onSelectThinkingDepth,
   onConfigureModels,
   className,
@@ -54,6 +65,8 @@ export default function ComposerModelThinkingMenu({
     (profile) => profile.id === selectedModelProfileId,
   )
   const hasModels = modelProfiles.length > 0
+  const hasRuntimes = runtimes.length > 0
+  const activeRuntime = runtimes.find((option) => option.executorId === selectedRuntimeId)
 
   const thinkingLabel = (depth: ThinkingDepth) => {
     switch (depth) {
@@ -70,7 +83,9 @@ export default function ComposerModelThinkingMenu({
 
   const modelThinkingLabel = presentationMode
     ? ts('chat.demoModelName')
-    : !hasModels
+    : activeRuntime
+      ? activeRuntime.label
+      : !hasModels
       ? ts('chat.configureModel')
       : selectedModel
         ? modelProfileLabel(selectedModel)
@@ -91,7 +106,7 @@ export default function ComposerModelThinkingMenu({
     )
   }
 
-  if (!hasModels) {
+  if (!hasModels && !hasRuntimes) {
     return (
       <Chip
         className={`${styles.chipTruncate}${className ? ` ${className}` : ''}`}
@@ -120,9 +135,11 @@ export default function ComposerModelThinkingMenu({
         }}
       >
         <span className={styles.chipLabel}>{modelThinkingLabel}</span>
-        <span className={styles.chipMeta}>
-          · {thinkingLabel(thinkingDepth)}
-        </span>{' '}
+        {activeRuntime ? null : (
+          <span className={styles.chipMeta}>
+            · {thinkingLabel(thinkingDepth)}
+          </span>
+        )}{' '}
         {compact ? null : null}▾
       </Chip>
       {open ? (
@@ -132,22 +149,32 @@ export default function ComposerModelThinkingMenu({
             tint="overlay"
             className={`${styles.dropdown} ${styles.dropdownWide} glass-overlay-enter`}
           >
-            <div className={styles.sectionLabel}>{ts('composer.modelSection')}</div>
-            {modelProfiles.map((profile) => (
-              <button
-                key={profile.id}
-                type="button"
-                className={`${styles.menuItem} ${
-                  profile.id === selectedModelProfileId ? styles.menuItemActive : ''
-                }`}
-                onClick={() => {
-                  onSelectModel(profile.id)
+            <ModelPickerMenu
+              profiles={modelProfiles}
+              selectedId={selectedModelProfileId}
+              pending={modelSelectionPending}
+              runtimes={runtimes}
+              selectedRuntimeId={selectedRuntimeId}
+              onSelectRuntime={
+                onSelectRuntime
+                  ? (executorId) => {
+                      onSelectRuntime(executorId)
+                      if (executorId !== null) setOpen(false)
+                    }
+                  : undefined
+              }
+              onSelect={(id) => {
+                void Promise.resolve(onSelectModel(id)).then((selected) => {
+                  if (selected === false) return
+                  onSelectRuntime?.(null)
                   setOpen(false)
-                }}
-              >
-                {modelProfileLabel(profile)}
-              </button>
-            ))}
+                })
+              }}
+              onManage={() => {
+                setOpen(false)
+                onConfigureModels?.()
+              }}
+            />
             <div className={styles.sectionDivider} />
             <div className={styles.sectionLabel}>{ts('chat.thinkingDepth')}</div>
             {THINKING_DEPTHS.map((depth) => (

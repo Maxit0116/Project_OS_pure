@@ -34,6 +34,24 @@ describe("chat-title-service", () => {
     expect(sanitizeChatTitle('"Login redirect fix"')).toBe("Login redirect fix");
   });
 
+  it("gives the session-context digest room for a multi-decision conversation", async () => {
+    const seen: Array<number | undefined> = [];
+    class CapturingGateway extends StubGateway {
+      override async complete(profile: ModelProfile, request: ModelGatewayRequest) {
+        seen.push(request.maxOutputTokens);
+        return super.complete(profile, request);
+      }
+    }
+    const digest = JSON.stringify({ title: "Profile open tasks", substantive: true, responsibility: "r", decisions: [], openQuestions: [], refs: [] });
+    await new ChatTitleService(new CapturingGateway(digest)).summarizeContext({
+      projectId: "project-test",
+      messages: [{ id: "m1", role: "user", content: "Show open tasks", timestamp: "2026-01-01T00:00:00.000Z" }] as never,
+      profile,
+      responseLanguage,
+    });
+    expect(seen[0]).toBeGreaterThanOrEqual(1000);
+  });
+
   it("summarizes with model gateway", async () => {
     const service = new ChatTitleService(new StubGateway("Billing module refactor"));
     const title = await service.summarizeWithModel({

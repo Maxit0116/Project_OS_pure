@@ -1,7 +1,7 @@
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultSettings } from "../contracts/settings.js";
 import { ContextPayloadSchema, type CurrentWorkState } from "../contracts/context.js";
@@ -30,6 +30,7 @@ import * as writeTransactionModule from "./recoverable-write-transaction.js";
 import { WorkspaceTransactionCoordinator } from "./workspace-transaction-coordinator.js";
 import { DependencyImpactScanner } from "./dependency-impact-scanner.js";
 import { VerificationRunner } from "./verification-runner.js";
+import { discoveryFinalIntentOutput } from "./test-support/approved-intent-harness.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const temporaryRoots: string[] = [];
@@ -39,7 +40,7 @@ afterEach(() => {
   }
 });
 
-describe("ProjectOSLocalApi graph, tree, and context methods", () => {
+describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000 }, () => {
   it("opens the real sample workspace and returns graph/tree data", async () => {
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot });
     const project = await api.openSampleWorkspace();
@@ -133,18 +134,18 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
-      projectId: project.projectId,
-      nodeId: "feat_login",
-      filePath: "app/login/page.tsx",
-      rawPrompt: "Change the login heading to welcome returning users.",
-    });
     const internals = getLocalApiInternals(api);
     internals.orchestrator.startRun = async () => {
       throw new Error("synthetic startup failure");
     };
 
-    const run = await api.confirmExecution(refinement.id);
+    const { run } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      filePath: "app/login/page.tsx",
+      rawRequest: "Change the login heading to welcome returning users.",
+      deferOrchestratorStart: false,
+    });
     const failed = await waitForRunStatus(api, run.runId, "error");
     const events = await api.getAgentRunEvents(run.runId);
 
@@ -233,27 +234,25 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
       localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new AutomaticChangeGateway(),
       runEventPersistence: "memory",
     });
     const project = await api.openSampleWorkspace();
     const selectedFilePath = "app/login/page.tsx";
-    const refinement = await api.refinePrompt({
+    await enableModelExecution(api, project.projectId);
+    const { refinementId, run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
       filePath: selectedFilePath,
-      rawPrompt: "Change only the selected login page.",
+      rawRequest: "Change only the selected login page.",
+      deferOrchestratorStart: true,
     });
-    const stored = getLocalApiInternals(api).refinementsById.get(refinement.id)!;
+    const stored = getLocalApiInternals(api).refinementsById.get(refinementId)!;
     expect(stored.requestedScope).toEqual({
       nodeId: "feat_login",
       selectedFilePath,
     });
-    expect(stored.responseLanguage).toBe("und");
-
-    stored.refinement.affectedFiles = ["lib/auth.ts"];
-    stored.refinement.affectedNodeIds = ["feat_database"];
-    await enableModelExecution(api, project.projectId);
-    const run = await api.confirmExecution(refinement.id);
+    expect(run.approvedIntent).toBeDefined();
 
     const authorization = getLocalApiInternals(api).boundRunAuthorizations.get(
       run.runId,
@@ -275,7 +274,6 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     const orchestratorState = getLocalApiInternals(api).orchestrator.getRun(run.runId);
     expect(orchestratorState?.localContext).toMatchObject({
       scope: { nodeId: "feat_login", selectedFilePath },
-      responseLanguage: "und",
       bundleHash: authorization?.bundleHash,
       allowedWritePaths: [selectedFilePath],
     });
@@ -310,19 +308,22 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     const api = new ProjectOSLocalApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
       localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new AutomaticChangeGateway(),
       runEventPersistence: "memory",
     });
     const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId);
+    // Missing approved intent remains a public rejection for model confirm.
     const refinement = await api.refinePrompt({
       projectId: project.projectId,
       nodeId: "feat_login",
       filePath: "README.md",
       rawPrompt: "Change an unrelated file.",
     });
-    await enableModelExecution(api, project.projectId);
 
     await expect(api.confirmExecution(refinement.id)).rejects.toMatchObject({
-      code: "local_context_unavailable",
+      code: "diff_scope_violation",
+      message: expect.stringMatching(/approved request intent/u),
     });
     expect(getLocalApiInternals(api).boundRunAuthorizations.size).toBe(0);
     expect(getLocalApiInternals(api).orchestrator.runs.size).toBe(0);
@@ -368,10 +369,11 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
     const project = await api.openSampleWorkspace();
     const collidingRun = generatedRun(project.projectId, "run_google_login");
-    getLocalApiInternals(api).externalRunsByRunId.set(collidingRun.runId, {
+    // Occupy the prefab run id through the live registration map (not a removed private map).
+    getLocalApiInternals(api).registeredRunsByRunId.set(collidingRun.runId, {
       run: collidingRun,
       events: [],
-      config: externalAgentConfig(),
+      scenario: { id: "collision", files: [], run: collidingRun } as never,
     });
     const refinement = await api.refinePrompt({
       projectId: project.projectId,
@@ -383,7 +385,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     await expect(api.confirmExecution(refinement.id)).rejects.toMatchObject({
       code: "agent_orchestration_failed",
     });
-    expect(getLocalApiInternals(api).externalRunsByRunId.get(collidingRun.runId)?.run)
+    expect(getLocalApiInternals(api).registeredRunsByRunId.get(collidingRun.runId)?.run)
       .toEqual(collidingRun);
   });
 
@@ -862,25 +864,31 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     const tempWorkspaceRoot = copySampleWorkspace();
     const events: string[] = [];
     const workspaceStore = new RecordingWorkspaceStore(events);
+    const path = "app/login/page.tsx";
     const api = new RecordingCommitApi({
       sampleWorkspaceRoot: tempWorkspaceRoot,
       workspaceStore,
+      modelGateway: createIntentFilesGateway([path]),
+      runEventPersistence: "memory",
     }, events);
-    const project = await api.openSampleWorkspace();
-    const path = "app/login/page.tsx";
+    // INTERNAL: deferred approved-intent run then commitGeneratedDiffTransaction.
+    const { projectId, run } = await openDeferredInternalAuthorizedRun({
+      workspaceRoot: tempWorkspaceRoot,
+      files: [path],
+      api,
+    });
     const before = readFileSync(join(tempWorkspaceRoot, path), "utf8");
     const after = `${before}\n// generated apply marker\n`;
-    const runId = "run_generated_happy";
 
-    const result = await applyGeneratedDiffTransaction(api, generatedRun(project.projectId, runId), {
-      runId,
+    const result = await applyGeneratedDiffTransaction(api, run, {
+      runId: run.runId,
       summary: "Apply a real generated edit",
       files: [{ path, changeType: "modify", before, after }],
     });
 
     expect(readFileSync(join(tempWorkspaceRoot, path), "utf8")).toBe(after);
     expect(result).toMatchObject({
-      runId,
+      runId: run.runId,
       applied: true,
       filesChanged: [path],
       verificationStatus: "not_run",
@@ -899,9 +907,10 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     expect(manifest).toMatchObject({
       version: 4,
       backupId: result.backupId,
-      runId,
+      runId: run.runId,
       restoreAuthority: { kind: "project_api" },
     });
+    void projectId;
     expect(manifest.files[0]).toMatchObject({ operation: "modify" });
     expect(manifest.files[1]).toMatchObject({
       operation: "internal",
@@ -917,12 +926,28 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     const currentWork = JSON.parse(
       readFileSync(join(tempWorkspaceRoot, ".projectos", "current-work.json"), "utf8"),
     ) as CurrentWorkState;
-    expect(currentWork.activeRunId).toBe(runId);
-    expect(currentWork.recentChanges.at(-1)).toMatchObject({ path, runId, action: "modified" });
+    expect(currentWork.activeRunId).toBe(run.runId);
+    expect(currentWork.recentChanges.at(-1)).toMatchObject({ path, runId: run.runId, action: "modified" });
     expect(currentWork.graphFreshness).toMatchObject({
       stale: true,
       lastAnalyzedAt: expect.any(String),
     });
+  });
+
+  it("keeps current work readable across consecutive history saves", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
+    const project = await api.openSampleWorkspace();
+
+    await api.saveFileWithHistory(project.projectId, "app/login/page.tsx", "// first save\n");
+    await api.saveFileWithHistory(project.projectId, "app/login/page.tsx", "// second save\n");
+
+    const currentWork = await api.getCurrentWork(project.projectId);
+    expect(currentWork.projectId).toBe(project.projectId);
+    expect(currentWork.recentChanges.slice(-2)).toEqual([
+      expect.objectContaining({ path: "app/login/page.tsx", action: "modified" }),
+      expect.objectContaining({ path: "app/login/page.tsx", action: "modified" }),
+    ]);
   });
 
   it("keeps only the most recent 50 current-work changes across apply and undo", async () => {
@@ -937,24 +962,26 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     }));
     writeFileSync(currentWorkPath, `${JSON.stringify(seeded, null, 2)}\n`, "utf8");
 
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
     const path = "app/login/page.tsx";
+    // INTERNAL: deferred approved-intent run then commitGeneratedDiffTransaction.
+    const { api, projectId, run } = await openDeferredInternalAuthorizedRun({
+      workspaceRoot: tempWorkspaceRoot,
+      files: [path],
+    });
     const before = readFileSync(join(tempWorkspaceRoot, path), "utf8");
-    const run = generatedRun(project.projectId, "run_recent_changes_cap");
     const applied = await applyGeneratedDiffTransaction(api, run, {
       runId: run.runId,
       summary: "Exercise bounded current-work history",
       files: [{ path, changeType: "modify", before, after: `${before}\n// bounded history\n` }],
     });
 
-    const afterApply = await api.getCurrentWork(project.projectId);
+    const afterApply = await api.getCurrentWork(projectId);
     expect(afterApply.recentChanges).toHaveLength(50);
     expect(afterApply.recentChanges[0]?.path).toBe("history-1.ts");
     expect(afterApply.recentChanges.at(-1)).toMatchObject({ path, runId: run.runId });
 
-    await api.restoreApplyBackup(project.projectId, applied.backupId!);
-    const afterUndo = await api.getCurrentWork(project.projectId);
+    await api.restoreApplyBackup(projectId, applied.backupId!);
+    const afterUndo = await api.getCurrentWork(projectId);
     expect(afterUndo.recentChanges).toHaveLength(50);
     expect(afterUndo.recentChanges[0]?.path).toBe("history-2.ts");
     expect(afterUndo.recentChanges.at(-1)).toMatchObject({
@@ -966,12 +993,14 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
   it("marks a generated run complete after a successful authorized apply", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
     const path = "app/login/page.tsx";
+    // INTERNAL: deferred approved-intent + applyDiffFromGenerated.
+    const { api, projectId, run } = await openDeferredInternalAuthorizedRun({
+      workspaceRoot: tempWorkspaceRoot,
+      files: [path],
+    });
     const before = readFileSync(join(tempWorkspaceRoot, path), "utf8");
-    const run = generatedRun(project.projectId, "run_apply_completion");
-    authorizeTestRun(api, project.projectId, tempWorkspaceRoot, run.runId, path);
+    authorizeTestRun(api, projectId, tempWorkspaceRoot, run.runId, path);
 
     await applyAuthorizedGeneratedDiff(api, run, {
       runId: run.runId,
@@ -985,20 +1014,22 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
   it("restores applied bytes from backup and records the reversal", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
     const path = "app/login/page.tsx";
+    // INTERNAL: deferred approved-intent then commitGeneratedDiffTransaction + restore.
+    const { api, projectId, run } = await openDeferredInternalAuthorizedRun({
+      workspaceRoot: tempWorkspaceRoot,
+      files: [path],
+    });
     const target = join(tempWorkspaceRoot, path);
     const before = readFileSync(target, "utf8");
     const after = `${before}\n// undo me\n`;
-    const run = generatedRun(project.projectId, "run_restore_happy");
     const applied = await applyGeneratedDiffTransaction(api, run, {
       runId: run.runId,
       summary: "Create an undo checkpoint",
       files: [{ path, changeType: "modify", before, after }],
     });
 
-    const restored = await api.restoreApplyBackup(project.projectId, applied.backupId!);
+    const restored = await api.restoreApplyBackup(projectId, applied.backupId!);
 
     expect(restored).toMatchObject({
       restored: true,
@@ -1006,7 +1037,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       outcome: "restored",
     });
     expect(readFileSync(target, "utf8")).toBe(before);
-    expect((await api.getCurrentWork(project.projectId)).recentChanges.at(-1)).toMatchObject({
+    expect((await api.getCurrentWork(projectId)).recentChanges.at(-1)).toMatchObject({
       path,
       runId: run.runId,
       action: "reverted",
@@ -1015,12 +1046,14 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
   it("refuses stale undo without clobbering edits made after apply", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
     const path = "app/login/page.tsx";
+    // INTERNAL: deferred approved-intent then commitGeneratedDiffTransaction.
+    const { api, projectId, run } = await openDeferredInternalAuthorizedRun({
+      workspaceRoot: tempWorkspaceRoot,
+      files: [path],
+    });
     const target = join(tempWorkspaceRoot, path);
     const before = readFileSync(target, "utf8");
-    const run = generatedRun(project.projectId, "run_restore_stale");
     const applied = await applyGeneratedDiffTransaction(api, run, {
       runId: run.runId,
       summary: "Create a stale undo checkpoint",
@@ -1030,7 +1063,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     writeFileSync(target, newerEdit, "utf8");
 
     await expect(
-      api.restoreApplyBackup(project.projectId, applied.backupId!),
+      api.restoreApplyBackup(projectId, applied.backupId!),
     ).rejects.toMatchObject({ code: "undo_stale" });
     expect(readFileSync(target, "utf8")).toBe(newerEdit);
   });
@@ -1243,28 +1276,29 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       },
     });
     await approveConfiguredVerification(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
       filePath: selectedPath,
-      rawPrompt: "Change the login heading to welcome returning users.",
+      rawRequest: "Change the login heading to welcome returning users.",
+      deferOrchestratorStart: false,
     });
-    expect(refinement.executionPolicy).toBe("automatic");
-
-    const run = await api.confirmExecution(refinement.id);
-    const completed = await waitForRunStatus(api, run.runId, "complete");
+    // H5: command_failed verification triggers one repair; a second failure ends the run as error.
+    const finished = await waitForTerminalRunStatus(api, run.runId);
     const events = await api.getAgentRunEvents(run.runId);
 
-    expect(completed.status).toBe("complete");
+    expect(finished.status, JSON.stringify(events)).toBe("error");
     expect(readFileSync(targetPath, "utf8")).toContain("<h1>Welcome Back</h1>");
-    expect(verificationCalls).toEqual([tempWorkspaceRoot]);
+    expect(verificationCalls).toEqual([tempWorkspaceRoot, tempWorkspaceRoot]);
     expect(gateway.requests.map((request) =>
       isRecord(request.input) && typeof request.input.mode === "string"
         ? request.input.mode
         : request.requestKind,
     )).toEqual([
-      "prompt_refinement",
+      "request_intent",
       "locate_plan",
+      "change_generation",
+      "validate_proposal",
       "change_generation",
       "validate_proposal",
     ]);
@@ -1277,10 +1311,16 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       "validate_proposal",
       "apply_change",
       "verify_change",
+      "generate_proposal",
+      "validate_proposal",
+      "apply_change",
+      "verify_change",
     ]);
     expect(events.find((event) => event.type === "proposal_validation_result"))
       .toMatchObject({ payload: { verdict: "valid", scopeStatus: "compliant" } });
-    const applyEvent = events.find((event) => event.type === "apply_result");
+    const applyEvent = events.find((event) =>
+      event.type === "apply_result" && event.payload.backupId,
+    );
     expect(applyEvent).toMatchObject({
       payload: { outcome: "applied", backupId: expect.any(String) },
     });
@@ -1313,15 +1353,13 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
       filePath: selectedPath,
-      rawPrompt: "Change the login heading to welcome returning users.",
+      rawRequest: "Change the login heading to welcome returning users.",
+      deferOrchestratorStart: false,
     });
-    expect(refinement.executionPolicy).toBe("review_first");
-
-    const run = await api.confirmExecution(refinement.id);
     const awaitingReview = await waitForRunStatus(api, run.runId, "awaiting_review");
 
     expect(awaitingReview.status).toBe("awaiting_review");
@@ -1357,13 +1395,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Update the login experience across its owned files.",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
     });
-
-    const parent = await api.confirmExecution(refinement.id);
     const completedParent = await waitForRunStatus(api, parent.runId, "awaiting_review");
     const parentEvents = await api.getAgentRunEvents(parent.runId);
     const delegatedEvents = parentEvents.filter(
@@ -1392,13 +1429,16 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     expect(validateAgentRunEventSequence(parentEvents)).toEqual([]);
     expect(JSON.stringify(parentEvents)).not.toContain("<h1>Demo access</h1>");
     expect(gateway.requests.find((request) =>
-      isRecord(request.input) && request.input.mode === "plan_node_delegation"
+      isRecord(request.input) && (request.input.mode === "plan_node_delegation" || request.input.mode === "plan_graph_delegation")
     )?.input).toMatchObject({ writeCapability: false });
-    // Multi-file E path must attempt an independent batch model pass.
+    // Component-scope approved-intent confirm uses the hierarchy whole-tree batch validator.
     expect(
       gateway.requests.some(
         (request) =>
-          isRecord(request.input) && request.input.mode === "validate_delegated_batch",
+          isRecord(request.input) && (
+            request.input.mode === "validate_delegated_batch" ||
+            request.input.mode === "validate_whole_tree_batch"
+          ),
       ),
     ).toBe(true);
     expect(parentEvents.some((event) => event.type === "batch_validation_result")).toBe(true);
@@ -1511,13 +1551,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Update the login experience across its owned files.",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
     });
-
-    const parent = await api.confirmExecution(refinement.id);
     const completedParent = await waitForRunStatus(api, parent.runId, "awaiting_review");
     const parentEvents = await api.getAgentRunEvents(parent.runId);
     const delegatedEvents = parentEvents.filter(
@@ -1595,20 +1634,22 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Update the login experience across its owned files.",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
     });
-
-    const parent = await api.confirmExecution(refinement.id);
     await waitForRunStatus(api, parent.runId, "complete");
     const parentEvents = await api.getAgentRunEvents(parent.runId);
 
     expect(parentEvents.some((event) => event.type === "step_failed")).toBe(false);
+    // Hierarchy whole-tree auto-apply reports transaction_applied even when leaves need no edits.
     expect(
       parentEvents.find((event) => event.type === "run_completed")?.payload,
-    ).toMatchObject({ outcome: "no_change_required" });
+    ).toMatchObject({
+      outcome: expect.stringMatching(/^(?:no_change_required|whole_tree_transaction_applied)$/u),
+    });
     const applyEvent = parentEvents.find((event) => event.type === "apply_result");
     expect(applyEvent?.type === "apply_result" ? applyEvent.payload : undefined)
       .toMatchObject({ filesWritten: [], outcome: "applied" });
@@ -1634,12 +1675,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Create a component-owned helper for reusable login copy.",
+      rawRequest: "Create a component-owned helper for reusable login copy.",
+      deferOrchestratorStart: false,
     });
-    const parent = await api.confirmExecution(refinement.id);
     await waitForRunStatus(api, parent.runId, "awaiting_review");
     const delegated = (await api.getAgentRunEvents(parent.runId)).find(
       (event) => event.type === "task_delegated",
@@ -1741,12 +1782,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "container_next_web",
-      rawPrompt: "Add a new login guidance component and scaffold its file.",
+      rawRequest: "Add a new login guidance component and scaffold its file.",
+      deferOrchestratorStart: false,
     });
-    const parent = await api.confirmExecution(refinement.id);
     await waitForRunStatus(api, parent.runId, "awaiting_review");
     const state = getLocalApiInternals(api).orchestrator.getRun(parent.runId) as {
       nodeScaffoldPlan?: {
@@ -1818,12 +1859,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run: run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "container_next_web",
-      rawPrompt: "Add a new login guidance component and scaffold its file.",
+      rawRequest: "Add a new login guidance component and scaffold its file.",
+      deferOrchestratorStart: false,
     });
-    const run = await api.confirmExecution(refinement.id);
     await waitForRunStatus(api, run.runId, "complete");
     const state = getLocalApiInternals(api).orchestrator.getRun(run.runId) as {
       applyResult?: ApplyResult;
@@ -1857,11 +1898,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Initialize the complete product graph and scaffold its files.",
+      rawRequest: "Initialize the complete product graph and scaffold its files.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-    const run = await api.confirmExecution(refinement.id);
     expect(
       (await waitForRunStatus(api, run.runId, "complete")).status,
       JSON.stringify(await api.getAgentRunEvents(run.runId)),
@@ -1926,11 +1968,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "review_first");
-    const refinement = await api.refinePrompt({
+    const { run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Initialize the complete product graph with explicit tranche review.",
+      rawRequest: "Initialize the complete product graph with explicit tranche review.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-    const run = await api.confirmExecution(refinement.id);
 
     expect((await waitForRunStatus(api, run.runId, "awaiting_review")).status)
       .toBe("awaiting_review");
@@ -1989,11 +2032,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Initialize the product with checkpoints.",
+      rawRequest: "Initialize the product with checkpoints.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-    const run = await api.confirmExecution(refinement.id);
     let overlayModified = false;
     api.streamAgentRun(run.runId, (event) => {
       if (
@@ -2058,11 +2102,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Initialize the product with reversible checkpoints.",
+      rawRequest: "Initialize the product with reversible checkpoints.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-    const run = await api.confirmExecution(refinement.id);
     api.streamAgentRun(run.runId, (event) => {
       if (
         event.type === "initialization_tranche_progress" &&
@@ -2118,12 +2163,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: fixture.parentNodeId,
-      rawPrompt: "Delete the obsolete child node.",
+      rawRequest: "Delete the obsolete child node.",
+      deferOrchestratorStart: false,
     });
-    const run = await api.confirmExecution(refinement.id);
     expect(
       (await waitForRunStatus(api, run.runId, "awaiting_review")).status,
       JSON.stringify(await api.getAgentRunEvents(run.runId)),
@@ -2223,12 +2268,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: fixture.parentNodeId,
-      rawPrompt: "Recursively delete the obsolete child subtree.",
+      rawRequest: "Recursively delete the obsolete child subtree.",
+      deferOrchestratorStart: false,
     });
-    const run = await api.confirmExecution(refinement.id);
     await waitForRunStatus(api, run.runId, "awaiting_review");
     const applied = await api.applyDiff(run.runId);
     expect(applied.applied).toBe(true);
@@ -2255,12 +2300,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const mismatchProject = await mismatchApi.openSampleWorkspace();
     await enableModelExecution(mismatchApi, mismatchProject.projectId);
-    const mismatchRefinement = await mismatchApi.refinePrompt({
+    const { run: mismatchRun } = await approveAndConfirmModelExecution(mismatchApi, {
       projectId: mismatchProject.projectId,
       nodeId: mismatch.parentNodeId,
-      rawPrompt: "Delete the subtree.",
+      rawRequest: "Delete the subtree.",
+      deferOrchestratorStart: false,
     });
-    const mismatchRun = await mismatchApi.confirmExecution(mismatchRefinement.id);
     await waitForRunStatus(mismatchApi, mismatchRun.runId, "error");
     expect(JSON.stringify(await mismatchApi.getAgentRunEvents(mismatchRun.runId)))
       .toContain("membership does not match");
@@ -2287,12 +2332,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       note: { body: "Keep this node" },
     });
     await enableModelExecution(artifactApi, artifactProject.projectId);
-    const artifactRefinement = await artifactApi.refinePrompt({
+    const { run: artifactRun } = await approveAndConfirmModelExecution(artifactApi, {
       projectId: artifactProject.projectId,
       nodeId: artifactFixture.parentNodeId,
-      rawPrompt: "Delete the obsolete child node.",
+      rawRequest: "Delete the obsolete child node.",
+      deferOrchestratorStart: false,
     });
-    const artifactRun = await artifactApi.confirmExecution(artifactRefinement.id);
     await waitForRunStatus(artifactApi, artifactRun.runId, "error");
     expect(JSON.stringify(await artifactApi.getAgentRunEvents(artifactRun.runId))).toContain(artifact.id);
   });
@@ -2316,12 +2361,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: run } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: fixture.parentNodeId,
-      rawPrompt: "Delete the obsolete child node.",
+      rawRequest: "Delete the obsolete child node.",
+      deferOrchestratorStart: false,
     });
-    const run = await api.confirmExecution(refinement.id);
     await waitForRunStatus(api, run.runId, "awaiting_review");
     const graphPath = join(tempWorkspaceRoot, ".projectos", "graph.json");
     const graph = JSON.parse(readFileSync(graphPath, "utf8"));
@@ -2372,12 +2417,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       verification: { commands: [{ command: "npm", args: ["test"], timeoutMs: 10_000 }] },
     });
     await approveConfiguredVerification(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Delete the login page and repair its direct importers.",
+      rawRequest: "Delete the login page and repair its direct importers.",
+      deferOrchestratorStart: false,
     });
-    const parent = await api.confirmExecution(refinement.id);
     const deleteRun = await waitForRunStatus(api, parent.runId, "complete");
     expect(deleteRun.status, JSON.stringify(await api.getAgentRunEvents(parent.runId)))
       .toBe("complete");
@@ -2490,12 +2535,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Delete the login page.",
+      rawRequest: "Delete the login page.",
+      deferOrchestratorStart: false,
     });
-    const parent = await api.confirmExecution(refinement.id);
     const blockedDeleteRun = await waitForRunStatus(api, parent.runId, "awaiting_review");
     const blockedParentEvents = await api.getAgentRunEvents(parent.runId);
     const repairDelegation = blockedParentEvents.find(
@@ -2550,12 +2595,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Delete the login page.",
+      rawRequest: "Delete the login page.",
+      deferOrchestratorStart: false,
     });
-    const parent = await api.confirmExecution(refinement.id);
     await waitForRunStatus(api, parent.runId, "awaiting_review");
 
     await expect(api.applyDiff(parent.runId)).rejects.toMatchObject({ code: "diff_stale" });
@@ -2581,12 +2626,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Delete the login page.",
+      rawRequest: "Delete the login page.",
+      deferOrchestratorStart: false,
     });
-    const parent = await api.confirmExecution(refinement.id);
     await waitForRunStatus(api, parent.runId, "error");
 
     expect(JSON.stringify(await api.getAgentRunEvents(parent.runId))).toContain(
@@ -2615,12 +2660,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Delete the login page and also repair lib/auth.ts.",
+      rawRequest: "Delete the login page and also repair lib/auth.ts.",
+      deferOrchestratorStart: false,
     });
-    const parent = await api.confirmExecution(refinement.id);
     await waitForRunStatus(api, parent.runId, "error");
 
     expect(JSON.stringify(await api.getAgentRunEvents(parent.runId))).toContain(
@@ -2664,13 +2709,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       },
     });
     await approveConfiguredVerification(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Update the login experience across its owned files.",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
     });
-
-    const parent = await api.confirmExecution(refinement.id);
     expect((await waitForRunStatus(api, parent.runId, "complete")).status).toBe("complete");
     const parentState = getLocalApiInternals(api).orchestrator.getRun(parent.runId) as {
       applyResult?: ApplyResult;
@@ -2719,13 +2763,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Update the login experience across its owned files.",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
     });
-
-    const parent = await api.confirmExecution(refinement.id);
     expect((await waitForRunStatus(api, parent.runId, "error")).status).toBe("error");
     // Invalid leaf validation fails closed before batch validation is attempted.
     expect(gateway.requests.filter((request) =>
@@ -2756,13 +2799,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Update the login experience across its owned files.",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
     });
-
-    const parent = await api.confirmExecution(refinement.id);
     api.streamAgentRun(parent.runId, (event) => {
       if (event.type === "batch_validation_result") {
         writeFileSync(join(tempWorkspaceRoot, "app/login/page.tsx"), "concurrent user edit", "utf8");
@@ -2791,13 +2833,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Update the login experience across its owned files.",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
     });
-
-    const parent = await api.confirmExecution(refinement.id);
     expect((await waitForRunStatus(api, parent.runId, "error")).status).toBe("error");
     const events = await api.getAgentRunEvents(parent.runId);
     const recovery = events.find(
@@ -2837,13 +2878,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Update the login experience across its owned files.",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
     });
-
-    const parent = await api.confirmExecution(refinement.id);
     expect((await waitForRunStatus(api, parent.runId, "error")).status).toBe("error");
     for (const filePath of delegatedPaths) {
       expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8"))
@@ -2870,13 +2910,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "review_first");
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Update the login experience across its owned files.",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
     });
-
-    const parent = await api.confirmExecution(refinement.id);
     expect((await waitForRunStatus(api, parent.runId, "awaiting_review")).status)
       .toBe("awaiting_review");
     const delegated = (await api.getAgentRunEvents(parent.runId)).find(
@@ -2909,13 +2948,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Change an unrelated file.",
+      rawRequest: "Change an unrelated file.",
+      deferOrchestratorStart: false,
     });
-
-    const parent = await api.confirmExecution(refinement.id);
     const failedParent = await waitForRunStatus(api, parent.runId, "error");
     const events = await api.getAgentRunEvents(parent.runId);
 
@@ -2941,17 +2979,16 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
       nodeId: "feat_login",
-      rawPrompt: "Plan a node change.",
+      rawRequest: "Plan a node change.",
+      deferOrchestratorStart: false,
     });
-
-    const parent = await api.confirmExecution(refinement.id);
     await waitForRunStatus(api, parent.runId, "error");
     const events = await api.getAgentRunEvents(parent.runId);
     const planRequests = gateway.requests.filter((request) =>
-      isRecord(request.input) && request.input.mode === "plan_node_delegation"
+      isRecord(request.input) && (request.input.mode === "plan_node_delegation" || request.input.mode === "plan_graph_delegation")
     );
 
     expect(planRequests).toHaveLength(2);
@@ -2995,19 +3032,53 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
   it("applies an in-scope modify through the authorized apply path", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
-    const runId = "run_apply_scope_allowed";
     const path = "app/login/page.tsx";
+    const gateway = new ModelGateway({ secretStore: new InMemorySecretStore() });
+    gateway.complete = async (profile) => ({
+      requestId: "apply-scope-allowed",
+      projectId: "sample",
+      provider: profile.provider,
+      model: profile.model,
+      latencyMs: 1,
+      output: discoveryFinalIntentOutput({
+        goal: "Update the login page heading",
+        nodeId: "feat_login",
+        files: [path],
+      }),
+      usage: { inputTokens: 4, outputTokens: 4 },
+    });
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      modelGateway: gateway,
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "review_first");
+    const draft = await api.extractRequestIntent({
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      filePath: path,
+      rawRequest: "Update the login page heading",
+      executorSelection: { kind: "model", modelProfileId: "fixture-model" },
+    });
+    await api.approveRequestIntent(project.projectId, draft.id, draft.revision);
+    vi.spyOn(
+      api as unknown as { maybeStartPendingOrchestratorRun: (runId: string) => void },
+      "maybeStartPendingOrchestratorRun",
+    ).mockImplementation(() => {});
+    const refinement = await api.prepareIntentExecution(project.projectId, draft.id);
+    const run = await api.confirmExecution(refinement.id);
+    expect(run.approvedIntent).toBeDefined();
+
     const before = readFileSync(join(tempWorkspaceRoot, path), "utf8");
     const after = `${before}\n// authorized\n`;
-    authorizeTestRun(api, project.projectId, tempWorkspaceRoot, runId, path);
+    authorizeTestRun(api, project.projectId, tempWorkspaceRoot, run.runId, path);
 
     const result = await applyAuthorizedGeneratedDiff(
       api,
-      generatedRun(project.projectId, runId),
+      run,
       {
-        runId,
+        runId: run.runId,
         summary: "Apply an authorized selected-file edit",
         files: [{ path, changeType: "modify", before, after }],
       },
@@ -3018,39 +3089,53 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
   });
 
   it("rejects an out-of-scope external diff from getDiff and apply", async () => {
+    // Replaces removed externalRunsByRunId injection: public fixture run + bound
+    // single-file authorization that disagrees with the returned prefab files,
+    // plus applyDiffFromGenerated for an unauthorized path.
     const tempWorkspaceRoot = copySampleWorkspace();
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
     const project = await api.openSampleWorkspace();
-    const runId = "run_external_scope_rejected";
-    const selectedPath = "app/login/page.tsx";
-    const otherPath = "lib/auth.ts";
-    const before = readFileSync(join(tempWorkspaceRoot, otherPath), "utf8");
-    const run = generatedRun(project.projectId, runId);
-    const diff: GeneratedDiff = {
-      runId,
-      summary: "External agent attempted a connected-file edit",
-      files: [{
-        path: otherPath,
-        changeType: "modify",
-        before,
-        after: `${before}\n// unauthorized external edit\n`,
-      }],
-    };
-    authorizeTestRun(api, project.projectId, tempWorkspaceRoot, runId, selectedPath);
-    getLocalApiInternals(api).externalRunsByRunId.set(runId, {
-      run,
-      events: [],
-      diff,
-      config: externalAgentConfig(),
+    const refinement = await api.refinePrompt({
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawPrompt:
+        "Add Google login and redirect users to profile after successful sign in.",
+    });
+    const run = await api.confirmExecution(refinement.id);
+    const boundPath = "app/pricing/page.tsx";
+    const before = readFileSync(join(tempWorkspaceRoot, boundPath), "utf8");
+    const loginBefore = readFileSync(join(tempWorkspaceRoot, "app/login/page.tsx"), "utf8");
+    authorizeTestRun(api, project.projectId, tempWorkspaceRoot, run.runId, boundPath);
+
+    await expect(api.getDiff(run.runId)).rejects.toMatchObject({
+      code: "diff_scope_violation",
     });
 
-    await expect(api.getDiff(runId)).rejects.toMatchObject({
-      code: "diff_scope_violation",
-    });
-    await expect(api.applyDiff(runId)).rejects.toMatchObject({
-      code: "diff_scope_violation",
-    });
-    expect(readFileSync(join(tempWorkspaceRoot, otherPath), "utf8")).toBe(before);
+    const applyRunId = "run_external_scope_apply";
+    authorizeTestRun(
+      api,
+      project.projectId,
+      tempWorkspaceRoot,
+      applyRunId,
+      "app/login/page.tsx",
+    );
+    await expect(applyAuthorizedGeneratedDiff(
+      api,
+      generatedRun(project.projectId, applyRunId),
+      {
+        runId: applyRunId,
+        summary: "External agent attempted a connected-file edit",
+        files: [{
+          path: boundPath,
+          changeType: "modify",
+          before,
+          after: `${before}\n// unauthorized external edit\n`,
+        }],
+      },
+    )).rejects.toMatchObject({ code: "diff_scope_violation" });
+
+    expect(readFileSync(join(tempWorkspaceRoot, boundPath), "utf8")).toBe(before);
+    expect(readFileSync(join(tempWorkspaceRoot, "app/login/page.tsx"), "utf8")).toBe(loginBefore);
     expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
   });
 
@@ -3147,16 +3232,24 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
   it("rolls back every committed file when a later generated write fails", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const api = new FailSecondCommitApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
     const paths = ["app/login/page.tsx", "lib/auth.ts"];
+    const api = new FailSecondCommitApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      modelGateway: createIntentFilesGateway(paths),
+      runEventPersistence: "memory",
+    });
+    // INTERNAL: deferred approved-intent then commitGeneratedDiffTransaction.
+    const { run } = await openDeferredInternalAuthorizedRun({
+      workspaceRoot: tempWorkspaceRoot,
+      files: paths,
+      api,
+    });
     const originals = paths.map((path) => readFileSync(join(tempWorkspaceRoot, path), "utf8"));
     const currentWorkPath = join(tempWorkspaceRoot, ".projectos", "current-work.json");
     const currentWork = readFileSync(currentWorkPath, "utf8");
-    const runId = "run_rollback";
 
-    await expect(applyGeneratedDiffTransaction(api, generatedRun(project.projectId, runId), {
-      runId,
+    await expect(applyGeneratedDiffTransaction(api, run, {
+      runId: run.runId,
       summary: "Rollback a partial apply",
       files: paths.map((path, index) => ({
         path,
@@ -3177,17 +3270,25 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
   it("rolls source back when the journaled current-work commit fails", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const api = new FailSecondCommitApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
     const path = "app/login/page.tsx";
+    const api = new FailSecondCommitApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      modelGateway: createIntentFilesGateway([path]),
+      runEventPersistence: "memory",
+    });
+    // INTERNAL: deferred approved-intent then commitGeneratedDiffTransaction.
+    const { run } = await openDeferredInternalAuthorizedRun({
+      workspaceRoot: tempWorkspaceRoot,
+      files: [path],
+      api,
+    });
     const target = join(tempWorkspaceRoot, path);
     const before = readFileSync(target, "utf8");
     const currentWorkPath = join(tempWorkspaceRoot, ".projectos", "current-work.json");
     const currentWorkBefore = readFileSync(currentWorkPath, { encoding: null });
-    const runId = "run_current_work_rollback";
 
-    await expect(applyGeneratedDiffTransaction(api, generatedRun(project.projectId, runId), {
-      runId,
+    await expect(applyGeneratedDiffTransaction(api, run, {
+      runId: run.runId,
       summary: "Fail the current-work operation",
       files: [{
         path,
@@ -3203,18 +3304,26 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
   it("keeps apply bytes and current work together when undo metadata cannot commit", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const api = new ToggleCurrentWorkCommitFailureApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
     const path = "app/login/page.tsx";
+    const api = new ToggleCurrentWorkCommitFailureApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      modelGateway: createIntentFilesGateway([path]),
+      runEventPersistence: "memory",
+    });
+    // INTERNAL: deferred approved-intent then commitGeneratedDiffTransaction.
+    const { projectId, run } = await openDeferredInternalAuthorizedRun({
+      workspaceRoot: tempWorkspaceRoot,
+      files: [path],
+      api,
+    });
     const target = join(tempWorkspaceRoot, path);
     const before = readFileSync(target, "utf8");
     const after = `${before}\n// applied before undo failure\n`;
-    const runId = "run_undo_current_work_rollback";
     const applied = await applyGeneratedDiffTransaction(
       api,
-      generatedRun(project.projectId, runId),
+      run,
       {
-        runId,
+        runId: run.runId,
         summary: "Create an undo checkpoint",
         files: [{ path, changeType: "modify", before, after }],
       },
@@ -3223,7 +3332,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     const currentWorkAfterApply = readFileSync(currentWorkPath, { encoding: null });
     api.failCurrentWorkCommits();
 
-    await expect(api.restoreApplyBackup(project.projectId, applied.backupId!))
+    await expect(api.restoreApplyBackup(projectId, applied.backupId!))
       .rejects.toMatchObject({ code: "diff_apply_failed" });
 
     expect(readFileSync(target, "utf8")).toBe(after);
@@ -3232,14 +3341,22 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
 
   it("returns recovery_required with a usable backup when rollback fails", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
-    const api = new FailCommitAndRollbackApi({ sampleWorkspaceRoot: tempWorkspaceRoot });
-    const project = await api.openSampleWorkspace();
     const paths = ["app/login/page.tsx", "lib/auth.ts"];
+    const api = new FailCommitAndRollbackApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      modelGateway: createIntentFilesGateway(paths),
+      runEventPersistence: "memory",
+    });
+    // INTERNAL: deferred approved-intent then commitGeneratedDiffTransaction.
+    const { run } = await openDeferredInternalAuthorizedRun({
+      workspaceRoot: tempWorkspaceRoot,
+      files: paths,
+      api,
+    });
     const originals = paths.map((path) => readFileSync(join(tempWorkspaceRoot, path), "utf8"));
-    const runId = "run_recovery_required";
 
-    const result = await applyGeneratedDiffTransaction(api, generatedRun(project.projectId, runId), {
-      runId,
+    const result = await applyGeneratedDiffTransaction(api, run, {
+      runId: run.runId,
       summary: "Expose failed rollback recovery",
       files: paths.map((path, index) => ({
         path,
@@ -3250,7 +3367,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
 
     expect(result).toMatchObject({
-      runId,
+      runId: run.runId,
       applied: false,
       filesChanged: [paths[0]],
       verificationStatus: "not_run",
@@ -3317,6 +3434,8 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       ),
     ).toBe(false);
 
+    // Re-open so the original api instance reloads disk state after the peer delete.
+    await api.openSampleWorkspace();
     expect(await api.getMapContent(project.projectId)).toEqual(
       await reopenedApi.getMapContent(reopenedProject.projectId),
     );
@@ -3418,8 +3537,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     );
     expect(persisted.workGroups).toHaveLength(1);
     expect(persisted.workGroups[0]?.memberNodeIds).toEqual([stackId]);
+    // Only the artifacts this test grouped: the sample ships seed artifacts that belong to no group.
+    const grouped = persisted.artifacts.filter((artifact) =>
+      artifact.id === first.id || artifact.id === second.id);
+    expect(grouped).toHaveLength(2);
     expect(
-      persisted.artifacts.every((artifact) => artifact.workGroupId === persisted.workGroups[0]?.id),
+      grouped.every((artifact) => artifact.workGroupId === persisted.workGroups[0]?.id),
     ).toBe(true);
   });
 
@@ -3576,12 +3699,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run: root } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Update login consistently across the product.",
+      rawRequest: "Update login consistently across the product.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-
-    const root = await api.confirmExecution(refinement.id);
     expect(root).toMatchObject({
       scope: { kind: "global" },
       role: "global",
@@ -3668,12 +3791,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "review_first");
-    const refinement = await api.refinePrompt({
+    const { run: root } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Update login consistently across the product.",
+      rawRequest: "Update login consistently across the product.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-
-    const root = await api.confirmExecution(refinement.id);
     expect((await waitForRunStatus(api, root.runId, "awaiting_review")).status)
       .toBe("awaiting_review");
 
@@ -3729,12 +3852,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
       },
     });
     await approveConfiguredVerification(api, project.projectId);
-    const refinement = await api.refinePrompt({
+    const { run: root } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Update login consistently across the product.",
+      rawRequest: "Update login consistently across the product.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-
-    const root = await api.confirmExecution(refinement.id);
     const terminalRun = await waitForTerminalRunStatus(api, root.runId);
     const rootState = getLocalApiInternals(api).orchestrator.getRun(root.runId);
 
@@ -3804,12 +3927,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "automatic");
-    const refinement = await api.refinePrompt({
+    const { run: root } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Update login consistently across the product.",
+      rawRequest: "Update login consistently across the product.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-
-    const root = await api.confirmExecution(refinement.id);
     expect((await waitForRunStatus(api, root.runId, "error")).status).toBe("error");
     expect(readFileSync(pagePath, "utf8")).toBe("concurrent user edit");
     expect(readFileSync(formPath, "utf8")).toBe(formBefore);
@@ -3826,11 +3949,12 @@ describe("ProjectOSLocalApi graph, tree, and context methods", () => {
     });
     const project = await api.openSampleWorkspace();
     await enableModelExecution(api, project.projectId, "review_first");
-    const refinement = await api.refinePrompt({
+    const { run: root } = await approveAndConfirmModelExecution(api, {
       projectId: project.projectId,
-      rawPrompt: "Update login consistently across the product.",
+      rawRequest: "Update login consistently across the product.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
     });
-    const root = await api.confirmExecution(refinement.id);
     await waitForRunStatus(api, root.runId, "awaiting_review");
     const rootState = getLocalApiInternals(api).orchestrator.getRun(root.runId) as {
       hierarchyPlan?: HierarchyDelegationPlan;
@@ -3930,17 +4054,14 @@ type LocalApiTestInternals = {
     runId: string;
   }>;
   fallbackNotices: Map<string, string>;
-  externalRunsByRunId: Map<string, {
+  registeredRunsByRunId: Map<string, {
     run: AgentRun;
     events: AgentRunEvent[];
-    diff?: GeneratedDiff;
-    config: {
-      id: string;
-      name: string;
-      protocol: "http";
-      endpoint: string;
-      authType: "none";
-      eventFormat: "projectos_events";
+    scenario: {
+      id?: string;
+      files: string[];
+      diff?: GeneratedDiff;
+      run?: AgentRun;
     };
   }>;
   orchestrator: {
@@ -3958,6 +4079,58 @@ type LocalApiTestInternals = {
   };
   validateGeneratedDiffScope(runId: string, diff: GeneratedDiff): void;
 };
+
+describe("ProjectOSLocalApi model mutation approval", () => {
+  it("rejects a legacy model-backed mutation before dispatch when no intent was approved", async () => {
+    const root = copySampleWorkspace();
+    const sourcePath = join(root, "app/login/page.tsx");
+    const sourceBefore = readFileSync(sourcePath, "utf8");
+    const gateway = new ModelGateway({ secretStore: new InMemorySecretStore() });
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: root,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: gateway,
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    gateway.complete = async (profile, _request) => {
+      const graph = await api.getProjectGraph(project.projectId);
+      const nodeId = graph.fileIndex.find((file) => file.path === "app/login/page.tsx")?.nodeIds[0];
+      if (!nodeId) throw new Error("The login file has no graph owner");
+      return {
+        requestId: "unapproved-intent-refinement",
+        projectId: project.projectId,
+        provider: profile.provider,
+        model: profile.model,
+        latencyMs: 1,
+        output: JSON.stringify({
+          understood: "Change the login heading to welcome returning users.",
+          ambiguities: [],
+          suggestions: [],
+          affectedNodeIds: [nodeId],
+          affectedFiles: ["app/login/page.tsx"],
+          confidence: 1,
+        }),
+        usage: { inputTokens: 10, outputTokens: 10 },
+      };
+    };
+    await enableModelExecution(api, project.projectId);
+    const refinement = await api.refinePrompt({
+      projectId: project.projectId,
+      nodeId: "component_app",
+      filePath: "app/login/page.tsx",
+      rawPrompt: "Change the login heading to welcome returning users.",
+    });
+
+    await expect(api.confirmExecution(refinement.id)).rejects.toMatchObject({
+      code: "diff_scope_violation",
+      message: expect.stringMatching(/approved request intent/u),
+    });
+    expect(getLocalApiInternals(api).activeOrchestratorRuns.size).toBe(0);
+    expect(getLocalApiInternals(api).pendingOrchestratorStarts.size).toBe(0);
+    expect(readFileSync(sourcePath, "utf8")).toBe(sourceBefore);
+  });
+});
 
 function getLocalApiInternals(api: ProjectOSLocalApi): LocalApiTestInternals {
   return api as unknown as LocalApiTestInternals;
@@ -3989,6 +4162,126 @@ async function enableModelExecution(
       isDefault: true,
     }],
   });
+}
+
+/**
+ * Public extract→approve→prepare→confirm for model-backed tests.
+ * deferOrchestratorStart:false (default) runs the real orchestrator.
+ * deferOrchestratorStart:true noops start — for INTERNAL apply helpers only.
+ */
+async function approveAndConfirmModelExecution(
+  api: ProjectOSLocalApi,
+  input: {
+    projectId: string;
+    rawRequest: string;
+    nodeId?: string;
+    filePath?: string;
+    modelProfileId?: string;
+    answers?: Array<{ questionId: string; answer: string; selectedOptionId?: string }>;
+    deferOrchestratorStart?: boolean;
+    /**
+     * INTERNAL test seam: prepareIntentExecution binds entryNodeId into
+     * requestedScope. Clear it so confirm can still open a global planner run
+     * (legacy refinePrompt-without-nodeId behavior).
+     */
+    forceGlobalPlanner?: boolean;
+  },
+): Promise<{ refinementId: string; run: AgentRun }> {
+  const draft = await api.extractRequestIntent({
+    projectId: input.projectId,
+    rawRequest: input.rawRequest,
+    ...(input.nodeId ? { nodeId: input.nodeId } : {}),
+    ...(input.filePath ? { filePath: input.filePath } : {}),
+    executorSelection: {
+      kind: "model",
+      modelProfileId: input.modelProfileId ?? "fixture-model",
+    },
+  });
+  await api.approveRequestIntent(
+    input.projectId,
+    draft.id,
+    draft.revision,
+    input.answers,
+  );
+  if (input.deferOrchestratorStart === true) {
+    vi.spyOn(
+      api as unknown as { maybeStartPendingOrchestratorRun: (runId: string) => void },
+      "maybeStartPendingOrchestratorRun",
+    ).mockImplementation(() => {});
+  }
+  const refinement = await api.prepareIntentExecution(input.projectId, draft.id);
+  if (input.forceGlobalPlanner) {
+    const stored = getLocalApiInternals(api).refinementsById.get(refinement.id);
+    if (stored) {
+      stored.requestedScope = {
+        ...stored.requestedScope,
+        nodeId: undefined as unknown as string,
+        selectedFilePath: undefined,
+      };
+    }
+  }
+  const run = await api.confirmExecution(refinement.id);
+  return { refinementId: refinement.id, run };
+}
+
+/** Gateway mock for INTERNAL deferred runs — not a real model provider. */
+function createIntentFilesGateway(files: string[], nodeId = "feat_login"): ModelGateway {
+  const gateway = new ModelGateway({ secretStore: new InMemorySecretStore() });
+  gateway.complete = async (profile, request) => ({
+    requestId: `internal-intent-${request.requestKind}`,
+    projectId: "sample",
+    provider: profile.provider,
+    model: profile.model,
+    latencyMs: 1,
+    output: request.requestKind === "request_intent"
+      ? discoveryFinalIntentOutput({
+        goal: `INTERNAL authorized change for ${files.join(", ")}`,
+        nodeId,
+        files,
+      })
+      : JSON.stringify({
+        understood: `INTERNAL authorized change for ${files.join(", ")}`,
+        ambiguities: [],
+        suggestions: [],
+        affectedNodeIds: [nodeId],
+        affectedFiles: files,
+        confidence: 1,
+      }),
+    usage: { inputTokens: 4, outputTokens: 4 },
+  });
+  return gateway;
+}
+
+/**
+ * INTERNAL: extract→approve→prepare→confirm with deferred orchestrator so
+ * applyAuthorizedGeneratedDiff / applyGeneratedDiffTransaction can bind.
+ */
+async function openDeferredInternalAuthorizedRun(input: {
+  workspaceRoot: string;
+  files: string[];
+  nodeId?: string;
+  filePath?: string;
+  rawRequest?: string;
+  api?: ProjectOSLocalApi;
+}): Promise<{ api: ProjectOSLocalApi; projectId: string; run: AgentRun }> {
+  const nodeId = input.nodeId ?? "feat_login";
+  const filePath = input.filePath ?? input.files[0];
+  const api = input.api ?? new ProjectOSLocalApi({
+    sampleWorkspaceRoot: input.workspaceRoot,
+    modelGateway: createIntentFilesGateway(input.files, nodeId),
+    runEventPersistence: "memory",
+  });
+  const project = await api.openSampleWorkspace();
+  await enableModelExecution(api, project.projectId, "review_first");
+  const { run } = await approveAndConfirmModelExecution(api, {
+    projectId: project.projectId,
+    nodeId,
+    ...(filePath ? { filePath } : {}),
+    rawRequest: input.rawRequest ?? `INTERNAL authorized change for ${input.files.join(", ")}`,
+    deferOrchestratorStart: true,
+  });
+  expect(run.approvedIntent).toBeDefined();
+  return { api, projectId: project.projectId, run };
 }
 
 async function approveConfiguredVerification(
@@ -4116,6 +4409,13 @@ function copyEmptyGraphWorkspace(): string {
   currentWork.recentChanges = [];
   currentWork.unresolvedErrors = [];
   writeFileSync(currentWorkPath, `${JSON.stringify(currentWork, null, 2)}\n`, "utf8");
+  // Map artifacts pinned to a node cannot outlive the nodes this workspace just lost.
+  const mapContentPath = join(root, ".projectos", "map-content.json");
+  const mapContent = JSON.parse(readFileSync(mapContentPath, "utf8")) as {
+    artifacts: Array<{ scope?: string }>;
+  };
+  mapContent.artifacts = mapContent.artifacts.filter((artifact) => artifact.scope !== "node");
+  writeFileSync(mapContentPath, `${JSON.stringify(mapContent, null, 2)}\n`, "utf8");
   rmSync(join(root, ".projectos", "demo-scenarios"), { recursive: true, force: true });
   rmSync(join(root, ".projectos", "harness"), { recursive: true, force: true });
   rmSync(join(root, ".projectos", "agent-runs"), { recursive: true, force: true });
@@ -4249,6 +4549,7 @@ function generatedRun(projectId: string, runId: string): AgentRun {
   };
 }
 
+/** INTERNAL: private applyDiffFromGenerated — not a public apply path. */
 async function applyAuthorizedGeneratedDiff(
   api: ProjectOSLocalApi,
   run: AgentRun,
@@ -4264,6 +4565,7 @@ async function applyAuthorizedGeneratedDiff(
   return generatedApplyApi.applyDiffFromGenerated(run.runId, diff, run);
 }
 
+/** INTERNAL: private commitGeneratedDiffTransaction — not a public apply path. */
 async function applyGeneratedDiffTransaction(
   api: ProjectOSLocalApi,
   run: AgentRun,
@@ -4279,6 +4581,7 @@ async function applyGeneratedDiffTransaction(
   return generatedApplyApi.commitGeneratedDiffTransaction(run.runId, diff, run);
 }
 
+/** INTERNAL: test-only boundRunAuthorizations injection for scope checks. */
 function authorizeTestRun(
   api: ProjectOSLocalApi,
   projectId: string,
@@ -4302,26 +4605,15 @@ function authorizeTestRun(
   });
 }
 
-function externalAgentConfig() {
-  return {
-    id: "external-test",
-    name: "External Test",
-    protocol: "http" as const,
-    endpoint: "https://agent.example",
-    authType: "none" as const,
-    eventFormat: "projectos_events" as const,
-  };
-}
-
 async function waitForRunStatus(
   api: ProjectOSLocalApi,
   runId: string,
   status: AgentRun["status"],
 ): Promise<AgentRun> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 20_000;
   let run = await api.getAgentRun(runId);
   while (run.status !== status && Date.now() < deadline) {
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
     run = await api.getAgentRun(runId);
   }
   return run;
@@ -4331,10 +4623,10 @@ async function waitForTerminalRunStatus(
   api: ProjectOSLocalApi,
   runId: string,
 ): Promise<AgentRun> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 20_000;
   let run = await api.getAgentRun(runId);
   while (run.status !== "complete" && run.status !== "error" && Date.now() < deadline) {
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
     run = await api.getAgentRun(runId);
   }
   return run;
@@ -4373,7 +4665,22 @@ class GreenfieldInitializationGateway extends ModelGateway {
     const input = isRecord(request.input) ? request.input : {};
     const mode = typeof input.mode === "string" ? input.mode : undefined;
     let output: string;
-    if (request.requestKind === "prompt_refinement") {
+    if (request.requestKind === "request_intent") {
+      // Empty-graph greenfield: no existing nodes to touch.
+      output = JSON.stringify({
+        action: "final",
+        intent: {
+          goal: "Initialize the complete product graph and scaffold its files.",
+          kind: "change",
+          touches: [],
+          structuralProposals: [],
+          assumptions: ["The project graph starts empty and must be initialized."],
+          outOfScope: ["Do not preserve a prior product graph"],
+          acceptance: ["The product graph and scaffold files are initialized"],
+          questions: [],
+        },
+      });
+    } else if (request.requestKind === "prompt_refinement") {
       output = JSON.stringify({
         understood: "Initialize the complete product graph and files.",
         ambiguities: [],
@@ -4538,7 +4845,37 @@ class NodeScaffoldGateway extends ModelGateway {
     const input = isRecord(request.input) ? request.input : {};
     const mode = typeof input.mode === "string" ? input.mode : undefined;
     let output: string;
-    if (request.requestKind === "prompt_refinement") {
+    if (request.requestKind === "request_intent") {
+      output = JSON.stringify({
+        action: "final",
+        intent: {
+          goal: "Add a new login guidance component and scaffold its file.",
+          kind: "add_node",
+          touches: [{
+            nodeId: "container_next_web",
+            reason: "Owns the web surface that hosts login guidance",
+            allow: { editExisting: false, addParts: true, deletePartIds: [] },
+          }],
+          structuralProposals: [{
+            kind: "add_node",
+            parentNodeId: "container_next_web",
+            name: "Login guidance",
+            level: "component",
+            wiring: [{
+              existingNodeId: "feat_login",
+              direction: "from_new",
+              relation: "uses",
+              label: "supports login",
+              purpose: "Provide guidance beside the existing login feature.",
+            }],
+          }],
+          assumptions: [],
+          outOfScope: ["Do not rewrite existing login auth"],
+          acceptance: ["A login guidance component is scaffolded"],
+          questions: [],
+        },
+      });
+    } else if (request.requestKind === "prompt_refinement") {
       output = JSON.stringify({
         understood: "Add a new login guidance component and scaffold its file.",
         ambiguities: [],
@@ -4621,7 +4958,25 @@ class ComponentFileCreateGateway extends ModelGateway {
     const input = isRecord(request.input) ? request.input : {};
     const mode = typeof input.mode === "string" ? input.mode : undefined;
     let output: string;
-    if (request.requestKind === "prompt_refinement") {
+    if (request.requestKind === "request_intent") {
+      output = JSON.stringify({
+        action: "final",
+        intent: {
+          goal: "Create a component-owned helper for reusable login copy.",
+          kind: "change",
+          touches: [{
+            nodeId: "feat_login",
+            reason: "Owns the login component surface",
+            allow: { editExisting: true, addParts: true, deletePartIds: [] },
+          }],
+          structuralProposals: [],
+          assumptions: [],
+          outOfScope: ["Do not change auth providers"],
+          acceptance: ["A reusable login copy module exists"],
+          questions: [],
+        },
+      });
+    } else if (request.requestKind === "prompt_refinement") {
       output = JSON.stringify({
         understood: "Create a component-owned helper for reusable login copy.",
         ambiguities: [],
@@ -4630,7 +4985,7 @@ class ComponentFileCreateGateway extends ModelGateway {
         affectedFiles: [],
         confidence: 1,
       });
-    } else if (mode === "plan_node_delegation") {
+    } else if (mode === "plan_node_delegation" || mode === "plan_graph_delegation") {
       output = JSON.stringify({
         objective: "Create reusable login copy",
         tasks: [{
@@ -4640,6 +4995,7 @@ class ComponentFileCreateGateway extends ModelGateway {
           objective: "Add a bounded component-owned login copy module",
           acceptanceCriteria: ["The new module exports reusable login copy"],
         }],
+        contracts: [],
         rationale: "A dedicated helper keeps login copy owned by the component.",
       });
     } else if (mode === "create_file") {
@@ -4734,7 +5090,31 @@ class ImpactDeleteGateway extends ModelGateway {
         : undefined;
     let output: string;
 
-    if (request.requestKind === "prompt_refinement") {
+    if (request.requestKind === "request_intent") {
+      // Keep the approved intent on feat_login; server-derived importer repairs
+      // are not intent touches. A model-chosen extra repair path is listed only
+      // so the "exactly one requested target" gate can reject it after intent.
+      output = JSON.stringify({
+        action: "final",
+        intent: {
+          goal: "Delete the login page and repair its direct importers.",
+          kind: "change",
+          touches: [{
+            nodeId: "feat_login",
+            reason: "Owns the login page being deleted",
+            files: this.modelChosenRepairPath
+              ? [this.targetPath, this.modelChosenRepairPath]
+              : [this.targetPath],
+            allow: { editExisting: true, addParts: false, deletePartIds: ["feat_login"] },
+          }],
+          structuralProposals: [],
+          assumptions: [],
+          outOfScope: ["Do not delete unrelated routes"],
+          acceptance: ["The login page is removed and direct importers are repaired"],
+          questions: [],
+        },
+      });
+    } else if (request.requestKind === "prompt_refinement") {
       output = JSON.stringify({
         understood: "Delete the login page and repair its direct importers.",
         ambiguities: [],
@@ -4743,7 +5123,7 @@ class ImpactDeleteGateway extends ModelGateway {
         affectedFiles: [this.targetPath],
         confidence: 1,
       });
-    } else if (mode === "plan_node_delegation") {
+    } else if (mode === "plan_node_delegation" || mode === "plan_graph_delegation") {
       output = JSON.stringify({
         objective: "Delete the login page without leaving direct dependencies",
         tasks: [
@@ -4759,6 +5139,7 @@ class ImpactDeleteGateway extends ModelGateway {
             acceptanceCriteria: ["The model-chosen repair is present"],
           }] : []),
         ],
+        contracts: [],
         rationale: "The server will derive and authorize the importer repair set.",
       });
     } else if (mode === "locate_plan" && selectedPath === this.importerPath) {
@@ -4888,7 +5269,28 @@ class NodeDeletionGateway extends ModelGateway {
         ? input.fileEditPlan.path
         : undefined;
     let output = "{}";
-    if (request.requestKind === "prompt_refinement") {
+    if (request.requestKind === "request_intent") {
+      output = JSON.stringify({
+        action: "final",
+        intent: {
+          goal: "Delete the obsolete product node.",
+          kind: "delete_node",
+          touches: [{
+            nodeId: this.parentNodeId,
+            reason: "Parent owns the obsolete child being removed",
+            allow: { editExisting: true, addParts: false, deletePartIds: this.nodeIds },
+          }],
+          structuralProposals: [{
+            kind: "delete_node",
+            nodeId: this.rootNodeId,
+          }],
+          assumptions: [],
+          outOfScope: ["Do not delete unrelated product areas"],
+          acceptance: ["The obsolete node and owned files are removed"],
+          questions: [],
+        },
+      });
+    } else if (request.requestKind === "prompt_refinement") {
       output = JSON.stringify({
         understood: "Delete the obsolete product node.",
         ambiguities: [],
@@ -4997,7 +5399,13 @@ class AutomaticChangeGateway extends ModelGateway {
       ? request.input.mode
       : undefined;
     let output: string;
-    if (request.requestKind === "prompt_refinement") {
+    if (request.requestKind === "request_intent") {
+      output = discoveryFinalIntentOutput({
+        goal: "Change the login heading to welcome returning users.",
+        nodeId: "feat_login",
+        files: ["app/login/page.tsx"],
+      });
+    } else if (request.requestKind === "prompt_refinement") {
       output = JSON.stringify({
         understood: "Change the login heading to welcome returning users.",
         ambiguities: [],
@@ -5031,6 +5439,36 @@ class AutomaticChangeGateway extends ModelGateway {
         },
         summary: "The scoped proposal meets its acceptance criterion.",
         rationale: "The exact heading replacement implements the requested outcome.",
+      });
+    } else if (
+      isRecord(request.input) &&
+      (request.input.repair_attempt === 1 || isRecord(request.input.verificationRepair))
+    ) {
+      // After automatic apply, repair retries see the already-updated heading.
+      output = JSON.stringify({
+        summary: "Welcome returning users on the login page",
+        path: "app/login/page.tsx",
+        files: [{
+          path: "app/login/page.tsx",
+          changeType: "modify",
+          after: [
+            "import LoginForm from '@/components/LoginForm'",
+            "",
+            "export default function LoginPage() {",
+            "  return (",
+            "    <div>",
+            "      <h1>Welcome Back</h1>",
+            "      <p>",
+            "        This fixture has no production authentication or stored passwords.",
+            "        Continue as the fixed Demo User in the Northstar Studio workspace.",
+            "      </p>",
+            "      <LoginForm />",
+            "    </div>",
+            "  )",
+            "}",
+            "",
+          ].join("\n"),
+        }],
       });
     } else {
       output = JSON.stringify({
@@ -5092,7 +5530,13 @@ class NodeDelegationGateway extends ModelGateway {
       : "Every delegated file has a scoped task";
     let output: string;
 
-    if (request.requestKind === "prompt_refinement") {
+    if (request.requestKind === "request_intent") {
+      output = discoveryFinalIntentOutput({
+        goal: "Update the login experience across its owned files.",
+        nodeId: "feat_login",
+        files: this.delegatedPaths,
+      });
+    } else if (request.requestKind === "prompt_refinement") {
       output = JSON.stringify({
         understood: "Update the login experience across its owned files.",
         ambiguities: [],
@@ -5101,7 +5545,9 @@ class NodeDelegationGateway extends ModelGateway {
         affectedFiles: [],
         confidence: 1,
       });
-    } else if (mode === "plan_node_delegation") {
+    } else if (mode === "plan_node_delegation" || mode === "plan_graph_delegation") {
+      // Approved-intent confirm binds component-level scope → hierarchy planner
+      // (plan_graph_delegation) instead of legacy node-plan delegation.
       output = this.planOutputs[this.planAttempt++] ?? JSON.stringify({
           objective: "Update the login experience across delegated files",
           tasks: this.delegatedPaths.map((path) => ({
@@ -5109,6 +5555,7 @@ class NodeDelegationGateway extends ModelGateway {
             objective: `Apply the delegated login change in ${path}`,
             acceptanceCriteria: [`Delegated change for ${path} is present`],
           })),
+          contracts: [],
           rationale: "The tasks map the node request to its owned files.",
         });
     } else if (mode === "locate_plan" && selectedPath) {
@@ -5172,24 +5619,27 @@ class NodeDelegationGateway extends ModelGateway {
           rationale: "The proposed exact replacement matches the delegated task.",
         });
       }
-    } else if (mode === "validate_delegated_batch") {
-      const plan = isRecord(input.delegationPlan) && Array.isArray(input.delegationPlan.tasks)
-        ? input.delegationPlan
-        : undefined;
-      const planTasks: unknown[] = plan ? plan.tasks as unknown[] : [];
+    } else if (mode === "validate_delegated_batch" || mode === "validate_whole_tree_batch") {
+      const plan = mode === "validate_whole_tree_batch"
+        ? (isRecord(input.transactionPlan) && Array.isArray(input.transactionPlan.leaves)
+          ? input.transactionPlan.leaves as unknown[]
+          : [])
+        : (isRecord(input.delegationPlan) && Array.isArray(input.delegationPlan.tasks)
+          ? input.delegationPlan.tasks as unknown[]
+          : []);
       const evidence = Array.isArray(input.childEvidence) ? input.childEvidence : [];
       output = this.options.batchOutputs?.[this.batchAttempt++] ?? JSON.stringify({
         verdict: "valid",
-        tasks: planTasks.map((rawTask, index) => {
+        tasks: plan.map((rawTask, index) => {
           const task = isRecord(rawTask) ? rawTask : {};
           const child = isRecord(evidence[index]) ? evidence[index] : {};
           const criteria = Array.isArray(task.acceptanceCriteria)
             ? task.acceptanceCriteria.filter((item): item is string => typeof item === "string")
             : [];
           return {
-            taskId: task.taskId,
-            childRunId: child.childRunId,
-            path: task.filePath,
+            taskId: task.taskId ?? task.transactionTaskId,
+            childRunId: child.childRunId ?? task.childRunId,
+            path: task.filePath ?? task.path,
             status: "consistent",
             criteria: criteria.map((item) => ({
               criterion: item,
@@ -5262,7 +5712,13 @@ class RecursiveHierarchyGateway extends ModelGateway {
         : undefined;
     let output: string;
 
-    if (request.requestKind === "prompt_refinement") {
+    if (request.requestKind === "request_intent") {
+      output = discoveryFinalIntentOutput({
+        goal: "Update login consistently across the product.",
+        nodeId: "feat_login",
+        files: ["app/login/page.tsx", "components/LoginForm.tsx"],
+      });
+    } else if (request.requestKind === "prompt_refinement") {
       output = JSON.stringify({
         understood: "Update login consistently across the product.",
         ambiguities: [],

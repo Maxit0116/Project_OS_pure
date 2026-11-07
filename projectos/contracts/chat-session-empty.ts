@@ -58,11 +58,11 @@ export function isEmptySessionPastValidTime(
 export interface EmptySessionDisposalInput {
   head: ChatSessionHead;
   messages: ReadonlyArray<Pick<ChatMessage, "role" | "content">>;
-  draft?: ComposerDraft | string | null;
+  draft?: ComposerDraft | string | null | undefined;
   heads: ReadonlyArray<Pick<ChatSessionHead, "id" | "parentSessionId">>;
   pinnedIds: ReadonlyArray<string>;
-  nowMs?: number;
-  validMs?: number;
+  nowMs?: number | undefined;
+  validMs?: number | undefined;
 }
 
 /**

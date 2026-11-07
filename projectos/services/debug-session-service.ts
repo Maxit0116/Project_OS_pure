@@ -61,9 +61,9 @@ export function findHarnessRecordForSession(
     harnessDescriptionsMatch(candidate.rawError, session.bugDescription),
   );
   if (byError) return byError;
-  if (session.scope.kind === "global") return undefined;
-  const nodeId = session.scope.nodeId;
-  return records.find((candidate) => candidate.businessNodeId === nodeId);
+  const scope = session.scope;
+  if (scope.kind === "global") return undefined;
+  return records.find((candidate) => candidate.businessNodeId === scope.nodeId);
 }
 
 export function resolveDebugFixFilePath(
@@ -176,8 +176,8 @@ export function applyBugAlignmentPatches(
   patches: Array<{
     id: string;
     selected: boolean;
-    comment?: string;
-    rejected?: boolean;
+    comment?: string | undefined;
+    rejected?: boolean | undefined;
   }>,
 ): DebugSession {
   const bugs = session.bugs ?? buildBugAlignmentItems(session.sessionId, session.bugDescription);

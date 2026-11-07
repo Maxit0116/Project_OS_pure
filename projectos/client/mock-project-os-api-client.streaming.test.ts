@@ -1,20 +1,24 @@
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createMockSampleWorkspace,
   MOCK_SAMPLE_WORKSPACE_ROOT,
   MockProjectOSApiClient,
 } from "../client/mock-project-os-api-client.js";
+import { InMemorySecretStore } from "../persistence/secret-store.js";
 import type { LocalContextAssemblerDependency } from "../services/project-os-local-api.js";
+import { ModelGateway } from "../services/model-gateway/gateway.js";
+import { discoveryFinalIntentOutput } from "../services/test-support/approved-intent-harness.js";
 
 const googleLoginPrompt =
   "Add Google login and redirect users to profile after successful sign in.";
 const temporaryRoots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -42,26 +46,8 @@ describe("MockProjectOSApiClient agent run streaming", () => {
   });
 
   it("exposes orchestrator events through getAgentRunEvents", async () => {
-    const mock = new MockProjectOSApiClient({
-      localContextAssembler: mockLocalContextAssembler,
-    });
-    const project = await mock.openSampleWorkspace();
-    await enableModelExecution(mock, project.projectId);
-
-    const refinement = await mock.refinePrompt({
-      projectId: project.projectId,
-      nodeId: "feat_login",
-      filePath: "app/login/page.tsx",
-      rawPrompt: googleLoginPrompt,
-    });
-    expect(refinement.fallback).toMatchObject({
-      stage: "prompt_refinement",
-      backend: "model",
-      profileId: "fixture-model",
-      message: expect.stringContaining("deterministic fallback"),
-      providerMessage: expect.stringContaining("missing an API key"),
-    });
-    const run = await mock.confirmExecution(refinement.id);
+    const { mock, projectId } = await openApprovedIntentStreamingClient();
+    const run = await startApprovedStreamingRun(mock, projectId);
 
     const streamed: string[] = [];
     mock.streamAgentRun(run.runId, (event) => {
@@ -73,25 +59,11 @@ describe("MockProjectOSApiClient agent run streaming", () => {
     expect(snapshot.some((event) => event.type === "step_started")).toBe(true);
     expect(streamed).toContain("run_started");
     expect(streamed).toContain("step_started");
-    await expect(mock.consumeFallbackNotice(project.projectId)).resolves.toContain(
-      "deterministic fallback",
-    );
   });
 
   it("starts orchestrator work when clients poll without subscribing", async () => {
-    const mock = new MockProjectOSApiClient({
-      localContextAssembler: mockLocalContextAssembler,
-    });
-    const project = await mock.openSampleWorkspace();
-    await enableModelExecution(mock, project.projectId);
-    const refinement = await mock.refinePrompt({
-      projectId: project.projectId,
-      nodeId: "feat_login",
-      filePath: "app/login/page.tsx",
-      rawPrompt: googleLoginPrompt,
-    });
-
-    const run = await mock.confirmExecution(refinement.id);
+    const { mock, projectId } = await openApprovedIntentStreamingClient();
+    const run = await startApprovedStreamingRun(mock, projectId);
     const events = await mock.getAgentRunEvents(run.runId);
 
     expect(events.map((event) => event.type)).toEqual(
@@ -100,18 +72,8 @@ describe("MockProjectOSApiClient agent run streaming", () => {
   });
 
   it("replays orchestrator events without duplicate event ids", async () => {
-    const mock = new MockProjectOSApiClient({
-      localContextAssembler: mockLocalContextAssembler,
-    });
-    const project = await mock.openSampleWorkspace();
-    await enableModelExecution(mock, project.projectId);
-    const refinement = await mock.refinePrompt({
-      projectId: project.projectId,
-      nodeId: "feat_login",
-      filePath: "app/login/page.tsx",
-      rawPrompt: googleLoginPrompt,
-    });
-    const run = await mock.confirmExecution(refinement.id);
+    const { mock, projectId } = await openApprovedIntentStreamingClient();
+    const run = await startApprovedStreamingRun(mock, projectId);
     const eventIds: string[] = [];
 
     mock.streamAgentRun(run.runId, (event) => eventIds.push(event.eventId));
@@ -125,20 +87,11 @@ describe("MockProjectOSApiClient agent run streaming", () => {
     const workspace = createMockSampleWorkspace();
     workspace.workspaceRoot = workspaceRoot;
     workspace.projectOSRoot = join(workspaceRoot, ".projectos");
-    const mock = new MockProjectOSApiClient({
+    const { mock, projectId } = await openApprovedIntentStreamingClient({
       workspace,
       runEventPersistence: "filesystem",
-      localContextAssembler: mockLocalContextAssembler,
     });
-    const project = await mock.openSampleWorkspace();
-    await enableModelExecution(mock, project.projectId);
-    const refinement = await mock.refinePrompt({
-      projectId: project.projectId,
-      nodeId: "feat_login",
-      filePath: "app/login/page.tsx",
-      rawPrompt: googleLoginPrompt,
-    });
-    const run = await mock.confirmExecution(refinement.id);
+    const run = await startApprovedStreamingRun(mock, projectId);
 
     const streamed: string[] = [];
     const disposable = mock.streamAgentRun(run.runId, (event) => {
@@ -163,18 +116,8 @@ describe("MockProjectOSApiClient agent run streaming", () => {
   });
 
   it("keeps mock:// orchestrator events in memory without writing run logs", async () => {
-    const mock = new MockProjectOSApiClient({
-      localContextAssembler: mockLocalContextAssembler,
-    });
-    const project = await mock.openSampleWorkspace();
-    await enableModelExecution(mock, project.projectId);
-    const refinement = await mock.refinePrompt({
-      projectId: project.projectId,
-      nodeId: "feat_login",
-      filePath: "app/login/page.tsx",
-      rawPrompt: googleLoginPrompt,
-    });
-    const run = await mock.confirmExecution(refinement.id);
+    const { mock, projectId } = await openApprovedIntentStreamingClient();
+    const run = await startApprovedStreamingRun(mock, projectId);
 
     const streamed: string[] = [];
     const disposable = mock.streamAgentRun(run.runId, (event) => {
@@ -281,6 +224,61 @@ const mockLocalContextAssembler: LocalContextAssemblerDependency = {
     };
   },
 };
+
+async function openApprovedIntentStreamingClient(options?: {
+  workspace?: ReturnType<typeof createMockSampleWorkspace>;
+  runEventPersistence?: "memory" | "filesystem";
+}): Promise<{ mock: MockProjectOSApiClient; projectId: string }> {
+  const gateway = new ModelGateway({ secretStore: new InMemorySecretStore() });
+  gateway.complete = async (profile, request) => {
+    const output = request.requestKind === "request_intent"
+      ? discoveryFinalIntentOutput({
+        goal: googleLoginPrompt,
+        nodeId: "feat_login",
+        files: ["app/login/page.tsx"],
+      })
+      : JSON.stringify({
+        summary: "Streaming fixture edit",
+        path: "app/login/page.tsx",
+        edits: [{ search: "Demo access", replace: "Welcome Back" }],
+      });
+    return {
+      requestId: "streaming-intent",
+      projectId: "sample",
+      provider: profile.provider,
+      model: profile.model,
+      latencyMs: 1,
+      output,
+      usage: { inputTokens: 4, outputTokens: 4 },
+    };
+  };
+  const mock = new MockProjectOSApiClient({
+    ...(options?.workspace ? { workspace: options.workspace } : {}),
+    ...(options?.runEventPersistence ? { runEventPersistence: options.runEventPersistence } : {}),
+    localContextAssembler: mockLocalContextAssembler,
+    modelGateway: gateway,
+  });
+  const project = await mock.openSampleWorkspace();
+  await enableModelExecution(mock, project.projectId);
+  return { mock, projectId: project.projectId };
+}
+
+async function startApprovedStreamingRun(
+  mock: MockProjectOSApiClient,
+  projectId: string,
+) {
+  const draft = await mock.extractRequestIntent({
+    projectId,
+    nodeId: "feat_login",
+    filePath: "app/login/page.tsx",
+    rawRequest: googleLoginPrompt,
+    executorSelection: { kind: "model", modelProfileId: "fixture-model" },
+  });
+  await mock.approveRequestIntent(projectId, draft.id, draft.revision);
+  // Real orchestration (no defer): streaming coverage needs run_started/step_started.
+  const refinement = await mock.prepareIntentExecution(projectId, draft.id);
+  return mock.confirmExecution(refinement.id);
+}
 
 async function enableModelExecution(
   mock: MockProjectOSApiClient,

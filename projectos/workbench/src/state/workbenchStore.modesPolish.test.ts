@@ -12,7 +12,7 @@ describe('workbenchStore modes polish', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
       } as never,
-      client: null,
+      client: {} as ProjectOSApi,
       chatMode: 'change',
       activeCustomModeSkillId: null,
       customModePreviousChatMode: null,

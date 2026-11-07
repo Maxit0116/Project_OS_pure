@@ -76,10 +76,15 @@ export interface ProjectOSBridge {
     showDiffReady(payload: {
       title: string
       body: string
-      destination: 'ask' | 'diff' | 'reminder'
+      destination: 'ask' | 'diff' | 'reminder' | 'decisions'
       runIds: string[]
+      decisionId?: string
     }): Promise<void>;
-    onActivated(listener: (payload: { destination: 'ask' | 'diff' | 'reminder'; runIds: string[] }) => void): Disposable;
+    onActivated(listener: (payload: {
+      destination: 'ask' | 'diff' | 'reminder' | 'decisions'
+      runIds: string[]
+      decisionId?: string
+    }) => void): Disposable;
   };
   keepAwake: {
     getStatus(): Promise<KeepAwakeStatus>;

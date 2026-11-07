@@ -50,9 +50,9 @@ async function detectListeningPorts(): Promise<ServicePort[]> {
 
     for (const line of stdout.split('\n')) {
       if (!line || line.startsWith('COMMAND')) continue
-      const match = line.match(/:(\d+)\s+\(LISTEN\)/)
-      if (!match) continue
-      const port = Number.parseInt(match[1], 10)
+      const portText = line.match(/:(\d+)\s+\(LISTEN\)/)?.[1]
+      if (portText === undefined) continue
+      const port = Number.parseInt(portText, 10)
       if (!Number.isFinite(port) || port <= 0) continue
       if (!COMMON_DEV_PORTS.has(port) && port > 1024 && port < 65535) {
         // include non-common high ports sparingly
@@ -61,8 +61,8 @@ async function detectListeningPorts(): Promise<ServicePort[]> {
 
       const hostMatch = line.match(/\(([^)]+)\)/)
       const host = hostMatch?.[1]?.includes('localhost') ? 'localhost' : 'localhost'
-      const pidMatch = line.match(/^\S+\s+(\d+)/)
-      const pid = pidMatch ? Number.parseInt(pidMatch[1], 10) : undefined
+      const pidText = line.match(/^\S+\s+(\d+)/)?.[1]
+      const pid = pidText !== undefined ? Number.parseInt(pidText, 10) : undefined
       ports.set(port, toServicePort(port, host, 'detected', pid))
     }
 

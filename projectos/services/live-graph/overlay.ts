@@ -456,10 +456,9 @@ function applyTaskDelegated(
     labelOverride: filePath
       ? fileLabel(filePath)
       : `delegate:${targetNodeId}`.slice(0, 80),
-    forceNodeIds:
-      !filePath || resolvePathToNodeIds(filePath, fileIndex).length === 0
-        ? [targetNodeId]
-        : undefined,
+    ...(!filePath || resolvePathToNodeIds(filePath, fileIndex).length === 0
+      ? { forceNodeIds: [targetNodeId] }
+      : {}),
   });
 
   const waitingId = Object.keys(next.activitiesById).find((id) => {
@@ -556,8 +555,8 @@ function settleRunningActivities(
 function activityId(input: {
   runId: string;
   kind: LiveNodeActivityKind;
-  path?: string;
-  phaseId?: string;
+  path?: string | undefined;
+  phaseId?: string | undefined;
   label?: string;
 }): string {
   const scope = input.path
@@ -574,14 +573,15 @@ function normalizeKey(value: string): string {
 function upsertPathActivity(
   overlay: ExecutionOverlay,
   input: {
+    // Event payloads carry these as possibly-undefined; both are handled below.
     runId: string;
-    path?: string;
+    path?: string | undefined;
     kind: LiveNodeActivityKind;
     status: LiveNodeActivityStatus;
     eventId: string;
     timestamp: string;
     fileIndex: readonly LiveGraphFileIndexEntry[];
-    phaseId?: string;
+    phaseId?: string | undefined;
     labelOverride?: string;
     preferKinds?: LiveNodeActivityKind[];
     /** When path is missing or unmapped, pin to these node ids (e.g. delegated nodeId). */

@@ -309,6 +309,7 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
     liveGraphFocusTaskId: null,
     liveGraphPausedRunId: null,
     diffReady: false,
+    diffReviewOnlyReason: null,
     generatedDiff: null,
     applyResult: null,
     verificationResult: null,

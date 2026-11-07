@@ -1,13 +1,33 @@
 import { describe, expect, it } from 'vitest'
 
-import type { AgentActionEvent, AgentRunEvent, ProjectOSApi } from '@contracts/index'
+import type {
+  AgentActionEvent,
+  AgentRunEvent,
+  ProjectGraph,
+  ProjectOSApi,
+} from '@contracts/index'
 import { AgentRunEventSchema } from '@contracts/index'
 import { agentActionMetadata } from '../components/AgentFlow/AgentActionRow'
 import {
   checkpointPatchForAppliedResult,
+  isAgentDelegationEvent,
   reduceRunEventState,
   type RunEventStoreSlice,
 } from './handleRunEvent'
+
+function graphWithMappedFile(path: string, nodeIds: string[]): ProjectGraph {
+  return {
+    version: '0.5.0',
+    projectId: 'p_live',
+    projectName: 'Live',
+    projectType: 'nextjs-app',
+    analyzedAt: '2026-10-20T00:00:00.000Z',
+    analysisStatus: 'complete',
+    nodes: [],
+    edges: [],
+    fileIndex: [{ path, nodeIds, type: 'page', imports: [], exports: [] }],
+  }
+}
 
 function baseState(): RunEventStoreSlice {
   return {
@@ -42,9 +62,7 @@ describe('Live Graph execution overlay', () => {
   it('projects file_read onto mapped nodes from graph.fileIndex', () => {
     const state = {
       ...baseState(),
-      graph: {
-        fileIndex: [{ path: 'app/login/page.tsx', nodeIds: ['code_login'], type: 'page', imports: [], exports: [] }],
-      } as RunEventStoreSlice['graph'],
+      graph: graphWithMappedFile('app/login/page.tsx', ['code_login']),
     }
     const action = parse({
       eventId: 'evt_live_read',
@@ -59,11 +77,7 @@ describe('Live Graph execution overlay', () => {
   })
 
   it('merges child run events into the same overlay without wiping parent activity', () => {
-    const graph = {
-      fileIndex: [
-        { path: 'app/login/page.tsx', nodeIds: ['code_login'], type: 'page', imports: [], exports: [] },
-      ],
-    } as RunEventStoreSlice['graph']
+    const graph = graphWithMappedFile('app/login/page.tsx', ['code_login'])
     const parent = parse({
       eventId: 'evt_parent',
       runId: 'run_parent',
@@ -269,7 +283,38 @@ describe('Agent Flow action trace state', () => {
         format: 'markdown',
       }],
     })
-    expect(verificationPatch.messages?.[0]?.content).toContain('Changed and verified')
+    // The test used to pin "Changed and verified" for a run whose verification FAILED. A summary must
+    // only claim what was checked.
+    expect(verificationPatch.messages?.[0]?.content).toContain('verification failed')
+    expect(verificationPatch.messages?.[0]?.content).not.toContain('Changed and verified')
+  })
+
+  it.each([
+    ['passed', 'Changed and verified', 'not verified'],
+    ['failed', 'verification failed', 'Changed and verified'],
+    ['not_run', 'Changed, not verified', 'Changed and verified'],
+  ] as const)('words the automatic-apply summary for a %s verification only as far as it was checked', (status, shown, hidden) => {
+    const apply = parse({
+      eventId: 'evt_apply',
+      runId: 'run_words',
+      timestamp: '2026-07-18T00:00:00.000Z',
+      type: 'apply_result',
+      phaseId: 'step_apply',
+      payload: { filesWritten: ['lib/data.ts'], backupId: 'backup-words', outcome: 'applied' },
+    })
+    const applied = { ...baseState(), ...reduceRunEventState(baseState(), apply) }
+    const patch = reduceRunEventState(applied, parse({
+      eventId: 'evt_verification',
+      runId: 'run_words',
+      timestamp: '2026-07-18T00:00:01.000Z',
+      type: 'verification_completed',
+      payload: { status },
+    }))
+    const content = patch.messages?.find((message) => message.id === 'automatic_apply_run_words')?.content ?? ''
+    expect(content).toContain(shown)
+    expect(content).not.toContain(hidden)
+    // The raw enum value must not reach a person.
+    expect(content).not.toContain('not_run')
   })
 
   it('stores durable delegation events separately from the parent action trace', () => {
@@ -286,6 +331,10 @@ describe('Agent Flow action trace state', () => {
         filePath: 'app/login/page.tsx',
       },
     })
+    expect(isAgentDelegationEvent(delegated)).toBe(true)
+    if (!isAgentDelegationEvent(delegated)) {
+      throw new Error('expected task_delegated to be a delegation event')
+    }
 
     const patch = reduceRunEventState(baseState(), delegated)
     expect(patch.flowDelegationEvents).toEqual([delegated])

@@ -10,7 +10,7 @@ export const MCP_TOOL_RESULT_MAX_CHARS = 32_000;
 export async function executeMcpToolCall(input: {
   call: ModelToolCall;
   getClient: (serverId: string) => Promise<Client>;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }): Promise<ModelToolExecutionResult> {
   const parsed = parseMcpToolName(input.call.name);
   if (!parsed) {

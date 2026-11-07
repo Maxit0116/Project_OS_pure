@@ -41,9 +41,9 @@ function placement(
 
 describe("ui-stencil catalog", () => {
   it("exposes a validated MVP catalog with unique ids", () => {
-    expect(UI_STENCIL_CATALOG_VERSION).toBe("0.1.0");
+    expect(UI_STENCIL_CATALOG_VERSION).toBe("0.2.0");
     expect(UI_STENCIL_CATALOG.length).toBeGreaterThanOrEqual(28);
-    expect(UI_STENCIL_CATALOG.length).toBeLessThanOrEqual(40);
+    expect(UI_STENCIL_CATALOG.length).toBeLessThanOrEqual(55);
     const ids = UI_STENCIL_CATALOG.map((item) => item.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(getStencilById("btn-primary")?.category).toBe("base");

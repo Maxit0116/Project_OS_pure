@@ -26,7 +26,7 @@ export function evaluateLlmRewrite(args: {
   before: string;
   after: string;
   reason: string;
-  excerpt?: string | null;
+  excerpt?: string | null | undefined;
 }): RewriteEvalResult {
   const reasons: string[] = [];
   const cleaned = cleanLlmRewriteOutput(args.after);

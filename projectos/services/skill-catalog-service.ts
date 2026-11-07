@@ -23,7 +23,8 @@ function parseFrontmatter(raw: string): {
     return { frontmatter: {}, body: raw };
   }
   const frontmatter: Record<string, unknown> = {};
-  for (const line of match[1].split("\n")) {
+  const [, frontmatterBlock = "", body = ""] = match;
+  for (const line of frontmatterBlock.split("\n")) {
     const colon = line.indexOf(":");
     if (colon === -1) continue;
     const key = line.slice(0, colon).trim();
@@ -39,7 +40,7 @@ function parseFrontmatter(raw: string): {
     }
     frontmatter[key] = value;
   }
-  return { frontmatter, body: match[2] };
+  return { frontmatter, body };
 }
 
 function collectSkillFiles(

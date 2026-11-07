@@ -51,7 +51,7 @@ import type {
 import {
   deriveExecutionEdges,
   focusNodeIdSet,
-  summarizeNodeLiveActivity,
+  summarizeNodeLiveActivityWithDecisions,
 } from '../../../../services/live-graph/index.js'
 import { impactStructureGraph } from '../../../../services/structure-graph-impact.js'
 import type { LiveExecutionEdge } from '@contracts/index'
@@ -963,7 +963,6 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     selectedNodeId,
     onSelectNode,
     onSelectFile,
-    onClearSelection,
     search,
     mapSearchFocus,
     clearMapSearchFocus,
@@ -994,6 +993,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   const bouncingNodeIds = useWorkbenchStore((s) => s.bouncingNodeIds)
   const flashKey = useWorkbenchStore((s) => s.flashKey)
   const executionOverlay = useWorkbenchStore((s) => s.executionOverlay)
+  const runDecisions = useWorkbenchStore((s) => s.runDecisions)
   const liveGraphFocusTaskId = useWorkbenchStore((s) => s.liveGraphFocusTaskId)
   const labNodeFindingCounts = useProductLabStore((s) => s.nodeFindingCounts)
   const durableGraph = useWorkbenchStore((s) => s.graph)
@@ -1896,7 +1896,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
               members: c4Node.members,
               selected: n.id === selectedNodeId,
               dimmed: nodeDimmed,
-              liveSummary: summarizeNodeLiveActivity(executionOverlay, n.id),
+              liveSummary: summarizeNodeLiveActivityWithDecisions(executionOverlay, n.id, runDecisions),
               canOpenGraph: canDrillIntoNode(n.id),
               onOpenGraph: () => drillIntoNode(n.id),
               openGraphLabel,
@@ -1965,7 +1965,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
           dimmed: nodeDimmed,
           focusOpacity,
           flash: n.id === selectedNodeId ? flashKey : 0,
-          liveSummary: summarizeNodeLiveActivity(executionOverlay, n.id),
+          liveSummary: summarizeNodeLiveActivityWithDecisions(executionOverlay, n.id, runDecisions),
           labFindingCount: labNodeFindingCounts[n.id] ?? 0,
         },
       }}),
@@ -1986,6 +1986,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       liveFocusNodeIds,
       flashKey,
       executionOverlay,
+      runDecisions,
       layoutVersion,
       layerFocusTransitionSample,
       artifactFlowNodes,

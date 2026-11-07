@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ExecutorDelegationPlanSchema, ExecutorInterfaceContractSchema } from "./executor-adapter.js";
 
 export const HierarchyPlannerLevelSchema = z.enum([
   "context",
@@ -9,7 +10,9 @@ export const HierarchyPlannerLevelSchema = z.enum([
 const HierarchyTaskBaseSchema = z.object({
   taskId: z.string().min(1),
   objective: z.string().trim().min(1).max(500),
+  dependencyTaskIds: z.array(z.string().min(1)).optional(),
   acceptanceCriteria: z.array(z.string().trim().min(1).max(300)).min(1).max(12),
+  interfaceContractIds: z.array(z.string().min(1)).optional(),
 });
 
 export const HierarchyPlannerTaskSchema = HierarchyTaskBaseSchema.extend({
@@ -41,8 +44,31 @@ export const HierarchyDelegationPlanSchema = z.object({
   contextHash: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
   objective: z.string().trim().min(1).max(500),
   tasks: z.array(HierarchyDelegationTaskSchema).min(1).max(8),
+  contracts: z.array(ExecutorInterfaceContractSchema).optional(),
   rationale: z.string().trim().min(1).max(500),
-}).strict();
+}).strict().superRefine((plan, ctx) => {
+  const normalized = ExecutorDelegationPlanSchema.safeParse({
+    taskId: plan.parentRunId,
+    objective: plan.objective,
+    tasks: plan.tasks.map((task) => ({
+      taskId: task.taskId,
+      scope: task.targetKind === "planner"
+        ? { kind: task.level, nodeId: task.nodeId }
+        : { kind: "leaf-file", nodeId: task.nodeId, filePath: task.filePath },
+      role: task.targetKind === "planner" ? "planner" : "leaf",
+      objective: task.objective,
+      dependencyTaskIds: task.dependencyTaskIds ?? [],
+      acceptanceCriteria: task.acceptanceCriteria,
+      interfaceContractIds: task.interfaceContractIds ?? [],
+    })),
+    contracts: plan.contracts ?? [],
+  });
+  if (!normalized.success) {
+    for (const issue of normalized.error.issues) {
+      ctx.addIssue({ ...issue, path: ["tasks", ...issue.path] });
+    }
+  }
+});
 
 export const WholeTreeLeafTaskSchema = z.object({
   transactionTaskId: z.string().min(1),

@@ -59,8 +59,8 @@ export async function buildDocRewrites(args: {
   workspaceRoot: string;
   item: ReminderTimelineItem;
   reason: string;
-  gateway?: ReminderRewriteGateway | null;
-  profile?: ModelProfile | null;
+  gateway?: ReminderRewriteGateway | null | undefined;
+  profile?: ModelProfile | null | undefined;
 }): Promise<ReminderDocRewrite[]> {
   const fallback = () =>
     heuristicDocRewrites(args.workspaceRoot, args.item, args.reason);

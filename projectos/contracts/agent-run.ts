@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RunExecutorSchema } from "./executor-selection.js";
 
 export const AgentRunKindSchema = z.enum([
   "feature_change",
@@ -64,6 +65,13 @@ export const AgentRunRoleSchema = z.enum([
   "leaf_file_deleter",
 ]);
 
+export const AgentRunWaitStateSchema = z.object({
+  kind: z.enum(["decision", "budget"]),
+  decisionId: z.string().min(1),
+  checkpointId: z.string().min(1),
+  since: z.string().min(1),
+}).strict();
+
 /**
  * Run identity (Session S-0). These ids are not interchangeable:
  * `runId` is one execution. `rootRunId` / `parentRunId` point at the tree.
@@ -82,6 +90,13 @@ export const AgentRunSchema = z
     parentRunId: z.string().min(1).optional(),
     rootRunId: z.string().min(1).optional(),
     role: AgentRunRoleSchema.optional(),
+    executor: RunExecutorSchema.optional(),
+    waitState: AgentRunWaitStateSchema.optional(),
+    approvedIntent: z.object({
+      intentId: z.string().min(1),
+      revision: z.number().int().positive(),
+      approvalHash: z.string().min(1),
+    }).strict().optional(),
     startedAt: z.string(),
     completedAt: z.string().optional(),
   })
@@ -176,4 +191,5 @@ export type AgentRunKind = z.infer<typeof AgentRunKindSchema>;
 export type AgentRunStatus = z.infer<typeof AgentRunStatusSchema>;
 export type AgentRunScope = z.infer<typeof AgentRunScopeSchema>;
 export type AgentRunRole = z.infer<typeof AgentRunRoleSchema>;
+export type AgentRunWaitState = z.infer<typeof AgentRunWaitStateSchema>;
 export type AgentRun = z.infer<typeof AgentRunSchema>;

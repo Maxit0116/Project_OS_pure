@@ -45,9 +45,9 @@ function conflictFromLlm(
 export async function startFirstPrinciplesWithIntelligence(input: {
   projectId: string;
   vision: string;
-  chatSessionId?: string;
+  chatSessionId?: string | undefined;
   workspace: LoadedProjectOSWorkspace;
-  profile: ModelProfile | null;
+  profile: ModelProfile | null | undefined;
   thinkingDepth: ThinkingDepth;
   gateway: ModelGateway;
 }): Promise<FirstPrinciplesSession> {
@@ -110,9 +110,13 @@ export async function startFirstPrinciplesWithIntelligence(input: {
 
 export async function advanceFirstPrinciplesWithIntelligence(input: {
   session: FirstPrinciplesSession;
-  answer: Omit<FirstPrinciplesAnswer, "answeredAt"> & { answeredAt?: string };
+  answer: Omit<FirstPrinciplesAnswer, "answeredAt"> & {
+    answeredAt?: string | undefined;
+    text?: string | undefined;
+    selectedOptionId?: string | undefined;
+  };
   workspace: LoadedProjectOSWorkspace;
-  profile: ModelProfile | null;
+  profile: ModelProfile | null | undefined;
   thinkingDepth: ThinkingDepth;
   gateway: ModelGateway;
 }): Promise<FirstPrinciplesSession> {

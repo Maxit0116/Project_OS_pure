@@ -49,6 +49,7 @@ import type {
   ChatSessionIndex,
   ChatSessionRecord,
 } from "../../contracts/chat-session.js";
+import type { ExecutorOption } from "../../contracts/executor-selection.js";
 import type { ListSkillsResult, SkillContent } from "../../contracts/skills.js";
 import type { AgentHarnessConfig } from "../../contracts/agent-harness-config.js";
 import type {
@@ -76,6 +77,7 @@ import type {
   UpdateMapArtifactPatch,
 } from "../../contracts/map-content.js";
 import { ProjectOSError, type ProjectOSErrorCode } from "../../errors.js";
+import { decodeIpcError, stripIpcWrapper } from "../../shared/ipc-error/index.js";
 import type { ApiTransport } from "./ApiTransport.js";
 
 interface SerializedProjectOSError {
@@ -121,12 +123,31 @@ export type AsyncIpcErrorHandler = (operation: string, error: unknown) => void;
 
 function translateIpcError(error: unknown): unknown {
   const projectOsError = readSerializedProjectOSError(error);
-  if (!projectOsError) return error;
-  return new ProjectOSError(
-    projectOsError.code,
-    projectOsError.message,
-    projectOsError.details ? { details: projectOsError.details } : {},
-  );
+  if (projectOsError) {
+    return new ProjectOSError(
+      projectOsError.code,
+      projectOsError.message,
+      projectOsError.details ? { details: projectOsError.details } : {},
+    );
+  }
+  // Over real Electron IPC only the message arrives, with the structured error encoded in it.
+  if (error instanceof Error) {
+    const decoded = decodeIpcError(error.message);
+    if (decoded) {
+      return new ProjectOSError(
+        decoded.code as ProjectOSErrorCode,
+        decoded.message,
+        decoded.details ? { details: decoded.details } : {},
+      );
+    }
+    const readable = stripIpcWrapper(error.message);
+    if (readable !== error.message) {
+      const cleaned = new Error(readable);
+      if (error.stack !== undefined) cleaned.stack = error.stack;
+      return cleaned;
+    }
+  }
+  return error;
 }
 
 function reportAsyncIpcError(operation: string, error: unknown): void {
@@ -485,6 +506,43 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("getFileContext", projectId, path);
   }
 
+  getGlobalAgentContext(
+    projectId: string,
+    responseLanguage: string,
+  ): Promise<import("../../contracts/local-context.js").GlobalContextBundle> {
+    return this.invoke("getGlobalAgentContext", projectId, responseLanguage);
+  }
+
+  extractRequestIntent(
+    request: import("../../contracts/request-intent.js").ExtractRequestIntentRequest,
+  ): Promise<import("../../contracts/request-intent.js").RequestIntent> {
+    return this.invoke("extractRequestIntent", request);
+  }
+
+  approveRequestIntent(
+    projectId: string,
+    intentId: string,
+    expectedRevision: number,
+    answers?: Array<{ questionId: string; answer: string; selectedOptionId?: string }>,
+  ): Promise<import("../../contracts/request-intent.js").RequestIntent> {
+    return this.invoke("approveRequestIntent", projectId, intentId, expectedRevision, answers);
+  }
+
+  prepareIntentExecution(
+    projectId: string,
+    intentId: string,
+  ): Promise<PromptRefinement> {
+    return this.invoke("prepareIntentExecution", projectId, intentId);
+  }
+
+  inspectAgentNode(
+    projectId: string,
+    nodeId: string,
+    responseLanguage: string,
+  ): Promise<import("../../contracts/local-context.js").NodeContextBundle> {
+    return this.invoke("inspectAgentNode", projectId, nodeId, responseLanguage);
+  }
+
   getFileContent(projectId: string, path: string): Promise<string> {
     return this.invoke("getFileContent", projectId, path);
   }
@@ -623,6 +681,10 @@ export class IpcTransport implements ApiTransport {
 
   listSkills(projectId: string): Promise<ListSkillsResult> {
     return this.invoke("listSkills", projectId);
+  }
+
+  listExecutors(projectId: string): Promise<ExecutorOption[]> {
+    return this.invoke("listExecutors", projectId);
   }
 
   getComposerMentions(
@@ -773,6 +835,37 @@ export class IpcTransport implements ApiTransport {
 
   getAgentRun(runId: string): Promise<AgentRun> {
     return this.invoke("getAgentRun", runId);
+  }
+
+  listRunDecisions(
+    projectId: string,
+    rootRunId: string,
+  ): Promise<import("../../contracts/run-state.js").RunDecision[]> {
+    return this.invoke("listRunDecisions", projectId, rootRunId);
+  }
+
+  resolveRunDecision(
+    projectId: string,
+    decisionId: string,
+    expectedRevision: number,
+    answer: { optionId: string; text?: string },
+    status?: "resolved" | "declined",
+  ): Promise<import("../../contracts/run-state.js").RunDecision> {
+    return this.invoke(
+      "resolveRunDecision",
+      projectId,
+      decisionId,
+      expectedRevision,
+      answer,
+      status,
+    );
+  }
+
+  getRunCheckpoint(
+    projectId: string,
+    checkpointId: string,
+  ): Promise<import("../../contracts/run-state.js").RunCheckpoint | null> {
+    return this.invoke("getRunCheckpoint", projectId, checkpointId);
   }
 
   getAgentRunEvents(runId: string): Promise<AgentRunEvent[]> {
@@ -1611,7 +1704,10 @@ export class IpcTransport implements ApiTransport {
     projectId: string,
     title?: string,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
-    return this.invoke("createLoopGraph", projectId).then(async (doc) => {
+    return this.invoke<import("../../contracts/loop-graph.js").LoopGraphDocument>(
+      "createLoopGraph",
+      projectId,
+    ).then(async (doc) => {
       if (!title?.trim()) return doc;
       return this.upsertLoopGraph(projectId, { ...doc, title: title.trim() });
     });

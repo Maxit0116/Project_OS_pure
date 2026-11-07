@@ -1,5 +1,6 @@
 import { ProjectOSError } from '../../../errors.js'
 import { FileOwnershipErrorDetailsSchema } from '../../../contracts/agent-conversation.js'
+import { encodeIpcError } from '../../../shared/ipc-error/index.js'
 
 export interface SerializedProjectOSError {
   __projectOsError: true
@@ -25,13 +26,17 @@ export async function wrapProjectOsHandler<T>(
     return await fn()
   } catch (error) {
     if (error instanceof ProjectOSError) {
-      // Electron IPC only preserves Error instances across the bridge. Plain
-      // objects surface in the renderer as "[object Object]".
-      const serialized = new Error(error.message) as Error & SerializedProjectOSError
+      // Electron IPC preserves only an Error's message across the bridge (wrapped as
+      // "Error invoking remote method ..."); plain objects surface as "[object Object]" and extra
+      // properties are dropped. The code and bounded details therefore travel inside the message,
+      // and the renderer transport decodes them. The properties stay for in-process callers.
+      const details = safeProjectOsErrorDetails(error)
+      const serialized = new Error(
+        encodeIpcError({ code: error.code, message: error.message, ...(details ? { details } : {}) }),
+      ) as Error & SerializedProjectOSError
       serialized.name = 'ProjectOSError'
       serialized.__projectOsError = true
       serialized.code = error.code
-      const details = safeProjectOsErrorDetails(error)
       if (details) serialized.details = details
       throw serialized
     }

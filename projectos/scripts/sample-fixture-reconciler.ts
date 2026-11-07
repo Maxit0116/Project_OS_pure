@@ -3965,11 +3965,80 @@ function parseScaffoldArguments(arguments_: string[]): FixtureScaffoldRequest {
   return { ownerId, treeParentId, files };
 }
 
+export interface FixtureRestoreResult {
+  /** Files written into the authoritative `.projectos` directory. */
+  restored: string[];
+  /** Files that already existed and were left alone (never with `force`). */
+  kept: string[];
+  /** Authoritative graph/tree files that differ from the committed mirror. */
+  divergent: string[];
+}
+
+/**
+ * The sample's `.projectos` directory is git-ignored local state, so a fresh
+ * clone (or a first app launch, which scans the folder) has no curated graph
+ * and every sample-dependent test fails. The committed mirror is the seed for
+ * that state: copy it in. Without `force` only missing files are written, so
+ * deliberate local edits survive; `force` overwrites every mirrored file.
+ */
+export function restoreAuthoritativeFixtures(
+  layout = createDefaultFixtureLayout(),
+  options: { force?: boolean } = {},
+): FixtureRestoreResult {
+  const mirrorRoot = layout.mirrorRoots[0];
+  if (!mirrorRoot || !existsSync(mirrorRoot)) {
+    throw new FixtureReconcilerError("No committed fixture mirror to restore from");
+  }
+  const result: FixtureRestoreResult = { restored: [], kept: [], divergent: [] };
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const source = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(source);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const relativePath = relative(mirrorRoot, source).split(sep).join("/");
+      const target = join(layout.authoritativeRoot, ...relativePath.split("/"));
+      const bytes = readFileSync(source);
+      const exists = existsSync(target);
+      if (exists && !options.force) {
+        result.kept.push(relativePath);
+        if (
+          (AUTHORITATIVE_FIXTURE_NAMES as readonly string[]).includes(relativePath) &&
+          !readFileSync(target).equals(bytes)
+        ) {
+          result.divergent.push(relativePath);
+        }
+        continue;
+      }
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, bytes);
+      result.restored.push(relativePath);
+    }
+  };
+  visit(mirrorRoot);
+  return result;
+}
+
 export async function runFixtureReconcilerCli(
   arguments_ = process.argv.slice(2),
 ): Promise<number> {
   const [command, ...commandArguments] = arguments_;
   try {
+    if (command === "restore") {
+      const result = restoreAuthoritativeFixtures(createDefaultFixtureLayout(), {
+        force: commandArguments.includes("--force"),
+      });
+      console.log([
+        `Restored: ${result.restored.length > 0 ? result.restored.join(", ") : "(none)"}`,
+        `Kept: ${result.kept.length}`,
+        ...(result.divergent.length > 0
+          ? [`Differs from the committed mirror (use --force to overwrite): ${result.divergent.join(", ")}`]
+          : []),
+      ].join("\n"));
+      return 0;
+    }
     if (command === "check") {
       const report = checkFixtures();
       const output = formatReport(report);
@@ -3994,6 +4063,7 @@ export async function runFixtureReconcilerCli(
       "Usage:",
       "  sample-fixture-reconciler check",
       "  sample-fixture-reconciler sync",
+      "  sample-fixture-reconciler restore [--force]",
       "  sample-fixture-reconciler scaffold --owner NODE --tree-parent TREE_NODE [--primary PATH] [--supporting PATH] [--config PATH] [--test PATH]",
     ].join("\n"));
     return 1;

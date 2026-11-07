@@ -150,14 +150,14 @@ export function buildSpatialPinSessionContext(opts?: {
     }
   } else {
     location = buildScreenLocationKey({
-      workspacePath: selected?.workspacePath,
+      ...(selected?.workspacePath !== undefined ? { workspacePath: selected.workspacePath } : {}),
       terminalCwd,
-      textHint: host?.textHint,
-      appName: host?.appName,
-      bundleId: host?.bundleId,
-      windowTitle: host?.windowTitle,
-      deviceKind: host?.deviceKind,
-      inferredPath: host?.inferredPath,
+      ...(host?.textHint !== undefined ? { textHint: host.textHint } : {}),
+      ...(host?.appName !== undefined ? { appName: host.appName } : {}),
+      ...(host?.bundleId !== undefined ? { bundleId: host.bundleId } : {}),
+      ...(host?.windowTitle !== undefined ? { windowTitle: host.windowTitle } : {}),
+      ...(host?.deviceKind !== undefined ? { deviceKind: host.deviceKind } : {}),
+      ...(host?.inferredPath !== undefined ? { inferredPath: host.inferredPath } : {}),
     })
   }
 

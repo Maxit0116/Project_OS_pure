@@ -38,6 +38,7 @@ const labels = {
     acceptance_list: 'Acceptance',
     terminal: 'Terminal',
     image: 'Image',
+    urls: 'URLs',
   },
 }
 

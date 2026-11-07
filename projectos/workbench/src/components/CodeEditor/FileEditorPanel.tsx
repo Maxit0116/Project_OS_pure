@@ -1,4 +1,13 @@
-import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Suspense,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import type { Monaco } from '@monaco-editor/react'
 import { languageForPath } from '../../data/sampleFileContents'
 import { useI18n } from '../../i18n'
@@ -57,6 +66,7 @@ export default function FileEditorPanel({ filePath, content, onChange, showHeade
   const splitBodyRef = useRef<HTMLDivElement>(null)
   const previewScrollRef = useRef<HTMLDivElement>(null)
   const [sourceSplitPercent, setSourceSplitPercent] = useState(DEFAULT_SPLIT_PERCENT)
+  const [splitBodyWidth, setSplitBodyWidth] = useState(0)
   const [editorMounted, setEditorMounted] = useState(false)
 
   useMarkdownEditorScrollSync({
@@ -108,6 +118,18 @@ export default function FileEditorPanel({ filePath, content, onChange, showHeade
     registerEditor(filePath, editor)
     return trackSemanticTokenModel(model, filePath)
   }, [editorMounted, filePath])
+
+  const splitActive = isMarkdown && markdownViewMode === 'split'
+  useLayoutEffect(() => {
+    const body = splitBodyRef.current
+    if (!splitActive || !body) return
+    const measure = () => setSplitBodyWidth(body.clientWidth)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(body)
+    return () => observer.disconnect()
+  }, [splitActive])
 
   const onSplitDelta = useCallback((delta: number) => {
     const body = splitBodyRef.current
@@ -238,6 +260,9 @@ export default function FileEditorPanel({ filePath, content, onChange, showHeade
               <PanelResizeHandle
                 edge="east"
                 onDelta={onSplitDelta}
+                value={(splitBodyWidth * sourceSplitPercent) / 100}
+                min={(splitBodyWidth * MIN_SPLIT_PERCENT) / 100}
+                max={(splitBodyWidth * MAX_SPLIT_PERCENT) / 100}
                 ariaLabel={ts('editor.resizeSplit')}
               />
             </div>

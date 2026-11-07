@@ -1,54 +1,20 @@
 # Project OS
 
-Project OS is being rebuilt from the product docs into a graph-driven AI IDE. The current repo is organized around the MVP showcase, the full-product architecture plan, and the small sample workspace that will demonstrate development through graphs.
+Project OS is a graph-centered AI development environment. It connects product structure, visual intent, code changes, agent activity, and verification in a local workspace.
 
-Canonical project memory:
+## Project memory
 
-- [project_description.md](project_description.md)
-- [feature-list.md](feature-list.md)
-- [progress.md](progress.md)
+- [Project description](project_description.md)
+- [Feature status](feature-list.md)
+- [Progress log](progress.md)
+- [Investor and partner overview](docs/Project-OS-Investor-Overview.md)
+- [Repository transition handoff](TRANSFER-HANDOFF.md)
 
-## Active Structure
+## Current branch
 
-```
-ProjectOS/
-├── docs/                 # Active product docs, MVP plan, and full-product architecture
-├── projectos/            # P0 workbench, contracts, and mock API client
-├── sample-graph-saas/    # Small sample app used to demonstrate graph-driven development
-└── archive/              # Legacy code and stale implementation contracts, kept for reference
-```
+This checkout starts from Pure's `graph` branch at `54288f4`. See the [backend development plan](docs/features/backend/Backend-Dev-Plan.md) for current scope and deferrals, and the [agent harness checklist](docs/features/Agent-Harness-Eval-Checklist.md) for the desktop acceptance gate. The backend plan identifies manual desktop workflow verification as unfinished.
 
-## Active Docs
-
-- [Product PRD](docs/Product-PRD.md) — long-term product direction.
-- [MVP PRD](docs/MVP-PRD.md) — product requirements for the MVP concept.
-- [MVP Showcase Architecture and Dev Plan](docs/MVP-Showcase-Architecture-and-Dev-Plan.md) — current execution plan for the presentation-grade MVP.
-- [Full Product Architecture and Dev Plan](docs/Full-Product-Architecture-and-Dev-Plan.md) — production architecture, schemas, interfaces, milestones, and migration path after the showcase.
-- [Stage 1 Whole Product Execution Plan](docs/Stage-1-Whole-Product-Execution-Plan.md) — detailed plan for building the first complete product loop on the sample workspace.
-- [MVP Frontend/Backend Two-Person Workload Plan](docs/MVP-Two-Person-Frontend-Backend-Workload-Plan.md) — 两人执行分工、接口对齐、mock/real integration 和沟通协议。
-- [Sample Fixture Reconciler](docs/Sample-Fixture-Reconciler.md) — authoritative fixture workflow, deterministic checks/scaffolding, and exact mirror sync.
-- [Team Cooperation Mode PRD](docs/Team-Cooperation-Mode-PRD.md) — async-first team collaboration around the function map (handoff, acceptance, team memory).
-- [Team Cooperation Mode Architecture](docs/Team-Cooperation-Mode-Architecture.md) — collab object model, `.projectos` persistence, and API boundaries.
-- [Team Cooperation Mode Dev Plan](docs/Team-Cooperation-Mode-Dev-Plan.md) — slices 0–4; Slice 1 (two-person handoff loop) is the implementation gate.
-
-## MVP Direction
-
-The MVP is a presentation-grade showcase, not a fully generalized production build. It should show the full Project OS promise in one controlled path:
-
-- open a sample codebase;
-- render a Function Map and Semantic File Tree;
-- select graph nodes to switch AI context;
-- show Prompt Refinement before execution;
-- stream an Agent Flow;
-- preview a code diff;
-- trigger a seeded bug;
-- show Debug Harness root-cause reasoning and recovery.
-
-The preferred shell is a fork of Void, used as the Electron IDE foundation. Project OS will add first-party graph, context, agent-flow, and harness surfaces on top.
-
-## P0 Workbench (Frontend)
-
-Standalone React workbench with mock API — Function Map, Semantic File Tree, and Chat context header.
+## Run the workbench
 
 ```bash
 cd projectos/workbench
@@ -56,28 +22,33 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 and click **Open Sample Workspace**.
-
-See [projectos/README.md](projectos/README.md) for structure and mock/real client notes.
-
-## Sample Project
-
-`sample-graph-saas/` is the active demo workspace. It is intentionally small and should be shaped to produce clear graph nodes, edges, demo diffs, and Debug Harness evidence.
-
-Its graph and semantic-tree JSON remain hand-reviewed source of truth. Before
-adding sample source files, follow the
-[fixture reconciler workflow](docs/Sample-Fixture-Reconciler.md) so the
-authoritative fixtures, client mirrors, and editor source universe advance in
-one slice.
-
-From the sample project:
+## Run the desktop app
 
 ```bash
-cd sample-graph-saas
-npm install
+cd projectos/desktop
+npm install --ignore-scripts
 npm run dev
 ```
 
-## Archive
+See [desktop development](docs/desktop-development.md) for platform details.
 
-`archive/legacy-20260705/` contains the previous Electron implementation, standalone MVP implementation, and older implementation-contract docs. These are no longer active surfaces for the rebuild, but they are preserved for reference.
+## Backend checks
+
+Run from `projectos/`:
+
+```bash
+npm run typecheck
+npm run test:unit
+```
+
+The default `npm test` enables the serialized real-preview gate and may start real Electron/Next processes. Use the [harness checklist](docs/features/Agent-Harness-Eval-Checklist.md) for manual desktop acceptance; unit tests do not replace it.
+
+## Main areas
+
+- `projectos/workbench/` — React and TypeScript user interface.
+- `projectos/desktop/` — Electron application and native integrations.
+- `projectos/contracts/` — shared API and data contracts.
+- `projectos/services/` — workspace, model, agent, graph, and harness services.
+- `projectos/persistence/` — local workspace state.
+- `sample-graph-saas/` — sample Next.js/Prisma workspace.
+- `docs/features/backend/` — backend execution plans and current boundaries.

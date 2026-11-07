@@ -468,9 +468,9 @@ function tryRepairDanglingGraphEdges(
       .filter((id) => id.length > 0),
   );
 
-  const before = root.edges.length;
+  const originalEdges: unknown[] = root.edges;
   const seenIds = new Set<string>();
-  root.edges = root.edges.filter((edge) => {
+  const keptEdges = originalEdges.filter((edge) => {
     if (!edge || typeof edge !== "object" || Array.isArray(edge)) return false;
     const record = edge as Record<string, unknown>;
     const source = typeof record.source === "string" ? record.source.trim() : "";
@@ -492,7 +492,8 @@ function tryRepairDanglingGraphEdges(
     return true;
   });
 
-  if (root.edges.length === before) return false;
+  if (keptEdges.length === originalEdges.length) return false;
+  root.edges = keptEdges;
 
   try {
     writeDurableJsonReplacing(graphPath, root, primitives);

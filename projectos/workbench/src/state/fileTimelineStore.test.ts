@@ -17,9 +17,14 @@ const listFileTimeline = vi.fn(async (): Promise<FileTimelineEntry[]> => [
 function setupProject() {
   useWorkbenchStore.setState({
     project: {
+      version: '0.1.0',
       projectId: 'proj_1',
       workspaceRoot: '/tmp',
-      name: 'Demo',
+      displayName: 'Demo',
+      framework: 'unknown',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      presentationMode: false,
     },
     client: { listFileTimeline } as unknown as ProjectOSApi,
   })

@@ -47,6 +47,7 @@ export const ImplementationPlanStatusSchema = z.enum([
   "needs_clarification",
   "ready",
   "building",
+  "proposal_ready",
   "built",
 ]);
 

@@ -23,18 +23,6 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
-  const user = await validateToken(request)
-  if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  const body = (await request.json()) as { content?: unknown }
-  const content = body.content
-  if (typeof content !== 'string' || content.trim() === '') {
-    return Response.json({ error: 'Content is required' }, { status: 400 })
-  }
-  await db.notification.create({ data: { userId: user.id, content } })
-  return Response.json({ success: true })
-}
-
 export async function PATCH(request: Request) {
   try {
     const context = await getRequestWorkspaceContext(request)

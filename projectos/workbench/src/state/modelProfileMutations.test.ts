@@ -23,6 +23,8 @@ afterEach(() => {
     client: originalClient,
     project: null,
     settings: null,
+    selectedModelProfileId: null,
+    modelSelectionPending: false,
     messages: [],
     toasts: [],
     pendingRefinement: null,
@@ -37,6 +39,32 @@ afterEach(() => {
 })
 
 describe('model profile mutations', () => {
+  it('keeps the previous selection when persisting a new chat model fails', async () => {
+    const workspace = createMockSampleWorkspace()
+    const settings = settingsWithModels(['model-a', 'model-b'])
+    const updateSettings = vi.fn(async () => {
+      throw new Error('settings unavailable')
+    })
+    useWorkbenchStore.setState({
+      client: { updateSettings } as unknown as ProjectOSApi,
+      project: workspace.project,
+      settings,
+      selectedModelProfileId: 'model-a',
+      modelSelectionPending: false,
+      locale: 'en',
+      error: null,
+      toasts: [],
+    })
+
+    await expect(useWorkbenchStore.getState().selectChatModel('model-b')).resolves.toBe(false)
+
+    expect(useWorkbenchStore.getState()).toMatchObject({
+      selectedModelProfileId: 'model-a',
+      modelSelectionPending: false,
+      error: 'settings unavailable',
+    })
+  })
+
   it('upserts an edited profile without duplicating its id and preserves a blank credential', async () => {
     const settings = settingsWithModels(['model-a'])
     const calls: string[] = []
@@ -149,43 +177,62 @@ describe('model profile mutations', () => {
 
 describe('chat failure diagnostics', () => {
   it('appends a persistent system message only for a refinement carrying fallback metadata', async () => {
+    // Change sendPrompt now uses extractRequestIntent; PromptRefinement.fallback
+    // still arrives from buildPlan. Assert the live confirmPlanBuild surface.
     const workspace = createMockSampleWorkspace()
-    const fallbackClient = {
-      async refinePrompt() {
-        return {
-          id: 'ref_fallback',
-          understood: 'Fallback refinement',
-          ambiguities: [],
-          suggestions: [],
-          affectedNodeIds: [],
-          affectedFiles: [],
-          confidence: 0.5,
-          mode: 'deterministic_fixture' as const,
-          fallback: {
-            stage: 'prompt_refinement' as const,
-            backend: 'model' as const,
-            profileId: 'broken-profile',
-            message: 'Model refinement failed',
-            providerMessage: 'unknown model; Authorization: Bearer secret-token',
-          },
-        }
+    const buildPlan = vi.fn(async () => ({
+      id: 'ref_fallback',
+      understood: 'Fallback refinement',
+      ambiguities: [],
+      suggestions: [],
+      affectedNodeIds: [],
+      affectedFiles: [],
+      confidence: 0.5,
+      mode: 'deterministic_fixture' as const,
+      sourcePlanId: 'plan_fallback',
+      fallback: {
+        stage: 'prompt_refinement' as const,
+        backend: 'model' as const,
+        profileId: 'broken-profile',
+        message: 'Model refinement failed',
+        providerMessage: 'unknown model; Authorization: Bearer secret-token',
       },
-    } as unknown as ProjectOSApi
+    }))
     useWorkbenchStore.setState({
-      client: fallbackClient,
+      client: { buildPlan } as unknown as ProjectOSApi,
       project: workspace.project,
       settings: { ...workspace.settings, presentationMode: false },
       messages: [],
       locale: 'en',
-      selectedNodeId: 'feat_login',
-      selectedFilePath: 'app/login/page.tsx',
-      pendingFileOwnerChoice: null,
-      fileScopeError: null,
-      chatMode: 'change',
-    })
+      refineLoading: false,
+      pendingPlan: {
+        version: '0.1.0',
+        id: 'plan_fallback',
+        projectId: workspace.project.projectId,
+        scope: { kind: 'node', nodeId: 'feat_login' },
+        objective: 'Change the login page',
+        steps: [
+          {
+            id: 'step_1',
+            description: 'Update login copy',
+            affectedFiles: ['app/login/page.tsx'],
+            acceptanceCriteria: ['Copy updated'],
+          },
+        ],
+        todos: [],
+        ambiguities: [],
+        rationale: 'Requested',
+        status: 'ready',
+        createdAt: '2026-07-17T00:00:00.000Z',
+        updatedAt: '2026-07-17T00:00:00.000Z',
+      },
+      // Avoid the live-run poll loop; this test only asserts fallback chat diagnostics.
+      confirmRefinement: vi.fn(async () => undefined),
+    } as never)
 
-    await useWorkbenchStore.getState().sendPrompt('Change the login page')
+    await useWorkbenchStore.getState().confirmPlanBuild()
 
+    expect(buildPlan).toHaveBeenCalledWith('plan_fallback')
     const systemMessage = useWorkbenchStore.getState().messages.find(
       (message) => message.role === 'system',
     )

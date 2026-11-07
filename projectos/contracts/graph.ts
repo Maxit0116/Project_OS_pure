@@ -255,6 +255,8 @@ export const FunctionalNodeSchema = z
     confidence: ConfidenceSchema,
     tags: boundedArray(z.string(), PROJECT_GRAPH_LIMITS.tagsPerNode),
     parentId: z.string().nullable().optional(),
+    /** A product capability shown in the root context view without being assigned a fabricated parent. */
+    standalone: z.boolean().optional(),
     children: boundedArray(
       z.string(),
       PROJECT_GRAPH_LIMITS.childrenPerNode,

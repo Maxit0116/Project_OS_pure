@@ -40,3 +40,17 @@ export function resolveSampleWorkspaceRoot(): string {
 export function resolveUserDataPath(): string {
   return app.getPath('userData')
 }
+
+/**
+ * Directory for FileSecretStore only. Defaults to Electron userData.
+ * Set PROJECTOS_SECRETS_USER_DATA to reuse an existing secrets root (e.g. the
+ * daily profile's secrets.json location) without pointing Chromium userData
+ * at that profile. Values are never logged.
+ */
+export function resolveSecretsUserDataPath(): string {
+  const fromEnv = process.env.PROJECTOS_SECRETS_USER_DATA?.trim()
+  if (fromEnv) {
+    return resolve(fromEnv)
+  }
+  return resolveUserDataPath()
+}

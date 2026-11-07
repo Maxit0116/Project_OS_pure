@@ -27,8 +27,8 @@ const effectHarness = vi.hoisted(() => {
 })
 
 const terminalDoubles = vi.hoisted(() => ({
-  createMapSession: vi.fn(async () => undefined),
-  disposeMapSession: vi.fn(async () => undefined),
+  createMapSession: vi.fn(async (): Promise<void> => {}),
+  disposeMapSession: vi.fn(async (): Promise<void> => {}),
   initIpcListeners: vi.fn(),
   state: {
     mapSessions: {} as Record<string, string>,
@@ -37,13 +37,14 @@ const terminalDoubles = vi.hoisted(() => ({
 
 vi.mock('react', () => ({
   useEffect: effectHarness.useEffect,
+  useMemo: <T,>(factory: () => T) => factory(),
   useRef: effectHarness.useRef,
 }))
 vi.mock('../../data/clientMode', () => ({ isDesktopApp: () => false }))
 vi.mock('../../i18n', () => ({ useI18n: () => ({ ts: (key: string) => key }) }))
-vi.mock('../../state/workbenchStore', () => ({
-  useWorkbenchStore: (selector: (state: { terminalLines: string[] }) => unknown) =>
-    selector({ terminalLines: [] }),
+vi.mock('../../state/activityStore', () => ({
+  useActivityStore: (selector: (state: { entries: unknown[] }) => unknown) =>
+    selector({ entries: [] }),
 }))
 vi.mock('../../state/terminalStore', () => ({
   useTerminalStore: (selector: (state: unknown) => unknown) =>
@@ -104,7 +105,7 @@ describe('MapTerminalHost session ownership', () => {
     terminalDoubles.createMapSession.mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
-          finishCreation = resolve
+          finishCreation = () => resolve()
         }),
     )
 

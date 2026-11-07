@@ -11,6 +11,7 @@ import {
 } from "./session-ops.js";
 import { writePlannedFeatureFromThesis } from "./features-write.js";
 import { mergeClaimUpdates } from "./explore-claims.js";
+import { parseFeaturesFile } from "../../contracts/features.js";
 
 describe("first principles conflict + features", () => {
   const dirs: string[] = [];
@@ -81,9 +82,21 @@ describe("first principles conflict + features", () => {
 
     const path = join(root, ".projectos", "features.json");
     const doc = JSON.parse(readFileSync(path, "utf8")) as {
-      features: Array<{ id: string; locked?: boolean; status?: string }>;
+      features: Array<{
+        id: string;
+        locked?: boolean;
+        status?: string;
+        mvp?: string;
+        successSignal?: string;
+        nonGoals?: string[];
+      }>;
     };
     expect(doc.features[0]?.status).toBe("planned");
+    expect(doc.features[0]?.mvp).toEqual(expect.any(String));
+    expect(doc.features[0]?.successSignal).toEqual(expect.any(String));
+    expect(doc.features[0]?.nonGoals?.length).toBeGreaterThan(0);
+    // Real writer output must satisfy the story-map contract (not a hand-trimmed shape).
+    expect(() => parseFeaturesFile(doc)).not.toThrow();
 
     // Lock and rewrite should skip
     doc.features[0]!.locked = true;

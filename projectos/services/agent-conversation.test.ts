@@ -208,7 +208,7 @@ describe("ProjectOSLocalApi grounded ask", () => {
     expect(state.orchestrator.runs.size).toBe(0);
     expect(state.boundRunAuthorizations.size).toBe(0);
     expect(state.pendingOrchestratorStarts.size).toBe(0);
-    expect(state.externalRunsByRunId.size).toBe(0);
+    // externalRunsByRunId was removed; do not reintroduce it for this assertion.
     expect(state.registeredRunsByRunId.size).toBe(0);
     expect(readFileSync(join(workspaceRoot, ".projectos", "current-work.json"), "utf8"))
       .toBe(currentWorkBefore);
@@ -222,6 +222,17 @@ describe("ProjectOSLocalApi grounded ask", () => {
       modelGateway: new AskGateway(),
     });
     const project = await api.openSampleWorkspace();
+    await api.updateSettings(project.projectId, {
+      presentationMode: false,
+      modelProfiles: [],
+      execution: {
+        mode: "fixture",
+        defaultModelProfileId: "",
+        defaultAgentProfileId: "default-feature",
+        thinkingDepth: "off",
+        changeExecutionPolicy: "review_first",
+      },
+    });
 
     await expect(api.askAgent({
       projectId: project.projectId,
@@ -232,7 +243,7 @@ describe("ProjectOSLocalApi grounded ask", () => {
       },
       question: "What does this file do?",
       language: { mode: "auto" },
-    })).rejects.toMatchObject({ code: "agent_answer_unavailable" });
+    })).rejects.toMatchObject({ code: "model_not_configured" });
   });
 
   it("passes a final language mismatch through as a usable answer", async () => {

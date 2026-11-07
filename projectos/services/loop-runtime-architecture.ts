@@ -187,7 +187,9 @@ export function matchConditionBranch(
 
 export function effectiveMaxIterations(
   spec: LoopSpec,
-  targetNodeId: string,
+  // Call sites pass the branch/node id for a future per-node cap; loop nodes
+  // currently contribute via spec-wide maxIterations aggregation only.
+  _targetNodeId: string,
 ): number {
   const loopNodes = spec.nodes.filter((node) => {
     const arch = architectureOf(node);

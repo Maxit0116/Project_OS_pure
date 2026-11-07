@@ -4,6 +4,7 @@
  */
 
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -17,7 +18,14 @@ import { randomUUID } from "node:crypto";
 
 import type { CurrentWorkState } from "../contracts/context.js";
 import type { ProjectGraph, FileEntry, FunctionalEdge, FunctionalNode } from "../contracts/graph.js";
-import { ProjectGraphSchema } from "../contracts/graph.js";
+import {
+  ArchitectureViewSchema,
+  FileEntrySchema,
+  FileRelationSchema,
+  FunctionalEdgeSchema,
+  FunctionalNodeSchema,
+  ProjectGraphSchema,
+} from "../contracts/graph.js";
 import type { ProjectFramework, ProjectOSProject } from "../contracts/project.js";
 import {
   createDefaultSettings,
@@ -748,69 +756,25 @@ function pickDefined(
   return out;
 }
 
-const GRAPH_ROOT_KEYS = [
-  "version",
-  "projectId",
-  "projectName",
-  "projectType",
-  "analyzedAt",
-  "analysisStatus",
-  "architecture",
-  "nodes",
-  "edges",
-  "fileRelations",
-  "fileIndex",
-  "topology",
-  "analysisError",
-] as const;
+/**
+ * Allowed keys come from the strict schemas themselves. A hand-kept list drifted once and
+ * silently stripped authored content (`authored`, `views`, owners, notes, provenance) on every
+ * repair and AI scan, so adding a field to a schema must be enough to keep it here too.
+ */
+function schemaKeys(schema: { shape: object }): readonly string[] {
+  return Object.keys(schema.shape);
+}
 
-const NODE_KEYS = [
-  "id",
-  "type",
-  "name",
-  "nameEn",
-  "status",
-  "description",
-  "summary",
-  "responsibility",
-  "elementType",
-  "level",
-  "layer",
-  "technology",
-  "linkedFiles",
-  "upstream",
-  "downstream",
-  "preview",
-  "confidence",
-  "tags",
-  "parentId",
-  "children",
-  "refs",
-  "depth",
-] as const;
+const GRAPH_ROOT_KEYS = schemaKeys(ProjectGraphSchema.innerType());
+const NODE_KEYS = schemaKeys(FunctionalNodeSchema);
+const EDGE_KEYS = schemaKeys(FunctionalEdgeSchema);
+const FILE_ENTRY_KEYS = schemaKeys(FileEntrySchema);
+const FILE_RELATION_KEYS = schemaKeys(FileRelationSchema);
+const VIEW_KEYS = schemaKeys(ArchitectureViewSchema);
 
-const EDGE_KEYS = [
-  "id",
-  "source",
-  "target",
-  "relation",
-  "label",
-  "purpose",
-  "technology",
-  "confidence",
-  "evidence",
-] as const;
-
-const FILE_ENTRY_KEYS = [
-  "path",
-  "type",
-  "nodeIds",
-  "imports",
-  "exports",
-  "status",
-  "size",
-  "lastModified",
-] as const;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
 
 function fileExistsUnderWorkspace(workspaceRoot: string, relativePath: string): boolean {
   try {
@@ -836,7 +800,9 @@ export function sanitizeLegacyProjectGraph(
 
   const nodes = nodesIn
     .filter((node): node is Record<string, unknown> => !!node && typeof node === "object")
-    .map((node) => {
+    // Picked records keep their open shape: spreading a Record into a literal would
+    // otherwise drop the index signature from the inferred type.
+    .map((node): Record<string, unknown> => {
       const picked = pickDefined(node, NODE_KEYS);
       const linkedFiles = Array.isArray(node.linkedFiles)
         ? node.linkedFiles
@@ -889,6 +855,35 @@ export function sanitizeLegacyProjectGraph(
     )
     .filter((entry) => fileExistsUnderWorkspace(options.workspaceRoot, String(entry.path)))
     .map((entry) => pickDefined(entry, FILE_ENTRY_KEYS));
+
+  const filePaths = new Set(fileIndex.map((entry) => String(entry.path)));
+  const fileRelations = Array.isArray(root.fileRelations)
+    ? root.fileRelations
+        .filter(isRecord)
+        .map((relation) => pickDefined(relation, FILE_RELATION_KEYS))
+        // The sanitizer drops file entries whose file is gone; a relation must not outlive its endpoints.
+        .filter(
+          (relation) =>
+            filePaths.has(String(relation.sourcePath)) && filePaths.has(String(relation.targetPath)),
+        )
+    : undefined;
+
+  const seenViewKeys = new Set<string>();
+  const views = Array.isArray(root.views)
+    ? root.views
+        .filter(isRecord)
+        .map((view) => pickDefined(view, VIEW_KEYS))
+        .filter((view) => {
+          const key = typeof view.key === "string" ? view.key : "";
+          if (key.length === 0 || seenViewKeys.has(key)) return false;
+          // A view anchored on a node that is not in the graph cannot be rendered.
+          const anchored = [view.parentId, view.focusNodeId].every(
+            (id) => id === undefined || (typeof id === "string" && nodeIdSet.has(id)),
+          );
+          if (anchored) seenViewKeys.add(key);
+          return anchored;
+        })
+    : undefined;
 
   const projectTypeRaw = root.projectType;
   const projectType =
@@ -947,7 +942,7 @@ export function sanitizeLegacyProjectGraph(
     };
   });
 
-  const candidate = {
+  const candidate: Record<string, unknown> = {
     ...pickDefined(root, GRAPH_ROOT_KEYS),
     projectId: options.projectId,
     projectType,
@@ -956,24 +951,46 @@ export function sanitizeLegacyProjectGraph(
     edges,
     fileIndex,
   };
+  if (views) candidate.views = views;
+  else delete candidate.views;
+  if (fileRelations) candidate.fileRelations = fileRelations;
+  else delete candidate.fileRelations;
+  if (typeof candidate.authored !== "boolean") delete candidate.authored;
 
-  const parsed = ProjectGraphSchema.safeParse(candidate);
+  let working = candidate;
+  const parsed = ProjectGraphSchema.safeParse(working);
   if (parsed.success) return parsed.data;
+
+  // Relations that break the schema's cross-checks (duplicate id, endpoints in different feature
+  // modules) are dropped one by one rather than costing the whole graph.
+  const rejectedRelations = new Set(
+    parsed.error.issues
+      .filter((issue) => issue.path[0] === "fileRelations" && typeof issue.path[1] === "number")
+      .map((issue) => issue.path[1] as number),
+  );
+  if (fileRelations && rejectedRelations.size > 0) {
+    working = {
+      ...candidate,
+      fileRelations: fileRelations.filter((_, index) => !rejectedRelations.has(index)),
+    };
+    const retried = ProjectGraphSchema.safeParse(working);
+    if (retried.success) return retried.data;
+  }
 
   // Soften required optional empties then retry once.
   const softened = {
-    ...candidate,
-    edges: candidate.edges ?? [],
-    fileIndex: candidate.fileIndex ?? [],
+    ...working,
+    edges: working.edges ?? [],
+    fileIndex: working.fileIndex ?? [],
     analysisStatus:
-      typeof candidate.analysisStatus === "string" &&
+      typeof working.analysisStatus === "string" &&
       ["complete", "partial", "demo_fixture", "error"].includes(
-        String(candidate.analysisStatus),
+        String(working.analysisStatus),
       )
-        ? candidate.analysisStatus
+        ? working.analysisStatus
         : "partial",
     analysisError:
-      candidate.analysisError === undefined ? null : candidate.analysisError,
+      working.analysisError === undefined ? null : working.analysisError,
   };
   const again = ProjectGraphSchema.safeParse(softened);
   return again.success ? again.data : null;
@@ -1057,6 +1074,19 @@ function requiredFixturesMissing(projectOSRoot: string): boolean {
   );
 }
 
+/**
+ * Keep the first copy of a graph.json the loader is about to rewrite or replace, so a repair
+ * or heuristic rebuild never silently destroys authored content. An existing backup is kept.
+ */
+function backUpGraphBeforeRewrite(graphPath: string): void {
+  const backupPath = `${graphPath}.bak`;
+  try {
+    if (!existsSync(backupPath)) copyFileSync(graphPath, backupPath);
+  } catch {
+    /* best effort: the backup must never block opening the project */
+  }
+}
+
 function loadOrBuildGraph(input: {
   projectOSRoot: string;
   projectId: string;
@@ -1084,12 +1114,14 @@ function loadOrBuildGraph(input: {
         projectId: input.projectId,
       });
       if (sanitized) {
+        backUpGraphBeforeRewrite(graphPath);
         writeJson(graphPath, sanitized, input.created);
         return { graph: sanitized, repairedGraph: true };
       }
     } catch {
       /* rebuild below */
     }
+    backUpGraphBeforeRewrite(graphPath);
   }
 
   const graph = buildHeuristicProjectGraph({

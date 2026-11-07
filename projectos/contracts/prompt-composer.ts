@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { LocalContextFileDispositionSchema } from "./local-context.js";
+import { ExecutorSelectionSchema } from "./executor-selection.js";
 
 export const PromptContextRefSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("file"), path: z.string().min(1) }).strict(),
@@ -85,6 +86,7 @@ export const ComposerDraftSchema = z
 
 export const PromptComposerFieldsSchema = z
   .object({
+    executorSelection: ExecutorSelectionSchema.optional(),
     attachments: z.array(PromptAttachmentSchema).optional(),
     invokedSkillId: z.string().min(1).optional(),
   })

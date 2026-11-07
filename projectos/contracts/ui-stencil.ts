@@ -1137,8 +1137,8 @@ export function buildStencilAwareUserContent(
 /** Minimal composer slice so callers need not import SpatialPin into this module. */
 export interface StencilPinComposerSlice {
   prompt: string;
-  stencilBrief?: string;
-  generationScope?: StencilGenerationScope;
+  stencilBrief?: string | undefined;
+  generationScope?: StencilGenerationScope | undefined;
 }
 
 /**

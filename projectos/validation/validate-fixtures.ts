@@ -200,7 +200,7 @@ export function validateWorkspaceFixtureData(
     tombstonedFilePaths.has(path) || fileExists(path);
   const nodeIds = new Set(graph?.nodes.map((node) => node.id) ?? []);
 
-  const project = parseArtifact(ProjectOSProjectSchema, data.project, "project.json", errors);
+  parseArtifact(ProjectOSProjectSchema, data.project, "project.json", errors);
   parseArtifact(
     ProjectOSSettingsSchema,
     data.settings === undefined

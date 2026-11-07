@@ -112,11 +112,25 @@ export interface WriteTransactionRequest {
   ) => void | (() => void);
 }
 
+export interface CommittedFileIdentity {
+  path: string;
+  canonicalPath: string;
+  device: number;
+  inode: number;
+  sha256: string;
+}
+
 export interface WriteTransactionResult {
   backupId: string;
   outcome: "committed" | "recovery_required";
   filesChanged: string[];
   recoveryFailedPaths?: string[];
+  /**
+   * Identity of each file this transaction installed. Captured from the
+   * temporary file before rename/link, so a later reader cannot rebind to a
+   * file the user replaced after the commit.
+   */
+  committedFiles?: CommittedFileIdentity[];
 }
 
 export interface RecoveryResult {
@@ -310,9 +324,12 @@ export class RecoverableWriteTransactionKernel {
         }
       }
       journal = updateJournal(journalPath, journal, { state: "committing" });
+      const committedFiles: CommittedFileIdentity[] = [];
       for (const [index, plan] of prepared.entries()) {
         assertOperationUnchanged(workspaceRoot, plan);
+        const installed = installedFileIdentity(plan);
         commitOperation(this.primitives, plan);
+        if (installed) committedFiles.push(installed);
         journal.entries[index]!.committed = true;
         journal = updateJournal(journalPath, journal, {});
       }
@@ -321,6 +338,7 @@ export class RecoverableWriteTransactionKernel {
         backupId,
         outcome: "committed" as const,
         filesChanged: prepared.map(pathOf),
+        committedFiles,
       };
       const compensation = request.acceptCommitted?.(committed);
       if (compensation !== undefined && typeof compensation !== "function") {
@@ -855,6 +873,22 @@ function assertOperationUnchanged(workspaceRoot: string, plan: PreparedOperation
       cause: error,
     });
   }
+}
+
+function installedFileIdentity(plan: PreparedOperation): CommittedFileIdentity | undefined {
+  if (!plan.temporaryPath || !plan.afterSha256) return undefined;
+  if (plan.authorization.operation === "internal" || plan.authorization.operation === "delete") {
+    return undefined;
+  }
+  const stats = lstatSync(plan.temporaryPath);
+  if (!stats.isFile() || stats.isSymbolicLink()) return undefined;
+  return {
+    path: plan.authorization.relativePath,
+    canonicalPath: plan.targetPath,
+    device: stats.dev,
+    inode: stats.ino,
+    sha256: plan.afterSha256,
+  };
 }
 
 function commitOperation(primitives: WriteTransactionPrimitives, plan: PreparedOperation): void {

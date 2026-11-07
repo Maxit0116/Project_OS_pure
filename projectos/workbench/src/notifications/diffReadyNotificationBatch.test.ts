@@ -1,18 +1,29 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { DIFF_READY_BATCH_WINDOW_MS } from './diffReadyNotification'
+import {
+  DIFF_READY_BATCH_WINDOW_MS,
+  type DiffReadyCompletion,
+} from './diffReadyNotification'
 import {
   DIFF_READY_BATCH_MAX_ITEMS,
   enqueueDiffReadyBatch,
   resetDiffReadyBatch,
 } from './diffReadyNotificationBatch'
 
-function completion(index: number) {
+function completion(index: number): DiffReadyCompletion {
   return {
+    kind: 'diff',
     runId: `run_${index}`,
     fileCount: 1,
     summary: `Task ${index}`,
     completedAt: index,
+    context: {
+      centerTab: 'code',
+      codeSubTab: 'editor',
+      windowFocused: false,
+      rightPanelTab: 'chat',
+      agentFlowOpen: false,
+    },
   }
 }
 
@@ -26,13 +37,13 @@ describe('diff-ready notification batching', () => {
     vi.useFakeTimers()
     const flush = vi.fn()
 
+    // First-in-batch schedules at 0ms; items enqueued before that tick share one flush.
     enqueueDiffReadyBatch(completion(1), flush)
-    vi.advanceTimersByTime(DIFF_READY_BATCH_WINDOW_MS - 500)
     enqueueDiffReadyBatch(completion(2), flush)
-    vi.advanceTimersByTime(499)
     expect(flush).not.toHaveBeenCalled()
+    expect(DIFF_READY_BATCH_WINDOW_MS).toBeGreaterThan(0)
 
-    vi.advanceTimersByTime(1)
+    vi.advanceTimersByTime(0)
     expect(flush).toHaveBeenCalledOnce()
     expect(flush.mock.calls[0]?.[0]).toEqual([completion(1), completion(2)])
   })

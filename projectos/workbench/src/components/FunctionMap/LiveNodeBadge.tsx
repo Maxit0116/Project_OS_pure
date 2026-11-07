@@ -34,7 +34,9 @@ export default function LiveNodeBadge({ summary, compact = false }: Props) {
   const { ts } = useI18n()
   const kindLabel = ts(`map.liveGraph.kind.${summary.primaryKind}`)
   const statusHint =
-    summary.primaryStatus === 'running'
+    summary.primaryKind === 'waiting'
+      ? ts('map.liveGraph.status.waiting')
+      : summary.primaryStatus === 'running'
       ? ts('map.liveGraph.status.running')
       : summary.primaryStatus === 'error'
         ? ts('map.liveGraph.status.error')
