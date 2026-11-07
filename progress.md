@@ -1,5 +1,14 @@
 # Progress
 
+## 2026-11-07 (S8) - fixing the gaps S7 left, and a second round of repositories
+
+- **Asked:** "explain what is the gaps", then "let's fix them". Details, numbers and what each fix does are in `build_plan.md` §0 ("S8, fixing the gaps").
+- **Fixed, with tests:** Agent edits on files above 12,000 tokens (outline plus regions, search/replace edits, hunks for validators; live on excalidraw's 93,000-token `App.tsx`); verification commands in a folder of the project (settings Folder box, suggestions from `backend/` and `frontend/`); symbols, referrers and tests for Python, Go, Rust, JVM languages, C#, Ruby, PHP and Swift; Ask states its coverage and reads more for whole-project questions; validators get the definitions of the functions a change calls (gitea's `db.Count` misuse); an Intel (x64) build, with node-pty's x64 helper made executable; an unanswered intent card kept with its conversation; `.tsx` outlines (the language server was told JSX was plain TypeScript).
+- **Second round (source only):** ripgrep, eShopOnWeb, gitea (6,407 files) and create-t3-turbo. Fixed: duplicate model edge ids (ripgrep map refused), no C# relations (eShopOnWeb map refused), a 120-files-per-component cap that left 653 of gitea's source files unindexed, an Ask budget that reasoning used up (ripgrep: empty answer). All four now map; Asks answered correctly; Agent changes in Go, Rust, C# and across two monorepo packages applied and read as correct.
+- **Not done, and why:** none of these repositories' own builds or tests ran, and running a verification command on one (the FastAPI template) was declined by this machine's permission check, so code changes are read, not compiled; the 17-minute deadline overrun was not seen again; DeepSeek only; above 8,000 files, a real Intel Mac, a clean machine, a quarantined download, a Developer ID build and Keychain storage are untried or the owner's call; the multi-file batch review does not get the called definitions.
+- **Tests:** full run 2,205 tests: 2,100 pass, 81 fail, 24 skipped. 80 of the failures are the standing ones (same names as S7); the 81st was a clock-dependent test, fixed in ef888a9 and passing three runs in a row. Five typechecks 0 errors. `dist:mac` builds arm64 and x64; both verify and both start a shell. Eleven commits, 94c2c68 to ef888a9, plus this docs commit; nothing pushed.
+- Next step: the owner's call on running verification commands on external repositories (installing their dependencies), a second Mac or account for a clean-machine and Intel run, Developer ID signing, Keychain, and merging `origin/graph`.
+
 ## 2026-11-06 (S7) - four more repositories, where each broke, and making it general
 
 - **Question asked:** "can I open any repo from GitHub and do a complete workflow?" Answer was no (two repositories, both TypeScript). The owner said to test more shapes and then make it general.
