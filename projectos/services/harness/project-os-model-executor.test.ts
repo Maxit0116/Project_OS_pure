@@ -43,7 +43,22 @@ function emptyDiff(runId = "run_1") {
 }
 
 describe("ProjectOSModelExecutor requestDecision before generate", () => {
-  it("calls host.requestDecision then generates after the card answer", async () => {
+  it("defaults to generating without a pre-generate ask", async () => {
+    const requestDecision = vi.fn();
+    const generate = vi.fn(async () => emptyDiff());
+    const host = {
+      requestDecision,
+      submitProposal: vi.fn(async () => ({ accepted: true as const })),
+    } as unknown as HarnessHost;
+
+    const adapter = new ProjectOSModelExecutor(generate);
+    const result = await (await adapter.start(task(), host)).result;
+    expect(requestDecision).not.toHaveBeenCalled();
+    expect(generate).toHaveBeenCalledOnce();
+    expect(result.outcome).toBe("completed");
+  });
+
+  it("calls host.requestDecision then generates after the card answer when opted in", async () => {
     let resolveDecision: ((value: { decisionId: string }) => void) | undefined;
     const decisionGate = new Promise<{ decisionId: string }>((resolve) => {
       resolveDecision = resolve;
@@ -56,7 +71,7 @@ describe("ProjectOSModelExecutor requestDecision before generate", () => {
       submitProposal,
     } as unknown as HarnessHost;
 
-    const adapter = new ProjectOSModelExecutor(generate);
+    const adapter = new ProjectOSModelExecutor(generate, { askBeforeGenerate: true });
     const handle = await adapter.start(task(), host);
     await new Promise((r) => setTimeout(r, 20));
     expect(generate).not.toHaveBeenCalled();
@@ -74,7 +89,7 @@ describe("ProjectOSModelExecutor requestDecision before generate", () => {
     expect(result.outcome).toBe("completed");
   });
 
-  it("skips the pause when the host reports not_implemented", async () => {
+  it("skips the pause when the opted-in host reports not_implemented", async () => {
     const generate = vi.fn(async () => emptyDiff());
     const host = {
       requestDecision: vi.fn(async () => {
@@ -85,23 +100,9 @@ describe("ProjectOSModelExecutor requestDecision before generate", () => {
       submitProposal: vi.fn(async () => ({ accepted: true as const })),
     } as unknown as HarnessHost;
 
-    const adapter = new ProjectOSModelExecutor(generate);
+    const adapter = new ProjectOSModelExecutor(generate, { askBeforeGenerate: true });
     const result = await (await adapter.start(task(), host)).result;
     expect(generate).toHaveBeenCalledOnce();
-    expect(result.outcome).toBe("completed");
-  });
-
-  it("can disable the mid-run ask", async () => {
-    const requestDecision = vi.fn();
-    const host = {
-      requestDecision,
-      submitProposal: vi.fn(async () => ({ accepted: true as const })),
-    } as unknown as HarnessHost;
-    const adapter = new ProjectOSModelExecutor(async () => emptyDiff(), {
-      askBeforeGenerate: false,
-    });
-    const result = await (await adapter.start(task(), host)).result;
-    expect(requestDecision).not.toHaveBeenCalled();
     expect(result.outcome).toBe("completed");
   });
 });

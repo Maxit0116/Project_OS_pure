@@ -2711,8 +2711,16 @@ export class AgentOrchestrator {
     feedback: { summary: string; rationale: string; scopeStatus: string } | undefined,
   ): Promise<GeneratedDiff> {
     const profile = state.modelProfile!;
+    // Approved intent already authorized the edit. Do not invent a Continue card on
+    // every built-in generate. Keep host.requestDecision for real mid-run asks
+    // (Fake/scripted decisionQuestion, future model clarification). Diagnostic
+    // opt-in mirrors PROJECTOS_SCRIPTED_REQUEST_DECISION and is not coverage that
+    // “the model autonomously needed a question.”
+    const askBeforeGenerate = process.env.PROJECTOS_MODEL_ASK_BEFORE_GENERATE === "1";
     const adapter = new ProjectOSModelExecutor(() =>
-      this.generateDiff(workspace, state, [], plan, stepId, feedback));
+      this.generateDiff(workspace, state, [], plan, stepId, feedback), {
+      askBeforeGenerate,
+    });
     const mode = state.run.kind === "debug_fix" ? "debug" : "change";
     const task = this.buildLeafTask(workspace, state, `model:${profile.id}`, mode, {
       objective: plan.objective,

@@ -17,11 +17,14 @@ function now(): string {
 
 export type ProjectOSModelExecutorOptions = {
   /**
-   * When true (default), block on the production waiting-decision card via
-   * `host.requestDecision` before generating. The built-in model path previously
-   * skipped this host op entirely, so H3 could only be proven with scripted/fake
-   * adapters. If the host has no decision store (`not_implemented`), generation
-   * continues without pausing.
+   * When true, block on the production waiting-decision card via
+   * `host.requestDecision` before generating. Default is false: after an
+   * approved intent the leaf must generate without inventing a Continue card.
+   * Opt in only for explicit mid-run / diagnostic pauses. Hosts without a
+   * decision store (`not_implemented`) still continue without pausing.
+   *
+   * This flag is not “the model asked a real clarification” — that remains a
+   * separate host.requestDecision call when an executor has a real question.
    */
   askBeforeGenerate?: boolean;
 };
@@ -46,7 +49,7 @@ export class ProjectOSModelExecutor implements NodeExecutorAdapter {
     private readonly generate: () => Promise<GeneratedDiff>,
     options: ProjectOSModelExecutorOptions = {},
   ) {
-    this.askBeforeGenerate = options.askBeforeGenerate !== false;
+    this.askBeforeGenerate = options.askBeforeGenerate === true;
   }
 
   describe() {
