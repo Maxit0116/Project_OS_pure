@@ -1,0 +1,318 @@
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  height: 100%;
+  background: var(--tech-bg-side-panel);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--tech-border);
+  flex-shrink: 0;
+}
+
+.titleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.subtitle {
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.gitUrlBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--tech-border);
+  flex-shrink: 0;
+}
+
+.gitUrlInput {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background-color: var(--tech-bg-muted);
+  background-image: none;
+  color: var(--tech-text-primary);
+  caret-color: var(--tech-text-primary);
+  font-size: var(--font-size-xs);
+  padding: 7px 10px;
+  outline: none;
+  box-shadow: none;
+}
+
+.gitUrlInput::placeholder {
+  color: var(--tech-text-muted);
+  opacity: 1;
+}
+
+.gitUrlInput:hover:not(:disabled) {
+  border-color: var(--tech-border-strong);
+}
+
+.gitUrlInput:focus,
+.gitUrlInput:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+  border-color: var(--tech-border-strong);
+}
+
+.gitUrlInput:disabled {
+  opacity: 0.6;
+}
+
+.importPackBar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--tech-border);
+  flex-shrink: 0;
+}
+
+.importPackInput {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  appearance: none;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background-color: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+  caret-color: var(--tech-text-primary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-xs);
+  padding: 7px 10px;
+  outline: none;
+  box-shadow: none;
+  line-height: 1.4;
+}
+
+.importPackInput::placeholder {
+  color: var(--tech-text-muted);
+  opacity: 1;
+}
+
+.importPackInput:hover:not(:disabled) {
+  border-color: var(--tech-border-strong);
+}
+
+.importPackInput:focus,
+.importPackInput:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+  border-color: var(--tech-border-strong);
+}
+
+.importPackInput:disabled {
+  opacity: 0.6;
+}
+
+.viewToggle {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  flex-shrink: 0;
+}
+
+.viewToggleBtn {
+  appearance: none;
+  border: 1px solid var(--tech-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--tech-text-secondary);
+  font-size: 11px;
+  font-weight: 550;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.viewToggleBtnActive {
+  border-color: color-mix(in srgb, var(--tech-accent) 45%, var(--tech-border));
+  color: var(--tech-accent);
+  background: color-mix(in srgb, var(--tech-accent) 8%, transparent);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--tech-border);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--tech-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 550;
+  padding: 6px 10px;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+}
+
+.tabActive {
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
+  box-shadow: inset 0 -2px 0 var(--tech-accent);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--tech-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.help {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  line-height: 1.4;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.empty {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--tech-text-secondary);
+}
+
+.loadingState {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 4px 0;
+  padding: 14px 12px;
+  border: 1px solid var(--tech-border);
+  border-radius: 8px;
+  background: var(--tech-bg-elevated);
+}
+
+.loadingCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.loadingTitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.loadingHint {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  line-height: 1.4;
+}
+
+.loadingSpin {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--tech-accent);
+  animation: marketplace-spin 0.8s linear infinite;
+}
+
+@keyframes marketplace-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loadingSpin {
+    animation: none;
+  }
+}
+
+.error {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-danger, #c44);
+}
+
+.consentCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--tech-border);
+  border-radius: 8px;
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-sm);
+}
+
+.consentTitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.consentBody {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  line-height: 1.45;
+}
+
+.consentActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Layers2, X } from 'lucide-react'
+import { Check, Layers2, X } from 'lucide-react'
 import type { WorkGroupSelectionItem } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
@@ -213,7 +213,7 @@ export default function MapWorkGroupCreateDialog({ onCancel, onConfirm }: Props)
             className={`${styles.checkbox}${selected ? ` ${styles.checkboxChecked}` : ''}`}
             aria-hidden
           >
-            {selected ? '✓' : ''}
+            {selected ? <Check size={10} strokeWidth={3} /> : null}
           </span>
           {candidate.kind === 'workgroup' ? (
             <Layers2 size={14} strokeWidth={1.75} aria-hidden />

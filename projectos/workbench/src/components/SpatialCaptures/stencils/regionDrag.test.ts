@@ -6,6 +6,7 @@ import {
   movedPlacementLocalRect,
   movedPlacementWithRegionFollow,
   regionRectForStencilDrop,
+  resizedPlacementFree,
   resizedRectFromHandle,
 } from './regionDrag'
 
@@ -129,5 +130,43 @@ describe('resizedRectFromHandle', () => {
     expect(hitTestResizeHandle(rect, 10, 20, 8)).toBe('topLeft')
     expect(hitTestResizeHandle(rect, 110, 100, 8)).toBe('bottomRight')
     expect(hitTestResizeHandle(rect, 60, 60, 8)).toBeNull()
+  })
+})
+
+describe('resizedPlacementFree', () => {
+  it('expands the region when the stub grows past its capture', () => {
+    const { nextCapture, nextLocal } = resizedPlacementFree(
+      { x: 8, y: 8, width: 100, height: 40 },
+      { x: 100, y: 100, width: 120, height: 56 },
+      'bottomRight',
+      400,
+      300,
+      { width: 800, height: 600 },
+      16,
+    )
+    expect(nextCapture.x + nextCapture.width).toBeGreaterThan(220)
+    expect(nextLocal.width).toBeGreaterThan(100)
+    expect(nextLocal.height).toBeGreaterThan(40)
+    // Placement stays inside the (expanded) capture.
+    expect(nextLocal.x + nextLocal.width).toBeLessThanOrEqual(
+      nextCapture.width + 0.01,
+    )
+    expect(nextLocal.y + nextLocal.height).toBeLessThanOrEqual(
+      nextCapture.height + 0.01,
+    )
+  })
+
+  it('allows shrinking below the old 48px floor', () => {
+    const { nextLocal } = resizedPlacementFree(
+      { x: 10, y: 10, width: 100, height: 80 },
+      { x: 0, y: 0, width: 400, height: 300 },
+      'bottomRight',
+      30,
+      30,
+      { width: 800, height: 600 },
+      16,
+    )
+    expect(nextLocal.width).toBe(20)
+    expect(nextLocal.height).toBe(20)
   })
 })

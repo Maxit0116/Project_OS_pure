@@ -10,7 +10,7 @@ import styles from './DiffReadyBanner.module.css'
 interface Props {
   title: string
   body: string
-  destination: 'ask' | 'diff'
+  destination: 'ask' | 'diff' | 'reminder'
   onReview: () => void
   onDismiss: () => void
 }
@@ -95,7 +95,13 @@ export default function DiffReadyBanner({ title, body, destination, onReview, on
           <span className={styles.title}>{title}</span>
           <span className={styles.body}>{body}</span>
           <span className={styles.action}>
-            {ts(destination === 'ask' ? 'diffReadyNotify.viewAnswerAction' : 'diffReadyNotify.reviewAction')}
+            {ts(
+              destination === 'ask'
+                ? 'diffReadyNotify.viewAnswerAction'
+                : destination === 'reminder'
+                  ? 'diffReadyNotify.openReminderAction'
+                  : 'diffReadyNotify.reviewAction',
+            )}
           </span>
         </div>
       </button>

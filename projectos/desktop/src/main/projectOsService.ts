@@ -40,6 +40,9 @@ export function getProjectOsService(): ProjectOSLocalApi {
       workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(workspaceStore, kernel),
       dependencyImpactScanner: new DependencyImpactScanner(),
       agentMemoryRoot: join(userDataPath, 'agent-memory'),
+      mcpCatalogCacheRoot: join(userDataPath, 'mcp-catalog'),
+      skillCatalogCacheRoot: join(userDataPath, 'skill-catalog'),
+      userDataPath,
     })
   }
   return service

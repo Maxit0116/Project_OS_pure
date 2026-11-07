@@ -46,7 +46,7 @@ function arrow(
   return {
     id: 'arrow_1',
     index: 1,
-    color: '#4c7dff',
+    color: '#c4c4c8',
     anchor: 'top',
     head: { x: 0.5, y: 0 },
     tail: { x: 0.5, y: -0.4 },

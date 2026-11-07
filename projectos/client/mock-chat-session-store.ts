@@ -15,6 +15,7 @@ import {
   demoteChatSessionToMisc,
   placeChatSessionOnGraph,
   preserveChatSessionContext,
+  withSessionGraphHeadProjection,
   type ChatSessionContextUpdate,
 } from "../contracts/chat-session-context.js";
 import { cloneJson } from "../utils/json.js";
@@ -74,9 +75,12 @@ export function mockUpsertChatSession(
   record: ChatSessionRecord,
 ): ChatSessionRecord {
   const store = getProjectStore(projectId);
-  const parsed = preserveChatSessionContext(
+  const preserved = preserveChatSessionContext(
     store.records.get(record.head.id) ?? null,
     ChatSessionRecordSchema.parse(record),
+  );
+  const parsed = ChatSessionRecordSchema.parse(
+    withSessionGraphHeadProjection(preserved),
   );
   store.records.set(parsed.head.id, cloneJson(parsed));
   const heads = store.index.heads.filter((head) => head.id !== parsed.head.id);

@@ -311,14 +311,17 @@ Use a restrained neutral foundation.
 Example conceptual palette:
 
 ```text
-Background
-    #0B0B0C
+Background (content / editor)
+    #181818
+
+Chrome (sideBar / panel / titleBar / terminal)
+    #141414
 
 Elevated Surface
-    #111113
+    #1C1C1C
 
-Secondary Surface
-    #171719
+Hover / muted
+    #222222
 
 Border
     rgba(255,255,255,0.08)

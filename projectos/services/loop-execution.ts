@@ -33,6 +33,47 @@ export interface LoopAgentRunRequest {
   filePath: string;
   /** Task text only. It must not be parsed for write paths. */
   goal: string;
+  /** Optional DevPlan task id for tracing. */
+  taskId?: string;
+  agentRole?: "planner" | "coder" | "reviewer" | string;
+  /** Workforce agent binding from the Loop Spec node. */
+  agentDefinitionId?: string | null;
+}
+
+export interface LoopGithubOperationRequest {
+  operation: string;
+  payload: Record<string, unknown>;
+}
+
+export interface LoopGithubOperationResult {
+  ok: boolean;
+  url?: string;
+  number?: number;
+  message?: string;
+  refs?: Record<string, string>;
+  simulated?: boolean;
+  /** When true, runtime keeps the node open until settle completes the op. */
+  deferred?: boolean;
+}
+
+export interface LoopTerminalCommandRequest {
+  command: string;
+  args: string[];
+  timeoutMs: number;
+  cwd?: string;
+  /** Human already approved this Action node. */
+  approved: boolean;
+}
+
+export interface LoopTerminalCommandResult {
+  ok: boolean;
+  exitCode: number | null;
+  timedOut?: boolean;
+  policyDenied?: boolean;
+  blocked?: boolean;
+  stdout?: string;
+  stderr?: string;
+  message: string;
 }
 
 /**
@@ -66,4 +107,12 @@ export interface LoopExecutionHooks {
   readRun: (runId: string) => LoopAgentRunView | null;
   readEvidence: (runId: string) => LoopEvidenceView | null;
   startAgentRun: (input: LoopAgentRunRequest) => LoopAgentRunView;
+  /** Optional GitHub bridge (sync). May return `deferred: true` for async settle. */
+  executeGithubOperation?: (
+    input: LoopGithubOperationRequest,
+  ) => LoopGithubOperationResult;
+  /** Optional Terminal bridge (sync policy + optional spawn). */
+  executeTerminalCommand?: (
+    input: LoopTerminalCommandRequest,
+  ) => LoopTerminalCommandResult;
 }

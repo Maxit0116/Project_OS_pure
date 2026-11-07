@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Catalog schema version (bump when MVP ids or brief contracts change). */
-export const UiStencilCatalogVersionSchema = z.literal("0.1.0");
+export const UiStencilCatalogVersionSchema = z.enum(["0.1.0", "0.2.0"]);
 
 /** Same shape as ScreenRect; kept local to avoid circular imports with spatial-pin. */
 const PlacementRectSchema = z
@@ -95,7 +95,7 @@ export type StencilCodegen = z.infer<typeof StencilCodegenSchema>;
 export type StencilDefinition = z.infer<typeof StencilDefinitionSchema>;
 export type StencilPlacement = z.infer<typeof StencilPlacementSchema>;
 
-export const UI_STENCIL_CATALOG_VERSION: UiStencilCatalogVersion = "0.1.0";
+export const UI_STENCIL_CATALOG_VERSION: UiStencilCatalogVersion = "0.2.0";
 
 /** Max stencil placements persisted on one capture region (MVP). */
 export const MAX_STENCILS_PER_REGION = 5;
@@ -107,8 +107,9 @@ function def(
 }
 
 /**
- * MVP catalog (~30). Preview assets are path contracts; PNG/WebM land in M1.
+ * Builtin catalog (~45). Preview assets are path contracts; Library may use letter tiles.
  * Briefs are agent-facing — prefer existing DS, else follow codegen hints.
+ * P6 adds common shadcn-oriented controls (badge, avatar, accordion, …).
  */
 export const UI_STENCIL_CATALOG: readonly StencilDefinition[] = [
   // —— Base (shadcn-oriented) ——
@@ -379,6 +380,227 @@ export const UI_STENCIL_CATALOG: readonly StencilDefinition[] = [
     codegen: {
       strategy: "shadcn",
       packageHints: ["npx shadcn@latest add sonner"],
+    },
+  }),
+  def({
+    id: "badge",
+    category: "base",
+    title: "Badge",
+    tags: ["status", "label"],
+    description: "Compact status / count badge",
+    previewAsset: "stencils/previews/badge.png",
+    briefTemplate:
+      "Add a Badge. Label: {{label}}. Variant hint: {{variant}}. Prefer existing Badge primitive for status chips and counts.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add badge"],
+      targetFilesHint: "components/ui/badge",
+    },
+  }),
+  def({
+    id: "avatar",
+    category: "base",
+    title: "Avatar",
+    tags: ["user", "media"],
+    description: "User avatar with optional fallback initials",
+    previewAsset: "stencils/previews/avatar.png",
+    briefTemplate:
+      "Add an Avatar. Fallback initials: {{label}}. Include accessible alt text. Prefer existing Avatar image + fallback pattern.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add avatar"],
+    },
+  }),
+  def({
+    id: "checkbox",
+    category: "base",
+    title: "Checkbox",
+    tags: ["form"],
+    description: "Standalone labeled checkbox",
+    previewAsset: "stencils/previews/checkbox.png",
+    briefTemplate:
+      "Add a labeled Checkbox. Label: {{label}}. Prefer existing Checkbox + Label; keep hit target comfortable.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: [
+        "npx shadcn@latest add checkbox",
+        "npx shadcn@latest add label",
+      ],
+    },
+  }),
+  def({
+    id: "radio-group",
+    category: "base",
+    title: "Radio group",
+    tags: ["form"],
+    description: "Exclusive radio options",
+    previewAsset: "stencils/previews/radio-group.png",
+    briefTemplate:
+      "Add a RadioGroup for {{label}}. Options should be mutually exclusive; associate a fieldset/legend or accessible label.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add radio-group"],
+    },
+  }),
+  def({
+    id: "breadcrumb",
+    category: "base",
+    title: "Breadcrumb",
+    tags: ["nav"],
+    description: "Hierarchical page breadcrumb",
+    previewAsset: "stencils/previews/breadcrumb.png",
+    briefTemplate:
+      "Add Breadcrumb navigation reflecting the current path. Keep last item non-link current page; prefer existing Breadcrumb.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add breadcrumb"],
+    },
+  }),
+  def({
+    id: "skeleton",
+    category: "base",
+    title: "Skeleton",
+    tags: ["loading"],
+    description: "Loading placeholder skeleton",
+    previewAsset: "stencils/previews/skeleton.png",
+    briefTemplate:
+      "Add Skeleton placeholders matching the layout of the loading content. Prefer existing Skeleton; respect reduced motion (no aggressive shimmer).",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add skeleton"],
+    },
+  }),
+  def({
+    id: "accordion",
+    category: "base",
+    title: "Accordion",
+    tags: ["disclosure", "layout"],
+    description: "Expandable accordion sections",
+    previewAsset: "stencils/previews/accordion.png",
+    motionAttachable: true,
+    briefTemplate:
+      "Add an Accordion with sections for {{label}}. One or multiple open as fits the UX; keep keyboard accessible.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add accordion"],
+    },
+  }),
+  def({
+    id: "combobox",
+    category: "base",
+    title: "Combobox",
+    tags: ["form", "filter", "search"],
+    description: "Searchable select / combobox",
+    previewAsset: "stencils/previews/combobox.png",
+    briefTemplate:
+      "Add a Combobox for {{label}}. Support typeahead filter over options; prefer Combobox / Command+Popover patterns already in the project.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: [
+        "npx shadcn@latest add command",
+        "npx shadcn@latest add popover",
+      ],
+    },
+  }),
+  def({
+    id: "pagination",
+    category: "base",
+    title: "Pagination",
+    tags: ["nav", "table"],
+    description: "Paged list / table controls",
+    previewAsset: "stencils/previews/pagination.png",
+    briefTemplate:
+      "Add Pagination for the list/table. Wire page change to the data source; keep previous/next and page numbers accessible.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add pagination"],
+    },
+  }),
+  def({
+    id: "separator",
+    category: "base",
+    title: "Separator",
+    tags: ["layout"],
+    description: "Horizontal or vertical rule",
+    previewAsset: "stencils/previews/separator.png",
+    briefTemplate:
+      "Add a Separator to divide sections. Prefer existing Separator; match surrounding spacing rhythm.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add separator"],
+    },
+  }),
+  def({
+    id: "alert",
+    category: "base",
+    title: "Alert",
+    tags: ["feedback"],
+    description: "Inline alert / callout banner",
+    previewAsset: "stencils/previews/alert.png",
+    briefTemplate:
+      "Add an Alert banner. Title/body: {{label}}. Variant: {{variant}} (info/success/warning/destructive). Prefer existing Alert.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add alert"],
+    },
+  }),
+  def({
+    id: "tooltip",
+    category: "base",
+    title: "Tooltip",
+    tags: ["help", "overlay"],
+    description: "Hover/focus tooltip",
+    previewAsset: "stencils/previews/tooltip.png",
+    briefTemplate:
+      "Add a Tooltip for {{label}}. Ensure keyboard focus can reveal it; keep copy short.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add tooltip"],
+    },
+  }),
+  def({
+    id: "slider",
+    category: "base",
+    title: "Slider",
+    tags: ["form"],
+    description: "Numeric range slider",
+    previewAsset: "stencils/previews/slider.png",
+    briefTemplate:
+      "Add a Slider for {{label}}. Expose min/max/step; show current value accessibly.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add slider"],
+    },
+  }),
+  def({
+    id: "progress",
+    category: "base",
+    title: "Progress",
+    tags: ["feedback", "loading"],
+    description: "Determinate progress bar",
+    previewAsset: "stencils/previews/progress.png",
+    briefTemplate:
+      "Add a Progress bar for {{label}}. Prefer determinate value when known; otherwise use an honest indeterminate pattern.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: ["npx shadcn@latest add progress"],
+    },
+  }),
+  def({
+    id: "calendar",
+    category: "base",
+    title: "Calendar",
+    tags: ["form", "date"],
+    description: "Date calendar picker surface",
+    previewAsset: "stencils/previews/calendar.png",
+    briefTemplate:
+      "Add a Calendar / date picker for {{label}}. Prefer existing date primitives; localize weekday order if the project already does.",
+    codegen: {
+      strategy: "shadcn",
+      packageHints: [
+        "npx shadcn@latest add calendar",
+        "npx shadcn@latest add popover",
+      ],
     },
   }),
 
@@ -671,18 +893,51 @@ const catalogById = new Map(
   UI_STENCIL_CATALOG.map((item) => [item.id, item] as const),
 );
 
+/** Project-installed marketplace stencils (never mutates UI_STENCIL_CATALOG). */
+let projectStencilOverlay = new Map<string, StencilDefinition>();
+
+export function setProjectStencilOverlay(
+  defs: readonly StencilDefinition[],
+): void {
+  projectStencilOverlay = new Map(defs.map((item) => [item.id, item] as const));
+}
+
+export function clearProjectStencilOverlay(): void {
+  projectStencilOverlay = new Map();
+}
+
+export function getProjectStencilOverlay(): ReadonlyMap<string, StencilDefinition> {
+  return projectStencilOverlay;
+}
+
 export function getStencilCatalogMap(): ReadonlyMap<string, StencilDefinition> {
-  return catalogById;
+  if (projectStencilOverlay.size === 0) return catalogById;
+  const merged = new Map(catalogById);
+  for (const [id, def] of projectStencilOverlay) {
+    if (!merged.has(id)) merged.set(id, def);
+  }
+  return merged;
 }
 
 export function getStencilById(id: string): StencilDefinition | undefined {
-  return catalogById.get(id);
+  return catalogById.get(id) ?? projectStencilOverlay.get(id);
+}
+
+export function listMergedStencilDefinitions(): StencilDefinition[] {
+  if (projectStencilOverlay.size === 0) return [...UI_STENCIL_CATALOG];
+  const out = [...UI_STENCIL_CATALOG];
+  for (const def of projectStencilOverlay.values()) {
+    if (!catalogById.has(def.id)) out.push(def);
+  }
+  return out;
 }
 
 export function listStencilsByCategory(
   category: StencilCategory,
 ): StencilDefinition[] {
-  return UI_STENCIL_CATALOG.filter((item) => item.category === category);
+  return listMergedStencilDefinitions().filter(
+    (item) => item.category === category,
+  );
 }
 
 const DEFAULT_PROPS: Record<string, string> = {
@@ -740,6 +995,11 @@ export function renderPlacementBrief(
     }
     parts.push(interpolateStencilTemplate(motion.briefTemplate, placement.props));
   }
+
+  const r = placement.rect;
+  parts.push(
+    `User-sized on capture to about ${Math.round(r.width)}×${Math.round(r.height)} px — match this footprint in layout.`,
+  );
 
   return parts.join("\n");
 }

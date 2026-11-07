@@ -166,6 +166,7 @@ import {
 } from "../create-file-content.js";
 import { childRunFailureCategory } from "./child-failure-category.js";
 import { assembleRunContext } from "../context-assembly.js";
+import { loadReminderCommitmentsMarkdown } from "../reminder-graph/index.js";
 import type { ContextAssembly } from "../../contracts/context-assembly.js";
 import {
   hashMemoryIndex,
@@ -307,6 +308,8 @@ export interface OrchestratorRunState {
   modelCallCount?: number;
   verificationRunCount?: number;
   status: "queued" | "running" | "complete" | "error" | "interrupted";
+  /** Next 1-based runSequence to stamp on emitted events. */
+  nextRunSequence: number;
 }
 
 export interface CreateOrchestratorRunOptions {
@@ -349,6 +352,10 @@ export interface CreateOrchestratorRunOptions {
     sessionMarkdown: string;
     omissions: Array<{ reason: ContextAssemblyOmissionReason; count: number }>;
   };
+  /** Extra system instructions from a workforce AgentDefinition. */
+  workforceInstructions?: string;
+  /** Skill bodies bound to a workforce AgentDefinition. */
+  workforceSkillBodies?: Array<{ name: string; body: string }>;
 }
 
 export type GlobalPlanningContext = GlobalContextBundle;
@@ -620,6 +627,15 @@ export interface AgentOrchestratorOptions {
   onRootRunCompleted?: (
     workspace: LoadedProjectOSWorkspace,
     snapshot: MemoryProposalRunSnapshot,
+  ) => void;
+  /**
+   * Fired after each durable event is persisted (Agent Pool index hook).
+   * Must not throw into the run — callers wrap their own try/catch.
+   */
+  onEventPersisted?: (
+    workspace: LoadedProjectOSWorkspace,
+    event: AgentRunEvent,
+    run: AgentRun,
   ) => void;
 }
 
@@ -1028,6 +1044,13 @@ export class AgentOrchestrator {
   private readonly onRootRunCompleted:
     | ((workspace: LoadedProjectOSWorkspace, snapshot: MemoryProposalRunSnapshot) => void)
     | undefined;
+  private readonly onEventPersisted:
+    | ((
+        workspace: LoadedProjectOSWorkspace,
+        event: AgentRunEvent,
+        run: AgentRun,
+      ) => void)
+    | undefined;
   private readonly pipelineBudget: LeafPipelineBudget;
   private readonly auditDirectory: string | undefined;
   private readonly runs = new Map<string, OrchestratorRunState>();
@@ -1065,6 +1088,7 @@ export class AgentOrchestrator {
     this.greenfieldInitialization = options.greenfieldInitialization;
     this.loadMemoryIndexMarkdown = options.loadMemoryIndexMarkdown;
     this.onRootRunCompleted = options.onRootRunCompleted;
+    this.onEventPersisted = options.onEventPersisted;
     this.pipelineBudget = resolveLeafPipelineBudget(options.pipelineBudget);
     this.auditDirectory = options.auditDirectory;
     this.decisionPort = options.decisions;
@@ -1148,13 +1172,23 @@ export class AgentOrchestrator {
           path: selectedPath,
         })
       : null;
+    const baseSystemPrompt = [resolvedProfile.systemPrompt, options.workforceInstructions]
+      .filter((part) => typeof part === "string" && part.trim().length > 0)
+      .join("\n\n");
+    const reminderCommitments = loadReminderCommitmentsMarkdown(workspace.workspaceRoot);
     const assembled = assembleRunContext({
       harness: {
-        baseSystemPrompt: resolvedProfile.systemPrompt,
+        baseSystemPrompt,
         mode: harnessMode,
         rulesMarkdown,
         ...(walkMarkdown ? { walkMarkdown } : {}),
         ...(memoryInjection.markdown ? { memoryIndexMarkdown: memoryInjection.markdown } : {}),
+        ...(reminderCommitments
+          ? { reminderCommitmentsMarkdown: reminderCommitments }
+          : {}),
+        ...(options.workforceSkillBodies?.length
+          ? { skillBodies: options.workforceSkillBodies }
+          : {}),
         ...(modelDelta ? { modelDelta } : {}),
       },
       bundle: scopeBundle,
@@ -1263,6 +1297,7 @@ export class AgentOrchestrator {
           : {}),
       ...(options.globalContext ? { globalContext: cloneJson(options.globalContext) } : {}),
       status: "queued",
+      nextRunSequence: 1,
     };
     this.runs.set(run.runId, state);
     this.runAbortControllers.set(run.runId, new AbortController());
@@ -7432,6 +7467,41 @@ export class AgentOrchestrator {
     );
   }
 
+  /** Emit a run-scoped MCP tool call for Agent Flow (future Change/locate wiring). */
+  recordMcpToolCall(
+    workspace: LoadedProjectOSWorkspace,
+    runId: string,
+    payload: {
+      serverId: string;
+      toolName: string;
+      callId: string;
+      status: "completed" | "failed" | "rejected";
+      durationMs: number;
+      resultBytes?: number;
+      error?: string;
+    },
+  ): void {
+    const state = this.runs.get(runId);
+    if (!state) return;
+    this.emit(
+      workspace,
+      state,
+      createActionEvent(runId, "mcp_tool_call", {
+        serverId: payload.serverId,
+        toolName: payload.toolName,
+        callId: payload.callId,
+        status: payload.status,
+        durationMs: payload.durationMs,
+        ...(payload.resultBytes !== undefined
+          ? { resultBytes: payload.resultBytes }
+          : {}),
+        ...(payload.error
+          ? { error: redactAuditText(payload.error).slice(0, 2_048) }
+          : {}),
+      }),
+    );
+  }
+
   noteVerificationApproval(runId: string, approvalId: string): void {
     const state = this.runs.get(runId);
     if (!state) return;
@@ -8580,7 +8650,12 @@ export class AgentOrchestrator {
           },
         }
       : recorded;
-    if (!this.persistEvent(workspace, withUsage)) {
+    const sequenced: AgentRunEvent = {
+      ...withUsage,
+      runSequence: state.nextRunSequence,
+    };
+    state.nextRunSequence += 1;
+    if (!this.persistEvent(workspace, sequenced)) {
       this.eventPersistenceFailedRunIds.add(state.run.runId);
       this.evictOldTerminalRunTrees();
       return;
@@ -8592,7 +8667,7 @@ export class AgentOrchestrator {
         console.error("[projectos] failed to write agent run snapshot", error);
       }
     }
-    state.events.push(withUsage);
+    state.events.push(sequenced);
     if (state.events.length > MAX_RETAINED_EVENTS_PER_RUN) {
       const runStarted = state.events.find((candidate) => candidate.type === "run_started");
       const tailLimit = MAX_RETAINED_EVENTS_PER_RUN - (runStarted ? 1 : 0);
@@ -8603,7 +8678,19 @@ export class AgentOrchestrator {
       state.events.splice(0, state.events.length, ...retained);
     }
     for (const listener of [...(this.listeners.get(state.run.runId) ?? [])]) {
-      listener(cloneJson(withUsage));
+      listener(cloneJson(sequenced));
+    }
+    if (this.onEventPersisted) {
+      const notify = this.onEventPersisted;
+      const runSnapshot = cloneJson(state.run);
+      const eventSnapshot = cloneJson(sequenced);
+      queueMicrotask(() => {
+        try {
+          notify(workspace, eventSnapshot, runSnapshot);
+        } catch (error) {
+          console.error("[projectos] agent pool index hook failed", error);
+        }
+      });
     }
     this.evictOldTerminalRunTrees();
     if (event.type === "run_completed" && !state.run.parentRunId && this.onRootRunCompleted) {

@@ -45,6 +45,7 @@ function mockStore(partial: Record<string, unknown>) {
     setComposerMode: vi.fn(),
     sendAuthoringTurn: vi.fn(),
     answerGoalClarification: vi.fn(),
+    cancelGoalClarification: vi.fn(),
     confirmGoalContext: vi.fn(),
     acceptGraphEditOffer: vi.fn(),
     dismissGraphEditOffer: vi.fn(),
@@ -86,5 +87,40 @@ describe('LoopGoalComposer', () => {
     const html = renderToStaticMarkup(<LoopGoalComposer />)
     expect(html).toContain('data-loop-graph-edit-offer')
     expect(html).toContain('chat.loopGraph.acceptGraphEdit')
+  })
+
+  it('shows clarifications as a peer bookmark sheet when questions are pending', () => {
+    mockStore({
+      composerSheet: 'clarify',
+      document: {
+        ...sampleDoc,
+        draftGoalContext: {
+          goal: 'Ship login',
+          constraints: [],
+          doneWhen: [],
+          outOfScope: [],
+          openQuestions: [{ id: 'q1', question: 'Done when?' }],
+          status: 'draft',
+          revision: 1,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          sourceThreadLength: 1,
+        },
+      },
+    })
+    const html = renderToStaticMarkup(<LoopGoalComposer />)
+    expect(html).toContain('chat.loopGraph.clarifySheet')
+    expect(html).toContain('data-loop-sheet="clarify"')
+    expect(html).toContain('data-loop-goal-clarify')
+    expect(html).toContain('chat.loopGraph.submitClarifications')
+    expect(html).toContain('chat.loopGraph.cancelClarifications')
+    expect(html).not.toContain('data-loop-sheet="flow"')
+    expect(html).not.toContain('data-loop-sheet="context"')
+  })
+
+  it('hides the clarifications tab when no questions are pending', () => {
+    mockStore({})
+    const html = renderToStaticMarkup(<LoopGoalComposer />)
+    expect(html).not.toContain('chat.loopGraph.clarifySheet')
+    expect(html).not.toContain('data-loop-sheet="clarify"')
   })
 })

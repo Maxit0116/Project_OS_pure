@@ -1,20 +1,18 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, Layers2, RotateCcw, SlidersHorizontal, StickyNote } from 'lucide-react'
+import { Check, RotateCcw, SlidersHorizontal, StickyNote } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
 import { useFunctionMap } from './FunctionMapContext'
 import { buildMapSearchHits, type MapSearchHit } from './mapSearch'
-import { MAP_CREATE_ARTIFACT_ACTIONS } from './mapCreateActions'
-import { EDGE_COLORS } from './edgePresentation'
 import contextMenuStyles from './FunctionMapContextMenu.module.css'
 import styles from './FunctionMap.module.css'
 
 const VIEWPORT_MARGIN = 8
 
 interface Props {
-  variant?: 'panel' | 'inline'
+  variant?: 'panel' | 'inline' | 'corner'
 }
 
 function SearchHitTitle({ title, query }: { title: string; query: string }) {
@@ -49,7 +47,6 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
     graphNodes,
     mapContent,
     jumpToMapSearchHit,
-    edges,
     architectureLevels,
     showArtifacts,
     setShowArtifacts,
@@ -60,22 +57,16 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
     setHideHeuristicNodes,
     architecture,
   } = useFunctionMap()
-  const beginMapArtifactCreate = useWorkbenchStore((s) => s.beginMapArtifactCreate)
-  const beginMapWorkGroupCreate = useWorkbenchStore((s) => s.beginMapWorkGroupCreate)
   const rescanStructureGraph = useWorkbenchStore((s) => s.rescanStructureGraph)
   const structureRescanLoading = useWorkbenchStore((s) => s.structureRescanLoading)
   const selectedNodeId = useWorkbenchStore((s) => s.selectedNodeId)
   const graph = useWorkbenchStore((s) => s.graph)
   const { ts } = useI18n()
-  const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [displayMenuOpen, setDisplayMenuOpen] = useState(false)
-  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null)
   const [displayMenuPosition, setDisplayMenuPosition] = useState<{
     x: number
     y: number
   } | null>(null)
-  const addButtonRef = useRef<HTMLDivElement>(null)
-  const addMenuRef = useRef<HTMLDivElement>(null)
   const displayButtonRef = useRef<HTMLDivElement>(null)
   const displayMenuRef = useRef<HTMLDivElement>(null)
   const isC4 = architecture?.notation === 'c4'
@@ -105,70 +96,6 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
   const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId)
   const canDeepen =
     selectedNode?.level === 'container' || selectedNode?.level === 'component'
-  const relationKeys = Array.from(new Set(edges.map((edge) => edge.relation)))
-  useLayoutEffect(() => {
-    if (!addMenuOpen || !menuPosition) return
-
-    const button = addButtonRef.current
-    const menuEl = addMenuRef.current
-    if (!button || !menuEl) return
-
-    const buttonRect = button.getBoundingClientRect()
-    const menuRect = menuEl.getBoundingClientRect()
-    let x = menuPosition.x
-    let y = menuPosition.y
-
-    if (x + menuRect.width > window.innerWidth - VIEWPORT_MARGIN) {
-      x = Math.max(VIEWPORT_MARGIN, window.innerWidth - menuRect.width - VIEWPORT_MARGIN)
-    }
-    if (y + menuRect.height > window.innerHeight - VIEWPORT_MARGIN) {
-      y = Math.max(VIEWPORT_MARGIN, buttonRect.top - menuRect.height - 4)
-    }
-
-    if (x !== menuPosition.x || y !== menuPosition.y) {
-      setMenuPosition({ x, y })
-    }
-  }, [addMenuOpen, menuPosition])
-
-  useEffect(() => {
-    if (!addMenuOpen) return
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setAddMenuOpen(false)
-        setMenuPosition(null)
-      }
-    }
-
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Node
-      if (addButtonRef.current?.contains(target) || addMenuRef.current?.contains(target)) {
-        return
-      }
-      setAddMenuOpen(false)
-      setMenuPosition(null)
-    }
-
-    const handleScroll = (event: Event) => {
-      if (!shouldCloseToolbarMenuForScroll(addMenuRef.current, event.target)) return
-      setAddMenuOpen(false)
-      setMenuPosition(null)
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    const dismissTimer = window.setTimeout(() => {
-      document.addEventListener('click', handleClickOutside, true)
-    }, 0)
-    window.addEventListener('scroll', handleScroll, true)
-
-    return () => {
-      window.clearTimeout(dismissTimer)
-      document.removeEventListener('keydown', handleKeyDown)
-      document.removeEventListener('click', handleClickOutside, true)
-      window.removeEventListener('scroll', handleScroll, true)
-    }
-  }, [addMenuOpen])
-
   useLayoutEffect(() => {
     if (!displayMenuOpen || !displayMenuPosition) return
 
@@ -290,22 +217,18 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
     setSearchActiveIndex(0)
   }
 
-  const openAddMenu = () => {
-    const rect = addButtonRef.current?.getBoundingClientRect()
-    if (!rect) return
-    setMenuPosition({ x: rect.left, y: rect.bottom + 4 })
-    setAddMenuOpen(true)
-  }
-
-  const closeAddMenu = () => {
-    setAddMenuOpen(false)
-    setMenuPosition(null)
-  }
+  const toolbarClass =
+    variant === 'inline'
+      ? styles.toolbarInline
+      : variant === 'corner'
+        ? styles.toolbarCorner
+        : styles.toolbar
 
   return (
     <div
-      className={variant === 'inline' ? styles.toolbarInline : styles.toolbar}
+      className={toolbarClass}
       data-zone-interactive
+      data-map-toolbar={variant}
     >
       <div className={styles.searchAnchor} ref={searchAnchorRef}>
         <input
@@ -557,84 +480,6 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
           <StickyNote size={13} strokeWidth={1.75} aria-hidden />
           {ts('map.artifacts')}
         </Button>
-        <div ref={addButtonRef} className={styles.addMenuAnchor}>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              if (addMenuOpen) {
-                closeAddMenu()
-              } else {
-                openAddMenu()
-              }
-            }}
-            aria-expanded={addMenuOpen}
-            aria-haspopup="menu"
-          >
-            {ts('map.add')} ▾
-          </Button>
-        </div>
-        {addMenuOpen &&
-          menuPosition &&
-          createPortal(
-            <div
-              ref={addMenuRef}
-              className={contextMenuStyles.menu}
-              role="menu"
-              aria-label={ts('map.contextMenu.create')}
-              data-zone-interactive
-              style={{ left: menuPosition.x, top: menuPosition.y }}
-            >
-              <div className={contextMenuStyles.groupLabel} aria-hidden>
-                {ts('map.contextMenu.create')}
-              </div>
-              {MAP_CREATE_ARTIFACT_ACTIONS.map(({ type, icon: Icon, labelKey }) => {
-                const label = ts(labelKey)
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    role="menuitem"
-                    className={contextMenuStyles.menuItem}
-                    onClick={() => {
-                      beginMapArtifactCreate(type, { mode: 'viewportCenter' })
-                      closeAddMenu()
-                    }}
-                  >
-                    <Icon className={contextMenuStyles.menuItemIcon} size={14} strokeWidth={1.75} aria-hidden />
-                    {label}
-                  </button>
-                )
-              })}
-              <div className={contextMenuStyles.groupLabel} aria-hidden>
-                {ts('map.workGroup.createWorkGroup')}
-              </div>
-              <button
-                type="button"
-                role="menuitem"
-                className={contextMenuStyles.menuItem}
-                onClick={() => {
-                  beginMapWorkGroupCreate({ source: 'toolbar' })
-                  closeAddMenu()
-                }}
-              >
-                <Layers2 className={contextMenuStyles.menuItemIcon} size={14} strokeWidth={1.75} aria-hidden />
-                {ts('map.workGroup.createWorkGroup')}
-              </button>
-            </div>,
-            document.body,
-          )}
-      </div>
-      ) : null}
-      {architectureLevels.length > 0 ? (
-      <div className={styles.legend}>
-        <span className={styles.legendTitle}>{ts('map.legend')}</span>
-        {relationKeys.map((key) => (
-          <span key={key} className={styles.legendItem}>
-            <span className={styles.legendDot} style={{ background: EDGE_COLORS[key] }} />
-            {ts(`map.relations.${key}`)}
-          </span>
-        ))}
       </div>
       ) : null}
     </div>

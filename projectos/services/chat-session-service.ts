@@ -25,8 +25,13 @@ import {
   demoteChatSessionToMisc,
   placeChatSessionOnGraph,
   preserveChatSessionContext,
+  withSessionGraphHeadProjection,
   type ChatSessionContextUpdate,
 } from "../contracts/chat-session-context.js";
+import {
+  orderSessionIdsForDeletion,
+  shouldDisposeEmptySessionRecord,
+} from "../contracts/chat-session-empty.js";
 
 const CHAT_SESSIONS_DIR = join(".projectos", "chat-sessions");
 const INDEX_PATH = join(CHAT_SESSIONS_DIR, "index.json");
@@ -121,9 +126,12 @@ export function upsertChatSession(
   workspaceRoot: string,
   record: ChatSessionRecord,
 ): ChatSessionRecord {
-  const parsed = preserveChatSessionContext(
+  const preserved = preserveChatSessionContext(
     getChatSession(workspaceRoot, record.head.id),
     ChatSessionRecordSchema.parse(record),
+  );
+  const parsed = ChatSessionRecordSchema.parse(
+    withSessionGraphHeadProjection(preserved),
   );
   ensureSessionsDir(workspaceRoot);
   writeFileSync(
@@ -249,6 +257,53 @@ export function deleteChatSession(workspaceRoot: string, sessionId: string): boo
   };
   writeIndex(workspaceRoot, index);
   return existed;
+}
+
+/**
+ * Scope B: drop disposable empty sessions (immediate empties + expired deferred shells).
+ * Never deletes `retainSessionId` (usually the active chat).
+ * Runs multiple passes so parents become eligible after empty children are removed.
+ */
+export function pruneDisposableEmptyChatSessions(
+  workspaceRoot: string,
+  options: { retainSessionId?: string | null; nowMs?: number } = {},
+): string[] {
+  const { retainSessionId = null, nowMs = Date.now() } = options;
+  const deleted: string[] = [];
+
+  for (;;) {
+    const index = readIndex(workspaceRoot);
+    const candidates: string[] = [];
+
+    for (const head of index.heads) {
+      if (retainSessionId && head.id === retainSessionId) continue;
+      const record = getChatSession(workspaceRoot, head.id);
+      if (!record) continue;
+      if (
+        shouldDisposeEmptySessionRecord(
+          record,
+          index.heads,
+          index.pinnedIds,
+          nowMs,
+        )
+      ) {
+        candidates.push(head.id);
+      }
+    }
+
+    if (candidates.length === 0) break;
+
+    let passDeleted = 0;
+    for (const id of orderSessionIdsForDeletion(candidates, index.heads)) {
+      if (deleteChatSession(workspaceRoot, id)) {
+        deleted.push(id);
+        passDeleted += 1;
+      }
+    }
+    if (passDeleted === 0) break;
+  }
+
+  return deleted;
 }
 
 export function saveChatSessionContext(

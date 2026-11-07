@@ -326,7 +326,7 @@ Phase 1 (MVP)              Phase 2 (Growth)           Phase 3 (Scale)          P
 
 | 功能 | 描述 | 优先级 |
 |------|------|--------|
-| 产品预览图生成 | 基于功能描述生成 UI mockup | P0 |
+| 产品预览图生成 | 基于功能描述生成 UI 线稿 / mockup；工程宿主为 **Diagram Graph · `ui-wireframe`**（见 `docs/features/UI-Wireframe-Pack-Dev-Plan.md`）。**不做 Design Tab** | P0 |
 | 产品对齐视频生成 | 基于用户旅程生成 15–30s 演示视频 | P0 |
 | 对齐预览 ↔ 功能地图联动 | 预览界面区域对应功能节点 | P0 |
 | 版本对比 | 「当前实现」vs「对齐目标」并排 | P1 |

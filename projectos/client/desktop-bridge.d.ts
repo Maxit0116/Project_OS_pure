@@ -12,6 +12,7 @@ import type { ServicePort } from "../contracts/service-port.js";
 import type { VerificationCommandApprovalStatus } from "../contracts/verification-command-approval.js";
 import type { ProjectDescription } from "../contracts/project-description.js";
 import type { AppMenuState } from "../contracts/app-menu.js";
+import type { KeepAwakeMode, KeepAwakeStatus } from "../contracts/keep-awake.js";
 
 export interface ProjectOSBridge {
   platform: string;
@@ -57,6 +58,9 @@ export interface ProjectOSBridge {
       | { error: "invalid_type" | "too_large" | "failed" }
       | null
     >;
+    pickReferenceFiles(options?: {
+      extensions?: string[];
+    }): Promise<Array<{ path: string; name: string; ext: string }>>;
     openExternal(url: string): Promise<void>;
   };
   window: {
@@ -72,15 +76,21 @@ export interface ProjectOSBridge {
     showDiffReady(payload: {
       title: string
       body: string
-      destination: 'ask' | 'diff' | 'decisions'
+      destination: 'ask' | 'diff' | 'decisions' | 'reminder'
       runIds: string[]
       decisionId?: string
     }): Promise<void>;
     onActivated(listener: (payload: {
-      destination: 'ask' | 'diff' | 'decisions'
+      destination: 'ask' | 'diff' | 'decisions' | 'reminder'
       runIds: string[]
       decisionId?: string
     }) => void): Disposable;
+  };
+  keepAwake: {
+    getStatus(): Promise<KeepAwakeStatus>;
+    setMode(mode: KeepAwakeMode): Promise<KeepAwakeStatus>;
+    setAgentActivity(active: boolean): Promise<KeepAwakeStatus>;
+    onStatus(listener: (status: KeepAwakeStatus) => void): Disposable;
   };
   terminal: {
     create(cwd: string): Promise<string>;
@@ -179,6 +189,52 @@ export interface ProjectOSBridge {
     notifySessionSolidified(sessionId: string): void;
     onSessionSolidified(
       listener: (payload: { sessionId: string | null }) => void,
+    ): Disposable;
+    /**
+     * Overlay GitHub card → Workbench host actions (toast / Ask Agent / open Graph).
+     * Fire-and-forget; main forwards to non-overlay windows.
+     */
+    notifyGithubCardHost(payload: {
+      kind:
+        | 'toast'
+        | 'askAgent'
+        | 'refreshGithubGraph'
+        | 'openGithubGraph'
+        | 'openFirstPrinciples'
+        | 'selectChatModel'
+        | 'setThinkingDepth'
+        | 'openSettings'
+      type?: 'info' | 'success' | 'warning' | 'error'
+      message?: string
+      prompt?: string
+      branch?: string | null
+      prNumber?: number | null
+      chatSessionId?: string
+      firstPrinciplesSessionId?: string
+      profileId?: string
+      depth?: 'off' | 'low' | 'medium' | 'high'
+    }): void;
+    onGithubCardHost(
+      listener: (payload: {
+        kind:
+          | 'toast'
+          | 'askAgent'
+          | 'refreshGithubGraph'
+          | 'openGithubGraph'
+          | 'openFirstPrinciples'
+          | 'selectChatModel'
+          | 'setThinkingDepth'
+          | 'openSettings'
+        type?: 'info' | 'success' | 'warning' | 'error'
+        message?: string
+        prompt?: string
+        branch?: string | null
+        prNumber?: number | null
+        chatSessionId?: string
+        firstPrinciplesSessionId?: string
+        profileId?: string
+        depth?: 'off' | 'low' | 'medium' | 'high'
+      }) => void,
     ): Disposable;
     onBeginCapture(
       listener: (payload: {

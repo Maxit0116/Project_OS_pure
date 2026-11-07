@@ -1,0 +1,231 @@
+{
+  "version": "1",
+  "generatedAt": "2026-11-04T18:01:09.023Z",
+  "listings": [
+    {
+      "id": "curated.feature-development",
+      "name": "Feature Development",
+      "description": "Planner → Human Review → Coder → Tests → Condition → Reviewer → Approval → Create PR",
+      "trustTier": "curated",
+      "version": "1.0.0",
+      "draft": {
+        "revision": 1,
+        "graphPrompt": "Feature development: plan → human review → code → test → branch → review → approve PR.",
+        "nodes": [
+          {
+            "id": "n_planner",
+            "title": "Planner",
+            "prompt": "Analyze the goal and project context, then produce a structured DevPlan.",
+            "type": "agent",
+            "agentRole": "planner",
+            "position": {
+              "x": 40,
+              "y": 40
+            }
+          },
+          {
+            "id": "n_plan_review",
+            "title": "Human Review",
+            "prompt": "Review the artifact and Accept, Request Changes, or Reject.",
+            "type": "human",
+            "humanMode": "review",
+            "position": {
+              "x": 40,
+              "y": 140
+            }
+          },
+          {
+            "id": "n_coder",
+            "title": "Coder",
+            "prompt": "Implement the assigned task within the allowed write scope.",
+            "type": "agent",
+            "agentRole": "coder",
+            "position": {
+              "x": 40,
+              "y": 240
+            }
+          },
+          {
+            "id": "n_test",
+            "title": "Run Tests",
+            "prompt": "Execute the project test command and produce a TestReport.",
+            "type": "action",
+            "actionIntegration": "test",
+            "actionOperation": "run",
+            "position": {
+              "x": 40,
+              "y": 340
+            }
+          },
+          {
+            "id": "n_condition",
+            "title": "Condition",
+            "prompt": "Branch on test_report.status == passed.",
+            "type": "logic",
+            "logicKind": "condition",
+            "position": {
+              "x": 40,
+              "y": 440
+            }
+          },
+          {
+            "id": "n_reviewer",
+            "title": "Reviewer",
+            "prompt": "Review the ChangeSet and tests; emit pass, needs_changes, or blocked.",
+            "type": "agent",
+            "agentRole": "reviewer",
+            "position": {
+              "x": 280,
+              "y": 440
+            }
+          },
+          {
+            "id": "n_approval",
+            "title": "Approval",
+            "prompt": "Human must approve the next side-effecting action.",
+            "type": "human",
+            "humanMode": "approval",
+            "position": {
+              "x": 280,
+              "y": 540
+            }
+          },
+          {
+            "id": "n_create_pr",
+            "title": "Create PR",
+            "prompt": "Create a pull request with the approved title, body, and base branch.",
+            "type": "action",
+            "actionIntegration": "github",
+            "actionOperation": "create_pr",
+            "position": {
+              "x": 280,
+              "y": 640
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e1",
+            "source": "n_planner",
+            "target": "n_plan_review",
+            "prompt": "Hand DevPlan to human review",
+            "kind": "depends"
+          },
+          {
+            "id": "e2",
+            "source": "n_plan_review",
+            "target": "n_coder",
+            "prompt": "On accept, implement first task",
+            "kind": "depends"
+          },
+          {
+            "id": "e3",
+            "source": "n_coder",
+            "target": "n_test",
+            "prompt": "Run tests after implementation",
+            "kind": "depends"
+          },
+          {
+            "id": "e4",
+            "source": "n_test",
+            "target": "n_condition",
+            "prompt": "Branch on TestReport.status",
+            "kind": "depends"
+          },
+          {
+            "id": "e5",
+            "source": "n_condition",
+            "target": "n_reviewer",
+            "prompt": "Tests passed → AI review",
+            "kind": "conditional",
+            "branchKey": "pass"
+          },
+          {
+            "id": "e6",
+            "source": "n_condition",
+            "target": "n_coder",
+            "prompt": "Tests failed → return errors to Coder",
+            "kind": "conditional",
+            "branchKey": "fail"
+          },
+          {
+            "id": "e7",
+            "source": "n_reviewer",
+            "target": "n_approval",
+            "prompt": "On review pass, request final approval",
+            "kind": "depends"
+          },
+          {
+            "id": "e8",
+            "source": "n_approval",
+            "target": "n_create_pr",
+            "prompt": "Execute approved Create PR parameters",
+            "kind": "depends"
+          }
+        ]
+      }
+    },
+    {
+      "id": "community.quick-review",
+      "name": "Quick Review",
+      "description": "Community mini flow: plan → human approve → code. Review before installing.",
+      "trustTier": "community",
+      "version": "0.1.0",
+      "draft": {
+        "revision": 1,
+        "graphPrompt": "Mini review workflow: plan → human review → code.",
+        "nodes": [
+          {
+            "id": "n_planner",
+            "title": "Planner",
+            "prompt": "Produce a short plan for the goal.",
+            "type": "agent",
+            "agentRole": "planner",
+            "position": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "id": "n_review",
+            "title": "Plan Review",
+            "prompt": "Approve or reject the plan.",
+            "type": "human",
+            "humanMode": "approval",
+            "position": {
+              "x": 220,
+              "y": 0
+            }
+          },
+          {
+            "id": "n_coder",
+            "title": "Coder",
+            "prompt": "Implement the approved plan.",
+            "type": "agent",
+            "agentRole": "coder",
+            "position": {
+              "x": 440,
+              "y": 0
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e1",
+            "source": "n_planner",
+            "target": "n_review",
+            "prompt": "Hand plan to human",
+            "kind": "depends"
+          },
+          {
+            "id": "e2",
+            "source": "n_review",
+            "target": "n_coder",
+            "prompt": "On accept, implement",
+            "kind": "depends"
+          }
+        ]
+      }
+    }
+  ]
+}

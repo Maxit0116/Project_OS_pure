@@ -166,15 +166,19 @@ export function routeLoopEdge(input: {
   obstacles?: IntentGraphNode[]
   width?: number
   height?: number
+  targetWidth?: number
+  targetHeight?: number
 }): RoutedEdge {
   const width = input.width ?? LOOP_NODE_W
   const height = input.height ?? LOOP_NODE_H
+  const targetWidth = input.targetWidth ?? width
+  const targetHeight = input.targetHeight ?? height
   const end: Point =
     input.endPoint ??
     (input.target
       ? {
-          x: input.target.position.x + width / 2,
-          y: input.target.position.y + height / 2,
+          x: input.target.position.x + targetWidth / 2,
+          y: input.target.position.y + targetHeight / 2,
         }
       : portPoint(input.source, 's', width, height))
 
@@ -187,14 +191,14 @@ export function routeLoopEdge(input: {
     targetPort = nearestPort(
       input.target,
       portPoint(input.source, sourcePort, width, height),
-      width,
-      height,
+      targetWidth,
+      targetHeight,
     )
   }
 
   const p0 = portPoint(input.source, sourcePort, width, height)
   const p3 = input.target && targetPort
-    ? portPoint(input.target, targetPort, width, height)
+    ? portPoint(input.target, targetPort, targetWidth, targetHeight)
     : end
 
   const span = Math.hypot(p3.x - p0.x, p3.y - p0.y)

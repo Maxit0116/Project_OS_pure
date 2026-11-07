@@ -4,6 +4,7 @@ import { useI18n } from '../i18n'
 import { usePanelPresence } from '../hooks/usePanelPresence'
 import ThreeZoneLayout from './ThreeZoneLayout'
 import WorkbenchTopBar from './WorkbenchTopBar'
+import WorkbenchStageRail from './WorkbenchStageRail'
 import DesktopTitleBar from './DesktopTitleBar'
 import WelcomeScreen from '../components/WelcomeScreen'
 import ToastContainer from '../components/ui/ToastContainer'
@@ -14,15 +15,28 @@ import BottomDockPanel from '../components/BottomDock/BottomDockPanel'
 import { useBottomDockStore } from '../state/bottomDockStore'
 import { useTerminalShortcuts } from '../components/Terminal/useTerminalShortcuts'
 import { useEditorShortcuts } from '../components/CodeEditor/useEditorShortcuts'
+import { useKeepAwakeSync } from '../hooks/useKeepAwakeSync'
+import { useReminderDigestScheduler } from '../hooks/useReminderDigestScheduler'
 import WorkbenchSidePanels from './WorkbenchSidePanels'
 import SessionGraphOverlay from '../components/SessionGraph/SessionGraphOverlay'
 import LoopGraphOverlay from '../components/LoopGraph/LoopGraphOverlay'
+import DiagramGraphOverlay from '../components/DiagramGraph/DiagramGraphOverlay'
+import ReminderGraphOverlay from '../components/ReminderGraph/ReminderGraphOverlay'
+import GithubGraphOverlay from '../components/GithubGraph/GithubGraphOverlay'
+import MarketplaceOverlay from '../components/Marketplace/MarketplaceOverlay'
 import AgentFlowOverlay from '../components/AgentFlow/AgentFlowOverlay'
 import SpatialCaptureOverlay from '../components/SpatialCaptures/SpatialCaptureOverlay'
+import { CaptureFolderDnDProvider } from '../components/SpatialCaptures/CaptureFolderDnDContext'
+import ChatHistoryDrawer from '../components/ChatHistory/ChatHistoryDrawer'
+import { useChatSessionStore } from '../state/chatSessionStore'
 import EdgeRails from './EdgeRails'
 import { FunctionMapBleedRoot } from '../components/FunctionMap/FunctionMapBleedLayer'
 import { preloadLocalWhisper } from '../components/ChatPanel/voice/localWhisperTranscribe'
 import { preloadMonacoEditor } from '../components/CodeEditor/preloadMonacoEditor'
+import {
+  applyGithubCardHostBridgeEvent,
+  type GithubCardHostBridgeEvent,
+} from '../components/SpatialComposeHub/composerRepoOpsHost'
 import styles from './AppShell.module.css'
 
 const PANEL_EXIT_MS = 200
@@ -36,9 +50,10 @@ export default function AppShell() {
   const centerTab = useWorkbenchStore((s) => s.centerTab)
   const openWorkspace = useWorkbenchStore((s) => s.openWorkspace)
   const dismissError = useWorkbenchStore((s) => s.dismissError)
-  const settingsOpen = useWorkbenchStore((s) => s.settingsOpen)
   const setSettingsOpen = useWorkbenchStore((s) => s.setSettingsOpen)
   const bottomDockOpen = useBottomDockStore((s) => s.open)
+  const historyOpen = useChatSessionStore((s) => s.historyOpen)
+  const setHistoryOpen = useChatSessionStore((s) => s.setHistoryOpen)
   const leftPanelOpen = useWorkbenchStore((s) => s.leftPanelOpen)
   const rightPanelOpen = useWorkbenchStore((s) => s.rightPanelOpen)
   const leftPanelWidth = useWorkbenchStore((s) => s.leftPanelWidth)
@@ -54,6 +69,8 @@ export default function AppShell() {
 
   useTerminalShortcuts()
   useEditorShortcuts()
+  useKeepAwakeSync()
+  useReminderDigestScheduler()
 
   useEffect(() => {
     if (phase === 'ready') {
@@ -61,6 +78,16 @@ export default function AppShell() {
       preloadMonacoEditor()
     }
   }, [phase])
+
+  // Overlay GitHub card → Workbench toast / Ask Agent / open Graph.
+  useEffect(() => {
+    const bridge = window.projectOS?.spatialPin
+    if (!bridge?.onGithubCardHost) return
+    const disposable = bridge.onGithubCardHost((payload) => {
+      applyGithubCardHostBridgeEvent(payload as GithubCardHostBridgeEvent)
+    })
+    return () => disposable.dispose()
+  }, [])
 
   const [narrow, setNarrow] = useState(false)
 
@@ -126,6 +153,7 @@ export default function AppShell() {
       >
         <DesktopTitleBar variant="workbench" onOpenSettings={() => setSettingsOpen(true)} />
         <WorkbenchTopBar onOpenSettings={() => setSettingsOpen(true)} />
+        <WorkbenchStageRail />
 
         {error && (
           <div className={styles.errorBar} role="alert">
@@ -137,38 +165,45 @@ export default function AppShell() {
         )}
 
         <div className={workbenchBodyClassName} style={workbenchBodyStyle}>
-          <main className={styles.main}>
-            <ThreeZoneLayout
-              narrow={narrow}
-              canvasBleed={mapBleedActive}
-              graphBleed={mapBleedActive}
-              mapBleed={mapBleedActive}
-              bottomDockOpen={bottomDockOpen}
-            />
-          </main>
+          <CaptureFolderDnDProvider>
+            <main className={styles.main}>
+              <ThreeZoneLayout
+                narrow={narrow}
+                canvasBleed={mapBleedActive}
+                graphBleed={mapBleedActive}
+                mapBleed={mapBleedActive}
+                bottomDockOpen={bottomDockOpen}
+              />
+            </main>
 
-          <SessionGraphOverlay />
-          <LoopGraphOverlay />
-          <AgentFlowOverlay />
-          <SpatialCaptureOverlay />
-          <EdgeRails
-            leftMounted={leftPresence.mounted}
-            rightMounted={rightPresence.mounted}
-            terminalDocked={bottomDockOpen}
-          />
-          <WorkbenchSidePanels
-            left={leftPresence}
-            right={rightPresence}
-            bottomDockOpen={bottomDockOpen}
-            centerSideInset={centerSideInset}
-          />
-          <BottomDockPanel centerSideInset={centerSideInset} presence={bottomDockPresence} />
+            <SessionGraphOverlay />
+            <LoopGraphOverlay />
+            <DiagramGraphOverlay />
+            <ReminderGraphOverlay />
+            <GithubGraphOverlay />
+            <MarketplaceOverlay />
+            <AgentFlowOverlay />
+            <SpatialCaptureOverlay />
+            <SettingsPanel />
+            <ChatHistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />
+            <EdgeRails
+              leftMounted={leftPresence.mounted}
+              rightMounted={rightPresence.mounted}
+              terminalDocked={bottomDockOpen}
+            />
+            <WorkbenchSidePanels
+              left={leftPresence}
+              right={rightPresence}
+              bottomDockOpen={bottomDockOpen}
+              centerSideInset={centerSideInset}
+            />
+            <BottomDockPanel centerSideInset={centerSideInset} presence={bottomDockPresence} />
+          </CaptureFolderDnDProvider>
         </div>
 
         <ToastContainer />
         <CommandPalette />
         <AppMenuBridge />
-        {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       </div>
     </FunctionMapBleedRoot>
   )

@@ -11,7 +11,8 @@
 - Loop 运行：`services/loop-runtime-service.ts` 的 `stepLoopInstance`。
 
 **对标一句话**：Loop 是可批准的工作流定义。一次 Run 才去改代码和跑验证。节点被标成完成，必须是因为 Run 和验证证据这么说。  
-**产品演进权威**：画布工作室、真暂停/恢复、Fresh·Stale、重规划提案、参数化/事件触发等见 [`../Loops-Graph-Workflow-Studio-Dev-Plan.md`](../Loops-Graph-Workflow-Studio-Dev-Plan.md)。本文仅锁定已落地的 P-0–P-3 执行底座。
+**产品演进权威**：画布工作室、真暂停/恢复、Fresh·Stale、重规划提案、参数化/事件触发等见 [`../Loops-Graph-Workflow-Studio-Dev-Plan.md`](../Loops-Graph-Workflow-Studio-Dev-Plan.md)。本文仅锁定已落地的 P-0–P-3 执行底座。  
+**Node Architecture（并行）**：四类 Node（Agent/Action/Logic/Human）、Artifact 数据流、可视化 Condition / 有限 Loop、GitHub/Terminal Action 见 [`../Loops-Graph-Node-Architecture-Dev-Plan.md`](../Loops-Graph-Node-Architecture-Dev-Plan.md)。Runtime 仍只有 `stepLoopInstance`——不引入第二编排引擎。
 
 ## 0. 现状
 

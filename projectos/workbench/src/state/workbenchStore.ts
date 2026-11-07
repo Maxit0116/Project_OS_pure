@@ -30,8 +30,40 @@ import type {
   RequestIntent,
   PromptRefinement,
   MemoryWriteNotice,
+  McpServerConfig,
+  McpToolDescriptor,
+  McpCatalogView,
+  InstallMcpFromCatalogInput,
+  SkillCatalogView,
+  InstallSkillFromCatalogInput,
+  RulesCatalogView,
+  InstallRulesFromCatalogInput,
+  AgentCatalogView,
+  InstallAgentFromCatalogInput,
+  ExportCapabilityPackInput,
+  ExportCapabilityPackResult,
+  InstallAgentFromExportPackInput,
+  InstallRulesFromExportPackInput,
+  WorkflowCatalogView,
+  InstallWorkflowFromCatalogInput,
+  InstallWorkflowFromExportPackInput,
+  StencilCatalogView,
+  InstallStencilFromCatalogInput,
+  InstallStencilFromExportPackInput,
+  StencilDefinition,
+  LoopGraphPreset,
+  AgentDefinition,
+  InstallFromGitUrlInput,
+  InstallFromGitUrlResult,
+  SkillDescriptor,
   SemanticTree,
   ThinkingDepth,
+  AskSubMode,
+  FirstPrinciplesAnswerKind,
+  FirstPrinciplesConflictResolution,
+  FirstPrinciplesHandoffTarget,
+  FirstPrinciplesSession,
+  FirstPrinciplesThesis,
   WorkspaceDirectoryEntry,
   VerificationRunResult,
   VerificationCommandApprovalStatus,
@@ -44,8 +76,6 @@ import type {
   FeaturesLayout,
   FeaturesStaleness,
   ExternalAgentConfig,
-  McpServerConfig,
-  McpToolDescriptor,
   TeamSnapshot,
   RelatedKnowledge,
   DailyBrief,
@@ -58,12 +88,21 @@ import type {
   UpsertTeamPersonInput,
   TeamMeeting,
   TeamBrainAnswer,
-  GitHubAuthStatus,
   GitSyncStatus,
   GitSyncSettingsPatch,
   GitCommitInput,
 } from './removedApiStubTypes'
-import { buildPromptComposerFields, emptyComposerDraft } from '@contracts/index'
+import type {
+  GitHubAuthStatus,
+  GitHubDeviceAuthPending,
+} from '@contracts/index'
+import {
+  buildPromptComposerFields,
+  emptyComposerDraft,
+  emptyPinComposerHub,
+  type PinComposerHub,
+} from '@contracts/index'
+import { appendComposerHubToPrompt } from '../components/SpatialComposeHub/composerHubPrompt'
 import type { MapWorkGroupMutationInput, UpdateMapWorkGroupPatch, WorkGroupSelectionItem } from '@contracts/index'
 import type { ExecutorOption, ExecutorSelection } from '@contracts/index'
 import { FileOwnershipErrorDetailsSchema, MAP_ARTIFACT_DEFAULT_SIZES, emptyNoteDocument } from '@contracts/index'
@@ -86,6 +125,17 @@ import { createClientId } from '../utils/clientId'
 import { GOOGLE_LOGIN_PROMPT } from '../data/demoInputs'
 import { AUTH_ERROR_RAW } from '../data/demoInputs'
 import { withPlanQuestionOptions } from '../components/ChatPanel/planClarification'
+import {
+  activeChatSessionId,
+  applyFirstPrinciplesAnswer,
+  assistantReflectMessage,
+  confirmThesisOnSession,
+  maybeGenerateFirstPrinciplesDiagram,
+  persistFirstPrinciplesSession,
+  pivotFirstPrinciplesSession,
+  runFirstPrinciplesHandoff,
+  startFirstPrinciplesSession,
+} from './firstPrinciplesWorkbench'
 import { seedDeepSeekDevProfile } from '../dev/seedDeepSeekDevProfile'
 import type { Locale } from '../i18n/types'
 import type { ToastItem, ToastType } from '../components/ui/Toast'
@@ -115,6 +165,7 @@ import {
   emptyExecutionOverlay,
   remapExecutionOverlay,
 } from '../../../services/live-graph/index.js'
+import { canSkipAlignment } from '../../../services/alignment-contract.js'
 import {
   appendAttachment,
   setComposerText,
@@ -160,6 +211,11 @@ import {
   type ChatModeSwitchPreference,
 } from '../preferences/chatModeSwitch'
 export type { ChatModeSwitchPreference } from '../preferences/chatModeSwitch'
+import {
+  loadKeepAwakeModePreference,
+  saveKeepAwakeModePreference,
+} from '../preferences/keepAwake'
+import type { KeepAwakeMode, KeepAwakeStatus } from '@contracts/keep-awake'
 function loadShowGestureCursorPreference(): boolean {
   return false
 }
@@ -177,6 +233,11 @@ import {
   enqueueDiffReadyBatch,
   resetDiffReadyBatch,
 } from '../notifications/diffReadyNotificationBatch'
+import {
+  mergeReminderNotifyEvents,
+  resolveReminderNotificationChannel,
+  shouldSuppressReminderNotification,
+} from '../notifications/reminderNotification'
 import {
   persistDefaultModelProfile,
   persistModelProfile,
@@ -214,7 +275,7 @@ export type MapLayerMode = 'architecture' | 'story'
 export type StoryViewLevel = 'overview' | 'features' | 'steps'
 export type RightPanelTab = 'chat' | 'harness'
 export type CodeSubTab = 'editor' | 'diff'
-export type AgentFlowViewMode = 'timeline' | 'graph'
+export type AgentFlowViewMode = 'timeline' | 'graph' | 'pool'
 export type TreeViewMode = 'semantic' | 'directory'
 
 export interface DirectoryListing {
@@ -272,7 +333,13 @@ export interface ChatMessage {
   invokedSkillId?: string
   explorationTrace?: import('@contracts/index').AskExplorationTrace
   retrievalSummary?: import('@contracts/index').RetrievalSummary
+  mcpToolCalls?: import('@contracts/index').AskMcpToolCall[]
   checkpointId?: string
+  /**
+   * Mode active when this user turn was sent (nav rail color / history).
+   * Persisted turns can carry the stored session mode, including `team_memory`.
+   */
+  chatMode?: import('@contracts/index').ChatSessionMode
 }
 
 /** No node/file selection ⇒ whole-project (global) agent scope. */
@@ -405,7 +472,7 @@ export type DiffReadyBannerState = {
   channel: Extract<DiffReadyNotificationChannel, 'map_banner' | 'center_banner'>
   title: string
   body: string
-  destination: 'ask' | 'diff'
+  destination: 'ask' | 'diff' | 'reminder'
   runIds: string[]
 }
 
@@ -448,6 +515,9 @@ export interface WorkbenchState {
   notifyOnPendingDecision: boolean
   /** When switching chat modes: open a fresh session (Cursor-like) or keep the same thread. */
   chatModeSwitch: ChatModeSwitchPreference
+  /** Mac desktop: keep machine awake (incl. lid close) for agent work. */
+  keepAwakeMode: KeepAwakeMode
+  keepAwakeStatus: KeepAwakeStatus | null
   showGestureCursor: boolean
   windowFocused: boolean
   diffReadyBanner: DiffReadyBannerState | null
@@ -480,11 +550,32 @@ export interface WorkbenchState {
   planConfirmed: boolean
   debugSession: import('@contracts/index').DebugSession | null
   composerDraft: ComposerDraft
+  /** Chat sidebar Compose Hub (Stage Dock) — same shape as spatial pin hub. */
+  composerHub: PinComposerHub
   chatMode: ChatMode
+  /** Ask-only secondary mode: Chat vs First Principles (立论). Not a ChatMode. */
+  askSubMode: AskSubMode
+  /** Active First Principles session (in-memory + thesis disk on upsert). */
+  pendingFirstPrinciples: FirstPrinciplesSession | null
+  firstPrinciplesBusy: boolean
+  /** Soft-suggest dismissed for this chat session. */
+  firstPrinciplesSuggestDismissed: boolean
   /** Pinned skill body injected every turn until cleared (Custom Mode). */
   activeCustomModeSkillId: string | null
   /** Built-in chat mode to restore when exiting Custom Mode. */
   customModePreviousChatMode: ChatMode | null
+  /** Workforce agent for Agent Mode; null = General Agent. */
+  activeAgentDefinitionId: string | null
+  /** Cached display name for mode chip. */
+  activeAgentDisplayName: string | null
+  /** Composer substate: drafting a new specialized agent from NL. */
+  createAgentComposerActive: boolean
+  /** Pending draft card after create-agent submit. */
+  pendingWorkforceDraft: {
+    draft: import('@contracts/index').WorkforceAgentDraft
+    sourcePrompt: string
+    source: 'chat' | 'loop'
+  } | null
   conversationCheckpoints: ConversationCheckpoint[]
   latestAskTrace: LatestAskTrace | null
   latestPlanTrace: LatestPlanTrace | null
@@ -535,6 +626,34 @@ export interface WorkbenchState {
 
   settings: ProjectOSSettings | null
   settingsOpen: boolean
+  /** When opening Settings, jump to this hub view once (e.g. teamGithub). */
+  settingsFocusView: string | null
+  /** Cached MCP marketplace catalog — prefetched when a workspace becomes ready. */
+  mcpCatalogView: McpCatalogView | null
+  /** Cached skill marketplace catalog — prefetched when a workspace becomes ready. */
+  skillCatalogView: SkillCatalogView | null
+  /** Cached rules marketplace catalog — prefetched when a workspace becomes ready. */
+  rulesCatalogView: RulesCatalogView | null
+  /** Cached agent marketplace catalog — prefetched when a workspace becomes ready. */
+  agentCatalogView: AgentCatalogView | null
+  /** Cached workflow marketplace catalog — prefetched when a workspace becomes ready. */
+  workflowCatalogView: WorkflowCatalogView | null
+  /** Cached stencil marketplace catalog — prefetched when a workspace becomes ready. */
+  stencilCatalogView: StencilCatalogView | null
+  /** Installed skill ids used by Marketplace install/uninstall badges. */
+  installedMarketplaceSkillIds: string[]
+  /** Installed rules pack ids (catalog installs under `.projectos/rules/<id>/`). */
+  installedMarketplaceRulesPackIds: string[]
+  /** Installed agent catalog listing ids (workforce defs with marketplaceProvenance). */
+  installedMarketplaceAgentListingIds: string[]
+  /** Installed workflow catalog listing ids (user presets under `.projectos/loop-presets/`). */
+  installedMarketplaceWorkflowListingIds: string[]
+  /** Installed stencil catalog listing ids (packs under `.projectos/stencils/`). */
+  installedMarketplaceStencilListingIds: string[]
+  /** Built-in UI stencils merged with user-installed marketplace packs. */
+  mergedStencilDefinitions: StencilDefinition[]
+  /** Marketplace catalog prefetch / refresh lifecycle. */
+  marketplaceCatalogStatus: 'idle' | 'loading' | 'ready' | 'error'
   selectedModelProfileId: string | null
   /** Agent runtimes this build offers for single-file changes; empty in a production build. */
   executorOptions: ExecutorOption[]
@@ -571,11 +690,8 @@ export interface WorkbenchState {
   decisionModalOpen: boolean
   rosterModalOpen: boolean
   meetingImportOpen: boolean
-  githubDeviceAuthPending: {
-    userCode: string
-    verificationUri: string
-    authorizeUrl: string
-  } | null
+  githubDeviceAuthPending: GitHubDeviceAuthPending | null
+  githubAuthPollTimer: ReturnType<typeof setInterval> | null
   handoffOverwriteHandoffId: string | null
   chatAnchor: AnchorRef | null
   lastAnchoredAnswer: TeamBrainAnswer | null
@@ -588,6 +704,8 @@ export interface WorkbenchState {
   setNotifyOnDiffReady: (enabled: boolean) => void
   setNotifyOnPendingDecision: (enabled: boolean) => void
   setChatModeSwitch: (value: ChatModeSwitchPreference) => void
+  setKeepAwakeMode: (mode: KeepAwakeMode) => Promise<void>
+  setKeepAwakeStatus: (status: KeepAwakeStatus | null) => void
   setShowGestureCursor: (show: boolean) => void
   setWindowFocused: (focused: boolean) => void
   dismissDiffReadyBanner: () => void
@@ -598,10 +716,15 @@ export interface WorkbenchState {
   dismissPendingChanges: () => void
   undoAllPendingChanges: () => Promise<void>
   navigateFromAgentNotification: (
-    destination: 'ask' | 'diff' | 'decisions',
+    destination: 'ask' | 'diff' | 'decisions' | 'reminder',
     runId?: string,
     decisionId?: string,
   ) => Promise<void>
+  /** Fire Reminder Graph due/ready/conflict alerts (system or in-app banner). */
+  notifyReminderEvents: (
+    events: import('@contracts/index').ReminderNotifyEvent[],
+    opts?: { focusedItemId?: string | null },
+  ) => void
   maybeNotifyAgentComplete: (item: Omit<DiffReadyCompletion, 'context'> & { context?: DiffReadyCompletion['context'] }) => void
   pushToast: (opts: { type: ToastType; message: string; autoDismiss?: number }) => void
   dismissToast: (id: string) => void
@@ -658,12 +781,34 @@ export interface WorkbenchState {
   setRightPanelTab: (tab: RightPanelTab) => void
   setChatInput: (value: string) => void
   setComposerDraft: (draft: ComposerDraft) => void
+  setComposerHub: (hub: PinComposerHub) => void
   /**
-   * Switch chat mode. By default (`chatModeSwitch: 'new_session'`) opens a fresh
-   * session so Ask/Plan/Agent/Debug contexts do not mix. Pass `{ isolate: false }`
-   * to flip mode in-place (demo scripts, same-session preference).
+   * Switch chat mode. Default preference (`chatModeSwitch: 'same_session'`) flips
+   * mode in the current chat (Cursor-like multi-mode thread). Opt into
+   * `new_session` in Settings to open a fresh chat on each switch. Pass
+   * `{ isolate: false }` to force in-place even when preference is `new_session`.
    */
   setChatMode: (mode: ChatMode, options?: { isolate?: boolean }) => Promise<void>
+  setAskSubMode: (mode: AskSubMode) => void
+  dismissFirstPrinciplesSuggest: () => void
+  beginFirstPrinciplesFromVision: (vision: string) => Promise<void>
+  answerFirstPrinciplesQuestion: (input: {
+    questionId: string
+    kind: FirstPrinciplesAnswerKind
+    selectedOptionId?: string
+    text?: string
+  }) => Promise<void>
+  confirmFirstPrinciplesThesis: (
+    thesis: FirstPrinciplesThesis,
+    acknowledgeLowConfidence?: boolean,
+    writePlannedFeature?: boolean,
+  ) => Promise<void>
+  resolveFirstPrinciplesConflict: (
+    resolution: FirstPrinciplesConflictResolution,
+    rephraseText?: string,
+  ) => Promise<void>
+  pivotFirstPrinciples: () => Promise<void>
+  handoffFirstPrinciples: (target: FirstPrinciplesHandoffTarget) => Promise<void>
   /** Stop the active agent run (dispose stream + server cancel). */
   stopAgentRun: () => Promise<void>
   updateEditorBuffer: (path: string, content: string) => void
@@ -691,8 +836,15 @@ export interface WorkbenchState {
   clearSelection: () => void
   dismissError: () => void
   sendPrompt: (input: string | ComposerDraft) => Promise<void>
-  confirmRefinement: (onStarted?: (run: AgentRun) => void) => Promise<void>
+  confirmRefinement: (
+    alignment?: import('@contracts/index').ConfirmAlignmentRequest,
+    onStarted?: (run: AgentRun) => void,
+  ) => Promise<void>
   reviseRefinement: () => void
+  confirmBugAlignment: (
+    bugs: Array<{ id: string; selected: boolean; comment?: string; rejected?: boolean }>,
+  ) => Promise<void>
+  markBugFixed: (bugId: string) => Promise<void>
   confirmPlanBuild: () => Promise<void>
   submitPlanClarification: (
     answers: Array<{ questionId: string; answer: string; selectedOptionId?: string }>,
@@ -708,6 +860,41 @@ export interface WorkbenchState {
   returnToPlan: () => void
   setActiveCustomModeSkillId: (skillId: string | null) => void
   exitCustomMode: () => void
+  setActiveAgentDefinitionId: (
+    definitionId: string | null,
+    displayName?: string | null,
+  ) => void
+  beginCreateAgentComposer: (source?: 'chat' | 'loop') => void
+  cancelCreateAgentComposer: () => void
+  submitCreateAgentPrompt: (prompt: string, source?: 'chat' | 'loop') => Promise<void>
+  confirmWorkforceDraft: (options?: {
+    placeOnLoop?: boolean
+    useInChat?: boolean
+  }) => Promise<import('@contracts/index').AgentDefinition | null>
+  dismissWorkforceDraft: () => void
+  updatePendingWorkforceDraft: (
+    draft: import('@contracts/index').WorkforceAgentDraft,
+  ) => void
+  /** Marketplace Installed compose: assemble proposal (local ± catalog). */
+  assembleWorkforceAgent: (input: {
+    prompt: string
+    scope: import('@contracts/index').AssemblySearchScope
+    seedSkillIds?: string[]
+    seedMcpServerIds?: string[]
+  }) => Promise<import('@contracts/index').AssembleWorkforceAgentResult | null>
+  /**
+   * Install selected missing bindings then create workforce agent.
+   * Returns created definition id, or null on failure.
+   */
+  confirmMarketplaceAgentAssembly: (input: {
+    draft: import('@contracts/index').WorkforceAgentDraft
+    bindings: import('@contracts/index').AssemblyBinding[]
+    installOnly?: boolean
+  }) => Promise<{
+    createdId: string | null
+    bindings: import('@contracts/index').AssemblyBinding[]
+    installErrorIds: string[]
+  } | null>
   loadPlanFromWorkspace: (planId: string) => Promise<void>
   listWorkspacePlans: () => Promise<
     Array<{
@@ -759,11 +946,84 @@ export interface WorkbenchState {
   saveAgentProfile: (profile: AgentProfile) => Promise<boolean>
   saveExternalAgent: (config: ExternalAgentConfig, authToken?: string) => Promise<boolean>
   saveMcpServer: (config: McpServerConfig, authToken?: string) => Promise<boolean>
+  deleteMcpServer: (serverId: string) => Promise<boolean>
   testModelConnection: (profileId: string) => Promise<void>
   testExternalAgent: (agentId: string) => Promise<void>
   testMcpServer: (serverId: string) => Promise<void>
   refreshMcpTools: (serverId: string) => Promise<McpToolDescriptor[]>
-  setSettingsOpen: (open: boolean) => void
+  listMcpCatalog: (options?: { forceRefresh?: boolean }) => Promise<McpCatalogView | null>
+  refreshMcpCatalog: () => Promise<McpCatalogView | null>
+  installMcpFromCatalog: (input: InstallMcpFromCatalogInput) => Promise<boolean>
+  disableMcpCatalogListing: (listingId: string) => Promise<boolean>
+  reportMcpCatalogListing: (input: { listingId: string; note?: string }) => Promise<boolean>
+  listSkillCatalog: (options?: { forceRefresh?: boolean }) => Promise<SkillCatalogView | null>
+  refreshSkillCatalog: () => Promise<SkillCatalogView | null>
+  installSkillFromCatalog: (input: InstallSkillFromCatalogInput) => Promise<SkillDescriptor | null>
+  uninstallSkillFromCatalog: (listingId: string) => Promise<boolean>
+  uninstallMcpListing: (listingId: string) => Promise<boolean>
+  disableSkillCatalogListing: (listingId: string) => Promise<boolean>
+  reportSkillCatalogListing: (input: { listingId: string; note?: string }) => Promise<boolean>
+  listRulesCatalog: (options?: { forceRefresh?: boolean }) => Promise<RulesCatalogView | null>
+  refreshRulesCatalog: () => Promise<RulesCatalogView | null>
+  installRulesFromCatalog: (
+    input: InstallRulesFromCatalogInput,
+  ) => Promise<{ packId: string; relativeRoot: string } | null>
+  uninstallRulesFromCatalog: (listingId: string) => Promise<boolean>
+  disableRulesCatalogListing: (listingId: string) => Promise<boolean>
+  reportRulesCatalogListing: (input: { listingId: string; note?: string }) => Promise<boolean>
+  listAgentCatalog: (options?: { forceRefresh?: boolean }) => Promise<AgentCatalogView | null>
+  refreshAgentCatalog: () => Promise<AgentCatalogView | null>
+  installAgentFromCatalog: (
+    input: InstallAgentFromCatalogInput,
+  ) => Promise<AgentDefinition | null>
+  uninstallAgentFromCatalog: (listingId: string) => Promise<boolean>
+  disableAgentCatalogListing: (listingId: string) => Promise<boolean>
+  reportAgentCatalogListing: (input: { listingId: string; note?: string }) => Promise<boolean>
+  exportCapabilityPack: (
+    input: ExportCapabilityPackInput,
+  ) => Promise<ExportCapabilityPackResult | null>
+  installAgentFromExportPack: (
+    input: InstallAgentFromExportPackInput,
+  ) => Promise<AgentDefinition | null>
+  installRulesFromExportPack: (
+    input: InstallRulesFromExportPackInput,
+  ) => Promise<{ packId: string; relativeRoot: string } | null>
+  listWorkflowCatalog: (options?: { forceRefresh?: boolean }) => Promise<WorkflowCatalogView | null>
+  refreshWorkflowCatalog: () => Promise<WorkflowCatalogView | null>
+  installWorkflowFromCatalog: (
+    input: InstallWorkflowFromCatalogInput,
+  ) => Promise<LoopGraphPreset | null>
+  uninstallWorkflowFromCatalog: (listingId: string) => Promise<boolean>
+  disableWorkflowCatalogListing: (listingId: string) => Promise<boolean>
+  reportWorkflowCatalogListing: (input: { listingId: string; note?: string }) => Promise<boolean>
+  installWorkflowFromExportPack: (
+    input: InstallWorkflowFromExportPackInput,
+  ) => Promise<LoopGraphPreset | null>
+  listStencilCatalog: (options?: { forceRefresh?: boolean }) => Promise<StencilCatalogView | null>
+  refreshStencilCatalog: () => Promise<StencilCatalogView | null>
+  installStencilFromCatalog: (
+    input: InstallStencilFromCatalogInput,
+  ) => Promise<StencilDefinition[] | null>
+  uninstallStencilFromCatalog: (listingId: string) => Promise<boolean>
+  disableStencilCatalogListing: (listingId: string) => Promise<boolean>
+  reportStencilCatalogListing: (input: { listingId: string; note?: string }) => Promise<boolean>
+  installStencilFromExportPack: (
+    input: InstallStencilFromExportPackInput,
+  ) => Promise<StencilDefinition[] | null>
+  listMergedStencilDefinitions: () => Promise<StencilDefinition[]>
+  listLoopGraphPresets: () => Promise<{ builtins: LoopGraphPreset[]; user: LoopGraphPreset[] } | null>
+  resolveLoopGraphPreset: (presetId: string) => Promise<LoopGraphPreset | null>
+  /** Warm MCP + skill + rules + agent + workflow catalogs in the background after a project opens. */
+  prefetchMarketplaceCatalogs: () => Promise<void>
+  refreshInstalledMarketplaceSkills: () => Promise<void>
+  refreshInstalledMarketplaceRulesPacks: () => Promise<void>
+  refreshInstalledMarketplaceAgents: () => Promise<void>
+  refreshInstalledMarketplaceWorkflows: () => Promise<void>
+  refreshInstalledMarketplaceStencils: () => Promise<void>
+  /** Install MCP or skill from a GitHub / git URL (deterministic installer). */
+  installFromGitUrl: (input: InstallFromGitUrlInput) => Promise<InstallFromGitUrlResult | null>
+  setSettingsOpen: (open: boolean, focusView?: string | null) => void
+  clearSettingsFocusView: () => void
   setSelectedModelProfileId: (profileId: string | null) => void
   loadExecutorOptions: () => Promise<void>
   selectRuntimeExecutor: (executorId: string | null) => void
@@ -793,16 +1053,13 @@ export interface WorkbenchState {
   setDecisionModalOpen: (open: boolean) => void
   setRosterModalOpen: (open: boolean) => void
   setMeetingImportOpen: (open: boolean) => void
-  setGitHubDeviceAuthPending: (
-    pending: {
-      userCode: string
-      verificationUri: string
-      authorizeUrl: string
-    } | null,
-  ) => void
+  setGitHubDeviceAuthPending: (pending: GitHubDeviceAuthPending | null) => void
   refreshGitHubAuthStatus: () => Promise<void>
   refreshGitSyncStatus: () => Promise<void>
   connectGitHub: () => Promise<void>
+  importGitHubFromGhCli: () => Promise<void>
+  saveGitHubOAuthClientId: (clientId: string) => Promise<void>
+  cancelGitHubOAuth: () => Promise<void>
   disconnectGitHub: () => Promise<void>
   gitPull: () => Promise<void>
   gitPush: () => Promise<void>
@@ -1145,6 +1402,22 @@ function attachStructureScanSubscription(
   })
 }
 
+const marketplaceCatalogInitialState = {
+  mcpCatalogView: null as McpCatalogView | null,
+  skillCatalogView: null as SkillCatalogView | null,
+  rulesCatalogView: null as RulesCatalogView | null,
+  agentCatalogView: null as AgentCatalogView | null,
+  workflowCatalogView: null as WorkflowCatalogView | null,
+  stencilCatalogView: null as StencilCatalogView | null,
+  installedMarketplaceSkillIds: [] as string[],
+  installedMarketplaceRulesPackIds: [] as string[],
+  installedMarketplaceAgentListingIds: [] as string[],
+  installedMarketplaceWorkflowListingIds: [] as string[],
+  installedMarketplaceStencilListingIds: [] as string[],
+  mergedStencilDefinitions: [] as StencilDefinition[],
+  marketplaceCatalogStatus: 'idle' as const,
+}
+
 async function loadWorkspaceIntoStore(
   project: ProjectOSProject,
   client: ProjectOSApi,
@@ -1220,6 +1493,8 @@ async function loadWorkspaceIntoStore(
     modelSelectionPending: false,
     context: null,
     ...initialTransientState,
+    // Reset marketplace cache for the new workspace so prefetch cannot skip on stale ready.
+    ...marketplaceCatalogInitialState,
     directoryListings: {
       '': directoryEntries
         ? { status: 'ready', entries: directoryEntries }
@@ -1234,6 +1509,8 @@ async function loadWorkspaceIntoStore(
     terminalLines: [],
   })
   rememberRecentWorkspace(project)
+  // Warm marketplace as soon as the workspace is ready — do not wait on chat/terminal/diagnostics.
+  void get().prefetchMarketplaceCatalogs()
   if (graph.analysisStatus === 'partial') {
     get().pushToast({
       type: 'info',
@@ -1245,6 +1522,9 @@ async function loadWorkspaceIntoStore(
   await useChatSessionStore.getState().loadForWorkspace()
   await useTerminalStore.getState().syncMapSessions(mapContent.artifacts)
   await useDiagnosticsStore.getState().init(project.workspaceRoot)
+  void import('./productLabStore').then(({ useProductLabStore }) => {
+    void useProductLabStore.getState().loadForWorkspace()
+  })
 }
 
 const initialTransientState = {
@@ -1275,9 +1555,22 @@ const initialTransientState = {
   planConfirmed: false,
   debugSession: null as import('@contracts/index').DebugSession | null,
   composerDraft: emptyComposerDraft(),
+  composerHub: emptyPinComposerHub(),
   chatMode: 'ask' as ChatMode,
+  askSubMode: 'chat' as AskSubMode,
+  pendingFirstPrinciples: null as FirstPrinciplesSession | null,
+  firstPrinciplesBusy: false,
+  firstPrinciplesSuggestDismissed: false,
   activeCustomModeSkillId: null as string | null,
   customModePreviousChatMode: null as ChatMode | null,
+  activeAgentDefinitionId: null as string | null,
+  activeAgentDisplayName: null as string | null,
+  createAgentComposerActive: false,
+  pendingWorkforceDraft: null as {
+    draft: import('@contracts/index').WorkforceAgentDraft
+    sourcePrompt: string
+    source: 'chat' | 'loop'
+  } | null,
   conversationCheckpoints: [] as ConversationCheckpoint[],
   latestAskTrace: null as LatestAskTrace | null,
   latestPlanTrace: null as LatestPlanTrace | null,
@@ -1341,12 +1634,18 @@ const initialTransientState = {
   rosterModalOpen: false,
   meetingImportOpen: false,
   githubDeviceAuthPending: null,
+  githubAuthPollTimer: null,
   handoffOverwriteHandoffId: null as string | null,
   chatAnchor: null as AnchorRef | null,
   lastAnchoredAnswer: null as TeamBrainAnswer | null,
   meetingDraft: null as TeamMeeting | null,
   publishBriefConfirm: false,
+  ...marketplaceCatalogInitialState,
 }
+
+/** Dedup concurrent marketplace prefetches for the same workspace open. */
+let marketplacePrefetchInflight: Promise<void> | null = null
+let marketplacePrefetchProjectId: string | null = null
 
 const pendingStructureRefineFiles: string[] = []
 let structureRefineTimer: ReturnType<typeof setTimeout> | null = null
@@ -1585,6 +1884,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   notifyOnDiffReady: loadNotifyOnDiffReadyPreference(),
   notifyOnPendingDecision: loadNotifyOnPendingDecisionPreference(),
   chatModeSwitch: loadChatModeSwitchPreference(),
+  keepAwakeMode: loadKeepAwakeModePreference(),
+  keepAwakeStatus: null,
   showGestureCursor: loadShowGestureCursorPreference(),
   windowFocused: typeof document !== 'undefined' ? document.hasFocus() : true,
   diffReadyBanner: null,
@@ -1593,7 +1894,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   treeViewMode: 'semantic',
   flashKey: 0,
   leftPanelOpen: true,
-  rightPanelOpen: false,
+  rightPanelOpen: true,
   shouldStartOnboarding: false,
   terminalLines: [] as string[],
   ...loadPanelLayout(),
@@ -1602,6 +1903,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   projectDescription: null,
   projectDescriptionSaving: false,
   settingsOpen: false,
+  settingsFocusView: null,
   selectedModelProfileId: null,
   executorOptions: [],
   selectedRuntimeId: null,
@@ -1651,6 +1953,38 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     saveChatModeSwitchPreference(value)
     set({ chatModeSwitch: value })
   },
+
+  setKeepAwakeMode: async (mode) => {
+    saveKeepAwakeModePreference(mode)
+    set({ keepAwakeMode: mode })
+    if (!isDesktopApp() || !window.projectOS?.keepAwake) return
+    try {
+      const status = await window.projectOS.keepAwake.setMode(mode)
+      if (get().keepAwakeMode === mode) {
+        set({ keepAwakeStatus: status })
+      }
+    } catch (error) {
+      console.error('[workbench] failed to apply keep-awake mode', error)
+      const message = error instanceof Error ? error.message : String(error)
+      set({
+        keepAwakeStatus: {
+          ...(get().keepAwakeStatus ?? {
+            supported: window.projectOS.platform === 'darwin',
+            mode,
+            active: false,
+            idleBlocked: false,
+            lidGuardActive: false,
+            lidGuardSupported: window.projectOS.platform === 'darwin',
+            agentActivity: false,
+          }),
+          mode,
+          lastError: message,
+        },
+      })
+    }
+  },
+
+  setKeepAwakeStatus: (status) => set({ keepAwakeStatus: status }),
 
   setShowGestureCursor: (show) => {
     saveShowGestureCursorPreference(show)
@@ -1720,12 +2054,80 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       return
     }
 
+    if (destination === 'reminder') {
+      useChatSessionStore.getState().setReminderGraphOpen(true)
+      set({ diffReadyBanner: null })
+      return
+    }
+
     useChatSessionStore.getState().presentAgentFlow()
     set({
       agentFlowSubject: 'ask',
       rightPanelTab: 'chat',
       diffReadyBanner: null,
     })
+  },
+
+  notifyReminderEvents: (events, opts) => {
+    const state = get()
+    if (!state.notifyOnDiffReady || events.length === 0) return
+
+    const reminderGraphOpen = useChatSessionStore.getState().reminderGraphOpen
+    const pending = events.filter(
+      (event) =>
+        !shouldSuppressReminderNotification({
+          enabled: true,
+          reminderGraphOpen,
+          windowFocused: state.windowFocused,
+          focusedItemId: opts?.focusedItemId ?? null,
+          eventItemId: event.itemId,
+        }),
+    )
+    const merged = mergeReminderNotifyEvents(pending)
+    if (!merged) return
+
+    const channel = resolveReminderNotificationChannel({
+      windowFocused: state.windowFocused,
+      centerTab: state.centerTab,
+      reminderGraphOpen,
+    })
+    const runIds = merged.itemIds.map((id) => `reminder:${id}`)
+
+    const showInAppBanner = (
+      bannerChannel: Extract<DiffReadyNotificationChannel, 'map_banner' | 'center_banner'>,
+    ) => {
+      set({
+        diffReadyBanner: {
+          visible: true,
+          channel: bannerChannel,
+          title: merged.title,
+          body: merged.body,
+          destination: 'reminder',
+          runIds,
+        },
+      })
+    }
+
+    if (channel === 'system') {
+      if (isDesktopApp() && window.projectOS?.notify) {
+        void window.projectOS.notify
+          .showDiffReady({
+            title: merged.title,
+            body: merged.body,
+            destination: 'reminder',
+            runIds,
+          })
+          .catch((error) => {
+            console.error('[workbench] failed to show reminder system notification', error)
+            showInAppBanner('center_banner')
+          })
+        return
+      }
+      showInAppBanner('center_banner')
+      return
+    }
+
+    showInAppBanner(channel)
   },
 
   maybeNotifyAgentComplete,
@@ -2169,6 +2571,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     set({
       centerTab: tab,
       ...(onDiffView ? { diffReadyBanner: null } : {}),
+      // Browser owns a vertical tab/docs rail — open left sidebar when entering.
+      ...(tab === 'browser' ? { leftPanelOpen: true } : {}),
     })
   },
   setMapLayer: (layer) => {
@@ -2202,10 +2606,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     /* features API removed in pure workbench */
   },
   openDesignSurface: (focus) => {
-    get().setCenterTab('function-map')
+    // Design Tab is abandoned — route wireframe / design intents into Diagram Graph.
     set({
       designSurfaceFocus: focus,
       designSurfaceFocusToken: get().designSurfaceFocusToken + 1,
+    })
+    void import('./diagramGraphStore').then(({ useDiagramGraphStore }) => {
+      useDiagramGraphStore.getState().enterWireframeMode()
     })
   },
   approvePlannedFeature: async (_featureId) => {
@@ -2319,6 +2726,223 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   setComposerDraft: (draft) => {
     set({ composerDraft: draft })
     scheduleChatSessionPersist()
+  },
+  setComposerHub: (hub) => {
+    set({ composerHub: hub })
+  },
+  setAskSubMode: (mode) => {
+    set({
+      askSubMode: mode,
+      ...(mode === 'first_principles' ? { firstPrinciplesSuggestDismissed: true } : {}),
+    })
+    scheduleChatSessionPersist()
+  },
+  dismissFirstPrinciplesSuggest: () => {
+    set({ firstPrinciplesSuggestDismissed: true })
+  },
+  beginFirstPrinciplesFromVision: async (vision) => {
+    const { project, client, locale } = get()
+    if (!project || !client || !vision.trim()) return
+    set({
+      chatMode: 'ask',
+      askSubMode: 'first_principles',
+      firstPrinciplesBusy: true,
+      firstPrinciplesSuggestDismissed: true,
+      rightPanelTab: 'chat',
+    })
+    try {
+      const chatSessionId = activeChatSessionId()
+      let session = typeof client.startFirstPrinciplesSession === 'function'
+        ? await client.startFirstPrinciplesSession({
+            projectId: project.projectId,
+            vision: vision.trim(),
+            ...(chatSessionId ? { chatSessionId } : {}),
+          })
+        : startFirstPrinciplesSession({
+            projectId: project.projectId,
+            vision: vision.trim(),
+            chatSessionId,
+          })
+      session = await persistFirstPrinciplesSession(client, project.projectId, session)
+      const userMsg = {
+        id: msgId(),
+        role: 'user' as const,
+        content: vision.trim(),
+        timestamp: new Date().toISOString(),
+        chatMode: 'ask' as const,
+      }
+      const assistantMsg = assistantReflectMessage(session, locale)
+      set((current) => ({
+        pendingFirstPrinciples: session,
+        firstPrinciplesBusy: false,
+        composerDraft: emptyComposerDraft(),
+        messages: [...current.messages, userMsg, assistantMsg],
+      }))
+    } catch (error) {
+      set({
+        firstPrinciplesBusy: false,
+        error: errorMessage(error, 'First Principles failed to start'),
+      })
+    }
+  },
+  answerFirstPrinciplesQuestion: async (input) => {
+    const { pendingFirstPrinciples, client, project, locale } = get()
+    if (!pendingFirstPrinciples || !project || !client) return
+    set({ firstPrinciplesBusy: true })
+    try {
+      let session = typeof client.answerFirstPrinciplesTurn === 'function'
+        ? await client.answerFirstPrinciplesTurn({
+            projectId: project.projectId,
+            sessionId: pendingFirstPrinciples.id,
+            answer: input,
+          })
+        : applyFirstPrinciplesAnswer(pendingFirstPrinciples, input)
+      if (
+        session.status === 'thesis_review' ||
+        session.layers.find((layer) => layer.id === 'L4')?.status === 'complete' ||
+        session.layers.find((layer) => layer.id === 'L4')?.status === 'skipped'
+      ) {
+        session = await maybeGenerateFirstPrinciplesDiagram(session)
+        session = await persistFirstPrinciplesSession(client, project.projectId, session)
+      }
+      const assistantMsg = assistantReflectMessage(session, locale)
+      set((current) => ({
+        pendingFirstPrinciples: session,
+        firstPrinciplesBusy: false,
+        messages: [...current.messages, assistantMsg],
+      }))
+    } catch (error) {
+      set({
+        firstPrinciplesBusy: false,
+        error: errorMessage(error, 'First Principles answer failed'),
+      })
+    }
+  },
+  confirmFirstPrinciplesThesis: async (
+    thesis,
+    acknowledgeLowConfidence = false,
+    writePlannedFeature = false,
+  ) => {
+    const { pendingFirstPrinciples, client, project, locale, pushToast } = get()
+    if (!pendingFirstPrinciples || !project || !client) return
+    set({ firstPrinciplesBusy: true })
+    try {
+      let session = confirmThesisOnSession(
+        pendingFirstPrinciples,
+        thesis,
+        acknowledgeLowConfidence,
+      )
+      session = await persistFirstPrinciplesSession(client, project.projectId, session)
+      if (
+        writePlannedFeature &&
+        thesis.verdict === 'go' &&
+        typeof client.writeFirstPrinciplesPlannedFeature === 'function'
+      ) {
+        const result = await client.writeFirstPrinciplesPlannedFeature({
+          projectId: project.projectId,
+          sessionId: session.id,
+        })
+        if (result.featureId) {
+          session = {
+            ...session,
+            featuresFeatureId: result.featureId,
+            updatedAt: new Date().toISOString(),
+          }
+          session = await persistFirstPrinciplesSession(client, project.projectId, session)
+        }
+        if (result.skippedLocked) {
+          pushToast({
+            type: 'warning',
+            message: result.message ?? 'Feature locked — left unchanged',
+            autoDismiss: 3000,
+          })
+        }
+      }
+      set({
+        pendingFirstPrinciples: session,
+        firstPrinciplesBusy: false,
+      })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'firstPrinciples.concluded', {
+          verdict: thesis.verdict,
+        }),
+        autoDismiss: 2500,
+      })
+    } catch (error) {
+      set({
+        firstPrinciplesBusy: false,
+        error: errorMessage(error, 'Confirm thesis failed'),
+      })
+    }
+  },
+  resolveFirstPrinciplesConflict: async (resolution, rephraseText) => {
+    const { pendingFirstPrinciples, client, project, locale } = get()
+    if (!pendingFirstPrinciples || !project || !client) return
+    set({ firstPrinciplesBusy: true })
+    try {
+      let session =
+        typeof client.resolveFirstPrinciplesConflict === 'function'
+          ? await client.resolveFirstPrinciplesConflict({
+              projectId: project.projectId,
+              sessionId: pendingFirstPrinciples.id,
+              resolution,
+              ...(rephraseText ? { rephraseText } : {}),
+            })
+          : pendingFirstPrinciples
+      session = await persistFirstPrinciplesSession(client, project.projectId, session)
+      const assistantMsg = assistantReflectMessage(session, locale)
+      set((current) => ({
+        pendingFirstPrinciples: session,
+        firstPrinciplesBusy: false,
+        messages: [...current.messages, assistantMsg],
+      }))
+    } catch (error) {
+      set({
+        firstPrinciplesBusy: false,
+        error: errorMessage(error, 'Resolve conflict failed'),
+      })
+    }
+  },
+  pivotFirstPrinciples: async () => {
+    const { pendingFirstPrinciples, client, project, locale } = get()
+    if (!pendingFirstPrinciples || !project) return
+    set({ firstPrinciplesBusy: true })
+    try {
+      let session = pivotFirstPrinciplesSession(pendingFirstPrinciples)
+      session = await persistFirstPrinciplesSession(client, project.projectId, session)
+      const assistantMsg = assistantReflectMessage(session, locale)
+      set((current) => ({
+        pendingFirstPrinciples: session,
+        firstPrinciplesBusy: false,
+        messages: [...current.messages, assistantMsg],
+      }))
+    } catch (error) {
+      set({
+        firstPrinciplesBusy: false,
+        error: errorMessage(error, 'Pivot failed'),
+      })
+    }
+  },
+  handoffFirstPrinciples: async (target) => {
+    const { pendingFirstPrinciples, setAskSubMode, setChatMode, setChatInput } = get()
+    if (!pendingFirstPrinciples) return
+    set({ firstPrinciplesBusy: true })
+    try {
+      await runFirstPrinciplesHandoff({
+        session: pendingFirstPrinciples,
+        target,
+        setAskSubMode,
+        setChatMode,
+        setChatInput,
+      })
+      set({ firstPrinciplesBusy: false })
+    } catch (error) {
+      set({
+        firstPrinciplesBusy: false,
+        error: errorMessage(error, 'Handoff failed'),
+      })
+    }
   },
   setChatMode: async (mode, options) => {
     const state = get()
@@ -2706,6 +3330,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const state = get()
     const draft = typeof input === 'string' ? emptyComposerDraft(input) : input
     const rawPrompt = draft.text
+    if (state.createAgentComposerActive && rawPrompt.trim()) {
+      set({ composerDraft: emptyComposerDraft() })
+      await get().submitCreateAgentPrompt(rawPrompt.trim(), 'chat')
+      return
+    }
     const composerFields = buildPromptComposerFields(draft)
     const {
       chatMode,
@@ -2714,10 +3343,14 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       selectedNodeId,
       selectedFilePath,
       pushToast,
+      composerHub,
     } = state
     if (!project || !rawPrompt.trim() || !canSubmitAgentPrompt(state)) {
       return
     }
+
+    const visiblePrompt = rawPrompt.trim()
+    const agentPrompt = appendComposerHubToPrompt(visiblePrompt, composerHub)
 
     const effectiveSkillId =
       draft.invokedSkillId ?? get().activeCustomModeSkillId ?? undefined
@@ -2730,13 +3363,177 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const buildUserMessage = (): ChatMessage => ({
       id: msgId(),
       role: 'user',
-      content: rawPrompt.trim(),
+      content: visiblePrompt,
       timestamp: new Date().toISOString(),
+      chatMode,
       ...(draft.attachments.length > 0 ? { attachments: draft.attachments } : {}),
       ...(effectiveSkillId ? { invokedSkillId: effectiveSkillId } : {}),
     })
 
     const clearedDraft = emptyComposerDraft()
+
+    // Wireframe Pack / Diagram Graph / Function Map routing (before mode-specific agent paths).
+    {
+      const {
+        DIAGRAM_DESIGN_SKILL_ID,
+        looksLikeDiagramRequest,
+        looksLikeFunctionMapRequest,
+        looksLikeOpenWireframePackRequest,
+        looksLikeWireframePackRequest,
+        wireframeVsDiagramAmbiguous,
+      } = await import('@contracts/index')
+      const skillIsDiagram = effectiveSkillId === DIAGRAM_DESIGN_SKILL_ID
+      if (looksLikeFunctionMapRequest(visiblePrompt) && !skillIsDiagram) {
+        const userMsg = buildUserMessage()
+        set((current) => ({
+          messages: [
+            ...current.messages,
+            userMsg,
+            {
+              id: msgId(),
+              role: 'assistant' as const,
+              content: getStoreMessage(get().locale, 'chat.diagramGraph.functionMapRedirect'),
+              format: 'plain' as const,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+          composerDraft: clearedDraft,
+          centerTab: 'function-map',
+        }))
+        return
+      }
+      if (
+        !skillIsDiagram &&
+        looksLikeWireframePackRequest(visiblePrompt) &&
+        !wireframeVsDiagramAmbiguous(visiblePrompt)
+      ) {
+        const userMsg = buildUserMessage()
+        const { useDiagramGraphStore } = await import('./diagramGraphStore')
+        if (looksLikeOpenWireframePackRequest(visiblePrompt)) {
+          const { useWireframePackStore } = await import('./wireframePackStore')
+          await useWireframePackStore.getState().loadForWorkspace()
+          useDiagramGraphStore.getState().enterWireframeMode()
+          set((current) => ({
+            messages: [
+              ...current.messages,
+              userMsg,
+              {
+                id: msgId(),
+                role: 'assistant' as const,
+                content: getStoreMessage(get().locale, 'chat.wireframePack.summaryNotice'),
+                format: 'plain' as const,
+                timestamp: new Date().toISOString(),
+              },
+            ],
+            composerDraft: clearedDraft,
+            rightPanelTab: 'chat',
+          }))
+          return
+        }
+        set((current) => ({
+          messages: [...current.messages, userMsg],
+          composerDraft: clearedDraft,
+          refineLoading: true,
+          rightPanelTab: 'chat',
+        }))
+        try {
+          const diagramStore = useDiagramGraphStore.getState()
+          diagramStore.enterWireframeMode()
+          diagramStore.setComposerDraft(visiblePrompt)
+          diagramStore.setTypeHint('ui-wireframe')
+          await diagramStore.generate('chat')
+          const after = useDiagramGraphStore.getState()
+          const wireframeError = (await import('./wireframePackStore')).useWireframePackStore
+            .getState().error
+          set((current) => ({
+            refineLoading: false,
+            messages: [
+              ...current.messages,
+              {
+                id: msgId(),
+                role: 'assistant' as const,
+                content: after.pendingSummary
+                  ? getStoreMessage(get().locale, 'chat.wireframePack.summaryNotice')
+                  : wireframeError ??
+                    after.error ??
+                    getStoreMessage(get().locale, 'chat.wireframePack.generating'),
+                format: 'plain' as const,
+                timestamp: new Date().toISOString(),
+              },
+            ],
+          }))
+        } catch (error) {
+          set({
+            refineLoading: false,
+            error: errorMessage(error, 'Wireframe pack generation failed'),
+          })
+        }
+        return
+      }
+      if (
+        !skillIsDiagram &&
+        wireframeVsDiagramAmbiguous(visiblePrompt)
+      ) {
+        const userMsg = buildUserMessage()
+        set((current) => ({
+          messages: [
+            ...current.messages,
+            userMsg,
+            {
+              id: msgId(),
+              role: 'assistant' as const,
+              content: getStoreMessage(get().locale, 'chat.wireframePack.ambiguousPrompt'),
+              format: 'plain' as const,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+          composerDraft: clearedDraft,
+        }))
+        return
+      }
+      if (skillIsDiagram || looksLikeDiagramRequest(visiblePrompt)) {
+        const userMsg = buildUserMessage()
+        set((current) => ({
+          messages: [...current.messages, userMsg],
+          composerDraft: clearedDraft,
+          refineLoading: true,
+          rightPanelTab: 'chat',
+        }))
+        try {
+          const { useDiagramGraphStore } = await import('./diagramGraphStore')
+          const diagramStore = useDiagramGraphStore.getState()
+          await diagramStore.ensureSkill()
+          await diagramStore.loadForWorkspace()
+          if (!diagramStore.styleChosen) {
+            await diagramStore.chooseStyle('project-os-tech')
+          }
+          diagramStore.setComposerDraft(visiblePrompt)
+          const artifact = await diagramStore.generate('chat')
+          set((current) => ({
+            refineLoading: false,
+            messages: [
+              ...current.messages,
+              {
+                id: msgId(),
+                role: 'assistant' as const,
+                content: artifact
+                  ? getStoreMessage(get().locale, 'chat.diagramGraph.summaryNotice')
+                  : diagramStore.error ??
+                    getStoreMessage(get().locale, 'chat.diagramGraph.generating'),
+                format: 'plain' as const,
+                timestamp: new Date().toISOString(),
+              },
+            ],
+          }))
+        } catch (error) {
+          set({
+            refineLoading: false,
+            error: errorMessage(error, 'Diagram generation failed'),
+          })
+        }
+        return
+      }
+    }
 
     if (chatMode === 'anchored') {
       const anchor =
@@ -2763,7 +3560,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         const answer = await client.askAgent({
           projectId: project.projectId,
           scope: askScope,
-          question: rawPrompt.trim(),
+          question: agentPrompt,
           language: { mode: 'auto' },
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
@@ -2803,6 +3600,37 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       return
     }
 
+    if (chatMode === 'ask' && get().askSubMode === 'first_principles') {
+      const pending = get().pendingFirstPrinciples
+      if (!pending || pending.status === 'concluded' || pending.status === 'abandoned') {
+        await get().beginFirstPrinciplesFromVision(visiblePrompt)
+        return
+      }
+      if (pending.status === 'thesis_review') {
+        pushToast({
+          type: 'info',
+          message: getStoreMessage(get().locale, 'firstPrinciples.thesis.intro'),
+          autoDismiss: 2800,
+        })
+        return
+      }
+      if (pending.activeQuestion) {
+        const userMsg = buildUserMessage()
+        set((current) => ({
+          messages: [...current.messages, userMsg],
+          composerDraft: clearedDraft,
+        }))
+        await get().answerFirstPrinciplesQuestion({
+          questionId: pending.activeQuestion.id,
+          kind: 'custom',
+          text: visiblePrompt,
+        })
+        return
+      }
+      await get().beginFirstPrinciplesFromVision(visiblePrompt)
+      return
+    }
+
     if (chatMode === 'ask') {
       const askScope: AgentConversationScope = isGlobalAgentScope(state)
         ? { kind: 'global' }
@@ -2832,7 +3660,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         const answer = await client.askAgent({
           projectId: project.projectId,
           scope: askScope,
-          question: rawPrompt.trim(),
+          question: agentPrompt,
           language: { mode: 'auto' },
           exploration: { maxRounds: 2 },
           ...chatSessionRequestFields(),
@@ -2856,6 +3684,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
               ...(answer.explorationTrace
                 ? { explorationTrace: answer.explorationTrace }
                 : {}),
+              ...(answer.mcpToolCalls?.length
+                ? { mcpToolCalls: answer.mcpToolCalls }
+                : {}),
               ...(answer.retrievalSummary?.searched
                 ? { retrievalSummary: answer.retrievalSummary }
                 : {}),
@@ -2873,7 +3704,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         }))
         get().maybeNotifyAgentComplete({
           kind: 'ask',
-          summary: truncateDiffReadySummary(rawPrompt.trim()),
+          summary: truncateDiffReadySummary(visiblePrompt),
           completedAt: Date.now(),
         })
         notifyMemoryWrite(pushToast, get().locale, answer.memoryWrite)
@@ -2959,7 +3790,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         const plan = withPlanQuestionOptions(await client.createPlan({
           projectId: project.projectId,
           scope: planScope,
-          objective: rawPrompt.trim(),
+          objective: agentPrompt,
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
         }))
@@ -3051,7 +3882,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         const session = await client.startDebugSession({
           projectId: project.projectId,
           scope: debugScope,
-          bugDescription: rawPrompt.trim(),
+          bugDescription: agentPrompt,
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
         })
@@ -3160,7 +3991,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         projectId: project.projectId,
         nodeId: selectedNodeId ?? undefined,
         filePath: selectedFilePath ?? undefined,
-        rawPrompt: rawPrompt.trim(),
+        rawPrompt: agentPrompt,
+        workforceAgentDefinitionId: get().activeAgentDefinitionId,
         ...chatSessionRequestFields(),
         ...composerFieldsWithMode,
       })
@@ -3183,7 +4015,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       } else if (refinement.mode === 'deterministic_fixture' && get().settings && !get().settings?.presentationMode) {
         pushToast({ type: 'info', message: getStoreMessage(get().locale, 'settings.fallbackNotice') })
       }
-      if (refinement.executionPolicy === 'automatic') {
+      if (
+        refinement.executionPolicy === 'automatic' &&
+        canSkipAlignment(refinement)
+      ) {
         await get().confirmRefinement()
         set({ pendingRefinement: null })
       }
@@ -3196,7 +4031,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     scheduleChatSessionPersist()
   },
 
-  confirmRefinement: async (onStarted) => {
+  confirmRefinement: async (alignment, onStarted) => {
     const { client, pendingRefinement, pushToast, locale } = get()
     if (!pendingRefinement) return
     const subscriptionProjectId = get().project?.projectId
@@ -3204,7 +4039,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     get().runDisposable?.dispose()
 
     try {
-      const run = await client.confirmExecution(pendingRefinement.id)
+      if (alignment) {
+        const confirmed = await client.confirmAlignment(alignment)
+        set({ pendingRefinement: confirmed })
+      }
+      const refinementId = get().pendingRefinement?.id ?? pendingRefinement.id
+      const run = await client.confirmExecution(refinementId)
       const delivered = run as typeof run & {
         contextAssembly?: import('@contracts/index').ContextAssembly
       }
@@ -3267,9 +4107,19 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         lastDecisionRefreshAt = now
         void get().loadRunDecisions(rootRunId)
       }
+      /** Snapshot watermark — live events with runSequence <= this are ignored (DevPlan §7.4). */
+      let snapshotWatermark: number | null = null
       const applyRunEvent = (event: AgentRunEvent) => {
         if (!isCurrentRunSubscription()) return
         if (handledRunEventIds.has(event.eventId)) return
+        if (
+          typeof event.runSequence === 'number' &&
+          snapshotWatermark != null &&
+          event.runSequence <= snapshotWatermark
+        ) {
+          handledRunEventIds.add(event.eventId)
+          return
+        }
         handledRunEventIds.add(event.eventId)
         try {
           handleRunEvent(event, set, get)
@@ -3409,14 +4259,24 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       const syncFlowFromRun = async () => {
         if (!isCurrentRunSubscription()) return
         try {
-          const events = await client.getAgentRunEvents(run.runId)
+          const snapshot = await client.getAgentRunEventSnapshot(run.runId)
           if (!isCurrentRunSubscription()) return
-          if (events.length === 0) return
-          for (const event of events) {
-            applyRunEvent(event)
+          snapshotWatermark = snapshot.watermark
+          if (snapshot.events.length === 0) return
+          for (const event of snapshot.events) {
+            applyRunEvent(event as AgentRunEvent)
           }
         } catch (error) {
-          console.error('[workbench] failed to sync agent run events', error)
+          // Fallback for older transports / partial mocks.
+          try {
+            const events = await client.getAgentRunEvents(run.runId)
+            if (!isCurrentRunSubscription()) return
+            for (const event of events) {
+              applyRunEvent(event)
+            }
+          } catch (fallbackError) {
+            console.error('[workbench] failed to sync agent run events', error, fallbackError)
+          }
         }
       }
 
@@ -3524,7 +4384,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       if (!isCurrentBuild()) return
       set({ pendingRefinement: refinement, refinementConfirmed: false })
       let started = false
-      await get().confirmRefinement(() => {
+      await get().confirmRefinement(undefined, () => {
         if (!isCurrentBuild()) return
         started = true
         set({
@@ -3653,6 +4513,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         activeCustomModeSkillId && customModePreviousChatMode
           ? customModePreviousChatMode
           : chatMode,
+      // Custom Mode and specialized Agent are mutually exclusive (v1).
+      activeAgentDefinitionId: null,
+      activeAgentDisplayName: null,
     })
     scheduleChatSessionPersist()
   },
@@ -3666,6 +4529,221 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       chatMode: restoreMode,
     })
     scheduleChatSessionPersist()
+  },
+
+  setActiveAgentDefinitionId: (definitionId, displayName = null) => {
+    set({
+      activeAgentDefinitionId: definitionId,
+      activeAgentDisplayName: definitionId ? displayName : null,
+      chatMode: 'change',
+      ...(definitionId
+        ? { activeCustomModeSkillId: null, customModePreviousChatMode: null }
+        : {}),
+      createAgentComposerActive: false,
+    })
+    scheduleChatSessionPersist()
+  },
+
+  beginCreateAgentComposer: (_source = 'chat') => {
+    set({
+      createAgentComposerActive: true,
+      pendingWorkforceDraft: null,
+      chatMode: 'change',
+    })
+  },
+
+  cancelCreateAgentComposer: () => {
+    set({ createAgentComposerActive: false, pendingWorkforceDraft: null })
+  },
+
+  submitCreateAgentPrompt: async (prompt, source = 'chat') => {
+    const { client, project } = get()
+    const trimmed = prompt.trim()
+    if (!client || !project || !trimmed || !client.draftWorkforceAgent) return
+    const result = await client.draftWorkforceAgent({
+      projectId: project.projectId,
+      prompt: trimmed,
+    })
+    set({
+      pendingWorkforceDraft: {
+        draft: result.draft,
+        sourcePrompt: result.sourcePrompt,
+        source,
+      },
+      createAgentComposerActive: true,
+    })
+  },
+
+  updatePendingWorkforceDraft: (draft) => {
+    const pending = get().pendingWorkforceDraft
+    if (!pending) return
+    set({ pendingWorkforceDraft: { ...pending, draft } })
+  },
+
+  dismissWorkforceDraft: () => {
+    set({ pendingWorkforceDraft: null, createAgentComposerActive: false })
+  },
+
+  confirmWorkforceDraft: async (options) => {
+    const { client, project, pendingWorkforceDraft } = get()
+    if (!client || !project || !pendingWorkforceDraft || !client.createWorkforceAgent) {
+      return null
+    }
+    const created = await client.createWorkforceAgent({
+      projectId: project.projectId,
+      draft: pendingWorkforceDraft.draft,
+    })
+    const useInChat = options?.useInChat ?? pendingWorkforceDraft.source === 'chat'
+    set({
+      pendingWorkforceDraft: null,
+      createAgentComposerActive: false,
+      ...(useInChat
+        ? {
+            activeAgentDefinitionId: created.definitionId,
+            activeAgentDisplayName: created.config.displayName,
+            chatMode: 'change' as ChatMode,
+            activeCustomModeSkillId: null,
+            customModePreviousChatMode: null,
+          }
+        : {}),
+    })
+    scheduleChatSessionPersist()
+    return created
+  },
+
+  assembleWorkforceAgent: async (input) => {
+    const { client, project } = get()
+    if (!client || !project || typeof client.assembleWorkforceAgent !== 'function') {
+      return null
+    }
+    const projectId = project.projectId
+    try {
+      return await client.assembleWorkforceAgent({
+        projectId,
+        prompt: input.prompt,
+        scope: input.scope,
+        ...(input.seedSkillIds ? { seedSkillIds: input.seedSkillIds } : {}),
+        ...(input.seedMcpServerIds ? { seedMcpServerIds: input.seedMcpServerIds } : {}),
+      })
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to assemble agent from capabilities')
+      }
+      return null
+    }
+  },
+
+  confirmMarketplaceAgentAssembly: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!client || !project || typeof client.createWorkforceAgent !== 'function') {
+      return null
+    }
+    const projectId = project.projectId
+    let bindings = [...input.bindings]
+    const installErrorIds: string[] = []
+
+    const markInstalled = (kind: string, id: string, serverId?: string) => {
+      bindings = bindings.map((b) => {
+        if (b.kind !== kind) return b
+        if (b.id !== id && b.listingId !== id) return b
+        return {
+          ...b,
+          installed: true,
+          action: b.action === 'suggest_install_only' ? b.action : 'bind',
+          ...(kind === 'mcp' && serverId ? { id: serverId } : {}),
+        }
+      })
+    }
+
+    try {
+      for (const binding of bindings) {
+        if (!binding.selected || binding.installed) continue
+        const listingId = binding.listingId ?? binding.id
+        const key = `${binding.kind}:${binding.id}`
+        try {
+          if (binding.kind === 'skill' && binding.action === 'install_then_bind') {
+            const ok = await get().installSkillFromCatalog({ listingId })
+            if (!ok) throw new Error('skill install failed')
+            markInstalled('skill', listingId)
+          } else if (binding.kind === 'mcp' && binding.action === 'install_then_bind') {
+            const ok = await get().installMcpFromCatalog({ listingId })
+            if (!ok) throw new Error('mcp install failed')
+            const settings = get().settings
+            const server = (settings?.mcpServers ?? []).find(
+              (s) => s.provenance?.listingId === listingId,
+            )
+            markInstalled('mcp', listingId, server?.id)
+          } else if (binding.kind === 'rules' && binding.action === 'suggest_install_only') {
+            const ok = await get().installRulesFromCatalog({ listingId })
+            if (!ok) throw new Error('rules install failed')
+            markInstalled('rules', listingId)
+          } else if (
+            binding.kind === 'workflow' &&
+            binding.action === 'suggest_install_only'
+          ) {
+            const ok = await get().installWorkflowFromCatalog({ listingId })
+            if (!ok) throw new Error('workflow install failed')
+            markInstalled('workflow', listingId)
+          } else if (
+            binding.kind === 'stencil' &&
+            binding.action === 'suggest_install_only'
+          ) {
+            const ok = await get().installStencilFromCatalog({ listingId })
+            if (!ok) throw new Error('stencil install failed')
+            markInstalled('stencil', listingId)
+          }
+        } catch {
+          installErrorIds.push(key)
+        }
+      }
+
+      if (input.installOnly) {
+        return { createdId: null, bindings, installErrorIds }
+      }
+
+      if (installErrorIds.length > 0) {
+        return { createdId: null, bindings, installErrorIds }
+      }
+
+      const skillIds = bindings
+        .filter(
+          (b) =>
+            b.kind === 'skill' &&
+            b.selected &&
+            b.installed &&
+            (b.action === 'bind' || b.action === 'install_then_bind'),
+        )
+        .map((b) => b.id)
+      const mcpServerIds = bindings
+        .filter(
+          (b) =>
+            b.kind === 'mcp' &&
+            b.selected &&
+            b.installed &&
+            (b.action === 'bind' || b.action === 'install_then_bind'),
+        )
+        .map((b) => b.id)
+
+      const created = await client.createWorkforceAgent({
+        projectId,
+        draft: {
+          ...input.draft,
+          skillIds: [...new Set(skillIds)],
+          mcpServerIds: [...new Set(mcpServerIds)],
+        },
+      })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'chat.marketplace.composeAgentCreated'),
+      })
+      await get().refreshInstalledMarketplaceAgents()
+      return { createdId: created.definitionId, bindings, installErrorIds }
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to create assembled agent')
+      }
+      return { createdId: null, bindings, installErrorIds }
+    }
   },
 
   listWorkspacePlans: async () => {
@@ -4053,16 +5131,88 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const { client, debugSession } = get()
     if (!debugSession) return
     try {
+      const bugs = debugSession.bugs ?? []
+      const openConfirmed = bugs.filter(
+        (bug) =>
+          bug.selected &&
+          bug.status !== 'rejected' &&
+          bug.status !== 'abandoned' &&
+          bug.status !== 'fixed',
+      )
+      if (openConfirmed.length === 1) {
+        const session = await client.markBugFixed({
+          sessionId: debugSession.sessionId,
+          bugId: openConfirmed[0]!.id,
+        })
+        set({ debugSession: session })
+        scheduleChatSessionPersist()
+        return
+      }
       await client.cleanupDebugInstrumentation(debugSession.sessionId)
       set({
         debugSession: {
           ...debugSession,
           phase: 'complete',
+          ...(bugs.length
+            ? {
+                bugs: bugs.map((bug) =>
+                  bug.selected && bug.status !== 'rejected'
+                    ? { ...bug, status: 'fixed' as const, fixedAt: new Date().toISOString() }
+                    : bug,
+                ),
+              }
+            : {}),
         },
       })
       scheduleChatSessionPersist()
     } catch (error) {
       set({ error: errorMessage(error, 'Failed to clean up debug instrumentation') })
+    }
+  },
+
+  confirmBugAlignment: async (bugs) => {
+    const { client, debugSession } = get()
+    if (!debugSession) return
+    try {
+      set({ refineLoading: true })
+      const session = await client.confirmBugAlignment({
+        sessionId: debugSession.sessionId,
+        bugs,
+      })
+      set((current) => ({
+        refineLoading: false,
+        debugSession: session,
+        messages: [
+          ...current.messages,
+          {
+            id: msgId(),
+            role: 'system' as const,
+            content: getStoreMessage(current.locale, 'debug.chatStageReproduce'),
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }))
+      scheduleChatSessionPersist()
+    } catch (error) {
+      set({
+        refineLoading: false,
+        error: errorMessage(error, 'Failed to confirm bug alignment'),
+      })
+    }
+  },
+
+  markBugFixed: async (bugId) => {
+    const { client, debugSession } = get()
+    if (!debugSession) return
+    try {
+      const session = await client.markBugFixed({
+        sessionId: debugSession.sessionId,
+        bugId,
+      })
+      set({ debugSession: session })
+      scheduleChatSessionPersist()
+    } catch (error) {
+      set({ error: errorMessage(error, 'Failed to mark bug fixed') })
     }
   },
 
@@ -4740,7 +5890,44 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
   saveExternalAgent: async () => false,
 
-  saveMcpServer: async () => false,
+  saveMcpServer: async (config, authToken) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.saveMcpServer(projectId, {
+        config,
+        ...(authToken?.trim() ? { authToken: authToken.trim() } : {}),
+      })
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({ type: 'success', message: getStoreMessage(locale, 'settings.mcpSaved') })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to save MCP server')
+      }
+      return false
+    }
+  },
+
+  deleteMcpServer: async (serverId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.deleteMcpServer(projectId, serverId)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({ type: 'success', message: getStoreMessage(locale, 'settings.mcpDeleted') })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to delete MCP server')
+      }
+      return false
+    }
+  },
 
   testModelConnection: async (profileId) => {
     const { client, project, pushToast, locale } = get()
@@ -4767,13 +5954,1475 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     /* external agents removed in pure workbench */
   },
 
-  testMcpServer: async (_serverId) => {
-    /* MCP removed in pure workbench */
+  testMcpServer: async (serverId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return
+    const projectId = project.projectId
+    try {
+      const result = await client.testMcpServer(projectId, serverId)
+      if (get().project?.projectId !== projectId) return
+      pushToast({
+        type: result.ok ? 'success' : 'warning',
+        message: result.ok
+          ? getStoreMessage(locale, 'settings.mcpConnectionOk', { ms: result.latencyMs })
+          : result.message ?? getStoreMessage(locale, 'settings.mcpConnectionFailed'),
+      })
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, getStoreMessage(locale, 'settings.mcpConnectionFailed'))
+      }
+    }
   },
 
-  refreshMcpTools: async (_serverId) => [],
+  refreshMcpTools: async (serverId) => {
+    const { client, project } = get()
+    if (!project) return []
+    return client.refreshMcpTools(project.projectId, serverId)
+  },
 
-  setSettingsOpen: (open) => set({ settingsOpen: open }),
+  listMcpCatalog: async (options) => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const view = await client.listMcpCatalog(projectId, options)
+      if (get().project?.projectId === projectId) {
+        set((s) => ({
+          mcpCatalogView: view,
+          marketplaceCatalogStatus:
+            s.marketplaceCatalogStatus === 'loading' ? s.marketplaceCatalogStatus : 'ready',
+        }))
+      }
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to load MCP catalog')
+      }
+      return null
+    }
+  },
+
+  refreshMcpCatalog: async () => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    set({ marketplaceCatalogStatus: 'loading' })
+    try {
+      const view = await client.refreshMcpCatalog(projectId)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        mcpCatalogView: view,
+        marketplaceCatalogStatus:
+          s.skillCatalogView || s.rulesCatalogView || s.agentCatalogView || view ? 'ready' : 'error',
+      }))
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to refresh MCP catalog')
+        set((s) => ({
+          marketplaceCatalogStatus:
+            s.mcpCatalogView || s.skillCatalogView || s.rulesCatalogView || s.agentCatalogView
+              ? 'ready'
+              : 'error',
+        }))
+      }
+      return null
+    }
+  },
+
+  installMcpFromCatalog: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.installMcpFromCatalog(projectId, input)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({ type: 'success', message: getStoreMessage(locale, 'settings.mcpMarketInstalled') })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install MCP listing')
+      }
+      return false
+    }
+  },
+
+  disableMcpCatalogListing: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.disableMcpCatalogListing(projectId, listingId)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({ type: 'success', message: getStoreMessage(locale, 'settings.mcpMarketDisabled') })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to disable MCP listing')
+      }
+      return false
+    }
+  },
+
+  reportMcpCatalogListing: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.reportMcpCatalogListing(projectId, input)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({ type: 'success', message: getStoreMessage(locale, 'settings.mcpMarketReported') })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to report MCP listing')
+      }
+      return false
+    }
+  },
+
+  listSkillCatalog: async (options) => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const view = await client.listSkillCatalog(projectId, options)
+      if (get().project?.projectId === projectId) {
+        set((s) => ({
+          skillCatalogView: view,
+          marketplaceCatalogStatus:
+            s.marketplaceCatalogStatus === 'loading' ? s.marketplaceCatalogStatus : 'ready',
+        }))
+      }
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to load skill catalog')
+      }
+      return null
+    }
+  },
+
+  refreshSkillCatalog: async () => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    set({ marketplaceCatalogStatus: 'loading' })
+    try {
+      const view = await client.refreshSkillCatalog(projectId)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        skillCatalogView: view,
+        marketplaceCatalogStatus:
+          s.mcpCatalogView || s.rulesCatalogView || s.agentCatalogView || view ? 'ready' : 'error',
+      }))
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to refresh skill catalog')
+        set((s) => ({
+          marketplaceCatalogStatus:
+            s.mcpCatalogView || s.skillCatalogView || s.rulesCatalogView || s.agentCatalogView
+              ? 'ready'
+              : 'error',
+        }))
+      }
+      return null
+    }
+  },
+
+  installSkillFromCatalog: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const descriptor = await client.installSkillFromCatalog(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        installedMarketplaceSkillIds: s.installedMarketplaceSkillIds.includes(descriptor.id)
+          ? s.installedMarketplaceSkillIds
+          : [...s.installedMarketplaceSkillIds, descriptor.id],
+      }))
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.skillMarketInstalled'),
+      })
+      return descriptor
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install skill')
+      }
+      return null
+    }
+  },
+
+  uninstallSkillFromCatalog: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      await client.uninstallSkillFromCatalog(projectId, { listingId })
+      if (get().project?.projectId !== projectId) return false
+      const normalized = listingId
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/gu, '-')
+        .replace(/^-+|-+$/gu, '')
+      set((s) => ({
+        installedMarketplaceSkillIds: s.installedMarketplaceSkillIds.filter(
+          (id) => id !== listingId && id !== normalized,
+        ),
+      }))
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.skillMarketUninstalled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to uninstall skill')
+      }
+      return false
+    }
+  },
+
+  uninstallMcpListing: async (listingId) => {
+    const { client, project, settings, pushToast, locale } = get()
+    if (!project || !settings) return false
+    const projectId = project.projectId
+    const targets = (settings.mcpServers ?? []).filter(
+      (server) => server.provenance?.listingId === listingId,
+    )
+    if (targets.length === 0) return false
+    try {
+      let updated = settings
+      for (const server of targets) {
+        updated = await client.deleteMcpServer(projectId, server.id)
+      }
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.mcpMarketUninstalled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to uninstall MCP listing')
+      }
+      return false
+    }
+  },
+
+  disableSkillCatalogListing: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.disableSkillCatalogListing(projectId, listingId)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.skillMarketDisabled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to disable skill listing')
+      }
+      return false
+    }
+  },
+
+  reportSkillCatalogListing: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.reportSkillCatalogListing(projectId, input)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.skillMarketReported'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to report skill listing')
+      }
+      return false
+    }
+  },
+
+  listRulesCatalog: async (options) => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const view = await client.listRulesCatalog(projectId, options)
+      if (get().project?.projectId === projectId) {
+        set((s) => ({
+          rulesCatalogView: view,
+          marketplaceCatalogStatus:
+            s.marketplaceCatalogStatus === 'loading' ? s.marketplaceCatalogStatus : 'ready',
+        }))
+      }
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to load rules catalog')
+      }
+      return null
+    }
+  },
+
+  refreshRulesCatalog: async () => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    set({ marketplaceCatalogStatus: 'loading' })
+    try {
+      const view = await client.refreshRulesCatalog(projectId)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        rulesCatalogView: view,
+        marketplaceCatalogStatus:
+          s.mcpCatalogView || s.skillCatalogView || s.agentCatalogView || view ? 'ready' : 'error',
+      }))
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to refresh rules catalog')
+        set((s) => ({
+          marketplaceCatalogStatus:
+            s.mcpCatalogView || s.skillCatalogView || s.rulesCatalogView || s.agentCatalogView
+              ? 'ready'
+              : 'error',
+        }))
+      }
+      return null
+    }
+  },
+
+  installRulesFromCatalog: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const result = await client.installRulesFromCatalog(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        installedMarketplaceRulesPackIds: s.installedMarketplaceRulesPackIds.includes(
+          result.packId,
+        )
+          ? s.installedMarketplaceRulesPackIds
+          : [...s.installedMarketplaceRulesPackIds, result.packId],
+      }))
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.rulesMarketInstalled'),
+      })
+      return result
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install rules pack')
+      }
+      return null
+    }
+  },
+
+  uninstallRulesFromCatalog: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      await client.uninstallRulesFromCatalog(projectId, { listingId })
+      if (get().project?.projectId !== projectId) return false
+      const normalized = listingId
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/gu, '-')
+        .replace(/^-+|-+$/gu, '')
+      set((s) => ({
+        installedMarketplaceRulesPackIds: s.installedMarketplaceRulesPackIds.filter(
+          (id) => id !== listingId && id !== normalized,
+        ),
+      }))
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.rulesMarketUninstalled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to uninstall rules pack')
+      }
+      return false
+    }
+  },
+
+  disableRulesCatalogListing: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.disableRulesCatalogListing(projectId, listingId)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.rulesMarketDisabled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to disable rules listing')
+      }
+      return false
+    }
+  },
+
+  reportRulesCatalogListing: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.reportRulesCatalogListing(projectId, input)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.rulesMarketReported'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to report rules listing')
+      }
+      return false
+    }
+  },
+
+  listAgentCatalog: async (options) => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const view = await client.listAgentCatalog(projectId, options)
+      if (get().project?.projectId === projectId) {
+        set((s) => ({
+          agentCatalogView: view,
+          marketplaceCatalogStatus:
+            s.marketplaceCatalogStatus === 'loading' ? s.marketplaceCatalogStatus : 'ready',
+        }))
+      }
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to load agent catalog')
+      }
+      return null
+    }
+  },
+
+  refreshAgentCatalog: async () => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    set({ marketplaceCatalogStatus: 'loading' })
+    try {
+      const view = await client.refreshAgentCatalog(projectId)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        agentCatalogView: view,
+        marketplaceCatalogStatus:
+          s.mcpCatalogView || s.skillCatalogView || s.rulesCatalogView || view
+            ? 'ready'
+            : 'error',
+      }))
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to refresh agent catalog')
+        set((s) => ({
+          marketplaceCatalogStatus:
+            s.mcpCatalogView || s.skillCatalogView || s.rulesCatalogView || s.agentCatalogView
+              ? 'ready'
+              : 'error',
+        }))
+      }
+      return null
+    }
+  },
+
+  installAgentFromCatalog: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const definition = await client.installAgentFromCatalog(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      const listingId = definition.config.marketplaceProvenance?.listingId ?? input.listingId
+      set((s) => ({
+        installedMarketplaceAgentListingIds: s.installedMarketplaceAgentListingIds.includes(
+          listingId,
+        )
+          ? s.installedMarketplaceAgentListingIds
+          : [...s.installedMarketplaceAgentListingIds, listingId],
+      }))
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.agentMarketInstalled'),
+      })
+      return definition
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install agent pack')
+      }
+      return null
+    }
+  },
+
+  uninstallAgentFromCatalog: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      await client.uninstallAgentFromCatalog(projectId, { listingId })
+      if (get().project?.projectId !== projectId) return false
+      set((s) => ({
+        installedMarketplaceAgentListingIds: s.installedMarketplaceAgentListingIds.filter(
+          (id) => id !== listingId,
+        ),
+      }))
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.agentMarketUninstalled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to uninstall agent pack')
+      }
+      return false
+    }
+  },
+
+  disableAgentCatalogListing: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.disableAgentCatalogListing(projectId, listingId)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.agentMarketDisabled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to disable agent listing')
+      }
+      return false
+    }
+  },
+
+  reportAgentCatalogListing: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.reportAgentCatalogListing(projectId, input)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.agentMarketReported'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to report agent listing')
+      }
+      return false
+    }
+  },
+
+  exportCapabilityPack: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const result = await client.exportCapabilityPack(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(
+          locale,
+          result.kind === 'stencil'
+            ? 'settings.stencilMarketExported'
+            : result.kind === 'workflow'
+              ? 'settings.workflowMarketExported'
+              : 'settings.agentMarketExported',
+        ),
+      })
+      return result
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to export capability pack')
+      }
+      return null
+    }
+  },
+
+  installAgentFromExportPack: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const definition = await client.installAgentFromExportPack(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      const listingId = definition.config.marketplaceProvenance?.listingId ?? input.listing.id
+      set((s) => ({
+        installedMarketplaceAgentListingIds: s.installedMarketplaceAgentListingIds.includes(
+          listingId,
+        )
+          ? s.installedMarketplaceAgentListingIds
+          : [...s.installedMarketplaceAgentListingIds, listingId],
+      }))
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.agentMarketInstalled'),
+      })
+      return definition
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install exported agent pack')
+      }
+      return null
+    }
+  },
+
+  installRulesFromExportPack: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const result = await client.installRulesFromExportPack(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        installedMarketplaceRulesPackIds: s.installedMarketplaceRulesPackIds.includes(result.packId)
+          ? s.installedMarketplaceRulesPackIds
+          : [...s.installedMarketplaceRulesPackIds, result.packId],
+      }))
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.rulesMarketInstalled'),
+      })
+      return result
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install exported rules pack')
+      }
+      return null
+    }
+  },
+
+  listWorkflowCatalog: async (options) => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const view = await client.listWorkflowCatalog(projectId, options)
+      if (get().project?.projectId === projectId) {
+        set((s) => ({
+          workflowCatalogView: view,
+          marketplaceCatalogStatus:
+            s.marketplaceCatalogStatus === 'loading' ? s.marketplaceCatalogStatus : 'ready',
+        }))
+      }
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to load workflow catalog')
+      }
+      return null
+    }
+  },
+
+  refreshWorkflowCatalog: async () => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    set({ marketplaceCatalogStatus: 'loading' })
+    try {
+      const view = await client.refreshWorkflowCatalog(projectId)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        workflowCatalogView: view,
+        marketplaceCatalogStatus:
+          s.mcpCatalogView ||
+          s.skillCatalogView ||
+          s.rulesCatalogView ||
+          s.agentCatalogView ||
+          view
+            ? 'ready'
+            : 'error',
+      }))
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to refresh workflow catalog')
+        set((s) => ({
+          marketplaceCatalogStatus:
+            s.mcpCatalogView ||
+            s.skillCatalogView ||
+            s.rulesCatalogView ||
+            s.agentCatalogView ||
+            s.workflowCatalogView
+              ? 'ready'
+              : 'error',
+        }))
+      }
+      return null
+    }
+  },
+
+  installWorkflowFromCatalog: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const preset = await client.installWorkflowFromCatalog(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        installedMarketplaceWorkflowListingIds: s.installedMarketplaceWorkflowListingIds.includes(
+          input.listingId,
+        )
+          ? s.installedMarketplaceWorkflowListingIds
+          : [...s.installedMarketplaceWorkflowListingIds, input.listingId],
+      }))
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.workflowMarketInstalled'),
+      })
+      return preset
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install workflow pack')
+      }
+      return null
+    }
+  },
+
+  uninstallWorkflowFromCatalog: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      await client.uninstallWorkflowFromCatalog(projectId, { listingId })
+      if (get().project?.projectId !== projectId) return false
+      set((s) => ({
+        installedMarketplaceWorkflowListingIds: s.installedMarketplaceWorkflowListingIds.filter(
+          (id) => id !== listingId,
+        ),
+      }))
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.workflowMarketUninstalled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to uninstall workflow pack')
+      }
+      return false
+    }
+  },
+
+  disableWorkflowCatalogListing: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.disableWorkflowCatalogListing(projectId, listingId)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.workflowMarketDisabled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to disable workflow listing')
+      }
+      return false
+    }
+  },
+
+  reportWorkflowCatalogListing: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.reportWorkflowCatalogListing(projectId, input)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.workflowMarketReported'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to report workflow listing')
+      }
+      return false
+    }
+  },
+
+  installWorkflowFromExportPack: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const preset = await client.installWorkflowFromExportPack(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      const listingId = input.listing.id
+      set((s) => ({
+        installedMarketplaceWorkflowListingIds: s.installedMarketplaceWorkflowListingIds.includes(
+          listingId,
+        )
+          ? s.installedMarketplaceWorkflowListingIds
+          : [...s.installedMarketplaceWorkflowListingIds, listingId],
+      }))
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.workflowMarketInstalled'),
+      })
+      return preset
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install exported workflow pack')
+      }
+      return null
+    }
+  },
+
+  listStencilCatalog: async (options) => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const view = await client.listStencilCatalog(projectId, options)
+      if (get().project?.projectId === projectId) {
+        set((s) => ({
+          stencilCatalogView: view,
+          marketplaceCatalogStatus:
+            s.marketplaceCatalogStatus === 'loading' ? s.marketplaceCatalogStatus : 'ready',
+        }))
+      }
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to load stencil catalog')
+      }
+      return null
+    }
+  },
+
+  refreshStencilCatalog: async () => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    set({ marketplaceCatalogStatus: 'loading' })
+    try {
+      const view = await client.refreshStencilCatalog(projectId)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        stencilCatalogView: view,
+        marketplaceCatalogStatus:
+          s.mcpCatalogView ||
+          s.skillCatalogView ||
+          s.rulesCatalogView ||
+          s.agentCatalogView ||
+          s.workflowCatalogView ||
+          view
+            ? 'ready'
+            : 'error',
+      }))
+      return view
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to refresh stencil catalog')
+        set((s) => ({
+          marketplaceCatalogStatus:
+            s.mcpCatalogView ||
+            s.skillCatalogView ||
+            s.rulesCatalogView ||
+            s.agentCatalogView ||
+            s.workflowCatalogView ||
+            s.stencilCatalogView
+              ? 'ready'
+              : 'error',
+        }))
+      }
+      return null
+    }
+  },
+
+  installStencilFromCatalog: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const stencils = await client.installStencilFromCatalog(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      set((s) => ({
+        installedMarketplaceStencilListingIds: s.installedMarketplaceStencilListingIds.includes(
+          input.listingId,
+        )
+          ? s.installedMarketplaceStencilListingIds
+          : [...s.installedMarketplaceStencilListingIds, input.listingId],
+      }))
+      await get().listMergedStencilDefinitions()
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.stencilMarketInstalled'),
+      })
+      return stencils
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install stencil pack')
+      }
+      return null
+    }
+  },
+
+  uninstallStencilFromCatalog: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      await client.uninstallStencilFromCatalog(projectId, { listingId })
+      if (get().project?.projectId !== projectId) return false
+      set((s) => ({
+        installedMarketplaceStencilListingIds: s.installedMarketplaceStencilListingIds.filter(
+          (id) => id !== listingId,
+        ),
+      }))
+      await get().listMergedStencilDefinitions()
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.stencilMarketUninstalled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to uninstall stencil pack')
+      }
+      return false
+    }
+  },
+
+  disableStencilCatalogListing: async (listingId) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.disableStencilCatalogListing(projectId, listingId)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.stencilMarketDisabled'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to disable stencil listing')
+      }
+      return false
+    }
+  },
+
+  reportStencilCatalogListing: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return false
+    const projectId = project.projectId
+    try {
+      const updated = await client.reportStencilCatalogListing(projectId, input)
+      if (get().project?.projectId !== projectId) return false
+      set({ settings: updated, error: null })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.stencilMarketReported'),
+      })
+      return true
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to report stencil listing')
+      }
+      return false
+    }
+  },
+
+  installStencilFromExportPack: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const stencils = await client.installStencilFromExportPack(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      const listingId = input.listing.id
+      set((s) => ({
+        installedMarketplaceStencilListingIds: s.installedMarketplaceStencilListingIds.includes(
+          listingId,
+        )
+          ? s.installedMarketplaceStencilListingIds
+          : [...s.installedMarketplaceStencilListingIds, listingId],
+      }))
+      await get().listMergedStencilDefinitions()
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'settings.stencilMarketInstalled'),
+      })
+      return stencils
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install exported stencil pack')
+      }
+      return null
+    }
+  },
+
+  listMergedStencilDefinitions: async () => {
+    const { client, project } = get()
+    if (!project) {
+      set({ mergedStencilDefinitions: [] })
+      return []
+    }
+    const projectId = project.projectId
+    try {
+      const definitions = await client.listMergedStencilDefinitions(projectId)
+      if (get().project?.projectId !== projectId) return []
+      set({ mergedStencilDefinitions: definitions })
+      return definitions
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to list stencil definitions')
+        set({ mergedStencilDefinitions: [] })
+      }
+      return []
+    }
+  },
+
+  listLoopGraphPresets: async () => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      return await client.listLoopGraphPresets(projectId)
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to list loop presets')
+      }
+      return null
+    }
+  },
+
+  resolveLoopGraphPreset: async (presetId) => {
+    const { client, project } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      return await client.resolveLoopGraphPreset(projectId, presetId)
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to resolve loop preset')
+      }
+      return null
+    }
+  },
+
+  prefetchMarketplaceCatalogs: async () => {
+    const { client, project } = get()
+    if (!project) return
+    const projectId = project.projectId
+    if (
+      marketplacePrefetchInflight &&
+      marketplacePrefetchProjectId === projectId
+    ) {
+      await marketplacePrefetchInflight
+      return
+    }
+    // Already warm for this project — skip unless catalogs were cleared.
+    if (
+      get().marketplaceCatalogStatus === 'ready' &&
+      get().project?.projectId === projectId &&
+      (get().mcpCatalogView ||
+        get().skillCatalogView ||
+        get().rulesCatalogView ||
+        get().agentCatalogView ||
+        get().workflowCatalogView ||
+        get().stencilCatalogView)
+    ) {
+      return
+    }
+
+    set({ marketplaceCatalogStatus: 'loading' })
+    marketplacePrefetchProjectId = projectId
+    marketplacePrefetchInflight = (async () => {
+      const stillCurrent = () => get().project?.projectId === projectId
+
+      const patchIfCurrent = (partial: Partial<WorkbenchState>) => {
+        if (!stillCurrent()) return
+        set(partial)
+      }
+
+      try {
+        // Progressive warm: publish each catalog as soon as it resolves so the open
+        // overlay can show content without waiting for the slowest sibling.
+        const catalogTasks: Array<Promise<unknown>> = [
+          client.listMcpCatalog(projectId).then((view) => {
+            patchIfCurrent({ mcpCatalogView: view })
+            return view
+          }),
+          client.listSkillCatalog(projectId).then((view) => {
+            patchIfCurrent({ skillCatalogView: view })
+            return view
+          }),
+          client.listRulesCatalog(projectId).then((view) => {
+            patchIfCurrent({ rulesCatalogView: view })
+            return view
+          }),
+          client.listAgentCatalog(projectId).then((view) => {
+            patchIfCurrent({ agentCatalogView: view })
+            return view
+          }),
+          client.listWorkflowCatalog(projectId).then((view) => {
+            patchIfCurrent({ workflowCatalogView: view })
+            return view
+          }),
+          client.listStencilCatalog(projectId).then((view) => {
+            patchIfCurrent({ stencilCatalogView: view })
+            return view
+          }),
+          client.listSkills(projectId).then((result) => {
+            patchIfCurrent({
+              installedMarketplaceSkillIds: result.skills.map((s) => s.id),
+            })
+            return result
+          }),
+          client.listInstalledRulesPackIds(projectId).then((ids) => {
+            patchIfCurrent({ installedMarketplaceRulesPackIds: ids })
+            return ids
+          }),
+          client.listInstalledMarketplaceAgentListingIds(projectId).then((ids) => {
+            patchIfCurrent({ installedMarketplaceAgentListingIds: ids })
+            return ids
+          }),
+          client.listInstalledWorkflowListingIds(projectId).then((ids) => {
+            patchIfCurrent({ installedMarketplaceWorkflowListingIds: ids })
+            return ids
+          }),
+          client.listInstalledStencilListingIds(projectId).then((ids) => {
+            patchIfCurrent({ installedMarketplaceStencilListingIds: ids })
+            return ids
+          }),
+          client.listMergedStencilDefinitions(projectId).then((defs) => {
+            patchIfCurrent({ mergedStencilDefinitions: defs })
+            return defs
+          }),
+        ]
+
+        await Promise.allSettled(catalogTasks)
+        if (!stillCurrent()) return
+
+        set((s) => ({
+          marketplaceCatalogStatus:
+            s.mcpCatalogView ||
+            s.skillCatalogView ||
+            s.rulesCatalogView ||
+            s.agentCatalogView ||
+            s.workflowCatalogView ||
+            s.stencilCatalogView
+              ? 'ready'
+              : 'error',
+        }))
+
+        // If we painted bundled catalogs for cold start, refresh remote once and patch store
+        // without flipping status back to loading.
+        if (stillCurrent()) {
+          const snap = get()
+          const remoteTasks: Array<Promise<unknown>> = []
+          if (snap.mcpCatalogView?.source === 'bundled') {
+            remoteTasks.push(
+              client.listMcpCatalog(projectId, { forceRefresh: true }).then((view) => {
+                patchIfCurrent({ mcpCatalogView: view })
+              }),
+            )
+          }
+          if (snap.skillCatalogView?.source === 'bundled') {
+            remoteTasks.push(
+              client.listSkillCatalog(projectId, { forceRefresh: true }).then((view) => {
+                patchIfCurrent({ skillCatalogView: view })
+              }),
+            )
+          }
+          if (snap.rulesCatalogView?.source === 'bundled') {
+            remoteTasks.push(
+              client.listRulesCatalog(projectId, { forceRefresh: true }).then((view) => {
+                patchIfCurrent({ rulesCatalogView: view })
+              }),
+            )
+          }
+          if (snap.agentCatalogView?.source === 'bundled') {
+            remoteTasks.push(
+              client.listAgentCatalog(projectId, { forceRefresh: true }).then((view) => {
+                patchIfCurrent({ agentCatalogView: view })
+              }),
+            )
+          }
+          if (snap.workflowCatalogView?.source === 'bundled') {
+            remoteTasks.push(
+              client.listWorkflowCatalog(projectId, { forceRefresh: true }).then((view) => {
+                patchIfCurrent({ workflowCatalogView: view })
+              }),
+            )
+          }
+          if (snap.stencilCatalogView?.source === 'bundled') {
+            remoteTasks.push(
+              client.listStencilCatalog(projectId, { forceRefresh: true }).then((view) => {
+                patchIfCurrent({ stencilCatalogView: view })
+              }),
+            )
+          }
+          if (remoteTasks.length > 0) {
+            void Promise.allSettled(remoteTasks)
+          }
+        }
+      } catch {
+        if (stillCurrent()) {
+          set((s) => ({
+            marketplaceCatalogStatus:
+              s.mcpCatalogView ||
+              s.skillCatalogView ||
+              s.rulesCatalogView ||
+              s.agentCatalogView ||
+              s.workflowCatalogView ||
+              s.stencilCatalogView
+                ? 'ready'
+                : 'error',
+          }))
+        }
+      } finally {
+        if (marketplacePrefetchProjectId === projectId) {
+          marketplacePrefetchInflight = null
+          marketplacePrefetchProjectId = null
+        }
+      }
+    })()
+    await marketplacePrefetchInflight
+  },
+
+  refreshInstalledMarketplaceSkills: async () => {
+    const { client, project } = get()
+    if (!project) {
+      set({ installedMarketplaceSkillIds: [] })
+      return
+    }
+    const projectId = project.projectId
+    try {
+      const result = await client.listSkills(projectId)
+      if (get().project?.projectId !== projectId) return
+      set({ installedMarketplaceSkillIds: result.skills.map((s) => s.id) })
+    } catch {
+      if (get().project?.projectId === projectId) {
+        set({ installedMarketplaceSkillIds: [] })
+      }
+    }
+  },
+
+  refreshInstalledMarketplaceRulesPacks: async () => {
+    const { client, project } = get()
+    if (!project) {
+      set({ installedMarketplaceRulesPackIds: [] })
+      return
+    }
+    const projectId = project.projectId
+    try {
+      const ids = await client.listInstalledRulesPackIds(projectId)
+      if (get().project?.projectId !== projectId) return
+      set({ installedMarketplaceRulesPackIds: ids })
+    } catch {
+      if (get().project?.projectId === projectId) {
+        set({ installedMarketplaceRulesPackIds: [] })
+      }
+    }
+  },
+
+  refreshInstalledMarketplaceAgents: async () => {
+    const { client, project } = get()
+    if (!project) {
+      set({ installedMarketplaceAgentListingIds: [] })
+      return
+    }
+    const projectId = project.projectId
+    try {
+      const ids = await client.listInstalledMarketplaceAgentListingIds(projectId)
+      if (get().project?.projectId !== projectId) return
+      set({ installedMarketplaceAgentListingIds: ids })
+    } catch {
+      if (get().project?.projectId === projectId) {
+        set({ installedMarketplaceAgentListingIds: [] })
+      }
+    }
+  },
+
+  refreshInstalledMarketplaceWorkflows: async () => {
+    const { client, project } = get()
+    if (!project) {
+      set({ installedMarketplaceWorkflowListingIds: [] })
+      return
+    }
+    const projectId = project.projectId
+    try {
+      const ids = await client.listInstalledWorkflowListingIds(projectId)
+      if (get().project?.projectId !== projectId) return
+      set({ installedMarketplaceWorkflowListingIds: ids })
+    } catch {
+      if (get().project?.projectId === projectId) {
+        set({ installedMarketplaceWorkflowListingIds: [] })
+      }
+    }
+  },
+
+  refreshInstalledMarketplaceStencils: async () => {
+    const { client, project } = get()
+    if (!project) {
+      set({ installedMarketplaceStencilListingIds: [] })
+      return
+    }
+    const projectId = project.projectId
+    try {
+      const ids = await client.listInstalledStencilListingIds(projectId)
+      if (get().project?.projectId !== projectId) return
+      set({ installedMarketplaceStencilListingIds: ids })
+    } catch {
+      if (get().project?.projectId === projectId) {
+        set({ installedMarketplaceStencilListingIds: [] })
+      }
+    }
+  },
+
+  installFromGitUrl: async (input) => {
+    const { client, project, pushToast, locale } = get()
+    if (!project) return null
+    const projectId = project.projectId
+    try {
+      const result = await client.installFromGitUrl(projectId, input)
+      if (get().project?.projectId !== projectId) return null
+      if (result.status === 'installed' && result.kind === 'mcp') {
+        set({ settings: result.settings, error: null })
+        pushToast({
+          type: 'success',
+          message: getStoreMessage(locale, 'settings.mcpMarketInstalled'),
+        })
+      } else if (result.status === 'installed' && result.kind === 'skills') {
+        set((s) => ({
+          installedMarketplaceSkillIds: s.installedMarketplaceSkillIds.includes(result.skill.id)
+            ? s.installedMarketplaceSkillIds
+            : [...s.installedMarketplaceSkillIds, result.skill.id],
+        }))
+        pushToast({
+          type: 'success',
+          message: getStoreMessage(locale, 'settings.skillMarketInstalled'),
+        })
+      } else if (result.status === 'installed' && result.kind === 'rules') {
+        set((s) => ({
+          installedMarketplaceRulesPackIds: s.installedMarketplaceRulesPackIds.includes(
+            result.packId,
+          )
+            ? s.installedMarketplaceRulesPackIds
+            : [...s.installedMarketplaceRulesPackIds, result.packId],
+        }))
+        pushToast({
+          type: 'success',
+          message: getStoreMessage(locale, 'settings.rulesMarketInstalled'),
+        })
+      } else if (result.status === 'installed' && result.kind === 'agents') {
+        set((s) => ({
+          installedMarketplaceAgentListingIds: s.installedMarketplaceAgentListingIds.includes(
+            result.listingId,
+          )
+            ? s.installedMarketplaceAgentListingIds
+            : [...s.installedMarketplaceAgentListingIds, result.listingId],
+        }))
+        pushToast({
+          type: 'success',
+          message: getStoreMessage(locale, 'settings.agentMarketInstalled'),
+        })
+      } else if (result.status === 'installed' && result.kind === 'workflows') {
+        set((s) => ({
+          installedMarketplaceWorkflowListingIds:
+            s.installedMarketplaceWorkflowListingIds.includes(result.listingId)
+              ? s.installedMarketplaceWorkflowListingIds
+              : [...s.installedMarketplaceWorkflowListingIds, result.listingId],
+        }))
+        pushToast({
+          type: 'success',
+          message: getStoreMessage(locale, 'settings.workflowMarketInstalled'),
+        })
+      } else if (result.status === 'installed' && result.kind === 'stencils') {
+        set((s) => ({
+          installedMarketplaceStencilListingIds: s.installedMarketplaceStencilListingIds.includes(
+            result.listingId,
+          )
+            ? s.installedMarketplaceStencilListingIds
+            : [...s.installedMarketplaceStencilListingIds, result.listingId],
+        }))
+        await get().listMergedStencilDefinitions()
+        pushToast({
+          type: 'success',
+          message: getStoreMessage(locale, 'settings.stencilMarketInstalled'),
+        })
+      }
+      return result
+    } catch (error) {
+      if (get().project?.projectId === projectId) {
+        reportSettingsMutationFailure(error, 'Failed to install from git URL')
+      }
+      return {
+        status: 'failed' as const,
+        kind: input.kind,
+        message: error instanceof Error ? error.message : 'Failed to install from git URL',
+        agentFallbackSuggested: true as const,
+      }
+    }
+  },
+
+  setSettingsOpen: (open, focusView) => {
+    set({
+      settingsOpen: open,
+      ...(focusView !== undefined ? { settingsFocusView: focusView } : open ? {} : { settingsFocusView: null }),
+    })
+    const chat = useChatSessionStore.getState()
+    if (open) {
+      chat.setCanvasOverlay('settings')
+    } else if (chat.canvasOverlay === 'settings') {
+      chat.setCanvasOverlay('none')
+    }
+  },
+  clearSettingsFocusView: () => set({ settingsFocusView: null }),
   setSelectedModelProfileId: (profileId) => set({ selectedModelProfileId: profileId }),
 
   loadExecutorOptions: async () => {
@@ -4950,7 +7599,24 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   setPublishBriefConfirm: (confirm) => set({ publishBriefConfirm: confirm }),
 
   refreshGitHubAuthStatus: async () => {
-    set({ githubAuthStatus: { connected: false } })
+    const { client } = get()
+    try {
+      const status = await client.getGitHubAuthStatus()
+      const pending = get().githubDeviceAuthPending
+      if (status.connected) {
+        const timer = get().githubAuthPollTimer
+        if (timer) clearInterval(timer)
+        set({
+          githubAuthStatus: status,
+          githubDeviceAuthPending: null,
+          githubAuthPollTimer: null,
+        })
+        return
+      }
+      set({ githubAuthStatus: status, ...(pending ? {} : {}) })
+    } catch {
+      set({ githubAuthStatus: { connected: false, oauthConfigured: false } })
+    }
   },
 
   refreshGitSyncStatus: async () => {
@@ -4958,11 +7624,83 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   connectGitHub: async () => {
-    set({ githubDeviceAuthPending: null })
+    const { client, githubAuthPollTimer } = get()
+    if (githubAuthPollTimer) clearInterval(githubAuthPollTimer)
+    try {
+      const result = await client.beginGitHubOAuth()
+      if (result.kind === 'connected') {
+        set({
+          githubAuthStatus: result.status,
+          githubDeviceAuthPending: null,
+          githubAuthPollTimer: null,
+        })
+        return
+      }
+      set({
+        githubAuthStatus: result.status,
+        githubDeviceAuthPending: result.pending,
+      })
+      const timer = setInterval(() => {
+        void get().refreshGitHubAuthStatus()
+      }, Math.max(2, result.pending.intervalSeconds) * 1000)
+      set({ githubAuthPollTimer: timer })
+    } catch (error) {
+      set({ githubDeviceAuthPending: null, githubAuthPollTimer: null })
+      const message =
+        error instanceof Error ? error.message : 'GitHub sign-in failed'
+      get().pushToast({ type: 'error', message })
+      throw error
+    }
+  },
+
+  importGitHubFromGhCli: async () => {
+    const { client, githubAuthPollTimer } = get()
+    if (githubAuthPollTimer) clearInterval(githubAuthPollTimer)
+    try {
+      const result = await client.importGitHubAuthFromGhCli()
+      if (result.kind === 'connected') {
+        set({
+          githubAuthStatus: result.status,
+          githubDeviceAuthPending: null,
+          githubAuthPollTimer: null,
+        })
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'GitHub CLI import failed'
+      get().pushToast({ type: 'error', message })
+      throw error
+    }
+  },
+
+  saveGitHubOAuthClientId: async (clientId) => {
+    const { client } = get()
+    const status = await client.saveGitHubOAuthClientId(clientId.trim())
+    set({ githubAuthStatus: status })
+  },
+
+  cancelGitHubOAuth: async () => {
+    const { client, githubAuthPollTimer } = get()
+    if (githubAuthPollTimer) clearInterval(githubAuthPollTimer)
+    set({ githubDeviceAuthPending: null, githubAuthPollTimer: null })
+    try {
+      const status = await client.cancelGitHubOAuth()
+      set({ githubAuthStatus: status })
+    } catch {
+      set({ githubAuthStatus: { connected: false } })
+    }
   },
 
   disconnectGitHub: async () => {
-    set({ githubAuthStatus: { connected: false } })
+    const { client, githubAuthPollTimer } = get()
+    if (githubAuthPollTimer) clearInterval(githubAuthPollTimer)
+    set({ githubDeviceAuthPending: null, githubAuthPollTimer: null })
+    try {
+      const status = await client.disconnectGitHub()
+      set({ githubAuthStatus: status })
+    } catch {
+      set({ githubAuthStatus: { connected: false } })
+    }
   },
 
   gitPull: async () => {

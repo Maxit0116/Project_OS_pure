@@ -139,13 +139,13 @@ export class ProjectOSWorkspaceStore {
       projectOSRoot,
       "project.json",
     );
+    const settingsPath = join(projectOSRoot, "settings.json");
+    const settingsRaw = existsSync(settingsPath)
+      ? (JSON.parse(readFileSync(settingsPath, "utf8")) as unknown)
+      : null;
     const settings = ProjectOSSettingsSchema.parse(
       migrateLegacyMcpExternalAgents(
-        readOptionalJsonContract(
-          ProjectOSSettingsSchema,
-          projectOSRoot,
-          "settings.json",
-        ) ?? createDefaultSettings(project.projectId, project.presentationMode),
+        settingsRaw ?? createDefaultSettings(project.projectId, project.presentationMode),
       ),
     );
     const graphBase = readJsonContract(ProjectGraphSchema, projectOSRoot, "graph.json");

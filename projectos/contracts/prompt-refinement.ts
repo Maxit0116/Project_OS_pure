@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { AlignmentContractSchema } from "./alignment-contract.js";
 import { MemoryWriteNoticeSchema } from "./agent-memory.js";
 import { ConfidenceSchema } from "./confidence.js";
 import { ModelImagePartSchema } from "./model-gateway.js";
@@ -14,6 +15,8 @@ export const PromptRefineRequestSchema = z
     rawPrompt: z.string(),
     chatSessionId: z.string().min(1).optional(),
     images: z.array(ModelImagePartSchema).max(4).optional(),
+    /** Specialized workforce agent for this Change turn; omit/null = General. */
+    workforceAgentDefinitionId: z.string().min(1).nullable().optional(),
   })
   .merge(PromptComposerFieldsSchema)
   .strict();
@@ -47,6 +50,8 @@ export const PromptRefinementSchema = z
     fallback: PromptRefinementFallbackSchema.optional(),
     sourcePlanId: z.string().min(1).optional(),
     memoryWrite: MemoryWriteNoticeSchema.optional(),
+    /** Statement-level task contract (Alignment Card). Optional for legacy fixtures. */
+    alignment: AlignmentContractSchema.optional(),
   })
   .strict();
 

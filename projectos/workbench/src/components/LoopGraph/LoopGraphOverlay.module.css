@@ -77,6 +77,20 @@
   color: var(--tech-text-primary);
 }
 
+.hitlActions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.hitlGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
 .actionButtonPrimary {
   border-color: var(--tech-accent);
   color: var(--tech-accent);
@@ -192,6 +206,12 @@
   cursor: crosshair;
 }
 
+.canvasDropTarget {
+  outline: 2px dashed color-mix(in srgb, var(--tech-accent) 55%, transparent);
+  outline-offset: -6px;
+  background-color: color-mix(in srgb, var(--tech-accent) 6%, transparent);
+}
+
 .edge {
   fill: none;
   stroke: var(--tech-border-strong);
@@ -209,6 +229,24 @@
 .edgeFeedback {
   stroke: var(--tech-warning);
   stroke-dasharray: 5 4;
+}
+
+.edgeConditional {
+  stroke: var(--tech-accent);
+  stroke-dasharray: 2 3;
+}
+
+.edgeProvides {
+  stroke: color-mix(in srgb, #7dd3fc 70%, var(--tech-border-strong));
+  stroke-dasharray: 3 4;
+  stroke-width: 1.25;
+  opacity: 0.9;
+}
+
+.edgeProvidesLabel {
+  fill: color-mix(in srgb, #7dd3fc 75%, var(--tech-text-secondary));
+  font-size: 9px;
+  font-weight: 500;
 }
 
 .edgeIncomplete {
@@ -304,19 +342,182 @@
   width: 100%;
 }
 
-.roleMark,
+.nodeIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 6px;
+}
+
 .incompleteMark {
   flex-shrink: 0;
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 4px;
   background: var(--tech-bg-muted);
-  color: var(--tech-text-secondary);
+  color: var(--tech-warning);
   text-transform: uppercase;
 }
 
-.incompleteMark {
+.catAgent {
+  color: color-mix(in srgb, #7dd3fc 85%, var(--tech-text-primary));
+}
+
+.nodeIcon.catAgent {
+  background: color-mix(in srgb, #7dd3fc 14%, var(--tech-bg-muted));
+  border: 1px solid color-mix(in srgb, #7dd3fc 35%, var(--tech-border));
+}
+
+.catAction {
+  color: color-mix(in srgb, var(--tech-success) 80%, var(--tech-text-primary));
+}
+
+.nodeIcon.catAction {
+  background: color-mix(in srgb, var(--tech-success) 14%, var(--tech-bg-muted));
+  border: 1px solid color-mix(in srgb, var(--tech-success) 35%, var(--tech-border));
+}
+
+.catLogic {
+  color: color-mix(in srgb, var(--tech-warning) 75%, var(--tech-text-primary));
+}
+
+.nodeIcon.catLogic {
+  background: color-mix(in srgb, var(--tech-warning) 14%, var(--tech-bg-muted));
+  border: 1px solid color-mix(in srgb, var(--tech-warning) 35%, var(--tech-border));
+}
+
+.catHuman {
+  color: color-mix(in srgb, #fdba74 80%, var(--tech-text-primary));
+}
+
+.nodeIcon.catHuman {
+  background: color-mix(in srgb, #fdba74 14%, var(--tech-bg-muted));
+  border: 1px solid color-mix(in srgb, #fdba74 30%, var(--tech-border));
+}
+
+.catDraft {
+  color: var(--tech-text-secondary);
+}
+
+.nodeIcon.catDraft {
+  background: var(--tech-bg-muted);
+  border: 1px solid var(--tech-border);
+}
+
+.catConfig {
+  color: color-mix(in srgb, #c4b5fd 80%, var(--tech-text-primary));
+}
+
+.nodeIcon.catConfig {
+  background: color-mix(in srgb, #c4b5fd 14%, var(--tech-bg-muted));
+  border: 1px solid color-mix(in srgb, #c4b5fd 32%, var(--tech-border));
+}
+
+.node.catAgent,
+.node.catAction,
+.node.catLogic,
+.node.catHuman,
+.node.catConfig,
+.node.catDraft {
+  color: var(--tech-text-primary);
+}
+
+.nodeConfig {
+  padding: 6px 8px;
+  min-height: 40px;
+  font-size: var(--font-size-xs);
+}
+
+.nodeAgentWired {
+  padding-bottom: 4px;
+}
+
+.wiringStrip {
+  position: relative;
+  height: 22px;
+  margin-top: 2px;
+  border-top: 1px dashed var(--tech-border);
+}
+
+.wiringPort {
+  position: absolute;
+  top: 3px;
+  transform: translateX(-50%);
+  border: 1px solid var(--tech-border);
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  border-radius: 3px;
+  font-size: 9px;
+  line-height: 1;
+  padding: 3px 4px;
+  cursor: crosshair;
+  white-space: nowrap;
+}
+
+.wiringPort:hover {
+  border-color: var(--tech-border-strong);
+  color: var(--tech-text-primary);
+}
+
+.wiringPortWarn {
+  border-color: color-mix(in srgb, var(--tech-warning) 55%, var(--tech-border));
   color: var(--tech-warning);
+}
+
+.communityBadge,
+.disabledBadge {
+  display: inline-flex;
+  margin-left: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.communityBadge {
+  color: var(--tech-warning);
+  background: color-mix(in srgb, var(--tech-warning) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tech-warning) 40%, var(--tech-border));
+}
+
+.disabledBadge {
+  color: var(--tech-text-secondary);
+  background: var(--tech-bg-muted);
+  border: 1px solid var(--tech-border);
+}
+
+.capabilityChooser {
+  position: fixed;
+  z-index: 80;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-md);
+}
+
+.capabilityChooserItem {
+  border: 0;
+  background: transparent;
+  color: var(--tech-text-primary);
+  text-align: left;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.capabilityChooserItem:hover {
+  background: var(--tech-bg-muted);
 }
 
 .nodeTitle {
@@ -476,11 +677,8 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  width: 100%;
   margin-top: 8px;
-}
-
-.assumptionRow label,
-.cycleRow label {
   font-size: var(--font-size-xs);
   color: var(--tech-text-primary);
 }
@@ -496,4 +694,24 @@
 
 .runEvent {
   padding: 2px 0;
+}
+
+.switchAgentPopover {
+  position: fixed;
+  z-index: 120;
+  padding: 4px;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-md);
+}
+
+.nodeAgentMeta {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--tech-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

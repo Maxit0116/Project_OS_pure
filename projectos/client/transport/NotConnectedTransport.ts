@@ -104,6 +104,246 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async getWorkspaceGitStatus(
+    _projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitStatus> {
+    return transportNotConnected();
+  }
+
+  async listWorkspaceGitBranches(
+    _projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitBranchList> {
+    return transportNotConnected();
+  }
+
+  async listWorkspaceGitCommits(
+    _projectId: string,
+    _input: { limit?: number; tips?: string[] } = {},
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCommitList> {
+    return transportNotConnected();
+  }
+
+  async getWorkspaceGitCommit(
+    _projectId: string,
+    _sha: string,
+    _input: { includePatch?: boolean } = {},
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCommitDetail> {
+    return transportNotConnected();
+  }
+
+  async getGithubGraphStore(
+    _projectId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return transportNotConnected();
+  }
+
+  async upsertGithubGraphFeature(
+    _projectId: string,
+    _feature: import("../../contracts/github-domain.js").GithubFeature,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return transportNotConnected();
+  }
+
+  async deleteGithubGraphFeature(
+    _projectId: string,
+    _featureId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return transportNotConnected();
+  }
+
+  async upsertGithubGraphRelation(
+    _projectId: string,
+    _relation: import("../../contracts/github-domain.js").GithubRelation,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return transportNotConnected();
+  }
+
+  async removeGithubGraphRelation(
+    _projectId: string,
+    _relationId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return transportNotConnected();
+  }
+
+  async checkoutWorkspaceBranch(
+    _projectId: string,
+    _branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async createWorkspaceBranch(
+    _projectId: string,
+    _input: {
+      name: string
+      from?: string
+      checkout?: boolean
+      push?: boolean
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async renameWorkspaceBranch(
+    _projectId: string,
+    _input: {
+      from: string
+      to: string
+      push?: boolean
+      deleteRemoteOld?: boolean
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async deleteWorkspaceBranch(
+    _projectId: string,
+    _input: {
+      name: string
+      remote?: boolean
+      force?: boolean
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async rollbackWorkspaceBranch(
+    _projectId: string,
+    _input: {
+      name: string
+      to?: string
+      mode?: 'hard' | 'mixed'
+      push?: boolean
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async fetchWorkspaceGit(
+    _projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async pushWorkspaceBranch(
+    _projectId: string,
+    _branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async pullWorkspaceBranch(
+    _projectId: string,
+    _branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async revertWorkspaceCommit(
+    _projectId: string,
+    _input: { sha: string; push?: boolean },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return transportNotConnected();
+  }
+
+  async listWorkspacePullRequests(
+    _projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitPullRequestList> {
+    return transportNotConnected();
+  }
+
+  async createWorkspacePullRequest(
+    _projectId: string,
+    _input: { title: string; head?: string; base?: string; body?: string },
+  ): Promise<{ ok: boolean; url?: string; number?: number; message: string }> {
+    return transportNotConnected();
+  }
+
+  async mergeWorkspacePullRequest(
+    _projectId: string,
+    _input: {
+      number: number
+      mergeMethod?: 'merge' | 'squash' | 'rebase'
+    },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    return transportNotConnected();
+  }
+
+  async closeWorkspacePullRequest(
+    _projectId: string,
+    _input: { number: number },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    return transportNotConnected();
+  }
+
+  async listWorkspaceIssues(
+    _projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitIssueList> {
+    return transportNotConnected();
+  }
+
+  async createWorkspaceIssue(
+    _projectId: string,
+    _input: { title: string; body?: string },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitIssueMutationResult
+  > {
+    return transportNotConnected();
+  }
+
+  async listWorkspaceCommitCheckRuns(
+    _projectId: string,
+    _sha: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCheckRunList> {
+    return transportNotConnected();
+  }
+
+  async getGitHubAuthStatus(): Promise<
+    import("../../contracts/github-auth.js").GitHubAuthStatus
+  > {
+    return transportNotConnected();
+  }
+
+  async beginGitHubOAuth(): Promise<
+    import("../../contracts/github-auth.js").BeginGitHubOAuthResult
+  > {
+    return transportNotConnected();
+  }
+
+  async cancelGitHubOAuth(): Promise<
+    import("../../contracts/github-auth.js").GitHubAuthStatus
+  > {
+    return transportNotConnected();
+  }
+
+  async disconnectGitHub(): Promise<
+    import("../../contracts/github-auth.js").GitHubAuthStatus
+  > {
+    return transportNotConnected();
+  }
+
+  async getAccountProfile(): Promise<
+    import("../../contracts/github-auth.js").AccountProfile | null
+  > {
+    return transportNotConnected();
+  }
+
+  async saveGitHubOAuthClientId(
+    _clientId: string,
+  ): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {
+    return transportNotConnected();
+  }
+
+  async importGitHubAuthFromGhCli(): Promise<
+    import("../../contracts/github-auth.js").BeginGitHubOAuthResult
+  > {
+    return transportNotConnected();
+  }
+
   async getNodeContext(
     _projectId: string,
     _nodeId: string,
@@ -421,6 +661,12 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async confirmAlignment(
+    _request: import("../../contracts/alignment-contract.js").ConfirmAlignmentRequest,
+  ): Promise<PromptRefinement> {
+    return transportNotConnected();
+  }
+
   async refinePrompt(_request: PromptRefineRequest): Promise<PromptRefinement> {
     return transportNotConnected();
   }
@@ -470,6 +716,73 @@ export class NotConnectedTransport implements ProjectOSApi {
   }
 
   async getAgentRunEvents(_runId: string): Promise<AgentRunEvent[]> {
+    return transportNotConnected();
+  }
+
+  async getAgentRunEventSnapshot(
+    _runId: string,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunEventSnapshot> {
+    return transportNotConnected();
+  }
+
+  async ensureAgentPoolRun(
+    _request: import("../../contracts/agent-pool-trace.js").EnsureAgentPoolRunRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentPoolRun> {
+    return transportNotConnected();
+  }
+
+  async getAgentPoolRun(
+    _poolRunId: string,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentPoolRun> {
+    return transportNotConnected();
+  }
+
+  async listAgentRunsByDefinition(
+    _request: import("../../contracts/agent-pool-trace.js").ListAgentRunsByDefinitionRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry[]> {
+    return transportNotConnected();
+  }
+
+  async setAgentRunAcceptance(
+    _request: import("../../contracts/agent-pool-trace.js").SetAgentRunAcceptanceRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry> {
+    return transportNotConnected();
+  }
+
+  async listWorkforceAgents(
+    _request: import("../../contracts/agent-workforce.js").ListWorkforceAgentsRequest,
+  ): Promise<import("../../contracts/agent-workforce.js").ListWorkforceAgentsResult> {
+    return transportNotConnected();
+  }
+
+  async assembleWorkforceAgent(
+    _request: import("../../contracts/agent-assembly.js").AssembleWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-assembly.js").AssembleWorkforceAgentResult> {
+    return transportNotConnected();
+  }
+
+  async draftWorkforceAgent(
+    _request: import("../../contracts/agent-workforce.js").DraftWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-workforce.js").DraftWorkforceAgentResult> {
+    return transportNotConnected();
+  }
+
+  async createWorkforceAgent(
+    _request: import("../../contracts/agent-workforce.js").CreateWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return transportNotConnected();
+  }
+
+  async updateWorkforceAgent(
+    _request: import("../../contracts/agent-workforce.js").UpdateWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return transportNotConnected();
+  }
+
+  async getWorkforceAgent(
+    _projectId: string,
+    _definitionId: string,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
     return transportNotConnected();
   }
 
@@ -549,6 +862,18 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async confirmBugAlignment(
+    _request: import("../../contracts/alignment-contract.js").ConfirmBugAlignmentRequest,
+  ): Promise<import("../../contracts/debug-session.js").DebugSession> {
+    return transportNotConnected();
+  }
+
+  async markBugFixed(
+    _request: import("../../contracts/alignment-contract.js").MarkBugFixedRequest,
+  ): Promise<import("../../contracts/debug-session.js").DebugSession> {
+    return transportNotConnected();
+  }
+
   async getDebugLogPort(): Promise<number> {
     return transportNotConnected();
   }
@@ -576,6 +901,362 @@ export class NotConnectedTransport implements ProjectOSApi {
     _projectId: string,
     _profileId: string,
   ): Promise<ModelOption[]> {
+    return transportNotConnected();
+  }
+
+  async listMcpServers(
+    _projectId: string,
+  ): Promise<import("../../contracts/settings.js").McpServerConfig[]> {
+    return transportNotConnected();
+  }
+
+  async saveMcpServer(
+    _projectId: string,
+    _input: {
+      config: import("../../contracts/settings.js").McpServerConfig;
+      authToken?: string;
+    },
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async deleteMcpServer(
+    _projectId: string,
+    _serverId: string,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async testMcpServer(
+    _projectId: string,
+    _serverId: string,
+  ): Promise<ConnectionTestResult> {
+    return transportNotConnected();
+  }
+
+  async refreshMcpTools(
+    _projectId: string,
+    _serverId: string,
+  ): Promise<import("../../contracts/settings.js").McpToolDescriptor[]> {
+    return transportNotConnected();
+  }
+
+  async listMcpCatalog(
+    _projectId: string,
+    _options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/mcp-catalog.js").McpCatalogView> {
+    return transportNotConnected();
+  }
+
+  async refreshMcpCatalog(
+    _projectId: string,
+  ): Promise<import("../../contracts/mcp-catalog.js").McpCatalogView> {
+    return transportNotConnected();
+  }
+
+  async installMcpFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/mcp-catalog.js").InstallMcpFromCatalogInput,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async disableMcpCatalogListing(
+    _projectId: string,
+    _listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async reportMcpCatalogListing(
+    _projectId: string,
+    _input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async listSkillCatalog(
+    _projectId: string,
+    _options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/skill-marketplace.js").SkillCatalogView> {
+    return transportNotConnected();
+  }
+
+  async refreshSkillCatalog(
+    _projectId: string,
+  ): Promise<import("../../contracts/skill-marketplace.js").SkillCatalogView> {
+    return transportNotConnected();
+  }
+
+  async installSkillFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/skill-marketplace.js").InstallSkillFromCatalogInput,
+  ): Promise<import("../../contracts/skills.js").SkillDescriptor> {
+    return transportNotConnected();
+  }
+
+  async uninstallSkillFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/skill-marketplace.js").UninstallSkillFromCatalogInput,
+  ): Promise<void> {
+    return transportNotConnected();
+  }
+
+  async disableSkillCatalogListing(
+    _projectId: string,
+    _listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async reportSkillCatalogListing(
+    _projectId: string,
+    _input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async listRulesCatalog(
+    _projectId: string,
+    _options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/rules-marketplace.js").RulesCatalogView> {
+    return transportNotConnected();
+  }
+
+  async refreshRulesCatalog(
+    _projectId: string,
+  ): Promise<import("../../contracts/rules-marketplace.js").RulesCatalogView> {
+    return transportNotConnected();
+  }
+
+  async installRulesFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/rules-marketplace.js").InstallRulesFromCatalogInput,
+  ): Promise<{ packId: string; relativeRoot: string }> {
+    return transportNotConnected();
+  }
+
+  async uninstallRulesFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/rules-marketplace.js").UninstallRulesFromCatalogInput,
+  ): Promise<void> {
+    return transportNotConnected();
+  }
+
+  async disableRulesCatalogListing(
+    _projectId: string,
+    _listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async reportRulesCatalogListing(
+    _projectId: string,
+    _input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async listInstalledRulesPackIds(_projectId: string): Promise<string[]> {
+    return transportNotConnected();
+  }
+
+  async listAgentCatalog(
+    _projectId: string,
+    _options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/agent-marketplace.js").AgentCatalogView> {
+    return transportNotConnected();
+  }
+
+  async refreshAgentCatalog(
+    _projectId: string,
+  ): Promise<import("../../contracts/agent-marketplace.js").AgentCatalogView> {
+    return transportNotConnected();
+  }
+
+  async installAgentFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/agent-marketplace.js").InstallAgentFromCatalogInput,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return transportNotConnected();
+  }
+
+  async uninstallAgentFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/agent-marketplace.js").UninstallAgentFromCatalogInput,
+  ): Promise<void> {
+    return transportNotConnected();
+  }
+
+  async disableAgentCatalogListing(
+    _projectId: string,
+    _listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async reportAgentCatalogListing(
+    _projectId: string,
+    _input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async listInstalledMarketplaceAgentListingIds(
+    _projectId: string,
+  ): Promise<string[]> {
+    return transportNotConnected();
+  }
+
+  async exportCapabilityPack(
+    _projectId: string,
+    _input: import("../../contracts/agent-marketplace.js").ExportCapabilityPackInput,
+  ): Promise<import("../../contracts/agent-marketplace.js").ExportCapabilityPackResult> {
+    return transportNotConnected();
+  }
+
+  async installAgentFromExportPack(
+    _projectId: string,
+    _input: import("../../contracts/agent-marketplace.js").InstallAgentFromExportPackInput,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return transportNotConnected();
+  }
+
+  async installRulesFromExportPack(
+    _projectId: string,
+    _input: import("../../contracts/agent-marketplace.js").InstallRulesFromExportPackInput,
+  ): Promise<{ packId: string; relativeRoot: string }> {
+    return transportNotConnected();
+  }
+
+  async listWorkflowCatalog(
+    _projectId: string,
+    _options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/workflow-marketplace.js").WorkflowCatalogView> {
+    return transportNotConnected();
+  }
+
+  async refreshWorkflowCatalog(
+    _projectId: string,
+  ): Promise<import("../../contracts/workflow-marketplace.js").WorkflowCatalogView> {
+    return transportNotConnected();
+  }
+
+  async installWorkflowFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/workflow-marketplace.js").InstallWorkflowFromCatalogInput,
+  ): Promise<import("../../contracts/loop-presets.js").LoopGraphPreset> {
+    return transportNotConnected();
+  }
+
+  async uninstallWorkflowFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/workflow-marketplace.js").UninstallWorkflowFromCatalogInput,
+  ): Promise<void> {
+    return transportNotConnected();
+  }
+
+  async disableWorkflowCatalogListing(
+    _projectId: string,
+    _listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async reportWorkflowCatalogListing(
+    _projectId: string,
+    _input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async listInstalledWorkflowListingIds(_projectId: string): Promise<string[]> {
+    return transportNotConnected();
+  }
+
+  async listLoopGraphPresets(_projectId: string): Promise<{
+    builtins: import("../../contracts/loop-presets.js").LoopGraphPreset[];
+    user: import("../../contracts/loop-presets.js").LoopGraphPreset[];
+  }> {
+    return transportNotConnected();
+  }
+
+  async resolveLoopGraphPreset(
+    _projectId: string,
+    _presetId: string,
+  ): Promise<import("../../contracts/loop-presets.js").LoopGraphPreset | null> {
+    return transportNotConnected();
+  }
+
+  async installWorkflowFromExportPack(
+    _projectId: string,
+    _input: import("../../contracts/workflow-marketplace.js").InstallWorkflowFromExportPackInput,
+  ): Promise<import("../../contracts/loop-presets.js").LoopGraphPreset> {
+    return transportNotConnected();
+  }
+
+  async listStencilCatalog(
+    _projectId: string,
+    _options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/stencil-marketplace.js").StencilCatalogView> {
+    return transportNotConnected();
+  }
+
+  async refreshStencilCatalog(
+    _projectId: string,
+  ): Promise<import("../../contracts/stencil-marketplace.js").StencilCatalogView> {
+    return transportNotConnected();
+  }
+
+  async installStencilFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/stencil-marketplace.js").InstallStencilFromCatalogInput,
+  ): Promise<import("../../contracts/ui-stencil.js").StencilDefinition[]> {
+    return transportNotConnected();
+  }
+
+  async uninstallStencilFromCatalog(
+    _projectId: string,
+    _input: import("../../contracts/stencil-marketplace.js").UninstallStencilFromCatalogInput,
+  ): Promise<void> {
+    return transportNotConnected();
+  }
+
+  async disableStencilCatalogListing(
+    _projectId: string,
+    _listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async reportStencilCatalogListing(
+    _projectId: string,
+    _input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return transportNotConnected();
+  }
+
+  async listInstalledStencilListingIds(_projectId: string): Promise<string[]> {
+    return transportNotConnected();
+  }
+
+  async listMergedStencilDefinitions(
+    _projectId: string,
+  ): Promise<import("../../contracts/ui-stencil.js").StencilDefinition[]> {
+    return transportNotConnected();
+  }
+
+  async installStencilFromExportPack(
+    _projectId: string,
+    _input: import("../../contracts/stencil-marketplace.js").InstallStencilFromExportPackInput,
+  ): Promise<import("../../contracts/ui-stencil.js").StencilDefinition[]> {
+    return transportNotConnected();
+  }
+
+  async installFromGitUrl(
+    _projectId: string,
+    _input: import("../../contracts/marketplace-git-install.js").InstallFromGitUrlInput,
+  ): Promise<import("../../contracts/marketplace-git-install.js").InstallFromGitUrlResult> {
     return transportNotConnected();
   }
 
@@ -709,6 +1390,60 @@ export class NotConnectedTransport implements ProjectOSApi {
     _projectId: string,
     _sessionId: string,
   ): Promise<boolean> {
+    return transportNotConnected();
+  }
+
+  async listSpatialCaptureFolders(
+    _projectId: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder[]
+  > {
+    return transportNotConnected();
+  }
+
+  async placeSpatialCaptureSession(
+    _projectId: string,
+    _sessionId: string,
+    _placement: import("../../contracts/spatial-capture-session.js").SpatialCapturePlacement,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureSession
+  > {
+    return transportNotConnected();
+  }
+
+  async renameSpatialCaptureFolder(
+    _projectId: string,
+    _folderId: string,
+    _name: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    return transportNotConnected();
+  }
+
+  async deleteSpatialCaptureFolder(
+    _projectId: string,
+    _folderId: string,
+    _options?: import("../../contracts/spatial-capture-session.js").DeleteSpatialCaptureFolderOptions,
+  ): Promise<boolean> {
+    return transportNotConnected();
+  }
+
+  async mergeSpatialCaptureFolders(
+    _projectId: string,
+    _sourceFolderId: string,
+    _targetFolderId: string,
+    _options?: import("../../contracts/spatial-capture-session.js").MergeSpatialCaptureFoldersOptions,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    return transportNotConnected();
+  }
+
+  async suggestCaptureVersionTitle(
+    _projectId: string,
+    _target: { folderId: string } | { folderName: string },
+  ): Promise<string> {
     return transportNotConnected();
   }
 
@@ -865,6 +1600,13 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async cancelLoopGoalClarification(
+    _projectId: string,
+    _loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
   async confirmLoopGoalContext(
     _projectId: string,
     _loopId: string,
@@ -898,6 +1640,280 @@ export class NotConnectedTransport implements ProjectOSApi {
     _loopId: string,
     _mode: import("../../contracts/loop-graph.js").LoopComposerMode,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async ensureDiagramDesignSkill(
+    _projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").EnsureDiagramDesignSkillResult> {
+    return transportNotConnected();
+  }
+
+  async getDiagramSkillPackStatus(
+    _projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramSkillPackStatus> {
+    return transportNotConnected();
+  }
+
+  async getDiagramIndex(
+    _projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramIndex> {
+    return transportNotConnected();
+  }
+
+  async listDiagrams(
+    _projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramArtifactMeta[]> {
+    return transportNotConnected();
+  }
+
+  async getDiagram(
+    _projectId: string,
+    _diagramId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramArtifact | null> {
+    return transportNotConnected();
+  }
+
+  async deleteDiagram(_projectId: string, _diagramId: string): Promise<boolean> {
+    return transportNotConnected();
+  }
+
+  async updateDiagramNotes(
+    _projectId: string,
+    _diagramId: string,
+    _input: import("../../contracts/diagram-graph.js").UpdateDiagramNotesInput,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramNotesDocument> {
+    return transportNotConnected();
+  }
+
+  async chooseDiagramStyle(
+    _projectId: string,
+    _input: import("../../contracts/diagram-graph.js").ChooseDiagramStyleInput,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramIndex> {
+    return transportNotConnected();
+  }
+
+  async generateDiagram(
+    _projectId: string,
+    _input: import("../../contracts/diagram-graph.js").GenerateDiagramInput,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramArtifact> {
+    return transportNotConnected();
+  }
+
+  async listWireframePacks(
+    _projectId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePackMeta[]> {
+    return transportNotConnected();
+  }
+
+  async getWireframePackIndex(
+    _projectId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePackIndex> {
+    return transportNotConnected();
+  }
+
+  async getWireframePack(
+    _projectId: string,
+    _packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack | null> {
+    return transportNotConnected();
+  }
+
+  async generateWireframePack(
+    _projectId: string,
+    _input: import("../../contracts/ui-wireframe-pack.js").GenerateWireframePackInput,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return transportNotConnected();
+  }
+
+  async updateWireframePackDraft(
+    _projectId: string,
+    _packId: string,
+    _input: import("../../contracts/ui-wireframe-pack.js").UpdateWireframePackDraftInput,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return transportNotConnected();
+  }
+
+  async deleteWireframeScreen(
+    _projectId: string,
+    _packId: string,
+    _screenId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return transportNotConnected();
+  }
+
+  async freezeWireframePack(
+    _projectId: string,
+    _packId: string,
+    _input?: import("../../contracts/ui-wireframe-pack.js").FreezeWireframePackInput,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return transportNotConnected();
+  }
+
+  async buildImplementAgainstPackBrief(
+    _projectId: string,
+    _packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").ImplementAgainstPackBrief> {
+    return transportNotConnected();
+  }
+
+  async listWireframeGaps(
+    _projectId: string,
+    _packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframeGap[]> {
+    return transportNotConnected();
+  }
+
+  async upsertWireframeGap(
+    _projectId: string,
+    _packId: string,
+    _input: import("../../contracts/ui-wireframe-pack.js").UpsertWireframeGapInput,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframeGap> {
+    return transportNotConnected();
+  }
+
+  async scanWireframeStructGaps(
+    _projectId: string,
+    _packId: string,
+    _input?: import("../../contracts/ui-wireframe-pack.js").ScanWireframeStructGapsInput,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframeGap[]> {
+    return transportNotConnected();
+  }
+
+  async bindWireframePackFeature(
+    _projectId: string,
+    _packId: string,
+    _featureId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return transportNotConnected();
+  }
+
+  async markWireframePackRealized(
+    _projectId: string,
+    _packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return transportNotConnected();
+  }
+
+  async deleteWireframePack(
+    _projectId: string,
+    _packId: string,
+  ): Promise<boolean> {
+    return transportNotConnected();
+  }
+
+  async getLabState(
+    _projectId: string,
+  ): Promise<import("../../contracts/product-lab.js").LabStateDocument> {
+    return transportNotConnected();
+  }
+
+  async upsertLabState(
+    _projectId: string,
+    _document: import("../../contracts/product-lab.js").LabStateDocument,
+  ): Promise<import("../../contracts/product-lab.js").LabStateDocument> {
+    return transportNotConnected();
+  }
+
+  async getLabLaunchProfile(
+    _projectId: string,
+  ): Promise<import("../../contracts/product-lab.js").LabLaunchProfile> {
+    return transportNotConnected();
+  }
+
+  async listTheses(
+    _projectId: string,
+  ): Promise<import("../../contracts/first-principles.js").ThesisIndex> {
+    return transportNotConnected();
+  }
+
+  async getThesisSession(
+    _projectId: string,
+    _sessionId: string,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession | null> {
+    return transportNotConnected();
+  }
+
+  async upsertThesisSession(
+    _projectId: string,
+    _session: import("../../contracts/first-principles.js").FirstPrinciplesSession,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return transportNotConnected();
+  }
+
+  async startFirstPrinciplesSession(
+    _request: import("../../contracts/first-principles.js").StartFirstPrinciplesRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return transportNotConnected();
+  }
+
+  async answerFirstPrinciplesTurn(
+    _request: import("../../contracts/first-principles.js").AnswerFirstPrinciplesRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return transportNotConnected();
+  }
+
+  async resolveFirstPrinciplesConflict(
+    _request: import("../../contracts/first-principles.js").ResolveFirstPrinciplesConflictRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return transportNotConnected();
+  }
+
+  async writeFirstPrinciplesPlannedFeature(
+    _request: import("../../contracts/first-principles.js").WriteFirstPrinciplesFeatureRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesFeatureWriteResult> {
+    return transportNotConnected();
+  }
+
+  async getReminderTimeline(
+    _projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return transportNotConnected();
+  }
+
+  async syncReminderTimeline(
+    _projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return transportNotConnected();
+  }
+
+  async reorderReminderItem(
+    _projectId: string,
+    _input: import("../../contracts/reminder-graph.js").ReminderReorderInput,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return transportNotConnected();
+  }
+
+  async acceptReminderEditOffer(
+    _projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return transportNotConnected();
+  }
+
+  async dismissReminderEditOffer(
+    _projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return transportNotConnected();
+  }
+
+  async setReminderMilestoneStatus(
+    _projectId: string,
+    _input: import("../../contracts/reminder-graph.js").ReminderMilestoneCompleteInput,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return transportNotConnected();
+  }
+
+  async sendReminderAuthoringTurn(
+    _projectId: string,
+    _request: import("../../contracts/reminder-graph.js").ReminderAuthoringTurnRequest,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderAuthoringTurnResult> {
+    return transportNotConnected();
+  }
+
+  async setReminderComposerMode(
+    _projectId: string,
+    _mode: import("../../contracts/reminder-graph.js").ReminderComposerMode,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
     return transportNotConnected();
   }
 

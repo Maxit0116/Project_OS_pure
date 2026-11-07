@@ -11,6 +11,7 @@ import { ProjectOSError } from "../errors.js";
 import type { LoadedProjectOSWorkspace } from "../persistence/index.js";
 import { cloneJson } from "../utils/json.js";
 import type { DemoScenario } from "../validation/index.js";
+import { ensureAlignmentOnRefinement } from "./alignment-contract.js";
 
 export interface RegisteredScenarioRun {
   run: AgentRun;
@@ -115,8 +116,9 @@ export function createGenericPromptRefinement(
 ): PromptRefinement {
   const affectedNodeIds = request.nodeId ? [request.nodeId] : [];
   const affectedFiles = request.filePath ? [request.filePath] : [];
-  return {
-    id: genericRefinementId(request),
+  const id = genericRefinementId(request);
+  const base: PromptRefinement = {
+    id,
     understood: request.rawPrompt,
     ambiguities: [],
     suggestions: [
@@ -128,8 +130,8 @@ export function createGenericPromptRefinement(
     confidence: 0.4,
     mode: "deterministic_fixture",
   };
+  return ensureAlignmentOnRefinement(base, request.rawPrompt);
 }
-
 interface PromptScenarioMatch {
   nodeId: string | undefined;
   rawPrompt: string;

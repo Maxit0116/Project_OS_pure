@@ -133,20 +133,45 @@
 
 .input,
 .textarea {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
   width: 100%;
-  border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-muted);
-  color: var(--color-text-primary);
+  box-sizing: border-box;
+  border: 1px solid var(--tech-border, var(--glass-border-subtle));
+  border-radius: 6px;
+  background-color: var(--tech-bg-muted, var(--color-bg-muted));
+  background-image: none;
+  color: var(--tech-text-primary, var(--color-text-primary));
+  caret-color: var(--tech-text-primary, var(--color-text-primary));
   font: inherit;
-  padding: 6px 8px;
+  font-size: var(--font-size-sm);
+  padding: 7px 9px;
+  outline: none;
+  box-shadow: none;
+  transition:
+    border-color var(--duration-fast, 150ms) var(--ease-out, ease),
+    box-shadow var(--duration-fast, 150ms) var(--ease-out, ease);
+}
+
+.input:hover:not(:disabled),
+.textarea:hover:not(:disabled) {
+  border-color: var(--tech-border-strong);
 }
 
 .input:focus,
-.textarea:focus {
+.input:focus-visible,
+.textarea:focus,
+.textarea:focus-visible {
   outline: none;
-  border-color: var(--color-accent);
-  box-shadow: var(--glass-focus-ring);
+  border-color: var(--tech-border-strong);
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--tech-text-muted, var(--color-text-muted));
+  opacity: 1;
 }
 
 .textarea {
@@ -163,9 +188,9 @@
   gap: 8px;
 }
 
-.checkboxRow input[type='checkbox'] {
-  margin-top: 3px;
+.criteriaCheck {
   flex-shrink: 0;
+  align-self: center;
 }
 
 .criteriaList {

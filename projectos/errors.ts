@@ -85,6 +85,7 @@ export type ProjectOSErrorCode =
   | "spatial_pin_invalid"
   | "loop_graph_not_found"
   | "loop_graph_invalid"
+  | "agent_definition_not_found"
   | "operation_cancelled";
 
 export interface ProjectOSErrorOptions {

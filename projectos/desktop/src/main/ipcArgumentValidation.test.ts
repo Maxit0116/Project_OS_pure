@@ -27,23 +27,15 @@ describe('privileged IPC argument validation', () => {
     })
   })
 
-  it('keeps deterministic design backup restore off the renderer IPC surface', () => {
+  it('exposes GitHub auth IPC and keeps deterministic design restore off the surface', () => {
     expect(PROJECTOS_IPC_METHODS).toContain('restoreApplyBackup')
-    expect(PROJECTOS_IPC_METHODS).toContain('getTeamSnapshot')
-    expect(PROJECTOS_IPC_METHODS).toContain('askTeamBrain')
-    expect(PROJECTOS_IPC_METHODS).toContain('listGitEvidence')
-    expect(PROJECTOS_IPC_METHODS).toContain('getDailyBrief')
-    expect(PROJECTOS_IPC_METHODS).toContain('updateDecision')
-    expect(PROJECTOS_IPC_METHODS).toContain('askAnchoredQuestion')
-    expect(PROJECTOS_IPC_METHODS).toContain('importMeetingTranscript')
-    expect(PROJECTOS_IPC_METHODS).toContain('applyMeetingImport')
-    expect(PROJECTOS_IPC_METHODS).toContain('markNodePlanned')
     expect(PROJECTOS_IPC_METHODS).toContain('getGitHubAuthStatus')
     expect(PROJECTOS_IPC_METHODS).toContain('beginGitHubOAuth')
-    expect(PROJECTOS_IPC_METHODS).toContain('gitPull')
-    expect(PROJECTOS_IPC_METHODS).toContain('getGitSyncStatus')
-    expect(PROJECTOS_IPC_METHODS).toContain('generateDailyBriefNarrative')
-    expect(PROJECTOS_IPC_METHODS).toContain('publishDailyBriefToPullRequest')
+    expect(PROJECTOS_IPC_METHODS).toContain('cancelGitHubOAuth')
+    expect(PROJECTOS_IPC_METHODS).toContain('disconnectGitHub')
+    expect(PROJECTOS_IPC_METHODS).toContain('getAccountProfile')
+    expect(PROJECTOS_IPC_METHODS).toContain('saveGitHubOAuthClientId')
+    expect(PROJECTOS_IPC_METHODS).toContain('importGitHubAuthFromGhCli')
     expect(PROJECTOS_IPC_METHODS as readonly string[]).not.toContain(
       'restoreDeterministicDesignMutationBackup',
     )
@@ -67,6 +59,7 @@ describe('privileged IPC argument validation', () => {
     expect(parseDiffReadyNotificationPayload({
       title: 'Diff ready',
       body: 'Review the generated change',
+      destination: 'diff',
       runIds: ['run_one'],
     })).toEqual({
       title: 'Diff ready',
@@ -84,8 +77,14 @@ describe('privileged IPC argument validation', () => {
     expect(() => parseDiffReadyNotificationPayload({
       title: 'Decision needed', body: 'Choose', destination: 'decisions', runIds: ['run_one'],
     })).toThrow('Notification payload is invalid')
+    expect(parseDiffReadyNotificationPayload({
+      title: 'Reminder ready',
+      body: 'Marketplace can start',
+      destination: 'reminder',
+      runIds: ['reminder:r1'],
+    }).destination).toBe('reminder')
     expect(() => parseDiffReadyNotificationPayload({
-      title: 'Diff ready', body: 'Review', runIds: ['run_one', 'run_one'],
+      title: 'Diff ready', body: 'Review', destination: 'diff', runIds: ['run_one', 'run_one'],
     })).toThrow('Notification payload is invalid')
     expect(() => parseDiffReadyNotificationPayload({
       title: 'Diff ready', body: 'Review', runIds: [],

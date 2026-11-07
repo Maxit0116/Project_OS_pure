@@ -518,15 +518,15 @@ describe("loop-runtime-service", () => {
     doc = startLoopInstance(root, doc.id, undefined, hooks.execution);
     expect(doc.instances[0]?.status).toBe("awaiting_hitl");
     expect(hooks.starts).toEqual([]);
+    const questionId = doc.instances[0]!.hitlQuestionIds?.[0] ?? "decide_n1";
     doc = resolveLoopHitl(root, doc.id, doc.instances[0]!.id, [
-      { questionId: "decide_n1", answer: "ship it" },
+      { questionId, answer: "ship it" },
     ], hooks.execution);
     expect(doc.instances[0]?.events.some((event) =>
       event.type === "hitl_resolved" && event.message?.includes("ship it"),
     )).toBe(true);
     expect(doc.instances[0]?.cursorNodeId).toBe("n2");
-    expect(hooks.starts).toEqual([]);
-    doc = advanceLoopInstance(root, doc.id, doc.instances[0]!.id, hooks.execution);
+    // Human approval now advances into the next node on resolve.
     expect(hooks.starts).toEqual(["run_1"]);
     expect(doc.instances[0]?.activeRunId).toBe("run_1");
   });

@@ -1,0 +1,26 @@
+{
+  "version": "1",
+  "generatedAt": "2026-11-04T17:23:31.863Z",
+  "listings": [
+    {
+      "id": "curated.typescript-strict",
+      "name": "TypeScript Strict",
+      "description": "Always-on project rules for strict TypeScript, explicit types at boundaries, and no casual any.",
+      "trustTier": "curated",
+      "version": "1.0.0",
+      "files": {
+        "typescript-strict.md": "---\nactivation: always\ndescription: Strict TypeScript defaults for agent edits\n---\n\n# TypeScript Strict\n\n- Prefer `unknown` over `any` at API boundaries; narrow before use.\n- Do not silence type errors with `@ts-ignore` / `@ts-expect-error` unless the user asks.\n- Keep public function return types explicit when inference would hide a contract.\n- Match existing module import style (ESM / path aliases) in this repo.\n"
+      }
+    },
+    {
+      "id": "community.verbose-explanations",
+      "name": "Verbose Explanations",
+      "description": "Community pack that asks the agent to narrate steps heavily. Review before installing.",
+      "trustTier": "community",
+      "version": "0.1.0",
+      "files": {
+        "verbose.md": "---\nactivation: always\ndescription: Prefer longer step-by-step narration\n---\n\n# Verbose Explanations\n\nWhen explaining changes, include rationale, alternatives considered, and residual risks.\nKeep code edits minimal; do not expand scope for narration alone.\n"
+      }
+    }
+  ]
+}

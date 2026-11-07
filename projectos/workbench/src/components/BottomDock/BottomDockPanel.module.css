@@ -74,6 +74,7 @@
   min-height: 0;
   height: 100%;
   overflow: hidden;
+  background: var(--tech-bg-chrome);
 }
 
 .expanded {

@@ -70,9 +70,9 @@ function DetailBody({
               {detail.anchors.map((anchor) => <li key={anchor}>{anchor}</li>)}
             </ul>
           ) : null}
-          {detail.acceptanceCriteria.length > 0 ? (
+          {(detail.acceptanceCriteria?.length ?? 0) > 0 ? (
             <ol>
-              {detail.acceptanceCriteria.map((item) => <li key={item}>{item}</li>)}
+              {detail.acceptanceCriteria!.map((item) => <li key={item}>{item}</li>)}
             </ol>
           ) : null}
         </>

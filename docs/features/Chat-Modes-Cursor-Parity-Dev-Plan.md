@@ -6,6 +6,7 @@
 - `agent-requirements.md` — 图作用域 agent、leaf-only write、诚实 pipeline（D1–D3 / E / F）
 - `docs/features/Agent-Harness-Dev-Plan.md` — Agent Harness 总地图（ToolPolicy、sandbox×approval、与 Cursor/Codex/Devin 差距）
 - `docs/AI-Devtool-UI-Gap-and-Target.md` — 聊天表面视觉语言
+- [`Ask-First-Principles-Mode-Dev-Plan.md`](./Ask-First-Principles-Mode-Dev-Plan.md) — Ask **二级**立论 mode（不进 `CHAT_MODES`）；Why/Whether 在 Plan/Agent 之前
 - Cursor 公开文档：Ask / Agent / Plan / Debug / Custom Modes（skill-as-mode）
 
 **明确不复制**：
@@ -28,6 +29,7 @@
 | Custom Modes | 无 | Custom Modes | skill 常驻为 mode |
 | — | `anchored` | Anchored | 保留；图节点/决策锚定问答 |
 | — | `team_memory`（schema 残留） | 合并进 Ask / Anchored | 会话 hydrate 已映射为 `ask` |
+| — | Ask 二级 `first_principles`（planned） | **Ask · 立论** | 不进一级枚举；见 First Principles Dev Plan |
 
 UI 文案：`chat.changeMode` → 「Agent」（或「Agent · Change」过渡期）。契约类型 `ChatMode = 'change'` 可暂不改，避免大范围破坏；若改枚举，单独做迁移切片。
 
@@ -73,6 +75,8 @@ sendPrompt(ask)
 | 追问可继续探索同一会话 | 有消息历史，但每轮仍绑定同一预装 bundle | A2 |
 | 「search the codebase」自然语言触发检索 | 无 | A1 |
 | Ask 不能改文件（硬边界） | 已有 | — |
+
+**Ask 二级（产品扩展，非 Cursor 对标）**：`Ask · First Principles`（立论）挂在 `askSubMode`，**不**进入 `CHAT_MODES` / Shift+Tab。用于动手前把模糊 feature vision 推成可证伪 Thesis，再升 Plan / Agent。权威计划见 [`Ask-First-Principles-Mode-Dev-Plan.md`](./Ask-First-Principles-Mode-Dev-Plan.md)。
 
 ### 1.3 Change（对标 Agent）
 
@@ -229,7 +233,7 @@ startDebugSession
 #### M0.2 切换 mode = 新会话（默认）
 
 - [x] `setChatMode` 默认：`createSession({ chatMode, seedWelcome: false, draftInput: 当前 draft })` 并激活；旧会话保留在历史。
-- [x] Settings 高级项：`chatModeSwitch: 'new_session' | 'same_session'`（默认 `new_session`，localStorage）。
+- [x] Settings 高级项：`chatModeSwitch: 'new_session' | 'same_session'`（默认 `same_session`，localStorage；与 Cursor 多 mode 同会话一致）。
 - [x] 新会话标题带 mode 名（如 `Ask` / `Agent`）。
 - [x] 测试：`workbenchStore.chatMode.test.ts` — 切换 mode 不串 `pendingPlan` / `debugSession` / `pendingRefinement`。
 

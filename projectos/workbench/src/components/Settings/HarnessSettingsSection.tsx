@@ -9,6 +9,8 @@ import { HARNESS_TOOL_NAMES } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
+import Checkbox from '../ui/Checkbox'
+import SettingsGroup from './SettingsGroup'
 import styles from './SettingsPanel.module.css'
 
 const TOOL_OPTIONS = ['*', ...HARNESS_TOOL_NAMES] as const
@@ -71,62 +73,54 @@ export default function HarnessSettingsSection() {
       {error && <p className={styles.formError}>{error}</p>}
 
       {memory && (
-        <>
-          <h3 className={styles.sectionTitle}>{ts('settings.harness.memory')}</h3>
-          <p className={styles.help}>{ts('settings.harness.memoryHelp')}</p>
-          <label className={styles.checkboxRow}>
-            <input
-              type="checkbox"
-              checked={memory.settings.enabled}
-              onChange={(event) =>
-                setMemory({
-                  ...memory,
-                  settings: { ...memory.settings, enabled: event.target.checked },
-                })
-              }
-            />
-            {ts('settings.harness.memoryEnabled')}
-          </label>
-          <label className={styles.checkboxRow}>
-            <input
-              type="checkbox"
-              checked={memory.settings.useMemories}
-              onChange={(event) =>
-                setMemory({
-                  ...memory,
-                  settings: { ...memory.settings, useMemories: event.target.checked },
-                })
-              }
-            />
-            {ts('settings.harness.memoryUse')}
-          </label>
-          <label className={styles.checkboxRow}>
-            <input
-              type="checkbox"
-              checked={memory.settings.generateMemories}
-              onChange={(event) =>
-                setMemory({
-                  ...memory,
-                  settings: { ...memory.settings, generateMemories: event.target.checked },
-                })
-              }
-            />
-            {ts('settings.harness.memoryGenerate')}
-          </label>
+        <SettingsGroup label={ts('settings.harness.memory')}>
+          <div className={styles.settingRowStackedPad}>
+            <p className={styles.help}>{ts('settings.harness.memoryHelp')}</p>
+          <Checkbox
+            className={styles.checkboxRow}
+            checked={memory.settings.enabled}
+            onCheckedChange={(enabled) =>
+              setMemory({
+                ...memory,
+                settings: { ...memory.settings, enabled },
+              })
+            }
+            label={ts('settings.harness.memoryEnabled')}
+          />
+          <Checkbox
+            className={styles.checkboxRow}
+            checked={memory.settings.useMemories}
+            onCheckedChange={(useMemories) =>
+              setMemory({
+                ...memory,
+                settings: { ...memory.settings, useMemories },
+              })
+            }
+            label={ts('settings.harness.memoryUse')}
+          />
+          <Checkbox
+            className={styles.checkboxRow}
+            checked={memory.settings.generateMemories}
+            onCheckedChange={(generateMemories) =>
+              setMemory({
+                ...memory,
+                settings: { ...memory.settings, generateMemories },
+              })
+            }
+            label={ts('settings.harness.memoryGenerate')}
+          />
           <p className={styles.help}>{ts('settings.harness.memoryGenerateHelp')}</p>
-          <label className={styles.checkboxRow}>
-            <input
-              type="checkbox"
-              checked={memory.settings.isolateByCheckout}
-              onChange={(event) =>
-                setMemory({
-                  ...memory,
-                  settings: { ...memory.settings, isolateByCheckout: event.target.checked },
-                })
-              }
-            />
-            {ts('settings.harness.memoryIsolate')}
-          </label>
+          <Checkbox
+            className={styles.checkboxRow}
+            checked={memory.settings.isolateByCheckout}
+            onCheckedChange={(isolateByCheckout) =>
+              setMemory({
+                ...memory,
+                settings: { ...memory.settings, isolateByCheckout },
+              })
+            }
+            label={ts('settings.harness.memoryIsolate')}
+          />
           <Button
             variant="secondary"
             size="sm"
@@ -292,7 +286,8 @@ export default function HarnessSettingsSection() {
           >
             {ts('settings.harness.memoryConsolidate')}
           </Button>
-        </>
+          </div>
+        </SettingsGroup>
       )}
 
       <h3 className={styles.sectionTitle}>{ts('settings.harness.permissions')}</h3>
@@ -376,32 +371,28 @@ export default function HarnessSettingsSection() {
       </Button>
 
       <h3 className={styles.sectionTitle}>{ts('settings.harness.sandbox')}</h3>
-      <label className={styles.checkboxRow}>
-        <input
-          type="checkbox"
-          checked={config.sandbox.networkAccess}
-          onChange={(event) =>
-            setConfig({
-              ...config,
-              sandbox: { ...config.sandbox, networkAccess: event.target.checked },
-            })
-          }
-        />
-        {ts('settings.harness.networkAccess')}
-      </label>
-      <label className={styles.checkboxRow}>
-        <input
-          type="checkbox"
-          checked={config.sandbox.allowTempWrites}
-          onChange={(event) =>
-            setConfig({
-              ...config,
-              sandbox: { ...config.sandbox, allowTempWrites: event.target.checked },
-            })
-          }
-        />
-        {ts('settings.harness.allowTempWrites')}
-      </label>
+      <Checkbox
+        className={styles.checkboxRow}
+        checked={config.sandbox.networkAccess}
+        onCheckedChange={(networkAccess) =>
+          setConfig({
+            ...config,
+            sandbox: { ...config.sandbox, networkAccess },
+          })
+        }
+        label={ts('settings.harness.networkAccess')}
+      />
+      <Checkbox
+        className={styles.checkboxRow}
+        checked={config.sandbox.allowTempWrites}
+        onCheckedChange={(allowTempWrites) =>
+          setConfig({
+            ...config,
+            sandbox: { ...config.sandbox, allowTempWrites },
+          })
+        }
+        label={ts('settings.harness.allowTempWrites')}
+      />
 
       <h3 className={styles.sectionTitle}>{ts('settings.harness.modelHarness')}</h3>
       <div className={styles.list}>

@@ -1,6 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Eye, GitBranch, Plus, Trash2 } from 'lucide-react'
+import {
+  Bot,
+  ClipboardList,
+  GitBranch,
+  Plus,
+  Save,
+  Trash2,
+  Upload,
+  UserPlus,
+} from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useRovingMenuFocus } from '../FunctionMap/useRovingMenuFocus'
 import styles from './LoopGraphContextMenu.module.css'
@@ -21,6 +30,7 @@ export type LoopGraphContextMenuState =
       x: number
       y: number
       nodeId: string
+      isAgentNode?: boolean
       restoreFocusTo?: HTMLElement
     }
   | {
@@ -35,8 +45,12 @@ interface Props {
   menu: LoopGraphContextMenuState | null
   onClose: () => void
   onCreateNode: (world: { x: number; y: number }) => void
+  onCreateAgent: () => void
   onConnectFrom: (nodeId: string) => void
-  onViewDescription: (nodeId: string) => void
+  onOpenDuty: (nodeId: string) => void
+  onSwitchAgent: (nodeId: string, anchor: { x: number; y: number }) => void
+  onApplyWiring?: (nodeId: string) => void
+  onSaveWiringAsAgent?: (nodeId: string) => void
   onDeleteNode: (nodeId: string) => void
   onDeleteEdge: (edgeId: string) => void
 }
@@ -45,8 +59,12 @@ export default function LoopGraphContextMenu({
   menu,
   onClose,
   onCreateNode,
+  onCreateAgent,
   onConnectFrom,
-  onViewDescription,
+  onOpenDuty,
+  onSwitchAgent,
+  onApplyWiring,
+  onSaveWiringAsAgent,
   onDeleteNode,
   onDeleteEdge,
 }: Props) {
@@ -108,18 +126,32 @@ export default function LoopGraphContextMenu({
       onKeyDown={handleMenuKeyDown}
     >
       {menu.kind === 'blank' ? (
-        <button
-          type="button"
-          role="menuitem"
-          className={styles.menuItem}
-          onClick={() => {
-            onCreateNode({ x: menu.worldX, y: menu.worldY })
-            onClose()
-          }}
-        >
-          <Plus className={styles.menuItemIcon} size={14} aria-hidden />
-          {ts('chat.loopGraph.addNode')}
-        </button>
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            className={styles.menuItem}
+            onClick={() => {
+              onCreateNode({ x: menu.worldX, y: menu.worldY })
+              onClose()
+            }}
+          >
+            <Plus className={styles.menuItemIcon} size={14} aria-hidden />
+            {ts('chat.loopGraph.addNode')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={styles.menuItem}
+            onClick={() => {
+              onCreateAgent()
+              onClose()
+            }}
+          >
+            <UserPlus className={styles.menuItemIcon} size={14} aria-hidden />
+            {ts('workforce.createAgentMenu')}
+          </button>
+        </>
       ) : null}
 
       {menu.kind === 'node' ? (
@@ -141,18 +173,60 @@ export default function LoopGraphContextMenu({
             role="menuitem"
             className={styles.menuItem}
             onClick={() => {
-              onViewDescription(menu.nodeId)
+              onOpenDuty(menu.nodeId)
               onClose()
             }}
           >
-            <Eye className={styles.menuItemIcon} size={14} aria-hidden />
-            {ts('chat.loopGraph.viewDescription')}
+            <ClipboardList className={styles.menuItemIcon} size={14} aria-hidden />
+            {ts('chat.loopGraph.openDuty')}
           </button>
+          {menu.isAgentNode ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => {
+                onSwitchAgent(menu.nodeId, { x: menu.x, y: menu.y })
+                onClose()
+              }}
+            >
+              <Bot className={styles.menuItemIcon} size={14} aria-hidden />
+              {ts('workforce.switchAgent')}
+            </button>
+          ) : null}
+          {menu.isAgentNode && onApplyWiring ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => {
+                onApplyWiring(menu.nodeId)
+                onClose()
+              }}
+            >
+              <Upload className={styles.menuItemIcon} size={14} aria-hidden />
+              {ts('chat.loopGraph.wiringApplyToAgent')}
+            </button>
+          ) : null}
+          {menu.isAgentNode && onSaveWiringAsAgent ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => {
+                onSaveWiringAsAgent(menu.nodeId)
+                onClose()
+              }}
+            >
+              <Save className={styles.menuItemIcon} size={14} aria-hidden />
+              {ts('chat.loopGraph.wiringSaveAsAgent')}
+            </button>
+          ) : null}
           <div className={styles.separator} role="separator" />
           <button
             type="button"
             role="menuitem"
-            className={styles.menuItem}
+            className={`${styles.menuItem} ${styles.menuItemDanger}`}
             onClick={() => {
               onDeleteNode(menu.nodeId)
               onClose()
@@ -168,7 +242,7 @@ export default function LoopGraphContextMenu({
         <button
           type="button"
           role="menuitem"
-          className={styles.menuItem}
+          className={`${styles.menuItem} ${styles.menuItemDanger}`}
           onClick={() => {
             onDeleteEdge(menu.edgeId)
             onClose()

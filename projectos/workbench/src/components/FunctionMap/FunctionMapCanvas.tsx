@@ -15,6 +15,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useWorkbenchStore } from '../../state/workbenchStore'
+import { useProductLabStore } from '../../state/productLabStore'
 import { useI18n } from '../../i18n'
 import { useFunctionMap } from './FunctionMapContext'
 import FeatureNode, { isPurposeFirstArchitectureLevel } from './FeatureNode'
@@ -146,7 +147,6 @@ import {
   sanitizeLayerBandsForNodes,
 } from './mergeFullLayerBands'
 import { EDGE_COLORS, formatC4EdgeLabel } from './edgePresentation'
-import C4NodeDetailDrawer from './C4NodeDetailDrawer'
 import {
   openCodeNodeFile,
   openCodeNodeInEditor,
@@ -212,7 +212,7 @@ interface ActiveLayerFocusTransition extends LayerFocusTransition {
 const ARTIFACT_LINK_EDGE_COLOR = 'var(--color-violet)'
 
 const LIVE_EXEC_EDGE_COLORS: Record<LiveExecutionEdge['kind'], string> = {
-  read_context: '#3b82f6',
+  read_context: '#a1a1aa',
   edit_create: '#f59e0b',
   impact: '#a78bfa',
   delegation: '#14b8a6',
@@ -963,7 +963,6 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     selectedNodeId,
     onSelectNode,
     onSelectFile,
-    onClearSelection,
     search,
     mapSearchFocus,
     clearMapSearchFocus,
@@ -996,6 +995,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   const executionOverlay = useWorkbenchStore((s) => s.executionOverlay)
   const runDecisions = useWorkbenchStore((s) => s.runDecisions)
   const liveGraphFocusTaskId = useWorkbenchStore((s) => s.liveGraphFocusTaskId)
+  const labNodeFindingCounts = useProductLabStore((s) => s.nodeFindingCounts)
   const durableGraph = useWorkbenchStore((s) => s.graph)
   const liveFocusNodeIds = useMemo(
     () =>
@@ -1966,6 +1966,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
           focusOpacity,
           flash: n.id === selectedNodeId ? flashKey : 0,
           liveSummary: summarizeNodeLiveActivityWithDecisions(executionOverlay, n.id, runDecisions),
+          labFindingCount: labNodeFindingCounts[n.id] ?? 0,
         },
       }}),
       ...artifactFlowNodes,
@@ -1974,6 +1975,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       workGroupFlowNodes,
       layerBandFlowNodes,
       c4BoundaryFlowNodes,
+      labNodeFindingCounts,
       useC4Visuals,
       c4NodeById,
       displayFeatureNodes,
@@ -4395,21 +4397,6 @@ function FunctionMapCanvasInner({ bleed }: Props) {
           onCancel={cancelMapArtifactRename}
         />
       )}
-      {useC4Visuals && selectedNodeId ? (
-        <C4NodeDetailDrawer
-          node={
-            nodes.find((candidate) => candidate.id === selectedNodeId) ??
-            graphNodes.find((candidate) => candidate.id === selectedNodeId) ??
-            null
-          }
-          layerNodes={nodes}
-          layerEdges={edges}
-          fileIndex={fileIndex}
-          fileRelations={fileRelations}
-          durableGraph={durableGraph}
-          onClose={onClearSelection}
-        />
-      ) : null}
     </div>
   )
 }

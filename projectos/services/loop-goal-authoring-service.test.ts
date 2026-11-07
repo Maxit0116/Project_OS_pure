@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   acceptLoopGraphEditOffer,
+  cancelLoopGoalClarification,
   confirmLoopGoalContext,
   createLoopGraph,
   dismissLoopGraphEditOffer,
@@ -61,6 +62,22 @@ describe("loop goal authoring + edit orchestration", () => {
     expect(doc.draft.nodes).toHaveLength(0);
     expect(doc.draftHistory).toHaveLength(0);
     expect(nodeCount).toBeGreaterThan(0);
+  });
+
+  it("cancels clarifying questions and rolls back the Ask turn", () => {
+    const root = tempRoot();
+    let doc = createLoopGraph(root, "proj", "Cancel clarify");
+    doc = sendLoopAuthoringTurn(root, doc.id, {
+      mode: "ask",
+      text: "Ship login",
+    });
+    expect(doc.draftGoalContext?.openQuestions.some((q) => !q.answer)).toBe(true);
+    expect(doc.authoringThread.length).toBeGreaterThanOrEqual(2);
+
+    doc = cancelLoopGoalClarification(root, doc.id);
+    expect(doc.draftGoalContext).toBeUndefined();
+    expect(doc.authoringThread).toHaveLength(0);
+    expect(doc.authoringTrace.status).toBe("idle");
   });
 
   it("dismisses graph edit offer without changing the draft", () => {

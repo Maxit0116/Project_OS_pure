@@ -13,6 +13,7 @@ import {
   LoopAuthoringTurnRequestSchema,
   LoopGraphIndexSchema,
   createEmptyLoopDocument,
+  emptyAuthoringTrace,
   headFromLoopDocument,
   normalizeLoopGraphDocument,
   pushIntentGraphHistory,
@@ -312,6 +313,37 @@ export function answerLoopGoalClarification(
     draftGoalContext: result.draftGoalContext,
     authoringThread: [...doc.authoringThread, userMessage, assistant].slice(-200),
     authoringTrace: buildCompleteTrace(result.steps),
+  });
+}
+
+/** Abandon unanswered clarifying questions and roll back the Ask turn that produced them. */
+export function cancelLoopGoalClarification(
+  workspaceRoot: string,
+  loopId: string,
+): LoopGraphDocument {
+  const doc = requireLoop(workspaceRoot, loopId);
+  if (!doc.draftGoalContext) {
+    throw new Error("No draft goal context to cancel");
+  }
+  const unanswered = doc.draftGoalContext.openQuestions.some((q) => !q.answer?.trim());
+  if (!unanswered) {
+    throw new Error("No pending clarifying questions to cancel");
+  }
+
+  let thread = doc.authoringThread;
+  if (
+    thread.length >= 2 &&
+    thread[thread.length - 1]?.role === "assistant" &&
+    thread[thread.length - 2]?.role === "user"
+  ) {
+    thread = thread.slice(0, -2);
+  }
+
+  const { draftGoalContext: _removed, ...rest } = doc;
+  return upsertLoopGraph(workspaceRoot, {
+    ...rest,
+    authoringThread: thread,
+    authoringTrace: emptyAuthoringTrace(),
   });
 }
 

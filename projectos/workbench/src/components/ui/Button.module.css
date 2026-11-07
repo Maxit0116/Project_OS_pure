@@ -87,6 +87,23 @@
   background: var(--tech-bg-muted);
 }
 
+/* Follows ancestor `--mode-color` (plan orange, debug red, ask green, …). */
+.mode {
+  color: var(--mode-on-color, var(--tech-accent-foreground));
+  background: var(--mode-color, var(--tech-accent));
+  border: 1px solid transparent;
+  box-shadow: none;
+}
+
+.mode:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.mode:active:not(:disabled) {
+  transform: scale(0.98);
+  filter: brightness(0.96);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .btn {
     transition: none;

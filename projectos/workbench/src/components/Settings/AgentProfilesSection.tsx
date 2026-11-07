@@ -12,6 +12,7 @@ import {
   emptyAgentProfileDraft,
   isAgentProfileDraftValid,
 } from './agentProfileDraft'
+import SettingsGroup from './SettingsGroup'
 import styles from './SettingsPanel.module.css'
 
 const KINDS: AgentProfileKind[] = ['feature_change', 'debug_fix', 'custom']
@@ -79,73 +80,93 @@ export default function AgentProfilesSection() {
 
   return (
     <section className={styles.section}>
-      <h3 className={styles.sectionTitle}>{ts('settings.agentsTitle')}</h3>
-      <div className={styles.list}>
-        {settings.agentProfiles.map((profile) => (
-          <div key={profile.id} className={styles.row}>
-            <div>
-              <div className={styles.rowTitle}>{profile.name}</div>
-              <div className={styles.rowMeta}>{profile.kind}</div>
+      <SettingsGroup label={ts('settings.agentsTitle')}>
+        <div className={styles.list}>
+          {settings.agentProfiles.map((profile) => (
+            <div key={profile.id} className={styles.row}>
+              <div>
+                <div className={styles.rowTitle}>{profile.name}</div>
+                <div className={styles.rowMeta}>{profile.kind}</div>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
-      <div className={styles.formGrid}>
-        <TextInput label={ts('settings.profileName')} value={name} onChange={(e) => setName(e.target.value)} />
-        <Select
-          label={ts('settings.agentKind')}
-          value={kind}
-          onChange={(e) => setKind(e.target.value as AgentProfileKind)}
-          options={KINDS.map((value) => ({ value, label: value }))}
-        />
-        <Select
-          label={ts('settings.boundModel')}
-          value={modelProfileId}
-          onChange={(e) => setModelProfileId(e.target.value)}
-          options={[
-            { value: '', label: ts('settings.selectModel') },
-            ...settings.modelProfiles.map((profile) => ({
-              value: profile.id,
-              label: profile.name,
-            })),
-          ]}
-        />
-        <label className={styles.textareaField}>
-          <span className={styles.label}>{ts('settings.systemPrompt')}</span>
-          <textarea
-            className={styles.textarea}
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            rows={4}
-          />
-        </label>
-        <div className={styles.toolList}>
-          {toolOptions.map((tool) => (
-            <label key={tool} className={styles.toolChip}>
-              <input
-                type="checkbox"
-                checked={enabledTools.includes(tool)}
-                onChange={() => toggleTool(tool)}
-              />
-              {tool}
-            </label>
           ))}
+          {settings.agentProfiles.length === 0 && (
+            <div className={styles.settingRow}>
+              <p className={styles.empty}>{ts('settings.agentsSummary', { count: 0 })}</p>
+            </div>
+          )}
         </div>
-      </div>
-      <Button
-        size="sm"
-        onClick={handleAdd}
-        disabled={submitting || !isAgentProfileDraftValid({
-          name,
-          kind,
-          systemPrompt,
-          modelProfileId,
-          enabledTools,
-        })}
-      >
-        {ts('settings.addAgent')}
-      </Button>
-      {submitError && <p className={styles.formError} role="alert">{submitError}</p>}
+      </SettingsGroup>
+
+      <SettingsGroup label={ts('settings.addAgent')}>
+        <div className={styles.formGrid}>
+          <TextInput label={ts('settings.profileName')} value={name} onChange={(e) => setName(e.target.value)} />
+          <Select
+            label={ts('settings.agentKind')}
+            value={kind}
+            onChange={(e) => setKind(e.target.value as AgentProfileKind)}
+            options={KINDS.map((value) => ({ value, label: value }))}
+          />
+          <Select
+            label={ts('settings.boundModel')}
+            value={modelProfileId}
+            onChange={(e) => setModelProfileId(e.target.value)}
+            options={[
+              { value: '', label: ts('settings.selectModel') },
+              ...settings.modelProfiles.map((profile) => ({
+                value: profile.id,
+                label: profile.name,
+              })),
+            ]}
+          />
+          <label className={styles.textareaField}>
+            <span className={styles.label}>{ts('settings.systemPrompt')}</span>
+            <textarea
+              className={styles.textarea}
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              rows={4}
+            />
+          </label>
+          <div className={styles.toolList}>
+            {toolOptions.map((tool) => {
+              const selected = enabledTools.includes(tool)
+              return (
+                <button
+                  key={tool}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={selected}
+                  className={`${styles.toolChip}${selected ? ` ${styles.toolChipOn}` : ''}`}
+                  onClick={() => toggleTool(tool)}
+                >
+                  {tool}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        <div className={styles.formActions}>
+          <Button
+            size="sm"
+            onClick={handleAdd}
+            disabled={submitting || !isAgentProfileDraftValid({
+              name,
+              kind,
+              systemPrompt,
+              modelProfileId,
+              enabledTools,
+            })}
+          >
+            {ts('settings.addAgent')}
+          </Button>
+        </div>
+        {submitError && (
+          <div className={styles.settingRow}>
+            <p className={styles.formError} role="alert">{submitError}</p>
+          </div>
+        )}
+      </SettingsGroup>
     </section>
   )
 }

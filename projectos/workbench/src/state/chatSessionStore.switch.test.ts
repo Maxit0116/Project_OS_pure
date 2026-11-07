@@ -43,6 +43,7 @@ function clientFor(records: Record<string, ReturnType<typeof record>>, extra: Re
     setLastActiveChatSession: vi.fn(async () => undefined),
     getChatSessionIndex: vi.fn(async () => ({ heads: [], pinnedIds: [], lastActiveId: null })),
     listRunDecisions: vi.fn(async () => []),
+    deleteChatSession: vi.fn(async () => undefined),
     ...extra,
   } as unknown as ProjectOSApi
 }
@@ -121,7 +122,10 @@ describe('leaving a conversation', () => {
     const waiting = { ...staleIntent, id: 'intent_waiting' }
     useWorkbenchStore.setState({
       client: clientFor({
-        chat_waiting: record('chat_waiting', 'change', { pendingIntent: waiting }),
+        chat_waiting: {
+          ...record('chat_waiting', 'change', { pendingIntent: waiting }),
+          messages: [{ id: 'msg_1', role: 'user', content: 'Add a count query', timestamp: now }],
+        },
         chat_approved: record('chat_approved', 'change', { pendingIntent: { ...waiting, status: 'approved' } }),
       }),
     })

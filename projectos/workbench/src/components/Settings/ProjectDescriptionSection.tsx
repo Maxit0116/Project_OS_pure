@@ -3,6 +3,8 @@ import { PROJECT_DESCRIPTION_MAX_CHARACTERS } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
+import SettingsGroup from './SettingsGroup'
+import SettingsRow from './SettingsRow'
 import styles from './SettingsPanel.module.css'
 import {
   normalizedProjectDescriptionDraft,
@@ -42,41 +44,46 @@ export default function ProjectDescriptionSection() {
 
   return (
     <section className={styles.section}>
-      <p className={styles.help}>{ts('settings.projectDescriptionHelp')}</p>
-      <label className={styles.textareaField}>
-        <span className={styles.label}>{ts('settings.projectDescriptionLabel')}</span>
-        <textarea
-          className={styles.textarea}
-          value={draft}
-          rows={7}
-          onChange={(event) => {
-            if ([...event.target.value].length <= PROJECT_DESCRIPTION_MAX_CHARACTERS) {
-              setDraft(event.target.value)
-            }
-          }}
-        />
-      </label>
-      <div className={styles.descriptionMeta}>
-        <span>
-          {ts('settings.projectDescriptionSource', {
-            source: ts(`settings.projectDescriptionSources.${projectDescription.source}`),
-          })}
-        </span>
-        <span>
-          {ts('settings.projectDescriptionCount', {
-            count: characterCount,
-            max: PROJECT_DESCRIPTION_MAX_CHARACTERS,
-          })}
-        </span>
-      </div>
-      <div className={styles.formActions}>
-        <Button
-          onClick={() => void saveProjectDescription(normalizedProjectDescriptionDraft(draft))}
-          disabled={saving || !draft.trim() || unchanged}
+      <SettingsGroup label={ts('settings.projectDescriptionLabel')}>
+        <SettingsRow
+          title={ts('settings.projectDescriptionTitle')}
+          description={ts('settings.projectDescriptionHelp')}
+          stacked
         >
-          {saving ? ts('settings.projectDescriptionSaving') : ts('settings.projectDescriptionSave')}
-        </Button>
-      </div>
+          <textarea
+            className={styles.textarea}
+            value={draft}
+            rows={7}
+            aria-label={ts('settings.projectDescriptionLabel')}
+            onChange={(event) => {
+              if ([...event.target.value].length <= PROJECT_DESCRIPTION_MAX_CHARACTERS) {
+                setDraft(event.target.value)
+              }
+            }}
+          />
+          <div className={styles.descriptionMeta}>
+            <span>
+              {ts('settings.projectDescriptionSource', {
+                source: ts(`settings.projectDescriptionSources.${projectDescription.source}`),
+              })}
+            </span>
+            <span>
+              {ts('settings.projectDescriptionCount', {
+                count: characterCount,
+                max: PROJECT_DESCRIPTION_MAX_CHARACTERS,
+              })}
+            </span>
+          </div>
+          <div className={styles.rowActions}>
+            <Button
+              onClick={() => void saveProjectDescription(normalizedProjectDescriptionDraft(draft))}
+              disabled={saving || !draft.trim() || unchanged}
+            >
+              {saving ? ts('settings.projectDescriptionSaving') : ts('settings.projectDescriptionSave')}
+            </Button>
+          </div>
+        </SettingsRow>
+      </SettingsGroup>
     </section>
   )
 }

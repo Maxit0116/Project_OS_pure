@@ -16,6 +16,8 @@ import {
   RequestIntentService,
   uncoveredFileOwnerIds,
 } from "./request-intent-service.js";
+import { spawnSync } from "node:child_process";
+
 import type { AgentRun } from "../contracts/agent-run.js";
 import {
   ExtractRequestIntentRequestSchema,
@@ -112,6 +114,23 @@ import {
 import { ToolResultSchema, type ToolResult } from "../contracts/tool-result.js";
 import type { AgentRunEvent, AgentTransientTrace } from "../contracts/events.js";
 import {
+  createWorkforceAgent as createWorkforceAgentOnDisk,
+  ensureAgentPoolRun as ensureAgentPoolRunOnDisk,
+  listAgentRunsByDefinition as listAgentRunsByDefinitionOnDisk,
+  listWorkforceAgents as listWorkforceAgentsOnDisk,
+  readAgentDefinition,
+  readAgentPoolRun as readAgentPoolRunOnDisk,
+  safeUpdateIndexFromEvent,
+  setAgentRunAcceptance as setAgentRunAcceptanceOnDisk,
+  updateWorkforceAgent as updateWorkforceAgentOnDisk,
+  upsertAgentDefinition,
+  upsertAgentRunIndexEntry,
+  watermarkFromEvents,
+} from "./agent-pool-index.js";
+import { draftWorkforceAgentFromPrompt } from "./workforce-agent-draft.js";
+import { assembleWorkforceAgentFromPrompt } from "./workforce-agent-assemble.js";
+import { AssembleWorkforceAgentRequestSchema } from "../contracts/agent-assembly.js";
+import {
   LocalContextBundleSchema,
   NodeContextBundleSchema,
   GlobalContextBundleSchema,
@@ -154,6 +173,10 @@ import {
   type LoopExecutionHooks,
 } from "./loop-execution.js";
 import {
+  evaluateTerminalPolicyDecision,
+  isHighRiskTerminalCommand,
+} from "./loop-terminal-action.js";
+import {
   memoryProposalSkipReason,
   memoryProposalSystemPrompt,
   memoryProposalUserPrompt,
@@ -179,11 +202,19 @@ import type {
 } from "../contracts/agent-worktree.js";
 import { filePathsFromContextBundle, projectRuleLoadOptions } from "./harness/rules.js";
 import { loadInstructionMaterials } from "./harness/walk-instructions.js";
+import { loadToolPermissionDocument } from "./harness/permissions.js";
 import {
   assertToolAllowed,
+  readCapabilityContext,
   writeCapabilityContext,
 } from "./harness/tool-policy.js";
 import { applyDiffToToolResult } from "./harness/tool-result.js";
+import type { GroundedAnswerMcpOptions } from "./grounded-answer-service.js";
+import {
+  buildMcpToolCatalog,
+  executeMcpToolCall,
+  listServerToolDescriptors,
+} from "./mcp/index.js";
 import {
   CreatePlanRequestSchema,
   ImplementationPlanSchema,
@@ -200,12 +231,168 @@ import {
   type StartDebugSessionRequest,
   type SubmitDebugReproRequest,
 } from "../contracts/debug-session.js";
-import type {
-  ConnectionTestResult,
-  ModelOption,
-  ProjectOSSettings,
-  SettingsPatch,
+import {
+  McpServerConfigSchema,
+  type ConnectionTestResult,
+  type McpServerConfig,
+  type McpToolDescriptor,
+  type ModelOption,
+  type ProjectOSSettings,
+  type SettingsPatch,
 } from "../contracts/settings.js";
+import { McpSessionManager } from "./mcp/index.js";
+import { GitHubAuthSessionManager } from "./github-auth/session-manager.js";
+import type {
+  AccountProfile,
+  BeginGitHubOAuthResult,
+  GitHubAuthStatus,
+} from "../contracts/github-auth.js";
+import {
+  filterInstallableListings,
+  findCatalogListing,
+  listingToMcpServerConfig,
+  McpCatalogClient,
+  withCatalogReport,
+  withDisabledListing,
+} from "./mcp-catalog/index.js";
+import {
+  filterInstallableSkillListings,
+  findSkillCatalogListing,
+  SkillCatalogClient,
+  withDisabledSkillListing,
+  withSkillCatalogReport,
+} from "./skill-marketplace/index.js";
+import {
+  filterInstallableRulesListings,
+  findRulesCatalogListing,
+  RulesCatalogClient,
+  withDisabledRulesListing,
+  withRulesCatalogReport,
+} from "./rules-marketplace/index.js";
+import {
+  exportRulesPackFromDisk,
+  installProjectRulesPack,
+  listInstalledRulesPackIds as listInstalledRulesPackIdsOnDisk,
+  RulesInstallError,
+  uninstallProjectRulesPack,
+} from "./rules-catalog-service.js";
+import {
+  filterInstallableAgentListings,
+  findAgentCatalogListing,
+  AgentCatalogClient,
+  withDisabledAgentListing,
+  withAgentCatalogReport,
+} from "./agent-marketplace/index.js";
+import {
+  exportWorkforceAgentPack,
+  installAgentFromListing,
+  listInstalledMarketplaceAgentListingIds as listInstalledMarketplaceAgentListingIdsOnDisk,
+  AgentInstallError,
+  uninstallAgentFromListing,
+} from "./agent-catalog-service.js";
+import {
+  filterInstallableWorkflowListings,
+  findWorkflowCatalogListing,
+  WorkflowCatalogClient,
+  withDisabledWorkflowListing,
+  withWorkflowCatalogReport,
+} from "./workflow-marketplace/index.js";
+import {
+  exportWorkflowPackFromDraft,
+  installWorkflowFromListing,
+  listInstalledWorkflowListingIds as listInstalledWorkflowListingIdsOnDisk,
+  listMergedLoopGraphPresets,
+  resolveLoopGraphPreset as resolveLoopGraphPresetOnDisk,
+  uninstallWorkflowFromListing,
+  WorkflowInstallError,
+} from "./workflow-catalog-service.js";
+import {
+  filterInstallableStencilListings,
+  findStencilCatalogListing,
+  StencilCatalogClient,
+  withDisabledStencilListing,
+  withStencilCatalogReport,
+} from "./stencil-marketplace/index.js";
+import {
+  exportStencilPackFromIds,
+  installStencilFromListing,
+  listInstalledStencilListingIds as listInstalledStencilListingIdsOnDisk,
+  listMergedStencilDefinitions as listMergedStencilDefinitionsOnDisk,
+  refreshProjectStencilOverlay,
+  uninstallStencilFromListing,
+  StencilInstallError,
+} from "./stencil-catalog-service.js";
+import {
+  InstallMcpFromCatalogInputSchema,
+  MCP_CATALOG_REPORT_ISSUE_URL,
+  type InstallMcpFromCatalogInput,
+  type McpCatalogView,
+} from "../contracts/mcp-catalog.js";
+import {
+  InstallSkillFromCatalogInputSchema,
+  SKILL_CATALOG_REPORT_ISSUE_URL,
+  UninstallSkillFromCatalogInputSchema,
+  type InstallSkillFromCatalogInput,
+  type SkillCatalogView,
+  type UninstallSkillFromCatalogInput,
+} from "../contracts/skill-marketplace.js";
+import {
+  InstallRulesFromCatalogInputSchema,
+  RULES_CATALOG_REPORT_ISSUE_URL,
+  UninstallRulesFromCatalogInputSchema,
+  type InstallRulesFromCatalogInput,
+  type RulesCatalogView,
+  type UninstallRulesFromCatalogInput,
+} from "../contracts/rules-marketplace.js";
+import {
+  AGENT_CATALOG_REPORT_ISSUE_URL,
+  ExportCapabilityPackInputSchema,
+  InstallAgentFromCatalogInputSchema,
+  InstallAgentFromExportPackInputSchema,
+  InstallRulesFromExportPackInputSchema,
+  UninstallAgentFromCatalogInputSchema,
+  type AgentCatalogView,
+  type ExportCapabilityPackInput,
+  type ExportCapabilityPackResult,
+  type InstallAgentFromCatalogInput,
+  type InstallAgentFromExportPackInput,
+  type InstallRulesFromExportPackInput,
+  type UninstallAgentFromCatalogInput,
+} from "../contracts/agent-marketplace.js";
+import {
+  InstallWorkflowFromCatalogInputSchema,
+  InstallWorkflowFromExportPackInputSchema,
+  UninstallWorkflowFromCatalogInputSchema,
+  WORKFLOW_CATALOG_REPORT_ISSUE_URL,
+  type InstallWorkflowFromCatalogInput,
+  type InstallWorkflowFromExportPackInput,
+  type UninstallWorkflowFromCatalogInput,
+  type WorkflowCatalogView,
+} from "../contracts/workflow-marketplace.js";
+import {
+  InstallStencilFromCatalogInputSchema,
+  InstallStencilFromExportPackInputSchema,
+  UninstallStencilFromCatalogInputSchema,
+  STENCIL_CATALOG_REPORT_ISSUE_URL,
+  type InstallStencilFromCatalogInput,
+  type InstallStencilFromExportPackInput,
+  type UninstallStencilFromCatalogInput,
+  type StencilCatalogView,
+} from "../contracts/stencil-marketplace.js";
+import type { LoopGraphPreset } from "../contracts/loop-presets.js";
+import {
+  getStencilById,
+  type StencilDefinition,
+} from "../contracts/ui-stencil.js";
+import type { AgentDefinition } from "../contracts/agent-pool-trace.js";
+import {
+  InstallFromGitUrlInputSchema,
+  type InstallFromGitUrlInput,
+  type InstallFromGitUrlResult,
+} from "../contracts/marketplace-git-install.js";
+import { installFromGitUrl } from "./marketplace-git-install/index.js";
+import type { SkillDescriptor } from "../contracts/skills.js";
+import { tmpdir } from "node:os";
 import type { ProjectOSProject } from "../contracts/project.js";
 import {
   ProjectDescriptionSchema,
@@ -279,6 +466,7 @@ import {
   type LoadedProjectOSWorkspace,
   ProjectOSWorkspaceStore,
   InMemorySecretStore,
+  createMcpAuthRef,
   type SecretStore,
 } from "../persistence/index.js";
 import {
@@ -315,10 +503,17 @@ import {
 import { DebugHypothesisService } from "./debug-hypothesis-service.js";
 import { LocalContextAssembler } from "./local-context-assembler.js";
 import {
+  applyAlignmentConfirmation,
+  canSkipAlignment,
+  ensureAlignmentOnRefinement,
+} from "./alignment-contract.js";
+import {
+  applyBugAlignmentPatches,
   chooseRootCause,
   createInitialDebugSession,
   debugInstrumentationService,
   buildInstrumentationSpecs,
+  markBugItemFixed,
   mergeInstrumentation,
   findHarnessRecordForSession,
   prepareManualDebugSession,
@@ -326,6 +521,14 @@ import {
   resolveDebugScopeFiles,
   type DebugSessionStoreState,
 } from "./debug-session-service.js";
+import type { ConfirmAlignmentRequest } from "../contracts/alignment-contract.js";
+import {
+  ConfirmAlignmentRequestSchema,
+  ConfirmBugAlignmentRequestSchema,
+  MarkBugFixedRequestSchema,
+  type ConfirmBugAlignmentRequest,
+  type MarkBugFixedRequest,
+} from "../contracts/alignment-contract.js";
 import { getSharedDebugLogServer } from "./debug-log-server.js";
 import { summarizeLocalContext } from "./local-context-summary.js";
 import { resolveAttachments, type AttachmentResolverDeps } from "./attachment-resolver.js";
@@ -335,7 +538,10 @@ import {
 } from "./explicit-context-assembler.js";
 import {
   getProjectSkill,
+  installProjectSkill,
   listProjectSkills,
+  SkillInstallError,
+  uninstallProjectSkill,
 } from "./skill-catalog-service.js";
 import { seedProjectSkills } from "./skill-seed-service.js";
 import {
@@ -408,6 +614,8 @@ export interface ProjectOSLocalApiOptions {
   workspaceTransactionCoordinator?: WorkspaceTransactionCoordinatorDependency;
   dependencyImpactScanner?: DependencyImpactScannerDependency;
   /** Desktop main injects shell.openExternal; tests may omit. */
+  openExternalUrl?: (url: string) => Promise<void>;
+  /** Desktop main injects shell.openExternal; tests may omit. */
   /**
    * Directory for personal agent memory (`<userData>/agent-memory`).
    * Omit in tests that are not exercising memory.
@@ -415,6 +623,39 @@ export interface ProjectOSLocalApiOptions {
   agentMemoryRoot?: string;
   /** Tests use 0. Production waits so an in-progress follow-up is not summarized. */
   memoryProposalDelayMs?: number;
+  /** Tests inject a fake MCP session manager; production creates a real one. */
+  mcpSessionManager?: McpSessionManager;
+  /** Directory for MCP catalog disk cache. Defaults under agentMemoryRoot/auditDirectory/tmpdir. */
+  mcpCatalogCacheRoot?: string;
+  /** Tests inject a fake catalog client. */
+  mcpCatalogClient?: McpCatalogClient;
+  /** Directory for skill catalog disk cache. */
+  skillCatalogCacheRoot?: string;
+  /** Tests inject a fake skill catalog client. */
+  skillCatalogClient?: SkillCatalogClient;
+  /** Directory for rules catalog disk cache. */
+  rulesCatalogCacheRoot?: string;
+  /** Tests inject a fake rules catalog client. */
+  rulesCatalogClient?: RulesCatalogClient;
+  /** Directory for agent catalog disk cache. */
+  agentCatalogCacheRoot?: string;
+  /** Tests inject a fake agent catalog client. */
+  agentCatalogClient?: AgentCatalogClient;
+  /** Directory for workflow catalog disk cache. */
+  workflowCatalogCacheRoot?: string;
+  /** Tests inject a fake workflow catalog client. */
+  workflowCatalogClient?: WorkflowCatalogClient;
+  /** Directory for stencil catalog disk cache. */
+  stencilCatalogCacheRoot?: string;
+  /** Tests inject a fake stencil catalog client. */
+  stencilCatalogClient?: StencilCatalogClient;
+  /**
+   * User-data root for GitHub account profile JSON (not secrets).
+   * Desktop sets this to Electron userData; tests may use a temp dir.
+   */
+  userDataPath?: string;
+  /** Tests inject a fake GitHub auth session manager. */
+  githubAuthSessionManager?: GitHubAuthSessionManager;
 }
 
 export interface VerificationRunnerDependency {
@@ -524,6 +765,8 @@ interface StoredRefinement {
   chatSessionId?: string;
   /** Pins, rules, and the session slot captured when this refinement was stored. */
   frozenDelivery?: FrozenTurnDelivery;
+  /** Specialized workforce agent for this Change turn. */
+  workforceAgentDefinitionId?: string | null;
 }
 
 export interface LocalContextAllowedWriteTarget {
@@ -698,6 +941,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   protected readonly chatTitleService: ChatTitleService;
   protected readonly codeFileUnderstandingService: CodeFileUnderstandingService;
   private readonly groundedAnswerService: GroundedAnswerService;
+  private readonly mcpSessionManager: McpSessionManager;
+  private readonly mcpCatalogClient: McpCatalogClient;
+  private readonly skillCatalogClient: SkillCatalogClient;
+  private readonly rulesCatalogClient: RulesCatalogClient;
+  private readonly agentCatalogClient: AgentCatalogClient;
+  private readonly workflowCatalogClient: WorkflowCatalogClient;
+  private readonly stencilCatalogClient: StencilCatalogClient;
+  private readonly githubAuthSessionManager: GitHubAuthSessionManager;
   private readonly planService: PlanService;
   private readonly intentExtractionService: RequestIntentExtractionService;
   private readonly requestIntentService: RequestIntentService;
@@ -708,10 +959,21 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly auditDirectory: string | undefined;
   private readonly workspaceTransactionCoordinator: WorkspaceTransactionCoordinatorDependency | undefined;
   private readonly dependencyImpactScanner: DependencyImpactScannerDependency | undefined;
+  private readonly openExternalUrl: ((url: string) => Promise<void>) | undefined;
   private readonly agentMemoryRoot: string | undefined;
   private readonly memoryProposalDelayMs: number;
   private readonly memoryProposalTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly orchestrator: AgentOrchestrator;
+  /** Agent Pool index context keyed by runId (definition / pool / session). */
+  private readonly agentPoolRunContextByRunId = new Map<
+    string,
+    {
+      definitionId: string;
+      poolRunId: string;
+      sessionId: string | null;
+      title: string;
+    }
+  >();
   private readonly workspacesByProjectId = new Map<
     string,
     LoadedProjectOSWorkspace
@@ -723,6 +985,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly plansById = new Map<string, ImplementationPlan>();
   private readonly planExecutions = new Map<string, ModelExecutionSnapshot>();
   private readonly debugExecutions = new Map<string, ModelExecutionSnapshot>();
+  private readonly thesisSessionsById = new Map<
+    string,
+    import("../contracts/first-principles.js").FirstPrinciplesSession
+  >();
   private readonly debugSessionsById = new Map<string, DebugSessionStoreState>();
   private readonly activeOrchestratorRuns = new Map<string, ActiveOrchestratorRun>();
   private readonly pendingOrchestratorStarts = new Map<
@@ -777,6 +1043,90 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       this.modelGateway,
     );
     this.groundedAnswerService = new GroundedAnswerService(this.modelGateway);
+    this.mcpSessionManager = options.mcpSessionManager ?? new McpSessionManager();
+    this.mcpCatalogClient =
+      options.mcpCatalogClient ??
+      new McpCatalogClient({
+        cacheRoot:
+          options.mcpCatalogCacheRoot ??
+          options.agentMemoryRoot ??
+          options.auditDirectory ??
+          join(tmpdir(), "projectos-mcp-catalog"),
+      });
+    this.skillCatalogClient =
+      options.skillCatalogClient ??
+      new SkillCatalogClient({
+        cacheRoot:
+          options.skillCatalogCacheRoot ??
+          options.mcpCatalogCacheRoot ??
+          options.agentMemoryRoot ??
+          options.auditDirectory ??
+          join(tmpdir(), "projectos-skill-catalog"),
+      });
+    this.rulesCatalogClient =
+      options.rulesCatalogClient ??
+      new RulesCatalogClient({
+        cacheRoot:
+          options.rulesCatalogCacheRoot ??
+          options.skillCatalogCacheRoot ??
+          options.mcpCatalogCacheRoot ??
+          options.agentMemoryRoot ??
+          options.auditDirectory ??
+          join(tmpdir(), "projectos-rules-catalog"),
+      });
+    this.agentCatalogClient =
+      options.agentCatalogClient ??
+      new AgentCatalogClient({
+        cacheRoot:
+          options.agentCatalogCacheRoot ??
+          options.rulesCatalogCacheRoot ??
+          options.skillCatalogCacheRoot ??
+          options.mcpCatalogCacheRoot ??
+          options.agentMemoryRoot ??
+          options.auditDirectory ??
+          join(tmpdir(), "projectos-agent-catalog"),
+      });
+    this.workflowCatalogClient =
+      options.workflowCatalogClient ??
+      new WorkflowCatalogClient({
+        cacheRoot:
+          options.workflowCatalogCacheRoot ??
+          options.agentCatalogCacheRoot ??
+          options.rulesCatalogCacheRoot ??
+          options.skillCatalogCacheRoot ??
+          options.mcpCatalogCacheRoot ??
+          options.agentMemoryRoot ??
+          options.auditDirectory ??
+          join(tmpdir(), "projectos-workflow-catalog"),
+      });
+    this.stencilCatalogClient =
+      options.stencilCatalogClient ??
+      new StencilCatalogClient({
+        cacheRoot:
+          options.stencilCatalogCacheRoot ??
+          options.workflowCatalogCacheRoot ??
+          options.agentCatalogCacheRoot ??
+          options.rulesCatalogCacheRoot ??
+          options.skillCatalogCacheRoot ??
+          options.mcpCatalogCacheRoot ??
+          options.agentMemoryRoot ??
+          options.auditDirectory ??
+          join(tmpdir(), "projectos-stencil-catalog"),
+      });
+    const githubUserDataPath =
+      options.userDataPath ??
+      options.agentMemoryRoot ??
+      options.auditDirectory ??
+      join(tmpdir(), "projectos-github-auth");
+    this.githubAuthSessionManager =
+      options.githubAuthSessionManager ??
+      new GitHubAuthSessionManager({
+        secretStore: this.secretStore,
+        userDataPath: githubUserDataPath,
+        ...(options.openExternalUrl
+          ? { openExternalUrl: options.openExternalUrl }
+          : {}),
+      });
     this.planService = new PlanService(this.modelGateway);
     this.intentExtractionService = new RequestIntentExtractionService(this.modelGateway);
     this.requestIntentService = new RequestIntentService();
@@ -798,6 +1148,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     this.auditDirectory = options.auditDirectory;
     this.workspaceTransactionCoordinator = options.workspaceTransactionCoordinator;
     this.dependencyImpactScanner = options.dependencyImpactScanner;
+    this.openExternalUrl = options.openExternalUrl;
     this.agentMemoryRoot = options.agentMemoryRoot;
     this.memoryProposalDelayMs = options.memoryProposalDelayMs ?? 1_200;
     if (options.writeTransactionRuntime) {
@@ -898,6 +1249,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       onRootRunCompleted: (workspace, snapshot) => {
         this.scheduleMemoryProposal(workspace, snapshot);
       },
+      onEventPersisted: (workspace, event, run) => {
+        const context = this.agentPoolRunContextByRunId.get(run.runId);
+        if (!context) return;
+        safeUpdateIndexFromEvent(workspace.projectOSRoot, event, run, context);
+      },
       ...(options.runEventPersistence
         ? { eventPersistence: options.runEventPersistence }
         : {}),
@@ -946,6 +1302,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const projectId = workspace.project.projectId;
     if (!workspace.workspaceRoot.startsWith("mock://")) {
       seedProjectSkills(workspace.workspaceRoot);
+      refreshProjectStencilOverlay(workspace.workspaceRoot);
       const recoveredRuns = reconcileInterruptedAgentRuns(workspace.projectOSRoot);
       for (const note of recoveredRuns) {
         if (!note.corruptLines?.length && !note.snapshotUpdateFailed) continue;
@@ -1473,6 +1830,502 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return listWorkspaceDirectoryEntries(workspace.workspaceRoot, relativePath);
   }
 
+  async getWorkspaceGitStatus(
+    projectId: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitStatus> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      readGitRepositoryStatus,
+      readGitRemoteUrl,
+      readGitDefaultBranch,
+    } = await import("./git-context-service.js");
+    const status = readGitRepositoryStatus(workspace.workspaceRoot);
+    const remoteUrl = readGitRemoteUrl(workspace.workspaceRoot);
+    const defaultBranch = readGitDefaultBranch(workspace.workspaceRoot);
+    return {
+      branch: status.branch,
+      dirty: status.dirty,
+      ...(status.ahead !== undefined ? { ahead: status.ahead } : {}),
+      ...(status.behind !== undefined ? { behind: status.behind } : {}),
+      ...(remoteUrl ? { remoteUrl } : {}),
+      ...(defaultBranch ? { defaultBranch } : {}),
+      ...(status.error ? { error: status.error } : {}),
+    };
+  }
+
+  private async resolveGithubAccessToken(): Promise<string | undefined> {
+    this.syncGitHubAuthMockMode();
+    const accessToken = await this.githubAuthSessionManager.getAccessToken();
+    if (!accessToken || accessToken === "mock-github-token") return undefined;
+    return accessToken;
+  }
+
+  async listWorkspaceGitBranches(
+    projectId: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitBranchList> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      listGitBranches,
+      fetchGitRemote,
+      mergeRemoteApiBranches,
+      listGithubRemoteBranchNames,
+    } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    // Soft-fetch so Graph / Locator see origin branches that exist on GitHub
+    // but were never pulled into refs/remotes (including single-branch clones).
+    fetchGitRemote(workspace.workspaceRoot, {
+      ...(accessToken ? { accessToken } : {}),
+    });
+    let listed = listGitBranches(workspace.workspaceRoot);
+    if (accessToken) {
+      const remote = await listGithubRemoteBranchNames(workspace.workspaceRoot, {
+        accessToken,
+      });
+      if (remote.available) {
+        listed = mergeRemoteApiBranches(listed, remote.branches);
+      }
+    }
+    return {
+      defaultBranch: listed.defaultBranch,
+      currentBranch: listed.currentBranch,
+      branches: listed.branches,
+    };
+  }
+
+  async listWorkspaceGitCommits(
+    projectId: string,
+    input: {
+      limit?: number;
+      tips?: string[];
+      sinceDays?: number;
+      range?: { base: string; head: string };
+      sinceForkBase?: string;
+      firstParentOnly?: boolean;
+    } = {},
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitCommitList> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listGitCommits, DEFAULT_GIT_COMMIT_LIST_LIMIT } = await import(
+      "./git-context-service.js"
+    );
+    const listed = listGitCommits(workspace.workspaceRoot, {
+      limit: input.limit ?? DEFAULT_GIT_COMMIT_LIST_LIMIT,
+      tips: input.tips,
+      sinceDays: input.sinceDays,
+      range: input.range,
+      sinceForkBase: input.sinceForkBase,
+      firstParentOnly: input.firstParentOnly,
+    });
+    return {
+      commits: listed.commits,
+      truncated: listed.truncated,
+      tips: listed.tips,
+    };
+  }
+
+  async getWorkspaceGitCommit(
+    projectId: string,
+    sha: string,
+    input: { includePatch?: boolean } = {},
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitCommitDetail> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getGitCommitShow } = await import("./git-context-service.js");
+    const detail = getGitCommitShow(workspace.workspaceRoot, sha, {
+      includePatch: input.includePatch,
+    });
+    return {
+      ok: detail.ok,
+      message: detail.message,
+      ...(detail.commit ? { commit: detail.commit } : {}),
+      ...(detail.files ? { files: detail.files } : {}),
+      ...(detail.patch !== undefined ? { patch: detail.patch } : {}),
+      ...(detail.patchTruncated !== undefined
+        ? { patchTruncated: detail.patchTruncated }
+        : {}),
+    };
+  }
+
+  async getGithubGraphStore(
+    projectId: string,
+  ): Promise<import("../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { loadGithubGraphStore } = await import("./github-graph-store.js");
+    return loadGithubGraphStore(workspace.workspaceRoot);
+  }
+
+  async upsertGithubGraphFeature(
+    projectId: string,
+    feature: import("../contracts/github-domain.js").GithubFeature,
+  ): Promise<import("../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { upsertGithubGraphFeature } = await import("./github-graph-store.js");
+    return upsertGithubGraphFeature(workspace.workspaceRoot, feature);
+  }
+
+  async deleteGithubGraphFeature(
+    projectId: string,
+    featureId: string,
+  ): Promise<import("../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { deleteGithubGraphFeature } = await import("./github-graph-store.js");
+    return deleteGithubGraphFeature(workspace.workspaceRoot, featureId);
+  }
+
+  async upsertGithubGraphRelation(
+    projectId: string,
+    relation: import("../contracts/github-domain.js").GithubRelation,
+  ): Promise<import("../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { upsertGithubGraphRelation } = await import("./github-graph-store.js");
+    return upsertGithubGraphRelation(workspace.workspaceRoot, relation);
+  }
+
+  async removeGithubGraphRelation(
+    projectId: string,
+    relationId: string,
+  ): Promise<import("../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { removeGithubGraphRelation } = await import("./github-graph-store.js");
+    return removeGithubGraphRelation(workspace.workspaceRoot, relationId);
+  }
+
+  async checkoutWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { checkoutGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = checkoutGitBranch(workspace.workspaceRoot, branch, {
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async createWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      from?: string;
+      checkout?: boolean;
+      push?: boolean;
+    },
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { createGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = createGitBranch(workspace.workspaceRoot, input.name, {
+      from: input.from,
+      checkout: input.checkout,
+      // Graph / hub create should land on GitHub unless explicitly local-only.
+      push: input.push !== false,
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async renameWorkspaceBranch(
+    projectId: string,
+    input: {
+      from: string;
+      to: string;
+      push?: boolean;
+      deleteRemoteOld?: boolean;
+    },
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { renameGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = renameGitBranch(workspace.workspaceRoot, input.from, input.to, {
+      push: input.push !== false,
+      deleteRemoteOld: input.deleteRemoteOld !== false,
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async deleteWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      remote?: boolean;
+      force?: boolean;
+    },
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { deleteGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = deleteGitBranch(workspace.workspaceRoot, input.name, {
+      remote: input.remote !== false,
+      force: input.force !== false,
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async rollbackWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      to?: string;
+      mode?: "hard" | "mixed";
+      push?: boolean;
+    },
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { rollbackGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = rollbackGitBranch(workspace.workspaceRoot, input.name, {
+      to: input.to,
+      mode: input.mode === "mixed" ? "mixed" : "hard",
+      push: input.push !== false,
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async fetchWorkspaceGit(
+    projectId: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { fetchGitRemote } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = fetchGitRemote(workspace.workspaceRoot, {
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return { ok: result.ok, message: result.message };
+  }
+
+  async pushWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { pushGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = pushGitBranch(workspace.workspaceRoot, branch, {
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async pullWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { pullGitBranch } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = pullGitBranch(workspace.workspaceRoot, branch, {
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async revertWorkspaceCommit(
+    projectId: string,
+    input: { sha: string; push?: boolean },
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { revertGitCommit } = await import("./git-context-service.js");
+    const accessToken = await this.resolveGithubAccessToken();
+    const result = revertGitCommit(workspace.workspaceRoot, input.sha, {
+      push: input.push !== false,
+      ...(accessToken ? { accessToken } : {}),
+    });
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.branch !== undefined ? { branch: result.branch } : {}),
+    };
+  }
+
+  async listWorkspacePullRequests(
+    projectId: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitPullRequestList> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listGithubPullRequests } = await import("./git-context-service.js");
+    const token = await this.resolveGithubAccessToken();
+    return listGithubPullRequests(workspace.workspaceRoot, {
+      ...(token ? { accessToken: token } : {}),
+    });
+  }
+
+  async createWorkspacePullRequest(
+    projectId: string,
+    input: { title: string; head?: string; base?: string; body?: string },
+  ): Promise<{
+    ok: boolean;
+    url?: string;
+    number?: number;
+    message: string;
+  }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { createGithubPullRequest } = await import("./git-context-service.js");
+    const token = await this.resolveGithubAccessToken();
+    return createGithubPullRequest(workspace.workspaceRoot, input, {
+      ...(token ? { accessToken: token } : {}),
+      pushHead: true,
+    });
+  }
+
+  async mergeWorkspacePullRequest(
+    projectId: string,
+    input: {
+      number: number;
+      mergeMethod?: "merge" | "squash" | "rebase";
+    },
+  ): Promise<
+    import("../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { mergeGithubPullRequest } = await import("./git-context-service.js");
+    const token = await this.resolveGithubAccessToken();
+    const result = await mergeGithubPullRequest(
+      workspace.workspaceRoot,
+      input.number,
+      {
+        ...(token ? { accessToken: token } : {}),
+        mergeMethod: input.mergeMethod ?? "squash",
+      },
+    );
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.sha ? { sha: result.sha } : {}),
+      number: input.number,
+    };
+  }
+
+  async closeWorkspacePullRequest(
+    projectId: string,
+    input: { number: number },
+  ): Promise<
+    import("../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { closeGithubPullRequest } = await import("./git-context-service.js");
+    const token = await this.resolveGithubAccessToken();
+    const result = await closeGithubPullRequest(
+      workspace.workspaceRoot,
+      input.number,
+      {
+        ...(token ? { accessToken: token } : {}),
+      },
+    );
+    return {
+      ok: result.ok,
+      message: result.message,
+      ...(result.url ? { url: result.url } : {}),
+      number: input.number,
+    };
+  }
+
+  async listWorkspaceIssues(
+    projectId: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitIssueList> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listGithubIssues } = await import("./git-context-service.js");
+    const token = await this.resolveGithubAccessToken();
+    return listGithubIssues(workspace.workspaceRoot, {
+      ...(token ? { accessToken: token } : {}),
+    });
+  }
+
+  async createWorkspaceIssue(
+    projectId: string,
+    input: { title: string; body?: string },
+  ): Promise<
+    import("../contracts/workspace-git.js").WorkspaceGitIssueMutationResult
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { createGithubIssue } = await import("./git-context-service.js");
+    const token = await this.resolveGithubAccessToken();
+    return createGithubIssue(workspace.workspaceRoot, input, {
+      ...(token ? { accessToken: token } : {}),
+    });
+  }
+
+  async listWorkspaceCommitCheckRuns(
+    projectId: string,
+    sha: string,
+  ): Promise<import("../contracts/workspace-git.js").WorkspaceGitCheckRunList> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listGithubCommitCheckRuns } = await import(
+      "./git-context-service.js"
+    );
+    const token = await this.resolveGithubAccessToken();
+    return listGithubCommitCheckRuns(workspace.workspaceRoot, sha, {
+      ...(token ? { accessToken: token } : {}),
+    });
+  }
+
+  private syncGitHubAuthMockMode(): void {
+    const workspace = [...this.workspacesByProjectId.values()][0];
+    const presentationMode = workspace
+      ? this.settingsService.getSettings(workspace).presentationMode
+      : false;
+    this.githubAuthSessionManager.setMockMode(Boolean(presentationMode));
+  }
+
+  async getGitHubAuthStatus(): Promise<GitHubAuthStatus> {
+    this.syncGitHubAuthMockMode();
+    return this.githubAuthSessionManager.getStatus();
+  }
+
+  async beginGitHubOAuth(): Promise<BeginGitHubOAuthResult> {
+    this.syncGitHubAuthMockMode();
+    return this.githubAuthSessionManager.beginOAuth();
+  }
+
+  async cancelGitHubOAuth(): Promise<GitHubAuthStatus> {
+    return this.githubAuthSessionManager.cancelOAuth();
+  }
+
+  async disconnectGitHub(): Promise<GitHubAuthStatus> {
+    return this.githubAuthSessionManager.disconnect();
+  }
+
+  async getAccountProfile(): Promise<AccountProfile | null> {
+    return this.githubAuthSessionManager.getAccountProfile();
+  }
+
+  async saveGitHubOAuthClientId(clientId: string): Promise<GitHubAuthStatus> {
+    return this.githubAuthSessionManager.saveClientId(clientId);
+  }
+
+  async importGitHubAuthFromGhCli(): Promise<BeginGitHubOAuthResult> {
+    this.syncGitHubAuthMockMode();
+    return this.githubAuthSessionManager.importFromGhCli();
+  }
+
   async getNodeContext(
     projectId: string,
     nodeId: string,
@@ -1953,6 +2806,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ...(parsedRequest.attachments !== undefined ? { attachments: parsedRequest.attachments } : {}),
       }),
     );
+    const reminderCommitments = await this.loadReminderCommitmentsMarkdown(
+      workspace.workspaceRoot,
+    );
     const assembled = assembleRunContext({
       harness: {
         baseSystemPrompt: "",
@@ -1960,6 +2816,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         rulesMarkdown: materials.rules.markdown,
         ...(materials.walk.markdown ? { walkMarkdown: materials.walk.markdown } : {}),
         ...(memoryTurn.index ? { memoryIndexMarkdown: memoryTurn.index } : {}),
+        ...(reminderCommitments ? { reminderCommitmentsMarkdown: reminderCommitments } : {}),
         ...(modelDelta ? { modelDelta } : {}),
       },
       bundle: augmented.bundle,
@@ -1979,6 +2836,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ],
     });
     const instructionAppendix = assembled.instructions;
+    const mcp = await this.buildAskMcpOptions(workspace);
     const result = await this.groundedAnswerService.answer({
       projectId: parsedRequest.projectId,
       question: parsedRequest.question,
@@ -1993,7 +2851,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ...(parsedRequest.images?.length
         ? { images: parsedRequest.images }
         : {}),
+      ...(mcp ? { mcp } : {}),
     });
+    const usedMcp = (result.mcpToolCalls?.length ?? 0) > 0;
     const contextSummary = summarizeLocalContext(augmented.bundle);
     const parsed = AgentAnswerResultSchema.parse({
       id: `answer_${globalThis.crypto.randomUUID()}`,
@@ -2008,6 +2868,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         bundleHash: augmented.attachmentSummary.bundleHash,
       },
       ...(result.reasoning ? { reasoning: result.reasoning } : {}),
+      ...(result.mcpToolCalls?.length
+        ? { mcpToolCalls: result.mcpToolCalls }
+        : {}),
       ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
       ...(exploration ? { explorationTrace: exploration.trace } : {}),
       ...(retrieval.summary.searched ? { retrievalSummary: retrieval.summary } : {}),
@@ -2039,7 +2902,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         runStatus: "complete",
         userPrompt: parsedRequest.question,
         understood: "",
-        usedMcp: false,
+        usedMcp,
         verificationFailed: false,
         rolledBack: false,
       });
@@ -2320,6 +3183,72 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
       return this.requestIntentService.normalizeDraft(workspace.graph, draft);
     });
+  }
+
+  private async buildAskMcpOptions(
+    workspace: LoadedProjectOSWorkspace,
+  ): Promise<GroundedAnswerMcpOptions | undefined> {
+    const servers = (workspace.settings.mcpServers ?? []).filter((server) => server.enabled);
+    if (servers.length === 0) return undefined;
+    const permissionRules = loadToolPermissionDocument(workspace.workspaceRoot).rules;
+    const toolsByServerId = new Map<string, Awaited<ReturnType<typeof listServerToolDescriptors>>>();
+    for (const server of servers) {
+      try {
+        const client = await this.mcpSessionManager.getClient({
+          projectId: workspace.project.projectId,
+          config: server,
+          workspaceRoot: workspace.workspaceRoot,
+          secretStore: this.secretStore,
+        });
+        toolsByServerId.set(server.id, await listServerToolDescriptors(client));
+      } catch {
+        // Honest: a failed server simply contributes no tools for this Ask turn.
+      }
+    }
+    const catalog = buildMcpToolCatalog({
+      servers,
+      toolsByServerId,
+      permissionRules,
+    });
+    if (catalog.length === 0) return undefined;
+    const serverById = new Map(servers.map((server) => [server.id, server]));
+    return {
+      tools: catalog.map((entry) => entry.modelTool),
+      toolPolicy: {
+        context: readCapabilityContext({
+          mode: "ask",
+          allowedReadPaths: [],
+        }),
+        rules: permissionRules,
+        workspaceRoot: workspace.workspaceRoot,
+      },
+      executeTool: async (call, signal) => {
+        const listed = catalog.find((entry) => entry.qualifiedName === call.name);
+        const serverId = listed?.serverId;
+        if (!serverId || !serverById.has(serverId)) {
+          return {
+            isError: true,
+            content: `MCP tool '${call.name}' is not in the Ask catalog`,
+          };
+        }
+        return executeMcpToolCall({
+          call,
+          signal,
+          getClient: async (id) => {
+            const config = serverById.get(id);
+            if (!config) {
+              throw new Error(`MCP server '${id}' is not configured`);
+            }
+            return this.mcpSessionManager.getClient({
+              projectId: workspace.project.projectId,
+              config,
+              workspaceRoot: workspace.workspaceRoot,
+              secretStore: this.secretStore,
+            });
+          },
+        });
+      },
+    };
   }
 
   async listSkills(projectId: string): Promise<ListSkillsResult> {
@@ -2688,12 +3617,18 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ...(parsedRequest.attachments !== undefined ? { attachments: parsedRequest.attachments } : {}),
       }),
     );
+    const planReminderCommitments = await this.loadReminderCommitmentsMarkdown(
+      workspace.workspaceRoot,
+    );
     const planAssembly = assembleRunContext({
       harness: {
         baseSystemPrompt: "",
         mode: "plan",
         rulesMarkdown: planMaterials.rules.markdown,
         ...(planMaterials.walk.markdown ? { walkMarkdown: planMaterials.walk.markdown } : {}),
+        ...(planReminderCommitments
+          ? { reminderCommitmentsMarkdown: planReminderCommitments }
+          : {}),
       },
       bundle: augmented.bundle,
       pinsMarkdown: augmented.supplementalMarkdown,
@@ -2999,7 +3934,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       harnessRecord,
       parsedRequest.scope.kind === "file" ? parsedRequest.scope.selectedFilePath : undefined,
     );
-    if (!harnessRecord) {
+    if (!harnessRecord && session.phase !== "align") {
       session = prepareManualDebugSession(session, scopeFiles);
       const profile = modelExecution?.profile;
       if (profile) {
@@ -3249,6 +4184,122 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     this.persistDebugSession(workspace, stored.session);
   }
 
+  async confirmBugAlignment(
+    request: ConfirmBugAlignmentRequest,
+  ): Promise<DebugSession> {
+    const parsed = ConfirmBugAlignmentRequestSchema.parse(request);
+    const stored = this.requireDebugSession(parsed.sessionId);
+    const workspace = this.requireLoadedWorkspace(stored.session.projectId);
+    let session: DebugSession;
+    try {
+      session = applyBugAlignmentPatches(stored.session, parsed.bugs);
+    } catch (error) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        error instanceof Error ? error.message : "Bug alignment failed",
+      );
+    }
+
+    const scopeFiles = resolveDebugScopeFiles(
+      session.scope,
+      null,
+      session.scope.kind === "file" ? session.scope.selectedFilePath : undefined,
+    );
+    session = prepareManualDebugSession(session, scopeFiles);
+    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    if (profile) {
+      try {
+        const { localContext } = await this.resolveConversationContext(
+          session.projectId,
+          session.scope,
+          session.bugDescription,
+        );
+        const exploration = exploreForAskQuestion(
+          workspace,
+          session.bugDescription,
+          {
+            allowedReadPaths: localContext.allowedReadPaths,
+            maxRounds: 2,
+            maxReads: 3,
+          },
+        );
+        const hypotheses = await this.debugHypothesisService.generateHypotheses({
+          projectId: session.projectId,
+          bugDescription: session.bugDescription,
+          localContext,
+          profile,
+          thinkingDepth: workspace.settings.execution.thinkingDepth,
+          supplementalMarkdown: exploration.supplementalMarkdown,
+        });
+        session = {
+          ...session,
+          hypotheses,
+          ...(exploration.trace.rounds.length > 0
+            ? { explorationTrace: exploration.trace }
+            : {}),
+          updatedAt: new Date().toISOString(),
+        };
+      } catch (error) {
+        console.error("[projectos] debug hypothesis generation failed", error);
+      }
+    }
+
+    if (session.phase === "instrument" && scopeFiles.length > 0) {
+      const specs = profile
+        ? await this.debugHypothesisService.proposeInstrumentationSpecs({
+            projectId: session.projectId,
+            session,
+            scopeFiles,
+            workspaceRoot: workspace.workspaceRoot,
+            profile,
+            thinkingDepth: workspace.settings.execution.thinkingDepth,
+          })
+        : buildInstrumentationSpecs(session, scopeFiles);
+      const applied = debugInstrumentationService.apply({
+        workspaceRoot: workspace.workspaceRoot,
+        sessionId: session.sessionId,
+        debugLogPort: session.debugLogPort ?? (await getSharedDebugLogServer()).getPort(),
+        specs,
+      });
+      session = {
+        ...session,
+        instrumentation: mergeInstrumentation([], applied.instrumentation),
+        phase: "reproduce",
+        updatedAt: new Date().toISOString(),
+      };
+      stored.backupByFile = applied.backupByFile;
+    }
+
+    stored.session = session;
+    this.persistDebugSession(workspace, session);
+    return DebugSessionSchema.parse(session);
+  }
+
+  async markBugFixed(request: MarkBugFixedRequest): Promise<DebugSession> {
+    const parsed = MarkBugFixedRequestSchema.parse(request);
+    const stored = this.requireDebugSession(parsed.sessionId);
+    const workspace = this.requireLoadedWorkspace(stored.session.projectId);
+    let session = markBugItemFixed(stored.session, parsed.bugId);
+    if (session.phase === "complete") {
+      const logServer = await getSharedDebugLogServer();
+      session = debugInstrumentationService.restoreFromSession(
+        workspace.workspaceRoot,
+        session,
+        stored.backupByFile,
+      );
+      session = {
+        ...session,
+        phase: "complete",
+        updatedAt: new Date().toISOString(),
+      };
+      stored.backupByFile.clear();
+      logServer.clearSession(parsed.sessionId);
+    }
+    stored.session = session;
+    this.persistDebugSession(workspace, session);
+    return DebugSessionSchema.parse(session);
+  }
+
   async getDebugLogPort(): Promise<number> {
     const logServer = await getSharedDebugLogServer();
     return logServer.getPort();
@@ -3299,11 +4350,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             supplementalMarkdown,
             knownNodeIds: new Set(workspace.graph.nodes.map((node) => node.id)),
           });
-          const refinement: PromptRefinement = {
-            ...refined,
-            executionPolicy: workspace.settings.execution.changeExecutionPolicy,
-            ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
-          };
+          const refinement: PromptRefinement = ensureAlignmentOnRefinement(
+            {
+              ...refined,
+              executionPolicy: workspace.settings.execution.changeExecutionPolicy,
+              ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
+            },
+            request.rawPrompt,
+          );
           await this.storeRefinement(
             request,
             refinement,
@@ -3332,16 +4386,19 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const baseRefinement =
       registry?.findPromptRefinement(request) ??
       createGenericPromptRefinement(request);
-    const refinement: PromptRefinement = modelFallback
-      ? {
-          ...baseRefinement,
-          fallback: modelFallback,
-          ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
-        }
-      : {
-          ...baseRefinement,
-          ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
-        };
+    const refinement: PromptRefinement = ensureAlignmentOnRefinement(
+      modelFallback
+        ? {
+            ...baseRefinement,
+            fallback: modelFallback,
+            ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
+          }
+        : {
+            ...baseRefinement,
+            ...(memoryTurn.notice ? { memoryWrite: memoryTurn.notice } : {}),
+          },
+      request.rawPrompt,
+    );
     await this.storeRefinement(
       request,
       refinement,
@@ -3350,6 +4407,33 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       route.forceFixture ? null : selectedExecution ?? null,
     );
     return refinement;
+  }
+
+  async confirmAlignment(request: ConfirmAlignmentRequest): Promise<PromptRefinement> {
+    const parsed = ConfirmAlignmentRequestSchema.parse(request);
+    const stored = this.refinementsById.get(parsed.refinementId);
+    if (!stored) {
+      throw new ProjectOSError(
+        "refinement_not_found",
+        `No refinement found for id ${parsed.refinementId}`,
+      );
+    }
+    try {
+      const confirmed = applyAlignmentConfirmation(stored.refinement, parsed);
+      stored.refinement = confirmed;
+      this.refinementsById.set(parsed.refinementId, stored);
+      return cloneJson(confirmed);
+    } catch (error) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        error instanceof Error ? error.message : "Alignment confirmation failed",
+      );
+    }
+  }
+
+  /** True when automatic execution may skip the Alignment Card. */
+  alignmentAllowsAutomaticSkip(refinement: PromptRefinement): boolean {
+    return canSkipAlignment(refinement);
   }
 
   async confirmExecution(refinementId: string): Promise<AgentRun> {
@@ -3563,6 +4647,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
                   : {}),
                 ...(stored.rawPrompt ? { userPrompt: stored.rawPrompt } : {}),
                 ...(stored.frozenDelivery ? { deliveredContext: stored.frozenDelivery } : {}),
+                ...this.resolveWorkforceRunOptions(
+                  projectWorkspace,
+                  stored.workforceAgentDefinitionId,
+                ),
               },
             );
             if (stored.approvedIntent) {
@@ -3604,6 +4692,61 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           });
           if (refinement.sourcePlanId) {
             this.updatePlanBuildStatus(projectWorkspace, refinement.sourcePlanId, "building");
+          }
+          try {
+            const sessionId = stored.chatSessionId ?? null;
+            const workforceId = stored.workforceAgentDefinitionId?.trim() || null;
+            const workforceDef = workforceId
+              ? readAgentDefinition(projectWorkspace.projectOSRoot, workforceId)
+              : null;
+            const definitionId =
+              workforceDef && (workforceDef.config.kind ?? "pool_lane") === "workforce"
+                ? workforceDef.definitionId
+                : sessionId
+                  ? `def_root_${sessionId}`
+                  : `def_root_${projectWorkspace.project.projectId}`;
+            const pool = ensureAgentPoolRunOnDisk({
+              projectOSRoot: projectWorkspace.projectOSRoot,
+              projectId: projectWorkspace.project.projectId,
+              rootRunId: runState.run.runId,
+              sessionId,
+              triggerSource: "chat",
+            });
+            const title =
+              workforceDef?.config.displayName ||
+              refinement.understood?.trim().slice(0, 80) ||
+              runState.run.runId;
+            if (!workforceDef) {
+              upsertAgentDefinition(projectWorkspace.projectOSRoot, {
+                definitionId,
+                projectId: projectWorkspace.project.projectId,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                config: {
+                  displayName: title,
+                },
+              });
+            }
+            this.bindAgentPoolRunContext(runState.run.runId, {
+              definitionId,
+              poolRunId: pool.poolRunId,
+              sessionId,
+              title,
+            });
+            upsertAgentRunIndexEntry(projectWorkspace.projectOSRoot, {
+              runId: runState.run.runId,
+              definitionId,
+              poolRunId: pool.poolRunId,
+              rootRunId: runState.run.rootRunId ?? runState.run.runId,
+              parentRunId: runState.run.parentRunId ?? null,
+              sessionId,
+              status: runState.run.status,
+              startedAt: runState.run.startedAt,
+              title,
+              acceptance: "none",
+            });
+          } catch (error) {
+            console.error("[projectos] chat agent pool bind failed", error);
           }
           this.maybeStartPendingOrchestratorRun(runState.run.runId);
           return {
@@ -3808,6 +4951,315 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       "run_not_found",
       `Agent run '${runId}' has not been registered`,
     );
+  }
+
+  async getAgentRunEventSnapshot(
+    runId: string,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentRunEventSnapshot> {
+    const events = await this.getAgentRunEvents(runId);
+    const mark = watermarkFromEvents(events);
+    return {
+      runId,
+      events,
+      watermark: mark.watermark,
+      watermarkEventId: mark.watermarkEventId,
+    };
+  }
+
+  async ensureAgentPoolRun(
+    request: import("../contracts/agent-pool-trace.js").EnsureAgentPoolRunRequest,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentPoolRun> {
+    const workspace = this.requireActiveWorkspace();
+    const pool = ensureAgentPoolRunOnDisk({
+      projectOSRoot: workspace.projectOSRoot,
+      projectId: workspace.project.projectId,
+      rootRunId: request.rootRunId,
+      sessionId: request.sessionId,
+      loopInstanceId: request.loopInstanceId,
+      loopSpecId: request.loopSpecId,
+      triggerSource: request.triggerSource,
+      existingPoolRunId: request.existingPoolRunId,
+    });
+    if (request.definitionId) {
+      const now = new Date().toISOString();
+      upsertAgentDefinition(workspace.projectOSRoot, {
+        definitionId: request.definitionId,
+        projectId: workspace.project.projectId,
+        createdAt: now,
+        updatedAt: now,
+        config: {
+          displayName: request.title ?? request.definitionId,
+        },
+      });
+    }
+    if (request.rootRunId) {
+      const definitionId =
+        request.definitionId ?? `def_root_${request.sessionId ?? "workspace"}`;
+      this.bindAgentPoolRunContext(request.rootRunId, {
+        definitionId,
+        poolRunId: pool.poolRunId,
+        sessionId: request.sessionId ?? null,
+        title: request.title ?? request.rootRunId,
+      });
+      try {
+        const run = await this.getAgentRun(request.rootRunId);
+        upsertAgentRunIndexEntry(workspace.projectOSRoot, {
+          runId: run.runId,
+          definitionId,
+          poolRunId: pool.poolRunId,
+          rootRunId: run.rootRunId ?? run.runId,
+          parentRunId: run.parentRunId ?? null,
+          sessionId: request.sessionId ?? null,
+          loopInstanceId: request.loopInstanceId ?? null,
+          status: run.status,
+          startedAt: run.startedAt,
+          ...(run.completedAt ? { endedAt: run.completedAt } : {}),
+          title: request.title ?? run.runId,
+          acceptance:
+            run.status === "awaiting_review" || run.status === "complete"
+              ? "pending"
+              : "none",
+        });
+      } catch {
+        // Run may not exist yet — context bind is enough for later emits.
+      }
+    }
+    return pool;
+  }
+
+  async getAgentPoolRun(
+    poolRunId: string,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentPoolRun> {
+    const workspace = this.requireActiveWorkspace();
+    const pool = readAgentPoolRunOnDisk(workspace.projectOSRoot, poolRunId);
+    if (!pool) {
+      throw new ProjectOSError(
+        "run_not_found",
+        `Agent pool run '${poolRunId}' was not found`,
+      );
+    }
+    return pool;
+  }
+
+  async listAgentRunsByDefinition(
+    request: import("../contracts/agent-pool-trace.js").ListAgentRunsByDefinitionRequest,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentRunIndexEntry[]> {
+    const workspace = this.requireActiveWorkspace();
+    return listAgentRunsByDefinitionOnDisk(workspace.projectOSRoot, request.definitionId, {
+      limit: request.limit,
+      offset: request.offset,
+    });
+  }
+
+  async setAgentRunAcceptance(
+    request: import("../contracts/agent-pool-trace.js").SetAgentRunAcceptanceRequest,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentRunIndexEntry> {
+    const workspace = this.requireActiveWorkspace();
+    const entry = setAgentRunAcceptanceOnDisk(
+      workspace.projectOSRoot,
+      request.runId,
+      request.acceptance,
+    );
+    if (!entry) {
+      throw new ProjectOSError(
+        "run_not_found",
+        `Agent run '${request.runId}' has no index entry`,
+      );
+    }
+    return entry;
+  }
+
+  async listWorkforceAgents(
+    request: import("../contracts/agent-workforce.js").ListWorkforceAgentsRequest,
+  ): Promise<import("../contracts/agent-workforce.js").ListWorkforceAgentsResult> {
+    const workspace = this.requireLoadedWorkspace(request.projectId);
+    return { agents: listWorkforceAgentsOnDisk(workspace.projectOSRoot) };
+  }
+
+  async draftWorkforceAgent(
+    request: import("../contracts/agent-workforce.js").DraftWorkforceAgentRequest,
+  ): Promise<import("../contracts/agent-workforce.js").DraftWorkforceAgentResult> {
+    this.requireLoadedWorkspace(request.projectId);
+    const skillsResult = await this.listSkills(request.projectId);
+    const settings = await this.getSettings(request.projectId);
+    return draftWorkforceAgentFromPrompt({
+      prompt: request.prompt,
+      skills: skillsResult.skills,
+      mcpServers: (settings.mcpServers ?? []).map((server) => ({
+        id: server.id,
+        name: server.name,
+      })),
+    });
+  }
+
+  async assembleWorkforceAgent(
+    request: import("../contracts/agent-assembly.js").AssembleWorkforceAgentRequest,
+  ): Promise<import("../contracts/agent-assembly.js").AssembleWorkforceAgentResult> {
+    const parsed = AssembleWorkforceAgentRequestSchema.parse(request);
+    this.requireLoadedWorkspace(parsed.projectId);
+    const skillsResult = await this.listSkills(parsed.projectId);
+    const settings = await this.getSettings(parsed.projectId);
+    const mcpServers = (settings.mcpServers ?? []).map((server) => ({
+      id: server.id,
+      name: server.name,
+      ...(server.provenance?.trustTier
+        ? { trustTier: server.provenance.trustTier }
+        : {}),
+      ...(server.provenance?.listingId
+        ? { listingId: server.provenance.listingId }
+        : {}),
+    }));
+
+    if (parsed.scope === "local") {
+      return assembleWorkforceAgentFromPrompt({
+        prompt: parsed.prompt,
+        scope: "local",
+        skills: skillsResult.skills,
+        mcpServers,
+        ...(parsed.seedSkillIds ? { seedSkillIds: parsed.seedSkillIds } : {}),
+        ...(parsed.seedMcpServerIds
+          ? { seedMcpServerIds: parsed.seedMcpServerIds }
+          : {}),
+      });
+    }
+
+    const [
+      skillCatalog,
+      mcpCatalog,
+      rulesCatalog,
+      workflowCatalog,
+      stencilCatalog,
+      installedRules,
+      installedWorkflows,
+      installedStencils,
+    ] = await Promise.all([
+      this.listSkillCatalog(parsed.projectId),
+      this.listMcpCatalog(parsed.projectId),
+      this.listRulesCatalog(parsed.projectId),
+      this.listWorkflowCatalog(parsed.projectId),
+      this.listStencilCatalog(parsed.projectId),
+      this.listInstalledRulesPackIds(parsed.projectId),
+      this.listInstalledWorkflowListingIds(parsed.projectId),
+      this.listInstalledStencilListingIds(parsed.projectId),
+    ]);
+
+    return assembleWorkforceAgentFromPrompt({
+      prompt: parsed.prompt,
+      scope: "local_and_catalog",
+      skills: skillsResult.skills,
+      mcpServers,
+      ...(parsed.seedSkillIds ? { seedSkillIds: parsed.seedSkillIds } : {}),
+      ...(parsed.seedMcpServerIds
+        ? { seedMcpServerIds: parsed.seedMcpServerIds }
+        : {}),
+      skillCatalog: skillCatalog.document.listings,
+      mcpCatalog: mcpCatalog.document.listings,
+      rulesCatalog: rulesCatalog.document.listings,
+      workflowCatalog: workflowCatalog.document.listings,
+      stencilCatalog: stencilCatalog.document.listings,
+      installedSkillIds: new Set(skillsResult.skills.map((s) => s.id)),
+      installedMcpListingIds: new Set(
+        mcpServers
+          .map((s) => s.listingId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+      installedRulesPackIds: new Set(installedRules),
+      installedWorkflowListingIds: new Set(installedWorkflows),
+      installedStencilListingIds: new Set(installedStencils),
+    });
+  }
+
+  async createWorkforceAgent(
+    request: import("../contracts/agent-workforce.js").CreateWorkforceAgentRequest,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentDefinition> {
+    const workspace = this.requireLoadedWorkspace(request.projectId);
+    return createWorkforceAgentOnDisk(workspace.projectOSRoot, {
+      projectId: request.projectId,
+      draft: request.draft,
+    });
+  }
+
+  async updateWorkforceAgent(
+    request: import("../contracts/agent-workforce.js").UpdateWorkforceAgentRequest,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentDefinition> {
+    const workspace = this.requireLoadedWorkspace(request.projectId);
+    try {
+      return updateWorkforceAgentOnDisk(workspace.projectOSRoot, {
+        definitionId: request.definitionId,
+        draft: request.draft,
+      });
+    } catch {
+      throw new ProjectOSError(
+        "agent_definition_not_found",
+        `Workforce agent '${request.definitionId}' was not found`,
+      );
+    }
+  }
+
+  async getWorkforceAgent(
+    projectId: string,
+    definitionId: string,
+  ): Promise<import("../contracts/agent-pool-trace.js").AgentDefinition> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const def = readAgentDefinition(workspace.projectOSRoot, definitionId);
+    if (!def || (def.config.kind ?? "pool_lane") !== "workforce") {
+      throw new ProjectOSError(
+        "agent_definition_not_found",
+        `Workforce agent '${definitionId}' was not found`,
+      );
+    }
+    return def;
+  }
+
+  private bindAgentPoolRunContext(
+    runId: string,
+    context: {
+      definitionId: string;
+      poolRunId: string;
+      sessionId: string | null;
+      title: string;
+    },
+  ): void {
+    this.agentPoolRunContextByRunId.set(runId, context);
+  }
+
+  private resolveWorkforceRunOptions(
+    workspace: LoadedProjectOSWorkspace,
+    definitionId: string | null | undefined,
+  ): {
+    workforceInstructions?: string;
+    workforceSkillBodies?: Array<{ name: string; body: string }>;
+  } {
+    const id = definitionId?.trim();
+    if (!id) return {};
+    const def = readAgentDefinition(workspace.projectOSRoot, id);
+    if (!def || (def.config.kind ?? "pool_lane") !== "workforce") return {};
+    const skillBodies: Array<{ name: string; body: string }> = [];
+    for (const skillId of def.config.skillIds ?? []) {
+      const skill = getProjectSkill(workspace.workspaceRoot, skillId);
+      if (skill?.body.trim()) {
+        skillBodies.push({ name: skill.descriptor.name, body: skill.body });
+      }
+    }
+    return {
+      ...(def.config.instructions?.trim()
+        ? { workforceInstructions: def.config.instructions.trim() }
+        : {}),
+      ...(skillBodies.length ? { workforceSkillBodies: skillBodies } : {}),
+    };
+  }
+
+  private requireActiveWorkspace(): LoadedProjectOSWorkspace {
+    const first = this.workspacesByProjectId.values().next().value as
+      | LoadedProjectOSWorkspace
+      | undefined;
+    if (!first) {
+      throw new ProjectOSError(
+        "project_not_loaded",
+        "No workspace is loaded",
+      );
+    }
+    return first;
   }
 
   streamAgentRun(
@@ -5743,6 +7195,141 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
   }
 
+  async listSpatialCaptureFolders(
+    projectId: string,
+  ): Promise<
+    import("../contracts/spatial-capture-session.js").SpatialCaptureFolder[]
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listSpatialCaptureFolders } = await import(
+      "./spatial-capture-session-service.js"
+    );
+    return listSpatialCaptureFolders(workspace.workspaceRoot);
+  }
+
+  async placeSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+    placement: import("../contracts/spatial-capture-session.js").SpatialCapturePlacement,
+  ): Promise<
+    import("../contracts/spatial-capture-session.js").SpatialCaptureSession
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      placeSpatialCaptureSession,
+      SpatialCaptureSessionError,
+    } = await import("./spatial-capture-session-service.js");
+    try {
+      return placeSpatialCaptureSession(
+        workspace.workspaceRoot,
+        sessionId,
+        placement,
+      );
+    } catch (error) {
+      if (error instanceof SpatialCaptureSessionError) {
+        throw new ProjectOSError("spatial_pin_invalid", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async renameSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    name: string,
+  ): Promise<
+    import("../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      renameSpatialCaptureFolder,
+      SpatialCaptureSessionError,
+    } = await import("./spatial-capture-session-service.js");
+    try {
+      return renameSpatialCaptureFolder(
+        workspace.workspaceRoot,
+        folderId,
+        name,
+      );
+    } catch (error) {
+      if (error instanceof SpatialCaptureSessionError) {
+        throw new ProjectOSError("spatial_pin_invalid", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async deleteSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    options?: import("../contracts/spatial-capture-session.js").DeleteSpatialCaptureFolderOptions,
+  ): Promise<boolean> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      deleteSpatialCaptureFolder,
+      SpatialCaptureSessionError,
+    } = await import("./spatial-capture-session-service.js");
+    try {
+      return deleteSpatialCaptureFolder(
+        workspace.workspaceRoot,
+        folderId,
+        options ?? { cascade: false },
+      );
+    } catch (error) {
+      if (error instanceof SpatialCaptureSessionError && error.code === "running") {
+        throw new ProjectOSError("spatial_pin_invalid", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async mergeSpatialCaptureFolders(
+    projectId: string,
+    sourceFolderId: string,
+    targetFolderId: string,
+    options?: import("../contracts/spatial-capture-session.js").MergeSpatialCaptureFoldersOptions,
+  ): Promise<
+    import("../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      mergeSpatialCaptureFolders,
+      SpatialCaptureSessionError,
+    } = await import("./spatial-capture-session-service.js");
+    try {
+      return mergeSpatialCaptureFolders(
+        workspace.workspaceRoot,
+        sourceFolderId,
+        targetFolderId,
+        options ?? {},
+      );
+    } catch (error) {
+      if (error instanceof SpatialCaptureSessionError) {
+        throw new ProjectOSError("spatial_pin_invalid", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async suggestCaptureVersionTitle(
+    projectId: string,
+    target: { folderId: string } | { folderName: string },
+  ): Promise<string> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      suggestCaptureVersionTitle,
+      SpatialCaptureSessionError,
+    } = await import("./spatial-capture-session-service.js");
+    try {
+      return suggestCaptureVersionTitle(workspace.workspaceRoot, target);
+    } catch (error) {
+      if (error instanceof SpatialCaptureSessionError) {
+        throw new ProjectOSError("spatial_pin_invalid", error.message);
+      }
+      throw error;
+    }
+  }
+
   async saveSpatialCaptureBackdrop(
     projectId: string,
     sessionId: string,
@@ -5923,6 +7510,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       formatRepoConstraintLines,
     } = await import("../contracts/repo-design-system.js");
     const { getStencilCatalogMap } = await import("../contracts/ui-stencil.js");
+    refreshProjectStencilOverlay(workspace.workspaceRoot);
     const now = new Date().toISOString();
     const repo = detectRepoDesignSystemFromWorkspace(workspace.workspaceRoot);
     const placements = await this.findStencilPlacementsForPin(projectId, pinId);
@@ -6016,12 +7604,56 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     let refinementId: string | undefined;
     let planId: string | undefined;
     let debugSessionId: string | undefined;
+    let firstPrinciplesSessionId: string | undefined;
     let nextStatus: import("../contracts/spatial-pin.js").SpatialPinStatus =
       "submitted";
 
     const imageFields = images.length > 0 ? { images } : {};
+    const askSubMode = pin.composer.askSubMode ?? "chat";
+    const workforceAgentDefinitionId =
+      pin.composer.agentDefinitionId?.trim() || null;
 
-    if (pin.composer.mode === "ask") {
+    if (pin.composer.mode === "ask" && askSubMode === "first_principles") {
+      const fpSession = await this.startFirstPrinciplesSession({
+        projectId,
+        vision: prompt,
+        chatSessionId: sessionId,
+      });
+      firstPrinciplesSessionId = fpSession.id;
+      nextStatus = "awaiting_review";
+      const answeredAt = new Date().toISOString();
+      const reflect =
+        fpSession.activeQuestion?.reflect ||
+        "First Principles framing started — continue in Chat.";
+      const question = fpSession.activeQuestion?.question;
+      const assistantContent = question
+        ? `${reflect}\n\n**${question}**`
+        : reflect;
+      await this.upsertChatSession(projectId, {
+        ...sessionRecord,
+        head: {
+          ...sessionRecord.head,
+          status: "awaiting_review",
+          lastUpdatedAt: answeredAt,
+          chatMode: "ask",
+        },
+        messages: [
+          ...sessionRecord.messages,
+          {
+            id: `msg_${crypto.randomUUID()}`,
+            role: "assistant",
+            content: assistantContent,
+            format: "markdown",
+            timestamp: answeredAt,
+          },
+        ],
+        snapshot: {
+          ...(sessionRecord.snapshot ?? {}),
+          agentFlowSubject: "ask",
+          flowStatus: "awaiting_review",
+        },
+      });
+    } else if (pin.composer.mode === "ask") {
       let answer: import("../contracts/agent-conversation.js").AgentAnswerResult;
       try {
         answer = await this.askAgent({
@@ -6081,6 +7713,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           ...(pin.location.nodeId ? { nodeId: pin.location.nodeId } : {}),
           rawPrompt: userContent,
           chatSessionId: sessionId,
+          ...(workforceAgentDefinitionId
+            ? { workforceAgentDefinitionId }
+            : { workforceAgentDefinitionId: null }),
           ...imageFields,
         });
       } catch (error) {
@@ -6090,6 +7725,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           ...(pin.location.nodeId ? { nodeId: pin.location.nodeId } : {}),
           rawPrompt: userContent,
           chatSessionId: sessionId,
+          ...(workforceAgentDefinitionId
+            ? { workforceAgentDefinitionId }
+            : { workforceAgentDefinitionId: null }),
         });
       }
       refinementId = refinement.id;
@@ -6158,6 +7796,60 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
     }
 
+    let composeSubagentLinks:
+      | import("../contracts/spatial-pin.js").PinComposerHubSubagentLink[]
+      | undefined;
+    let childRunIds: string[] | undefined;
+    const hub = pin.composer.hub;
+    const enabledSubagents =
+      hub?.subagents.filter((slot) => slot.enabled) ?? [];
+    if (
+      hub &&
+      enabledSubagents.length > 0 &&
+      (pin.composer.mode === "change" ||
+        (pin.composer.mode === "ask" && askSubMode !== "first_principles"))
+    ) {
+      const { spawnComposeSubagents } = await import("./compose-subagents.js");
+      const spawned = await spawnComposeSubagents(hub, prompt, {
+        ask: async ({ question }) => {
+          const answer = await this.askAgent({
+            projectId,
+            scope,
+            question,
+            language: { mode: "auto" },
+            chatSessionId: sessionId,
+          });
+          return { answer: answer.answer };
+        },
+      });
+      composeSubagentLinks = spawned.links;
+      childRunIds =
+        spawned.childRunIds.length > 0 ? spawned.childRunIds : undefined;
+      if (spawned.results.length > 0) {
+        const latest = await this.getChatSession(projectId, sessionId);
+        if (latest) {
+          const stamped = new Date().toISOString();
+          await this.upsertChatSession(projectId, {
+            ...latest,
+            head: {
+              ...latest.head,
+              lastUpdatedAt: stamped,
+            },
+            messages: [
+              ...latest.messages,
+              ...spawned.results.map((result) => ({
+                id: `msg_${crypto.randomUUID()}`,
+                role: "assistant" as const,
+                content: `### Subagent · ${result.name}\n\n${result.summary}`,
+                format: "markdown" as const,
+                timestamp: stamped,
+              })),
+            ],
+          });
+        }
+      }
+    }
+
     const updatedPin = await this.upsertSpatialPin(projectId, {
       ...pin,
       updatedAt: new Date().toISOString(),
@@ -6170,6 +7862,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ...(refinementId ? { refinementId } : {}),
         ...(planId ? { planId } : {}),
         ...(debugSessionId ? { debugSessionId } : {}),
+        ...(firstPrinciplesSessionId
+          ? { firstPrinciplesSessionId }
+          : {}),
+        ...(composeSubagentLinks ? { composeSubagents: composeSubagentLinks } : {}),
+        ...(childRunIds ? { childRunIds } : {}),
       },
     });
 
@@ -6180,6 +7877,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ...(refinementId ? { refinementId } : {}),
       ...(planId ? { planId } : {}),
       ...(debugSessionId ? { debugSessionId } : {}),
+      ...(firstPrinciplesSessionId ? { firstPrinciplesSessionId } : {}),
     };
   }
 
@@ -6357,12 +8055,89 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
   }
 
+  private async settlePendingGithubOp(
+    workspace: LoadedProjectOSWorkspace,
+    _loopId: string,
+    document: import("../contracts/loop-graph.js").LoopGraphDocument,
+    instanceId: string,
+    completePendingGithubOp: typeof import("./loop-runtime-service.js").completePendingGithubOp,
+    upsertLoopGraph: typeof import("./loop-graph-service.js").upsertLoopGraph,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const instance = document.instances.find((item) => item.id === instanceId);
+    const pending = instance?.pendingGithubOp;
+    if (!pending) return document;
+
+    const payload = pending.payload;
+    let result: import("./loop-execution.js").LoopGithubOperationResult;
+
+    if (pending.operation === "create_pr") {
+      const { createGithubPullRequest } = await import("./git-context-service.js");
+      const token = await this.resolveGithubAccessToken();
+      const title =
+        typeof payload.title === "string" && payload.title.trim()
+          ? payload.title.trim()
+          : "Loop Graph pull request";
+      const remote = await createGithubPullRequest(
+        workspace.workspaceRoot,
+        {
+          title,
+          ...(typeof payload.head === "string" ? { head: payload.head } : {}),
+          ...(typeof payload.base === "string" ? { base: payload.base } : {}),
+          ...(typeof payload.body === "string" ? { body: payload.body } : {}),
+        },
+        {
+          ...(token ? { accessToken: token } : {}),
+          pushHead: true,
+        },
+      );
+      result = {
+        ok: remote.ok,
+        message: remote.message,
+        ...(remote.url ? { url: remote.url } : {}),
+        ...(typeof remote.number === "number" ? { number: remote.number } : {}),
+        refs: Object.fromEntries(
+          Object.entries(payload).map(([key, value]) => [key, String(value)]),
+        ),
+      };
+    } else if (pending.operation === "create_branch") {
+      const { createGitBranch } = await import("./git-context-service.js");
+      const token = await this.resolveGithubAccessToken();
+      const branch =
+        (typeof payload.branch === "string" && payload.branch.trim()) ||
+        (typeof payload.name === "string" && payload.name.trim()) ||
+        "";
+      const created = createGitBranch(workspace.workspaceRoot, branch, {
+        ...(typeof payload.from === "string" ? { from: payload.from } : {}),
+        push: true,
+        ...(token ? { accessToken: token } : {}),
+      });
+      result = {
+        ok: created.ok,
+        message: created.message,
+        refs: { branch, ...(typeof payload.from === "string" ? { from: payload.from } : {}) },
+      };
+    } else {
+      result = {
+        ok: false,
+        message: `Unsupported deferred GitHub operation: ${pending.operation}`,
+      };
+    }
+
+    return upsertLoopGraph(
+      workspace.workspaceRoot,
+      completePendingGithubOp(document, instanceId, result),
+    );
+  }
+
   private async settleLoopRuns(
     workspace: LoadedProjectOSWorkspace,
     loopId: string,
     document: import("../contracts/loop-graph.js").LoopGraphDocument,
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
-    const { advanceLoopInstance } = await import("./loop-runtime-service.js");
+    const { advanceLoopInstance, completePendingGithubOp } = await import(
+      "./loop-runtime-service.js"
+    );
+    const { upsertLoopGraph } = await import("./loop-graph-service.js");
     let current = document;
     for (let attempt = 0; attempt < 6; attempt += 1) {
       const instance = [...current.instances].reverse().find((item) =>
@@ -6371,6 +8146,19 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         item.status === "awaiting_review",
       );
       if (!instance) return current;
+
+      if (instance.pendingGithubOp) {
+        current = await this.settlePendingGithubOp(
+          workspace,
+          loopId,
+          current,
+          instance.id,
+          completePendingGithubOp,
+          upsertLoopGraph,
+        );
+        continue;
+      }
+
       const hooks = this.loopExecutionHooks(workspace, instance.featureNodeId);
       if (!instance.activeRunId) {
         if (instance.status === "awaiting_review") return current;
@@ -6446,6 +8234,115 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
     return {
       leaf,
+      executeGithubOperation: (input) => {
+        const payloadRefs = Object.fromEntries(
+          Object.entries(input.payload).map(([key, value]) => [key, String(value)]),
+        );
+        // Sync stepper cannot await REST; queue create_pr/create_branch for settleLoopRuns.
+        if (
+          input.operation === "create_pr" ||
+          input.operation === "create_branch"
+        ) {
+          return {
+            ok: true,
+            deferred: true,
+            message: `GitHub ${input.operation} queued for settle`,
+            refs: payloadRefs,
+          };
+        }
+        return {
+          ok: true,
+          simulated: true,
+          message: `GitHub ${input.operation} simulated after approval`,
+          refs: payloadRefs,
+        };
+      },
+      executeTerminalCommand: (input) => {
+        const commandLine = [input.command, ...input.args].join(" ");
+        if (isHighRiskTerminalCommand(commandLine) && !input.approved) {
+          return {
+            ok: false,
+            exitCode: null,
+            blocked: true,
+            message: "High-risk terminal command blocked without approval",
+          };
+        }
+
+        const policy = writeCapabilityContext({
+          allowedWritePaths: leaf ? [leaf.filePath] : [],
+        });
+        const loaded = loadToolPermissionDocument(workspace.workspaceRoot).rules;
+        const permissionRules =
+          loaded.length > 0
+            ? loaded
+            : [{ effect: "allow" as const, tool: "shell" as const }];
+        const decision = evaluateTerminalPolicyDecision({
+          command: {
+            command: input.command,
+            args: input.args,
+            timeoutMs: input.timeoutMs,
+          },
+          policy,
+          permissionRules,
+        });
+        if (decision === "deny") {
+          return {
+            ok: false,
+            exitCode: null,
+            policyDenied: true,
+            message: "Terminal policy_denied",
+          };
+        }
+        if (decision === "ask" && !input.approved) {
+          return {
+            ok: false,
+            exitCode: null,
+            blocked: true,
+            message: "Terminal requires approval (policy ask)",
+          };
+        }
+
+        const spawned = spawnSync(input.command, input.args, {
+          cwd: input.cwd ?? workspace.workspaceRoot,
+          encoding: "utf8",
+          timeout: input.timeoutMs,
+          maxBuffer: 2 * 1024 * 1024,
+        });
+        const timedOut =
+          Boolean(spawned.error) &&
+          (spawned.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+        if (timedOut) {
+          return {
+            ok: false,
+            exitCode: null,
+            timedOut: true,
+            blocked: true,
+            message: "Terminal timed out (blocked)",
+            stdout: spawned.stdout?.slice(0, 4000),
+            stderr: spawned.stderr?.slice(0, 4000),
+          };
+        }
+        if (spawned.error) {
+          return {
+            ok: false,
+            exitCode: spawned.status,
+            message: spawned.error.message,
+            stdout: spawned.stdout?.slice(0, 4000),
+            stderr: spawned.stderr?.slice(0, 4000),
+          };
+        }
+        const exitCode = spawned.status;
+        const ok = exitCode === 0;
+        return {
+          ok,
+          exitCode,
+          stdout: spawned.stdout?.slice(0, 4000),
+          stderr: spawned.stderr?.slice(0, 4000),
+          message: ok
+            ? `Terminal ok: ${commandLine.slice(0, 160)}`
+            : `Terminal exit ${exitCode}: ${(spawned.stderr || spawned.stdout || "").slice(0, 240)}`,
+        };
+      },
       readRun: (runId) => {
         const state = this.orchestrator.getRun(runId);
         if (state) {
@@ -6492,6 +8389,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           workspace.project.projectId,
           prepared.authorization,
         );
+        const workforceOpts = this.resolveWorkforceRunOptions(
+          workspace,
+          input.agentDefinitionId,
+        );
         const state = this.orchestrator.createRun(
           workspace,
           {
@@ -6518,8 +8419,56 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             role: "leaf_file_editor",
             memoryInjection: emptyMemory,
             userPrompt: input.goal.slice(0, 4000),
+            ...workforceOpts,
           },
         );
+        try {
+          const workforceDef = input.agentDefinitionId
+            ? readAgentDefinition(workspace.projectOSRoot, input.agentDefinitionId)
+            : null;
+          const definitionId =
+            workforceDef && (workforceDef.config.kind ?? "pool_lane") === "workforce"
+              ? workforceDef.definitionId
+              : `def_loop_${input.featureNodeId}`;
+          const pool = ensureAgentPoolRunOnDisk({
+            projectOSRoot: workspace.projectOSRoot,
+            projectId: workspace.project.projectId,
+            rootRunId: state.run.runId,
+            triggerSource: "loop",
+          });
+          if (!workforceDef) {
+            upsertAgentDefinition(workspace.projectOSRoot, {
+              definitionId,
+              projectId: workspace.project.projectId,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              config: {
+                displayName: input.filePath || input.featureNodeId,
+                loopNodeId: input.specNodeId,
+              },
+            });
+          } else {
+            upsertAgentDefinition(workspace.projectOSRoot, {
+              ...workforceDef,
+              updatedAt: new Date().toISOString(),
+              config: {
+                ...workforceDef.config,
+                loopNodeId: input.specNodeId,
+              },
+            });
+          }
+          this.bindAgentPoolRunContext(state.run.runId, {
+            definitionId,
+            poolRunId: pool.poolRunId,
+            sessionId: null,
+            title:
+              workforceDef?.config.displayName ||
+              input.filePath ||
+              input.featureNodeId,
+          });
+        } catch (error) {
+          console.error("[projectos] loop agent pool bind failed", error);
+        }
         return {
           runId: state.run.runId,
           status: state.run.status,
@@ -6668,6 +8617,22 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
   }
 
+  async cancelLoopGoalClarification(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { cancelLoopGoalClarification } = await import("./loop-graph-service.js");
+    try {
+      return cancelLoopGoalClarification(workspace.workspaceRoot, loopId);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to cancel clarification",
+      );
+    }
+  }
+
   async confirmLoopGoalContext(
     projectId: string,
     loopId: string,
@@ -6733,6 +8698,756 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { setLoopComposerMode } = await import("./loop-graph-service.js");
     return setLoopComposerMode(workspace.workspaceRoot, loopId, mode);
+  }
+
+  async ensureDiagramDesignSkill(
+    projectId: string,
+  ): Promise<import("../contracts/diagram-graph.js").EnsureDiagramDesignSkillResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      ensureDiagramDesignSkillPack,
+      writeMinimalDiagramSkillPack,
+    } = await import("./diagram-graph/index.js");
+    const root = this.diagramWorkspaceRoot(workspace.workspaceRoot, projectId);
+    const isMock = workspace.workspaceRoot.startsWith("mock://");
+    if (isMock) {
+      writeMinimalDiagramSkillPack(
+        join(root, ".projectos", "skills", "community.diagram-design"),
+      );
+      return {
+        status: {
+          installed: true,
+          skillId: "community.diagram-design",
+          hasReferences: true,
+          version: "2.6-fixture",
+        },
+        installedNow: true,
+      };
+    }
+    return ensureDiagramDesignSkillPack({ workspaceRoot: root });
+  }
+
+  async getDiagramSkillPackStatus(
+    projectId: string,
+  ): Promise<import("../contracts/diagram-graph.js").DiagramSkillPackStatus> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getDiagramSkillPackStatus } = await import("./diagram-graph/index.js");
+    if (workspace.workspaceRoot.startsWith("mock://")) {
+      return {
+        installed: true,
+        skillId: "community.diagram-design",
+        hasReferences: true,
+        version: "2.6-fixture",
+      };
+    }
+    return getDiagramSkillPackStatus(workspace.workspaceRoot);
+  }
+
+  async getDiagramIndex(
+    projectId: string,
+  ): Promise<import("../contracts/diagram-graph.js").DiagramIndex> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getDiagramIndex } = await import("./diagram-graph/index.js");
+    return getDiagramIndex(this.diagramWorkspaceRoot(workspace.workspaceRoot, projectId));
+  }
+
+  async listDiagrams(
+    projectId: string,
+  ): Promise<import("../contracts/diagram-graph.js").DiagramArtifactMeta[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listDiagramArtifacts } = await import("./diagram-graph/index.js");
+    return listDiagramArtifacts(this.diagramWorkspaceRoot(workspace.workspaceRoot, projectId));
+  }
+
+  async getDiagram(
+    projectId: string,
+    diagramId: string,
+  ): Promise<import("../contracts/diagram-graph.js").DiagramArtifact | null> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getDiagramArtifact } = await import("./diagram-graph/index.js");
+    return getDiagramArtifact(
+      this.diagramWorkspaceRoot(workspace.workspaceRoot, projectId),
+      diagramId,
+    );
+  }
+
+  async deleteDiagram(projectId: string, diagramId: string): Promise<boolean> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { deleteDiagramArtifact } = await import("./diagram-graph/index.js");
+    return deleteDiagramArtifact(
+      this.diagramWorkspaceRoot(workspace.workspaceRoot, projectId),
+      diagramId,
+    );
+  }
+
+  async updateDiagramNotes(
+    projectId: string,
+    diagramId: string,
+    input: import("../contracts/diagram-graph.js").UpdateDiagramNotesInput,
+  ): Promise<import("../contracts/diagram-graph.js").DiagramNotesDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { writeDiagramNotes } = await import("./diagram-graph/index.js");
+    const { UpdateDiagramNotesInputSchema } = await import(
+      "../contracts/diagram-graph.js"
+    );
+    return writeDiagramNotes(
+      this.diagramWorkspaceRoot(workspace.workspaceRoot, projectId),
+      diagramId,
+      UpdateDiagramNotesInputSchema.parse(input),
+    );
+  }
+
+  async chooseDiagramStyle(
+    projectId: string,
+    input: import("../contracts/diagram-graph.js").ChooseDiagramStyleInput,
+  ): Promise<import("../contracts/diagram-graph.js").DiagramIndex> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { chooseDiagramStyle } = await import("./diagram-graph/index.js");
+    const { ChooseDiagramStyleInputSchema } = await import(
+      "../contracts/diagram-graph.js"
+    );
+    return chooseDiagramStyle(
+      this.diagramWorkspaceRoot(workspace.workspaceRoot, projectId),
+      ChooseDiagramStyleInputSchema.parse(input),
+    );
+  }
+
+  async generateDiagram(
+    projectId: string,
+    input: import("../contracts/diagram-graph.js").GenerateDiagramInput,
+  ): Promise<import("../contracts/diagram-graph.js").DiagramArtifact> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { generateDiagramArtifact } = await import("./diagram-graph/index.js");
+    const { GenerateDiagramInputSchema } = await import(
+      "../contracts/diagram-graph.js"
+    );
+    const root = this.diagramWorkspaceRoot(workspace.workspaceRoot, projectId);
+    const isMock = workspace.workspaceRoot.startsWith("mock://");
+    if (isMock) {
+      const { writeMinimalDiagramSkillPack, chooseDiagramStyle } = await import(
+        "./diagram-graph/index.js"
+      );
+      const { join } = await import("node:path");
+      writeMinimalDiagramSkillPack(
+        join(root, ".projectos", "skills", "community.diagram-design"),
+      );
+      chooseDiagramStyle(root, { kind: "project-os-tech" });
+    }
+    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    return generateDiagramArtifact({
+      workspaceRoot: root,
+      input: GenerateDiagramInputSchema.parse(input),
+      profile: isMock ? null : profile,
+      gateway: isMock ? null : this.modelGateway,
+      projectId,
+      useSample: isMock || !profile,
+      vendorRoot: isMock
+        ? undefined
+        : undefined,
+    });
+  }
+
+  /** Resolve a real filesystem root for diagram artifacts (mock workspaces use tmp). */
+  private diagramWorkspaceRoot(workspaceRoot: string, projectId: string): string {
+    if (!workspaceRoot.startsWith("mock://")) return workspaceRoot;
+    const root = join(tmpdir(), "projectos-mock-diagrams", projectId);
+    mkdirSync(join(root, ".projectos", "diagrams"), { recursive: true });
+    return root;
+  }
+
+  /** Resolve a filesystem root for Wireframe Pack artifacts (mock workspaces use tmp). */
+  private wireframeWorkspaceRoot(workspaceRoot: string, projectId: string): string {
+    if (!workspaceRoot.startsWith("mock://")) return workspaceRoot;
+    const root = join(tmpdir(), "projectos-mock-wireframes", projectId);
+    mkdirSync(join(root, ".projectos", "wireframes"), { recursive: true });
+    return root;
+  }
+
+  async listWireframePacks(
+    projectId: string,
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframePackMeta[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listWireframePacks } = await import("./ui-wireframe-pack/index.js");
+    return listWireframePacks(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+    );
+  }
+
+  async getWireframePackIndex(
+    projectId: string,
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframePackIndex> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getWireframePackIndex } = await import("./ui-wireframe-pack/index.js");
+    return getWireframePackIndex(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+    );
+  }
+
+  async getWireframePack(
+    projectId: string,
+    packId: string,
+    version?: number,
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframePack | null> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getWireframePack } = await import("./ui-wireframe-pack/index.js");
+    return getWireframePack(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      packId,
+      version,
+    );
+  }
+
+  async generateWireframePack(
+    projectId: string,
+    input: import("../contracts/ui-wireframe-pack.js").GenerateWireframePackInput,
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframePack> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { generateWireframePack } = await import("./ui-wireframe-pack/index.js");
+    const { GenerateWireframePackInputSchema } = await import(
+      "../contracts/ui-wireframe-pack.js"
+    );
+    return generateWireframePack(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      GenerateWireframePackInputSchema.parse(input),
+    );
+  }
+
+  async updateWireframePackDraft(
+    projectId: string,
+    packId: string,
+    input: import("../contracts/ui-wireframe-pack.js").UpdateWireframePackDraftInput,
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframePack> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { updateWireframePackDraft } = await import("./ui-wireframe-pack/index.js");
+    const { UpdateWireframePackDraftInputSchema } = await import(
+      "../contracts/ui-wireframe-pack.js"
+    );
+    return updateWireframePackDraft(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      packId,
+      UpdateWireframePackDraftInputSchema.parse(input),
+    );
+  }
+
+  async deleteWireframeScreen(
+    projectId: string,
+    packId: string,
+    screenId: string,
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframePack> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { deleteWireframeScreen } = await import("./ui-wireframe-pack/index.js");
+    return deleteWireframeScreen(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      packId,
+      screenId,
+    );
+  }
+
+  async freezeWireframePack(
+    projectId: string,
+    packId: string,
+    input: import("../contracts/ui-wireframe-pack.js").FreezeWireframePackInput = {},
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframePack> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { freezeWireframePack } = await import("./ui-wireframe-pack/index.js");
+    const { FreezeWireframePackInputSchema } = await import(
+      "../contracts/ui-wireframe-pack.js"
+    );
+    return freezeWireframePack(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      packId,
+      FreezeWireframePackInputSchema.parse(input ?? {}),
+    );
+  }
+
+  async buildImplementAgainstPackBrief(
+    projectId: string,
+    packId: string,
+    input: import("../contracts/ui-wireframe-pack.js").BuildImplementAgainstPackInput = {},
+  ): Promise<import("../contracts/ui-wireframe-pack.js").ImplementAgainstPackBrief> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { buildImplementAgainstPackBrief } = await import(
+      "./ui-wireframe-pack/index.js"
+    );
+    const { BuildImplementAgainstPackInputSchema } = await import(
+      "../contracts/ui-wireframe-pack.js"
+    );
+    return buildImplementAgainstPackBrief(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      packId,
+      BuildImplementAgainstPackInputSchema.parse(input ?? {}),
+    );
+  }
+
+  async listWireframeGaps(
+    projectId: string,
+    packId: string,
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframeGap[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listWireframeGaps } = await import("./ui-wireframe-pack/index.js");
+    return listWireframeGaps(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      packId,
+    );
+  }
+
+  async upsertWireframeGap(
+    projectId: string,
+    packId: string,
+    input: import("../contracts/ui-wireframe-pack.js").UpsertWireframeGapInput,
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframeGap> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { upsertWireframeGap } = await import("./ui-wireframe-pack/index.js");
+    const { UpsertWireframeGapInputSchema } = await import(
+      "../contracts/ui-wireframe-pack.js"
+    );
+    return upsertWireframeGap(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      packId,
+      UpsertWireframeGapInputSchema.parse(input),
+    );
+  }
+
+  async scanWireframeStructGaps(
+    projectId: string,
+    packId: string,
+    input: import("../contracts/ui-wireframe-pack.js").ScanWireframeStructGapsInput = {},
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframeGap[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { scanWireframeStructGaps } = await import("./ui-wireframe-pack/index.js");
+    const { ScanWireframeStructGapsInputSchema } = await import(
+      "../contracts/ui-wireframe-pack.js"
+    );
+    return scanWireframeStructGaps(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      packId,
+      ScanWireframeStructGapsInputSchema.parse(input ?? {}),
+    );
+  }
+
+  async bindWireframePackFeature(
+    projectId: string,
+    packId: string,
+    featureId: string,
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframePack> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { bindWireframePackFeature } = await import("./ui-wireframe-pack/index.js");
+    return bindWireframePackFeature(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      packId,
+      featureId.trim() ? featureId.trim() : null,
+    );
+  }
+
+  async markWireframePackRealized(
+    projectId: string,
+    packId: string,
+  ): Promise<import("../contracts/ui-wireframe-pack.js").WireframePack> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { markWireframePackRealized } = await import(
+      "./ui-wireframe-pack/index.js"
+    );
+    return markWireframePackRealized(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      packId,
+    );
+  }
+
+  async deleteWireframePack(projectId: string, packId: string): Promise<boolean> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { deleteWireframePack } = await import("./ui-wireframe-pack/index.js");
+    return deleteWireframePack(
+      this.wireframeWorkspaceRoot(workspace.workspaceRoot, projectId),
+      packId,
+    );
+  }
+
+  /** Resolve a filesystem root for Reminder Graph timeline (mock workspaces use tmp). */
+  private reminderWorkspaceRoot(workspaceRoot: string, projectId: string): string {
+    if (!workspaceRoot.startsWith("mock://")) return workspaceRoot;
+    const root = join(tmpdir(), "projectos-mock-reminder", projectId);
+    mkdirSync(join(root, ".projectos"), { recursive: true });
+    return root;
+  }
+
+  private async loadReminderCommitmentsMarkdown(
+    workspaceRoot: string,
+  ): Promise<string> {
+    try {
+      const { loadReminderCommitmentsMarkdown } = await import(
+        "./reminder-graph/index.js"
+      );
+      return loadReminderCommitmentsMarkdown(workspaceRoot);
+    } catch {
+      return "";
+    }
+  }
+
+  async getLabState(
+    projectId: string,
+  ): Promise<import("../contracts/product-lab.js").LabStateDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { readLabState } = await import("./product-lab/index.js");
+    if (workspace.workspaceRoot.startsWith("mock://")) {
+      const { createEmptyLabDocument } = await import("./product-lab/index.js");
+      return createEmptyLabDocument();
+    }
+    return readLabState(workspace.workspaceRoot);
+  }
+
+  async upsertLabState(
+    projectId: string,
+    document: import("../contracts/product-lab.js").LabStateDocument,
+  ): Promise<import("../contracts/product-lab.js").LabStateDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { LabStateDocumentSchema } = await import("../contracts/product-lab.js");
+    const parsed = LabStateDocumentSchema.parse(document);
+    if (workspace.workspaceRoot.startsWith("mock://")) {
+      return parsed;
+    }
+    const { writeLabState } = await import("./product-lab/index.js");
+    return writeLabState(workspace.workspaceRoot, parsed);
+  }
+
+  async getLabLaunchProfile(
+    projectId: string,
+  ): Promise<import("../contracts/product-lab.js").LabLaunchProfile> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { detectLabLaunchProfile } = await import("./product-lab/index.js");
+    const { LabLaunchProfileSchema } = await import("../contracts/product-lab.js");
+    if (workspace.workspaceRoot.startsWith("mock://")) {
+      return LabLaunchProfileSchema.parse({
+        hasWebPreview: true,
+        needsTerminalStart: true,
+        surface: "web",
+        suggestedCommands: ["npm run dev"],
+        startHints: ["mock workspace"],
+        rationale: "mock",
+      });
+    }
+    return LabLaunchProfileSchema.parse(
+      detectLabLaunchProfile(workspace.workspaceRoot),
+    );
+  }
+
+  async listTheses(
+    projectId: string,
+  ): Promise<import("../contracts/first-principles.js").ThesisIndex> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { emptyThesisIndex } = await import("../contracts/first-principles.js");
+    if (workspace.workspaceRoot.startsWith("mock://")) {
+      return emptyThesisIndex();
+    }
+    const { listThesisSessions } = await import("./first-principles/index.js");
+    return listThesisSessions(workspace.workspaceRoot);
+  }
+
+  async getThesisSession(
+    projectId: string,
+    sessionId: string,
+  ): Promise<import("../contracts/first-principles.js").FirstPrinciplesSession | null> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const cached = this.thesisSessionsById.get(sessionId);
+    if (cached && cached.projectId === projectId) return cached;
+    if (workspace.workspaceRoot.startsWith("mock://")) {
+      return cached ?? null;
+    }
+    const { readThesisSession } = await import("./first-principles/index.js");
+    const fromDisk = readThesisSession(workspace.workspaceRoot, sessionId);
+    if (fromDisk) this.thesisSessionsById.set(fromDisk.id, fromDisk);
+    return fromDisk;
+  }
+
+  async upsertThesisSession(
+    projectId: string,
+    session: import("../contracts/first-principles.js").FirstPrinciplesSession,
+  ): Promise<import("../contracts/first-principles.js").FirstPrinciplesSession> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { FirstPrinciplesSessionSchema } = await import(
+      "../contracts/first-principles.js"
+    );
+    const parsed = FirstPrinciplesSessionSchema.parse(session);
+    this.thesisSessionsById.set(parsed.id, parsed);
+    if (workspace.workspaceRoot.startsWith("mock://")) {
+      return parsed;
+    }
+    const { writeThesisSession } = await import("./first-principles/index.js");
+    return writeThesisSession(workspace.workspaceRoot, parsed);
+  }
+
+  async startFirstPrinciplesSession(
+    request: import("../contracts/first-principles.js").StartFirstPrinciplesRequest,
+  ): Promise<import("../contracts/first-principles.js").FirstPrinciplesSession> {
+    const { StartFirstPrinciplesRequestSchema } = await import(
+      "../contracts/first-principles.js"
+    );
+    const parsed = StartFirstPrinciplesRequestSchema.parse(request);
+    const workspace = this.requireLoadedWorkspace(parsed.projectId);
+    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    const {
+      startFirstPrinciplesWithIntelligence,
+      writeThesisSession,
+      createFirstPrinciplesSession,
+    } = await import("./first-principles/index.js");
+    const session = workspace.workspaceRoot.startsWith("mock://")
+      ? createFirstPrinciplesSession({
+          projectId: parsed.projectId,
+          vision: parsed.vision,
+          ...(parsed.chatSessionId ? { chatSessionId: parsed.chatSessionId } : {}),
+        })
+      : await startFirstPrinciplesWithIntelligence({
+          projectId: parsed.projectId,
+          vision: parsed.vision,
+          ...(parsed.chatSessionId ? { chatSessionId: parsed.chatSessionId } : {}),
+          workspace,
+          profile,
+          thinkingDepth: workspace.settings.execution.thinkingDepth,
+          gateway: this.modelGateway,
+        });
+    this.thesisSessionsById.set(session.id, session);
+    if (workspace.workspaceRoot.startsWith("mock://")) {
+      return session;
+    }
+    return writeThesisSession(workspace.workspaceRoot, session);
+  }
+
+  async answerFirstPrinciplesTurn(
+    request: import("../contracts/first-principles.js").AnswerFirstPrinciplesRequest,
+  ): Promise<import("../contracts/first-principles.js").FirstPrinciplesSession> {
+    const { AnswerFirstPrinciplesRequestSchema } = await import(
+      "../contracts/first-principles.js"
+    );
+    const parsed = AnswerFirstPrinciplesRequestSchema.parse(request);
+    const workspace = this.requireLoadedWorkspace(parsed.projectId);
+    const {
+      readThesisSession,
+      writeThesisSession,
+      advanceFirstPrinciplesWithIntelligence,
+      answerFirstPrinciplesTurn: answerLocal,
+    } = await import("./first-principles/index.js");
+    const existing =
+      this.thesisSessionsById.get(parsed.sessionId) ??
+      (workspace.workspaceRoot.startsWith("mock://")
+        ? null
+        : readThesisSession(workspace.workspaceRoot, parsed.sessionId));
+    if (!existing || existing.projectId !== parsed.projectId) {
+      throw new ProjectOSError("plan_not_found", "First Principles session not found");
+    }
+    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    const next = workspace.workspaceRoot.startsWith("mock://")
+      ? answerLocal(existing, parsed.answer)
+      : await advanceFirstPrinciplesWithIntelligence({
+          session: existing,
+          answer: parsed.answer,
+          workspace,
+          profile,
+          thinkingDepth: workspace.settings.execution.thinkingDepth,
+          gateway: this.modelGateway,
+        });
+    this.thesisSessionsById.set(next.id, next);
+    if (workspace.workspaceRoot.startsWith("mock://")) {
+      return next;
+    }
+    return writeThesisSession(workspace.workspaceRoot, next);
+  }
+
+  async resolveFirstPrinciplesConflict(
+    request: import("../contracts/first-principles.js").ResolveFirstPrinciplesConflictRequest,
+  ): Promise<import("../contracts/first-principles.js").FirstPrinciplesSession> {
+    const { ResolveFirstPrinciplesConflictRequestSchema } = await import(
+      "../contracts/first-principles.js"
+    );
+    const parsed = ResolveFirstPrinciplesConflictRequestSchema.parse(request);
+    const workspace = this.requireLoadedWorkspace(parsed.projectId);
+    const {
+      readThesisSession,
+      writeThesisSession,
+      resolveFirstPrinciplesConflict,
+    } = await import("./first-principles/index.js");
+    const existing =
+      this.thesisSessionsById.get(parsed.sessionId) ??
+      (workspace.workspaceRoot.startsWith("mock://")
+        ? null
+        : readThesisSession(workspace.workspaceRoot, parsed.sessionId));
+    if (!existing || existing.projectId !== parsed.projectId) {
+      throw new ProjectOSError("plan_not_found", "First Principles session not found");
+    }
+    const next = resolveFirstPrinciplesConflict(
+      existing,
+      parsed.resolution,
+      parsed.rephraseText,
+    );
+    this.thesisSessionsById.set(next.id, next);
+    if (workspace.workspaceRoot.startsWith("mock://")) {
+      return next;
+    }
+    return writeThesisSession(workspace.workspaceRoot, next);
+  }
+
+  async writeFirstPrinciplesPlannedFeature(
+    request: import("../contracts/first-principles.js").WriteFirstPrinciplesFeatureRequest,
+  ): Promise<import("../contracts/first-principles.js").FirstPrinciplesFeatureWriteResult> {
+    const { WriteFirstPrinciplesFeatureRequestSchema } = await import(
+      "../contracts/first-principles.js"
+    );
+    const parsed = WriteFirstPrinciplesFeatureRequestSchema.parse(request);
+    const workspace = this.requireLoadedWorkspace(parsed.projectId);
+    if (workspace.workspaceRoot.startsWith("mock://")) {
+      return {
+        written: false,
+        featureId: null,
+        skippedLocked: false,
+        message: "Mock workspace does not persist features.json",
+      };
+    }
+    const {
+      readThesisSession,
+      writeThesisSession,
+      writePlannedFeatureFromThesis,
+    } = await import("./first-principles/index.js");
+    const existing =
+      this.thesisSessionsById.get(parsed.sessionId) ??
+      readThesisSession(workspace.workspaceRoot, parsed.sessionId);
+    if (!existing) {
+      throw new ProjectOSError("plan_not_found", "First Principles session not found");
+    }
+    const result = writePlannedFeatureFromThesis(workspace.workspaceRoot, existing);
+    if (result.written && result.featureId) {
+      const updated = {
+        ...existing,
+        featuresFeatureId: result.featureId,
+        updatedAt: new Date().toISOString(),
+      };
+      this.thesisSessionsById.set(updated.id, updated);
+      await writeThesisSession(workspace.workspaceRoot, updated);
+    }
+    return result;
+  }
+
+  async getReminderTimeline(
+    projectId: string,
+  ): Promise<import("../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { refreshReminderBindings } = await import("./reminder-graph/index.js");
+    return refreshReminderBindings(
+      this.reminderWorkspaceRoot(workspace.workspaceRoot, projectId),
+    );
+  }
+
+  async syncReminderTimeline(
+    projectId: string,
+  ): Promise<import("../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const root = this.reminderWorkspaceRoot(workspace.workspaceRoot, projectId);
+    const isMock = workspace.workspaceRoot.startsWith("mock://");
+    if (isMock) {
+      const {
+        buildDemoReminderTimeline,
+        writeReminderTimeline,
+        applyBindingWatch,
+        applyDueMilestoneStatuses,
+      } = await import("./reminder-graph/index.js");
+      const seeded = applyDueMilestoneStatuses(buildDemoReminderTimeline());
+      return writeReminderTimeline(root, applyBindingWatch(seeded, root));
+    }
+    const { syncReminderTimelineFromDocs } = await import("./reminder-graph/index.js");
+    return syncReminderTimelineFromDocs(root);
+  }
+
+  async reorderReminderItem(
+    projectId: string,
+    input: import("../contracts/reminder-graph.js").ReminderReorderInput,
+  ): Promise<import("../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { proposeOrApplyReorder } = await import("./reminder-graph/index.js");
+    const { ReminderReorderInputSchema } = await import(
+      "../contracts/reminder-graph.js"
+    );
+    const isMock = workspace.workspaceRoot.startsWith("mock://");
+    const profile = isMock
+      ? null
+      : this.settingsService.resolveModelProfile(workspace.settings);
+    return proposeOrApplyReorder(
+      this.reminderWorkspaceRoot(workspace.workspaceRoot, projectId),
+      ReminderReorderInputSchema.parse(input),
+      {
+        gateway: isMock || !profile ? null : this.modelGateway,
+        profile,
+      },
+    );
+  }
+
+  async acceptReminderEditOffer(
+    projectId: string,
+  ): Promise<import("../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { acceptReminderEditOffer } = await import("./reminder-graph/index.js");
+    return acceptReminderEditOffer(
+      this.reminderWorkspaceRoot(workspace.workspaceRoot, projectId),
+    );
+  }
+
+  async dismissReminderEditOffer(
+    projectId: string,
+  ): Promise<import("../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { dismissReminderEditOffer } = await import("./reminder-graph/index.js");
+    return dismissReminderEditOffer(
+      this.reminderWorkspaceRoot(workspace.workspaceRoot, projectId),
+    );
+  }
+
+  async setReminderMilestoneStatus(
+    projectId: string,
+    input: import("../contracts/reminder-graph.js").ReminderMilestoneCompleteInput,
+  ): Promise<import("../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { setReminderMilestoneStatus } = await import("./reminder-graph/index.js");
+    const { ReminderMilestoneCompleteInputSchema } = await import(
+      "../contracts/reminder-graph.js"
+    );
+    return setReminderMilestoneStatus(
+      this.reminderWorkspaceRoot(workspace.workspaceRoot, projectId),
+      ReminderMilestoneCompleteInputSchema.parse(input),
+    );
+  }
+
+  async sendReminderAuthoringTurn(
+    projectId: string,
+    request: import("../contracts/reminder-graph.js").ReminderAuthoringTurnRequest,
+  ): Promise<import("../contracts/reminder-graph.js").ReminderAuthoringTurnResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { sendReminderAuthoringTurn } = await import("./reminder-graph/index.js");
+    const { ReminderAuthoringTurnRequestSchema } = await import(
+      "../contracts/reminder-graph.js"
+    );
+    const isMock = workspace.workspaceRoot.startsWith("mock://");
+    const profile = isMock
+      ? null
+      : this.settingsService.resolveModelProfile(workspace.settings);
+    return sendReminderAuthoringTurn(
+      this.reminderWorkspaceRoot(workspace.workspaceRoot, projectId),
+      ReminderAuthoringTurnRequestSchema.parse(request),
+      {
+        gateway: isMock || !profile ? null : this.modelGateway,
+        profile,
+      },
+    );
+  }
+
+  async setReminderComposerMode(
+    projectId: string,
+    mode: import("../contracts/reminder-graph.js").ReminderComposerMode,
+  ): Promise<import("../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { setReminderComposerMode } = await import("./reminder-graph/index.js");
+    const { ReminderComposerModeSchema } = await import(
+      "../contracts/reminder-graph.js"
+    );
+    return setReminderComposerMode(
+      this.reminderWorkspaceRoot(workspace.workspaceRoot, projectId),
+      ReminderComposerModeSchema.parse(mode),
+    );
   }
 
   async applyMapWorkGroupMutation(
@@ -6912,6 +9627,1013 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return models.map((model) => ({ id: model.id, name: model.name }));
   }
 
+  async listMcpServers(projectId: string): Promise<McpServerConfig[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return cloneJson(workspace.settings.mcpServers ?? []);
+  }
+
+  async saveMcpServer(
+    projectId: string,
+    input: { config: McpServerConfig; authToken?: string },
+  ): Promise<ProjectOSSettings> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const config = McpServerConfigSchema.parse(input.config);
+    const authToken = input.authToken?.trim();
+    const authRef = config.authRef || createMcpAuthRef(config.id);
+    const previous = (workspace.settings.mcpServers ?? []).find(
+      (server) => server.id === config.id,
+    );
+    const nextConfig: McpServerConfig = {
+      ...config,
+      ...(authToken || previous?.authRef || config.authRef
+        ? { authRef: authToken ? authRef : (config.authRef ?? previous?.authRef) }
+        : {}),
+    };
+    if (authToken) {
+      await this.secretStore.set(authRef, authToken);
+      nextConfig.authRef = authRef;
+    }
+    const mcpServers = previous
+      ? (workspace.settings.mcpServers ?? []).map((server) =>
+          server.id === config.id ? nextConfig : server,
+        )
+      : [...(workspace.settings.mcpServers ?? []), nextConfig];
+    try {
+      const updated = await this.updateSettings(projectId, { mcpServers });
+      await this.mcpSessionManager.disposeServer(projectId, config.id);
+      return updated;
+    } catch (error) {
+      if (authToken && !previous?.authRef) {
+        await this.secretStore.delete(authRef).catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
+  async deleteMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<ProjectOSSettings> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const existing = (workspace.settings.mcpServers ?? []).find(
+      (server) => server.id === serverId,
+    );
+    const mcpServers = (workspace.settings.mcpServers ?? []).filter(
+      (server) => server.id !== serverId,
+    );
+    const updated = await this.updateSettings(projectId, { mcpServers });
+    await this.mcpSessionManager.disposeServer(projectId, serverId);
+    if (existing?.authRef) {
+      await this.secretStore.delete(existing.authRef).catch(() => undefined);
+    }
+    return updated;
+  }
+
+  async testMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<ConnectionTestResult> {
+    const started = Date.now();
+    try {
+      const tools = await this.refreshMcpTools(projectId, serverId);
+      return {
+        ok: true,
+        latencyMs: Date.now() - started,
+        message: `Connected (${tools.length} tool${tools.length === 1 ? "" : "s"})`,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        latencyMs: Date.now() - started,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async refreshMcpTools(
+    projectId: string,
+    serverId: string,
+  ): Promise<McpToolDescriptor[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const config = (workspace.settings.mcpServers ?? []).find(
+      (server) => server.id === serverId,
+    );
+    if (!config) {
+      throw new ProjectOSError(
+        "invalid_settings",
+        `MCP server '${serverId}' is not configured`,
+      );
+    }
+    const client = await this.mcpSessionManager.getClient({
+      projectId,
+      config,
+      workspaceRoot: workspace.workspaceRoot,
+      secretStore: this.secretStore,
+    });
+    return listServerToolDescriptors(client);
+  }
+
+  async listMcpCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<McpCatalogView> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const catalogUrl = workspace.settings.mcpMarketplace?.catalogUrl;
+    const view = await this.mcpCatalogClient.getCatalog({
+      ...(catalogUrl ? { catalogUrl } : {}),
+      ...(options?.forceRefresh ? { forceRefresh: true } : {}),
+    });
+    const listings = filterInstallableListings(
+      view.document,
+      workspace.settings.mcpMarketplace,
+    );
+    return {
+      ...view,
+      document: {
+        ...view.document,
+        listings,
+      },
+    };
+  }
+
+  async refreshMcpCatalog(projectId: string): Promise<McpCatalogView> {
+    return this.listMcpCatalog(projectId, { forceRefresh: true });
+  }
+
+  async installMcpFromCatalog(
+    projectId: string,
+    input: InstallMcpFromCatalogInput,
+  ): Promise<ProjectOSSettings> {
+    const parsed = InstallMcpFromCatalogInputSchema.parse(input);
+    const view = await this.listMcpCatalog(projectId);
+    const listing = findCatalogListing(view.document, parsed.listingId);
+    const config = listingToMcpServerConfig({
+      listing,
+      catalogVersion: view.document.version,
+      overrides: {
+        ...(parsed.cwd ? { cwd: parsed.cwd } : {}),
+        ...(typeof parsed.enabled === "boolean"
+          ? { enabled: parsed.enabled }
+          : {}),
+      },
+    });
+    return this.saveMcpServer(projectId, {
+      config,
+      ...(parsed.authToken?.trim()
+        ? { authToken: parsed.authToken.trim() }
+        : {}),
+    });
+  }
+
+  async disableMcpCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const id = String(listingId ?? "").trim();
+    if (!id) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const mcpMarketplace = withDisabledListing(
+      workspace.settings.mcpMarketplace,
+      id,
+    );
+    return this.updateSettings(projectId, { mcpMarketplace });
+  }
+
+  async reportMcpCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const listingId = String(input.listingId ?? "").trim();
+    if (!listingId) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const mcpMarketplace = withCatalogReport(workspace.settings.mcpMarketplace, {
+      listingId,
+      reportedAt: new Date().toISOString(),
+      ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+    });
+    const updated = await this.updateSettings(projectId, { mcpMarketplace });
+    if (this.openExternalUrl) {
+      await this.openExternalUrl(MCP_CATALOG_REPORT_ISSUE_URL).catch(() => undefined);
+    }
+    return updated;
+  }
+
+  async listSkillCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<SkillCatalogView> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const catalogUrl = workspace.settings.skillMarketplace?.catalogUrl;
+    const view = await this.skillCatalogClient.getCatalog({
+      ...(catalogUrl ? { catalogUrl } : {}),
+      ...(options?.forceRefresh ? { forceRefresh: true } : {}),
+    });
+    const listings = filterInstallableSkillListings(
+      view.document,
+      workspace.settings.skillMarketplace,
+    );
+    return {
+      ...view,
+      document: {
+        ...view.document,
+        listings,
+      },
+    };
+  }
+
+  async refreshSkillCatalog(projectId: string): Promise<SkillCatalogView> {
+    return this.listSkillCatalog(projectId, { forceRefresh: true });
+  }
+
+  async installSkillFromCatalog(
+    projectId: string,
+    input: InstallSkillFromCatalogInput,
+  ): Promise<SkillDescriptor> {
+    const parsed = InstallSkillFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const view = await this.listSkillCatalog(projectId);
+    const listing = findSkillCatalogListing(view.document, parsed.listingId);
+    try {
+      return installProjectSkill({
+        workspaceRoot: workspace.workspaceRoot,
+        listing,
+        ...(parsed.replace === true ? { replace: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof SkillInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async uninstallSkillFromCatalog(
+    projectId: string,
+    input: UninstallSkillFromCatalogInput,
+  ): Promise<void> {
+    const parsed = UninstallSkillFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    try {
+      uninstallProjectSkill({
+        workspaceRoot: workspace.workspaceRoot,
+        listingId: parsed.listingId,
+      });
+    } catch (error) {
+      if (error instanceof SkillInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async disableSkillCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const id = String(listingId ?? "").trim();
+    if (!id) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const skillMarketplace = withDisabledSkillListing(
+      workspace.settings.skillMarketplace,
+      id,
+    );
+    return this.updateSettings(projectId, { skillMarketplace });
+  }
+
+  async reportSkillCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const listingId = String(input.listingId ?? "").trim();
+    if (!listingId) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const skillMarketplace = withSkillCatalogReport(
+      workspace.settings.skillMarketplace,
+      {
+        listingId,
+        reportedAt: new Date().toISOString(),
+        ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+      },
+    );
+    const updated = await this.updateSettings(projectId, { skillMarketplace });
+    if (this.openExternalUrl) {
+      await this.openExternalUrl(SKILL_CATALOG_REPORT_ISSUE_URL).catch(() => undefined);
+    }
+    return updated;
+  }
+
+  async listRulesCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<RulesCatalogView> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const catalogUrl = workspace.settings.rulesMarketplace?.catalogUrl;
+    const view = await this.rulesCatalogClient.getCatalog({
+      ...(catalogUrl ? { catalogUrl } : {}),
+      ...(options?.forceRefresh ? { forceRefresh: true } : {}),
+    });
+    const listings = filterInstallableRulesListings(
+      view.document,
+      workspace.settings.rulesMarketplace,
+    );
+    return {
+      ...view,
+      document: {
+        ...view.document,
+        listings,
+      },
+    };
+  }
+
+  async refreshRulesCatalog(projectId: string): Promise<RulesCatalogView> {
+    return this.listRulesCatalog(projectId, { forceRefresh: true });
+  }
+
+  async installRulesFromCatalog(
+    projectId: string,
+    input: InstallRulesFromCatalogInput,
+  ): Promise<{ packId: string; relativeRoot: string }> {
+    const parsed = InstallRulesFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const view = await this.listRulesCatalog(projectId);
+    const listing = findRulesCatalogListing(view.document, parsed.listingId);
+    try {
+      return installProjectRulesPack({
+        workspaceRoot: workspace.workspaceRoot,
+        listing,
+        catalogVersion: view.document.version,
+        ...(parsed.replace === true ? { replace: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof RulesInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async uninstallRulesFromCatalog(
+    projectId: string,
+    input: UninstallRulesFromCatalogInput,
+  ): Promise<void> {
+    const parsed = UninstallRulesFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    try {
+      uninstallProjectRulesPack({
+        workspaceRoot: workspace.workspaceRoot,
+        listingId: parsed.listingId,
+      });
+    } catch (error) {
+      if (error instanceof RulesInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async disableRulesCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const id = String(listingId ?? "").trim();
+    if (!id) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const rulesMarketplace = withDisabledRulesListing(
+      workspace.settings.rulesMarketplace,
+      id,
+    );
+    return this.updateSettings(projectId, { rulesMarketplace });
+  }
+
+  async reportRulesCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const listingId = String(input.listingId ?? "").trim();
+    if (!listingId) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const rulesMarketplace = withRulesCatalogReport(
+      workspace.settings.rulesMarketplace,
+      {
+        listingId,
+        reportedAt: new Date().toISOString(),
+        ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+      },
+    );
+    const updated = await this.updateSettings(projectId, { rulesMarketplace });
+    if (this.openExternalUrl) {
+      await this.openExternalUrl(RULES_CATALOG_REPORT_ISSUE_URL).catch(() => undefined);
+    }
+    return updated;
+  }
+
+  async listInstalledRulesPackIds(projectId: string): Promise<string[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return listInstalledRulesPackIdsOnDisk(workspace.workspaceRoot);
+  }
+
+  async listAgentCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<AgentCatalogView> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const catalogUrl = workspace.settings.agentMarketplace?.catalogUrl;
+    const view = await this.agentCatalogClient.getCatalog({
+      ...(catalogUrl ? { catalogUrl } : {}),
+      ...(options?.forceRefresh ? { forceRefresh: true } : {}),
+    });
+    const listings = filterInstallableAgentListings(
+      view.document,
+      workspace.settings.agentMarketplace,
+    );
+    return {
+      ...view,
+      document: {
+        ...view.document,
+        listings,
+      },
+    };
+  }
+
+  async refreshAgentCatalog(projectId: string): Promise<AgentCatalogView> {
+    return this.listAgentCatalog(projectId, { forceRefresh: true });
+  }
+
+  async installAgentFromCatalog(
+    projectId: string,
+    input: InstallAgentFromCatalogInput,
+  ): Promise<AgentDefinition> {
+    const parsed = InstallAgentFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const view = await this.listAgentCatalog(projectId);
+    const listing = findAgentCatalogListing(view.document, parsed.listingId);
+    try {
+      return installAgentFromListing({
+        projectOSRoot: workspace.projectOSRoot,
+        projectId,
+        listing,
+        catalogVersion: view.document.version,
+        source: "catalog",
+        ...(parsed.replace === true ? { replace: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof AgentInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async uninstallAgentFromCatalog(
+    projectId: string,
+    input: UninstallAgentFromCatalogInput,
+  ): Promise<void> {
+    const parsed = UninstallAgentFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    try {
+      uninstallAgentFromListing({
+        projectOSRoot: workspace.projectOSRoot,
+        listingId: parsed.listingId,
+      });
+    } catch (error) {
+      if (error instanceof AgentInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async disableAgentCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const id = String(listingId ?? "").trim();
+    if (!id) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const agentMarketplace = withDisabledAgentListing(
+      workspace.settings.agentMarketplace,
+      id,
+    );
+    return this.updateSettings(projectId, { agentMarketplace });
+  }
+
+  async reportAgentCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const listingId = String(input.listingId ?? "").trim();
+    if (!listingId) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const agentMarketplace = withAgentCatalogReport(
+      workspace.settings.agentMarketplace,
+      {
+        listingId,
+        reportedAt: new Date().toISOString(),
+        ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+      },
+    );
+    const updated = await this.updateSettings(projectId, { agentMarketplace });
+    if (this.openExternalUrl) {
+      await this.openExternalUrl(AGENT_CATALOG_REPORT_ISSUE_URL).catch(() => undefined);
+    }
+    return updated;
+  }
+
+  async listInstalledMarketplaceAgentListingIds(
+    projectId: string,
+  ): Promise<string[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return listInstalledMarketplaceAgentListingIdsOnDisk(workspace.projectOSRoot);
+  }
+
+  async exportCapabilityPack(
+    projectId: string,
+    input: ExportCapabilityPackInput,
+  ): Promise<ExportCapabilityPackResult> {
+    const parsed = ExportCapabilityPackInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    if (parsed.kind === "workflow") {
+      const { getLoopGraph } = await import("./loop-graph-service.js");
+      const doc = getLoopGraph(workspace.workspaceRoot, parsed.loopId);
+      if (!doc) {
+        throw new ProjectOSError(
+          "invalid_settings",
+          `Loop '${parsed.loopId}' was not found`,
+        );
+      }
+      try {
+        const exported = exportWorkflowPackFromDraft({
+          title: doc.title,
+          description: doc.draft.graphPrompt,
+          draft: doc.draft,
+          sourceLoopId: doc.id,
+        });
+        return {
+          kind: "workflow",
+          listing: exported.listing,
+          packJson: exported.packJson,
+        };
+      } catch (error) {
+        if (error instanceof WorkflowInstallError) {
+          throw new ProjectOSError("invalid_settings", error.message);
+        }
+        throw error;
+      }
+    }
+    if (parsed.kind === "stencil") {
+      refreshProjectStencilOverlay(workspace.workspaceRoot);
+      try {
+        const exported = exportStencilPackFromIds({
+          stencilIds: parsed.stencilIds,
+          ...(parsed.title ? { title: parsed.title } : {}),
+          ...(parsed.description ? { description: parsed.description } : {}),
+          resolveStencil: (id) => getStencilById(id),
+        });
+        return {
+          kind: "stencil",
+          listing: exported.listing,
+          packJson: exported.packJson,
+        };
+      } catch (error) {
+        if (error instanceof StencilInstallError) {
+          throw new ProjectOSError("invalid_settings", error.message);
+        }
+        throw error;
+      }
+    }
+    if (parsed.kind === "rules") {
+      try {
+        const exported = exportRulesPackFromDisk({
+          workspaceRoot: workspace.workspaceRoot,
+          listingId: parsed.listingId,
+        });
+        return {
+          kind: "rules",
+          listing: exported.listing,
+          packJson: exported.packJson,
+        };
+      } catch (error) {
+        if (error instanceof RulesInstallError) {
+          throw new ProjectOSError("invalid_settings", error.message);
+        }
+        throw error;
+      }
+    }
+    try {
+      const exported = exportWorkforceAgentPack({
+        projectOSRoot: workspace.projectOSRoot,
+        definitionId: parsed.definitionId,
+        mcpServers: workspace.settings.mcpServers ?? [],
+      });
+      return {
+        kind: "agent",
+        listing: exported.listing,
+        packJson: exported.packJson,
+      };
+    } catch (error) {
+      if (error instanceof AgentInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async installRulesFromExportPack(
+    projectId: string,
+    input: InstallRulesFromExportPackInput,
+  ): Promise<{ packId: string; relativeRoot: string }> {
+    const parsed = InstallRulesFromExportPackInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    try {
+      return installProjectRulesPack({
+        workspaceRoot: workspace.workspaceRoot,
+        listing: parsed.listing,
+        catalogVersion: "export",
+        source: "export-reimport",
+        ...(parsed.replace === true ? { replace: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof RulesInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async installAgentFromExportPack(
+    projectId: string,
+    input: InstallAgentFromExportPackInput,
+  ): Promise<AgentDefinition> {
+    const parsed = InstallAgentFromExportPackInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    try {
+      return installAgentFromListing({
+        projectOSRoot: workspace.projectOSRoot,
+        projectId,
+        listing: parsed.listing,
+        catalogVersion: "export",
+        source: "export-reimport",
+        ...(parsed.replace === true ? { replace: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof AgentInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async listWorkflowCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<WorkflowCatalogView> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const catalogUrl = workspace.settings.workflowMarketplace?.catalogUrl;
+    const view = await this.workflowCatalogClient.getCatalog({
+      ...(catalogUrl ? { catalogUrl } : {}),
+      ...(options?.forceRefresh ? { forceRefresh: true } : {}),
+    });
+    const listings = filterInstallableWorkflowListings(
+      view.document,
+      workspace.settings.workflowMarketplace,
+    );
+    return {
+      ...view,
+      document: {
+        ...view.document,
+        listings,
+      },
+    };
+  }
+
+  async refreshWorkflowCatalog(projectId: string): Promise<WorkflowCatalogView> {
+    return this.listWorkflowCatalog(projectId, { forceRefresh: true });
+  }
+
+  async installWorkflowFromCatalog(
+    projectId: string,
+    input: InstallWorkflowFromCatalogInput,
+  ): Promise<LoopGraphPreset> {
+    const parsed = InstallWorkflowFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const view = await this.listWorkflowCatalog(projectId);
+    const listing = findWorkflowCatalogListing(view.document, parsed.listingId);
+    try {
+      return installWorkflowFromListing({
+        workspaceRoot: workspace.workspaceRoot,
+        listing,
+        catalogVersion: view.document.version,
+        source: "catalog",
+        ...(parsed.replace === true ? { replace: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof WorkflowInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async uninstallWorkflowFromCatalog(
+    projectId: string,
+    input: UninstallWorkflowFromCatalogInput,
+  ): Promise<void> {
+    const parsed = UninstallWorkflowFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    try {
+      uninstallWorkflowFromListing({
+        workspaceRoot: workspace.workspaceRoot,
+        listingId: parsed.listingId,
+      });
+    } catch (error) {
+      if (error instanceof WorkflowInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async disableWorkflowCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const id = String(listingId ?? "").trim();
+    if (!id) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const workflowMarketplace = withDisabledWorkflowListing(
+      workspace.settings.workflowMarketplace,
+      id,
+    );
+    return this.updateSettings(projectId, { workflowMarketplace });
+  }
+
+  async reportWorkflowCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const listingId = String(input.listingId ?? "").trim();
+    if (!listingId) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const workflowMarketplace = withWorkflowCatalogReport(
+      workspace.settings.workflowMarketplace,
+      {
+        listingId,
+        reportedAt: new Date().toISOString(),
+        ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+      },
+    );
+    const updated = await this.updateSettings(projectId, { workflowMarketplace });
+    if (this.openExternalUrl) {
+      await this.openExternalUrl(WORKFLOW_CATALOG_REPORT_ISSUE_URL).catch(
+        () => undefined,
+      );
+    }
+    return updated;
+  }
+
+  async listInstalledWorkflowListingIds(projectId: string): Promise<string[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return listInstalledWorkflowListingIdsOnDisk(workspace.workspaceRoot);
+  }
+
+  async listLoopGraphPresets(projectId: string): Promise<{
+    builtins: LoopGraphPreset[];
+    user: LoopGraphPreset[];
+  }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return listMergedLoopGraphPresets(workspace.workspaceRoot);
+  }
+
+  async resolveLoopGraphPreset(
+    projectId: string,
+    presetId: string,
+  ): Promise<LoopGraphPreset | null> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const id = String(presetId ?? "").trim();
+    if (!id) return null;
+    return resolveLoopGraphPresetOnDisk(workspace.workspaceRoot, id);
+  }
+
+  async installWorkflowFromExportPack(
+    projectId: string,
+    input: InstallWorkflowFromExportPackInput,
+  ): Promise<LoopGraphPreset> {
+    const parsed = InstallWorkflowFromExportPackInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    try {
+      return installWorkflowFromListing({
+        workspaceRoot: workspace.workspaceRoot,
+        listing: parsed.listing,
+        catalogVersion: "export",
+        source: "export-reimport",
+        ...(parsed.replace === true ? { replace: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof WorkflowInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async listStencilCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<StencilCatalogView> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const catalogUrl = workspace.settings.stencilMarketplace?.catalogUrl;
+    const view = await this.stencilCatalogClient.getCatalog({
+      ...(catalogUrl ? { catalogUrl } : {}),
+      ...(options?.forceRefresh ? { forceRefresh: true } : {}),
+    });
+    const listings = filterInstallableStencilListings(
+      view.document,
+      workspace.settings.stencilMarketplace,
+    );
+    return {
+      ...view,
+      document: {
+        ...view.document,
+        listings,
+      },
+    };
+  }
+
+  async refreshStencilCatalog(projectId: string): Promise<StencilCatalogView> {
+    return this.listStencilCatalog(projectId, { forceRefresh: true });
+  }
+
+  async installStencilFromCatalog(
+    projectId: string,
+    input: InstallStencilFromCatalogInput,
+  ): Promise<StencilDefinition[]> {
+    const parsed = InstallStencilFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const view = await this.listStencilCatalog(projectId);
+    const listing = findStencilCatalogListing(view.document, parsed.listingId);
+    try {
+      return installStencilFromListing({
+        workspaceRoot: workspace.workspaceRoot,
+        listing,
+        catalogVersion: view.document.version,
+        source: "catalog",
+        ...(parsed.replace === true ? { replace: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof StencilInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async uninstallStencilFromCatalog(
+    projectId: string,
+    input: UninstallStencilFromCatalogInput,
+  ): Promise<void> {
+    const parsed = UninstallStencilFromCatalogInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    try {
+      uninstallStencilFromListing({
+        workspaceRoot: workspace.workspaceRoot,
+        listingId: parsed.listingId,
+      });
+    } catch (error) {
+      if (error instanceof StencilInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async disableStencilCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const id = String(listingId ?? "").trim();
+    if (!id) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const stencilMarketplace = withDisabledStencilListing(
+      workspace.settings.stencilMarketplace,
+      id,
+    );
+    return this.updateSettings(projectId, { stencilMarketplace });
+  }
+
+  async reportStencilCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    this.requireLoadedWorkspace(projectId);
+    const listingId = String(input.listingId ?? "").trim();
+    if (!listingId) {
+      throw new ProjectOSError("invalid_settings", "listingId is required");
+    }
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const stencilMarketplace = withStencilCatalogReport(
+      workspace.settings.stencilMarketplace,
+      {
+        listingId,
+        reportedAt: new Date().toISOString(),
+        ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+      },
+    );
+    const updated = await this.updateSettings(projectId, { stencilMarketplace });
+    if (this.openExternalUrl) {
+      await this.openExternalUrl(STENCIL_CATALOG_REPORT_ISSUE_URL).catch(
+        () => undefined,
+      );
+    }
+    return updated;
+  }
+
+  async listInstalledStencilListingIds(projectId: string): Promise<string[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    return listInstalledStencilListingIdsOnDisk(workspace.workspaceRoot);
+  }
+
+  async listMergedStencilDefinitions(
+    projectId: string,
+  ): Promise<StencilDefinition[]> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    refreshProjectStencilOverlay(workspace.workspaceRoot);
+    return listMergedStencilDefinitionsOnDisk(workspace.workspaceRoot);
+  }
+
+  async installStencilFromExportPack(
+    projectId: string,
+    input: InstallStencilFromExportPackInput,
+  ): Promise<StencilDefinition[]> {
+    const parsed = InstallStencilFromExportPackInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    try {
+      return installStencilFromListing({
+        workspaceRoot: workspace.workspaceRoot,
+        listing: parsed.listing,
+        catalogVersion: "export",
+        source: "export-reimport",
+        ...(parsed.replace === true ? { replace: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof StencilInstallError) {
+        throw new ProjectOSError("invalid_settings", error.message);
+      }
+      throw error;
+    }
+  }
+
+  async installFromGitUrl(
+    projectId: string,
+    input: InstallFromGitUrlInput,
+  ): Promise<InstallFromGitUrlResult> {
+    const parsed = InstallFromGitUrlInputSchema.parse(input);
+    const workspace = this.requireLoadedWorkspace(projectId);
+    this.syncGitHubAuthMockMode();
+    const accessToken = await this.githubAuthSessionManager.getAccessToken();
+    return installFromGitUrl(parsed, {
+      workspaceRoot: workspace.workspaceRoot,
+      projectOSRoot: workspace.projectOSRoot,
+      projectId,
+      settings: workspace.settings,
+      ...(accessToken ? { accessToken } : {}),
+      saveMcpServer: async ({ config }) =>
+        this.saveMcpServer(projectId, { config }),
+    });
+  }
+
   async transcribeAudio(
     request: import("../contracts/voice-input.js").TranscribeAudioRequest,
   ): Promise<import("../contracts/voice-input.js").TranscribeAudioResult> {
@@ -7058,6 +10780,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ...(injection
         ? { memoryInjection: injection, memoryIndexMarkdown: injection.markdown }
         : {}),
+      ...(request.workforceAgentDefinitionId !== undefined
+        ? { workforceAgentDefinitionId: request.workforceAgentDefinitionId }
+        : previous?.workforceAgentDefinitionId !== undefined
+          ? { workforceAgentDefinitionId: previous.workforceAgentDefinitionId }
+          : {}),
     });
   }
 

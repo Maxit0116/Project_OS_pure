@@ -56,8 +56,8 @@
 }
 
 .reading {
-  border-color: #3b82f6;
-  color: #93c5fd;
+  border-color: var(--tech-accent);
+  color: var(--tech-accent);
 }
 
 .editing {
@@ -98,7 +98,7 @@
 
 /* Host ring — applied on flowHost / feature card wrapper */
 .hostReading {
-  box-shadow: inset 0 0 0 2px #3b82f6;
+  box-shadow: inset 0 0 0 2px var(--tech-accent);
 }
 
 .hostEditing {

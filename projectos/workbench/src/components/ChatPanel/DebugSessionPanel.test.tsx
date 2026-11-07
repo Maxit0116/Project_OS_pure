@@ -23,6 +23,8 @@ function render(overrides: Partial<{ phase: string; fixPending: boolean }>) {
       onReproduced={() => undefined}
       onConfirmFix={() => undefined}
       onMarkFixed={() => undefined}
+      onConfirmBugAlignment={() => undefined}
+      onMarkBugFixed={() => undefined}
     />,
   )
 }

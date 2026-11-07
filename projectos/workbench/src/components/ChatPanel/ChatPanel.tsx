@@ -14,11 +14,15 @@ import PromptRefinementCard from './PromptRefinementCard'
 import RequestIntentCard from './RequestIntentCard'
 import PlanReviewCard from './PlanReviewCard'
 import PendingRunDecisions from './PendingRunDecisions'
+import AgentPoolAcceptanceCard from './AgentPoolAcceptanceCard'
+import { useAgentPoolStore } from '../AgentFlow/AgentPool/agentPoolStore'
 import DebugSessionPanel from './DebugSessionPanel'
 import { cycleChatMode } from './ChatModeSelector'
 import ChatMessageContent from './ChatMessageContent'
 import ChatMessageCopyButton from './ChatMessageCopyButton'
 import InheritedSessionCard from './InheritedSessionCard'
+import ProductLabCard from '../ProductLab/ProductLabCard'
+import { useProductLabStore } from '../../state/productLabStore'
 import AgentActivityIndicator from '../ui/AgentActivityIndicator'
 import AgentActivitySummaryRow from '../AgentFlow/AgentActivitySummaryRow'
 import {
@@ -40,16 +44,29 @@ import {
   parseSpatialPinChatContent,
 } from './spatialPinChatDisplay'
 import LoopAuthoringBanner from '../LoopGraph/LoopAuthoringBanner'
+import DiagramSummaryCard from '../DiagramGraph/DiagramSummaryCard'
+import { useDiagramGraphStore } from '../../state/diagramGraphStore'
+import WireframePackSummaryCard from '../WireframePack/WireframePackSummaryCard'
+import { useWireframePackStore } from '../../state/wireframePackStore'
+import AgentDraftCard from '../AgentWorkforce/AgentDraftCard'
 import { shouldSuggestPlanMode } from './suggestPlanMode'
 import { isDebugFixPending } from '../../state/debugFixPending'
 import ConversationNavRail from './ConversationNavRail'
-import { collectUserTurns } from './conversationNavTurns'
+import { collectUserTurns, scrollTurnIntoView } from './conversationNavTurns'
+import FirstPrinciplesConflictCard from './FirstPrinciples/FirstPrinciplesConflictCard'
+import FirstPrinciplesLayerCard from './FirstPrinciples/FirstPrinciplesLayerCard'
+import FirstPrinciplesSuggestChip from './FirstPrinciples/FirstPrinciplesSuggestChip'
+import ThesisHandoffBar from './FirstPrinciples/ThesisHandoffBar'
+import ThesisReviewCard from './FirstPrinciples/ThesisReviewCard'
+import { looksLikeVisionPrompt } from '@contracts/index'
 import styles from './ChatPanel.module.css'
 
 export default function ChatPanel() {
   const messages = useWorkbenchStore((s) => s.messages)
   const inheritedDigest = useChatSessionStore((s) => s.inheritedDigest)
   const activeSessionId = useChatSessionStore((s) => s.activeSessionId)
+  const pendingRevealMessageId = useChatSessionStore((s) => s.pendingRevealMessageId)
+  const clearPendingRevealMessage = useChatSessionStore((s) => s.clearPendingRevealMessage)
   const forkSession = useChatSessionStore((s) => s.forkSession)
   const composerDraft = useWorkbenchStore((s) => s.composerDraft)
   const setComposerDraft = useWorkbenchStore((s) => s.setComposerDraft)
@@ -66,6 +83,21 @@ export default function ChatPanel() {
   const focusedDecisionId = useWorkbenchStore((s) => s.focusedDecisionId)
   const decisionResolvingIds = useWorkbenchStore((s) => s.decisionResolvingIds)
   const resolveRunDecision = useWorkbenchStore((s) => s.resolveRunDecision)
+  const activeChatSessionId = useChatSessionStore((s) => s.activeSessionId)
+  const labChatSessionId = useProductLabStore((s) => {
+    const id = s.document.activeSessionId
+    if (!id) return null
+    const session = s.document.sessions.find((entry) => entry.id === id)
+    if (!session || session.status === 'ended') return null
+    return session.chatSessionId ?? null
+  })
+  // Lab Card belongs only to the dedicated Lab chat session.
+  const showLabCard = Boolean(
+    labChatSessionId && labChatSessionId === activeChatSessionId,
+  )
+  const pendingDiagramSummary = useDiagramGraphStore((s) => s.pendingSummary)
+  const pendingWireframeSummary = useWireframePackStore((s) => s.pendingSummary)
+  const reviewingPoolTask = useAgentPoolStore((s) => s.reviewingTaskSnapshot)
   const planConfirmed = useWorkbenchStore((s) => s.planConfirmed)
   const debugSession = useWorkbenchStore((s) => s.debugSession)
   const refinementConfirmed = useWorkbenchStore((s) => s.refinementConfirmed)
@@ -80,6 +112,13 @@ export default function ChatPanel() {
   const activeCustomModeSkillId = useWorkbenchStore((s) => s.activeCustomModeSkillId)
   const setActiveCustomModeSkillId = useWorkbenchStore((s) => s.setActiveCustomModeSkillId)
   const exitCustomMode = useWorkbenchStore((s) => s.exitCustomMode)
+  const createAgentComposerActive = useWorkbenchStore((s) => s.createAgentComposerActive)
+  const pendingWorkforceDraft = useWorkbenchStore((s) => s.pendingWorkforceDraft)
+  const updatePendingWorkforceDraft = useWorkbenchStore((s) => s.updatePendingWorkforceDraft)
+  const confirmWorkforceDraft = useWorkbenchStore((s) => s.confirmWorkforceDraft)
+  const dismissWorkforceDraft = useWorkbenchStore((s) => s.dismissWorkforceDraft)
+  const cancelCreateAgentComposer = useWorkbenchStore((s) => s.cancelCreateAgentComposer)
+  const [workforceDraftBusy, setWorkforceDraftBusy] = useState(false)
   const loadPlanFromWorkspace = useWorkbenchStore((s) => s.loadPlanFromWorkspace)
   const listWorkspacePlans = useWorkbenchStore((s) => s.listWorkspacePlans)
   const restoreConversationCheckpoint = useWorkbenchStore((s) => s.restoreConversationCheckpoint)
@@ -99,6 +138,8 @@ export default function ChatPanel() {
   const submitDebugRepro = useWorkbenchStore((s) => s.submitDebugRepro)
   const confirmDebugFix = useWorkbenchStore((s) => s.confirmDebugFix)
   const markDebugFixed = useWorkbenchStore((s) => s.markDebugFixed)
+  const confirmBugAlignment = useWorkbenchStore((s) => s.confirmBugAlignment)
+  const markBugFixed = useWorkbenchStore((s) => s.markBugFixed)
   const reviseRefinement = useWorkbenchStore((s) => s.reviseRefinement)
   const refineLoading = useWorkbenchStore((s) => s.refineLoading)
   const flowStatus = useWorkbenchStore((s) => s.flowStatus)
@@ -108,6 +149,20 @@ export default function ChatPanel() {
   const latestAskTrace = useWorkbenchStore((s) => s.latestAskTrace)
   const latestPlanTrace = useWorkbenchStore((s) => s.latestPlanTrace)
   const chatMode = useWorkbenchStore((s) => s.chatMode)
+  const askSubMode = useWorkbenchStore((s) => s.askSubMode)
+  const pendingFirstPrinciples = useWorkbenchStore((s) => s.pendingFirstPrinciples)
+  const firstPrinciplesBusy = useWorkbenchStore((s) => s.firstPrinciplesBusy)
+  const firstPrinciplesSuggestDismissed = useWorkbenchStore(
+    (s) => s.firstPrinciplesSuggestDismissed,
+  )
+  const setAskSubMode = useWorkbenchStore((s) => s.setAskSubMode)
+  const dismissFirstPrinciplesSuggest = useWorkbenchStore((s) => s.dismissFirstPrinciplesSuggest)
+  const beginFirstPrinciplesFromVision = useWorkbenchStore((s) => s.beginFirstPrinciplesFromVision)
+  const answerFirstPrinciplesQuestion = useWorkbenchStore((s) => s.answerFirstPrinciplesQuestion)
+  const confirmFirstPrinciplesThesis = useWorkbenchStore((s) => s.confirmFirstPrinciplesThesis)
+  const resolveFirstPrinciplesConflict = useWorkbenchStore((s) => s.resolveFirstPrinciplesConflict)
+  const pivotFirstPrinciples = useWorkbenchStore((s) => s.pivotFirstPrinciples)
+  const handoffFirstPrinciples = useWorkbenchStore((s) => s.handoffFirstPrinciples)
   const selectedNodeId = useWorkbenchStore((s) => s.selectedNodeId)
   const selectedFilePath = useWorkbenchStore((s) => s.selectedFilePath)
   const setChatMode = useWorkbenchStore((s) => s.setChatMode)
@@ -255,8 +310,24 @@ export default function ChatPanel() {
   useEffect(() => {
     const el = messagesRef.current
     if (!el) return
+    if (pendingRevealMessageId) return
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-  }, [messages, pendingRefinement, pendingIntent, pendingPlan, debugSession, refineLoading])
+  }, [messages, pendingRefinement, pendingIntent, pendingPlan, debugSession, refineLoading, pendingRevealMessageId])
+
+  useEffect(() => {
+    if (!pendingRevealMessageId) return
+    const el = messagesRef.current
+    if (!el) return
+    const messageId = pendingRevealMessageId
+    const frame = window.requestAnimationFrame(() => {
+      const found = scrollTurnIntoView(el, messageId)
+      clearPendingRevealMessage()
+      if (!found) {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      }
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [pendingRevealMessageId, messages, clearPendingRevealMessage, activeSessionId])
 
   useEffect(() => {
     if (!isRecording && !isTranscribing) return
@@ -273,6 +344,10 @@ export default function ChatPanel() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (isRecording || isTranscribing) stopVoice()
+    if (createAgentComposerActive) {
+      if (composerDraft.text.trim()) void sendPrompt(composerDraft)
+      return
+    }
     if (composerDraft.text.trim() && canSubmit) void sendPrompt(composerDraft)
   }
 
@@ -345,6 +420,7 @@ export default function ChatPanel() {
           onResolve={(decision, optionId, text, status) =>
             void resolveRunDecision(decision, optionId, text, status)}
         />
+        {showLabCard ? <ProductLabCard /> : null}
         {messages.map((msg) => {
           const spatialPin = msg.role === 'user' && parseSpatialPinChatContent(msg.content)
           const attachments = spatialPin
@@ -356,18 +432,22 @@ export default function ChatPanel() {
             !!activeSessionId &&
             (msg.role === 'user' || msg.role === 'assistant') &&
             msg.content.trim().length > 0
-          const isUserTurn = msg.role === 'user' && msg.content.trim().length > 0
+          const canAnchor =
+            (msg.role === 'user' || msg.role === 'assistant') && msg.content.trim().length > 0
           return (
             <div
               key={msg.id}
               className={`${styles.message} ${styles[msg.role]}`}
-              {...(isUserTurn ? { 'data-message-id': msg.id } : {})}
+              {...(canAnchor ? { 'data-message-id': msg.id } : {})}
             >
               <div className={styles.messageBody}>
                 {msg.role === 'user' && (attachments.length || msg.invokedSkillId) ? (
                   <AttachmentChips
                     attachments={attachments}
                     invokedSkillLabel={msg.invokedSkillId}
+                    onRemove={() => {
+                      /* message history chips are read-only */
+                    }}
                   />
                 ) : null}
                 <div className={styles.bubble} title={formatTime(msg.timestamp)}>
@@ -434,10 +514,16 @@ export default function ChatPanel() {
             refinement={pendingRefinement}
             targetFile={selectedFilePath}
             confirmed={refinementConfirmed}
-            onConfirm={() => void confirmRefinement()}
+            confirming={refineLoading}
+            onConfirm={(payload) => void confirmRefinement(payload)}
             onRevise={handleRevise}
           />
         )}
+        {reviewingPoolTask &&
+        (!reviewingPoolTask.chatSessionId ||
+          reviewingPoolTask.chatSessionId === activeSessionId) ? (
+          <AgentPoolAcceptanceCard task={reviewingPoolTask} />
+        ) : null}
         {planActivityRows.map((activity) => (
           <AgentActivitySummaryRow
             key={activity.id}
@@ -447,6 +533,12 @@ export default function ChatPanel() {
             onOpen={() => openActivity(activity.id)}
           />
         ))}
+        {pendingDiagramSummary ? (
+          <DiagramSummaryCard summary={pendingDiagramSummary} />
+        ) : null}
+        {pendingWireframeSummary ? (
+          <WireframePackSummaryCard summary={pendingWireframeSummary} />
+        ) : null}
         {chatMode === 'plan' && pendingPlan && (
           <PlanReviewCard
             plan={pendingPlan}
@@ -548,6 +640,8 @@ export default function ChatPanel() {
             onConfirmFix={() => void confirmDebugFix()}
             fixPending={debugFixPending}
             onMarkFixed={requestDebugCleanup}
+            onConfirmBugAlignment={(bugs) => void confirmBugAlignment(bugs)}
+            onMarkBugFixed={(bugId) => void markBugFixed(bugId)}
           />
         )}
         {chatMode === 'debug' && debugSession && !refineLoading && flowStatus !== 'running' ? (
@@ -590,6 +684,47 @@ export default function ChatPanel() {
             ) : null}
           </div>
         ) : null}
+        {chatMode === 'ask' &&
+        askSubMode === 'first_principles' &&
+        pendingFirstPrinciples?.status === 'layer_active' ? (
+          <FirstPrinciplesLayerCard
+            session={pendingFirstPrinciples}
+            submitting={firstPrinciplesBusy}
+            onAnswer={(input) => void answerFirstPrinciplesQuestion(input)}
+          />
+        ) : null}
+        {chatMode === 'ask' &&
+        askSubMode === 'first_principles' &&
+        pendingFirstPrinciples?.status === 'conflict' ? (
+          <FirstPrinciplesConflictCard
+            session={pendingFirstPrinciples}
+            submitting={firstPrinciplesBusy}
+            onResolve={(resolution, rephraseText) =>
+              void resolveFirstPrinciplesConflict(resolution, rephraseText)
+            }
+          />
+        ) : null}
+        {chatMode === 'ask' &&
+        askSubMode === 'first_principles' &&
+        pendingFirstPrinciples &&
+        (pendingFirstPrinciples.status === 'thesis_review' ||
+          pendingFirstPrinciples.status === 'concluded') ? (
+          <>
+            <ThesisReviewCard
+              session={pendingFirstPrinciples}
+              submitting={firstPrinciplesBusy}
+              onConfirm={(thesis, ack, writeFeature) =>
+                void confirmFirstPrinciplesThesis(thesis, ack, writeFeature)
+              }
+              onPivot={() => void pivotFirstPrinciples()}
+            />
+            <ThesisHandoffBar
+              session={pendingFirstPrinciples}
+              busy={firstPrinciplesBusy}
+              onHandoff={(target) => void handoffFirstPrinciples(target)}
+            />
+          </>
+        ) : null}
         {runActivityRows.map((activity) => (
           <AgentActivitySummaryRow
             key={activity.id}
@@ -614,7 +749,6 @@ export default function ChatPanel() {
           scopeRef={panelRef}
           modeLabel={chatModeNavLabel}
           flashClassName={styles.navFlash}
-          onOpenActivity={openActivity}
         />
       </div>
       <form className={styles.inputArea} onSubmit={handleSubmit}>
@@ -686,20 +820,58 @@ export default function ChatPanel() {
               </div>
             </div>
           ) : null}
+          {chatMode === 'ask' &&
+          askSubMode === 'chat' &&
+          !firstPrinciplesSuggestDismissed &&
+          looksLikeVisionPrompt(composerDraft.text) ? (
+            <FirstPrinciplesSuggestChip
+              onAccept={() => {
+                const vision = composerDraft.text.trim()
+                if (!vision) {
+                  setAskSubMode('first_principles')
+                  return
+                }
+                void beginFirstPrinciplesFromVision(vision)
+              }}
+              onDismiss={() => dismissFirstPrinciplesSuggest()}
+            />
+          ) : null}
           <VoiceInputErrorBanner
             errorKey={voiceState.error}
             onDismiss={dismissError}
             labels={voiceLabels}
           />
+          {pendingWorkforceDraft && pendingWorkforceDraft.source === 'chat' ? (
+            <AgentDraftCard
+              draft={pendingWorkforceDraft.draft}
+              source="chat"
+              busy={workforceDraftBusy}
+              onChange={updatePendingWorkforceDraft}
+              onCancel={() => dismissWorkforceDraft()}
+              onConfirm={(options) => {
+                setWorkforceDraftBusy(true)
+                void confirmWorkforceDraft(options)
+                  .catch(() => undefined)
+                  .finally(() => setWorkforceDraftBusy(false))
+              }}
+            />
+          ) : null}
           <PromptComposer
             draft={composerDraft}
             onDraftChange={setComposerDraft}
             onModeSelect={(mode) => void setChatMode(mode)}
-            onChatModeChange={(mode) => void setChatMode(mode)}
+            onChatModeChange={(mode) => {
+              cancelCreateAgentComposer()
+              void setChatMode(mode)
+            }}
             onUseAsCustomMode={(skillId) => setActiveCustomModeSkillId(skillId)}
             disabled={refineLoading && flowStatus !== 'running'}
             chatMode={chatMode}
-            submitDisabled={!composerDraft.text.trim() || refineLoading || !canSubmit}
+            submitDisabled={
+              !composerDraft.text.trim() ||
+              refineLoading ||
+              (!createAgentComposerActive && !canSubmit)
+            }
             stopVisible={agentStopVisible}
             onStop={() => void stopAgentRun()}
             voice={{
@@ -711,20 +883,31 @@ export default function ChatPanel() {
               isSupported,
               onMicToggle: handleVoiceToggle,
             }}
-            placeholder={ts(
-              chatMode === 'ask'
-                ? 'chat.askPlaceholder'
-                : chatMode === 'anchored'
-                ? 'chat.anchoredPlaceholder'
-                : chatMode === 'plan'
-                ? pendingPlan?.status === 'needs_clarification'
-                  ? 'plan.planClarificationPlaceholder'
-                  : 'chat.planPlaceholder'
-                : chatMode === 'debug'
-                ? 'chat.debugPlaceholder'
-                : 'chat.placeholder',
-            )}
+            placeholder={
+              createAgentComposerActive
+                ? ts('workforce.createAgentPlaceholder')
+                : ts(
+                    chatMode === 'ask'
+                      ? askSubMode === 'first_principles'
+                        ? 'chat.firstPrinciplesPlaceholder'
+                        : 'chat.askPlaceholder'
+                      : chatMode === 'anchored'
+                        ? 'chat.anchoredPlaceholder'
+                        : chatMode === 'plan'
+                          ? pendingPlan?.status === 'needs_clarification'
+                            ? 'plan.planClarificationPlaceholder'
+                            : 'chat.planPlaceholder'
+                          : chatMode === 'debug'
+                            ? 'chat.debugPlaceholder'
+                            : 'chat.placeholder',
+                  )
+            }
             onKeyDownExtra={(event) => {
+              if (event.key === 'Escape' && createAgentComposerActive) {
+                event.preventDefault()
+                cancelCreateAgentComposer()
+                return
+              }
               if (event.key === 'Escape' && (isRecording || isTranscribing)) {
                 event.preventDefault()
                 setComposerDraft(setComposerText(composerDraft, baseInputRef.current))
@@ -744,7 +927,11 @@ export default function ChatPanel() {
               if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                 event.preventDefault()
                 if (isRecording) stopVoice()
-                if (composerDraft.text.trim() && !refineLoading && canSubmit) {
+                if (
+                  composerDraft.text.trim() &&
+                  !refineLoading &&
+                  (createAgentComposerActive || canSubmit)
+                ) {
                   void sendPrompt(composerDraft)
                 }
               }

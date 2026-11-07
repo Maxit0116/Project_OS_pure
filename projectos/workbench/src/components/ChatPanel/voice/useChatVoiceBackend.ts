@@ -1,4 +1,5 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { ModelProfile, ProjectOSSettings } from '@contracts/index'
 import { isDesktopApp } from '../../../data/clientMode'
 import { loadVoiceSubmitKeywords, voiceLanguageFromLocale } from '../../../preferences/voiceInput'
 import { useWorkbenchStore } from '../../../state/workbenchStore'
@@ -16,15 +17,62 @@ function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
-export function useChatVoiceBackend(locale: Locale) {
+export interface ChatVoiceBackendOptions {
+  /**
+   * Overlay / capture surfaces that are not hydrated via Zustand can pass a
+   * project id + optional profiles so cloud transcription still works.
+   */
+  projectId?: string | null
+  modelProfiles?: ModelProfile[]
+  selectedModelProfileId?: string | null
+  /** Prefer IPC `transcribeAudio` when no API client is available (Overlay). */
+  preferInvoke?: boolean
+}
+
+export function useChatVoiceBackend(
+  locale: Locale,
+  options: ChatVoiceBackendOptions = {},
+) {
   const client = useWorkbenchStore((s) => s.client)
   const project = useWorkbenchStore((s) => s.project)
   const settings = useWorkbenchStore((s) => s.settings)
-  const selectedModelProfileId = useWorkbenchStore((s) => s.selectedModelProfileId)
+  const storeSelectedModelProfileId = useWorkbenchStore((s) => s.selectedModelProfileId)
+
+  const projectId = options.projectId ?? project?.projectId ?? null
+  const selectedModelProfileId =
+    options.selectedModelProfileId !== undefined
+      ? options.selectedModelProfileId
+      : storeSelectedModelProfileId
+
+  const [invokedProfiles, setInvokedProfiles] = useState<ModelProfile[]>([])
+
+  useEffect(() => {
+    if (!options.preferInvoke || !projectId || !window.projectOS?.invoke) return
+    if (options.modelProfiles && options.modelProfiles.length > 0) return
+    let cancelled = false
+    void window.projectOS
+      .invoke('getSettings', projectId)
+      .then((raw) => {
+        if (cancelled) return
+        const next = raw as ProjectOSSettings | null
+        setInvokedProfiles(next?.modelProfiles ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setInvokedProfiles([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [options.preferInvoke, options.modelProfiles, projectId])
+
+  const modelProfiles =
+    options.modelProfiles ??
+    (options.preferInvoke ? invokedProfiles : settings?.modelProfiles) ??
+    []
 
   const whisperProfiles = useMemo(
-    () => (settings?.modelProfiles ?? []).filter(profileSupportsWhisper),
-    [settings?.modelProfiles],
+    () => modelProfiles.filter(profileSupportsWhisper),
+    [modelProfiles],
   )
 
   const language = voiceLanguageFromLocale(locale)
@@ -32,7 +80,8 @@ export function useChatVoiceBackend(locale: Locale) {
   // The on-device model needs no project or backend, so it alone is enough to keep
   // us off the Web Speech API.
   const canBatchTranscribe =
-    isLocalWhisperAvailable() || (Boolean(project) && isDesktopApp())
+    isLocalWhisperAvailable() ||
+    (Boolean(projectId) && isDesktopApp())
 
   const engine: VoiceInputEngine = canBatchTranscribe ? 'batch' : 'webSpeech'
 
@@ -55,17 +104,28 @@ export function useChatVoiceBackend(locale: Locale) {
         throw new Error('No speech detected')
       }
 
-      if (project && cloudTranscriptionProfileId) {
+      if (projectId && cloudTranscriptionProfileId) {
         try {
           const audioBase64 = await blobToBase64(blob)
-          const result = await client.transcribeAudio({
-            projectId: project.projectId,
-            audioBase64,
-            mimeType: blob.type || 'audio/webm',
-            modelProfileId: cloudTranscriptionProfileId,
-          })
-          const text = result.text.trim()
-          if (text) return text
+          if (options.preferInvoke && window.projectOS?.invoke) {
+            const result = (await window.projectOS.invoke('transcribeAudio', {
+              projectId,
+              audioBase64,
+              mimeType: blob.type || 'audio/webm',
+              modelProfileId: cloudTranscriptionProfileId,
+            })) as { text?: string }
+            const text = result.text?.trim() ?? ''
+            if (text) return text
+          } else if (client?.transcribeAudio) {
+            const result = await client.transcribeAudio({
+              projectId,
+              audioBase64,
+              mimeType: blob.type || 'audio/webm',
+              modelProfileId: cloudTranscriptionProfileId,
+            })
+            const text = result.text.trim()
+            if (text) return text
+          }
         } catch (error) {
           console.warn('[voice] hosted transcription failed, falling back to on-device model', error)
           // Rethrowing preserves the specific backend reason (missing key, etc.)
@@ -80,7 +140,13 @@ export function useChatVoiceBackend(locale: Locale) {
 
       throw new Error('speech_not_supported')
     }
-  }, [canBatchTranscribe, client, cloudTranscriptionProfileId, project])
+  }, [
+    canBatchTranscribe,
+    client,
+    cloudTranscriptionProfileId,
+    options.preferInvoke,
+    projectId,
+  ])
 
   const submitKeywords = useMemo(() => loadVoiceSubmitKeywords(), [])
 

@@ -6,14 +6,22 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createDraftSpatialPin } from "../contracts/spatial-pin.js";
 import {
+  deleteSpatialCaptureFolder,
   deleteSpatialCaptureSession,
+  getSpatialCaptureFolder,
   getSpatialCaptureSession,
+  listSpatialCaptureFolders,
   listSpatialCaptureSessions,
+  mergeSpatialCaptureFolders,
+  placeSpatialCaptureSession,
   SpatialCaptureSessionError,
   upsertSpatialCaptureSession,
 } from "./spatial-capture-session-service.js";
 import { upsertSpatialPin } from "./spatial-pin-service.js";
-import type { SpatialCaptureSession } from "../contracts/spatial-capture-session.js";
+import {
+  partitionSpatialCaptures,
+  type SpatialCaptureSession,
+} from "../contracts/spatial-capture-session.js";
 
 describe("spatial-capture-session-service", () => {
   const roots: string[] = [];
@@ -168,5 +176,142 @@ describe("spatial-capture-session-service", () => {
     expect(deleteSpatialCaptureSession(root, "cap_1")).toBe(true);
     expect(getSpatialCaptureSession(root, "cap_1")).toBeNull();
     expect(listSpatialCaptureSessions(root)).toEqual([]);
+  });
+
+  it("keeps a single-member new folder in misc until a second capture joins", () => {
+    const root = tempRoot();
+    upsertSpatialCaptureSession(root, sampleSession({ id: "cap_1" }));
+    placeSpatialCaptureSession(root, "cap_1", {
+      mode: "new_folder",
+      folderName: "LoginUX",
+      title: "LoginUX-1",
+    });
+    const folders = listSpatialCaptureFolders(root);
+    expect(folders).toHaveLength(1);
+    expect(folders[0]?.memberSessionIds).toEqual(["cap_1"]);
+    const partitioned = partitionSpatialCaptures(
+      listSpatialCaptureSessions(root),
+      folders,
+    );
+    expect(partitioned.folders).toHaveLength(0);
+    expect(partitioned.misc.map((h) => h.id)).toEqual(["cap_1"]);
+
+    upsertSpatialCaptureSession(root, sampleSession({ id: "cap_2" }));
+    placeSpatialCaptureSession(root, "cap_2", {
+      mode: "join_folder",
+      folderId: folders[0]!.id,
+      title: "",
+    });
+    const after = partitionSpatialCaptures(
+      listSpatialCaptureSessions(root),
+      listSpatialCaptureFolders(root),
+    );
+    expect(after.folders).toHaveLength(1);
+    expect(after.folders[0]?.name).toBe("LoginUX");
+    expect(after.misc).toHaveLength(0);
+    expect(getSpatialCaptureSession(root, "cap_2")?.title).toBe("LoginUX-2");
+  });
+
+  it("merges two misc captures into a visible folder", () => {
+    const root = tempRoot();
+    upsertSpatialCaptureSession(
+      root,
+      sampleSession({ id: "cap_a", title: "A" }),
+    );
+    upsertSpatialCaptureSession(
+      root,
+      sampleSession({ id: "cap_b", title: "B" }),
+    );
+    placeSpatialCaptureSession(root, "cap_b", {
+      mode: "merge_misc",
+      otherSessionId: "cap_a",
+      folderName: "Checkout",
+      title: "Checkout-2",
+      otherTitle: "Checkout-1",
+    });
+    const folder = listSpatialCaptureFolders(root)[0];
+    expect(folder?.memberSessionIds.sort()).toEqual(["cap_a", "cap_b"]);
+    expect(getSpatialCaptureSession(root, "cap_a")?.folderId).toBe(folder?.id);
+    expect(getSpatialCaptureSession(root, "cap_b")?.title).toBe("Checkout-2");
+  });
+
+  it("dissolves a folder back to misc, or cascade-deletes members", () => {
+    const root = tempRoot();
+    upsertSpatialCaptureSession(root, sampleSession({ id: "cap_1" }));
+    upsertSpatialCaptureSession(root, sampleSession({ id: "cap_2" }));
+    placeSpatialCaptureSession(root, "cap_2", {
+      mode: "merge_misc",
+      otherSessionId: "cap_1",
+      folderName: "Pair",
+      title: "Pair-2",
+      otherTitle: "Pair-1",
+    });
+    const folderId = listSpatialCaptureFolders(root)[0]!.id;
+    expect(deleteSpatialCaptureFolder(root, folderId, { cascade: false })).toBe(
+      true,
+    );
+    expect(getSpatialCaptureFolder(root, folderId)).toBeNull();
+    expect(getSpatialCaptureSession(root, "cap_1")?.folderId).toBeUndefined();
+    expect(listSpatialCaptureSessions(root)).toHaveLength(2);
+
+    placeSpatialCaptureSession(root, "cap_2", {
+      mode: "merge_misc",
+      otherSessionId: "cap_1",
+      folderName: "Pair",
+      title: "Pair-2",
+      otherTitle: "Pair-1",
+    });
+    const again = listSpatialCaptureFolders(root)[0]!.id;
+    expect(deleteSpatialCaptureFolder(root, again, { cascade: true })).toBe(
+      true,
+    );
+    expect(listSpatialCaptureSessions(root)).toEqual([]);
+    expect(listSpatialCaptureFolders(root)).toEqual([]);
+  });
+
+  it("merges one folder into another and keeps capture titles", () => {
+    const root = tempRoot();
+    upsertSpatialCaptureSession(
+      root,
+      sampleSession({ id: "a1", title: "Alpha-1" }),
+    );
+    upsertSpatialCaptureSession(
+      root,
+      sampleSession({ id: "a2", title: "Alpha-2" }),
+    );
+    upsertSpatialCaptureSession(
+      root,
+      sampleSession({ id: "b1", title: "Beta-1" }),
+    );
+    upsertSpatialCaptureSession(
+      root,
+      sampleSession({ id: "b2", title: "Beta-2" }),
+    );
+    placeSpatialCaptureSession(root, "a2", {
+      mode: "merge_misc",
+      otherSessionId: "a1",
+      folderName: "Alpha",
+      title: "Alpha-2",
+      otherTitle: "Alpha-1",
+    });
+    placeSpatialCaptureSession(root, "b2", {
+      mode: "merge_misc",
+      otherSessionId: "b1",
+      folderName: "Beta",
+      title: "Beta-2",
+      otherTitle: "Beta-1",
+    });
+    const folders = listSpatialCaptureFolders(root);
+    const alpha = folders.find((folder) => folder.name === "Alpha")!;
+    const beta = folders.find((folder) => folder.name === "Beta")!;
+    const merged = mergeSpatialCaptureFolders(root, alpha.id, beta.id, {
+      name: "Release",
+    });
+    expect(merged.name).toBe("Release");
+    expect(merged.memberSessionIds.sort()).toEqual(["a1", "a2", "b1", "b2"]);
+    expect(getSpatialCaptureFolder(root, alpha.id)).toBeNull();
+    expect(getSpatialCaptureSession(root, "a1")?.folderId).toBe(beta.id);
+    expect(getSpatialCaptureSession(root, "a1")?.title).toBe("Alpha-1");
+    expect(getSpatialCaptureSession(root, "b2")?.title).toBe("Beta-2");
   });
 });

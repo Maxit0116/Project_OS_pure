@@ -3,6 +3,7 @@ import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useFunctionMap } from './FunctionMapContext'
 import FunctionMapCanvas from './FunctionMapCanvas'
 import FunctionMapNodePreview from './FunctionMapNodePreview'
+import FunctionMapToolbar from './FunctionMapToolbar'
 import LiveGraphFocusChip from './LiveGraphFocusChip'
 import LiveGraphUnmappedRail from './LiveGraphUnmappedRail'
 import StructureScanProgressCard from './StructureScanProgressCard'
@@ -30,6 +31,7 @@ export default function FunctionMapView({ bleed = false }: Props) {
   return (
     <div ref={mapSurfaceRef} className={styles.mapViewHost} data-canvas="interactive">
       <FunctionMapCanvas bleed={bleed} />
+      {bleed ? <FunctionMapToolbar variant="corner" /> : null}
       <FunctionMapNodePreview />
       <LiveGraphFocusChip />
       <LiveGraphUnmappedRail />

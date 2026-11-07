@@ -244,16 +244,39 @@
 }
 
 .dialogInput {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
   width: 100%;
   box-sizing: border-box;
   padding: 10px 12px;
   font-size: var(--font-size-sm);
   font-family: var(--font-mono);
   color: var(--tech-text-primary);
-  background: var(--tech-bg-muted);
+  caret-color: var(--tech-text-primary);
+  background-color: var(--tech-bg-muted);
+  background-image: none;
   border: 1px solid var(--tech-border);
   border-radius: 6px;
   margin-bottom: var(--space-sm);
+  outline: none;
+  box-shadow: none;
+}
+
+.dialogInput::placeholder {
+  color: var(--tech-text-muted);
+  opacity: 1;
+}
+
+.dialogInput:hover:not(:disabled) {
+  border-color: var(--tech-border-strong);
+}
+
+.dialogInput:focus,
+.dialogInput:focus-visible {
+  outline: none;
+  border-color: var(--tech-border-strong);
+  box-shadow: var(--tech-shadow-focus);
 }
 
 .dialogHint {

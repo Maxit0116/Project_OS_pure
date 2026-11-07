@@ -3,6 +3,9 @@ import { useWorkbenchStore } from '../state/workbenchStore'
 import { useI18n } from '../i18n'
 import SemanticFileTree from '../components/SemanticFileTree/SemanticFileTree'
 import DirectoryTree from '../components/SemanticFileTree/DirectoryTree'
+import CaptureMiscSidebar from '../components/SpatialCaptures/CaptureMiscSidebar'
+import FunctionMapNodeDetailSidebar from '../components/FunctionMap/FunctionMapNodeDetailSidebar'
+import BrowserSidebar from '../components/Browser/BrowserSidebar'
 import TabBar from '../components/ui/TabBar'
 import Button from '../components/ui/Button'
 import { GlassPanelShell } from '../components/Glass'
@@ -49,7 +52,10 @@ export default function LeftPanel({
     focusedEditorPaneId,
     editorSplitDirection,
   })
-  const showCodeSections = centerTab === 'code'
+  const showCodeTree = centerTab === 'code'
+  const showCaptureMisc = centerTab === 'spatial-captures'
+  const showMapNodeDetail = centerTab === 'function-map'
+  const showBrowserSidebar = centerTab === 'browser'
 
   useEffect(() => {
     if (motionPhase === 'enter') {
@@ -74,54 +80,128 @@ export default function LeftPanel({
         ? ''
         : 'glass-slide-left'
 
+  const zone = showCaptureMisc
+    ? 'capture-misc'
+    : showMapNodeDetail
+      ? 'map-node-detail'
+      : showBrowserSidebar
+        ? 'browser-sidebar'
+        : 'file-tree'
+
   const panel = (
     <aside
       ref={panelRef}
       className={`${styles.panel} ${graphBleed ? styles.panelBleed : frostClass} ${motionClass}`}
-      data-tour="file-tree"
+      data-zone={zone}
       onAnimationEnd={shellMotion ? undefined : onMotionEnd}
     >
       <div className={styles.inner}>
-        <div className={styles.header}>
-          <div className={styles.headerTop}>
-            <span className={styles.title}>{ts('tree.title')}</span>
-            {drawer && onClose && (
-              <Button variant="ghost" size="sm" onClick={onClose} aria-label={ts('common.close')}>
-                ×
-              </Button>
-            )}
-          </div>
-          <TabBar
-            tabs={tabs}
-            activeId={treeViewMode}
-            onChange={(id) => setTreeViewMode(id as 'semantic' | 'directory')}
-            size="sm"
-            chrome="nested"
-          />
-        </div>
-        <div className={styles.body}>
-          <div className={styles.treeLayout}>
-            {treeViewMode === 'semantic' ? <SemanticFileTree /> : <DirectoryTree />}
-          </div>
-          {showCodeSections ? (
-            <div className={styles.codeSections}>
-              <LeftSidebarSection
-                title={ts('outline.title')}
-                expanded={outlineExpanded}
-                onToggle={() => setOutlineExpanded(!outlineExpanded)}
-              >
-                <OutlinePanel filePath={activeEditorFile} />
-              </LeftSidebarSection>
-              <LeftSidebarSection
-                title={ts('timeline.title')}
-                expanded={timelineExpanded}
-                onToggle={() => setTimelineExpanded(!timelineExpanded)}
-              >
-                <TimelinePanel filePath={activeEditorFile} />
-              </LeftSidebarSection>
+        {showCaptureMisc ? (
+          <>
+            <div className={styles.header}>
+              <div className={styles.headerTop}>
+                <span className={styles.title}>{ts('spatialCaptures.miscTitle')}</span>
+                {drawer && onClose && (
+                  <Button variant="ghost" size="sm" onClick={onClose} aria-label={ts('common.close')}>
+                    ×
+                  </Button>
+                )}
+              </div>
             </div>
-          ) : null}
-        </div>
+            <div className={styles.body}>
+              <CaptureMiscSidebar />
+            </div>
+          </>
+        ) : showMapNodeDetail ? (
+          <>
+            <div className={styles.header}>
+              <div className={styles.headerTop}>
+                <span className={styles.title}>{ts('map.c4Detail.title')}</span>
+                {drawer && onClose && (
+                  <Button variant="ghost" size="sm" onClick={onClose} aria-label={ts('common.close')}>
+                    ×
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className={styles.body}>
+              <FunctionMapNodeDetailSidebar />
+            </div>
+          </>
+        ) : showBrowserSidebar ? (
+          <>
+            <div className={styles.header}>
+              <div className={styles.headerTop}>
+                <span className={styles.title}>{ts('browser.sidebar.title')}</span>
+                {drawer && onClose && (
+                  <Button variant="ghost" size="sm" onClick={onClose} aria-label={ts('common.close')}>
+                    ×
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className={styles.body}>
+              <BrowserSidebar />
+            </div>
+          </>
+        ) : showCodeTree ? (
+          <>
+            <div className={styles.header}>
+              <div className={styles.headerTop}>
+                <span className={styles.title}>{ts('tree.title')}</span>
+                {drawer && onClose && (
+                  <Button variant="ghost" size="sm" onClick={onClose} aria-label={ts('common.close')}>
+                    ×
+                  </Button>
+                )}
+              </div>
+              <TabBar
+                tabs={tabs}
+                activeId={treeViewMode}
+                onChange={(id) => setTreeViewMode(id as 'semantic' | 'directory')}
+                size="sm"
+                chrome="nested"
+              />
+            </div>
+            <div className={styles.body}>
+              <div className={styles.treeLayout}>
+                {treeViewMode === 'semantic' ? <SemanticFileTree /> : <DirectoryTree />}
+              </div>
+              <div className={styles.codeSections}>
+                <LeftSidebarSection
+                  title={ts('outline.title')}
+                  expanded={outlineExpanded}
+                  onToggle={() => setOutlineExpanded(!outlineExpanded)}
+                >
+                  <OutlinePanel filePath={activeEditorFile} />
+                </LeftSidebarSection>
+                <LeftSidebarSection
+                  title={ts('timeline.title')}
+                  expanded={timelineExpanded}
+                  onToggle={() => setTimelineExpanded(!timelineExpanded)}
+                >
+                  <TimelinePanel filePath={activeEditorFile} />
+                </LeftSidebarSection>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className={styles.header}>
+              <div className={styles.headerTop}>
+                <span className={styles.title}>{ts('tree.title')}</span>
+                {drawer && onClose && (
+                  <Button variant="ghost" size="sm" onClick={onClose} aria-label={ts('common.close')}>
+                    ×
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className={styles.body}>
+              <div className={styles.sidebarUnavailable}>{ts('tree.unavailableForTab')}</div>
+            </div>
+          </>
+        )}
       </div>
     </aside>
   )

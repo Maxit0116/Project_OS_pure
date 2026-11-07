@@ -9,14 +9,14 @@ import {
 
 /** Distinct arrow colors cycling by 1-based index. */
 export const ARROW_COLOR_PALETTE = [
-  '#4c7dff',
-  '#ff5c5c',
-  '#34c759',
-  '#ff9f0a',
-  '#bf5af2',
-  '#5ac8fa',
-  '#ff375f',
-  '#af52de',
+  '#c4c4c8',
+  '#c94f47',
+  '#3a9a58',
+  '#c98518',
+  '#9570c4',
+  '#8e8e93',
+  '#b04a5a',
+  '#8f5fbf',
 ] as const
 
 export function colorForArrowIndex(index: number): string {

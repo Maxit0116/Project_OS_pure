@@ -1,0 +1,110 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 12px 12px;
+  padding: 12px;
+  border: 1px solid var(--tech-border, var(--color-border-subtle));
+  border-radius: 6px;
+  background: var(--tech-bg-elevated, var(--color-bg-elevated));
+  box-shadow: var(--tech-shadow-sm);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--tech-text-primary, var(--color-text-primary));
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+}
+
+.input,
+.textarea {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--tech-border, var(--color-border-subtle));
+  border-radius: 4px;
+  background: var(--tech-bg-canvas, var(--color-bg-canvas));
+  color: var(--tech-text-primary, var(--color-text-primary));
+  font: inherit;
+  font-size: var(--font-size-sm);
+  resize: vertical;
+}
+
+.input:focus,
+.textarea:focus {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--tech-bg-muted, var(--color-bg-muted));
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-primary, var(--color-text-primary));
+}
+
+.muted {
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.primary,
+.secondary {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.primary {
+  border: 1px solid var(--tech-border-strong, var(--color-border-strong));
+  background: var(--tech-accent, var(--color-accent));
+  color: var(--tech-bg-canvas, #111);
+}
+
+.secondary {
+  border: 1px solid var(--tech-border, var(--color-border-subtle));
+  background: transparent;
+  color: var(--tech-text-primary, var(--color-text-primary));
+}
+
+.primary:disabled,
+.secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

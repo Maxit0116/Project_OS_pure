@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -8,7 +9,12 @@ import {
   type ReactNode,
   type WheelEvent,
 } from 'react'
-import type { ChatSessionHead, SessionGraphModel } from '@contracts/index'
+import { createPortal } from 'react-dom'
+import type {
+  ChatSessionHead,
+  SessionGraphModel,
+  SessionGraphStripItem,
+} from '@contracts/index'
 import {
   buildSessionGraph,
   pickGraphRepresentative,
@@ -44,22 +50,52 @@ import { classifySessionTask } from './sessionTaskKind'
 import {
   createRailFolder,
   emptySessionGraphRailLayout,
+  findFolderEntry,
   graphRailTitle,
+  insertFolderOnRail,
   insertGraphOnRail,
   loadSessionGraphRailLayout,
+  moveFolderIntoFolder,
   moveGraphIntoFolder,
   removeFolderFromLayout,
   removeGraphFromLayout,
+  renameRailFolder,
   resolveActiveGraphId,
   saveSessionGraphRailLayout,
   syncRailLayoutWithGraphs,
   type SessionGraphRailLayout,
 } from './sessionGraphRailLayout'
 import {
+  applyCanvasPositionOverrides,
+  emptySessionGraphCanvasLayout,
+  getGraphCanvasPositions,
+  loadSessionGraphCanvasLayout,
+  pruneGraphCanvasPositions,
+  saveSessionGraphCanvasLayout,
+  setSessionCanvasPosition,
+  type SessionGraphCanvasLayout,
+} from './sessionGraphCanvasLayout'
+import {
+  SESSION_DRAG_MOVE_PX,
+  readRailDropIndex,
+  readSessionGraphDropTarget,
   useSessionGraphDrag,
   type SessionDragState,
   type SessionDropTarget,
 } from './useSessionGraphDrag'
+import {
+  SESSION_NODE_PREVIEW_DELAY_MS,
+  SESSION_NODE_PREVIEW_HIDE_MS,
+  SESSION_NODE_PREVIEW_MAX_HEIGHT,
+  SESSION_NODE_PREVIEW_WIDTH,
+  resolveSessionNodePreviewPosition,
+} from './sessionNodePreview'
+import { computeMiscFitCount } from './miscFitCount'
+import {
+  formatSessionGraphRelativeTime,
+  isSessionGraphQuiet,
+  sessionMatchesGraphQuery,
+} from './sessionGraphCardMeta'
 import WorkingSessionRail from './WorkingSessionRail'
 import styles from './SessionGraphOverlay.module.css'
 
@@ -105,6 +141,7 @@ export default function SessionGraphOverlay() {
   const activeSessionId = useChatSessionStore((s) => s.activeSessionId)
   const setSessionGraphOpen = useChatSessionStore((s) => s.setSessionGraphOpen)
   const switchSession = useChatSessionStore((s) => s.switchSession)
+  const openSessionAtMessage = useChatSessionStore((s) => s.openSessionAtMessage)
   const createSession = useChatSessionStore((s) => s.createSession)
   const forkSession = useChatSessionStore((s) => s.forkSession)
   const placeSessionOnGraph = useChatSessionStore((s) => s.placeSessionOnGraph)
@@ -121,14 +158,51 @@ export default function SessionGraphOverlay() {
   const [railLayout, setRailLayout] = useState<SessionGraphRailLayout>(() =>
     emptySessionGraphRailLayout(),
   )
+  const [canvasLayout, setCanvasLayout] = useState<SessionGraphCanvasLayout>(() =>
+    emptySessionGraphCanvasLayout(),
+  )
   const [preferredGraphId, setPreferredGraphId] = useState<string | null>(null)
   const [forceRailExpanded, setForceRailExpanded] = useState(false)
-  const [layout, setLayout] = useState<SessionGraphLayout | null>(null)
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
+  const [baseLayout, setBaseLayout] = useState<SessionGraphLayout | null>(null)
   const [viewport, setViewport] = useState({ x: 32, y: 32, scale: 1 })
   const [dragging, setDragging] = useState(false)
+  const [filterQuery, setFilterQuery] = useState('')
+  const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null)
+  const [nodeCanvasDrag, setNodeCanvasDrag] = useState<{
+    sessionId: string
+    graphId: string
+    title: string
+    mode: 'position' | 'semantic'
+    x: number
+    y: number
+    target: SessionDropTarget | null
+    railDropIndex: number | null
+  } | null>(null)
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
+  const nodeDragRef = useRef<{
+    sessionId: string
+    graphId: string
+    title: string
+    ox: number
+    oy: number
+    px: number
+    py: number
+    pointerId: number
+    mode: 'pending' | 'position' | 'semantic'
+    lastCanvasX: number
+    lastCanvasY: number
+    target: SessionDropTarget | null
+    railDropIndex: number | null
+  } | null>(null)
+  const suppressNodeClickRef = useRef(false)
+  const nodeDragCleanupRef = useRef<(() => void) | null>(null)
   const railLayoutRef = useRef(railLayout)
   railLayoutRef.current = railLayout
+  const canvasLayoutRef = useRef(canvasLayout)
+  canvasLayoutRef.current = canvasLayout
+  const viewportRef = useRef(viewport)
+  viewportRef.current = viewport
 
   const activeGraphId = useMemo(
     () => resolveActiveGraphId(heads, activeSessionId, preferredGraphId),
@@ -142,13 +216,26 @@ export default function SessionGraphOverlay() {
     () => syncRailLayoutWithGraphs(railLayout, heads),
     [railLayout, heads],
   )
+  const graphCanvasPositions = useMemo(
+    () => getGraphCanvasPositions(canvasLayout, activeGraphId),
+    [canvasLayout, activeGraphId],
+  )
+  const layout = useMemo(
+    () =>
+      baseLayout
+        ? applyCanvasPositionOverrides(baseLayout, graphCanvasPositions)
+        : null,
+    [baseLayout, graphCanvasPositions],
+  )
 
   useEffect(() => {
     if (!projectId) {
       setRailLayout(emptySessionGraphRailLayout())
+      setCanvasLayout(emptySessionGraphCanvasLayout())
       return
     }
     setRailLayout(loadSessionGraphRailLayout(projectId, heads))
+    setCanvasLayout(loadSessionGraphCanvasLayout(projectId))
     // Only re-load when project changes; heads migration uses current heads once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
@@ -157,6 +244,14 @@ export default function SessionGraphOverlay() {
     (next: SessionGraphRailLayout) => {
       setRailLayout(next)
       if (projectId) saveSessionGraphRailLayout(projectId, next)
+    },
+    [projectId],
+  )
+
+  const persistCanvas = useCallback(
+    (next: SessionGraphCanvasLayout) => {
+      setCanvasLayout(next)
+      if (projectId) saveSessionGraphCanvasLayout(projectId, next)
     },
     [projectId],
   )
@@ -198,6 +293,19 @@ export default function SessionGraphOverlay() {
         railLayoutRef.current,
         useChatSessionStore.getState().heads,
       )
+
+      // ——— Rail folder drag ———
+      if (drag.source === 'rail' && drag.folderId) {
+        if (target.kind === 'folder' && target.folderId) {
+          persistRail(moveFolderIntoFolder(base, drag.folderId, target.folderId))
+          return
+        }
+        if (target.kind === 'rail') {
+          persistRail(insertFolderOnRail(base, drag.folderId, target.railDropIndex))
+          return
+        }
+        return
+      }
 
       // ——— Rail graph drag ———
       if (drag.source === 'rail' && drag.graphId) {
@@ -341,7 +449,25 @@ export default function SessionGraphOverlay() {
   useEffect(() => {
     if (!open) return undefined
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !sessionDrag) setSessionGraphOpen(false)
+      if (event.key !== 'Escape') return
+      if (nodeDragRef.current) {
+        const drag = nodeDragRef.current
+        if (drag.mode !== 'pending') {
+          setCanvasLayout((current) =>
+            setSessionCanvasPosition(current, drag.graphId, drag.sessionId, {
+              x: drag.ox,
+              y: drag.oy,
+            }),
+          )
+        }
+        nodeDragCleanupRef.current?.()
+        nodeDragCleanupRef.current = null
+        nodeDragRef.current = null
+        setNodeCanvasDrag(null)
+        setForceRailExpanded(false)
+        return
+      }
+      if (!sessionDrag) setSessionGraphOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -351,12 +477,247 @@ export default function SessionGraphOverlay() {
     if (!open) return undefined
     let cancelled = false
     void layoutSessionGraph(model).then((next) => {
-      if (!cancelled) setLayout(next)
+      if (!cancelled) setBaseLayout(next)
     })
     return () => {
       cancelled = true
     }
   }, [open, model])
+
+  useEffect(() => {
+    if (!activeGraphId) return
+    const liveIds = model.nodes.map((node) => node.id)
+    const pruned = pruneGraphCanvasPositions(
+      canvasLayoutRef.current,
+      activeGraphId,
+      liveIds,
+    )
+    if (pruned !== canvasLayoutRef.current) persistCanvas(pruned)
+  }, [activeGraphId, model.nodes, persistCanvas])
+
+  const handleDropRef = useRef(handleDrop)
+  handleDropRef.current = handleDrop
+  const persistCanvasRef = useRef(persistCanvas)
+  persistCanvasRef.current = persistCanvas
+
+  const endNodeCanvasDrag = useCallback(() => {
+    nodeDragCleanupRef.current?.()
+    nodeDragCleanupRef.current = null
+    nodeDragRef.current = null
+    setNodeCanvasDrag(null)
+    setForceRailExpanded(false)
+  }, [])
+
+  const onNodeCanvasPointerDown = useCallback(
+    (
+      event: ReactPointerEvent,
+      payload: {
+        sessionId: string
+        graphId: string
+        title: string
+        x: number
+        y: number
+      },
+    ) => {
+      if (event.button !== 0) return
+      if ((event.target as HTMLElement).closest('[data-session-drag-ignore]')) return
+      if (sessionDrag || nodeDragRef.current) return
+      event.stopPropagation()
+      suppressNodeClickRef.current = false
+
+      const graphId = activeGraphId ?? payload.graphId
+      if (!graphId) return
+
+      const pointerId = event.pointerId
+      nodeDragRef.current = {
+        sessionId: payload.sessionId,
+        graphId,
+        title: payload.title,
+        ox: payload.x,
+        oy: payload.y,
+        px: event.clientX,
+        py: event.clientY,
+        pointerId,
+        mode: 'pending',
+        lastCanvasX: payload.x,
+        lastCanvasY: payload.y,
+        target: null,
+        railDropIndex: null,
+      }
+
+      try {
+        ;(event.currentTarget as HTMLElement).setPointerCapture(pointerId)
+      } catch {
+        /* ignore */
+      }
+
+      const detach = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        window.removeEventListener('pointercancel', onUp)
+        if (nodeDragCleanupRef.current === detach) nodeDragCleanupRef.current = null
+      }
+
+      const finish = (clientX: number, clientY: number) => {
+        detach()
+        const drag = nodeDragRef.current
+        if (!drag || drag.pointerId !== pointerId) return
+
+        if (drag.mode === 'pending') {
+          endNodeCanvasDrag()
+          return
+        }
+
+        if (drag.mode === 'semantic') {
+          const el = document.elementFromPoint(clientX, clientY)
+          let target = drag.target ?? readSessionGraphDropTarget(el)
+          const overRail = Boolean(el?.closest?.('[data-working-session-rail]'))
+          if (
+            (!target || target.kind === 'canvas') &&
+            overRail &&
+            drag.railDropIndex != null
+          ) {
+            target = { kind: 'rail', railDropIndex: drag.railDropIndex }
+          }
+          if (target && target.kind === 'rail' && drag.railDropIndex != null) {
+            target = { ...target, railDropIndex: drag.railDropIndex }
+          }
+          const reverted = setSessionCanvasPosition(
+            canvasLayoutRef.current,
+            drag.graphId,
+            drag.sessionId,
+            { x: drag.ox, y: drag.oy },
+          )
+          persistCanvasRef.current(reverted)
+          endNodeCanvasDrag()
+          if (target && target.kind !== 'canvas') {
+            void handleDropRef.current(
+              {
+                sessionId: drag.sessionId,
+                graphId: drag.graphId,
+                folderId: null,
+                title: drag.title,
+                source: 'canvas',
+                x: clientX,
+                y: clientY,
+                target,
+                railDropIndex: target.railDropIndex ?? null,
+              },
+              target,
+            )
+          }
+          return
+        }
+
+        persistCanvasRef.current(canvasLayoutRef.current)
+        endNodeCanvasDrag()
+      }
+
+      const onMove = (moveEvent: PointerEvent) => {
+        if (moveEvent.pointerId !== pointerId) return
+        const drag = nodeDragRef.current
+        if (!drag || drag.pointerId !== pointerId) return
+
+        const dxScreen = moveEvent.clientX - drag.px
+        const dyScreen = moveEvent.clientY - drag.py
+        if (drag.mode === 'pending') {
+          if (
+            dxScreen * dxScreen + dyScreen * dyScreen <
+            SESSION_DRAG_MOVE_PX * SESSION_DRAG_MOVE_PX
+          ) {
+            return
+          }
+          suppressNodeClickRef.current = true
+        }
+        moveEvent.preventDefault()
+
+        const el = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)
+        const target = readSessionGraphDropTarget(el)
+        const overRailHost = Boolean(el?.closest?.('[data-working-session-rail]'))
+        const overRail =
+          target?.kind === 'rail' ||
+          target?.kind === 'graph' ||
+          target?.kind === 'folder' ||
+          overRailHost
+        const railDropIndex = overRail
+          ? readRailDropIndex(moveEvent.clientY, drag.graphId, null)
+          : null
+        // Only leave the canvas for true external drop zones — never treat
+        // data-session-graph-drop="canvas" as a semantic target.
+        const semantic =
+          target?.kind === 'misc' ||
+          target?.kind === 'rail' ||
+          target?.kind === 'graph' ||
+          target?.kind === 'folder'
+
+        if (semantic) {
+          const nextTarget = target
+          if (drag.mode !== 'semantic') {
+            setCanvasLayout((current) =>
+              setSessionCanvasPosition(current, drag.graphId, drag.sessionId, {
+                x: drag.lastCanvasX,
+                y: drag.lastCanvasY,
+              }),
+            )
+            setForceRailExpanded(true)
+          }
+          drag.mode = 'semantic'
+          drag.target = nextTarget
+          drag.railDropIndex = railDropIndex
+          nodeDragRef.current = drag
+          setNodeCanvasDrag({
+            sessionId: drag.sessionId,
+            graphId: drag.graphId,
+            title: drag.title,
+            mode: 'semantic',
+            x: moveEvent.clientX,
+            y: moveEvent.clientY,
+            target: nextTarget,
+            railDropIndex,
+          })
+          return
+        }
+
+        const scale = viewportRef.current.scale || 1
+        const nextX = Math.max(0, drag.ox + dxScreen / scale)
+        const nextY = Math.max(0, drag.oy + dyScreen / scale)
+        drag.mode = 'position'
+        drag.lastCanvasX = nextX
+        drag.lastCanvasY = nextY
+        drag.target = null
+        drag.railDropIndex = null
+        nodeDragRef.current = drag
+        setCanvasLayout((current) =>
+          setSessionCanvasPosition(current, drag.graphId, drag.sessionId, {
+            x: nextX,
+            y: nextY,
+          }),
+        )
+        setNodeCanvasDrag({
+          sessionId: drag.sessionId,
+          graphId: drag.graphId,
+          title: drag.title,
+          mode: 'position',
+          x: moveEvent.clientX,
+          y: moveEvent.clientY,
+          target: null,
+          railDropIndex: null,
+        })
+        setForceRailExpanded(false)
+      }
+
+      const onUp = (upEvent: PointerEvent) => {
+        if (upEvent.pointerId !== pointerId) return
+        finish(upEvent.clientX, upEvent.clientY)
+      }
+
+      nodeDragCleanupRef.current = detach
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+      window.addEventListener('pointercancel', onUp)
+    },
+    [activeGraphId, endNodeCanvasDrag, sessionDrag],
+  )
 
   if (!open) return null
 
@@ -378,20 +739,35 @@ export default function SessionGraphOverlay() {
     })
   }
 
+  const activeDropTarget =
+    sessionDrag?.target ??
+    (nodeCanvasDrag?.mode === 'semantic' ? nodeCanvasDrag.target : null)
   const dropHighlight =
-    sessionDrag?.target?.kind === 'rail' ||
-    sessionDrag?.target?.kind === 'graph' ||
-    sessionDrag?.target?.kind === 'folder'
-      ? sessionDrag.target.kind
+    activeDropTarget?.kind === 'rail' ||
+    activeDropTarget?.kind === 'graph' ||
+    activeDropTarget?.kind === 'folder'
+      ? activeDropTarget.kind
       : null
 
-  const ghostTitle = sessionDrag?.title ?? ''
-  const ghostTask = sessionDrag
+  const semanticGhost =
+    sessionDrag ??
+    (nodeCanvasDrag?.mode === 'semantic'
+      ? {
+          sessionId: nodeCanvasDrag.sessionId,
+          graphId: nodeCanvasDrag.graphId,
+          folderId: null as string | null,
+          title: nodeCanvasDrag.title,
+          x: nodeCanvasDrag.x,
+          y: nodeCanvasDrag.y,
+        }
+      : null)
+  const ghostTitle = semanticGhost?.title ?? ''
+  const ghostTask = semanticGhost
     ? classifySessionTask(
         ghostTitle,
-        sessionDrag.sessionId
-          ? heads.find((h) => h.id === sessionDrag.sessionId)?.responsibility
-          : pickGraphRepresentative(heads, sessionDrag.graphId ?? '')?.responsibility,
+        semanticGhost.sessionId
+          ? heads.find((h) => h.id === semanticGhost.sessionId)?.responsibility
+          : pickGraphRepresentative(heads, semanticGhost.graphId ?? '')?.responsibility,
       )
     : null
   const GhostIcon = ghostTask ? TASK_ICON[ghostTask] : null
@@ -406,20 +782,50 @@ export default function SessionGraphOverlay() {
         layout={mergedRail}
         heads={heads}
         activeGraphId={activeGraphId}
-        forceExpanded={forceRailExpanded}
+        forceExpanded={forceRailExpanded || renamingFolderId != null}
+        renamingFolderId={renamingFolderId}
         dropHighlight={dropHighlight}
-        dropGraphId={sessionDrag?.target?.graphId ?? null}
-        dropFolderId={sessionDrag?.target?.folderId ?? null}
+        dropGraphId={activeDropTarget?.graphId ?? null}
+        dropFolderId={activeDropTarget?.folderId ?? null}
         draggingGraphId={
           sessionDrag?.source === 'rail' ? sessionDrag.graphId : null
         }
-        railDropIndex={sessionDrag?.railDropIndex ?? null}
+        draggingFolderId={
+          sessionDrag?.source === 'rail' ? sessionDrag.folderId : null
+        }
+        railDropIndex={
+          sessionDrag?.railDropIndex ??
+          (nodeCanvasDrag?.mode === 'semantic' ? nodeCanvasDrag.railDropIndex : null)
+        }
         onOpenGraph={(graphId) => {
           void openGraph(graphId)
         }}
         onCreate={createWorkingSession}
         onCreateFolder={() => {
-          persistRail(createRailFolder(railLayout, ts('chat.sessionGraph.folderUntitled')))
+          const created = createRailFolder(
+            railLayout,
+            ts('chat.sessionGraph.folderUntitled'),
+          )
+          persistRail(created.layout)
+          setRenamingFolderId(created.folderId)
+        }}
+        onRenameFolder={(folderId, title) => {
+          persistRail(renameRailFolder(railLayoutRef.current, folderId, title))
+          setRenamingFolderId(null)
+        }}
+        onCancelRenameFolder={() => {
+          if (renamingFolderId) {
+            const folder = findFolderEntry(railLayoutRef.current.entries, renamingFolderId)
+            if (
+              folder &&
+              folder.children.length === 0 &&
+              (!folder.title.trim() ||
+                folder.title.trim() === ts('chat.sessionGraph.folderUntitled'))
+            ) {
+              persistRail(removeFolderFromLayout(railLayoutRef.current, renamingFolderId))
+            }
+          }
+          setRenamingFolderId(null)
         }}
         onRemoveGraph={(graphId) => {
           void (async () => {
@@ -432,6 +838,7 @@ export default function SessionGraphOverlay() {
           })()
         }}
         onRemoveFolder={(folderId) => {
+          if (renamingFolderId === folderId) setRenamingFolderId(null)
           persistRail(removeFolderFromLayout(mergedRail, folderId))
         }}
         onGraphPointerDown={(event, graphId, title) => {
@@ -441,16 +848,35 @@ export default function SessionGraphOverlay() {
             source: 'rail',
           })
         }}
+        onFolderPointerDown={(event, folderId, title) => {
+          onSessionPointerDown(event, {
+            folderId,
+            title,
+            source: 'rail',
+          })
+        }}
         onPointerMove={onSessionPointerMove}
         onPointerUp={onSessionPointerUp}
       />
       <div className={styles.main}>
         <header className={styles.header}>
-          <h2 className={styles.title}>
-            {activeGraphId
-              ? graphRailTitle(heads, activeGraphId, ts('chat.sessionGraph.title'))
-              : ts('chat.sessionGraph.title')}
-          </h2>
+          <div className={styles.headerMain}>
+            <h2 className={styles.title}>
+              {activeGraphId
+                ? graphRailTitle(heads, activeGraphId, ts('chat.sessionGraph.title'))
+                : ts('chat.sessionGraph.title')}
+            </h2>
+            <input
+              className={styles.searchInput}
+              type="search"
+              value={filterQuery}
+              placeholder={ts('chat.sessionGraph.searchPlaceholder')}
+              aria-label={ts('chat.sessionGraph.searchAria')}
+              title={ts('chat.sessionGraph.focusHint')}
+              onChange={(event) => setFilterQuery(event.target.value)}
+              onPointerDown={(event) => event.stopPropagation()}
+            />
+          </div>
           <button
             type="button"
             className={styles.closeButton}
@@ -461,13 +887,13 @@ export default function SessionGraphOverlay() {
           </button>
         </header>
         <div
-          className={`${styles.canvas} ${dragging ? styles.canvasDragging : ''} ${
+          className={`${styles.canvas} ${dragging || nodeCanvasDrag?.mode === 'position' ? styles.canvasDragging : ''} ${
             sessionDrag?.target?.kind === 'canvas' ? styles.canvasDropTarget : ''
           }`}
           data-session-graph-drop="canvas"
           onWheel={onWheel}
           onPointerDown={(event) => {
-            if (sessionDrag) return
+            if (sessionDrag || nodeDragRef.current) return
             if ((event.target as HTMLElement).closest('[data-session-node]')) return
             dragRef.current = {
               x: viewport.x,
@@ -479,6 +905,7 @@ export default function SessionGraphOverlay() {
             event.currentTarget.setPointerCapture(event.pointerId)
           }}
           onPointerMove={(event) => {
+            if (nodeDragRef.current) return
             const drag = dragRef.current
             if (!drag) return
             setViewport((current) => ({
@@ -488,6 +915,12 @@ export default function SessionGraphOverlay() {
             }))
           }}
           onPointerUp={() => {
+            if (nodeDragRef.current) return
+            dragRef.current = null
+            setDragging(false)
+          }}
+          onPointerCancel={() => {
+            if (nodeDragRef.current) return
             dragRef.current = null
             setDragging(false)
           }}
@@ -508,17 +941,32 @@ export default function SessionGraphOverlay() {
                   const source = layout.positions[edge.source]
                   const target = layout.positions[edge.target]
                   if (!source || !target) return null
+                  const sourceHeight = layout.heights[edge.source] ?? SESSION_NODE_HEIGHT
                   const x1 = source.x + SESSION_NODE_WIDTH / 2
-                  const y1 = source.y + SESSION_NODE_HEIGHT
+                  const y1 = source.y + sourceHeight
                   const x2 = target.x + SESSION_NODE_WIDTH / 2
                   const y2 = target.y
                   const mid = (y1 + y2) / 2
+                  const labelX = (x1 + x2) / 2
+                  const labelY = mid
+                  const child = model.nodes.find((node) => node.id === edge.target)
                   return (
-                    <path
-                      key={`${edge.source}-${edge.target}`}
-                      className={styles.edge}
-                      d={`M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`}
-                    />
+                    <g key={`${edge.source}-${edge.target}`}>
+                      <path
+                        className={`${styles.edge} ${styles.edgeFork}`}
+                        d={`M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`}
+                      />
+                      <text
+                        className={styles.edgeLabel}
+                        x={labelX}
+                        y={labelY}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                      >
+                        {ts('chat.sessionGraph.edgeFork')}
+                        {child?.forkMessageId ? ' ·' : ''}
+                      </text>
+                    </g>
                   )
                 })}
               </svg>
@@ -527,7 +975,22 @@ export default function SessionGraphOverlay() {
                 if (!position) return null
                 const head = heads.find((item) => item.id === node.id)
                 const title = node.title || ts('chat.history.untitled')
-                const lifted = sessionDrag?.sessionId === node.id
+                const lifted =
+                  sessionDrag?.sessionId === node.id ||
+                  (nodeCanvasDrag?.mode === 'semantic' &&
+                    nodeCanvasDrag.sessionId === node.id)
+                const draggingNode =
+                  nodeCanvasDrag?.mode === 'position' &&
+                  nodeCanvasDrag.sessionId === node.id
+                const matches = sessionMatchesGraphQuery(filterQuery, {
+                  title,
+                  responsibility: node.responsibility,
+                  previewStrip: node.previewStrip,
+                })
+                const dimmed =
+                  (!matches && filterQuery.trim().length > 0) ||
+                  (focusedSessionId != null && focusedSessionId !== node.id)
+                const height = layout.heights[node.id] ?? SESSION_NODE_HEIGHT
                 return (
                   <SessionNode
                     key={node.id}
@@ -535,23 +998,40 @@ export default function SessionGraphOverlay() {
                     title={title}
                     responsibility={node.responsibility}
                     status={node.status}
+                    previewStrip={node.previewStrip}
+                    messageCount={node.messageCount}
+                    lastUpdatedAt={node.lastUpdatedAt}
+                    forked={Boolean(node.parentId)}
                     active={node.id === activeSessionId}
+                    focused={focusedSessionId === node.id}
+                    dimmed={dimmed}
                     lifted={lifted}
+                    dragging={draggingNode}
                     x={position.x}
                     y={position.y}
-                    onOpen={() => void switchSession(node.id)}
+                    height={height}
+                    onOpen={() => {
+                      setFocusedSessionId((current) =>
+                        current === node.id ? null : node.id,
+                      )
+                      void openSessionAtMessage(node.id)
+                    }}
+                    onStripItem={(item) => {
+                      setFocusedSessionId(node.id)
+                      void openSessionAtMessage(node.id, item.messageId)
+                    }}
                     onBranch={() => void forkSession(node.id)}
                     onMisc={() => void demoteToMisc(node.id)}
+                    shouldSuppressClick={() => suppressNodeClickRef.current}
                     onPointerDown={(event) =>
-                      onSessionPointerDown(event, {
+                      onNodeCanvasPointerDown(event, {
                         sessionId: node.id,
                         graphId: node.graphId,
                         title,
-                        source: 'canvas',
+                        x: position.x,
+                        y: position.y,
                       })
                     }
-                    onPointerMove={onSessionPointerMove}
-                    onPointerUp={onSessionPointerUp}
                   />
                 )
               })}
@@ -561,7 +1041,9 @@ export default function SessionGraphOverlay() {
         <MiscTray
           items={model.misc}
           activeSessionId={activeSessionId}
-          dropActive={sessionDrag?.target?.kind === 'misc'}
+          dropActive={activeDropTarget?.kind === 'misc'}
+          dragActive={Boolean(sessionDrag) || nodeCanvasDrag?.mode === 'semantic'}
+          dragFromMisc={sessionDrag?.source === 'misc'}
           onOpen={(sessionId) => void switchSession(sessionId)}
           onPromote={(sessionId) => {
             void placeSessionOnGraph(
@@ -586,10 +1068,10 @@ export default function SessionGraphOverlay() {
           onPointerUp={onSessionPointerUp}
         />
       </div>
-      {sessionDrag ? (
+      {semanticGhost ? (
         <div
           className={styles.sessionDragGhost}
-          style={{ left: sessionDrag.x + 10, top: sessionDrag.y + 10 }}
+          style={{ left: semanticGhost.x + 10, top: semanticGhost.y + 10 }}
           data-task={ghostTask ?? undefined}
           aria-hidden
         >
@@ -606,95 +1088,290 @@ function SessionNode({
   title,
   responsibility,
   status,
+  previewStrip,
+  messageCount,
+  lastUpdatedAt,
+  forked,
   active,
+  focused,
+  dimmed,
   lifted,
+  dragging = false,
   x,
   y,
+  height,
   onOpen,
+  onStripItem,
   onBranch,
   onMisc,
+  shouldSuppressClick,
   onPointerDown,
-  onPointerMove,
-  onPointerUp,
 }: {
   head: ChatSessionHead | undefined
   title: string
   responsibility?: string
   status: SessionGraphModel['nodes'][number]['status']
+  previewStrip: SessionGraphStripItem[]
+  messageCount: number
+  lastUpdatedAt: string
+  forked: boolean
   active: boolean
+  focused: boolean
+  dimmed: boolean
   lifted: boolean
+  dragging?: boolean
   x: number
   y: number
+  height: number
   onOpen: () => void
+  onStripItem: (item: SessionGraphStripItem) => void
   onBranch: () => void
   onMisc: () => void
+  shouldSuppressClick: () => boolean
   onPointerDown: (event: ReactPointerEvent) => void
-  onPointerMove: (event: ReactPointerEvent) => void
-  onPointerUp: (event: ReactPointerEvent) => void
 }) {
   const { ts } = useI18n()
   const task = classifySessionTask(title, responsibility)
   const TaskIcon = TASK_ICON[task]
   const taskLabel = ts(`chat.sessionGraph.task.${task}`)
+  const description = responsibility?.trim() ?? ''
+  const stripHasDecisions = previewStrip.some((item) => item.kind === 'decision')
+  const previewExtra = [
+    !stripHasDecisions && description ? description : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+  const nodeRef = useRef<HTMLDivElement | null>(null)
+  const openTimerRef = useRef<number | null>(null)
+  const hideTimerRef = useRef<number | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewPos, setPreviewPos] = useState({ x: 0, y: 0 })
+  const quiet = isSessionGraphQuiet(lastUpdatedAt, status)
+  const relative = formatSessionGraphRelativeTime(lastUpdatedAt)
+  const liveLabel =
+    status === 'running'
+      ? ts('chat.sessionGraph.liveWorking')
+      : status === 'awaiting_review'
+        ? ts('chat.sessionGraph.liveNeedsYou')
+        : null
+
+  const clearOpenTimer = useCallback(() => {
+    if (openTimerRef.current != null) {
+      window.clearTimeout(openTimerRef.current)
+      openTimerRef.current = null
+    }
+  }, [])
+
+  const clearHideTimer = useCallback(() => {
+    if (hideTimerRef.current != null) {
+      window.clearTimeout(hideTimerRef.current)
+      hideTimerRef.current = null
+    }
+  }, [])
+
+  const closePreview = useCallback(() => {
+    clearOpenTimer()
+    clearHideTimer()
+    setPreviewOpen(false)
+  }, [clearHideTimer, clearOpenTimer])
+
+  const openPreview = useCallback(() => {
+    if (!previewExtra || lifted) return
+    const nodeEl = nodeRef.current
+    if (!nodeEl) return
+    setPreviewPos(
+      resolveSessionNodePreviewPosition(
+        nodeEl.getBoundingClientRect(),
+        SESSION_NODE_PREVIEW_WIDTH,
+        SESSION_NODE_PREVIEW_MAX_HEIGHT,
+      ),
+    )
+    setPreviewOpen(true)
+  }, [lifted, previewExtra])
+
+  const schedulePreviewOpen = useCallback(() => {
+    if (!previewExtra || lifted) return
+    clearHideTimer()
+    clearOpenTimer()
+    openTimerRef.current = window.setTimeout(() => {
+      openTimerRef.current = null
+      openPreview()
+    }, SESSION_NODE_PREVIEW_DELAY_MS)
+  }, [clearHideTimer, clearOpenTimer, lifted, openPreview, previewExtra])
+
+  const schedulePreviewClose = useCallback(() => {
+    clearOpenTimer()
+    clearHideTimer()
+    hideTimerRef.current = window.setTimeout(() => {
+      hideTimerRef.current = null
+      setPreviewOpen(false)
+    }, SESSION_NODE_PREVIEW_HIDE_MS)
+  }, [clearHideTimer, clearOpenTimer])
+
+  useEffect(() => () => closePreview(), [closePreview])
+
+  useEffect(() => {
+    if (lifted || dragging) closePreview()
+  }, [closePreview, dragging, lifted])
+
   return (
-    <div
-      className={`${styles.node} ${active ? styles.nodeActive : ''} ${
-        lifted ? styles.nodeLifted : ''
-      }`}
-      style={{ left: x, top: y, width: SESSION_NODE_WIDTH, height: SESSION_NODE_HEIGHT }}
-      data-session-node={head?.id}
-      data-task={task}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-    >
-      <div className={styles.nodeTop}>
-        <span className={styles.taskMark} title={taskLabel}>
-          <TaskIcon size={14} strokeWidth={1.75} aria-hidden />
-          <span className={styles.taskName}>{taskLabel}</span>
-        </span>
-        <button type="button" className={styles.nodeTitle} onClick={onOpen} aria-current={active ? 'true' : undefined}>
-          {title}
-        </button>
-      </div>
-      {responsibility ? <span className={styles.nodeResponsibility}>{responsibility}</span> : null}
-      <div className={styles.nodeMeta}>
-        <span className={styles.status}>
-          <span className={`${styles.statusDot} ${STATUS_CLASS[status]}`} aria-hidden />
-          {ts(`chat.sessionGraph.status.${status}`)}
-        </span>
-        <span className={styles.nodeActions}>
+    <>
+      <div
+        ref={nodeRef}
+        className={`${styles.node} ${active ? styles.nodeActive : ''} ${
+          focused ? styles.nodeFocused : ''
+        } ${dimmed ? styles.nodeDim : ''} ${lifted ? styles.nodeLifted : ''} ${
+          dragging ? styles.nodeDragging : ''
+        }`}
+        style={{ left: x, top: y, width: SESSION_NODE_WIDTH, height }}
+        data-session-node={head?.id}
+        data-task={task}
+        onPointerDown={(event) => {
+          closePreview()
+          onPointerDown(event)
+        }}
+        onMouseEnter={schedulePreviewOpen}
+        onMouseLeave={schedulePreviewClose}
+      >
+        <div className={styles.nodeTop}>
+          <span className={styles.taskMark} title={taskLabel}>
+            <TaskIcon size={14} strokeWidth={1.75} aria-hidden />
+            <span className={styles.taskName}>{taskLabel}</span>
+          </span>
           <button
             type="button"
-            className={styles.iconButton}
-            data-session-drag-ignore=""
-            aria-label={ts('chat.sessionGraph.branch')}
-            title={ts('chat.sessionGraph.branch')}
-            onClick={onBranch}
+            className={styles.nodeTitle}
+            onClick={() => {
+              if (shouldSuppressClick()) return
+              onOpen()
+            }}
+            aria-current={active ? 'true' : undefined}
           >
-            <GitBranch size={14} aria-hidden />
+            {title}
           </button>
-          <button
-            type="button"
-            className={styles.iconButton}
-            data-session-drag-ignore=""
-            aria-label={ts('chat.sessionGraph.moveToMisc')}
-            title={ts('chat.sessionGraph.moveToMisc')}
-            onClick={onMisc}
-          >
-            <Archive size={14} aria-hidden />
-          </button>
-        </span>
+          {liveLabel ? (
+            <span
+              className={`${styles.liveChip} ${
+                status === 'running' ? styles.liveChipWorking : styles.liveChipNeedsYou
+              }`}
+            >
+              {liveLabel}
+            </span>
+          ) : (
+            <span className={styles.status} title={ts(`chat.sessionGraph.status.${status}`)}>
+              <span className={`${styles.statusDot} ${STATUS_CLASS[status]}`} aria-hidden />
+            </span>
+          )}
+          <span className={styles.nodeActions}>
+            <button
+              type="button"
+              className={styles.iconButton}
+              data-session-drag-ignore=""
+              aria-label={ts('chat.sessionGraph.branch')}
+              title={ts('chat.sessionGraph.branch')}
+              onClick={onBranch}
+            >
+              <GitBranch size={14} aria-hidden />
+            </button>
+            <button
+              type="button"
+              className={styles.iconButton}
+              data-session-drag-ignore=""
+              aria-label={ts('chat.sessionGraph.moveToMisc')}
+              title={ts('chat.sessionGraph.moveToMisc')}
+              onClick={onMisc}
+            >
+              <Archive size={14} aria-hidden />
+            </button>
+          </span>
+        </div>
+        <ol className={styles.strip}>
+          {previewStrip.length === 0 ? (
+            <li className={styles.stripEmpty}>{ts('chat.sessionGraph.stripEmpty')}</li>
+          ) : (
+            previewStrip.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className={styles.stripItem}
+                  data-kind={item.kind}
+                  title={ts(`chat.sessionGraph.stripKind.${item.kind}`)}
+                  onClick={() => {
+                    if (shouldSuppressClick()) return
+                    onStripItem(item)
+                  }}
+                >
+                  <span className={styles.stripGlyph} aria-hidden />
+                  <span className={styles.stripTitle}>{item.title}</span>
+                  <time className={styles.stripTime} dateTime={item.ts}>
+                    {formatSessionGraphRelativeTime(item.ts)}
+                  </time>
+                </button>
+              </li>
+            ))
+          )}
+        </ol>
+        <div className={styles.nodeFoot}>
+          <span className={styles.nodeFootMeta}>
+            <span>
+              {ts('chat.sessionGraph.messagesCount', { count: messageCount })}
+            </span>
+            {forked ? <span>{ts('chat.sessionGraph.forked')}</span> : null}
+            {quiet ? (
+              <span className={styles.quietMark} title={ts('chat.sessionGraph.quietTitle')}>
+                {ts('chat.sessionGraph.quiet')}
+              </span>
+            ) : null}
+          </span>
+          <span>
+            {relative
+              ? ts('chat.sessionGraph.updated', { time: relative })
+              : null}
+          </span>
+        </div>
       </div>
-    </div>
+      {previewOpen && previewExtra
+        ? createPortal(
+            <aside
+              className={styles.nodePreview}
+              style={{
+                left: previewPos.x,
+                top: previewPos.y,
+                width: SESSION_NODE_PREVIEW_WIDTH,
+                maxHeight: SESSION_NODE_PREVIEW_MAX_HEIGHT,
+              }}
+              aria-label={`${ts('chat.sessionGraph.description')}: ${title}`}
+              aria-live="polite"
+              onMouseEnter={clearHideTimer}
+              onMouseLeave={schedulePreviewClose}
+              onWheel={(event) => event.stopPropagation()}
+            >
+              <div className={styles.nodePreviewTitle}>{title}</div>
+              <div className={styles.nodePreviewLabel}>{ts('chat.sessionGraph.description')}</div>
+              <div className={styles.nodePreviewBody}>{previewExtra}</div>
+            </aside>,
+            document.body,
+          )
+        : null}
+    </>
   )
 }
+
+/** Match WorkingSessionRail Stage Manager hover cadence. */
+const MISC_EXPAND_DELAY_MS = 350
+const MISC_COLLAPSE_DELAY_MS = 180
+const MISC_COLLAPSED_HEIGHT_PX = 44
+const MISC_CHIP_ROW_PX = 32
+const MISC_ROW_GAP_PX = 6
+const MISC_PANEL_PAD_Y_PX = 8
+const MISC_LIST_MAX_HEIGHT_PX = 5 * MISC_CHIP_ROW_PX + 4 * MISC_ROW_GAP_PX
 
 function MiscTray({
   items,
   activeSessionId,
   dropActive,
+  dragActive,
+  dragFromMisc,
   onOpen,
   onPromote,
   onPointerDown,
@@ -704,6 +1381,8 @@ function MiscTray({
   items: ChatSessionHead[]
   activeSessionId: string | null
   dropActive: boolean
+  dragActive: boolean
+  dragFromMisc: boolean
   onOpen: (sessionId: string) => void
   onPromote: (sessionId: string) => void
   onPointerDown: (
@@ -715,44 +1394,267 @@ function MiscTray({
   onPointerUp: (event: ReactPointerEvent) => void
 }) {
   const { ts } = useI18n()
+  const canExpand = items.length > 0
+  const [expanded, setExpanded] = useState(false)
+  const [pointerInside, setPointerInside] = useState(false)
+  const [fitCount, setFitCount] = useState(items.length)
+  /** Clip overflow chips only after collapse height finishes — keeps exit as smooth as the rail. */
+  const [clipOverflow, setClipOverflow] = useState(true)
+  const [panelHeight, setPanelHeight] = useState(MISC_COLLAPSED_HEIGHT_PX)
+  const expandTimerRef = useRef<number | null>(null)
+  const collapseTimerRef = useRef<number | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const measureRef = useRef<HTMLDivElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+
+  const showFlyout = expanded && canExpand
+
+  const clearExpandTimer = useCallback(() => {
+    if (expandTimerRef.current != null) {
+      window.clearTimeout(expandTimerRef.current)
+      expandTimerRef.current = null
+    }
+  }, [])
+
+  const clearCollapseTimer = useCallback(() => {
+    if (collapseTimerRef.current != null) {
+      window.clearTimeout(collapseTimerRef.current)
+      collapseTimerRef.current = null
+    }
+  }, [])
+
+  const requestExpand = useCallback(() => {
+    if (!canExpand) return
+    clearCollapseTimer()
+    if (expanded) return
+    clearExpandTimer()
+    expandTimerRef.current = window.setTimeout(() => {
+      expandTimerRef.current = null
+      setClipOverflow(false)
+      setExpanded(true)
+    }, MISC_EXPAND_DELAY_MS)
+  }, [canExpand, clearCollapseTimer, clearExpandTimer, expanded])
+
+  const requestCollapse = useCallback(() => {
+    if (dragActive) return
+    clearExpandTimer()
+    clearCollapseTimer()
+    collapseTimerRef.current = window.setTimeout(() => {
+      collapseTimerRef.current = null
+      setExpanded(false)
+    }, MISC_COLLAPSE_DELAY_MS)
+  }, [clearCollapseTimer, clearExpandTimer, dragActive])
+
+  useEffect(() => {
+    if (!canExpand) {
+      clearExpandTimer()
+      clearCollapseTimer()
+      setExpanded(false)
+      setClipOverflow(true)
+      setPanelHeight(MISC_COLLAPSED_HEIGHT_PX)
+      return
+    }
+    if (dragActive && (dragFromMisc || dropActive || expanded)) {
+      clearExpandTimer()
+      clearCollapseTimer()
+      setClipOverflow(false)
+      setExpanded(true)
+      return
+    }
+    if (!dragActive && !pointerInside && expanded) {
+      requestCollapse()
+    }
+  }, [
+    canExpand,
+    clearCollapseTimer,
+    clearExpandTimer,
+    dragActive,
+    dragFromMisc,
+    dropActive,
+    expanded,
+    pointerInside,
+    requestCollapse,
+  ])
+
+  useEffect(() => {
+    return () => {
+      clearExpandTimer()
+      clearCollapseTimer()
+    }
+  }, [clearCollapseTimer, clearExpandTimer])
+
+  useLayoutEffect(() => {
+    if (showFlyout) {
+      const list = listRef.current
+      if (!list) return
+      const listHeight = Math.min(list.scrollHeight, MISC_LIST_MAX_HEIGHT_PX)
+      const next = Math.max(
+        MISC_COLLAPSED_HEIGHT_PX,
+        MISC_PANEL_PAD_Y_PX * 2 + listHeight,
+      )
+      setPanelHeight(next)
+      return
+    }
+    setPanelHeight(MISC_COLLAPSED_HEIGHT_PX)
+  }, [showFlyout, items])
+
+  // If height transition is skipped (reduced motion) or transitionend is missed, still clip.
+  useEffect(() => {
+    if (showFlyout || clipOverflow) return undefined
+    const reduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduced) {
+      setClipOverflow(true)
+      return undefined
+    }
+    const timer = window.setTimeout(() => setClipOverflow(true), 220)
+    return () => window.clearTimeout(timer)
+  }, [showFlyout, clipOverflow])
+
+  useLayoutEffect(() => {
+    if (showFlyout || items.length === 0) {
+      setFitCount(items.length)
+      return
+    }
+    const list = listRef.current
+    const measure = measureRef.current
+    if (!list || !measure) return
+
+    const update = () => {
+      const available = list.clientWidth
+      const chipEls = measure.querySelectorAll<HTMLElement>('[data-misc-measure-chip]')
+      const moreEl = measure.querySelector<HTMLElement>('[data-misc-measure-more]')
+      const chipWidths = Array.from(chipEls).map((el) => el.getBoundingClientRect().width)
+      const moreWidth = moreEl?.getBoundingClientRect().width ?? 36
+      setFitCount(computeMiscFitCount(chipWidths, moreWidth, available))
+    }
+
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [showFlyout, items, clipOverflow])
+
+  const hiddenCount = clipOverflow ? Math.max(0, items.length - fitCount) : 0
+
   return (
     <div
-      className={`${styles.misc} ${dropActive ? styles.miscDropTarget : ''}`}
-      data-session-graph-drop="misc"
+      className={styles.miscRoot}
+      onPointerEnter={() => {
+        setPointerInside(true)
+        requestExpand()
+      }}
+      onPointerLeave={() => {
+        setPointerInside(false)
+        requestCollapse()
+      }}
+      onFocusCapture={() => {
+        if (canExpand) requestExpand()
+      }}
+      onBlurCapture={(event) => {
+        const next = event.relatedTarget as Node | null
+        if (next && event.currentTarget.contains(next)) return
+        setPointerInside(false)
+        requestCollapse()
+      }}
     >
-      <span className={styles.miscLabel}>{ts('chat.sessionGraph.misc')}</span>
-      <div className={styles.miscList}>
-        {items.length === 0 ? (
-          <span className={styles.miscHint}>{ts('chat.sessionGraph.miscDropHint')}</span>
-        ) : (
-          items.map((item) => {
-            const title = item.title.trim() || ts('chat.history.untitled')
-            return (
-              <div
-                key={item.id}
-                className={`${styles.miscChip} ${item.id === activeSessionId ? styles.miscChipActive : ''}`}
-                onPointerDown={(event) => onPointerDown(event, item.id, title)}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerCancel={onPointerUp}
+      <div className={styles.miscSpacer} aria-hidden />
+
+      <div
+        ref={panelRef}
+        className={`${styles.miscPanel} ${showFlyout ? styles.miscPanelExpanded : ''} ${
+          dropActive ? styles.miscDropTarget : ''
+        }`}
+        style={{ height: panelHeight }}
+        data-session-graph-drop="misc"
+        aria-expanded={showFlyout}
+        role="region"
+        aria-label={ts('chat.sessionGraph.misc')}
+        onTransitionEnd={(event) => {
+          if (event.propertyName !== 'height') return
+          if (event.target !== panelRef.current) return
+          if (!showFlyout) setClipOverflow(true)
+        }}
+      >
+        <span className={styles.miscLabel}>{ts('chat.sessionGraph.misc')}</span>
+        <div className={styles.miscList} ref={listRef}>
+          {items.length === 0 ? (
+            <span className={styles.miscHint}>{ts('chat.sessionGraph.miscDropHint')}</span>
+          ) : (
+            <>
+              {items.map((item, index) => {
+                const title = item.title.trim() || ts('chat.history.untitled')
+                const subtitle = item.previewStrip?.[0]?.title?.trim() ?? ''
+                const overflow = clipOverflow && index >= fitCount
+                return (
+                  <div
+                    key={item.id}
+                    className={`${styles.miscChip} ${
+                      item.id === activeSessionId ? styles.miscChipActive : ''
+                    } ${overflow ? styles.miscChipOverflow : ''}`}
+                    onPointerDown={(event) => onPointerDown(event, item.id, title)}
+                    onPointerMove={onPointerMove}
+                    onPointerUp={onPointerUp}
+                    onPointerCancel={onPointerUp}
+                  >
+                    <div className={styles.miscChipBody}>
+                      <button
+                        type="button"
+                        className={styles.miscTitle}
+                        onClick={() => onOpen(item.id)}
+                        tabIndex={overflow ? -1 : undefined}
+                      >
+                        {title}
+                      </button>
+                      {subtitle ? (
+                        <span className={styles.miscSubtitle} title={subtitle}>
+                          {subtitle}
+                        </span>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className={styles.miscButton}
+                      data-session-drag-ignore=""
+                      aria-label={ts('chat.sessionGraph.moveToGraph')}
+                      title={ts('chat.sessionGraph.moveToGraph')}
+                      tabIndex={overflow ? -1 : undefined}
+                      onClick={() => onPromote(item.id)}
+                    >
+                      +
+                    </button>
+                  </div>
+                )
+              })}
+              <span
+                className={`${styles.miscMore} ${hiddenCount > 0 ? '' : styles.miscMoreHidden}`}
+                aria-hidden
               >
-                <button type="button" className={styles.miscTitle} onClick={() => onOpen(item.id)}>
-                  {title}
-                </button>
-                <button
-                  type="button"
-                  className={styles.miscButton}
-                  data-session-drag-ignore=""
-                  aria-label={ts('chat.sessionGraph.moveToGraph')}
-                  title={ts('chat.sessionGraph.moveToGraph')}
-                  onClick={() => onPromote(item.id)}
-                >
-                  +
-                </button>
-              </div>
-            )
-          })
-        )}
+                {ts('chat.sessionGraph.miscMore', {
+                  count: hiddenCount > 0 ? hiddenCount : 0,
+                })}
+              </span>
+            </>
+          )}
+        </div>
+
+        {items.length > 0 && clipOverflow ? (
+          <div className={styles.miscMeasure} ref={measureRef} aria-hidden>
+            {items.map((item) => {
+              const title = item.title.trim() || ts('chat.history.untitled')
+              return (
+                <div key={item.id} className={styles.miscChip} data-misc-measure-chip="">
+                  <span className={styles.miscTitle}>{title}</span>
+                  <span className={styles.miscButton}>+</span>
+                </div>
+              )
+            })}
+            <span className={styles.miscMore} data-misc-measure-more="">
+              {ts('chat.sessionGraph.miscMore', { count: 99 })}
+            </span>
+          </div>
+        ) : null}
       </div>
     </div>
   )

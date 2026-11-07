@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { EMPTY_SESSION_VALID_MS } from "../contracts/chat-session-empty.js";
 import { buildForkedChatSession } from "../contracts/chat-session-context.js";
 import {
   applyAutoChatSessionTitle,
@@ -11,6 +12,7 @@ import {
   getChatSession,
   getChatSessionIndex,
   listChatSessionHeads,
+  pruneDisposableEmptyChatSessions,
   renameChatSession,
   setChatSessionArchived,
   setChatSessionPinned,
@@ -124,6 +126,53 @@ describe("chat-session-service", () => {
       expect(getChatSession(workspaceRoot, parent.head.id)?.messages).toHaveLength(1);
       expect(deleteChatSession(workspaceRoot, parent.head.id)).toBe(false);
       expect(listChatSessionHeads(workspaceRoot).map((head) => head.id)).toContain(parent.head.id);
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("prunes immediate empty misc and expired deferred empty shells", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "chat-sessions-prune-"));
+    try {
+      const keep = createEmptyChatSessionRecord({
+        title: "Keep",
+        messages: [
+          {
+            id: "m1",
+            role: "user",
+            content: "Real work",
+            timestamp: "2026-11-01T00:00:00.000Z",
+          },
+        ],
+      });
+      const emptyMisc = createEmptyChatSessionRecord({ title: "" });
+      emptyMisc.head = {
+        ...emptyMisc.head,
+        classification: "misc",
+        classificationSource: "auto",
+      };
+      const expiredFork = createEmptyChatSessionRecord({ title: "" });
+      const createdAt = new Date(Date.now() - EMPTY_SESSION_VALID_MS - 1000).toISOString();
+      expiredFork.head = {
+        ...expiredFork.head,
+        parentSessionId: keep.head.id,
+        createdAt,
+        lastUpdatedAt: createdAt,
+        classification: "misc",
+        classificationSource: "auto",
+      };
+
+      upsertChatSession(workspaceRoot, keep);
+      upsertChatSession(workspaceRoot, emptyMisc);
+      upsertChatSession(workspaceRoot, expiredFork);
+
+      const deleted = pruneDisposableEmptyChatSessions(workspaceRoot, {
+        retainSessionId: keep.head.id,
+      });
+      expect(deleted.sort()).toEqual([emptyMisc.head.id, expiredFork.head.id].sort());
+      expect(listChatSessionHeads(workspaceRoot).map((head) => head.id)).toEqual([
+        keep.head.id,
+      ]);
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true });
     }

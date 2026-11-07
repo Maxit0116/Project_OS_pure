@@ -1,38 +1,61 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Bug,
-  ChevronDown,
   Eraser,
   LayoutTemplate,
-  ListTree,
-  MessageCircle,
   Pencil,
   Send,
-  SquarePen,
   Trash2,
   X,
 } from 'lucide-react'
 import type {
+  AgentDefinition,
+  AskSubMode,
+  ProjectOSSettings,
+  ThinkingDepth,
+} from '@contracts/index'
+import type {
   AnnotationStroke,
   LocationKey,
+  PinComposerHub,
+  PinComposerHubSubagentLink,
   ScreenRect,
   SpatialPin,
   SpatialPinDeviceKind,
-  SpatialPinMode,
   SpatialPinProjectCandidate,
 } from '@contracts/spatial-pin'
 import {
   createArrowStroke,
   createDraftSpatialPin,
   emptyAnnotationDoc,
+  emptyPinComposerHub,
   isWebSurface,
 } from '@contracts/spatial-pin'
+import {
+  ensureHub,
+  ResearchToggle,
+  SpatialComposeHub,
+  type ComposeHubDataSource,
+} from '../components/SpatialComposeHub'
+import { createOverlayComposerRepoOpsHost } from '../components/SpatialComposeHub/composerRepoOpsHost'
+import { syncComposeSubagentsToPool } from '../components/AgentFlow/AgentPool/syncComposeSubagents'
+import ComposerModeSwitch from '../components/ChatPanel/composer/ComposerModeSwitch'
+import ComposerModelThinkingMenu from '../components/ChatPanel/composer/ComposerModelThinkingMenu'
+import { useComposePromptVoice } from '../components/ChatPanel/composer/useComposePromptVoice'
+import {
+  VoiceInputDock,
+  VoiceInputErrorBanner,
+} from '../components/ChatPanel/VoiceInputControls'
+import type { ProjectGraph } from '@contracts/index'
+import { useWorkbenchStore } from '../state/workbenchStore'
+import { pinComposerModeFields } from './composerModeFields'
 import type { RepoDesignSystemSnapshot } from '@contracts/repo-design-system'
 import {
   MAX_STENCILS_PER_REGION,
+  UI_STENCIL_CATALOG,
+  type StencilDefinition,
   type StencilGenerationScope,
 } from '@contracts/ui-stencil'
+import type { ExportCapabilityPackResult } from '@contracts/index'
 import StencilLibrary from '../components/SpatialCaptures/stencils/StencilLibrary'
 import StencilComposeExtras from '../components/SpatialCaptures/stencils/StencilComposeExtras'
 import StencilLiveStub from '../components/SpatialCaptures/stencils/StencilLiveStub'
@@ -40,7 +63,6 @@ import StencilPreviewVisual from '../components/SpatialCaptures/stencils/Stencil
 import {
   buildPlacementAtStagePoint,
   combinedBriefForArrow,
-  defaultStencilSize,
   DEFAULT_STENCIL_SCOPE,
   placementsForArrow,
   stageRectForPlacement,
@@ -56,7 +78,7 @@ import {
   movedCaptureRect,
   movedPlacementWithRegionFollow,
   REGION_DRAG_THRESHOLD_PX,
-  regionRectForStencilDrop,
+  resizedPlacementFree,
   resizedRectFromHandle,
   RESIZE_HANDLES,
   resizeHandleScreenPoint,
@@ -64,7 +86,9 @@ import {
   type ResizeHandle,
 } from '../components/SpatialCaptures/stencils/regionDrag'
 import stencilPlacementStyles from '../components/SpatialCaptures/SpatialCaptureOverlay.module.css'
+import type { SpatialCapturePlacement } from '@contracts/spatial-capture-session'
 import ComposeArrowPath from './ComposeArrowPath'
+import OverlaySavePlacementDialog from './OverlaySavePlacementDialog'
 import { routeComposeArrowCurve } from './composeArrowCurve'
 import {
   applyRunEventToCompactFlow,
@@ -108,8 +132,6 @@ import {
   toEdgeAnchor,
 } from './regionAnchors'
 import { buildCaptureSessionFromOverlay } from './captureSessionSerialize'
-
-type OpenMenu = 'mode' | null
 
 type PointerMode =
   | { kind: 'idle' }
@@ -169,18 +191,6 @@ type PointerMode =
       originCaptureRect: ScreenRect
     }
 
-const MODES: Array<{
-  id: SpatialPinMode
-  label: string
-  icon: LucideIcon
-  toneClass: string
-}> = [
-  { id: 'ask', label: 'Ask', icon: MessageCircle, toneClass: 'overlay-mode-ask' },
-  { id: 'change', label: 'Agent', icon: SquarePen, toneClass: 'overlay-mode-change' },
-  { id: 'plan', label: 'Plan', icon: ListTree, toneClass: 'overlay-mode-plan' },
-  { id: 'debug', label: 'Debug', icon: Bug, toneClass: 'overlay-mode-debug' },
-]
-
 interface BridgeLocation {
   surface?: LocationKey['surface']
   url?: string
@@ -208,7 +218,9 @@ export function OverlayApp() {
   const [activeArrowId, setActiveArrowId] = useState<string | null>(null)
   const [draftRect, setDraftRect] = useState<ScreenRect | null>(null)
   const [pointer, setPointer] = useState<PointerMode>({ kind: 'idle' })
-  const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
+  const [workforceAgents, setWorkforceAgents] = useState<AgentDefinition[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(false)
+  const [agentsLoaded, setAgentsLoaded] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [libraryRevealed, setLibraryRevealed] = useState(false)
   const [libraryCollapseToken, setLibraryCollapseToken] = useState(0)
@@ -220,13 +232,73 @@ export function OverlayApp() {
   } | null>(null)
   const [repoDesignSystem, setRepoDesignSystem] =
     useState<RepoDesignSystemSnapshot | null>(null)
+  const [mergedStencilCatalog, setMergedStencilCatalog] = useState<
+    StencilDefinition[]
+  >([])
   const [stencilBriefByArrow, setStencilBriefByArrow] = useState<
     Record<string, string>
   >({})
   const [stencilScopeByArrow, setStencilScopeByArrow] = useState<
     Record<string, StencilGenerationScope>
   >({})
+  const [hubByArrow, setHubByArrow] = useState<Record<string, PinComposerHub>>(
+    {},
+  )
+  const [subagentLinksByArrow, setSubagentLinksByArrow] = useState<
+    Record<string, PinComposerHubSubagentLink[]>
+  >({})
+  const [researchLinesByArrow, setResearchLinesByArrow] = useState<
+    Record<string, string[]>
+  >({})
+  const [assetUrls, setAssetUrls] = useState<Record<string, string>>({})
   const [projectId, setProjectId] = useState<string | null>(null)
+  const [composerSettings, setComposerSettings] =
+    useState<ProjectOSSettings | null>(null)
+  const [selectedModelProfileId, setSelectedModelProfileId] = useState<
+    string | null
+  >(null)
+  const [githubConnected, setGithubConnected] = useState(false)
+  const [githubLogin, setGithubLogin] = useState<string | null>(null)
+  const locale = useWorkbenchStore((s) => s.locale)
+
+  const refreshGithubAuth = useCallback(async () => {
+    if (!window.projectOS?.invoke) {
+      setGithubConnected(false)
+      setGithubLogin(null)
+      return
+    }
+    try {
+      const status = (await window.projectOS.invoke(
+        'getGitHubAuthStatus',
+      )) as { connected?: boolean; login?: string }
+      setGithubConnected(Boolean(status?.connected))
+      setGithubLogin(status?.login?.trim() ? status.login : null)
+    } catch {
+      setGithubConnected(false)
+      setGithubLogin(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshGithubAuth()
+    const timer = window.setInterval(() => {
+      void refreshGithubAuth()
+    }, 15_000)
+    return () => window.clearInterval(timer)
+  }, [refreshGithubAuth])
+
+  const repoOpsHost = useMemo(
+    () =>
+      createOverlayComposerRepoOpsHost({
+        githubConnected,
+        refreshGithubAuth,
+      }),
+    [githubConnected, refreshGithubAuth],
+  )
+
+  useEffect(() => {
+    syncComposeSubagentsToPool(hubByArrow, subagentLinksByArrow)
+  }, [hubByArrow, subagentLinksByArrow])
   const [candidates, setCandidates] = useState<SpatialPinProjectCandidate[]>([])
   const [location, setLocation] = useState<LocationKey | null>(null)
   const [webEnhanceAvailable, setWebEnhanceAvailable] = useState(false)
@@ -282,18 +354,131 @@ export function OverlayApp() {
   }, [libraryRevealed, projectId])
 
   useEffect(() => {
+    if (!libraryOpen || !projectId || !window.projectOS) return
+    let cancelled = false
+    void window.projectOS
+      .invoke('listMergedStencilDefinitions', projectId)
+      .then((definitions) => {
+        if (!cancelled) {
+          setMergedStencilCatalog(definitions as StencilDefinition[])
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMergedStencilCatalog([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [libraryOpen, projectId])
+
+  const stencilCatalog = useMemo(
+    () =>
+      mergedStencilCatalog.length > 0
+        ? mergedStencilCatalog
+        : [...UI_STENCIL_CATALOG],
+    [mergedStencilCatalog],
+  )
+
+  const handleExportStencil = useCallback(
+    async (stencilId: string) => {
+      if (!projectId || !window.projectOS) return
+      try {
+        const pack = (await window.projectOS.invoke(
+          'exportCapabilityPack',
+          projectId,
+          { kind: 'stencil', stencilIds: [stencilId] },
+        )) as ExportCapabilityPackResult
+        if (!pack || pack.kind !== 'stencil') return
+        await navigator.clipboard.writeText(pack.packJson)
+      } catch {
+        // Clipboard or export may fail outside a connected workspace.
+      }
+    },
+    [projectId],
+  )
+
+  useEffect(() => {
     locationRef.current = location
   }, [location])
   useEffect(() => {
     regionsRef.current = regions
   }, [regions])
   const focusedRegionIdsRef = useRef(focusedRegionIds)
+  const activeArrowIdRef = useRef(activeArrowId)
+  const onSubmitArrowRef = useRef<
+    (regionId: string, arrowId: string) => Promise<void>
+  >(async () => undefined)
   useEffect(() => {
     focusedRegionIdsRef.current = focusedRegionIds
   }, [focusedRegionIds])
   useEffect(() => {
+    activeArrowIdRef.current = activeArrowId
+  }, [activeArrowId])
+  useEffect(() => {
     displayBoundsRef.current = displayBounds
   }, [displayBounds])
+
+  const setActiveArrowPrompt = useCallback((text: string) => {
+    const arrowId = activeArrowIdRef.current
+    if (!arrowId) return
+    setRegions((prev) =>
+      prev.map((region) => ({
+        ...region,
+        arrows: region.arrows.map((arrow) =>
+          arrow.id === arrowId ? { ...arrow, prompt: text } : arrow,
+        ),
+      })),
+    )
+  }, [])
+
+  const getActiveArrowPrompt = useCallback(() => {
+    const arrowId = activeArrowIdRef.current
+    if (!arrowId) return ''
+    for (const region of regionsRef.current) {
+      const arrow = region.arrows.find((item) => item.id === arrowId)
+      if (arrow) return arrow.prompt
+    }
+    return ''
+  }, [])
+
+  const composeVoice = useComposePromptVoice({
+    locale,
+    disabled: !activeArrowId,
+    getText: getActiveArrowPrompt,
+    setText: setActiveArrowPrompt,
+    voiceBackendOptions: {
+      projectId,
+      preferInvoke: true,
+      modelProfiles: composerSettings?.modelProfiles,
+      selectedModelProfileId,
+    },
+    onSubmit: (text) => {
+      const arrowId = activeArrowIdRef.current
+      if (!arrowId || !text.trim()) return
+      const region = regionsRef.current.find((item) =>
+        item.arrows.some((arrow) => arrow.id === arrowId),
+      )
+      if (!region) return
+      void onSubmitArrowRef.current(region.id, arrowId)
+    },
+  })
+
+  useEffect(() => {
+    composeVoice.syncBaseFromExternalText(getActiveArrowPrompt())
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+  }, [activeArrowId])
+
+  const emitHostBridge = useCallback(
+    (
+      event:
+        | { kind: 'selectChatModel'; profileId: string }
+        | { kind: 'setThinkingDepth'; depth: ThinkingDepth }
+        | { kind: 'openSettings' },
+    ) => {
+      window.projectOS?.spatialPin?.notifyGithubCardHost?.(event)
+    },
+    [],
+  )
 
   useEffect(() => {
     const bridge = window.projectOS
@@ -310,7 +495,6 @@ export function OverlayApp() {
       setFlow(null)
       setFlowSteps([])
       setActiveRunId(null)
-      setOpenMenu(null)
       snapshotByRegionRef.current.clear()
       captureSessionIdRef.current = randomId('capture')
       captureSessionCreatedAtRef.current = new Date().toISOString()
@@ -382,36 +566,79 @@ export function OverlayApp() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (openMenu) {
-          setOpenMenu(null)
-          return
-        }
-        if (placeDrag || libraryRevealed || libraryOpen) {
-          exitStencilChrome()
-          return
-        }
-        void solidifyThenHideRef.current()
+      if (event.key !== 'Escape') return
+      // Scope Map floater owns Escape while open (compose card must stay).
+      if (document.querySelector('[data-scope-map-picker="true"]')) return
+      if (placeDrag || libraryRevealed || libraryOpen) {
+        exitStencilChrome()
+        return
       }
+      if (activeArrowId) {
+        setActiveArrowId(null)
+        return
+      }
+      void solidifyThenHideRef.current()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openMenu, placeDrag, libraryOpen, libraryRevealed])
+  }, [placeDrag, libraryOpen, libraryRevealed, activeArrowId])
+
+  const loadWorkforceAgents = useCallback(() => {
+    if (!projectId || !window.projectOS?.invoke || agentsLoaded || agentsLoading) {
+      return
+    }
+    setAgentsLoading(true)
+    void window.projectOS
+      .invoke('listWorkforceAgents', { projectId })
+      .then((result) => {
+        const agents = (result as { agents?: AgentDefinition[] } | null)?.agents
+        setWorkforceAgents(Array.isArray(agents) ? agents : [])
+        setAgentsLoaded(true)
+      })
+      .catch(() => {
+        setWorkforceAgents([])
+        setAgentsLoaded(true)
+      })
+      .finally(() => {
+        setAgentsLoading(false)
+      })
+  }, [projectId, agentsLoaded, agentsLoading])
 
   useEffect(() => {
-    if (!openMenu) return
-    const onPointerDown = (event: PointerEvent) => {
-      const panel = activeArrowId
-        ? rootRef.current?.querySelector(
-            `[data-compose-arrow="${CSS.escape(activeArrowId)}"]`,
-          )
-        : null
-      if (panel?.contains(event.target as Node)) return
-      setOpenMenu(null)
+    setAgentsLoaded(false)
+    setWorkforceAgents([])
+  }, [projectId])
+
+  useEffect(() => {
+    if (!projectId || !window.projectOS?.invoke) {
+      setComposerSettings(null)
+      setSelectedModelProfileId(null)
+      return
     }
-    document.addEventListener('pointerdown', onPointerDown, true)
-    return () => document.removeEventListener('pointerdown', onPointerDown, true)
-  }, [openMenu, activeArrowId])
+    let cancelled = false
+    void window.projectOS
+      .invoke('getSettings', projectId)
+      .then((raw) => {
+        if (cancelled) return
+        const next = raw as ProjectOSSettings | null
+        setComposerSettings(next)
+        setSelectedModelProfileId(
+          next?.execution.defaultModelProfileId ??
+            next?.modelProfiles.find((profile) => profile.isDefault)?.id ??
+            next?.modelProfiles[0]?.id ??
+            null,
+        )
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setComposerSettings(null)
+          setSelectedModelProfileId(null)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
 
   useEffect(() => {
     if (!activeRunId || !window.projectOS) return
@@ -473,6 +700,295 @@ export function OverlayApp() {
     }
     setWebEnhanceAvailable(Boolean(session.webEnhanceAvailable))
   }
+
+  useEffect(() => {
+    if (!projectId || !window.projectOS) return
+    const paths = new Set<string>()
+    for (const region of regions) {
+      if (region.snapshotAssetPath) paths.add(region.snapshotAssetPath)
+    }
+    for (const hub of Object.values(hubByArrow)) {
+      for (const ref of ensureHub(hub).references) {
+        if (
+          (ref.kind === 'image' ||
+            ref.kind === 'video' ||
+            ref.kind === 'audio') &&
+          ref.assetPath
+        ) {
+          paths.add(ref.assetPath)
+        }
+      }
+    }
+    let cancelled = false
+    for (const path of paths) {
+      if (assetUrls[path]) continue
+      void window.projectOS
+        .invoke('readProjectAssetBase64', projectId, path)
+        .then((result) => {
+          const payload = result as { base64: string; mimeType: string } | null
+          if (cancelled || !payload?.base64) return
+          setAssetUrls((prev) =>
+            prev[path]
+              ? prev
+              : {
+                  ...prev,
+                  [path]: `data:${payload.mimeType};base64,${payload.base64}`,
+                },
+          )
+        })
+        .catch(() => undefined)
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [projectId, regions, hubByArrow, assetUrls])
+
+  const hubDataSource = useMemo((): ComposeHubDataSource => {
+    return {
+      listSkills: async () => {
+        if (!projectId || !window.projectOS) return []
+        const result = (await window.projectOS.invoke(
+          'listSkills',
+          projectId,
+        )) as { skills: Array<{ id: string; name: string; description: string }> }
+        return (result.skills ?? []).map((skill) => ({
+          id: skill.id,
+          name: skill.name,
+          description: skill.description,
+        }))
+      },
+      listDirectories: async (relativePath) => {
+        if (!projectId || !window.projectOS) return []
+        const entries = (await window.projectOS.invoke(
+          'listWorkspaceDirectory',
+          projectId,
+          relativePath,
+        )) as Array<{ name: string; path: string; kind: string }>
+        return entries
+          .filter((entry) => entry.kind === 'directory')
+          .map((entry) => ({ name: entry.name, path: entry.path }))
+      },
+      listMentionFiles: async (query) => {
+        if (!projectId || !window.projectOS) return []
+        const result = (await window.projectOS.invoke(
+          'getComposerMentions',
+          projectId,
+          query,
+        )) as { files: string[] }
+        return result.files ?? []
+      },
+      pickReferenceFiles: async (options) => {
+        if (!window.projectOS?.shell?.pickReferenceFiles) return []
+        return window.projectOS.shell.pickReferenceFiles(options)
+      },
+      listMcpServers: async () => {
+        if (!projectId || !window.projectOS) return []
+        const servers = (await window.projectOS.invoke(
+          'listMcpServers',
+          projectId,
+        )) as Array<{
+          id: string
+          name: string
+          enabled: boolean
+          transport: 'stdio' | 'http'
+          toolAllowlist?: string[]
+        }>
+        return (servers ?? []).map((server) => ({
+          id: server.id,
+          name: server.name,
+          enabled: server.enabled,
+          transport: server.transport,
+          toolCount: server.toolAllowlist?.length,
+        }))
+      },
+      setMcpServerEnabled: async (serverId, enabled) => {
+        if (!projectId || !window.projectOS) return null
+        const servers = (await window.projectOS.invoke(
+          'listMcpServers',
+          projectId,
+        )) as Array<{
+          id: string
+          name: string
+          enabled: boolean
+          transport: 'stdio' | 'http'
+          command?: string
+          args?: string[]
+          cwd?: string
+          url?: string
+          toolAllowlist?: string[]
+          authRef?: string
+        }>
+        const current = (servers ?? []).find((server) => server.id === serverId)
+        if (!current) return null
+        const nextConfig = { ...current, enabled }
+        await window.projectOS.invoke('saveMcpServer', projectId, {
+          config: nextConfig,
+        })
+        return {
+          id: nextConfig.id,
+          name: nextConfig.name,
+          enabled: nextConfig.enabled,
+          transport: nextConfig.transport,
+          toolCount: nextConfig.toolAllowlist?.length,
+        }
+      },
+      getGitStatus: async () => {
+        if (!projectId || !window.projectOS) {
+          return { branch: null, dirty: false }
+        }
+        return (await window.projectOS.invoke(
+          'getWorkspaceGitStatus',
+          projectId,
+        )) as {
+          branch: string | null
+          dirty: boolean
+          ahead?: number
+          behind?: number
+          remoteUrl?: string
+          defaultBranch?: string
+        }
+      },
+      listGitBranches: async () => {
+        if (!projectId || !window.projectOS) {
+          return { defaultBranch: null, currentBranch: null, branches: [] }
+        }
+        return (await window.projectOS.invoke(
+          'listWorkspaceGitBranches',
+          projectId,
+        )) as {
+          defaultBranch: string | null
+          currentBranch: string | null
+          branches: Array<{
+            id: string
+            name: string
+            current: boolean
+            remote: boolean
+            ahead?: number
+            behind?: number
+          }>
+        }
+      },
+      checkoutBranch: async (branch) => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'checkoutWorkspaceBranch',
+          projectId,
+          branch,
+        )) as { ok: boolean; message: string; branch?: string | null }
+      },
+      createBranch: async (input) => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'createWorkspaceBranch',
+          projectId,
+          {
+            name: input.name,
+            ...(input.from ? { from: input.from } : {}),
+            checkout: input.checkout !== false,
+            push: false,
+          },
+        )) as { ok: boolean; message: string; branch?: string | null }
+      },
+      pushBranch: async (branch) => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'pushWorkspaceBranch',
+          projectId,
+          branch,
+        )) as { ok: boolean; message: string; branch?: string | null }
+      },
+      pullBranch: async (branch) => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'pullWorkspaceBranch',
+          projectId,
+          branch,
+        )) as { ok: boolean; message: string; branch?: string | null }
+      },
+      fetchGit: async () => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'fetchWorkspaceGit',
+          projectId,
+        )) as { ok: boolean; message: string }
+      },
+      listPullRequests: async () => {
+        if (!projectId || !window.projectOS) {
+          return { available: false, pullRequests: [], message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'listWorkspacePullRequests',
+          projectId,
+        )) as {
+          available: boolean
+          pullRequests: Array<{
+            number: number
+            title: string
+            url: string
+            headRef: string
+            baseRef: string
+          }>
+          message?: string
+        }
+      },
+      createPullRequest: async (input) => {
+        if (!projectId || !window.projectOS) {
+          return { ok: false, message: 'No project' }
+        }
+        return (await window.projectOS.invoke(
+          'createWorkspacePullRequest',
+          projectId,
+          input,
+        )) as {
+          ok: boolean
+          url?: string
+          number?: number
+          message: string
+        }
+      },
+      openGithubGraph: (focus) => {
+        window.projectOS?.spatialPin?.notifyGithubCardHost?.({
+          kind: 'openGithubGraph',
+          branch: focus?.branch ?? null,
+          prNumber: focus?.prNumber ?? null,
+        })
+        void window.projectOS?.spatialPin?.hideOverlay?.()
+      },
+      openExternalUrl: (url) => {
+        void window.projectOS?.shell.openExternal(url)
+      },
+      getProjectGraph: async () => {
+        if (!projectId || !window.projectOS) return null
+        const graph = (await window.projectOS.invoke(
+          'getProjectGraph',
+          projectId,
+        )) as ProjectGraph
+        return {
+          nodes: graph.nodes ?? [],
+          edges: graph.edges ?? [],
+        }
+      },
+      listRepoCandidates: async () =>
+        candidates.map((item) => ({
+          projectId: item.projectId,
+          displayName: item.displayName,
+        })),
+      onSelectRepo: async (nextProjectId) => {
+        await onSelectProject(nextProjectId)
+      },
+      resolveAssetUrl: (assetPath) => assetUrls[assetPath],
+    }
+  }, [projectId, candidates, assetUrls])
 
   async function resolvePins(hint: BridgeLocation) {
     const pid = projectIdRef.current ?? (await refreshContext())
@@ -685,16 +1201,21 @@ export function OverlayApp() {
       combinedBriefForArrow(region, arrow.id)
     const generationScope =
       stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
+    const hub = enrichHubForArrow(arrow.id, region, {
+      projectLabel:
+        candidates.find((item) => item.projectId === pid)?.displayName ?? pid,
+    })
 
     const updated: SpatialPin = {
       ...base,
       updatedAt: new Date().toISOString(),
       captureRect: region.captureRect,
       composer: {
-        mode: region.mode,
+        ...pinComposerModeFields(region),
         prompt: arrow.prompt,
         ...(snapshotAssetPath ? { snapshotAssetPath } : {}),
         ...(stencilBrief ? { stencilBrief, generationScope } : {}),
+        hub,
       },
       annotations: {
         version: '0.1.0',
@@ -703,6 +1224,42 @@ export function OverlayApp() {
       title: arrow.prompt.trim().slice(0, 60) || `Arrow #${arrow.index}`,
     }
     await window.projectOS.invoke('upsertSpatialPin', pid, updated)
+  }
+
+  function enrichHubForArrow(
+    arrowId: string,
+    region: OverlayRegion,
+    opts: { projectLabel: string },
+  ): PinComposerHub {
+    const base = ensureHub(hubByArrow[arrowId] ?? emptyPinComposerHub())
+    const snapshotAssetPath =
+      region.snapshotAssetPath ?? snapshotByRegionRef.current.get(region.id)
+    const references =
+      base.references.length > 0
+        ? base.references
+        : snapshotAssetPath
+          ? [
+              {
+                kind: 'image' as const,
+                id: `ref_${arrowId}_snap`,
+                assetPath: snapshotAssetPath,
+                label: 'Region snapshot',
+              },
+            ]
+          : []
+    const inferred = locationRef.current?.inferredPath?.trim()
+    const folders =
+      base.folders.length > 0
+        ? base.folders
+        : inferred
+          ? [inferred]
+          : []
+    return {
+      ...base,
+      repo: base.repo ?? { label: opts.projectLabel, branch: 'main' },
+      references,
+      folders,
+    }
   }
 
   function ensureBriefState(arrowId: string, region: OverlayRegion) {
@@ -721,20 +1278,27 @@ export function OverlayApp() {
     stencilId: string,
     stagePoint: { x: number; y: number },
   ) {
-    const containing = regionsRef.current.filter((region) =>
-      pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
+    const containing = regionsRef.current.filter(
+      (region) =>
+        !region.hideSelectionChrome &&
+        pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
     )
-    let baseRegion = containing[0]
+    let baseRegion: OverlayRegion | undefined = containing[0]
     let createdFullFrame = false
     let fullRect: ScreenRect | null = null
 
     if (!baseRegion) {
+      baseRegion = regionsRef.current.find((region) => region.hideSelectionChrome)
+    }
+
+    if (!baseRegion) {
       const regionId = randomId('region')
-      fullRect = regionRectForStencilDrop(
-        stagePoint,
-        defaultStencilSize(stencilId),
-        { width: window.innerWidth, height: window.innerHeight },
-      )
+      fullRect = {
+        x: 0,
+        y: 0,
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }
       baseRegion = {
         id: regionId,
         captureRect: fullRect,
@@ -746,6 +1310,7 @@ export function OverlayApp() {
         showAnchors: false,
         tool: 'arrow',
         stencils: [],
+        hideSelectionChrome: true,
       }
       createdFullFrame = true
     }
@@ -1034,12 +1599,24 @@ export function OverlayApp() {
     }
   }
 
-  async function solidifyThenHide(): Promise<void> {
+  async function solidifyThenHide(
+    placement?: SpatialCapturePlacement,
+  ): Promise<void> {
     if (solidifyingRef.current) return
     solidifyingRef.current = true
     setSavePromptOpen(false)
     try {
       await solidifyCaptureSession()
+      const pid = projectIdRef.current
+      const sessionId = captureSessionIdRef.current
+      if (placement && pid && sessionId && window.projectOS) {
+        await window.projectOS.invoke(
+          'placeSpatialCaptureSession',
+          pid,
+          sessionId,
+          placement,
+        )
+      }
     } catch {
       /* still dismiss — never block Esc on flush failure */
     }
@@ -1160,7 +1737,7 @@ export function OverlayApp() {
       const stroke: AnnotationStroke = {
         id: strokeId,
         kind: 'pen',
-        color: '#4c7dff',
+        color: '#c4c4c8',
         width: 2,
         points: [rel],
       }
@@ -1420,29 +1997,22 @@ export function OverlayApp() {
       return
     }
     if (pointer.kind === 'placement-resize') {
-      const originStage = {
-        x: pointer.originCaptureRect.x + pointer.originLocal.x,
-        y: pointer.originCaptureRect.y + pointer.originLocal.y,
-        width: pointer.originLocal.width,
-        height: pointer.originLocal.height,
-      }
-      const nextStage = resizedRectFromHandle(
-        originStage,
+      const { nextCapture, nextLocal } = resizedPlacementFree(
+        pointer.originLocal,
+        pointer.originCaptureRect,
         pointer.handle,
         event.clientX,
         event.clientY,
-        undefined,
-        pointer.originCaptureRect,
+        { width: window.innerWidth, height: window.innerHeight },
       )
-      const nextLocal = {
-        x: nextStage.x - pointer.originCaptureRect.x,
-        y: nextStage.y - pointer.originCaptureRect.y,
-        width: nextStage.width,
-        height: nextStage.height,
-      }
       updateRegion(pointer.regionId, (r) => {
         const stencils = (r.stencils ?? []).map((item) =>
-          item.id === pointer.placementId ? { ...item, rect: nextLocal } : item,
+          item.id === pointer.placementId
+            ? { ...item, rect: nextLocal }
+            : {
+                ...item,
+                rect: clampLocalRectInRegion(item.rect, nextCapture),
+              },
         )
         let arrows = r.arrows
         if (pointer.arrowId) {
@@ -1452,7 +2022,7 @@ export function OverlayApp() {
               Math.max(
                 0.02,
                 (nextLocal.x + nextLocal.width / 2) /
-                  Math.max(1, r.captureRect.width),
+                  Math.max(1, nextCapture.width),
               ),
             ),
             y: Math.min(
@@ -1460,7 +2030,7 @@ export function OverlayApp() {
               Math.max(
                 0.02,
                 (nextLocal.y + nextLocal.height / 2) /
-                  Math.max(1, r.captureRect.height),
+                  Math.max(1, nextCapture.height),
               ),
             ),
           }
@@ -1474,7 +2044,7 @@ export function OverlayApp() {
               : arrow,
           )
         }
-        return { ...r, stencils, arrows }
+        return { ...r, captureRect: nextCapture, stencils, arrows }
       })
     }
   }
@@ -1620,6 +2190,12 @@ export function OverlayApp() {
       const arrow = pointer.arrowId
         ? region?.arrows.find((a) => a.id === pointer.arrowId)
         : undefined
+      const regionExpanded =
+        !!region &&
+        (region.captureRect.x !== pointer.originCaptureRect.x ||
+          region.captureRect.y !== pointer.originCaptureRect.y ||
+          region.captureRect.width !== pointer.originCaptureRect.width ||
+          region.captureRect.height !== pointer.originCaptureRect.height)
       setPointer({ kind: 'idle' })
       if (region && arrow) {
         void upsertArrowPin(
@@ -1631,6 +2207,9 @@ export function OverlayApp() {
           },
           arrow,
         )
+      }
+      if (region && regionExpanded) {
+        void captureRegion(region.id, region.captureRect)
       }
       setStatus('Drag to select a region on any screen')
     }
@@ -1692,14 +2271,20 @@ export function OverlayApp() {
         combinedBriefForArrow(region, arrow.id)
       const generationScope =
         stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
+      const hub = enrichHubForArrow(arrow.id, region, {
+        projectLabel:
+          candidates.find((item) => item.projectId === pid)?.displayName ??
+          pid,
+      })
       if (pin) {
         await window.projectOS.invoke('upsertSpatialPin', pid, {
           ...pin,
           composer: {
             ...pin.composer,
+            ...pinComposerModeFields(region),
             prompt: trimmed,
-            mode: region.mode,
             ...(stencilBrief ? { stencilBrief, generationScope } : {}),
+            hub,
           },
         })
       }
@@ -1712,6 +2297,14 @@ export function OverlayApp() {
         chatSessionId: string
         planId?: string
         debugSessionId?: string
+        firstPrinciplesSessionId?: string
+        pin?: SpatialPin
+      }
+      if (result.pin?.links?.composeSubagents) {
+        setSubagentLinksByArrow((prev) => ({
+          ...prev,
+          [arrow.id]: result.pin!.links!.composeSubagents!,
+        }))
       }
 
       updateRegion(regionId, (r) => ({
@@ -1728,7 +2321,23 @@ export function OverlayApp() {
         ),
       }))
 
-      if (result.runId) {
+      if (result.firstPrinciplesSessionId) {
+        setFlowSteps([
+          {
+            id: 'fp',
+            label: 'First Principles started — continue in Chat',
+            status: 'complete',
+          },
+        ])
+        setFlow('done')
+        setStatus('First Principles · opening Chat…')
+        window.projectOS?.spatialPin?.notifyGithubCardHost?.({
+          kind: 'openFirstPrinciples',
+          chatSessionId: result.chatSessionId,
+          firstPrinciplesSessionId: result.firstPrinciplesSessionId,
+        })
+        void window.projectOS?.spatialPin?.hideOverlay?.()
+      } else if (result.runId) {
         setActiveRunId(result.runId)
         setFlow('thinking')
         setStatus('Agent running…')
@@ -1764,6 +2373,8 @@ export function OverlayApp() {
       }))
     }
   }
+
+  onSubmitArrowRef.current = onSubmitArrow
 
   function deleteArrow(regionId: string, arrowId: string) {
     updateRegion(regionId, (r) => {
@@ -1953,7 +2564,9 @@ export function OverlayApp() {
         collapseToken={libraryCollapseToken}
         draggingStencilId={placeDrag?.stencilId ?? null}
         repoDesignSystem={repoDesignSystem}
+        catalog={stencilCatalog}
         strings={STENCIL_UI_STRINGS_EN}
+        onExportStencil={handleExportStencil}
         onRevealChange={setLibraryRevealed}
         onClose={() => {
           exitStencilChrome()
@@ -1980,39 +2593,12 @@ export function OverlayApp() {
         </div>
       ) : null}
 
-      {savePromptOpen ? (
-        <div
-          className="overlay-save-prompt"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="overlay-save-prompt-title"
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <div className="overlay-save-prompt-card">
-            <h2 id="overlay-save-prompt-title">Save to Spatial Captures?</h2>
-            <p>
-              Finished regions (selection, arrow, and compose card) can be kept.
-              A selection by itself is discarded.
-            </p>
-            <div className="overlay-save-prompt-actions">
-              <button
-                type="button"
-                className="overlay-save-prompt-btn"
-                onClick={() => void hideOverlayOnly()}
-              >
-                Don&apos;t save
-              </button>
-              <button
-                type="button"
-                className="overlay-save-prompt-btn overlay-save-prompt-btn-primary"
-                onClick={() => void solidifyThenHide()}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <OverlaySavePlacementDialog
+        open={savePromptOpen}
+        projectId={projectId}
+        onCancel={() => void hideOverlayOnly()}
+        onConfirm={(placement) => void solidifyThenHide(placement)}
+      />
 
       {regions.length === 0 && !draftRect ? (
         <div className="overlay-hint">
@@ -2052,16 +2638,19 @@ export function OverlayApp() {
         (region.stencils ?? []).map((placement) => {
           const box = stageRectForPlacement(region, placement)
           const focused = isRegionFocused(focusedRegionIds, region.id)
+          const active =
+            focused ||
+            (placement.arrowId != null && placement.arrowId === activeArrowId)
           return (
             <StencilLiveStub
               key={placement.id}
               stencilId={placement.stencilId}
-              dimmed={!focused}
+              dimmed={!active}
               style={{
                 left: box.x,
                 top: box.y,
-                width: Math.max(box.width, 48),
-                height: Math.max(box.height, 36),
+                width: box.width,
+                height: box.height,
               }}
               onMovePointerDown={(event) =>
                 beginPlacementDrag(event, region, placement.id)
@@ -2073,26 +2662,42 @@ export function OverlayApp() {
 
       {regions.map((region) => {
         const focused = isRegionFocused(focusedRegionIds, region.id)
-        if (!focused || region.tool === 'draw') return null
+        if (region.tool === 'draw') return null
+        const stencilHandles = (region.stencils ?? []).filter(
+          (placement) =>
+            focused ||
+            (placement.arrowId != null &&
+              placement.arrowId === activeArrowId) ||
+            (pointer.kind === 'placement-resize' &&
+              pointer.placementId === placement.id),
+        )
+        if (
+          stencilHandles.length === 0 &&
+          !(focused && !region.hideSelectionChrome)
+        ) {
+          return null
+        }
         return (
           <div key={`resize-${region.id}`}>
-            {RESIZE_HANDLES.map((handle) => {
-              const p = resizeHandleScreenPoint(region.captureRect, handle)
-              return (
-                <button
-                  key={handle}
-                  type="button"
-                  className="overlay-resize-handle"
-                  data-handle={handle}
-                  style={{ left: p.x, top: p.y }}
-                  aria-label={`Resize region ${handle}`}
-                  onPointerDown={(event) =>
-                    beginRegionResize(event, region, handle)
-                  }
-                />
-              )
-            })}
-            {(region.stencils ?? []).map((placement) => {
+            {focused && !region.hideSelectionChrome
+              ? RESIZE_HANDLES.map((handle) => {
+                  const p = resizeHandleScreenPoint(region.captureRect, handle)
+                  return (
+                    <button
+                      key={handle}
+                      type="button"
+                      className="overlay-resize-handle"
+                      data-handle={handle}
+                      style={{ left: p.x, top: p.y }}
+                      aria-label={`Resize region ${handle}`}
+                      onPointerDown={(event) =>
+                        beginRegionResize(event, region, handle)
+                      }
+                    />
+                  )
+                })
+              : null}
+            {stencilHandles.map((placement) => {
               const box = stageRectForPlacement(region, placement)
               return RESIZE_HANDLES.map((handle) => {
                 const p = resizeHandleScreenPoint(box, handle)
@@ -2191,12 +2796,37 @@ export function OverlayApp() {
         const focused = isRegionFocused(focusedRegionIds, region.id)
         const isActive = arrow.id === activeArrowId
         const layout = layoutArrowCompose(region, arrow)
-        const modeVisual =
-          MODES.find((item) => item.id === region.mode) ?? MODES[1]!
-        const ModeIcon = modeVisual.icon
+        const hub = enrichHubForArrow(arrow.id, region, {
+          projectLabel:
+            candidates.find((item) => item.projectId === projectId)
+              ?.displayName ??
+            projectId ??
+            'project',
+        })
         return (
-          <div
+          <SpatialComposeHub
             key={`compose-${arrow.id}`}
+            card={layout.card}
+            expanded={Boolean(isActive && focused)}
+            hub={hub}
+            onHubChange={(next) =>
+              setHubByArrow((prev) => ({ ...prev, [arrow.id]: next }))
+            }
+            subagentLinks={subagentLinksByArrow[arrow.id]}
+            promptText={arrow.prompt}
+            researchLines={researchLinesByArrow[arrow.id] ?? []}
+            onResearchLinesChange={(lines) =>
+              setResearchLinesByArrow((prev) => ({
+                ...prev,
+                [arrow.id]: lines,
+              }))
+            }
+            dataSource={hubDataSource}
+            repoOpsHost={repoOpsHost}
+            githubLogin={githubLogin}
+            resolveAssetUrl={(path) => assetUrls[path]}
+          >
+          <div
             ref={bindPanel(arrow.id)}
             className={`overlay-panel overlay-panel-chrome${focused ? '' : ' overlay-panel-dimmed'}`}
             style={{
@@ -2277,7 +2907,9 @@ export function OverlayApp() {
                     value={arrow.prompt}
                     placeholder={
                       region.mode === 'ask'
-                        ? 'Ask about this callout…'
+                        ? region.askSubMode === 'first_principles'
+                          ? 'Describe a feature vision to reason from first principles…'
+                          : 'Ask about this callout…'
                         : region.mode === 'plan'
                           ? 'Describe the plan for this callout…'
                           : region.mode === 'debug'
@@ -2292,12 +2924,22 @@ export function OverlayApp() {
                           a.id === arrow.id ? { ...a, prompt: value } : a,
                         ),
                       }))
+                      composeVoice.syncBaseFromExternalText(value)
                     }}
                     onFocus={() => {
                       setFocusedRegionIds([region.id])
                       setActiveArrowId(arrow.id)
                     }}
                     onKeyDown={(event) => {
+                      if (
+                        event.key === 'Escape' &&
+                        (composeVoice.voice.isRecording ||
+                          composeVoice.voice.isTranscribing)
+                      ) {
+                        event.preventDefault()
+                        composeVoice.cancelVoice()
+                        return
+                      }
                       if (
                         (event.metaKey || event.ctrlKey) &&
                         event.key === 'Enter'
@@ -2351,81 +2993,160 @@ export function OverlayApp() {
                     />
                   ) : null}
                 </div>
+                {isActive && composeVoice.voice.state.error ? (
+                  <div className="overlay-voice-error">
+                    <VoiceInputErrorBanner
+                      errorKey={composeVoice.voice.state.error}
+                      onDismiss={composeVoice.voice.dismissError}
+                      labels={composeVoice.voiceLabels}
+                    />
+                  </div>
+                ) : null}
                 <div className="overlay-composer-footer">
                   <div className="overlay-toolbar-left">
-                    <div className="overlay-menu-wrap">
-                      <button
-                        type="button"
-                        className={`overlay-chip overlay-chip-mode ${modeVisual.toneClass}`}
-                        aria-expanded={openMenu === 'mode' && isActive}
-                        aria-haspopup="listbox"
-                        onClick={() => {
-                          setActiveArrowId(arrow.id)
-                          setFocusedRegionIds([region.id])
-                          setOpenMenu((current) =>
-                            current === 'mode' && isActive ? null : 'mode',
-                          )
-                        }}
-                      >
-                        <ModeIcon size={13} strokeWidth={2} aria-hidden />
-                        <span className="overlay-chip-label">
-                          {modeVisual.label}
-                        </span>
-                        <ChevronDown
-                          size={12}
-                          strokeWidth={2}
-                          className="overlay-chip-caret"
-                          aria-hidden
-                        />
-                      </button>
-                      {openMenu === 'mode' && isActive ? (
-                        <div
-                          className="overlay-dropdown overlay-dropdown-up"
-                          role="listbox"
-                        >
-                          {MODES.map((item) => {
-                            const Icon = item.icon
-                            const active = item.id === region.mode
-                            return (
-                              <button
-                                key={item.id}
-                                type="button"
-                                role="option"
-                                aria-selected={active}
-                                className={`overlay-menu-item ${item.toneClass}${active ? ' overlay-menu-item-active' : ''}`}
-                                onClick={() => {
-                                  updateRegion(region.id, { mode: item.id })
-                                  setOpenMenu(null)
-                                }}
-                              >
-                                <Icon
-                                  size={14}
-                                  strokeWidth={2}
-                                  className="overlay-menu-item-icon"
-                                  aria-hidden
-                                />
-                                {item.label}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      ) : null}
-                    </div>
+                    <ComposerModeSwitch
+                      compact
+                      mode={region.mode}
+                      askSubMode={region.askSubMode ?? 'chat'}
+                      agentDefinitionId={region.agentDefinitionId ?? null}
+                      agentDisplayName={region.agentDisplayName ?? null}
+                      agents={workforceAgents}
+                      agentsLoading={agentsLoading}
+                      onAgentFlyoutOpen={loadWorkforceAgents}
+                      onModeChange={(next) => {
+                        setActiveArrowId(arrow.id)
+                        setFocusedRegionIds([region.id])
+                        if (next === 'anchored') return
+                        updateRegion(region.id, {
+                          mode: next,
+                          ...(next === 'ask'
+                            ? {}
+                            : {
+                                askSubMode: undefined,
+                                agentDefinitionId:
+                                  next === 'change'
+                                    ? region.agentDefinitionId
+                                    : null,
+                                agentDisplayName:
+                                  next === 'change'
+                                    ? region.agentDisplayName
+                                    : null,
+                              }),
+                        })
+                      }}
+                      onAskSubModeChange={(subMode: AskSubMode) => {
+                        setActiveArrowId(arrow.id)
+                        setFocusedRegionIds([region.id])
+                        updateRegion(region.id, {
+                          mode: 'ask',
+                          askSubMode: subMode,
+                          agentDefinitionId: null,
+                          agentDisplayName: null,
+                        })
+                      }}
+                      onSelectGeneralAgent={() => {
+                        setActiveArrowId(arrow.id)
+                        setFocusedRegionIds([region.id])
+                        updateRegion(region.id, {
+                          mode: 'change',
+                          askSubMode: undefined,
+                          agentDefinitionId: null,
+                          agentDisplayName: null,
+                        })
+                      }}
+                      onSelectAgent={(definitionId, displayName) => {
+                        setActiveArrowId(arrow.id)
+                        setFocusedRegionIds([region.id])
+                        updateRegion(region.id, {
+                          mode: 'change',
+                          askSubMode: undefined,
+                          agentDefinitionId: definitionId,
+                          agentDisplayName: displayName,
+                        })
+                      }}
+                    />
+                    <ComposerModelThinkingMenu
+                      compact
+                      modelProfiles={composerSettings?.modelProfiles ?? []}
+                      selectedModelProfileId={selectedModelProfileId}
+                      thinkingDepth={
+                        composerSettings?.execution.thinkingDepth ?? 'medium'
+                      }
+                      presentationMode={
+                        composerSettings?.presentationMode ?? false
+                      }
+                      onSelectModel={(profileId) => {
+                        setSelectedModelProfileId(profileId)
+                        setComposerSettings((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                execution: {
+                                  ...prev.execution,
+                                  defaultModelProfileId: profileId,
+                                },
+                              }
+                            : prev,
+                        )
+                        emitHostBridge({ kind: 'selectChatModel', profileId })
+                      }}
+                      onSelectThinkingDepth={(depth) => {
+                        setComposerSettings((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                execution: {
+                                  ...prev.execution,
+                                  thinkingDepth: depth,
+                                },
+                              }
+                            : prev,
+                        )
+                        emitHostBridge({ kind: 'setThinkingDepth', depth })
+                      }}
+                      onConfigureModels={() => {
+                        emitHostBridge({ kind: 'openSettings' })
+                        void window.projectOS?.spatialPin?.hideOverlay?.()
+                      }}
+                    />
+                    <ResearchToggle
+                      enabled={hub.researchEnabled}
+                      onChange={(next) =>
+                        setHubByArrow((prev) => ({
+                          ...prev,
+                          [arrow.id]: {
+                            ...ensureHub(prev[arrow.id]),
+                            researchEnabled: next,
+                          },
+                        }))
+                      }
+                    />
                   </div>
-                  <button
-                    type="button"
-                    className="overlay-send"
-                    disabled={
-                      arrow.status === 'submitting' || !arrow.prompt.trim()
-                    }
-                    aria-label={
-                      arrow.status === 'submitting' ? 'Sending' : 'Submit'
-                    }
-                    title="Submit (⌘↵)"
-                    onClick={() => void onSubmitArrow(region.id, arrow.id)}
-                  >
-                    <Send size={14} strokeWidth={2.25} aria-hidden />
-                  </button>
+                  <div className="overlay-toolbar-right">
+                    <VoiceInputDock
+                      {...composeVoice.dockProps}
+                      inline
+                      micDisabled={
+                        composeVoice.dockProps.micDisabled ||
+                        arrow.status === 'submitting' ||
+                        !isActive
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="overlay-send"
+                      disabled={
+                        arrow.status === 'submitting' || !arrow.prompt.trim()
+                      }
+                      aria-label={
+                        arrow.status === 'submitting' ? 'Sending' : 'Submit'
+                      }
+                      title="Submit (⌘↵)"
+                      onClick={() => void onSubmitArrow(region.id, arrow.id)}
+                    >
+                      <Send size={14} strokeWidth={2.25} aria-hidden />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2449,6 +3170,7 @@ export function OverlayApp() {
               </>
             ) : null}
           </div>
+          </SpatialComposeHub>
         )
       })}
 
@@ -2527,6 +3249,29 @@ function RegionView({
   const btnLeft = region.captureRect.x + region.captureRect.width + 6
   const btnTop =
     region.captureRect.y + region.captureRect.height - toolStackHeight
+
+  if (region.hideSelectionChrome) {
+    return (
+      <div
+        className="overlay-selection-chrome-hidden"
+        style={{
+          position: 'absolute',
+          left: region.captureRect.x,
+          top: region.captureRect.y,
+          width: region.captureRect.width,
+          height: region.captureRect.height,
+          pointerEvents: 'none',
+        }}
+        aria-hidden
+      >
+        <canvas
+          ref={canvasRef}
+          className="overlay-canvas"
+          style={{ width: '100%', height: '100%' }}
+        />
+      </div>
+    )
+  }
 
   return (
     <>

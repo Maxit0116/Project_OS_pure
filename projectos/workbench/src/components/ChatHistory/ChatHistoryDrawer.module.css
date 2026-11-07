@@ -1,0 +1,220 @@
+/* Absolute within workbenchBody — same sticky squeeze band as GraphOverlayFrame. */
+.shield {
+  position: absolute;
+  z-index: var(--z-chat-history-drawer, 50);
+  pointer-events: none;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  transition:
+    top var(--duration-panel-enter) var(--ease-out),
+    right var(--duration-panel-enter) var(--ease-out),
+    bottom var(--duration-terminal-enter) var(--ease-out),
+    left var(--duration-panel-enter) var(--ease-out);
+}
+
+.shieldResizing {
+  transition: none;
+}
+
+.panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: calc(var(--workbench-right-panel-width) * 0.92);
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: auto;
+  background: var(--tech-bg-side-panel);
+  border: 1px solid var(--tech-border-strong);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  box-shadow: var(--tech-shadow-lg);
+  overflow: hidden;
+  contain: layout paint;
+  transform: translateX(0);
+  animation: historyDrawerEnterLeft var(--duration-panel-enter) var(--ease-out) both;
+}
+
+@keyframes historyDrawerEnterLeft {
+  from {
+    opacity: 0.55;
+    transform: translateX(28px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.searchRow {
+  padding: 8px 10px 6px;
+  flex-shrink: 0;
+}
+
+.searchInput {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  font-size: var(--font-size-xs);
+  font-family: inherit;
+  color: var(--tech-text-primary);
+  caret-color: var(--tech-text-primary);
+  background-color: var(--tech-bg-muted);
+  background-image: none;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  outline: none;
+  box-shadow: none;
+}
+
+.searchInput::placeholder {
+  color: var(--tech-text-muted);
+  opacity: 1;
+}
+
+.searchInput:hover:not(:disabled) {
+  border-color: var(--tech-border-strong);
+}
+
+.searchInput:focus,
+.searchInput:focus-visible {
+  outline: none;
+  border-color: var(--tech-border-strong);
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 6px 8px;
+}
+
+.groupLabel {
+  padding: 6px 8px 2px;
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tech-text-secondary);
+}
+
+.itemRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+}
+
+.itemRow:hover,
+.itemRow:focus-within {
+  background: var(--tech-bg-muted);
+}
+
+.itemButton {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 8px;
+  font-family: inherit;
+  text-align: left;
+  color: var(--tech-text-primary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.itemButtonActive {
+  color: var(--tech-accent);
+  background: color-mix(in srgb, var(--tech-accent) 12%, transparent);
+}
+
+.itemMeta {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--tech-text-secondary);
+}
+
+.itemSubtitle {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.itemRow:hover .itemActions,
+.itemRow:focus-within .itemActions {
+  opacity: 1;
+}
+
+.actionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--tech-text-secondary);
+  cursor: pointer;
+}
+
+.actionButton:hover {
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+}
+
+.findWithAgent {
+  margin: 2px 8px 6px;
+  flex-shrink: 0;
+}
+
+.empty {
+  padding: var(--space-md) var(--space-sm);
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shield {
+    transition: none;
+  }
+
+  .panel {
+    animation: none;
+  }
+}

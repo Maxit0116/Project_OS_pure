@@ -3,6 +3,7 @@ import { CheckSquare, Minus, Plus } from 'lucide-react'
 import type { NodeProps } from '@xyflow/react'
 import type { AcceptanceCriterion, AcceptanceMapArtifact } from '@contracts/index'
 import { useI18n } from '../../i18n'
+import Checkbox from '../ui/Checkbox'
 import MapArtifactChrome, { type MapArtifactNodeData } from './MapArtifactChrome'
 import styles from './mapArtifactNodes.module.css'
 import { newCriterionId, useDebouncedArtifactUpdate } from './useDebouncedArtifactUpdate'
@@ -71,13 +72,13 @@ function MapAcceptanceNode({ data }: NodeProps & { data: Data }) {
       <div className={`${styles.criteriaList} nodrag nopan`}>
         {items.map((item) => (
           <div key={item.id} className={`${styles.criteriaRow} nodrag nopan`}>
-            <input
-              type="checkbox"
-              className="nodrag nopan"
+            <Checkbox
+              className={`${styles.criteriaCheck} nodrag nopan`}
               checked={item.done}
-              onChange={(e) => {
+              aria-label={ts('mapArtifacts.markDone')}
+              onCheckedChange={(done) => {
                 const nextItems = items.map((row) =>
-                  row.id === item.id ? { ...row, done: e.target.checked } : row,
+                  row.id === item.id ? { ...row, done } : row,
                 )
                 setItems(nextItems)
                 persist(nextItems)

@@ -11,6 +11,7 @@ import {
   modelValueForProviderSelection,
 } from './modelProfileForm'
 import { createSettingsSubmitGuard } from './settingsSubmitGuard'
+import SettingsGroup from './SettingsGroup'
 import styles from './SettingsPanel.module.css'
 
 const PROVIDERS: ModelProvider[] = ['openai', 'anthropic', 'ollama', 'custom']
@@ -142,117 +143,129 @@ export default function ModelProfilesSection() {
 
   return (
     <section className={styles.section}>
-      <h3 className={styles.sectionTitle}>{ts('settings.modelsTitle')}</h3>
-      <div className={styles.list}>
-        {settings.modelProfiles.map((profile) => (
-          <ModelProfileRow
-            key={profile.id}
-            profile={profile}
-            testing={testingId === profile.id}
-            onTest={() => {
-              setTestingId(profile.id)
-              void testModelConnection(profile.id).finally(() => setTestingId(null))
-            }}
-            onEdit={() => handleEdit(profile)}
-            onDelete={() => handleDelete(profile)}
-            onSetDefault={() => {
-              void submitGuardRef.current?.run(
-                () => setDefaultModelProfile(profile.id),
-                undefined,
-                ts('settings.mutationFailed'),
-              )
-            }}
-            isDefault={settings.execution.defaultModelProfileId === profile.id}
-            mutationPending={submitting}
-          />
-        ))}
-        {settings.modelProfiles.length === 0 && (
-          <p className={styles.empty}>{ts('settings.noModels')}</p>
-        )}
-      </div>
-      <div className={styles.formGrid}>
-        <TextInput label={ts('settings.profileName')} value={name} onChange={(e) => setName(e.target.value)} />
-        <Select
-          label={ts('settings.provider')}
-          value={provider}
-          onChange={(e) => handleProviderChange(e.target.value as ModelProvider)}
-          options={PROVIDERS.map((value) => ({
-            value,
-            label:
-              value === 'custom'
-                ? ts('settings.customProvider')
-                : value.charAt(0).toUpperCase() + value.slice(1),
-          }))}
-        />
-        {isCustom && (
-          <TextInput
-            label={ts('settings.customProviderName')}
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="DeepSeek"
-          />
-        )}
-        {isCustom && (
-          <>
-            <Select
-              label={ts('settings.apiFormat')}
-              value={apiFormat}
-              onChange={(e) => setApiFormat(e.target.value as ModelApiFormat)}
-              options={API_FORMATS.map((value) => ({
-                value,
-                label: ts(`settings.apiFormats.${value}`),
-              }))}
-            />
-            <p className={styles.help}>{ts('settings.apiFormatHint')}</p>
-          </>
-        )}
-        <TextInput label={ts('settings.model')} value={model} onChange={(e) => setModel(e.target.value)} />
-        <TextInput
-          label={isCustom ? `${ts('settings.baseUrl')} *` : ts('settings.baseUrl')}
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder={PROVIDER_PRESETS.openai.defaultBaseUrl}
-          required={isCustom}
-        />
-        {showApiKey && (
-          <TextInput
-            label={ts('settings.apiKey')}
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            autoComplete="off"
-            disabled={removeCredential}
-          />
-        )}
-        {editingId && settings.modelProfiles.find((profile) => profile.id === editingId)?.apiKeyRef && (
-          <label className={styles.toolChip}>
-            <input
-              type="checkbox"
-              checked={removeCredential}
-              onChange={(event) => {
-                setRemoveCredential(event.target.checked)
-                if (event.target.checked) setApiKey('')
+      <SettingsGroup label={ts('settings.modelsTitle')}>
+        <div className={styles.list}>
+          {settings.modelProfiles.map((profile) => (
+            <ModelProfileRow
+              key={profile.id}
+              profile={profile}
+              testing={testingId === profile.id}
+              onTest={() => {
+                setTestingId(profile.id)
+                void testModelConnection(profile.id).finally(() => setTestingId(null))
               }}
+              onEdit={() => handleEdit(profile)}
+              onDelete={() => handleDelete(profile)}
+              onSetDefault={() => {
+                void submitGuardRef.current?.run(
+                  () => setDefaultModelProfile(profile.id),
+                  undefined,
+                  ts('settings.mutationFailed'),
+                )
+              }}
+              isDefault={settings.execution.defaultModelProfileId === profile.id}
+              mutationPending={submitting}
             />
-            {ts('settings.removeCredential')}
-          </label>
-        )}
-      </div>
-      <div className={styles.formActions}>
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={submitting || !name.trim() || !model.trim() || (isCustom && !baseUrl.trim())}
-        >
-          {editingId ? ts('settings.saveChanges') : ts('settings.addModel')}
-        </Button>
-        {editingId && (
-          <Button variant="secondary" size="sm" onClick={resetForm} disabled={submitting}>
-            {ts('common.cancel')}
+          ))}
+          {settings.modelProfiles.length === 0 && (
+            <div className={styles.settingRow}>
+              <p className={styles.empty}>{ts('settings.noModels')}</p>
+            </div>
+          )}
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup label={editingId ? ts('settings.saveChanges') : ts('settings.addModel')}>
+        <div className={styles.formGrid}>
+          <TextInput label={ts('settings.profileName')} value={name} onChange={(e) => setName(e.target.value)} />
+          <Select
+            label={ts('settings.provider')}
+            value={provider}
+            onChange={(e) => handleProviderChange(e.target.value as ModelProvider)}
+            options={PROVIDERS.map((value) => ({
+              value,
+              label:
+                value === 'custom'
+                  ? ts('settings.customProvider')
+                  : value.charAt(0).toUpperCase() + value.slice(1),
+            }))}
+          />
+          {isCustom && (
+            <TextInput
+              label={ts('settings.customProviderName')}
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="DeepSeek"
+            />
+          )}
+          {isCustom && (
+            <>
+              <Select
+                label={ts('settings.apiFormat')}
+                value={apiFormat}
+                onChange={(e) => setApiFormat(e.target.value as ModelApiFormat)}
+                options={API_FORMATS.map((value) => ({
+                  value,
+                  label: ts(`settings.apiFormats.${value}`),
+                }))}
+              />
+              <p className={styles.help}>{ts('settings.apiFormatHint')}</p>
+            </>
+          )}
+          <TextInput label={ts('settings.model')} value={model} onChange={(e) => setModel(e.target.value)} />
+          <TextInput
+            label={isCustom ? `${ts('settings.baseUrl')} *` : ts('settings.baseUrl')}
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder={PROVIDER_PRESETS.openai.defaultBaseUrl}
+            required={isCustom}
+          />
+          {showApiKey && (
+            <TextInput
+              label={ts('settings.apiKey')}
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              autoComplete="off"
+              disabled={removeCredential}
+            />
+          )}
+          {editingId && settings.modelProfiles.find((profile) => profile.id === editingId)?.apiKeyRef && (
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={removeCredential}
+              className={`${styles.toolChip}${removeCredential ? ` ${styles.toolChipOn}` : ''}`}
+              onClick={() => {
+                const next = !removeCredential
+                setRemoveCredential(next)
+                if (next) setApiKey('')
+              }}
+            >
+              {ts('settings.removeCredential')}
+            </button>
+          )}
+        </div>
+        <div className={styles.formActions}>
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={submitting || !name.trim() || !model.trim() || (isCustom && !baseUrl.trim())}
+          >
+            {editingId ? ts('settings.saveChanges') : ts('settings.addModel')}
           </Button>
+          {editingId && (
+            <Button variant="secondary" size="sm" onClick={resetForm} disabled={submitting}>
+              {ts('common.cancel')}
+            </Button>
+          )}
+        </div>
+        {submitError && (
+          <div className={styles.settingRow}>
+            <p className={styles.formError} role="alert">{submitError}</p>
+          </div>
         )}
-      </div>
-      {submitError && <p className={styles.formError} role="alert">{submitError}</p>}
+      </SettingsGroup>
     </section>
   )
 }

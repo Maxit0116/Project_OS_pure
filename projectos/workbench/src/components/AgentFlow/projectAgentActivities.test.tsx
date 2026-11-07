@@ -203,4 +203,47 @@ describe('projectAgentActivities', () => {
     const activities = projectAgentActivities(emptyInput, labels)
     expect(activities).toEqual([])
   })
+
+  it('maps Ask mcpToolCalls into mcp activity rows without leaking errors into the summary only path', () => {
+    const activities = projectAgentActivities({
+      ...emptyInput,
+      latestAskTrace: {
+        status: 'complete',
+        scope: { kind: 'global' },
+        result: {
+          id: 'answer_1',
+          createdAt: '2026-10-29T00:00:00.000Z',
+          contextBundleHash: `sha256:${'a'.repeat(64)}`,
+          contextSummary: { files: [] },
+          mcpToolCalls: [{
+            serverId: 'docs',
+            toolName: 'search',
+            callId: 'call_1',
+            status: 'completed',
+            durationMs: 12,
+          }, {
+            serverId: 'docs',
+            toolName: 'lookup',
+            callId: 'call_2',
+            status: 'rejected',
+            durationMs: 3,
+            error: 'tool_policy_deny: blocked',
+          }],
+        },
+      },
+    }, labels)
+
+    const mcpRows = activities.filter((item) => item.kind === 'mcp')
+    expect(mcpRows.map((item) => item.summary)).toEqual([
+      'search · completed',
+      'lookup · rejected',
+    ])
+    expect(mcpRows[1]?.status).toBe('error')
+    expect(mcpRows[1]?.detail).toMatchObject({
+      kind: 'mcp',
+      serverId: 'docs',
+      toolName: 'lookup',
+      error: 'tool_policy_deny: blocked',
+    })
+  })
 })

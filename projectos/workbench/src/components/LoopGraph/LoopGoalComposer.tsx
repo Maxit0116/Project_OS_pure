@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { ChevronUp, MessageSquare, Pencil, Undo2 } from 'lucide-react'
+import { Bot, ChevronUp, MessageSquare, Pencil, Undo2 } from 'lucide-react'
 import type { LoopComposerMode, LoopOpenQuestion } from '@contracts/index'
 import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea'
 import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
+import { useWorkbenchStore } from '../../state/workbenchStore'
+import AgentDraftCard from '../AgentWorkforce/AgentDraftCard'
 import AgentActivityIndicator from '../ui/AgentActivityIndicator'
 import Button from '../ui/Button'
 import Chip from '../ui/Chip'
 import styles from './LoopGoalComposer.module.css'
 
-const COMPOSER_MODES: LoopComposerMode[] = ['ask', 'edit']
+const COMPOSER_MODES: LoopComposerMode[] = ['ask', 'edit', 'create_agent']
 
 const MODE_ICON = {
   ask: MessageSquare,
   edit: Pencil,
+  create_agent: Bot,
 } as const
 
 export default function LoopGoalComposer() {
@@ -27,13 +30,24 @@ export default function LoopGoalComposer() {
   const setComposerMode = useLoopGraphStore((s) => s.setComposerMode)
   const sendAuthoringTurn = useLoopGraphStore((s) => s.sendAuthoringTurn)
   const answerGoalClarification = useLoopGraphStore((s) => s.answerGoalClarification)
+  const cancelGoalClarification = useLoopGraphStore((s) => s.cancelGoalClarification)
   const confirmGoalContext = useLoopGraphStore((s) => s.confirmGoalContext)
   const acceptGraphEditOffer = useLoopGraphStore((s) => s.acceptGraphEditOffer)
   const dismissGraphEditOffer = useLoopGraphStore((s) => s.dismissGraphEditOffer)
   const undoDraft = useLoopGraphStore((s) => s.undoDraft)
+  const beginAuthorNodeFromPalette = useLoopGraphStore((s) => s.beginAuthorNodeFromPalette)
+  const expandAgentWiring = useLoopGraphStore((s) => s.expandAgentWiring)
+  const submitCreateAgentPrompt = useWorkbenchStore((s) => s.submitCreateAgentPrompt)
+  const pendingWorkforceDraft = useWorkbenchStore((s) => s.pendingWorkforceDraft)
+  const updatePendingWorkforceDraft = useWorkbenchStore((s) => s.updatePendingWorkforceDraft)
+  const confirmWorkforceDraft = useWorkbenchStore((s) => s.confirmWorkforceDraft)
+  const dismissWorkforceDraft = useWorkbenchStore((s) => s.dismissWorkforceDraft)
+  const beginCreateAgentComposer = useWorkbenchStore((s) => s.beginCreateAgentComposer)
+  const cancelCreateAgentComposer = useWorkbenchStore((s) => s.cancelCreateAgentComposer)
 
   const [clarifyAnswers, setClarifyAnswers] = useState<Record<string, string>>({})
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
+  const [draftBusy, setDraftBusy] = useState(false)
   const modeMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useAutoResizeTextarea(composerDraft, 200)
 
@@ -78,11 +92,26 @@ export default function LoopGoalComposer() {
 
   const ModeIcon = MODE_ICON[mode]
   const modeLabel =
-    mode === 'ask' ? ts('chat.loopGraph.modeDiscuss') : ts('chat.loopGraph.modeEdit')
+    mode === 'ask'
+      ? ts('chat.loopGraph.modeDiscuss')
+      : mode === 'create_agent'
+        ? ts('workforce.createAgentMode')
+        : ts('chat.loopGraph.modeEdit')
   const submitDisabled =
-    authoringBusy || !composerDraft.trim() || (mode === 'ask' && needsClarification)
+    authoringBusy ||
+    draftBusy ||
+    !composerDraft.trim() ||
+    (mode === 'ask' && needsClarification)
 
   const onSend = () => {
+    if (mode === 'create_agent') {
+      const text = composerDraft.trim()
+      if (!text) return
+      setDraftBusy(true)
+      setComposerDraft('')
+      void submitCreateAgentPrompt(text, 'loop').finally(() => setDraftBusy(false))
+      return
+    }
     void sendAuthoringTurn()
   }
 
@@ -144,6 +173,7 @@ export default function LoopGoalComposer() {
 
   const flowOpen = composerSheet === 'flow'
   const contextOpen = composerSheet === 'context'
+  const clarifyOpen = composerSheet === 'clarify' && needsClarification
 
   return (
     <div className={styles.composer} data-loop-goal-composer="">
@@ -183,6 +213,24 @@ export default function LoopGoalComposer() {
             />
             {ts('chat.loopGraph.goalContextSheet')}
           </button>
+          {needsClarification ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={clarifyOpen}
+              className={`${styles.bookmarkTab} ${clarifyOpen ? styles.bookmarkTabActive : ''} ${
+                styles.bookmarkTabAttention
+              }`}
+              onClick={() => toggleComposerSheet('clarify')}
+            >
+              <ChevronUp
+                size={11}
+                aria-hidden
+                className={clarifyOpen ? styles.bookmarkChevronOpen : undefined}
+              />
+              {ts('chat.loopGraph.clarifySheet')}
+            </button>
+          ) : null}
         </div>
 
         {flowOpen ? (
@@ -265,24 +313,40 @@ export default function LoopGoalComposer() {
             )}
           </div>
         ) : null}
-      </div>
 
-      {needsClarification ? (
-        <div className={styles.clarifyCard} data-loop-goal-clarify="">
-          <p>{ts('chat.loopGraph.clarifyHint')}</p>
-          {openQuestions.filter((q) => !q.answer?.trim()).map(renderQuestion)}
-          <div className={styles.clarifyActions}>
-            <button
-              type="button"
-              className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
-              disabled={authoringBusy}
-              onClick={submitClarifications}
-            >
-              {ts('chat.loopGraph.submitClarifications')}
-            </button>
+        {clarifyOpen ? (
+          <div
+            className={`${styles.sheetPanel} ${styles.clarifySheetPanel}`}
+            role="tabpanel"
+            data-loop-sheet="clarify"
+            data-loop-goal-clarify=""
+          >
+            <p className={styles.clarifyHint}>{ts('chat.loopGraph.clarifyHint')}</p>
+            {openQuestions.filter((q) => !q.answer?.trim()).map(renderQuestion)}
+            <div className={styles.clarifyActions}>
+              <button
+                type="button"
+                className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                disabled={authoringBusy}
+                onClick={submitClarifications}
+              >
+                {ts('chat.loopGraph.submitClarifications')}
+              </button>
+              <button
+                type="button"
+                className={styles.actionButton}
+                disabled={authoringBusy}
+                onClick={() => {
+                  setClarifyAnswers({})
+                  void cancelGoalClarification()
+                }}
+              >
+                {ts('chat.loopGraph.cancelClarifications')}
+              </button>
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       {offer ? (
         <div className={styles.offerCard} data-loop-graph-edit-offer="">
@@ -308,6 +372,48 @@ export default function LoopGoalComposer() {
         </div>
       ) : null}
 
+      {pendingWorkforceDraft && pendingWorkforceDraft.source === 'loop' ? (
+        <AgentDraftCard
+          draft={pendingWorkforceDraft.draft}
+          source="loop"
+          busy={draftBusy}
+          onChange={updatePendingWorkforceDraft}
+          onCancel={() => {
+            dismissWorkforceDraft()
+            void setComposerMode('ask')
+          }}
+          onConfirm={(options) => {
+            setDraftBusy(true)
+            void confirmWorkforceDraft(options)
+              .then(async (created) => {
+                if (created && options?.placeOnLoop) {
+                  const nodeId = await beginAuthorNodeFromPalette(
+                    'agent.coder',
+                    { x: 120, y: 120 },
+                    {
+                      agentDefinitionId: created.definitionId,
+                      title: created.config.displayName,
+                    },
+                  )
+                  if (nodeId) {
+                    expandAgentWiring(
+                      nodeId,
+                      {
+                        modelProfileId: created.config.modelProfileId ?? undefined,
+                        skillIds: created.config.skillIds ?? [],
+                        mcpServerIds: created.config.mcpServerIds ?? [],
+                      },
+                      { replaceExistingProvides: true },
+                    )
+                  }
+                }
+                void setComposerMode('ask')
+              })
+              .finally(() => setDraftBusy(false))
+          }}
+        />
+      ) : null}
+
       <div className={styles.promptDock}>
         <div className={styles.inputComposer}>
           <div className={styles.composerBody}>
@@ -316,11 +422,13 @@ export default function LoopGoalComposer() {
               className={styles.input}
               value={composerDraft}
               placeholder={
-                mode === 'ask'
-                  ? ts('chat.loopGraph.askPlaceholder')
-                  : ts('chat.loopGraph.editPlaceholder')
+                mode === 'create_agent'
+                  ? ts('workforce.createAgentPlaceholder')
+                  : mode === 'ask'
+                    ? ts('chat.loopGraph.askPlaceholder')
+                    : ts('chat.loopGraph.editPlaceholder')
               }
-              disabled={authoringBusy || (mode === 'ask' && needsClarification)}
+              disabled={authoringBusy || draftBusy || (mode === 'ask' && needsClarification)}
               onChange={(event) => setComposerDraft(event.target.value)}
               onKeyDown={onKeyDown}
               rows={3}
@@ -351,7 +459,9 @@ export default function LoopGoalComposer() {
                       const label =
                         option === 'ask'
                           ? ts('chat.loopGraph.modeDiscuss')
-                          : ts('chat.loopGraph.modeEdit')
+                          : option === 'create_agent'
+                            ? ts('workforce.createAgentMode')
+                            : ts('chat.loopGraph.modeEdit')
                       return (
                         <button
                           key={option}
@@ -360,6 +470,8 @@ export default function LoopGoalComposer() {
                           aria-selected={active}
                           className={`${styles.menuItem} ${active ? styles.menuItemActive : ''}`}
                           onClick={() => {
+                            if (option === 'create_agent') beginCreateAgentComposer('loop')
+                            else cancelCreateAgentComposer()
                             void setComposerMode(option)
                             setModeMenuOpen(false)
                           }}

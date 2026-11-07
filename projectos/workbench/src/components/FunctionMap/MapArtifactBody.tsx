@@ -13,6 +13,7 @@ import type {
   UrlsMapArtifact,
 } from '@contracts/index'
 import { useI18n } from '../../i18n'
+import Checkbox from '../ui/Checkbox'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useBrowserStore } from '../../state/browserStore'
 import { useTerminalStore } from '../../state/terminalStore'
@@ -58,13 +59,13 @@ function PlanBody({ artifact }: { artifact: PlanMapArtifact }) {
       <div className={`${styles.criteriaList} nodrag nopan`}>
         {items.map((item) => (
           <div key={item.id} className={`${styles.criteriaRow} nodrag nopan`}>
-            <input
-              type="checkbox"
-              className="nodrag nopan"
+            <Checkbox
+              className={`${styles.criteriaCheck} nodrag nopan`}
               checked={item.done}
-              onChange={(e) => {
+              aria-label={ts('mapArtifacts.markDone')}
+              onCheckedChange={(done) => {
                 const nextItems = items.map((row) =>
-                  row.id === item.id ? { ...row, done: e.target.checked } : row,
+                  row.id === item.id ? { ...row, done } : row,
                 )
                 setItems(nextItems)
                 persist(nextItems)
@@ -139,13 +140,13 @@ function AcceptanceBody({ artifact }: { artifact: AcceptanceMapArtifact }) {
       <div className={`${styles.criteriaList} nodrag nopan`}>
         {items.map((item) => (
           <div key={item.id} className={`${styles.criteriaRow} nodrag nopan`}>
-            <input
-              type="checkbox"
-              className="nodrag nopan"
+            <Checkbox
+              className={`${styles.criteriaCheck} nodrag nopan`}
               checked={item.done}
-              onChange={(e) => {
+              aria-label={ts('mapArtifacts.markDone')}
+              onCheckedChange={(done) => {
                 const nextItems = items.map((row) =>
-                  row.id === item.id ? { ...row, done: e.target.checked } : row,
+                  row.id === item.id ? { ...row, done } : row,
                 )
                 setItems(nextItems)
                 persist(nextItems)

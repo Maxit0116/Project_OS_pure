@@ -13,7 +13,9 @@ import type { ServicePort } from '../../../contracts/service-port.js'
 import type { VerificationCommandApprovalStatus } from '../../../contracts/verification-command-approval.js'
 import type { ProjectDescription } from '../../../contracts/project-description.js'
 import type { AppMenuState } from '../../../contracts/app-menu.js'
+import type { KeepAwakeMode, KeepAwakeStatus } from '../../../contracts/keep-awake.js'
 type RunEventListener = (runId: string, event: AgentRunEvent) => void
+type KeepAwakeStatusListener = (status: KeepAwakeStatus) => void
 type RunTransientTraceListener = (runId: string, trace: AgentTransientTrace) => void
 type StructureScanEventListener = (
   projectId: string,
@@ -25,7 +27,7 @@ type ServicesChangedListener = (ports: ServicePort[]) => void
 type LspMessageListener = (message: string) => void
 type FocusChangeListener = (focused: boolean) => void
 type DiffReadyActivatedListener = (payload: {
-  destination: 'ask' | 'diff' | 'decisions'
+  destination: 'ask' | 'diff' | 'decisions' | 'reminder'
   runIds: string[]
   decisionId?: string
 }) => void
@@ -38,6 +40,7 @@ const servicesChangedListeners = new Set<ServicesChangedListener>()
 const lspMessageListeners = new Set<LspMessageListener>()
 const focusChangeListeners = new Set<FocusChangeListener>()
 const diffReadyActivatedListeners = new Set<DiffReadyActivatedListener>()
+const keepAwakeStatusListeners = new Set<KeepAwakeStatusListener>()
 ipcRenderer.on('projectos:runEvent', (_event, runId: string, agentEvent: AgentRunEvent) => {
   for (const listener of runEventListeners) {
     listener(runId, agentEvent)
@@ -90,12 +93,18 @@ ipcRenderer.on('window:focusChange', (_event, focused: boolean) => {
 })
 
 ipcRenderer.on('notify:diffReadyActivated', (_event, payload: {
-  destination: 'ask' | 'diff' | 'decisions'
+  destination: 'ask' | 'diff' | 'decisions' | 'reminder'
   runIds: string[]
   decisionId?: string
 }) => {
   for (const listener of diffReadyActivatedListeners) {
     listener(payload)
+  }
+})
+
+ipcRenderer.on('keepAwake:status', (_event, status: KeepAwakeStatus) => {
+  for (const listener of keepAwakeStatusListeners) {
+    listener(status)
   }
 })
 
@@ -200,6 +209,11 @@ const api = {
     > {
       return ipcRenderer.invoke('shell:pickImageFile')
     },
+    pickReferenceFiles(options?: {
+      extensions?: string[]
+    }): Promise<Array<{ path: string; name: string; ext: string }>> {
+      return ipcRenderer.invoke('shell:pickReferenceFiles', options ?? {})
+    },
     openExternal(url: string): Promise<void> {
       return ipcRenderer.invoke('shell:openExternal', url)
     },
@@ -244,7 +258,7 @@ const api = {
     showDiffReady(payload: {
       title: string
       body: string
-      destination: 'ask' | 'diff' | 'decisions'
+      destination: 'ask' | 'diff' | 'decisions' | 'reminder'
       runIds: string[]
       decisionId?: string
     }): Promise<void> {
@@ -255,6 +269,25 @@ const api = {
       return {
         dispose() {
           diffReadyActivatedListeners.delete(listener)
+        },
+      }
+    },
+  },
+  keepAwake: {
+    getStatus(): Promise<KeepAwakeStatus> {
+      return ipcRenderer.invoke('keepAwake:getStatus')
+    },
+    setMode(mode: KeepAwakeMode): Promise<KeepAwakeStatus> {
+      return ipcRenderer.invoke('keepAwake:setMode', mode)
+    },
+    setAgentActivity(active: boolean): Promise<KeepAwakeStatus> {
+      return ipcRenderer.invoke('keepAwake:setAgentActivity', active)
+    },
+    onStatus(listener: KeepAwakeStatusListener): Disposable {
+      keepAwakeStatusListeners.add(listener)
+      return {
+        dispose() {
+          keepAwakeStatusListeners.delete(listener)
         },
       }
     },
@@ -461,6 +494,106 @@ const api = {
       return {
         dispose() {
           ipcRenderer.off('spatial-pin:sessionSolidified', handler)
+        },
+      }
+    },
+    notifyGithubCardHost(payload: {
+      kind:
+        | 'toast'
+        | 'askAgent'
+        | 'refreshGithubGraph'
+        | 'openGithubGraph'
+        | 'openFirstPrinciples'
+        | 'selectChatModel'
+        | 'setThinkingDepth'
+        | 'openSettings'
+      type?: 'info' | 'success' | 'warning' | 'error'
+      message?: string
+      prompt?: string
+      branch?: string | null
+      prNumber?: number | null
+      chatSessionId?: string
+      firstPrinciplesSessionId?: string
+      profileId?: string
+      depth?: 'off' | 'low' | 'medium' | 'high'
+    }): void {
+      ipcRenderer.send('spatial-pin:githubCardHost', payload)
+    },
+    onGithubCardHost(
+      listener: (payload: {
+        kind:
+          | 'toast'
+          | 'askAgent'
+          | 'refreshGithubGraph'
+          | 'openGithubGraph'
+          | 'openFirstPrinciples'
+          | 'selectChatModel'
+          | 'setThinkingDepth'
+          | 'openSettings'
+        type?: 'info' | 'success' | 'warning' | 'error'
+        message?: string
+        prompt?: string
+        branch?: string | null
+        prNumber?: number | null
+        chatSessionId?: string
+        firstPrinciplesSessionId?: string
+        profileId?: string
+        depth?: 'off' | 'low' | 'medium' | 'high'
+      }) => void,
+    ): Disposable {
+      const handler = (
+        _event: unknown,
+        payload: {
+          kind?:
+            | 'toast'
+            | 'askAgent'
+            | 'refreshGithubGraph'
+            | 'openGithubGraph'
+            | 'openFirstPrinciples'
+            | 'selectChatModel'
+            | 'setThinkingDepth'
+            | 'openSettings'
+          type?: 'info' | 'success' | 'warning' | 'error'
+          message?: string
+          prompt?: string
+          branch?: string | null
+          prNumber?: number | null
+          chatSessionId?: string
+          firstPrinciplesSessionId?: string
+          profileId?: string
+          depth?: 'off' | 'low' | 'medium' | 'high'
+        },
+      ) => {
+        if (!payload?.kind) return
+        listener({
+          kind: payload.kind,
+          ...(payload.type ? { type: payload.type } : {}),
+          ...(payload.message !== undefined
+            ? { message: payload.message }
+            : {}),
+          ...(payload.prompt !== undefined ? { prompt: payload.prompt } : {}),
+          ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
+          ...(payload.prNumber !== undefined
+            ? { prNumber: payload.prNumber }
+            : {}),
+          ...(payload.chatSessionId !== undefined
+            ? { chatSessionId: payload.chatSessionId }
+            : {}),
+          ...(payload.firstPrinciplesSessionId !== undefined
+            ? {
+                firstPrinciplesSessionId: payload.firstPrinciplesSessionId,
+              }
+            : {}),
+          ...(payload.profileId !== undefined
+            ? { profileId: payload.profileId }
+            : {}),
+          ...(payload.depth !== undefined ? { depth: payload.depth } : {}),
+        })
+      }
+      ipcRenderer.on('spatial-pin:githubCardHost', handler)
+      return {
+        dispose() {
+          ipcRenderer.off('spatial-pin:githubCardHost', handler)
         },
       }
     },

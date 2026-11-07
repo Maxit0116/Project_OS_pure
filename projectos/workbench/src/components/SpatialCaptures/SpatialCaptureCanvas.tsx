@@ -1,33 +1,40 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
-  Bug,
-  ChevronDown,
   Eraser,
   LayoutTemplate,
-  ListTree,
-  MessageCircle,
   Minus,
   Pencil,
   Plus,
   Send,
-  SquarePen,
   Trash2,
   X,
 } from 'lucide-react'
+import type { AgentDefinition, AskSubMode } from '@contracts/index'
 import type { SpatialCaptureSession } from '@contracts/spatial-capture-session'
 import {
   createArrowStroke,
   createDraftSpatialPin,
   emptyAnnotationDoc,
+  emptyPinComposerHub,
   type AnnotationStroke,
+  type PinComposerHub,
+  type PinComposerHubSubagentLink,
   type ScreenRect,
   type SpatialPin,
-  type SpatialPinMode,
 } from '@contracts/spatial-pin'
+import {
+  ensureHub,
+  ResearchToggle,
+  SpatialComposeHub,
+  COMPOSE_HUB_STRINGS_EN,
+  createWorkbenchComposeHubDataSource,
+  type ComposeHubDataSource,
+  type ComposeHubStrings,
+} from '../SpatialComposeHub'
 import type { RepoDesignSystemSnapshot } from '@contracts/repo-design-system'
 import {
   MAX_STENCILS_PER_REGION,
+  UI_STENCIL_CATALOG,
   type StencilGenerationScope,
 } from '@contracts/ui-stencil'
 import {
@@ -72,8 +79,18 @@ import {
   toEdgeAnchor,
 } from '../../overlay/regionAnchors'
 import { useI18n } from '../../i18n'
+import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useSpatialCaptureStore } from '../../state/spatialCaptureStore'
+import { syncComposeSubagentsToPool } from '../AgentFlow/AgentPool/syncComposeSubagents'
+import ComposerModeSwitch from '../ChatPanel/composer/ComposerModeSwitch'
+import ComposerModelThinkingMenu from '../ChatPanel/composer/ComposerModelThinkingMenu'
+import { useComposePromptVoice } from '../ChatPanel/composer/useComposePromptVoice'
+import {
+  VoiceInputDock,
+  VoiceInputErrorBanner,
+} from '../ChatPanel/VoiceInputControls'
+import { pinComposerModeFields } from '../../overlay/composerModeFields'
 import {
   CAPTURE_ZOOM_MAX,
   CAPTURE_ZOOM_MIN,
@@ -91,7 +108,6 @@ import StencilPreviewVisual from './stencils/StencilPreviewVisual'
 import {
   buildPlacementAtStagePoint,
   combinedBriefForArrow,
-  defaultStencilSize,
   DEFAULT_STENCIL_SCOPE,
   placementsForArrow,
   stageRectForPlacement,
@@ -107,7 +123,7 @@ import {
   movedCaptureRect,
   movedPlacementWithRegionFollow,
   REGION_DRAG_THRESHOLD_PX,
-  regionRectForStencilDrop,
+  resizedPlacementFree,
   resizedRectFromHandle,
   RESIZE_HANDLES,
   resizeHandleScreenPoint,
@@ -122,18 +138,6 @@ import styles from './SpatialCaptureOverlay.module.css'
 function randomId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`
 }
-
-const MODES: Array<{
-  id: SpatialPinMode
-  label: string
-  icon: LucideIcon
-  toneClass: string
-}> = [
-  { id: 'ask', label: 'Ask', icon: MessageCircle, toneClass: 'overlay-mode-ask' },
-  { id: 'change', label: 'Agent', icon: SquarePen, toneClass: 'overlay-mode-change' },
-  { id: 'plan', label: 'Plan', icon: ListTree, toneClass: 'overlay-mode-plan' },
-  { id: 'debug', label: 'Debug', icon: Bug, toneClass: 'overlay-mode-debug' },
-]
 
 type PointerMode =
   | { kind: 'idle' }
@@ -218,6 +222,16 @@ export default function SpatialCaptureCanvas({
 }) {
   const project = useWorkbenchStore((s) => s.project)
   const client = useWorkbenchStore((s) => s.client)
+  const locale = useWorkbenchStore((s) => s.locale)
+  const settings = useWorkbenchStore((s) => s.settings)
+  const selectedModelProfileId = useWorkbenchStore((s) => s.selectedModelProfileId)
+  const selectChatModel = useWorkbenchStore((s) => s.selectChatModel)
+  const setThinkingDepth = useWorkbenchStore((s) => s.setThinkingDepth)
+  const setSettingsOpen = useWorkbenchStore((s) => s.setSettingsOpen)
+  const mergedStencilDefinitions = useWorkbenchStore((s) => s.mergedStencilDefinitions)
+  const listMergedStencilDefinitions = useWorkbenchStore((s) => s.listMergedStencilDefinitions)
+  const exportCapabilityPack = useWorkbenchStore((s) => s.exportCapabilityPack)
+  const pushToast = useWorkbenchStore((s) => s.pushToast)
   const upsertActiveSession = useSpatialCaptureStore((s) => s.upsertActiveSession)
   const { ts } = useI18n()
 
@@ -233,7 +247,9 @@ export default function SpatialCaptureCanvas({
   })
   const [draftRect, setDraftRect] = useState<ScreenRect | null>(null)
   const [pointer, setPointer] = useState<PointerMode>({ kind: 'idle' })
-  const [openMenu, setOpenMenu] = useState<'mode' | null>(null)
+  const [workforceAgents, setWorkforceAgents] = useState<AgentDefinition[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(false)
+  const [agentsLoaded, setAgentsLoaded] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [libraryRevealed, setLibraryRevealed] = useState(false)
   const [libraryCollapseToken, setLibraryCollapseToken] = useState(0)
@@ -251,7 +267,165 @@ export default function SpatialCaptureCanvas({
   const [stencilScopeByArrow, setStencilScopeByArrow] = useState<
     Record<string, StencilGenerationScope>
   >({})
+  const [hubByArrow, setHubByArrow] = useState<Record<string, PinComposerHub>>(
+    {},
+  )
+  const [subagentLinksByArrow, setSubagentLinksByArrow] = useState<
+    Record<string, PinComposerHubSubagentLink[]>
+  >({})
+  const [researchLinesByArrow, setResearchLinesByArrow] = useState<
+    Record<string, string[]>
+  >({})
+  const [assetUrls, setAssetUrls] = useState<Record<string, string>>({})
   const [status, setStatus] = useState(IDLE_HINT)
+
+  useEffect(() => {
+    syncComposeSubagentsToPool(hubByArrow, subagentLinksByArrow)
+  }, [hubByArrow, subagentLinksByArrow])
+
+  const composeHubStrings: ComposeHubStrings = useMemo(
+    () => ({
+      ...COMPOSE_HUB_STRINGS_EN,
+      expand: ts('spatialCaptures.composeHub.expand'),
+      collapse: ts('spatialCaptures.composeHub.collapse'),
+      repo: ts('spatialCaptures.composeHub.repo'),
+      repoEmpty: ts('spatialCaptures.composeHub.repoEmpty'),
+      repoDirty: ts('spatialCaptures.composeHub.repoDirty'),
+      repoClean: ts('spatialCaptures.composeHub.repoClean'),
+      repoLocate: ts('spatialCaptures.composeHub.repoLocate'),
+      repoLocateSearch: ts('spatialCaptures.composeHub.repoLocateSearch'),
+      repoLocateRoot: ts('spatialCaptures.composeHub.repoLocateRoot'),
+      repoLocateLoading: ts('spatialCaptures.composeHub.repoLocateLoading'),
+      repoLocateEmpty: ts('spatialCaptures.composeHub.repoLocateEmpty'),
+      repoLocateError: ts('spatialCaptures.composeHub.repoLocateError'),
+      repoCurrent: ts('spatialCaptures.composeHub.repoCurrent'),
+      repoOpenGithub: ts('spatialCaptures.composeHub.repoOpenGithub'),
+      repoOpenGraph: ts('spatialCaptures.composeHub.repoOpenGraph'),
+      repoFetch: ts('spatialCaptures.composeHub.repoFetch'),
+      repoPull: ts('spatialCaptures.composeHub.repoPull'),
+      repoPush: ts('spatialCaptures.composeHub.repoPush'),
+      repoCheckout: ts('spatialCaptures.composeHub.repoCheckout'),
+      repoCheckoutPending: ts('spatialCaptures.composeHub.repoCheckoutPending'),
+      repoNewBranch: ts('spatialCaptures.composeHub.repoNewBranch'),
+      repoNewBranchPlaceholder: ts(
+        'spatialCaptures.composeHub.repoNewBranchPlaceholder',
+      ),
+      repoCreateBranch: ts('spatialCaptures.composeHub.repoCreateBranch'),
+      repoCreatePr: ts('spatialCaptures.composeHub.repoCreatePr'),
+      repoViewPr: ts('spatialCaptures.composeHub.repoViewPr'),
+      repoPrTitlePlaceholder: ts(
+        'spatialCaptures.composeHub.repoPrTitlePlaceholder',
+      ),
+      repoAskAgent: ts('spatialCaptures.composeHub.repoAskAgent'),
+      repoAskAgentStarted: ts('spatialCaptures.composeHub.repoAskAgentStarted'),
+      repoConnectGithub: ts('spatialCaptures.composeHub.repoConnectGithub'),
+      repoDirtyBlocked: ts('spatialCaptures.composeHub.repoDirtyBlocked'),
+      repoOpFailed: ts('spatialCaptures.composeHub.repoOpFailed'),
+      repoCancel: ts('spatialCaptures.composeHub.repoCancel'),
+      repoLocateCheckoutHint: ts(
+        'spatialCaptures.composeHub.repoLocateCheckoutHint',
+      ),
+      referencesTabRepoHint: ts(
+        'spatialCaptures.composeHub.referencesTabRepoHint',
+      ),
+      folders: ts('spatialCaptures.composeHub.folders'),
+      foldersEmpty: ts('spatialCaptures.composeHub.foldersEmpty'),
+      foldersAdd: ts('spatialCaptures.composeHub.foldersAdd'),
+      scope: ts('spatialCaptures.composeHub.scope'),
+      scopeEmpty: ts('spatialCaptures.composeHub.scopeEmpty'),
+      scopeAdd: ts('spatialCaptures.composeHub.scopeAdd'),
+      scopeModeFolders: ts('spatialCaptures.composeHub.scopeModeFolders'),
+      scopeModeMap: ts('spatialCaptures.composeHub.scopeModeMap'),
+      scopeMapTitle: ts('spatialCaptures.composeHub.scopeMapTitle'),
+      scopeMapEmpty: ts('spatialCaptures.composeHub.scopeMapEmpty'),
+      scopeMapLoading: ts('spatialCaptures.composeHub.scopeMapLoading'),
+      scopeMapWeak: ts('spatialCaptures.composeHub.scopeMapWeak'),
+      scopeMapDrill: ts('spatialCaptures.composeHub.scopeMapDrill'),
+      scopeMapDone: ts('spatialCaptures.composeHub.scopeMapDone'),
+      scopeMapHint: ts('spatialCaptures.composeHub.scopeMapHint'),
+      scopeMapSelected: ts('spatialCaptures.composeHub.scopeMapSelected'),
+      scopeMapLevelContext: ts(
+        'spatialCaptures.composeHub.scopeMapLevelContext',
+      ),
+      scopeMapLevelContainer: ts(
+        'spatialCaptures.composeHub.scopeMapLevelContainer',
+      ),
+      scopeMapLevelComponent: ts(
+        'spatialCaptures.composeHub.scopeMapLevelComponent',
+      ),
+      scopeMapLevelCode: ts('spatialCaptures.composeHub.scopeMapLevelCode'),
+      mcp: ts('spatialCaptures.composeHub.mcp'),
+      mcpEmpty: ts('spatialCaptures.composeHub.mcpEmpty'),
+      mcpLibraryEmpty: ts('spatialCaptures.composeHub.mcpLibraryEmpty'),
+      mcpAdd: ts('spatialCaptures.composeHub.mcpAdd'),
+      mcpOpenSettings: ts('spatialCaptures.composeHub.mcpOpenSettings'),
+      mcpOpenMarketplace: ts('spatialCaptures.composeHub.mcpOpenMarketplace'),
+      mcpEnabled: ts('spatialCaptures.composeHub.mcpEnabled'),
+      mcpDisabled: ts('spatialCaptures.composeHub.mcpDisabled'),
+      mcpPolicyHint: ts('spatialCaptures.composeHub.mcpPolicyHint'),
+      skills: ts('spatialCaptures.composeHub.skills'),
+      skillsEmpty: ts('spatialCaptures.composeHub.skillsEmpty'),
+      skillsLibraryEmpty: ts('spatialCaptures.composeHub.skillsLibraryEmpty'),
+      skillsAdd: ts('spatialCaptures.composeHub.skillsAdd'),
+      skillsOpenMarketplace: ts(
+        'spatialCaptures.composeHub.skillsOpenMarketplace',
+      ),
+      references: ts('spatialCaptures.composeHub.references'),
+      referencesEmpty: ts('spatialCaptures.composeHub.referencesEmpty'),
+      referencesAdd: ts('spatialCaptures.composeHub.referencesAdd'),
+      referencesAddUrl: ts('spatialCaptures.composeHub.referencesAddUrl'),
+      referencesAddUrlPlaceholder: ts(
+        'spatialCaptures.composeHub.referencesAddUrlPlaceholder',
+      ),
+      referencesAddFile: ts('spatialCaptures.composeHub.referencesAddFile'),
+      referencesAddFiles: ts('spatialCaptures.composeHub.referencesAddFiles'),
+      referencesAddPanel: ts('spatialCaptures.composeHub.referencesAddPanel'),
+      referencesClosePanel: ts(
+        'spatialCaptures.composeHub.referencesClosePanel',
+      ),
+      referencesPicking: ts('spatialCaptures.composeHub.referencesPicking'),
+      referencesTabFiles: ts('spatialCaptures.composeHub.referencesTabFiles'),
+      referencesTabMedia: ts('spatialCaptures.composeHub.referencesTabMedia'),
+      referencesTabLinks: ts('spatialCaptures.composeHub.referencesTabLinks'),
+      referencesTabRepo: ts('spatialCaptures.composeHub.referencesTabRepo'),
+      referencesTypeAll: ts('spatialCaptures.composeHub.referencesTypeAll'),
+      referencesFolderAll: ts('spatialCaptures.composeHub.referencesFolderAll'),
+      referencesFolderUnfiled: ts(
+        'spatialCaptures.composeHub.referencesFolderUnfiled',
+      ),
+      referencesFolderNew: ts('spatialCaptures.composeHub.referencesFolderNew'),
+      referencesFolderPlaceholder: ts(
+        'spatialCaptures.composeHub.referencesFolderPlaceholder',
+      ),
+      referencesFolderEmpty: ts(
+        'spatialCaptures.composeHub.referencesFolderEmpty',
+      ),
+      referencesLibraryEmpty: ts(
+        'spatialCaptures.composeHub.referencesLibraryEmpty',
+      ),
+      referencesGithub: ts('spatialCaptures.composeHub.referencesGithub'),
+      referencesUrl: ts('spatialCaptures.composeHub.referencesUrl'),
+      referencesVideo: ts('spatialCaptures.composeHub.referencesVideo'),
+      referencesAudio: ts('spatialCaptures.composeHub.referencesAudio'),
+      referencesImage: ts('spatialCaptures.composeHub.referencesImage'),
+      referencesFile: ts('spatialCaptures.composeHub.referencesFile'),
+      research: ts('spatialCaptures.composeHub.research'),
+      researchEmpty: ts('spatialCaptures.composeHub.researchEmpty'),
+      researchToggle: ts('spatialCaptures.composeHub.researchToggle'),
+      subagent: ts('spatialCaptures.composeHub.subagent'),
+      subagentAdd: ts('spatialCaptures.composeHub.subagentAdd'),
+      subagentName: ts('spatialCaptures.composeHub.subagentName'),
+      subagentBrief: ts('spatialCaptures.composeHub.subagentBrief'),
+      subagentEnabled: ts('spatialCaptures.composeHub.subagentEnabled'),
+      subagentRemove: ts('spatialCaptures.composeHub.subagentRemove'),
+      statusReady: ts('spatialCaptures.composeHub.statusReady'),
+      statusQueued: ts('spatialCaptures.composeHub.statusQueued'),
+      statusRunning: ts('spatialCaptures.composeHub.statusRunning'),
+      statusDone: ts('spatialCaptures.composeHub.statusDone'),
+      statusError: ts('spatialCaptures.composeHub.statusError'),
+    }),
+    [ts],
+  )
 
   const stencilStrings: StencilUiStrings = useMemo(
     () => ({
@@ -280,8 +454,46 @@ export default function SpatialCaptureCanvas({
       motionNone: ts('spatialCaptures.stencilMotionNone'),
       motionArmed: ts('spatialCaptures.stencilMotionArmed'),
       licenseNote: ts('spatialCaptures.stencilLicense'),
+      exportStencil: ts('spatialCaptures.exportStencil'),
+      exportStencilCopied: ts('spatialCaptures.exportStencilCopied'),
     }),
     [ts],
+  )
+
+  const stencilCatalog = useMemo(
+    () =>
+      mergedStencilDefinitions.length > 0
+        ? mergedStencilDefinitions
+        : [...UI_STENCIL_CATALOG],
+    [mergedStencilDefinitions],
+  )
+
+  useEffect(() => {
+    if (!libraryOpen) return
+    void listMergedStencilDefinitions()
+  }, [libraryOpen, listMergedStencilDefinitions])
+
+  const handleExportStencil = useCallback(
+    async (stencilId: string) => {
+      const pack = await exportCapabilityPack({
+        kind: 'stencil',
+        stencilIds: [stencilId],
+      })
+      if (!pack || pack.kind !== 'stencil') return
+      try {
+        await navigator.clipboard.writeText(pack.packJson)
+        pushToast({
+          type: 'success',
+          message: ts('spatialCaptures.exportStencilCopied'),
+        })
+      } catch {
+        pushToast({
+          type: 'error',
+          message: ts('chat.marketplace.loadFailed'),
+        })
+      }
+    },
+    [exportCapabilityPack, pushToast, ts],
   )
 
   useEffect(() => {
@@ -326,6 +538,7 @@ export default function SpatialCaptureCanvas({
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
   const regionsRef = useRef(regions)
   const focusedRegionIdsRef = useRef(focusedRegionIds)
+  const activeArrowIdRef = useRef(activeArrowId)
   /** Invalidate in-flight library→canvas pointer listeners (Esc / close). */
   const placeDragSessionRef = useRef(0)
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -333,6 +546,9 @@ export default function SpatialCaptureCanvas({
   const panRef = useRef({ x: 0, y: 0 })
   const fitScaleRef = useRef(1)
   const viewportRef = useRef(viewport)
+  const onSubmitArrowRef = useRef<(regionId: string, arrowId: string) => Promise<void>>(
+    async () => undefined,
+  )
   zoomRef.current = zoom
   panRef.current = pan
   fitScaleRef.current = fitScale
@@ -345,6 +561,55 @@ export default function SpatialCaptureCanvas({
   useEffect(() => {
     focusedRegionIdsRef.current = focusedRegionIds
   }, [focusedRegionIds])
+
+  useEffect(() => {
+    activeArrowIdRef.current = activeArrowId
+  }, [activeArrowId])
+
+  const setActiveArrowPrompt = useCallback((text: string) => {
+    const arrowId = activeArrowIdRef.current
+    if (!arrowId) return
+    setRegions((prev) =>
+      prev.map((region) => ({
+        ...region,
+        arrows: region.arrows.map((arrow) =>
+          arrow.id === arrowId ? { ...arrow, prompt: text } : arrow,
+        ),
+      })),
+    )
+  }, [])
+
+  const getActiveArrowPrompt = useCallback(() => {
+    const arrowId = activeArrowIdRef.current
+    if (!arrowId) return ''
+    for (const region of regionsRef.current) {
+      const arrow = region.arrows.find((item) => item.id === arrowId)
+      if (arrow) return arrow.prompt
+    }
+    return ''
+  }, [])
+
+  const composeVoice = useComposePromptVoice({
+    locale,
+    disabled: !activeArrowId,
+    getText: getActiveArrowPrompt,
+    setText: setActiveArrowPrompt,
+    onSubmit: (text) => {
+      const arrowId = activeArrowIdRef.current
+      if (!arrowId || !text.trim()) return
+      const region = regionsRef.current.find((item) =>
+        item.arrows.some((arrow) => arrow.id === arrowId),
+      )
+      if (!region) return
+      void onSubmitArrowRef.current(region.id, arrowId)
+    },
+  })
+
+  useEffect(() => {
+    composeVoice.syncBaseFromExternalText(getActiveArrowPrompt())
+    // Only re-base when the active arrow changes; typing is owned by voice/setText.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+  }, [activeArrowId])
 
   useEffect(() => {
     setRegions(
@@ -519,21 +784,47 @@ export default function SpatialCaptureCanvas({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (openMenu) {
-          setOpenMenu(null)
-          return
-        }
-        if (placeDrag || libraryRevealed || libraryOpen) {
-          exitStencilChrome()
-          return
-        }
-        onExit()
+      if (event.key !== 'Escape') return
+      // Scope Map floater owns Escape while open (compose card must stay).
+      if (document.querySelector('[data-scope-map-picker="true"]')) return
+      if (placeDrag || libraryRevealed || libraryOpen) {
+        exitStencilChrome()
+        return
       }
+      if (activeArrowId) {
+        setActiveArrowId(null)
+        return
+      }
+      onExit()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onExit, openMenu, placeDrag, libraryOpen, libraryRevealed])
+  }, [onExit, placeDrag, libraryOpen, libraryRevealed, activeArrowId])
+
+  const loadWorkforceAgents = useCallback(() => {
+    if (!client?.listWorkforceAgents || !project || agentsLoaded || agentsLoading) {
+      return
+    }
+    setAgentsLoading(true)
+    void client
+      .listWorkforceAgents({ projectId: project.projectId })
+      .then((result) => {
+        setWorkforceAgents(result.agents)
+        setAgentsLoaded(true)
+      })
+      .catch(() => {
+        setWorkforceAgents([])
+        setAgentsLoaded(true)
+      })
+      .finally(() => {
+        setAgentsLoading(false)
+      })
+  }, [client, project, agentsLoaded, agentsLoading])
+
+  useEffect(() => {
+    setAgentsLoaded(false)
+    setWorkforceAgents([])
+  }, [project?.projectId])
 
   function stagePoint(event: {
     clientX: number
@@ -661,17 +952,19 @@ export default function SpatialCaptureCanvas({
       combinedBriefForArrow(region, arrow.id)
     const generationScope =
       stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
+    const hub = enrichHubForArrow(arrow.id, region)
     const updated: SpatialPin = {
       ...base,
       updatedAt: new Date().toISOString(),
       captureRect: region.captureRect,
       composer: {
-        mode: region.mode,
+        ...pinComposerModeFields(region),
         prompt: arrow.prompt,
         ...(region.snapshotAssetPath
           ? { snapshotAssetPath: region.snapshotAssetPath }
           : {}),
         ...(stencilBrief ? { stencilBrief, generationScope } : {}),
+        hub,
       },
       annotations: {
         version: '0.1.0',
@@ -681,6 +974,95 @@ export default function SpatialCaptureCanvas({
     }
     await client.upsertSpatialPin(project.projectId, updated)
   }
+
+  function enrichHubForArrow(
+    arrowId: string,
+    region: OverlayRegion,
+  ): PinComposerHub {
+    const base = ensureHub(hubByArrow[arrowId] ?? emptyPinComposerHub())
+    const snapshotAssetPath = region.snapshotAssetPath
+    const references =
+      base.references.length > 0
+        ? base.references
+        : snapshotAssetPath
+          ? [
+              {
+                kind: 'image' as const,
+                id: `ref_${arrowId}_snap`,
+                assetPath: snapshotAssetPath,
+                label: 'Region snapshot',
+              },
+            ]
+          : []
+    const inferred = session.location?.inferredPath?.trim()
+    const folders =
+      base.folders.length > 0
+        ? base.folders
+        : inferred
+          ? [inferred]
+          : []
+    return {
+      ...base,
+      repo:
+        base.repo ??
+        (project
+          ? { label: project.displayName || project.projectId, branch: 'main' }
+          : undefined),
+      references,
+      folders,
+    }
+  }
+
+  useEffect(() => {
+    if (!client || !project) return
+    const paths = new Set<string>()
+    for (const region of regions) {
+      if (region.snapshotAssetPath) paths.add(region.snapshotAssetPath)
+    }
+    for (const hub of Object.values(hubByArrow)) {
+      for (const ref of hub.references) {
+        if (
+          (ref.kind === 'image' ||
+            ref.kind === 'video' ||
+            ref.kind === 'audio') &&
+          ref.assetPath
+        ) {
+          paths.add(ref.assetPath)
+        }
+      }
+    }
+    let cancelled = false
+    for (const path of paths) {
+      if (assetUrls[path]) continue
+      void client
+        .readProjectAssetBase64(project.projectId, path)
+        .then((payload) => {
+          if (cancelled || !payload?.base64) return
+          setAssetUrls((prev) =>
+            prev[path]
+              ? prev
+              : {
+                  ...prev,
+                  [path]: `data:${payload.mimeType};base64,${payload.base64}`,
+                },
+          )
+        })
+        .catch(() => undefined)
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [client, project, regions, hubByArrow, assetUrls])
+
+  const hubDataSource = useMemo(
+    (): ComposeHubDataSource =>
+      createWorkbenchComposeHubDataSource({
+        client,
+        project,
+        resolveAssetUrl: (assetPath) => assetUrls[assetPath],
+      }),
+    [client, project, assetUrls],
+  )
 
   function ensureBriefState(arrowId: string, region: OverlayRegion) {
     setStencilBriefByArrow((prev) => {
@@ -698,22 +1080,30 @@ export default function SpatialCaptureCanvas({
     stencilId: string,
     stagePoint: { x: number; y: number },
   ) {
-    const containing = regionsRef.current.filter((region) =>
-      pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
+    // Prefer a user-drawn region under the pointer; otherwise reuse / create a
+    // full-screenshot backdrop (chrome hidden) so the stencil is not wrapped
+    // in a visible snug selection frame.
+    const containing = regionsRef.current.filter(
+      (region) =>
+        !region.hideSelectionChrome &&
+        pointInRect(region.captureRect, stagePoint.x, stagePoint.y),
     )
-    let baseRegion = containing[0]
+    let baseRegion: OverlayRegion | undefined = containing[0]
     let createdFullFrame = false
     let fullRect: ScreenRect | null = null
 
     if (!baseRegion) {
+      baseRegion = regionsRef.current.find((region) => region.hideSelectionChrome)
+    }
+
+    if (!baseRegion) {
       const regionId = randomId('region')
-      // Snug region around the drop — leave the rest of the stage free for
-      // new box-selects (do not lock the whole viewport into one region).
-      fullRect = regionRectForStencilDrop(
-        stagePoint,
-        defaultStencilSize(stencilId),
-        session.viewport,
-      )
+      fullRect = {
+        x: 0,
+        y: 0,
+        width: session.viewport.width,
+        height: session.viewport.height,
+      }
       baseRegion = {
         id: regionId,
         captureRect: fullRect,
@@ -725,6 +1115,7 @@ export default function SpatialCaptureCanvas({
         showAnchors: false,
         tool: 'arrow',
         stencils: [],
+        hideSelectionChrome: true,
       }
       createdFullFrame = true
     }
@@ -1067,14 +1458,16 @@ export default function SpatialCaptureCanvas({
         combinedBriefForArrow(region, arrow.id)
       const generationScope =
         stencilScopeByArrow[arrow.id] ?? DEFAULT_STENCIL_SCOPE
+      const hub = enrichHubForArrow(arrow.id, region)
       if (pin) {
         await client.upsertSpatialPin(project.projectId, {
           ...pin,
           composer: {
             ...pin.composer,
+            ...pinComposerModeFields(region),
             prompt: trimmed,
-            mode: region.mode,
             ...(stencilBrief ? { stencilBrief, generationScope } : {}),
+            hub,
           },
         })
       }
@@ -1082,6 +1475,12 @@ export default function SpatialCaptureCanvas({
         project.projectId,
         arrow.pinId,
       )
+      if (result.pin?.links?.composeSubagents) {
+        setSubagentLinksByArrow((prev) => ({
+          ...prev,
+          [arrow.id]: result.pin.links!.composeSubagents!,
+        }))
+      }
       updateRegion(regionId, (r) => ({
         ...r,
         arrows: r.arrows.map((a) =>
@@ -1095,23 +1494,60 @@ export default function SpatialCaptureCanvas({
             : a,
         ),
       }))
-      setStatus(result.runId ? 'Agent running…' : 'Submitted')
-      if (!result.runId) {
+      if (result.firstPrinciplesSessionId) {
+        setStatus('First Principles · opening Chat…')
         seedFlow(arrowId, {
           steps: [
             {
-              id: 'done',
-              label: result.planId
-                ? 'Plan ready'
-                : result.debugSessionId
-                  ? 'Debug started'
-                  : 'Answer ready',
+              id: 'fp',
+              label: 'First Principles started — continue in Chat',
               status: 'complete',
             },
           ],
           phase: 'done',
           live: false,
         })
+        useWorkbenchStore.setState({
+          rightPanelTab: 'chat',
+          rightPanelOpen: true,
+        })
+        await useChatSessionStore.getState().switchSession(result.chatSessionId)
+        try {
+          const fpSession = client.getThesisSession
+            ? await client.getThesisSession(
+                project.projectId,
+                result.firstPrinciplesSessionId,
+              )
+            : null
+          useWorkbenchStore.setState({
+            chatMode: 'ask',
+            askSubMode: 'first_principles',
+            pendingFirstPrinciples: fpSession,
+            firstPrinciplesSuggestDismissed: true,
+          })
+        } catch {
+          useWorkbenchStore.getState().setAskSubMode('first_principles')
+          useWorkbenchStore.getState().setChatMode('ask')
+        }
+      } else {
+        setStatus(result.runId ? 'Agent running…' : 'Submitted')
+        if (!result.runId) {
+          seedFlow(arrowId, {
+            steps: [
+              {
+                id: 'done',
+                label: result.planId
+                  ? 'Plan ready'
+                  : result.debugSessionId
+                    ? 'Debug started'
+                    : 'Answer ready',
+                status: 'complete',
+              },
+            ],
+            phase: 'done',
+            live: false,
+          })
+        }
       }
     } catch {
       updateRegion(regionId, (r) => ({
@@ -1128,6 +1564,8 @@ export default function SpatialCaptureCanvas({
       })
     }
   }
+
+  onSubmitArrowRef.current = onSubmitArrow
 
   function beginPan(event: React.PointerEvent) {
     setPointer({
@@ -1255,7 +1693,7 @@ export default function SpatialCaptureCanvas({
       const stroke: AnnotationStroke = {
         id: strokeId,
         kind: 'pen',
-        color: '#4c7dff',
+        color: '#c4c4c8',
         width: 2,
         points: [rel],
       }
@@ -1519,29 +1957,22 @@ export default function SpatialCaptureCanvas({
       return
     }
     if (pointer.kind === 'placement-resize') {
-      const originStage = {
-        x: pointer.originCaptureRect.x + pointer.originLocal.x,
-        y: pointer.originCaptureRect.y + pointer.originLocal.y,
-        width: pointer.originLocal.width,
-        height: pointer.originLocal.height,
-      }
-      const nextStage = resizedRectFromHandle(
-        originStage,
+      const { nextCapture, nextLocal } = resizedPlacementFree(
+        pointer.originLocal,
+        pointer.originCaptureRect,
         pointer.handle,
         pt.x,
         pt.y,
-        undefined,
-        pointer.originCaptureRect,
+        session.viewport,
       )
-      const nextLocal = {
-        x: nextStage.x - pointer.originCaptureRect.x,
-        y: nextStage.y - pointer.originCaptureRect.y,
-        width: nextStage.width,
-        height: nextStage.height,
-      }
       updateRegion(pointer.regionId, (r) => {
         const stencils = (r.stencils ?? []).map((item) =>
-          item.id === pointer.placementId ? { ...item, rect: nextLocal } : item,
+          item.id === pointer.placementId
+            ? { ...item, rect: nextLocal }
+            : {
+                ...item,
+                rect: clampLocalRectInRegion(item.rect, nextCapture),
+              },
         )
         let arrows = r.arrows
         if (pointer.arrowId) {
@@ -1551,7 +1982,7 @@ export default function SpatialCaptureCanvas({
               Math.max(
                 0.02,
                 (nextLocal.x + nextLocal.width / 2) /
-                  Math.max(1, r.captureRect.width),
+                  Math.max(1, nextCapture.width),
               ),
             ),
             y: Math.min(
@@ -1559,7 +1990,7 @@ export default function SpatialCaptureCanvas({
               Math.max(
                 0.02,
                 (nextLocal.y + nextLocal.height / 2) /
-                  Math.max(1, r.captureRect.height),
+                  Math.max(1, nextCapture.height),
               ),
             ),
           }
@@ -1573,7 +2004,7 @@ export default function SpatialCaptureCanvas({
               : arrow,
           )
         }
-        return { ...r, stencils, arrows }
+        return { ...r, captureRect: nextCapture, stencils, arrows }
       })
     }
   }
@@ -1694,8 +2125,17 @@ export default function SpatialCaptureCanvas({
       const arrow = pointer.arrowId
         ? region?.arrows.find((a) => a.id === pointer.arrowId)
         : undefined
+      const regionExpanded =
+        !!region &&
+        (region.captureRect.x !== pointer.originCaptureRect.x ||
+          region.captureRect.y !== pointer.originCaptureRect.y ||
+          region.captureRect.width !== pointer.originCaptureRect.width ||
+          region.captureRect.height !== pointer.originCaptureRect.height)
       setPointer({ kind: 'idle' })
       if (region && arrow) void upsertArrowPin(region, arrow)
+      if (region && regionExpanded) {
+        void captureFrozenRegion(region.id, region.captureRect)
+      }
       setStatus(IDLE_HINT)
     }
   }
@@ -1834,7 +2274,9 @@ export default function SpatialCaptureCanvas({
         collapseToken={libraryCollapseToken}
         draggingStencilId={placeDrag?.stencilId ?? null}
         repoDesignSystem={repoDesignSystem}
+        catalog={stencilCatalog}
         strings={stencilStrings}
+        onExportStencil={handleExportStencil}
         onRevealChange={setLibraryRevealed}
         onClose={() => {
           exitStencilChrome()
@@ -1946,16 +2388,20 @@ export default function SpatialCaptureCanvas({
               (region.stencils ?? []).map((placement) => {
                 const box = stageRectForPlacement(region, placement)
                 const focused = isRegionFocused(focusedRegionIds, region.id)
+                const active =
+                  focused ||
+                  (placement.arrowId != null &&
+                    placement.arrowId === activeArrowId)
                 return (
                   <StencilLiveStub
                     key={placement.id}
                     stencilId={placement.stencilId}
-                    dimmed={!focused}
+                    dimmed={!active}
                     style={{
                       left: box.x,
                       top: box.y,
-                      width: Math.max(box.width, 48),
-                      height: Math.max(box.height, 36),
+                      width: box.width,
+                      height: box.height,
                     }}
                     onMovePointerDown={(event) =>
                       beginPlacementDrag(event, region, placement.id)
@@ -1967,26 +2413,45 @@ export default function SpatialCaptureCanvas({
 
             {regions.map((region) => {
               const focused = isRegionFocused(focusedRegionIds, region.id)
-              if (!focused || region.tool === 'draw') return null
+              if (region.tool === 'draw') return null
+              const stencilHandles = (region.stencils ?? []).filter(
+                (placement) =>
+                  focused ||
+                  (placement.arrowId != null &&
+                    placement.arrowId === activeArrowId) ||
+                  (pointer.kind === 'placement-resize' &&
+                    pointer.placementId === placement.id),
+              )
+              if (
+                stencilHandles.length === 0 &&
+                !(focused && !region.hideSelectionChrome)
+              ) {
+                return null
+              }
               return (
                 <div key={`resize-${region.id}`}>
-                  {RESIZE_HANDLES.map((handle) => {
-                    const p = resizeHandleScreenPoint(region.captureRect, handle)
-                    return (
-                      <button
-                        key={handle}
-                        type="button"
-                        className="overlay-resize-handle"
-                        data-handle={handle}
-                        style={{ left: p.x, top: p.y }}
-                        aria-label={`Resize region ${handle}`}
-                        onPointerDown={(event) =>
-                          beginRegionResize(event, region, handle)
-                        }
-                      />
-                    )
-                  })}
-                  {(region.stencils ?? []).map((placement) => {
+                  {focused && !region.hideSelectionChrome
+                    ? RESIZE_HANDLES.map((handle) => {
+                        const p = resizeHandleScreenPoint(
+                          region.captureRect,
+                          handle,
+                        )
+                        return (
+                          <button
+                            key={handle}
+                            type="button"
+                            className="overlay-resize-handle"
+                            data-handle={handle}
+                            style={{ left: p.x, top: p.y }}
+                            aria-label={`Resize region ${handle}`}
+                            onPointerDown={(event) =>
+                              beginRegionResize(event, region, handle)
+                            }
+                          />
+                        )
+                      })
+                    : null}
+                  {stencilHandles.map((placement) => {
                     const box = stageRectForPlacement(region, placement)
                     return RESIZE_HANDLES.map((handle) => {
                       const p = resizeHandleScreenPoint(box, handle)
@@ -2097,12 +2562,30 @@ export default function SpatialCaptureCanvas({
               const focused = isRegionFocused(focusedRegionIds, region.id)
               const isActive = arrow.id === activeArrowId
               const layout = layoutArrowCompose(region, arrow)
-              const modeVisual =
-                MODES.find((item) => item.id === region.mode) ?? MODES[1]!
-              const ModeIcon = modeVisual.icon
+              const hub = enrichHubForArrow(arrow.id, region)
               return (
-                <div
+                <SpatialComposeHub
                   key={`compose-${arrow.id}`}
+                  card={layout.card}
+                  expanded={Boolean(isActive && focused)}
+                  hub={hub}
+                  onHubChange={(next) =>
+                    setHubByArrow((prev) => ({ ...prev, [arrow.id]: next }))
+                  }
+                  subagentLinks={subagentLinksByArrow[arrow.id]}
+                  promptText={arrow.prompt}
+                  researchLines={researchLinesByArrow[arrow.id] ?? []}
+                  onResearchLinesChange={(lines) =>
+                    setResearchLinesByArrow((prev) => ({
+                      ...prev,
+                      [arrow.id]: lines,
+                    }))
+                  }
+                  dataSource={hubDataSource}
+                  resolveAssetUrl={(path) => assetUrls[path]}
+                  strings={composeHubStrings}
+                >
+                <div
                   ref={bindPanel(arrow.id)}
                   className={`overlay-panel overlay-panel-chrome${
                     focused ? '' : ' overlay-panel-dimmed'
@@ -2170,7 +2653,9 @@ export default function SpatialCaptureCanvas({
                           value={arrow.prompt}
                           placeholder={
                             region.mode === 'ask'
-                              ? 'Ask about this callout…'
+                              ? region.askSubMode === 'first_principles'
+                                ? 'Describe a feature vision to reason from first principles…'
+                                : 'Ask about this callout…'
                               : region.mode === 'plan'
                                 ? 'Describe the plan for this callout…'
                                 : region.mode === 'debug'
@@ -2187,12 +2672,22 @@ export default function SpatialCaptureCanvas({
                                   : a,
                               ),
                             }))
+                            composeVoice.syncBaseFromExternalText(value)
                           }}
                           onFocus={() => {
                             setFocusedRegionIds([region.id])
                             setActiveArrowId(arrow.id)
                           }}
                           onKeyDown={(event) => {
+                            if (
+                              event.key === 'Escape' &&
+                              (composeVoice.voice.isRecording ||
+                                composeVoice.voice.isTranscribing)
+                            ) {
+                              event.preventDefault()
+                              composeVoice.cancelVoice()
+                              return
+                            }
                             if (
                               (event.metaKey || event.ctrlKey) &&
                               event.key === 'Enter'
@@ -2247,102 +2742,143 @@ export default function SpatialCaptureCanvas({
                           />
                         ) : null}
                       </div>
+                      {isActive && composeVoice.voice.state.error ? (
+                        <div className="overlay-voice-error">
+                          <VoiceInputErrorBanner
+                            errorKey={composeVoice.voice.state.error}
+                            onDismiss={composeVoice.voice.dismissError}
+                            labels={composeVoice.voiceLabels}
+                          />
+                        </div>
+                      ) : null}
                       <div className="overlay-composer-footer">
                         <div className="overlay-toolbar-left">
-                          <div className="overlay-menu-wrap">
-                            <button
-                              type="button"
-                              className={`overlay-chip overlay-chip-mode ${modeVisual.toneClass}`}
-                              aria-expanded={openMenu === 'mode' && isActive}
-                              aria-haspopup="listbox"
-                              onClick={() => {
-                                setActiveArrowId(arrow.id)
-                                setFocusedRegionIds([region.id])
-                                setOpenMenu((current) =>
-                                  current === 'mode' && isActive
-                                    ? null
-                                    : 'mode',
-                                )
-                              }}
-                            >
-                              <ModeIcon
-                                size={13}
-                                strokeWidth={2}
-                                aria-hidden
-                              />
-                              <span className="overlay-chip-label">
-                                {modeVisual.label}
-                              </span>
-                              <ChevronDown
-                                size={12}
-                                strokeWidth={2}
-                                className="overlay-chip-caret"
-                                aria-hidden
-                              />
-                            </button>
-                            {openMenu === 'mode' && isActive ? (
-                              <div
-                                className="overlay-dropdown overlay-dropdown-up"
-                                role="listbox"
-                              >
-                                {MODES.map((item) => {
-                                  const Icon = item.icon
-                                  const active = item.id === region.mode
-                                  return (
-                                    <button
-                                      key={item.id}
-                                      type="button"
-                                      role="option"
-                                      aria-selected={active}
-                                      className={`overlay-menu-item ${item.toneClass}${
-                                        active
-                                          ? ' overlay-menu-item-active'
-                                          : ''
-                                      }`}
-                                      onClick={() => {
-                                        updateRegion(region.id, {
-                                          mode: item.id,
-                                        })
-                                        setOpenMenu(null)
-                                      }}
-                                    >
-                                      <Icon
-                                        size={14}
-                                        strokeWidth={2}
-                                        className="overlay-menu-item-icon"
-                                        aria-hidden
-                                      />
-                                      {item.label}
-                                    </button>
-                                  )
-                                })}
-                              </div>
-                            ) : null}
-                          </div>
+                          <ComposerModeSwitch
+                            compact
+                            mode={region.mode}
+                            askSubMode={region.askSubMode ?? 'chat'}
+                            agentDefinitionId={region.agentDefinitionId ?? null}
+                            agentDisplayName={region.agentDisplayName ?? null}
+                            agents={workforceAgents}
+                            agentsLoading={agentsLoading}
+                            onAgentFlyoutOpen={loadWorkforceAgents}
+                            onModeChange={(next) => {
+                              setActiveArrowId(arrow.id)
+                              setFocusedRegionIds([region.id])
+                              if (next === 'anchored') return
+                              updateRegion(region.id, {
+                                mode: next,
+                                ...(next === 'ask'
+                                  ? {}
+                                  : {
+                                      askSubMode: undefined,
+                                      agentDefinitionId:
+                                        next === 'change'
+                                          ? region.agentDefinitionId
+                                          : null,
+                                      agentDisplayName:
+                                        next === 'change'
+                                          ? region.agentDisplayName
+                                          : null,
+                                    }),
+                              })
+                            }}
+                            onAskSubModeChange={(subMode: AskSubMode) => {
+                              setActiveArrowId(arrow.id)
+                              setFocusedRegionIds([region.id])
+                              updateRegion(region.id, {
+                                mode: 'ask',
+                                askSubMode: subMode,
+                                agentDefinitionId: null,
+                                agentDisplayName: null,
+                              })
+                            }}
+                            onSelectGeneralAgent={() => {
+                              setActiveArrowId(arrow.id)
+                              setFocusedRegionIds([region.id])
+                              updateRegion(region.id, {
+                                mode: 'change',
+                                askSubMode: undefined,
+                                agentDefinitionId: null,
+                                agentDisplayName: null,
+                              })
+                            }}
+                            onSelectAgent={(definitionId, displayName) => {
+                              setActiveArrowId(arrow.id)
+                              setFocusedRegionIds([region.id])
+                              updateRegion(region.id, {
+                                mode: 'change',
+                                askSubMode: undefined,
+                                agentDefinitionId: definitionId,
+                                agentDisplayName: displayName,
+                              })
+                            }}
+                          />
+                          <ComposerModelThinkingMenu
+                            compact
+                            modelProfiles={settings?.modelProfiles ?? []}
+                            selectedModelProfileId={selectedModelProfileId}
+                            thinkingDepth={
+                              settings?.execution.thinkingDepth ?? 'medium'
+                            }
+                            presentationMode={settings?.presentationMode ?? false}
+                            onSelectModel={(profileId) => {
+                              void selectChatModel(profileId)
+                            }}
+                            onSelectThinkingDepth={(depth) => {
+                              void setThinkingDepth(depth)
+                            }}
+                            onConfigureModels={() => setSettingsOpen(true)}
+                          />
+                          <ResearchToggle
+                            enabled={hub.researchEnabled}
+                            onChange={(next) =>
+                              setHubByArrow((prev) => ({
+                                ...prev,
+                                [arrow.id]: {
+                                  ...ensureHub(prev[arrow.id]),
+                                  researchEnabled: next,
+                                },
+                              }))
+                            }
+                            strings={composeHubStrings}
+                          />
                         </div>
-                        <button
-                          type="button"
-                          className="overlay-send"
-                          disabled={
-                            arrow.status === 'submitting' ||
-                            !arrow.prompt.trim()
-                          }
-                          aria-label={
-                            arrow.status === 'submitting'
-                              ? 'Sending'
-                              : 'Submit'
-                          }
-                          title="Submit (⌘↵)"
-                          onClick={() =>
-                            void onSubmitArrow(region.id, arrow.id)
-                          }
-                        >
-                          <Send size={14} strokeWidth={2.25} aria-hidden />
-                        </button>
+                        <div className="overlay-toolbar-right">
+                          <VoiceInputDock
+                            {...composeVoice.dockProps}
+                            inline
+                            micDisabled={
+                              composeVoice.dockProps.micDisabled ||
+                              arrow.status === 'submitting' ||
+                              !isActive
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="overlay-send"
+                            disabled={
+                              arrow.status === 'submitting' ||
+                              !arrow.prompt.trim()
+                            }
+                            aria-label={
+                              arrow.status === 'submitting'
+                                ? 'Sending'
+                                : 'Submit'
+                            }
+                            title="Submit (⌘↵)"
+                            onClick={() =>
+                              void onSubmitArrow(region.id, arrow.id)
+                            }
+                          >
+                            <Send size={14} strokeWidth={2.25} aria-hidden />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
+                </SpatialComposeHub>
               )
             })}
           </div>
@@ -2397,6 +2933,30 @@ function FrozenRegionView({
   const btnLeft = region.captureRect.x + region.captureRect.width + 6
   const btnTop =
     region.captureRect.y + region.captureRect.height - toolStackHeight
+
+  if (region.hideSelectionChrome) {
+    // Full-screenshot stencil backdrop: no selection frame / anchors / tools.
+    return (
+      <div
+        className="overlay-selection-chrome-hidden"
+        style={{
+          position: 'absolute',
+          left: region.captureRect.x,
+          top: region.captureRect.y,
+          width: region.captureRect.width,
+          height: region.captureRect.height,
+          pointerEvents: 'none',
+        }}
+        aria-hidden
+      >
+        <canvas
+          ref={canvasRef}
+          className="overlay-canvas"
+          style={{ width: '100%', height: '100%' }}
+        />
+      </div>
+    )
+  }
 
   return (
     <>

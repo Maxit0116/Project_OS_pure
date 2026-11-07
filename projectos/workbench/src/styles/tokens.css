@@ -1,29 +1,35 @@
 :root,
 [data-theme='dark'] {
-  /* Near-black workspace. Neutrals carry hierarchy; accent is selection, not decoration. */
-  --color-bg-base: #0b0b0c;
-  --color-bg-canvas: #0b0b0c;
-  /* Function map canvas — recessed vs side panels; dot grid sits on this fill. */
-  --color-bg-map: #0e0e10;
-  --color-bg-side-panel: #111113;
-  --glass-panel-surface: #111113;
-  --color-bg-elevated: #171719;
-  --color-bg-muted: #1c1c1f;
+  /* Cursor Dark Anysphere neutrals: chrome darker than content; accent is selection.
+   * Chrome maps to sideBar/panel/titleBar/terminal.background (#141414).
+   * Content maps to editor.background (#181818). Official docs name themes only. */
+  --color-bg-base: #181818;
+  --color-bg-canvas: #181818;
+  /* Function map canvas — same as editor/content; side panels are the recessed chrome. */
+  --color-bg-map: #181818;
+  --color-bg-chrome: #141414;
+  --color-bg-side-panel: var(--color-bg-chrome);
+  --glass-panel-surface: var(--color-bg-chrome);
+  --color-bg-elevated: #1c1c1c;
+  --color-bg-muted: #222222;
   --color-map-artifact-chrome: var(--color-bg-muted);
   --color-border: rgba(255, 255, 255, 0.08);
   --color-border-subtle: rgba(255, 255, 255, 0.05);
 
-  --color-text-primary: rgba(255, 255, 255, 0.92);
-  --color-text-secondary: rgba(255, 255, 255, 0.58);
-  --color-text-muted: rgba(255, 255, 255, 0.48);
+  /* Soft grey text — avoid pure white glare on dark chrome. */
+  --color-text-primary: rgba(220, 220, 222, 0.92);
+  --color-text-secondary: rgba(220, 220, 222, 0.58);
+  --color-text-muted: rgba(220, 220, 222, 0.46);
 
-  --color-accent: #4c7dff;
-  --color-accent-strong: #6b93ff;
-  --color-accent-subtle: rgba(76, 125, 255, 0.16);
-  --color-success: #30d158;
-  --color-warning: #ffd60a;
-  --color-error: #ff453a;
-  --color-violet: #bf5af2;
+  /* Accent = selection / primary action — restrained soft grey, not pure white. */
+  --color-accent: #c4c4c8;
+  --color-accent-strong: #d8d8dc;
+  --color-accent-subtle: rgba(196, 196, 200, 0.14);
+  /* Semantic hues — slightly darker / less neon for mature IDE chrome. */
+  --color-success: #3a9a58;
+  --color-warning: #c99214;
+  --color-error: #c94f47;
+  --color-violet: #9570c4;
 
   --glass-saturate: 100%;
   --glass-blur-sm: 0px;
@@ -52,17 +58,17 @@
 
   --scrim: rgba(0, 0, 0, 0.35);
   --scrim-heavy: rgba(0, 0, 0, 0.6);
-  --minimap-mask: rgba(10, 132, 255, 0.1);
-  --color-error-subtle: rgba(255, 69, 58, 0.12);
-  --color-error-border: rgba(255, 69, 58, 0.25);
-  --color-warning-subtle: rgba(255, 214, 10, 0.08);
-  --color-warning-border: rgba(255, 214, 10, 0.2);
-  --color-success-subtle: rgba(48, 209, 88, 0.12);
+  --minimap-mask: rgba(255, 255, 255, 0.08);
+  --color-error-subtle: rgba(201, 79, 71, 0.14);
+  --color-error-border: rgba(201, 79, 71, 0.28);
+  --color-warning-subtle: rgba(201, 146, 20, 0.1);
+  --color-warning-border: rgba(201, 146, 20, 0.24);
+  --color-success-subtle: rgba(58, 154, 88, 0.14);
   --color-diff-line-changed: rgba(255, 255, 255, 0.04);
   --color-diff-char-added: var(--color-success);
   --color-diff-char-removed: var(--color-error);
   --color-code-bg: #0d0d14;
-  --color-bg-editor: #1e1e1e;
+  --color-bg-editor: #181818;
   --color-hover-overlay: rgba(255, 255, 255, 0.06);
   --color-shimmer-mid: rgba(255, 255, 255, 0.06);
 
@@ -92,16 +98,16 @@
   --window-rim-chrome: inset 0 0 0 1px var(--border-window-chrome);
 
   --map3d-bg: var(--color-bg-map);
-  --map3d-sun-core: #f8fafc;
-  --map3d-project-anchor-glow: #e2e8f0;
+  --map3d-sun-core: #d4d4d8;
+  --map3d-project-anchor-glow: #a1a1aa;
   --map3d-satellite: #94a3b8;
   --map3d-edge-sibling: #475569;
   --map3d-edge-parent: #94a3b8;
-  --map3d-partition-experience: #38bdf8;
-  --map3d-partition-interface: #22d3ee;
-  --map3d-partition-application: #a78bfa;
-  --map3d-partition-infrastructure: #94a3b8;
-  --map3d-partition-data: #34d399;
+  --map3d-partition-experience: #c4c4c8;
+  --map3d-partition-interface: #8e8e93;
+  --map3d-partition-application: #a1a1aa;
+  --map3d-partition-infrastructure: #71717a;
+  --map3d-partition-data: #52525b;
 
   --shadow-panel: none;
 
@@ -109,9 +115,15 @@
   --tech-bg-base: var(--color-bg-base);
   --tech-bg-canvas: var(--color-bg-canvas);
   --tech-bg-map: var(--color-bg-map);
+  --tech-bg-chrome: var(--color-bg-chrome);
   --tech-bg-side-panel: var(--color-bg-side-panel);
-  --tech-bg-elevated: #171719;
-  --tech-bg-muted: #1c1c1f;
+  --tech-bg-elevated: #1c1c1c;
+  --tech-bg-muted: #222222;
+
+  /* Legacy glass-surface aliases — bottom dock / older views. */
+  --glass-surface: var(--color-bg-chrome);
+  --glass-surface-hover: var(--color-bg-muted);
+  --glass-surface-active: var(--color-bg-elevated);
 
   --tech-border: rgba(255, 255, 255, 0.08);
   --tech-border-subtle: rgba(255, 255, 255, 0.05);
@@ -124,7 +136,7 @@
   --tech-accent: var(--color-accent);
   --tech-accent-strong: var(--color-accent-strong);
   --tech-accent-subtle: var(--color-accent-subtle);
-  --tech-accent-foreground: #ffffff;
+  --tech-accent-foreground: #141414;
 
   --tech-success: var(--color-success);
   --tech-warning: var(--color-warning);
@@ -133,7 +145,7 @@
   --tech-shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.04);
   --tech-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.28);
   --tech-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.4);
-  --tech-shadow-focus: 0 0 0 2px rgba(76, 125, 255, 0.5);
+  --tech-shadow-focus: 0 0 0 2px rgba(196, 196, 200, 0.32);
 }
 
 [data-theme='light'] {
@@ -141,7 +153,8 @@
   --color-bg-canvas: #f7f7f8;
   /* Function map canvas — slightly recessed vs side panels and chrome. */
   --color-bg-map: #efeff1;
-  --color-bg-side-panel: #fbfbfc;
+  --color-bg-chrome: #fbfbfc;
+  --color-bg-side-panel: var(--color-bg-chrome);
   --glass-panel-surface: rgba(255, 255, 255, 0.36);
   --color-bg-elevated: rgba(255, 255, 255, 0.95);
   --color-bg-muted: rgba(242, 242, 247, 0.95);
@@ -153,13 +166,14 @@
   --color-text-secondary: rgba(17, 17, 19, 0.62);
   --color-text-muted: rgba(17, 17, 19, 0.4);
 
-  --color-accent: #2563eb;
-  --color-accent-strong: #1d4ed8;
-  --color-accent-subtle: rgba(37, 99, 235, 0.12);
-  --color-success: #34c759;
-  --color-warning: #ff9f0a;
-  --color-error: #ff3b30;
-  --color-violet: #af52de;
+  /* Accent = selection / primary action — near-black on light chrome. */
+  --color-accent: #111113;
+  --color-accent-strong: #000000;
+  --color-accent-subtle: rgba(17, 17, 19, 0.08);
+  --color-success: #2f9e4f;
+  --color-warning: #d4890a;
+  --color-error: #d44a42;
+  --color-violet: #8f5fbf;
 
   --glass-bg-regular: var(--color-bg-side-panel);
   --glass-bg-clear: var(--color-bg-elevated);
@@ -183,7 +197,7 @@
 
   --scrim: rgba(0, 0, 0, 0.2);
   --scrim-heavy: rgba(0, 0, 0, 0.45);
-  --minimap-mask: rgba(0, 122, 255, 0.08);
+  --minimap-mask: rgba(17, 17, 19, 0.06);
   --color-error-subtle: rgba(255, 59, 48, 0.1);
   --color-error-border: rgba(255, 59, 48, 0.2);
   --color-warning-subtle: rgba(255, 159, 10, 0.08);
@@ -228,9 +242,14 @@
   --tech-bg-base: var(--color-bg-base);
   --tech-bg-canvas: var(--color-bg-canvas);
   --tech-bg-map: var(--color-bg-map);
+  --tech-bg-chrome: var(--color-bg-chrome);
   --tech-bg-side-panel: var(--color-bg-side-panel);
   --tech-bg-elevated: #ffffff;
   --tech-bg-muted: #ececee;
+
+  --glass-surface: var(--color-bg-chrome);
+  --glass-surface-hover: var(--color-bg-muted);
+  --glass-surface-active: var(--color-bg-elevated);
 
   --tech-border: rgba(0, 0, 0, 0.08);
   --tech-border-subtle: rgba(0, 0, 0, 0.05);
@@ -252,7 +271,7 @@
   --tech-shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.04);
   --tech-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08);
   --tech-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.12);
-  --tech-shadow-focus: 0 0 0 2px rgba(37, 99, 235, 0.35);
+  --tech-shadow-focus: 0 0 0 2px rgba(17, 17, 19, 0.28);
 }
 
 :root {
@@ -326,7 +345,18 @@
 
   --z-workbench-chrome: 20;
   --z-workbench-side-panel: 20;
+  /* Above GraphOverlayFrame (12); below terminal; chat history drawer left of chat. */
+  --z-chat-history-drawer: 50;
   --z-workbench-terminal: 55;
+  /* Above session / loop / agent-flow overlays; scrub rail floats over the center. */
+  --z-conversation-nav: 70;
+  /* Floating stage-front tools — overlays chrome / panels without consuming layout. */
+  --z-workbench-stage-rail: 80;
+
+  /* Chat mode brand colors — muted, restrained (selected chip + markers + mode cards). */
+  --chat-mode-ask: var(--color-success);
+  --chat-mode-plan: #c98518;
+  --chat-mode-debug: var(--color-error);
 
   /* Overlay side panels + terminal dock layout (runtime sizes set on .workbenchBody) */
   --workbench-left-panel-width: 253px;

@@ -72,9 +72,15 @@ import {
   mockUpsertSpatialPin,
 } from "./mock-spatial-pin-store.js";
 import {
+  mockDeleteSpatialCaptureFolder,
   mockDeleteSpatialCaptureSession,
   mockGetSpatialCaptureSession,
+  mockListSpatialCaptureFolders,
   mockListSpatialCaptureSessions,
+  mockMergeSpatialCaptureFolders,
+  mockPlaceSpatialCaptureSession,
+  mockRenameSpatialCaptureFolder,
+  mockSuggestCaptureVersionTitle,
   mockUpsertSpatialCaptureSession,
 } from "./mock-spatial-capture-session-store.js";
 import {
@@ -82,6 +88,7 @@ import {
   mockAdvanceLoopInstance,
   mockAnswerLoopGoalClarification,
   mockApproveLoopSpec,
+  mockCancelLoopGoalClarification,
   mockCompileLoopGraph,
   mockConfirmLoopGoalContext,
   mockCreateLoopGraph,
@@ -307,6 +314,65 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     return Promise.resolve(mockDeleteSpatialCaptureSession(projectId, sessionId));
   }
 
+  override listSpatialCaptureFolders(projectId: string) {
+    return Promise.resolve(mockListSpatialCaptureFolders(projectId));
+  }
+
+  override placeSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+    placement: import("../contracts/spatial-capture-session.js").SpatialCapturePlacement,
+  ) {
+    return Promise.resolve(
+      mockPlaceSpatialCaptureSession(projectId, sessionId, placement),
+    );
+  }
+
+  override renameSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    name: string,
+  ) {
+    return Promise.resolve(
+      mockRenameSpatialCaptureFolder(projectId, folderId, name),
+    );
+  }
+
+  override deleteSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    options: import("../contracts/spatial-capture-session.js").DeleteSpatialCaptureFolderOptions = {
+      cascade: false,
+    },
+  ) {
+    return Promise.resolve(
+      mockDeleteSpatialCaptureFolder(projectId, folderId, options),
+    );
+  }
+
+  override mergeSpatialCaptureFolders(
+    projectId: string,
+    sourceFolderId: string,
+    targetFolderId: string,
+    options: import("../contracts/spatial-capture-session.js").MergeSpatialCaptureFoldersOptions = {},
+  ) {
+    return Promise.resolve(
+      mockMergeSpatialCaptureFolders(
+        projectId,
+        sourceFolderId,
+        targetFolderId,
+        options,
+      ),
+    );
+  }
+
+  override suggestCaptureVersionTitle(
+    projectId: string,
+    target: { folderId: string } | { folderName: string },
+  ) {
+    return Promise.resolve(mockSuggestCaptureVersionTitle(projectId, target));
+  }
+
   override saveSpatialCaptureBackdrop(
     projectId: string,
     sessionId: string,
@@ -475,6 +541,13 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     answers: LoopGoalClarificationAnswer[],
   ): Promise<LoopGraphDocument> {
     return Promise.resolve(mockAnswerLoopGoalClarification(projectId, loopId, answers));
+  }
+
+  override cancelLoopGoalClarification(
+    projectId: string,
+    loopId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockCancelLoopGoalClarification(projectId, loopId));
   }
 
   override confirmLoopGoalContext(

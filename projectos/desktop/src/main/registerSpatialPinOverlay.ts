@@ -179,6 +179,34 @@ export function registerSpatialPinOverlay(): void {
     }
   })
 
+  // Overlay GitHub card host actions → Workbench (toast / Ask Agent / Graph).
+  ipcMain.on('spatial-pin:githubCardHost', (event, payload: unknown) => {
+    try {
+      assertTrustedHostRenderer(event)
+    } catch {
+      return
+    }
+    if (!payload || typeof payload !== 'object') return
+    const kind = (payload as { kind?: unknown }).kind
+    if (
+      kind !== 'toast' &&
+      kind !== 'askAgent' &&
+      kind !== 'refreshGithubGraph' &&
+      kind !== 'openGithubGraph' &&
+      kind !== 'openFirstPrinciples' &&
+      kind !== 'selectChatModel' &&
+      kind !== 'setThinkingDepth' &&
+      kind !== 'openSettings'
+    ) {
+      return
+    }
+    const overlay = getOverlayWindow()
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed() || win === overlay) continue
+      win.webContents.send('spatial-pin:githubCardHost', payload)
+    }
+  })
+
   ipcMain.handle('spatial-pin:closeOverlay', (event) => {
     assertTrustedHostRenderer(event)
     closeOverlayWindow()

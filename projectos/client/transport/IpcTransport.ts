@@ -272,6 +272,236 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("assignFileOwner", projectId, filePath, nodeId);
   }
 
+  getWorkspaceGitStatus(
+    projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitStatus> {
+    return this.invoke("getWorkspaceGitStatus", projectId);
+  }
+
+  listWorkspaceGitBranches(
+    projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitBranchList> {
+    return this.invoke("listWorkspaceGitBranches", projectId);
+  }
+
+  listWorkspaceGitCommits(
+    projectId: string,
+    input: { limit?: number; tips?: string[] } = {},
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCommitList> {
+    return this.invoke("listWorkspaceGitCommits", projectId, input);
+  }
+
+  getWorkspaceGitCommit(
+    projectId: string,
+    sha: string,
+    input: { includePatch?: boolean } = {},
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCommitDetail> {
+    return this.invoke("getWorkspaceGitCommit", projectId, sha, input);
+  }
+
+  getGithubGraphStore(
+    projectId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return this.invoke("getGithubGraphStore", projectId);
+  }
+
+  upsertGithubGraphFeature(
+    projectId: string,
+    feature: import("../../contracts/github-domain.js").GithubFeature,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return this.invoke("upsertGithubGraphFeature", projectId, feature);
+  }
+
+  deleteGithubGraphFeature(
+    projectId: string,
+    featureId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return this.invoke("deleteGithubGraphFeature", projectId, featureId);
+  }
+
+  upsertGithubGraphRelation(
+    projectId: string,
+    relation: import("../../contracts/github-domain.js").GithubRelation,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return this.invoke("upsertGithubGraphRelation", projectId, relation);
+  }
+
+  removeGithubGraphRelation(
+    projectId: string,
+    relationId: string,
+  ): Promise<import("../../contracts/github-graph-store.js").GithubGraphStoreDocument> {
+    return this.invoke("removeGithubGraphRelation", projectId, relationId);
+  }
+
+  checkoutWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("checkoutWorkspaceBranch", projectId, branch);
+  }
+
+  createWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      from?: string;
+      checkout?: boolean;
+      push?: boolean;
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("createWorkspaceBranch", projectId, input);
+  }
+
+  renameWorkspaceBranch(
+    projectId: string,
+    input: {
+      from: string;
+      to: string;
+      push?: boolean;
+      deleteRemoteOld?: boolean;
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("renameWorkspaceBranch", projectId, input);
+  }
+
+  deleteWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      remote?: boolean;
+      force?: boolean;
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("deleteWorkspaceBranch", projectId, input);
+  }
+
+  rollbackWorkspaceBranch(
+    projectId: string,
+    input: {
+      name: string;
+      to?: string;
+      mode?: "hard" | "mixed";
+      push?: boolean;
+    },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("rollbackWorkspaceBranch", projectId, input);
+  }
+
+  fetchWorkspaceGit(
+    projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("fetchWorkspaceGit", projectId);
+  }
+
+  pushWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("pushWorkspaceBranch", projectId, branch);
+  }
+
+  pullWorkspaceBranch(
+    projectId: string,
+    branch: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("pullWorkspaceBranch", projectId, branch);
+  }
+
+  revertWorkspaceCommit(
+    projectId: string,
+    input: { sha: string; push?: boolean },
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitMutationResult> {
+    return this.invoke("revertWorkspaceCommit", projectId, input);
+  }
+
+  listWorkspacePullRequests(
+    projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitPullRequestList> {
+    return this.invoke("listWorkspacePullRequests", projectId);
+  }
+
+  createWorkspacePullRequest(
+    projectId: string,
+    input: { title: string; head?: string; base?: string; body?: string },
+  ): Promise<{ ok: boolean; url?: string; number?: number; message: string }> {
+    return this.invoke("createWorkspacePullRequest", projectId, input);
+  }
+
+  mergeWorkspacePullRequest(
+    projectId: string,
+    input: {
+      number: number;
+      mergeMethod?: "merge" | "squash" | "rebase";
+    },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    return this.invoke("mergeWorkspacePullRequest", projectId, input);
+  }
+
+  closeWorkspacePullRequest(
+    projectId: string,
+    input: { number: number },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitPullRequestMutationResult
+  > {
+    return this.invoke("closeWorkspacePullRequest", projectId, input);
+  }
+
+  listWorkspaceIssues(
+    projectId: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitIssueList> {
+    return this.invoke("listWorkspaceIssues", projectId);
+  }
+
+  createWorkspaceIssue(
+    projectId: string,
+    input: { title: string; body?: string },
+  ): Promise<
+    import("../../contracts/workspace-git.js").WorkspaceGitIssueMutationResult
+  > {
+    return this.invoke("createWorkspaceIssue", projectId, input);
+  }
+
+  listWorkspaceCommitCheckRuns(
+    projectId: string,
+    sha: string,
+  ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitCheckRunList> {
+    return this.invoke("listWorkspaceCommitCheckRuns", projectId, sha);
+  }
+
+  getGitHubAuthStatus(): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {
+    return this.invoke("getGitHubAuthStatus");
+  }
+
+  beginGitHubOAuth(): Promise<import("../../contracts/github-auth.js").BeginGitHubOAuthResult> {
+    return this.invoke("beginGitHubOAuth");
+  }
+
+  cancelGitHubOAuth(): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {
+    return this.invoke("cancelGitHubOAuth");
+  }
+
+  disconnectGitHub(): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {
+    return this.invoke("disconnectGitHub");
+  }
+
+  getAccountProfile(): Promise<import("../../contracts/github-auth.js").AccountProfile | null> {
+    return this.invoke("getAccountProfile");
+  }
+
+  saveGitHubOAuthClientId(
+    clientId: string,
+  ): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {
+    return this.invoke("saveGitHubOAuthClientId", clientId);
+  }
+
+  importGitHubAuthFromGhCli(): Promise<
+    import("../../contracts/github-auth.js").BeginGitHubOAuthResult
+  > {
+    return this.invoke("importGitHubAuthFromGhCli");
+  }
+
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload> {
     return this.invoke("getNodeContext", projectId, nodeId);
   }
@@ -587,6 +817,10 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("refinePrompt", request);
   }
 
+  confirmAlignment(request: import("../../contracts/alignment-contract.js").ConfirmAlignmentRequest): Promise<PromptRefinement> {
+    return this.invoke("confirmAlignment", request);
+  }
+
   confirmExecution(refinementId: string): Promise<AgentRun> {
     return this.invoke("confirmExecution", refinementId);
   }
@@ -640,6 +874,95 @@ export class IpcTransport implements ApiTransport {
 
   getAgentRunEvents(runId: string): Promise<AgentRunEvent[]> {
     return this.invoke("getAgentRunEvents", runId);
+  }
+
+  getAgentRunEventSnapshot(
+    runId: string,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunEventSnapshot> {
+    return this.invoke("getAgentRunEventSnapshot", runId) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentRunEventSnapshot
+    >;
+  }
+
+  ensureAgentPoolRun(
+    request: import("../../contracts/agent-pool-trace.js").EnsureAgentPoolRunRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentPoolRun> {
+    return this.invoke("ensureAgentPoolRun", request) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentPoolRun
+    >;
+  }
+
+  getAgentPoolRun(
+    poolRunId: string,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentPoolRun> {
+    return this.invoke("getAgentPoolRun", poolRunId) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentPoolRun
+    >;
+  }
+
+  listAgentRunsByDefinition(
+    request: import("../../contracts/agent-pool-trace.js").ListAgentRunsByDefinitionRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry[]> {
+    return this.invoke("listAgentRunsByDefinition", request) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry[]
+    >;
+  }
+
+  setAgentRunAcceptance(
+    request: import("../../contracts/agent-pool-trace.js").SetAgentRunAcceptanceRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry> {
+    return this.invoke("setAgentRunAcceptance", request) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentRunIndexEntry
+    >;
+  }
+
+  listWorkforceAgents(
+    request: import("../../contracts/agent-workforce.js").ListWorkforceAgentsRequest,
+  ): Promise<import("../../contracts/agent-workforce.js").ListWorkforceAgentsResult> {
+    return this.invoke("listWorkforceAgents", request) as Promise<
+      import("../../contracts/agent-workforce.js").ListWorkforceAgentsResult
+    >;
+  }
+
+  draftWorkforceAgent(
+    request: import("../../contracts/agent-workforce.js").DraftWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-workforce.js").DraftWorkforceAgentResult> {
+    return this.invoke("draftWorkforceAgent", request) as Promise<
+      import("../../contracts/agent-workforce.js").DraftWorkforceAgentResult
+    >;
+  }
+
+  assembleWorkforceAgent(
+    request: import("../../contracts/agent-assembly.js").AssembleWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-assembly.js").AssembleWorkforceAgentResult> {
+    return this.invoke("assembleWorkforceAgent", request) as Promise<
+      import("../../contracts/agent-assembly.js").AssembleWorkforceAgentResult
+    >;
+  }
+
+  createWorkforceAgent(
+    request: import("../../contracts/agent-workforce.js").CreateWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return this.invoke("createWorkforceAgent", request) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentDefinition
+    >;
+  }
+
+  updateWorkforceAgent(
+    request: import("../../contracts/agent-workforce.js").UpdateWorkforceAgentRequest,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return this.invoke("updateWorkforceAgent", request) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentDefinition
+    >;
+  }
+
+  getWorkforceAgent(
+    projectId: string,
+    definitionId: string,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return this.invoke("getWorkforceAgent", projectId, definitionId) as Promise<
+      import("../../contracts/agent-pool-trace.js").AgentDefinition
+    >;
   }
 
   streamAgentRun(
@@ -745,6 +1068,18 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("cleanupDebugInstrumentation", sessionId);
   }
 
+  confirmBugAlignment(
+    request: import("../../contracts/alignment-contract.js").ConfirmBugAlignmentRequest,
+  ): Promise<import("../../contracts/debug-session.js").DebugSession> {
+    return this.invoke("confirmBugAlignment", request);
+  }
+
+  markBugFixed(
+    request: import("../../contracts/alignment-contract.js").MarkBugFixedRequest,
+  ): Promise<import("../../contracts/debug-session.js").DebugSession> {
+    return this.invoke("markBugFixed", request);
+  }
+
   getDebugLogPort(): Promise<number> {
     return this.invoke("getDebugLogPort");
   }
@@ -773,6 +1108,358 @@ export class IpcTransport implements ApiTransport {
     profileId: string,
   ): Promise<ModelOption[]> {
     return this.invoke("listAvailableModels", projectId, profileId);
+  }
+
+  listMcpServers(projectId: string): Promise<import("../../contracts/settings.js").McpServerConfig[]> {
+    return this.invoke("listMcpServers", projectId);
+  }
+
+  saveMcpServer(
+    projectId: string,
+    input: {
+      config: import("../../contracts/settings.js").McpServerConfig;
+      authToken?: string;
+    },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("saveMcpServer", projectId, input);
+  }
+
+  deleteMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("deleteMcpServer", projectId, serverId);
+  }
+
+  testMcpServer(
+    projectId: string,
+    serverId: string,
+  ): Promise<ConnectionTestResult> {
+    return this.invoke("testMcpServer", projectId, serverId);
+  }
+
+  refreshMcpTools(
+    projectId: string,
+    serverId: string,
+  ): Promise<import("../../contracts/settings.js").McpToolDescriptor[]> {
+    return this.invoke("refreshMcpTools", projectId, serverId);
+  }
+
+  listMcpCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/mcp-catalog.js").McpCatalogView> {
+    return this.invoke("listMcpCatalog", projectId, options ?? {});
+  }
+
+  refreshMcpCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/mcp-catalog.js").McpCatalogView> {
+    return this.invoke("refreshMcpCatalog", projectId);
+  }
+
+  installMcpFromCatalog(
+    projectId: string,
+    input: import("../../contracts/mcp-catalog.js").InstallMcpFromCatalogInput,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("installMcpFromCatalog", projectId, input);
+  }
+
+  disableMcpCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableMcpCatalogListing", projectId, listingId);
+  }
+
+  reportMcpCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportMcpCatalogListing", projectId, input);
+  }
+
+  listSkillCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/skill-marketplace.js").SkillCatalogView> {
+    return this.invoke("listSkillCatalog", projectId, options ?? {});
+  }
+
+  refreshSkillCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/skill-marketplace.js").SkillCatalogView> {
+    return this.invoke("refreshSkillCatalog", projectId);
+  }
+
+  installSkillFromCatalog(
+    projectId: string,
+    input: import("../../contracts/skill-marketplace.js").InstallSkillFromCatalogInput,
+  ): Promise<import("../../contracts/skills.js").SkillDescriptor> {
+    return this.invoke("installSkillFromCatalog", projectId, input);
+  }
+
+  uninstallSkillFromCatalog(
+    projectId: string,
+    input: import("../../contracts/skill-marketplace.js").UninstallSkillFromCatalogInput,
+  ): Promise<void> {
+    return this.invoke("uninstallSkillFromCatalog", projectId, input);
+  }
+
+  disableSkillCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableSkillCatalogListing", projectId, listingId);
+  }
+
+  reportSkillCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportSkillCatalogListing", projectId, input);
+  }
+
+  listRulesCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/rules-marketplace.js").RulesCatalogView> {
+    return this.invoke("listRulesCatalog", projectId, options ?? {});
+  }
+
+  refreshRulesCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/rules-marketplace.js").RulesCatalogView> {
+    return this.invoke("refreshRulesCatalog", projectId);
+  }
+
+  installRulesFromCatalog(
+    projectId: string,
+    input: import("../../contracts/rules-marketplace.js").InstallRulesFromCatalogInput,
+  ): Promise<{ packId: string; relativeRoot: string }> {
+    return this.invoke("installRulesFromCatalog", projectId, input);
+  }
+
+  uninstallRulesFromCatalog(
+    projectId: string,
+    input: import("../../contracts/rules-marketplace.js").UninstallRulesFromCatalogInput,
+  ): Promise<void> {
+    return this.invoke("uninstallRulesFromCatalog", projectId, input);
+  }
+
+  disableRulesCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableRulesCatalogListing", projectId, listingId);
+  }
+
+  reportRulesCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportRulesCatalogListing", projectId, input);
+  }
+
+  listInstalledRulesPackIds(projectId: string): Promise<string[]> {
+    return this.invoke("listInstalledRulesPackIds", projectId);
+  }
+
+  listAgentCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/agent-marketplace.js").AgentCatalogView> {
+    return this.invoke("listAgentCatalog", projectId, options ?? {});
+  }
+
+  refreshAgentCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/agent-marketplace.js").AgentCatalogView> {
+    return this.invoke("refreshAgentCatalog", projectId);
+  }
+
+  installAgentFromCatalog(
+    projectId: string,
+    input: import("../../contracts/agent-marketplace.js").InstallAgentFromCatalogInput,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return this.invoke("installAgentFromCatalog", projectId, input);
+  }
+
+  uninstallAgentFromCatalog(
+    projectId: string,
+    input: import("../../contracts/agent-marketplace.js").UninstallAgentFromCatalogInput,
+  ): Promise<void> {
+    return this.invoke("uninstallAgentFromCatalog", projectId, input);
+  }
+
+  disableAgentCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableAgentCatalogListing", projectId, listingId);
+  }
+
+  reportAgentCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportAgentCatalogListing", projectId, input);
+  }
+
+  listInstalledMarketplaceAgentListingIds(projectId: string): Promise<string[]> {
+    return this.invoke("listInstalledMarketplaceAgentListingIds", projectId);
+  }
+
+  exportCapabilityPack(
+    projectId: string,
+    input: import("../../contracts/agent-marketplace.js").ExportCapabilityPackInput,
+  ): Promise<import("../../contracts/agent-marketplace.js").ExportCapabilityPackResult> {
+    return this.invoke("exportCapabilityPack", projectId, input);
+  }
+
+  installAgentFromExportPack(
+    projectId: string,
+    input: import("../../contracts/agent-marketplace.js").InstallAgentFromExportPackInput,
+  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+    return this.invoke("installAgentFromExportPack", projectId, input);
+  }
+
+  installRulesFromExportPack(
+    projectId: string,
+    input: import("../../contracts/agent-marketplace.js").InstallRulesFromExportPackInput,
+  ): Promise<{ packId: string; relativeRoot: string }> {
+    return this.invoke("installRulesFromExportPack", projectId, input);
+  }
+
+  listWorkflowCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/workflow-marketplace.js").WorkflowCatalogView> {
+    return this.invoke("listWorkflowCatalog", projectId, options ?? {});
+  }
+
+  refreshWorkflowCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/workflow-marketplace.js").WorkflowCatalogView> {
+    return this.invoke("refreshWorkflowCatalog", projectId);
+  }
+
+  installWorkflowFromCatalog(
+    projectId: string,
+    input: import("../../contracts/workflow-marketplace.js").InstallWorkflowFromCatalogInput,
+  ): Promise<import("../../contracts/loop-presets.js").LoopGraphPreset> {
+    return this.invoke("installWorkflowFromCatalog", projectId, input);
+  }
+
+  uninstallWorkflowFromCatalog(
+    projectId: string,
+    input: import("../../contracts/workflow-marketplace.js").UninstallWorkflowFromCatalogInput,
+  ): Promise<void> {
+    return this.invoke("uninstallWorkflowFromCatalog", projectId, input);
+  }
+
+  disableWorkflowCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableWorkflowCatalogListing", projectId, listingId);
+  }
+
+  reportWorkflowCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportWorkflowCatalogListing", projectId, input);
+  }
+
+  listInstalledWorkflowListingIds(projectId: string): Promise<string[]> {
+    return this.invoke("listInstalledWorkflowListingIds", projectId);
+  }
+
+  listLoopGraphPresets(projectId: string): Promise<{
+    builtins: import("../../contracts/loop-presets.js").LoopGraphPreset[];
+    user: import("../../contracts/loop-presets.js").LoopGraphPreset[];
+  }> {
+    return this.invoke("listLoopGraphPresets", projectId);
+  }
+
+  resolveLoopGraphPreset(
+    projectId: string,
+    presetId: string,
+  ): Promise<import("../../contracts/loop-presets.js").LoopGraphPreset | null> {
+    return this.invoke("resolveLoopGraphPreset", projectId, presetId);
+  }
+
+  installWorkflowFromExportPack(
+    projectId: string,
+    input: import("../../contracts/workflow-marketplace.js").InstallWorkflowFromExportPackInput,
+  ): Promise<import("../../contracts/loop-presets.js").LoopGraphPreset> {
+    return this.invoke("installWorkflowFromExportPack", projectId, input);
+  }
+
+  listStencilCatalog(
+    projectId: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<import("../../contracts/stencil-marketplace.js").StencilCatalogView> {
+    return this.invoke("listStencilCatalog", projectId, options ?? {});
+  }
+
+  refreshStencilCatalog(
+    projectId: string,
+  ): Promise<import("../../contracts/stencil-marketplace.js").StencilCatalogView> {
+    return this.invoke("refreshStencilCatalog", projectId);
+  }
+
+  installStencilFromCatalog(
+    projectId: string,
+    input: import("../../contracts/stencil-marketplace.js").InstallStencilFromCatalogInput,
+  ): Promise<import("../../contracts/ui-stencil.js").StencilDefinition[]> {
+    return this.invoke("installStencilFromCatalog", projectId, input);
+  }
+
+  uninstallStencilFromCatalog(
+    projectId: string,
+    input: import("../../contracts/stencil-marketplace.js").UninstallStencilFromCatalogInput,
+  ): Promise<void> {
+    return this.invoke("uninstallStencilFromCatalog", projectId, input);
+  }
+
+  disableStencilCatalogListing(
+    projectId: string,
+    listingId: string,
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("disableStencilCatalogListing", projectId, listingId);
+  }
+
+  reportStencilCatalogListing(
+    projectId: string,
+    input: { listingId: string; note?: string },
+  ): Promise<ProjectOSSettings> {
+    return this.invoke("reportStencilCatalogListing", projectId, input);
+  }
+
+  listInstalledStencilListingIds(projectId: string): Promise<string[]> {
+    return this.invoke("listInstalledStencilListingIds", projectId);
+  }
+
+  listMergedStencilDefinitions(
+    projectId: string,
+  ): Promise<import("../../contracts/ui-stencil.js").StencilDefinition[]> {
+    return this.invoke("listMergedStencilDefinitions", projectId);
+  }
+
+  installStencilFromExportPack(
+    projectId: string,
+    input: import("../../contracts/stencil-marketplace.js").InstallStencilFromExportPackInput,
+  ): Promise<import("../../contracts/ui-stencil.js").StencilDefinition[]> {
+    return this.invoke("installStencilFromExportPack", projectId, input);
+  }
+
+  installFromGitUrl(
+    projectId: string,
+    input: import("../../contracts/marketplace-git-install.js").InstallFromGitUrlInput,
+  ): Promise<import("../../contracts/marketplace-git-install.js").InstallFromGitUrlResult> {
+    return this.invoke("installFromGitUrl", projectId, input);
   }
 
   setSecret(ref: string, value: string): Promise<void> {
@@ -900,6 +1587,83 @@ export class IpcTransport implements ApiTransport {
     sessionId: string,
   ): Promise<boolean> {
     return this.invoke("deleteSpatialCaptureSession", projectId, sessionId);
+  }
+
+  listSpatialCaptureFolders(
+    projectId: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder[]
+  > {
+    return this.invoke("listSpatialCaptureFolders", projectId);
+  }
+
+  placeSpatialCaptureSession(
+    projectId: string,
+    sessionId: string,
+    placement: import("../../contracts/spatial-capture-session.js").SpatialCapturePlacement,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureSession
+  > {
+    return this.invoke(
+      "placeSpatialCaptureSession",
+      projectId,
+      sessionId,
+      placement,
+    );
+  }
+
+  renameSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    name: string,
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    return this.invoke(
+      "renameSpatialCaptureFolder",
+      projectId,
+      folderId,
+      name,
+    );
+  }
+
+  deleteSpatialCaptureFolder(
+    projectId: string,
+    folderId: string,
+    options: import("../../contracts/spatial-capture-session.js").DeleteSpatialCaptureFolderOptions = {
+      cascade: false,
+    },
+  ): Promise<boolean> {
+    return this.invoke(
+      "deleteSpatialCaptureFolder",
+      projectId,
+      folderId,
+      options,
+    );
+  }
+
+  mergeSpatialCaptureFolders(
+    projectId: string,
+    sourceFolderId: string,
+    targetFolderId: string,
+    options: import("../../contracts/spatial-capture-session.js").MergeSpatialCaptureFoldersOptions = {},
+  ): Promise<
+    import("../../contracts/spatial-capture-session.js").SpatialCaptureFolder
+  > {
+    return this.invoke(
+      "mergeSpatialCaptureFolders",
+      projectId,
+      sourceFolderId,
+      targetFolderId,
+      options,
+    );
+  }
+
+  suggestCaptureVersionTitle(
+    projectId: string,
+    target: { folderId: string } | { folderName: string },
+  ): Promise<string> {
+    return this.invoke("suggestCaptureVersionTitle", projectId, target);
   }
 
   saveSpatialCaptureBackdrop(
@@ -1068,6 +1832,13 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("answerLoopGoalClarification", projectId, loopId, answers);
   }
 
+  cancelLoopGoalClarification(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("cancelLoopGoalClarification", projectId, loopId);
+  }
+
   confirmLoopGoalContext(
     projectId: string,
     loopId: string,
@@ -1102,6 +1873,277 @@ export class IpcTransport implements ApiTransport {
     mode: import("../../contracts/loop-graph.js").LoopComposerMode,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return this.invoke("setLoopComposerMode", projectId, loopId, mode);
+  }
+
+  ensureDiagramDesignSkill(
+    projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").EnsureDiagramDesignSkillResult> {
+    return this.invoke("ensureDiagramDesignSkill", projectId);
+  }
+
+  getDiagramSkillPackStatus(
+    projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramSkillPackStatus> {
+    return this.invoke("getDiagramSkillPackStatus", projectId);
+  }
+
+  getDiagramIndex(
+    projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramIndex> {
+    return this.invoke("getDiagramIndex", projectId);
+  }
+
+  listDiagrams(
+    projectId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramArtifactMeta[]> {
+    return this.invoke("listDiagrams", projectId);
+  }
+
+  getDiagram(
+    projectId: string,
+    diagramId: string,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramArtifact | null> {
+    return this.invoke("getDiagram", projectId, diagramId);
+  }
+
+  deleteDiagram(projectId: string, diagramId: string): Promise<boolean> {
+    return this.invoke("deleteDiagram", projectId, diagramId);
+  }
+
+  updateDiagramNotes(
+    projectId: string,
+    diagramId: string,
+    input: import("../../contracts/diagram-graph.js").UpdateDiagramNotesInput,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramNotesDocument> {
+    return this.invoke("updateDiagramNotes", projectId, diagramId, input);
+  }
+
+  chooseDiagramStyle(
+    projectId: string,
+    input: import("../../contracts/diagram-graph.js").ChooseDiagramStyleInput,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramIndex> {
+    return this.invoke("chooseDiagramStyle", projectId, input);
+  }
+
+  generateDiagram(
+    projectId: string,
+    input: import("../../contracts/diagram-graph.js").GenerateDiagramInput,
+  ): Promise<import("../../contracts/diagram-graph.js").DiagramArtifact> {
+    return this.invoke("generateDiagram", projectId, input);
+  }
+
+  listWireframePacks(
+    projectId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePackMeta[]> {
+    return this.invoke("listWireframePacks", projectId);
+  }
+
+  getWireframePackIndex(
+    projectId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePackIndex> {
+    return this.invoke("getWireframePackIndex", projectId);
+  }
+
+  getWireframePack(
+    projectId: string,
+    packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack | null> {
+    return this.invoke("getWireframePack", projectId, packId);
+  }
+
+  generateWireframePack(
+    projectId: string,
+    input: import("../../contracts/ui-wireframe-pack.js").GenerateWireframePackInput,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("generateWireframePack", projectId, input);
+  }
+
+  updateWireframePackDraft(
+    projectId: string,
+    packId: string,
+    input: import("../../contracts/ui-wireframe-pack.js").UpdateWireframePackDraftInput,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("updateWireframePackDraft", projectId, packId, input);
+  }
+
+  deleteWireframeScreen(
+    projectId: string,
+    packId: string,
+    screenId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("deleteWireframeScreen", projectId, packId, screenId);
+  }
+
+  freezeWireframePack(
+    projectId: string,
+    packId: string,
+    input: import("../../contracts/ui-wireframe-pack.js").FreezeWireframePackInput = {},
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("freezeWireframePack", projectId, packId, input);
+  }
+
+  buildImplementAgainstPackBrief(
+    projectId: string,
+    packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").ImplementAgainstPackBrief> {
+    return this.invoke("buildImplementAgainstPackBrief", projectId, packId);
+  }
+
+  listWireframeGaps(
+    projectId: string,
+    packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframeGap[]> {
+    return this.invoke("listWireframeGaps", projectId, packId);
+  }
+
+  upsertWireframeGap(
+    projectId: string,
+    packId: string,
+    input: import("../../contracts/ui-wireframe-pack.js").UpsertWireframeGapInput,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframeGap> {
+    return this.invoke("upsertWireframeGap", projectId, packId, input);
+  }
+
+  scanWireframeStructGaps(
+    projectId: string,
+    packId: string,
+    input: import("../../contracts/ui-wireframe-pack.js").ScanWireframeStructGapsInput = {},
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframeGap[]> {
+    return this.invoke("scanWireframeStructGaps", projectId, packId, input);
+  }
+
+  bindWireframePackFeature(
+    projectId: string,
+    packId: string,
+    featureId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("bindWireframePackFeature", projectId, packId, featureId);
+  }
+
+  markWireframePackRealized(
+    projectId: string,
+    packId: string,
+  ): Promise<import("../../contracts/ui-wireframe-pack.js").WireframePack> {
+    return this.invoke("markWireframePackRealized", projectId, packId);
+  }
+
+  deleteWireframePack(projectId: string, packId: string): Promise<boolean> {
+    return this.invoke("deleteWireframePack", projectId, packId);
+  }
+
+  getLabState(
+    projectId: string,
+  ): Promise<import("../../contracts/product-lab.js").LabStateDocument> {
+    return this.invoke("getLabState", projectId);
+  }
+
+  upsertLabState(
+    projectId: string,
+    document: import("../../contracts/product-lab.js").LabStateDocument,
+  ): Promise<import("../../contracts/product-lab.js").LabStateDocument> {
+    return this.invoke("upsertLabState", projectId, document);
+  }
+
+  getLabLaunchProfile(
+    projectId: string,
+  ): Promise<import("../../contracts/product-lab.js").LabLaunchProfile> {
+    return this.invoke("getLabLaunchProfile", projectId);
+  }
+
+  listTheses(
+    projectId: string,
+  ): Promise<import("../../contracts/first-principles.js").ThesisIndex> {
+    return this.invoke("listTheses", projectId);
+  }
+
+  getThesisSession(
+    projectId: string,
+    sessionId: string,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession | null> {
+    return this.invoke("getThesisSession", projectId, sessionId);
+  }
+
+  upsertThesisSession(
+    projectId: string,
+    session: import("../../contracts/first-principles.js").FirstPrinciplesSession,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return this.invoke("upsertThesisSession", projectId, session);
+  }
+
+  startFirstPrinciplesSession(
+    request: import("../../contracts/first-principles.js").StartFirstPrinciplesRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return this.invoke("startFirstPrinciplesSession", request);
+  }
+
+  answerFirstPrinciplesTurn(
+    request: import("../../contracts/first-principles.js").AnswerFirstPrinciplesRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return this.invoke("answerFirstPrinciplesTurn", request);
+  }
+
+  resolveFirstPrinciplesConflict(
+    request: import("../../contracts/first-principles.js").ResolveFirstPrinciplesConflictRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesSession> {
+    return this.invoke("resolveFirstPrinciplesConflict", request);
+  }
+
+  writeFirstPrinciplesPlannedFeature(
+    request: import("../../contracts/first-principles.js").WriteFirstPrinciplesFeatureRequest,
+  ): Promise<import("../../contracts/first-principles.js").FirstPrinciplesFeatureWriteResult> {
+    return this.invoke("writeFirstPrinciplesPlannedFeature", request);
+  }
+
+  getReminderTimeline(
+    projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("getReminderTimeline", projectId);
+  }
+
+  syncReminderTimeline(
+    projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("syncReminderTimeline", projectId);
+  }
+
+  reorderReminderItem(
+    projectId: string,
+    input: import("../../contracts/reminder-graph.js").ReminderReorderInput,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("reorderReminderItem", projectId, input);
+  }
+
+  acceptReminderEditOffer(
+    projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("acceptReminderEditOffer", projectId);
+  }
+
+  dismissReminderEditOffer(
+    projectId: string,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("dismissReminderEditOffer", projectId);
+  }
+
+  setReminderMilestoneStatus(
+    projectId: string,
+    input: import("../../contracts/reminder-graph.js").ReminderMilestoneCompleteInput,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("setReminderMilestoneStatus", projectId, input);
+  }
+
+  sendReminderAuthoringTurn(
+    projectId: string,
+    request: import("../../contracts/reminder-graph.js").ReminderAuthoringTurnRequest,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderAuthoringTurnResult> {
+    return this.invoke("sendReminderAuthoringTurn", projectId, request);
+  }
+
+  setReminderComposerMode(
+    projectId: string,
+    mode: import("../../contracts/reminder-graph.js").ReminderComposerMode,
+  ): Promise<import("../../contracts/reminder-graph.js").ReminderTimelineDocument> {
+    return this.invoke("setReminderComposerMode", projectId, mode);
   }
 
   initMapArtifactStack(

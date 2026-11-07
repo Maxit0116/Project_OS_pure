@@ -9,7 +9,9 @@ import {
   emptyComposerDraft,
   extractSubtreeToNewGraph,
   mergeSessionGraphs,
+  orderSessionIdsForDeletion,
   placeChatSessionOnGraph,
+  shouldDisposeEmptySessionRecord,
 } from '@contracts/index'
 import { create } from 'zustand'
 import { resolveClientMode } from '../data/clientMode'
@@ -30,46 +32,95 @@ import { reconcileStaleFlowStatus, useWorkbenchStore, type ChatMode } from './wo
 
 const PERSIST_DEBOUNCE_MS = 500
 const TITLE_SUMMARIZE_DEBOUNCE_MS = 1500
+/** Legacy keys — overlays must not auto-restore; clear on boot / project open. */
 const CANVAS_OVERLAY_KEY = 'projectos_canvas_overlay'
 const SESSION_GRAPH_OPEN_KEY = 'projectos_session_graph_open'
 
-export type CanvasOverlay = 'none' | 'session' | 'loop' | 'spatial' | 'agent-flow'
+export type CanvasOverlay =
+  | 'none'
+  | 'session'
+  | 'loop'
+  | 'spatial'
+  | 'agent-flow'
+  | 'github'
+  | 'marketplace'
+  | 'diagram'
+  | 'wireframe'
+  | 'reminder'
+  | 'settings'
 
 /** Suppresses auto-open while a run id is not known yet (Ask / Plan still starting). */
 const AGENT_FLOW_DISMISS_IDLE = '__agent_flow_idle__'
 
-function readCanvasOverlay(): CanvasOverlay {
-  if (typeof localStorage === 'undefined') return 'none'
-  try {
-    const raw = localStorage.getItem(CANVAS_OVERLAY_KEY)
-    if (
-      raw === 'session' ||
-      raw === 'loop' ||
-      raw === 'spatial' ||
-      raw === 'agent-flow' ||
-      raw === 'none'
-    ) {
-      return raw
-    }
-    // Migrate legacy session-graph-only preference.
-    return localStorage.getItem(SESSION_GRAPH_OPEN_KEY) === 'true' ? 'session' : 'none'
-  } catch {
-    return 'none'
-  }
-}
-
-function writeCanvasOverlay(overlay: CanvasOverlay): void {
+/**
+ * Center GraphOverlayFrame panels are session-ephemeral: C4 is the default
+ * center surface until the user (or an in-session run) opens an overlay.
+ * Never restore a previous overlay from localStorage on boot / project open.
+ */
+function clearPersistedCanvasOverlay(): void {
   if (typeof localStorage === 'undefined') return
   try {
-    localStorage.setItem(CANVAS_OVERLAY_KEY, overlay)
-    localStorage.setItem(SESSION_GRAPH_OPEN_KEY, overlay === 'session' ? 'true' : 'false')
+    localStorage.removeItem(CANVAS_OVERLAY_KEY)
+    localStorage.removeItem(SESSION_GRAPH_OPEN_KEY)
   } catch {
     /* ignore quota and private-mode failures */
   }
 }
 
+clearPersistedCanvasOverlay()
+
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 let titleSummarizeTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Silent GC for empty shells — no toast; caller must ensure session is not active. */
+async function tryDeleteDisposableEmptySession(
+  sessionId: string,
+  heads: ChatSessionHead[],
+  pinnedIds: string[],
+): Promise<boolean> {
+  const { client, project } = useWorkbenchStore.getState()
+  if (!client || !project) return false
+
+  const record = await client.getChatSession(project.projectId, sessionId)
+  if (!record) return false
+  if (!shouldDisposeEmptySessionRecord(record, heads, pinnedIds)) return false
+  return client.deleteChatSession(project.projectId, sessionId)
+}
+
+/** Scope B / multi-pass prune of non-retained empty sessions via the API client. */
+async function pruneDisposableEmptySessionsViaClient(
+  retainSessionId: string | null,
+): Promise<void> {
+  const { client, project } = useWorkbenchStore.getState()
+  if (!client || !project) return
+
+  for (;;) {
+    const index = await client.getChatSessionIndex(project.projectId)
+    const candidates: string[] = []
+    for (const head of index.heads) {
+      if (retainSessionId && head.id === retainSessionId) continue
+      const record = await client.getChatSession(project.projectId, head.id)
+      if (!record) continue
+      if (
+        shouldDisposeEmptySessionRecord(
+          record,
+          index.heads,
+          index.pinnedIds,
+        )
+      ) {
+        candidates.push(head.id)
+      }
+    }
+    if (candidates.length === 0) break
+
+    let passDeleted = 0
+    for (const id of orderSessionIdsForDeletion(candidates, index.heads)) {
+      const deleted = await client.deleteChatSession(project.projectId, id)
+      if (deleted) passDeleted += 1
+    }
+    if (passDeleted === 0) break
+  }
+}
 
 interface ChatSessionStore {
   heads: ChatSessionHead[]
@@ -82,10 +133,24 @@ interface ChatSessionStore {
   loopGraphOpen: boolean
   spatialCaptureOpen: boolean
   agentFlowOpen: boolean
+  githubGraphOpen: boolean
+  marketplaceOpen: boolean
+  diagramGraphOpen: boolean
+  wireframePackOpen: boolean
+  reminderGraphOpen: boolean
+  /**
+   * Bumped by Compose Hub / Stage Dock git mutations so an open GitHub Graph
+   * soft-reloads. Optional focus fields apply on the next reload.
+   */
+  githubGraphRefreshNonce: number
+  githubGraphFocusBranch: string | null
+  githubGraphFocusPrNumber: number | null
   /** Run id the user hid for this round. Auto-open skips that id until a new present. */
   agentFlowDismissedRunId: string | null
   inheritedDigest: SessionContextDigest | null
   loading: boolean
+  /** One-shot: after switchSession, ChatPanel scrolls to this message id. */
+  pendingRevealMessageId: string | null
 
   loadForWorkspace: () => Promise<void>
   clear: () => void
@@ -100,12 +165,30 @@ interface ChatSessionStore {
   toggleSpatialCapture: () => void
   setAgentFlowOpen: (open: boolean) => void
   toggleAgentFlow: () => void
+  setGithubGraphOpen: (open: boolean) => void
+  toggleGithubGraph: () => void
+  requestGithubGraphRefresh: (focus?: {
+    branch?: string | null
+    prNumber?: number | null
+  }) => void
+  clearGithubGraphFocus: () => void
+  setMarketplaceOpen: (open: boolean) => void
+  toggleMarketplace: () => void
+  setDiagramGraphOpen: (open: boolean) => void
+  toggleDiagramGraph: () => void
+  setWireframePackOpen: (open: boolean) => void
+  toggleWireframePack: () => void
+  setReminderGraphOpen: (open: boolean) => void
+  toggleReminderGraph: () => void
   /** User or command asked to see Agent Flow. Clears a previous dismiss. */
   presentAgentFlow: () => void
   /** Live run start. Stays closed when the user already dismissed this run. */
   openAgentFlowForRun: (runId: string | null) => void
   /** Close the Agent Flow card. A busy run will not auto-open again. */
   closeAgentFlow: () => void
+  /** Open a session and optionally scroll to a message after load. */
+  openSessionAtMessage: (sessionId: string, messageId?: string | null) => Promise<void>
+  clearPendingRevealMessage: () => void
   switchSession: (sessionId: string) => Promise<void>
   createSession: (options?: {
     seedWelcome?: boolean
@@ -226,6 +309,8 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
     activeRunId: hydrated.activeRunId,
     activeCustomModeSkillId: hydrated.activeCustomModeSkillId,
     customModePreviousChatMode: hydrated.customModePreviousChatMode,
+    activeAgentDefinitionId: hydrated.activeAgentDefinitionId,
+    activeAgentDisplayName: null,
     conversationCheckpoints: hydrated.conversationCheckpoints,
     latestContextAssembly: hydrated.latestContextAssembly,
     flowSteps: [],
@@ -253,8 +338,10 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
     focusedDecisionId: null,
     decisionResolvingIds: [],
   })
+  // Restore run evidence into the store, but do not open the Agent Flow overlay.
+  // Project open / session hydrate must land on Function Map (C4); overlays open
+  // only via explicit user action or a newly started in-session run.
   if (hydrated.activeRunId) {
-    useChatSessionStore.getState().presentAgentFlow()
     void restoreRunFlow(hydrated.activeRunId)
   }
 }
@@ -266,7 +353,34 @@ function overlayState(overlay: CanvasOverlay) {
     loopGraphOpen: overlay === 'loop',
     spatialCaptureOpen: overlay === 'spatial',
     agentFlowOpen: overlay === 'agent-flow',
+    githubGraphOpen: overlay === 'github',
+    marketplaceOpen: overlay === 'marketplace',
+    diagramGraphOpen: overlay === 'diagram',
+    wireframePackOpen: overlay === 'wireframe',
+    reminderGraphOpen: overlay === 'reminder',
   }
+}
+
+/**
+ * Close workbench Settings when another canvas overlay takes the slot.
+ * Must not run inside `overlayState` — that helper is also used while
+ * initializing this store, and calling workbenchStore then hits a circular
+ * import (blank renderer).
+ */
+function closeSettingsUnlessOverlay(overlay: CanvasOverlay) {
+  if (overlay === 'settings') return
+  const wb = useWorkbenchStore.getState()
+  if (!wb.settingsOpen) return
+  useWorkbenchStore.setState({ settingsOpen: false, settingsFocusView: null })
+}
+
+function setCanvasOverlayState(
+  set: (partial: ReturnType<typeof overlayState> | Record<string, unknown>) => void,
+  overlay: CanvasOverlay,
+  extra?: Record<string, unknown>,
+) {
+  set(extra ? { ...overlayState(overlay), ...extra } : overlayState(overlay))
+  closeSettingsUnlessOverlay(overlay)
 }
 
 export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
@@ -274,10 +388,14 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   pinnedIds: [],
   activeSessionId: null,
   historyOpen: false,
-  ...overlayState(readCanvasOverlay()),
+  ...overlayState('none'),
+  githubGraphRefreshNonce: 0,
+  githubGraphFocusBranch: null,
+  githubGraphFocusPrNumber: null,
   agentFlowDismissedRunId: null,
   inheritedDigest: null,
   loading: false,
+  pendingRevealMessageId: null,
 
   clear: () => {
     if (persistTimer) {
@@ -288,14 +406,26 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       clearTimeout(titleSummarizeTimer)
       titleSummarizeTimer = null
     }
-    set({
+    clearPersistedCanvasOverlay()
+    setCanvasOverlayState(set, 'none', {
       heads: [],
       pinnedIds: [],
       activeSessionId: null,
       historyOpen: false,
       inheritedDigest: null,
       loading: false,
+      pendingRevealMessageId: null,
     })
+  },
+
+  clearPendingRevealMessage: () => set({ pendingRevealMessageId: null }),
+
+  openSessionAtMessage: async (sessionId, messageId) => {
+    set({
+      pendingRevealMessageId: messageId?.trim() ? messageId.trim() : null,
+    })
+    useWorkbenchStore.setState({ rightPanelTab: 'chat', rightPanelOpen: true })
+    await get().switchSession(sessionId)
   },
 
   setHistoryOpen: (open) => set({ historyOpen: open }),
@@ -303,45 +433,107 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   toggleHistory: () => set((state) => ({ historyOpen: !state.historyOpen })),
 
   setCanvasOverlay: (overlay) => {
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    setCanvasOverlayState(set, overlay)
   },
 
   setSessionGraphOpen: (open) => {
-    const overlay: CanvasOverlay = open ? 'session' : 'none'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    setCanvasOverlayState(set, open ? 'session' : 'none')
   },
 
   toggleSessionGraph: () => {
-    const overlay: CanvasOverlay = get().canvasOverlay === 'session' ? 'none' : 'session'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    setCanvasOverlayState(set, get().canvasOverlay === 'session' ? 'none' : 'session')
   },
 
   setLoopGraphOpen: (open) => {
-    const overlay: CanvasOverlay = open ? 'loop' : 'none'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    setCanvasOverlayState(set, open ? 'loop' : 'none')
   },
 
   toggleLoopGraph: () => {
-    const overlay: CanvasOverlay = get().canvasOverlay === 'loop' ? 'none' : 'loop'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    setCanvasOverlayState(set, get().canvasOverlay === 'loop' ? 'none' : 'loop')
+  },
+
+  setGithubGraphOpen: (open) => {
+    setCanvasOverlayState(set, open ? 'github' : 'none')
+  },
+
+  toggleGithubGraph: () => {
+    setCanvasOverlayState(set, get().canvasOverlay === 'github' ? 'none' : 'github')
+  },
+
+  setDiagramGraphOpen: (open) => {
+    setCanvasOverlayState(set, open ? 'diagram' : 'none')
+  },
+
+  toggleDiagramGraph: () => {
+    setCanvasOverlayState(set, get().canvasOverlay === 'diagram' ? 'none' : 'diagram')
+  },
+
+  setWireframePackOpen: (open) => {
+    // Folded into Diagram Graph · ui-wireframe — never open a parallel overlay.
+    if (open) {
+      setCanvasOverlayState(set, 'diagram')
+      void import('./diagramGraphStore').then(({ useDiagramGraphStore }) => {
+        useDiagramGraphStore.getState().enterWireframeMode()
+      })
+      return
+    }
+    if (get().canvasOverlay === 'diagram' || get().canvasOverlay === 'wireframe') {
+      setCanvasOverlayState(set, 'none')
+    }
+  },
+
+  toggleWireframePack: () => {
+    // Compat shim: treat as Diagram Graph wireframe mode.
+    if (get().canvasOverlay === 'diagram' || get().canvasOverlay === 'wireframe') {
+      setCanvasOverlayState(set, 'none')
+      return
+    }
+    setCanvasOverlayState(set, 'diagram')
+    void import('./diagramGraphStore').then(({ useDiagramGraphStore }) => {
+      useDiagramGraphStore.getState().enterWireframeMode()
+    })
+  },
+
+  setReminderGraphOpen: (open) => {
+    setCanvasOverlayState(set, open ? 'reminder' : 'none')
+  },
+
+  toggleReminderGraph: () => {
+    setCanvasOverlayState(set, get().canvasOverlay === 'reminder' ? 'none' : 'reminder')
+  },
+
+  requestGithubGraphRefresh: (focus) => {
+    set((state) => ({
+      githubGraphRefreshNonce: state.githubGraphRefreshNonce + 1,
+      githubGraphFocusBranch:
+        focus && 'branch' in focus
+          ? (focus.branch ?? null)
+          : state.githubGraphFocusBranch,
+      githubGraphFocusPrNumber:
+        focus && 'prNumber' in focus
+          ? (focus.prNumber ?? null)
+          : state.githubGraphFocusPrNumber,
+    }))
+  },
+
+  clearGithubGraphFocus: () => {
+    set({ githubGraphFocusBranch: null, githubGraphFocusPrNumber: null })
+  },
+
+  setMarketplaceOpen: (open) => {
+    setCanvasOverlayState(set, open ? 'marketplace' : 'none')
+  },
+
+  toggleMarketplace: () => {
+    setCanvasOverlayState(set, get().canvasOverlay === 'marketplace' ? 'none' : 'marketplace')
   },
 
   setSpatialCaptureOpen: (open) => {
-    const overlay: CanvasOverlay = open ? 'spatial' : 'none'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    setCanvasOverlayState(set, open ? 'spatial' : 'none')
   },
 
   toggleSpatialCapture: () => {
-    const overlay: CanvasOverlay =
-      get().canvasOverlay === 'spatial' ? 'none' : 'spatial'
-    writeCanvasOverlay(overlay)
-    set(overlayState(overlay))
+    setCanvasOverlayState(set, get().canvasOverlay === 'spatial' ? 'none' : 'spatial')
   },
 
   setAgentFlowOpen: (open) => {
@@ -355,16 +547,14 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   presentAgentFlow: () => {
-    writeCanvasOverlay('agent-flow')
-    set({ ...overlayState('agent-flow'), agentFlowDismissedRunId: null })
+    setCanvasOverlayState(set, 'agent-flow', { agentFlowDismissedRunId: null })
   },
 
   openAgentFlowForRun: (runId) => {
     const dismissed = get().agentFlowDismissedRunId
     if (runId && dismissed === runId) return
     if (!runId && dismissed === AGENT_FLOW_DISMISS_IDLE) return
-    writeCanvasOverlay('agent-flow')
-    set(overlayState('agent-flow'))
+    setCanvasOverlayState(set, 'agent-flow')
   },
 
   closeAgentFlow: () => {
@@ -372,18 +562,20 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     const workbench = useWorkbenchStore.getState()
     const busy = workbench.flowStatus === 'running' || workbench.refineLoading
     const token = busy ? (workbench.activeRunId ?? AGENT_FLOW_DISMISS_IDLE) : null
-    writeCanvasOverlay('none')
-    set({
-      ...overlayState('none'),
-      ...(token ? { agentFlowDismissedRunId: token } : {}),
-    })
+    setCanvasOverlayState(
+      set,
+      'none',
+      token ? { agentFlowDismissedRunId: token } : undefined,
+    )
   },
 
   loadForWorkspace: async () => {
     const { client, project, locale } = useWorkbenchStore.getState()
     if (!client || !project) return
 
-    set({ loading: true })
+    // Project open always lands on C4; overlays only after explicit user/run open.
+    clearPersistedCanvasOverlay()
+    setCanvasOverlayState(set, 'none', { loading: true })
     try {
       let index = await client.getChatSessionIndex(project.projectId)
       let heads = index.heads
@@ -424,10 +616,44 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         index = { ...index, lastActiveId: welcomeRecord.head.id }
       }
 
-      const activeId =
+      let activeId =
         index.lastActiveId && heads.some((head) => head.id === index.lastActiveId)
           ? index.lastActiveId
           : heads[0]?.id ?? null
+
+      // Scope B: clear leftover empty shells (and expired deferred ones) before hydrate.
+      await pruneDisposableEmptySessionsViaClient(activeId)
+      index = await client.getChatSessionIndex(project.projectId)
+      heads = index.heads
+      if (activeId && !heads.some((head) => head.id === activeId)) {
+        activeId = heads[0]?.id ?? null
+        if (activeId) {
+          await client.setLastActiveChatSession(project.projectId, activeId)
+        }
+      }
+
+      if (heads.length === 0) {
+        const welcomeRecord: ChatSessionRecord = {
+          version: '0.2.0',
+          head: {
+            id: `chat_${crypto.randomUUID()}`,
+            title: '',
+            createdAt: new Date().toISOString(),
+            lastUpdatedAt: new Date().toISOString(),
+            chatMode: 'ask',
+            isArchived: false,
+            status: 'idle',
+            classification: 'misc',
+            classificationSource: 'auto',
+          },
+          messages: buildWelcomeMessages(locale),
+        }
+        await client.upsertChatSession(project.projectId, welcomeRecord)
+        index = await client.getChatSessionIndex(project.projectId)
+        heads = index.heads
+        activeId = welcomeRecord.head.id
+        await client.setLastActiveChatSession(project.projectId, activeId)
+      }
 
       set({
         heads,
@@ -440,9 +666,14 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         const record = await client.getChatSession(project.projectId, activeId)
         if (record) applySessionToWorkbench(record)
       }
+
+      // Hard guarantee: opening a project never leaves a center overlay up.
+      clearPersistedCanvasOverlay()
+      setCanvasOverlayState(set, 'none')
     } catch (error) {
       console.error('[chatSessionStore] failed to load sessions', error)
-      set({ loading: false })
+      clearPersistedCanvasOverlay()
+      setCanvasOverlayState(set, 'none', { loading: false })
     }
   },
 
@@ -508,6 +739,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       return
     }
 
+    const leavingId = get().activeSessionId
     await get().persistActiveSession()
 
     const { client, project } = useWorkbenchStore.getState()
@@ -519,13 +751,25 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     applySessionToWorkbench(record)
     await client.setLastActiveChatSession(project.projectId, sessionId)
 
-    const index = await client.getChatSessionIndex(project.projectId)
+    let index = await client.getChatSessionIndex(project.projectId)
     set({
       activeSessionId: sessionId,
       heads: index.heads,
       pinnedIds: index.pinnedIds,
       historyOpen: false,
     })
+
+    if (leavingId && leavingId !== sessionId) {
+      const deleted = await tryDeleteDisposableEmptySession(
+        leavingId,
+        index.heads,
+        index.pinnedIds,
+      )
+      if (deleted) {
+        index = await client.getChatSessionIndex(project.projectId)
+        set({ heads: index.heads, pinnedIds: index.pinnedIds })
+      }
+    }
   },
 
   createSession: async (options = {}) => {
@@ -536,6 +780,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       activate = true,
       title = '',
     } = options
+    const leavingId = get().activeSessionId
     await get().persistActiveSession()
 
     const { client, project, locale } = useWorkbenchStore.getState()
@@ -562,17 +807,29 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
 
     await client.upsertChatSession(project.projectId, record)
 
-    const index = await client.getChatSessionIndex(project.projectId)
+    let index = await client.getChatSessionIndex(project.projectId)
     set({
       heads: index.heads,
       pinnedIds: index.pinnedIds,
-      activeSessionId: sessionId,
+      activeSessionId: activate ? sessionId : get().activeSessionId,
       historyOpen: false,
     })
 
     if (activate) {
       applySessionToWorkbench(record)
       await client.setLastActiveChatSession(project.projectId, sessionId)
+
+      if (leavingId && leavingId !== sessionId) {
+        const deleted = await tryDeleteDisposableEmptySession(
+          leavingId,
+          index.heads,
+          index.pinnedIds,
+        )
+        if (deleted) {
+          index = await client.getChatSessionIndex(project.projectId)
+          set({ heads: index.heads, pinnedIds: index.pinnedIds })
+        }
+      }
     }
 
     return sessionId

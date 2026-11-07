@@ -67,6 +67,11 @@
   color: var(--tech-accent);
 }
 
+.bookmarkTabAttention:not(.bookmarkTabActive) {
+  color: var(--tech-accent);
+  border-color: color-mix(in srgb, var(--tech-accent) 35%, var(--tech-border));
+}
+
 .bookmarkChevronOpen {
   transform: rotate(180deg);
 }
@@ -77,6 +82,13 @@
   padding: 10px 12px;
   border-top: 1px solid var(--tech-border-strong);
   background: var(--tech-bg-canvas);
+}
+
+.clarifySheetPanel {
+  max-height: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .flowCurrent {
@@ -140,8 +152,7 @@
   color: var(--tech-text-muted);
 }
 
-.offerCard,
-.clarifyCard {
+.offerCard {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -153,7 +164,7 @@
 }
 
 .offerCard p,
-.clarifyCard p {
+.clarifyHint {
   margin: 0;
   font-size: var(--font-size-sm);
   color: var(--tech-text-primary);

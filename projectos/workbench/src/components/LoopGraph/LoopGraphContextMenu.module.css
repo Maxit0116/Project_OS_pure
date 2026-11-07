@@ -37,6 +37,19 @@
   color: var(--tech-text-secondary);
 }
 
+.menuItemDanger {
+  color: var(--tech-error);
+}
+
+.menuItemDanger .menuItemIcon {
+  color: var(--tech-error);
+}
+
+.menuItemDanger:hover,
+.menuItemDanger:focus-visible {
+  background: color-mix(in srgb, var(--tech-error) 14%, var(--tech-bg-muted));
+}
+
 .separator {
   height: 1px;
   margin: 4px 0;

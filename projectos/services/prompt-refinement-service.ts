@@ -7,6 +7,7 @@ import type {
 } from "../contracts/prompt-refinement.js";
 import type { ModelProfile, ThinkingDepth } from "../contracts/settings.js";
 import { ProjectOSError } from "../errors.js";
+import { ensureAlignmentOnRefinement } from "./alignment-contract.js";
 import { ModelGateway } from "./model-gateway/index.js";
 import { redactText } from "./model-gateway/redaction.js";
 import {
@@ -16,16 +17,67 @@ import {
 import { orderedModelOutputSources } from "./model-json-output.js";
 import { separateLeadingThinkBlock } from "./model-gateway/providers.js";
 
-const REFINEMENT_SYSTEM_PROMPT = `You refine user prompts for a graph-driven IDE.
+const REFINEMENT_SYSTEM_PROMPT = `You refine user prompts for a graph-driven IDE into an alignment contract.
 Respond with JSON only using this shape:
 {
-  "understood": "string",
-  "ambiguities": ["string"],
-  "suggestions": ["string"],
+  "understood": "string — short prose summary",
+  "ambiguities": ["string — unclear points, also mirrored as guess items"],
+  "suggestions": ["string — optional ideas"],
   "affectedNodeIds": ["string"],
   "affectedFiles": ["string"],
-  "confidence": 0.0
-}`;
+  "confidence": 0.0,
+  "alignment": {
+    "items": [
+      { "id": "stated_1", "kind": "stated", "text": "short requirement", "selected": true },
+      { "id": "guess_1", "kind": "guess", "text": "inferred but unstated", "selected": false }
+    ],
+    "questions": [
+      {
+        "id": "q1",
+        "question": "How should X be implemented?",
+        "topic": "implementation",
+        "blocking": true,
+        "options": [
+          { "id": "o1", "label": "Option A", "description": "..." },
+          { "id": "o2", "label": "Option B" }
+        ]
+      }
+    ]
+  }
+}
+Rules:
+- kind "stated" = explicit user asks (default selected true). kind "guess" = your inferences (default selected false).
+- Keep item text short (one clause). Max 12 items total, max 5 questions, max 3 blocking questions.
+- Questions are only for decisions you must know before coding (implementation approach, scope, UX form). Prefer 0–2 questions for simple asks.
+- Do not invent write authorization; affectedFiles are predictions only.`;
+
+const ModelAlignmentItemSchema = z.object({
+  id: z.string().trim().min(1).max(128).optional(),
+  kind: z.enum(["stated", "guess", "constraint", "out_of_scope"]),
+  text: z.string().trim().min(1).max(500),
+  selected: z.boolean().optional(),
+  comment: z.string().trim().max(2_000).optional(),
+});
+
+const ModelAlignmentQuestionSchema = z.object({
+  id: z.string().trim().min(1).max(128).optional(),
+  question: z.string().trim().min(1).max(500),
+  topic: z
+    .enum(["implementation", "scope", "ux", "data", "testing", "other"])
+    .optional(),
+  blocking: z.boolean().optional(),
+  options: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).max(128).optional(),
+        label: z.string().trim().min(1).max(200),
+        description: z.string().trim().max(500).optional(),
+      }),
+    )
+    .min(2)
+    .max(5)
+    .optional(),
+});
 
 const ModelRefinementPayloadSchema = z.object({
   understood: z.string().trim().min(1),
@@ -39,6 +91,12 @@ const ModelRefinementPayloadSchema = z.object({
     ),
   ).max(65_536),
   confidence: z.number().finite().min(0).max(1),
+  alignment: z
+    .object({
+      items: z.array(ModelAlignmentItemSchema).max(12),
+      questions: z.array(ModelAlignmentQuestionSchema).max(5).optional(),
+    })
+    .optional(),
 });
 
 export interface ModelRefinementInput {
@@ -86,6 +144,7 @@ export class PromptRefinementService {
       redactText(response.output, "secrets_and_paths"),
       input.knownNodeIds,
       response.reasoning,
+      input.request.rawPrompt,
     );
     return {
       ...parsed,
@@ -97,7 +156,8 @@ export class PromptRefinementService {
 function parseRefinementJson(
   output: string,
   knownNodeIds: ReadonlySet<string>,
-  reasoning?: string,
+  reasoning: string | undefined,
+  rawPrompt: string,
 ): Omit<PromptRefinement, "mode"> {
   let sawDecodedJson = false;
   for (const source of orderedModelOutputSources(output, reasoning)) {
@@ -119,10 +179,50 @@ function parseRefinementJson(
           "The model returned an invalid prompt refinement",
         );
       }
-      return {
-        id: `refinement_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        ...parsed.data,
+      const id = `refinement_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const { alignment: modelAlignment, ...rest } = parsed.data;
+      const refinement: Omit<PromptRefinement, "mode"> = {
+        id,
+        ...rest,
+        ...(modelAlignment
+          ? {
+              alignment: {
+                version: "0.1.0" as const,
+                id: `align_${id}`,
+                rawPrompt,
+                items: modelAlignment.items.map((item, index) => ({
+                  id: item.id ?? `${id}_item_${index + 1}`,
+                  kind: item.kind,
+                  text: item.text,
+                  selected:
+                    item.selected ??
+                    (item.kind === "guess" ? false : true),
+                  ...(item.comment ? { comment: item.comment } : {}),
+                })),
+                questions: (modelAlignment.questions ?? []).map((question, index) => ({
+                  id: question.id ?? `${id}_q_${index + 1}`,
+                  question: question.question,
+                  topic: question.topic ?? "other",
+                  blocking: question.blocking ?? true,
+                  ...(question.options
+                    ? {
+                        options: question.options.map((option, optionIndex) => ({
+                          id: option.id ?? `${id}_q_${index + 1}_opt_${optionIndex + 1}`,
+                          label: option.label,
+                          ...(option.description
+                            ? { description: option.description }
+                            : {}),
+                        })),
+                      }
+                    : {}),
+                })),
+                confidence: rest.confidence,
+                status: "awaiting_user" as const,
+              },
+            }
+          : {}),
       };
+      return ensureAlignmentOnRefinement(refinement as PromptRefinement, rawPrompt);
     }
   }
 

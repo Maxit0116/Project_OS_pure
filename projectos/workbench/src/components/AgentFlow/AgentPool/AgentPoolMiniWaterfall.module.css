@@ -1,0 +1,361 @@
+/* Shared-axis Gantt grammar — calm density, growing bars + playhead as liveness. */
+
+.compact {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+}
+
+.compactTrack,
+.rowTrack {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  border-radius: 5px;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent calc(25% - 0.5px),
+      color-mix(in srgb, var(--tech-border-strong, rgba(255, 255, 255, 0.16)) 55%, transparent)
+        calc(25% - 0.5px),
+      color-mix(in srgb, var(--tech-border-strong, rgba(255, 255, 255, 0.16)) 55%, transparent)
+        calc(25% + 0.5px)
+    ),
+    color-mix(in srgb, var(--tech-bg-muted, var(--color-bg-muted)) 88%, #000);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.compactTrack {
+  height: 14px;
+}
+
+.rowTrack {
+  height: 12px;
+}
+
+.compactBar,
+.rowBar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tech-text-secondary, #9aa0a6) 42%, transparent);
+  min-width: 3px;
+  will-change: left, width;
+}
+
+.compactBar[data-kind='agent'],
+.rowBar[data-kind='agent'] {
+  background: color-mix(in srgb, var(--tech-text-secondary, #9aa0a6) 50%, transparent);
+}
+
+.compactBar[data-kind='step'],
+.rowBar[data-kind='step'],
+.compactBar[data-kind='major'],
+.rowBar[data-kind='major'] {
+  top: 1px;
+  bottom: 1px;
+  background: color-mix(in srgb, var(--tech-text-primary, #fff) 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tech-border-strong) 50%, transparent);
+}
+
+.compactBar[data-kind='model'],
+.rowBar[data-kind='model'] {
+  background: color-mix(in srgb, #6ea8fe 72%, transparent);
+}
+
+.compactBar[data-kind='tool'],
+.rowBar[data-kind='tool'] {
+  background: color-mix(in srgb, #3fb950 68%, transparent);
+}
+
+.compactBar[data-kind='action'],
+.rowBar[data-kind='action'],
+.compactBar[data-kind='other'],
+.rowBar[data-kind='other'] {
+  background: color-mix(in srgb, var(--tech-text-secondary, #9aa0a6) 58%, transparent);
+}
+
+.compactBar[data-kind='file'],
+.rowBar[data-kind='file'] {
+  background: color-mix(in srgb, #79c0ff 62%, transparent);
+}
+
+.compactBar[data-kind='apply'],
+.rowBar[data-kind='apply'] {
+  background: color-mix(in srgb, #3fb950 48%, #79c0ff 35%);
+}
+
+.compactBar[data-kind='verify'],
+.rowBar[data-kind='verify'] {
+  background: color-mix(in srgb, var(--color-warning, #d29922) 68%, transparent);
+}
+
+.compactBar[data-kind='wait'],
+.rowBar[data-kind='wait'] {
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--tech-text-secondary) 22%, transparent),
+    color-mix(in srgb, var(--tech-text-secondary) 22%, transparent) 3px,
+    transparent 3px,
+    transparent 6px
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tech-border-strong) 70%, transparent);
+}
+
+.compactBar[data-kind='handoff'],
+.rowBar[data-kind='handoff'] {
+  background: color-mix(in srgb, #a371f7 62%, #58a6ff 28%);
+}
+
+.compactBar[data-status='complete'],
+.rowBar[data-status='complete'] {
+  /* Keep kind hue; completion is read from meta, not bar wash. */
+  opacity: 0.92;
+}
+
+.compactBar[data-status='running'],
+.rowBar[data-status='running'] {
+  opacity: 1;
+}
+
+.compactBar[data-status='error'],
+.rowBar[data-status='error'] {
+  background: color-mix(in srgb, var(--color-error, #f85149) 82%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-error, #f85149) 55%, transparent);
+}
+
+.compactBar[data-growing='true'],
+.rowBar[data-growing='true'] {
+  transition:
+    left 140ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Static leading edge — conveys growth without infinite shimmer noise. */
+.compactBar[data-growing='true']::after,
+.rowBar[data-growing='true']::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  border-radius: 0 999px 999px 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--tech-text-primary, #fff) 42%, transparent)
+  );
+  pointer-events: none;
+}
+
+.playhead,
+.rowPlayhead,
+.axisNow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.5px;
+  background: var(--tech-text-primary, rgba(255, 255, 255, 0.92));
+  opacity: 0.85;
+  transform: translateX(-0.75px);
+  pointer-events: none;
+  transition: left 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--tech-text-primary) 35%, transparent);
+  z-index: 2;
+}
+
+.playhead::before,
+.rowPlayhead::before,
+.axisNow::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--tech-text-primary, #fff);
+  transform: translateX(-50%);
+}
+
+.expand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 440px;
+  overflow: auto;
+  margin: 0;
+  padding: 2px 0 4px;
+  scrollbar-gutter: stable;
+}
+
+.axisTicks {
+  display: grid;
+  grid-template-columns: minmax(88px, 160px) 1fr auto;
+  align-items: end;
+  gap: 10px;
+  min-height: 18px;
+  padding: 0 8px 4px;
+  color: var(--tech-text-muted, var(--color-text-muted));
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.axisLabelSpacer,
+.axisMetaSpacer {
+  min-width: 0;
+}
+
+.axisMetaSpacer {
+  width: 3.75rem;
+}
+
+.axisTrack {
+  position: relative;
+  height: 16px;
+  min-width: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--tech-border) 80%, transparent);
+}
+
+.axisTick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.axisTick::before {
+  content: '';
+  width: 1px;
+  height: 6px;
+  background: color-mix(in srgb, var(--tech-border-strong) 70%, transparent);
+}
+
+.axisTick[data-edge='start'] {
+  transform: translateX(0);
+  align-items: flex-start;
+}
+
+.axisTick[data-edge='end'] {
+  transform: translateX(-100%);
+  align-items: flex-end;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(88px, 160px) 1fr auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tech-text-primary, var(--color-text-primary));
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-out, ease-out),
+    border-color 150ms var(--ease-out, ease-out);
+}
+
+.row[data-depth='1'] {
+  padding-left: 18px;
+}
+
+.row[data-depth='2'] {
+  padding-left: 30px;
+}
+
+.row[data-timing='derived'] .rowMeta,
+.row[data-timing='incomplete'] .rowMeta {
+  opacity: 0.72;
+}
+
+.row:hover,
+.row:focus-visible {
+  background: color-mix(in srgb, var(--tech-bg-muted, var(--color-bg-muted)) 80%, transparent);
+  outline: none;
+}
+
+.row:focus-visible {
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.row[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--tech-border-strong) 90%, transparent);
+  background: color-mix(in srgb, var(--tech-bg-muted, var(--color-bg-muted)) 92%, transparent);
+}
+
+.row[data-status='error'] .rowLabelText {
+  color: color-mix(in srgb, var(--color-error, #f85149) 70%, var(--tech-text-primary));
+}
+
+.rowLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  min-width: 0;
+}
+
+.rowLabelText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.rowErrorIcon {
+  flex: 0 0 auto;
+  color: var(--color-error, #f85149);
+}
+
+.rowMeta {
+  font-size: 10px;
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 3.75rem;
+  text-align: right;
+}
+
+.empty {
+  font-size: var(--font-size-sm);
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+  padding: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compactBar[data-growing='true'],
+  .rowBar[data-growing='true'],
+  .playhead,
+  .rowPlayhead,
+  .axisNow,
+  .row {
+    transition: none;
+  }
+
+  .compactBar[data-growing='true']::after,
+  .rowBar[data-growing='true']::after {
+    opacity: 0.55;
+  }
+
+  .playhead,
+  .rowPlayhead,
+  .axisNow {
+    box-shadow: none;
+    opacity: 0.9;
+  }
+}

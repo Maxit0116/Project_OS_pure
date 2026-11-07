@@ -9,8 +9,11 @@ export const STENCIL_DRAG_THRESHOLD_PX = 6
 /** Padding around a newly placed stencil when creating a dedicated region. */
 export const STENCIL_REGION_PAD_PX = 24
 
-/** Minimum region / placement size when resizing from a corner. */
+/** Minimum region size when resizing from a corner. */
 export const MIN_RESIZE_SIZE_PX = 48
+
+/** Minimum stencil placement size — small so users can shrink freely. */
+export const MIN_PLACEMENT_RESIZE_PX = 16
 
 export type ResizeHandle =
   | 'topLeft'
@@ -174,6 +177,64 @@ export function resizedRectFromHandle(
     width: right - left,
     height: bottom - top,
   }
+}
+
+/**
+ * Resize a stencil in stage space (viewport clamp only). If the new box
+ * extends past the region, expand the region so growth is not capped by the
+ * original snug/full-frame captureRect.
+ */
+export function resizedPlacementFree(
+  originLocal: ScreenRect,
+  originCapture: ScreenRect,
+  handle: ResizeHandle,
+  pointerX: number,
+  pointerY: number,
+  viewport: { width: number; height: number },
+  minSize = MIN_PLACEMENT_RESIZE_PX,
+): { nextCapture: ScreenRect; nextLocal: ScreenRect } {
+  const originStage: ScreenRect = {
+    x: originCapture.x + originLocal.x,
+    y: originCapture.y + originLocal.y,
+    width: originLocal.width,
+    height: originLocal.height,
+  }
+  const nextStage = resizedRectFromHandle(
+    originStage,
+    handle,
+    pointerX,
+    pointerY,
+    minSize,
+    { x: 0, y: 0, width: viewport.width, height: viewport.height },
+  )
+
+  const unionLeft = Math.min(originCapture.x, nextStage.x)
+  const unionTop = Math.min(originCapture.y, nextStage.y)
+  const unionRight = Math.max(
+    originCapture.x + originCapture.width,
+    nextStage.x + nextStage.width,
+  )
+  const unionBottom = Math.max(
+    originCapture.y + originCapture.height,
+    nextStage.y + nextStage.height,
+  )
+  const nextCapture: ScreenRect = {
+    x: Math.max(0, unionLeft),
+    y: Math.max(0, unionTop),
+    width: Math.min(viewport.width, unionRight) - Math.max(0, unionLeft),
+    height: Math.min(viewport.height, unionBottom) - Math.max(0, unionTop),
+  }
+  // Keep width/height valid if floating-point edges kiss the viewport.
+  nextCapture.width = Math.max(minSize, nextCapture.width)
+  nextCapture.height = Math.max(minSize, nextCapture.height)
+
+  const nextLocal: ScreenRect = {
+    x: nextStage.x - nextCapture.x,
+    y: nextStage.y - nextCapture.y,
+    width: nextStage.width,
+    height: nextStage.height,
+  }
+  return { nextCapture, nextLocal }
 }
 
 /** Keep a local placement rect inside a (possibly shrunken) region. */

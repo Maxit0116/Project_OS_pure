@@ -32,3 +32,12 @@ export function createSecretRef(profileId: string): string {
 export function createExternalAuthRef(agentId: string): string {
   return `external_agent:${agentId}`;
 }
+
+export function createMcpAuthRef(serverId: string): string {
+  return `mcp_server:${serverId}`;
+}
+
+/** Desktop GitHub OAuth access token (never store in settings JSON). */
+export function createGitHubAuthRef(slot = "default"): string {
+  return `github_auth:${slot}`;
+}

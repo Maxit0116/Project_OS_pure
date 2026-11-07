@@ -6,6 +6,8 @@ import {
   applyChatSessionContextUpdate,
   buildForkedChatSession,
   buildSessionGraph,
+  buildSessionGraphStrip,
+  withSessionGraphHeadProjection,
   chatSessionHasChildren,
   chatSessionIdsToPrune,
   isSubstantiveChat,
@@ -358,5 +360,73 @@ describe("chat session context", () => {
     expect(parsed?.title).toBe("Login redirect");
     expect(parsed?.digest?.refs).toEqual(["app/login.tsx"]);
     expect(parsed?.digest?.throughMessageId).toBe("m2");
+  });
+
+  it("builds a curated preview strip from digest and messages", () => {
+    const session = record({
+      head: head({
+        id: "chat_strip",
+        classification: "topic",
+        responsibility: "Fix the login redirect",
+      }),
+      messages: [
+        message("m1", "user", "hi"),
+        {
+          id: "m2",
+          role: "user",
+          content: "Fix the login redirect after callback",
+          timestamp: "2026-08-02T01:00:00.000Z",
+        },
+        {
+          id: "m3",
+          role: "assistant",
+          content: "Updated the callback handler.\nMore detail.",
+          timestamp: "2026-08-02T02:00:00.000Z",
+        },
+      ],
+      contextDigest: {
+        responsibility: "Fix the login redirect",
+        decisions: ["Keep the callback"],
+        openQuestions: ["Do we need a toast?"],
+        refs: ["app/login.tsx"],
+        updatedAt: "2026-08-02T01:30:00.000Z",
+        throughMessageId: "m2",
+      },
+    });
+    const strip = buildSessionGraphStrip(session);
+    expect(strip.length).toBeGreaterThanOrEqual(3);
+    expect(strip.length).toBeLessThanOrEqual(5);
+    expect(strip.map((item) => item.kind)).toContain("decision");
+    expect(strip.map((item) => item.kind)).toContain("intent");
+    expect(strip.every((item) => item.title.length <= 80)).toBe(true);
+    for (let i = 1; i < strip.length; i += 1) {
+      expect(strip[i - 1]!.ts >= strip[i]!.ts).toBe(true);
+    }
+    const projected = withSessionGraphHeadProjection(session);
+    expect(projected.head.previewStrip).toEqual(strip);
+    expect(projected.head.messageCount).toBe(3);
+  });
+
+  it("seeds a forked child strip from inherited digest", () => {
+    const parent = record({
+      head: head({
+        id: "parent",
+        classification: "topic",
+        responsibility: "Fix the login redirect",
+      }),
+      messages: [message("m1", "user", "Fix the login redirect after callback")],
+      contextDigest: {
+        responsibility: "Fix the login redirect",
+        decisions: ["Keep the callback"],
+        openQuestions: [],
+        refs: [],
+        updatedAt: now,
+        throughMessageId: "m1",
+      },
+    });
+    const child = buildForkedChatSession(parent, parent.contextDigest ?? null, "m1", now);
+    expect(child.head.previewStrip?.some((item) => item.kind === "note")).toBe(true);
+    expect(child.head.previewStrip?.some((item) => item.kind === "decision")).toBe(true);
+    expect(child.head.messageCount).toBe(0);
   });
 });

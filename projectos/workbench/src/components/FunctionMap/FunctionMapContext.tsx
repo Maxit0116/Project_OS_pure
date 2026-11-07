@@ -284,7 +284,7 @@ export interface FunctionMapContextValue {
   setMapGestureInputBlocked: (blocked: boolean) => void
 }
 
-const FunctionMapContext = createContext<FunctionMapContextValue | null>(null)
+export const FunctionMapContext = createContext<FunctionMapContextValue | null>(null)
 
 const NODE_PREVIEW_DELAY_MS = PREVIEW_DWELL_MS
 export const PREVIEW_WIDTH = 240

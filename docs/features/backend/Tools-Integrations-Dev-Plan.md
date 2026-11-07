@@ -96,8 +96,9 @@ ToolResult {
 |----|--------|
 | 模型自由工具循环 | Harness 仍 DEFERRED Route ② |
 | `git commit` / push / 发布 | 有持久审批记录之前不做，见 Security |
+| 用户发起的 workspace branch checkout / create / fetch | Compose GitHub Hub（见 [`../GitHub-Compose-Hub-Dev-Plan.md`](../GitHub-Compose-Hub-Dev-Plan.md)）；IPC 写操作，不是开放 agent 工具 |
 | 浏览器自动化 | 不是本阶段差异化 |
-| 新的 MCP 服务器市场 | 只消费现有 Policy 门控的 `mcp_tool` |
+| 社区上传 / 审核后台 | 市场见 [`../MCP-Marketplace-Dev-Plan.md`](../MCP-Marketplace-Dev-Plan.md)；仍只消费 Policy 门控的 `mcp_tool`，目录安装 ≠ allow |
 
 ## 3. 依赖
 
@@ -117,3 +118,4 @@ T-0 阻塞 Verification V-0 和 Harness H5。T-1 可与 T-0 并行。T-2、T-3 �
 | 2026-10-20 | 初稿。对照工具清单、`runHarnessShell` 和 `git-context-service`，把合格线收成结果信封和 Git 只读状态。 |
 | 2026-10-20 | 落地 T-0 结果信封、T-1 `git_status`、T-2 清单约束，以及 T-3 的 Policy 拒绝信封。 |
 | 2026-10-20 | T-3：叶子 apply 成功和 `diff_scope_violation` 都带 `ToolResult`。 |
+| 2026-10-29 | MCP 市场从「明确不做」改为指向 Marketplace Dev Plan；工具执行仍只经 Policy。 |

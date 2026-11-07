@@ -3,6 +3,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
@@ -15,6 +17,7 @@ import {
   Box,
   Bug,
   Folder,
+  FolderOpen,
   FolderPlus,
   GitPullRequest,
   LayoutTemplate,
@@ -27,8 +30,11 @@ import {
 import { useI18n } from '../../i18n'
 import { classifySessionTask } from './sessionTaskKind'
 import {
+  countFolderItems,
+  folderContainsActive,
   graphRailTitle,
   type SessionGraphRailEntry,
+  type SessionGraphRailFolderEntry,
   type SessionGraphRailLayout,
 } from './sessionGraphRailLayout'
 import { previewRailReorder } from './useSessionGraphDrag'
@@ -36,6 +42,8 @@ import styles from './WorkingSessionRail.module.css'
 
 const EXPAND_DELAY_MS = 350
 const COLLAPSE_DELAY_MS = 180
+const FOLDER_REVEAL_MS = 40
+const FOLDER_COLLAPSE_MS = 90
 
 const TASK_ICON = {
   explore: Search,
@@ -59,19 +67,28 @@ interface Props {
   heads: ChatSessionHead[]
   activeGraphId: string | null
   forceExpanded?: boolean
+  renamingFolderId?: string | null
   dropHighlight?: 'rail' | 'graph' | 'folder' | null
   dropGraphId?: string | null
   dropFolderId?: string | null
   draggingGraphId?: string | null
+  draggingFolderId?: string | null
   railDropIndex?: number | null
   onOpenGraph: (graphId: string) => void
   onCreate: () => void
   onCreateFolder: () => void
+  onRenameFolder: (folderId: string, title: string) => void
+  onCancelRenameFolder: () => void
   onRemoveGraph: (graphId: string) => void
   onRemoveFolder: (folderId: string) => void
   onGraphPointerDown: (
     event: ReactPointerEvent,
     graphId: string,
+    title: string,
+  ) => void
+  onFolderPointerDown: (
+    event: ReactPointerEvent,
+    folderId: string,
     title: string,
   ) => void
   onPointerMove: (event: ReactPointerEvent) => void
@@ -83,67 +100,75 @@ export default function WorkingSessionRail({
   heads,
   activeGraphId,
   forceExpanded = false,
+  renamingFolderId = null,
   dropHighlight = null,
   dropGraphId = null,
   dropFolderId = null,
   draggingGraphId = null,
+  draggingFolderId = null,
   railDropIndex = null,
   onOpenGraph,
   onCreate,
   onCreateFolder,
+  onRenameFolder,
+  onCancelRenameFolder,
   onRemoveGraph,
   onRemoveFolder,
   onGraphPointerDown,
+  onFolderPointerDown,
   onPointerMove,
   onPointerUp,
 }: Props) {
   const { ts } = useI18n()
   const [expanded, setExpanded] = useState(false)
-  const [folderMenuId, setFolderMenuId] = useState<string | null>(null)
+  const [revealedIds, setRevealedIds] = useState<Record<string, true>>({})
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const revealTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const collapseTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const suppressClickRef = useRef(false)
 
-  const isExpanded = forceExpanded || expanded
+  const renaming = renamingFolderId != null
+  const isExpanded = forceExpanded || expanded || renaming
+  const dragging = draggingGraphId != null || draggingFolderId != null
   const entries = layout.entries
 
   const { display, placeholderIndex } = useMemo(() => {
-    if (!draggingGraphId) {
+    if (!draggingGraphId && !draggingFolderId) {
       return { display: entries, placeholderIndex: null as number | null }
     }
-    return previewRailReorder(entries, draggingGraphId, railDropIndex)
-  }, [draggingGraphId, entries, railDropIndex])
+    return previewRailReorder(
+      entries,
+      draggingGraphId,
+      railDropIndex,
+      draggingFolderId,
+    )
+  }, [draggingFolderId, draggingGraphId, entries, railDropIndex])
 
   useEffect(() => {
     return () => {
       if (expandTimer.current) clearTimeout(expandTimer.current)
       if (collapseTimer.current) clearTimeout(collapseTimer.current)
+      for (const timer of revealTimers.current.values()) clearTimeout(timer)
+      for (const timer of collapseTimers.current.values()) clearTimeout(timer)
     }
   }, [])
 
   useEffect(() => {
-    if (draggingGraphId) suppressClickRef.current = true
-  }, [draggingGraphId])
+    if (dragging) suppressClickRef.current = true
+  }, [dragging])
 
   useEffect(() => {
-    if (!folderMenuId) return undefined
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setFolderMenuId(null)
-    }
-    const onPointer = (event: PointerEvent) => {
-      const target = event.target as Element | null
-      if (target?.closest?.('[data-rail-folder-menu]')) return
-      setFolderMenuId(null)
-    }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('pointerdown', onPointer)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('pointerdown', onPointer)
-    }
-  }, [folderMenuId])
+    if (!isExpanded && !renaming) setRevealedIds({})
+  }, [isExpanded, renaming])
 
-  const clearTimers = () => {
+  useEffect(() => {
+    if (renamingFolderId) {
+      setRevealedIds((prev) => ({ ...prev, [renamingFolderId]: true }))
+    }
+  }, [renamingFolderId])
+
+  const clearExpandTimers = () => {
     if (expandTimer.current) {
       clearTimeout(expandTimer.current)
       expandTimer.current = null
@@ -154,53 +179,74 @@ export default function WorkingSessionRail({
     }
   }
 
+  const clearFolderTimer = (
+    map: Map<string, ReturnType<typeof setTimeout>>,
+    folderId: string,
+  ) => {
+    const timer = map.get(folderId)
+    if (timer) {
+      clearTimeout(timer)
+      map.delete(folderId)
+    }
+  }
+
   const onEnter = () => {
-    if (forceExpanded) return
-    clearTimers()
+    if (forceExpanded || renaming) return
+    clearExpandTimers()
     expandTimer.current = setTimeout(() => setExpanded(true), EXPAND_DELAY_MS)
   }
 
   const onLeave = () => {
-    if (forceExpanded) return
-    clearTimers()
-    collapseTimer.current = setTimeout(() => setExpanded(false), COLLAPSE_DELAY_MS)
+    if (forceExpanded || renaming) return
+    clearExpandTimers()
+    collapseTimer.current = setTimeout(() => {
+      setExpanded(false)
+      setRevealedIds({})
+    }, COLLAPSE_DELAY_MS)
   }
 
-  const renderEntry = (entry: SessionGraphRailEntry, index: number) => {
-    if (entry.kind === 'folder') {
-      return (
-        <FolderRailItem
-          key={entry.id}
-          entry={entry}
-          index={index}
-          expanded={isExpanded}
-          heads={heads}
-          activeGraphId={activeGraphId}
-          menuOpen={folderMenuId === entry.id}
-          dropActive={dropHighlight === 'folder' && dropFolderId === entry.id}
-          onOpenMenu={() => {
-            if (suppressClickRef.current) {
-              suppressClickRef.current = false
-              return
-            }
-            setFolderMenuId(entry.id)
-          }}
-          onCloseMenu={() => setFolderMenuId(null)}
-          onOpenGraph={(graphId) => {
-            setFolderMenuId(null)
-            onOpenGraph(graphId)
-          }}
-          onRemoveFolder={() => onRemoveFolder(entry.id)}
-          onRemoveGraph={onRemoveGraph}
-          onGraphPointerDown={onGraphPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-        />
-      )
-    }
-    const title = graphRailTitle(heads, entry.graphId, ts('chat.history.untitled'))
-    const rep = pickGraphRepresentative(heads, entry.graphId)
-    const members = sessionsInGraph(heads, entry.graphId)
+  const scheduleReveal = (folderId: string) => {
+    if (!isExpanded) return
+    clearFolderTimer(collapseTimers.current, folderId)
+    clearFolderTimer(revealTimers.current, folderId)
+    if (revealedIds[folderId] || renamingFolderId === folderId) return
+    revealTimers.current.set(
+      folderId,
+      setTimeout(() => {
+        revealTimers.current.delete(folderId)
+        setRevealedIds((prev) => ({ ...prev, [folderId]: true }))
+      }, FOLDER_REVEAL_MS),
+    )
+  }
+
+  const scheduleRevealCollapse = (folderId: string) => {
+    if (renamingFolderId === folderId || dragging) return
+    clearFolderTimer(revealTimers.current, folderId)
+    clearFolderTimer(collapseTimers.current, folderId)
+    collapseTimers.current.set(
+      folderId,
+      setTimeout(() => {
+        collapseTimers.current.delete(folderId)
+        setRevealedIds((prev) => {
+          if (!prev[folderId]) return prev
+          const next = { ...prev }
+          delete next[folderId]
+          return next
+        })
+      }, FOLDER_COLLAPSE_MS),
+    )
+  }
+
+  const isRevealed = (folderId: string) =>
+    Boolean(revealedIds[folderId] || renamingFolderId === folderId)
+
+  const renderGraph = (
+    graphId: string,
+    options: { index?: number; nested?: boolean } = {},
+  ) => {
+    const title = graphRailTitle(heads, graphId, ts('chat.history.untitled'))
+    const rep = pickGraphRepresentative(heads, graphId)
+    const members = sessionsInGraph(heads, graphId)
     const status = members.some((m) => m.status === 'error')
       ? 'error'
       : members.some((m) => m.status === 'running')
@@ -210,30 +256,67 @@ export default function WorkingSessionRail({
           : 'idle'
     return (
       <GraphRailItem
-        key={entry.graphId}
-        graphId={entry.graphId}
-        index={index}
+        key={graphId}
+        graphId={graphId}
+        index={options.index}
+        nested={options.nested}
         title={title}
         responsibility={rep?.responsibility}
         status={status}
         expanded={isExpanded}
-        active={entry.graphId === activeGraphId}
-        dropActive={dropHighlight === 'graph' && dropGraphId === entry.graphId}
-        lifted={draggingGraphId === entry.graphId}
+        active={graphId === activeGraphId}
+        dropActive={dropHighlight === 'graph' && dropGraphId === graphId}
+        lifted={draggingGraphId === graphId}
         memberCount={members.length}
         onOpen={() => {
           if (suppressClickRef.current) {
             suppressClickRef.current = false
             return
           }
-          onOpenGraph(entry.graphId)
+          onOpenGraph(graphId)
         }}
-        onRemove={() => onRemoveGraph(entry.graphId)}
-        onPointerDown={(event) => onGraphPointerDown(event, entry.graphId, title)}
+        onRemove={() => onRemoveGraph(graphId)}
+        onPointerDown={(event) => onGraphPointerDown(event, graphId, title)}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       />
     )
+  }
+
+  const renderFolder = (
+    entry: SessionGraphRailFolderEntry,
+    options: { index?: number; nested?: boolean } = {},
+  ) => (
+    <FolderRailItem
+      key={entry.id}
+      entry={entry}
+      index={options.index}
+      nested={options.nested}
+      expanded={isExpanded}
+      revealed={isRevealed(entry.id)}
+      renaming={renamingFolderId === entry.id}
+      activeGraphId={activeGraphId}
+      dropActive={dropHighlight === 'folder' && dropFolderId === entry.id}
+      lifted={draggingFolderId === entry.id}
+      onRevealEnter={() => scheduleReveal(entry.id)}
+      onRevealLeave={() => scheduleRevealCollapse(entry.id)}
+      onCommitRename={(title) => onRenameFolder(entry.id, title)}
+      onCancelRename={onCancelRenameFolder}
+      onRemoveFolder={() => onRemoveFolder(entry.id)}
+      onFolderPointerDown={onFolderPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      renderChild={(child) =>
+        child.kind === 'graph'
+          ? renderGraph(child.graphId, { nested: true })
+          : renderFolder(child, { nested: true })
+      }
+    />
+  )
+
+  const renderEntry = (entry: SessionGraphRailEntry, index: number) => {
+    if (entry.kind === 'folder') return renderFolder(entry, { index })
+    return renderGraph(entry.graphId, { index })
   }
 
   const rows: ReactNode[] = []
@@ -276,10 +359,11 @@ export default function WorkingSessionRail({
         onPointerEnter={onEnter}
         onPointerLeave={onLeave}
         onFocusCapture={() => {
-          clearTimers()
+          clearExpandTimers()
           setExpanded(true)
         }}
         onBlurCapture={(event) => {
+          if (renaming) return
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
             onLeave()
           }
@@ -322,6 +406,7 @@ export default function WorkingSessionRail({
 function GraphRailItem({
   graphId,
   index,
+  nested = false,
   title,
   responsibility,
   status,
@@ -337,7 +422,8 @@ function GraphRailItem({
   onPointerUp,
 }: {
   graphId: string
-  index: number
+  index?: number
+  nested?: boolean
   title: string
   responsibility?: string
   status: ChatSessionHead['status']
@@ -361,12 +447,15 @@ function GraphRailItem({
         dropActive ? styles.itemDropTarget : ''
       }`}
       data-rail-entry-index={index}
+      data-rail-nested={nested ? 'true' : undefined}
       data-session-graph-drop="graph"
       data-graph-id={graphId}
     >
       <button
         type="button"
-        className={`${styles.item} ${active ? styles.itemActive : ''}`}
+        className={`${styles.item} ${nested ? styles.folderChild : ''} ${
+          active ? styles.itemActive : ''
+        }`}
         data-task={task}
         aria-current={active ? 'true' : undefined}
         aria-label={title}
@@ -378,15 +467,17 @@ function GraphRailItem({
         onPointerCancel={onPointerUp}
       >
         <span className={styles.icon}>
-          <TaskIcon size={18} strokeWidth={2} aria-hidden />
+          <TaskIcon size={nested ? 16 : 18} strokeWidth={2} aria-hidden />
         </span>
         {expanded ? (
           <span className={styles.label}>
             <span className={styles.labelTitle}>{title}</span>
-            <span className={styles.labelMeta}>
-              <span className={`${styles.statusDot} ${STATUS_CLASS[status]}`} aria-hidden />
-              {ts('chat.sessionGraph.graphCount', { count: memberCount })}
-            </span>
+            {!nested ? (
+              <span className={styles.labelMeta}>
+                <span className={`${styles.statusDot} ${STATUS_CLASS[status]}`} aria-hidden />
+                {ts('chat.sessionGraph.graphCount', { count: memberCount })}
+              </span>
+            ) : null}
           </span>
         ) : null}
       </button>
@@ -410,152 +501,106 @@ function GraphRailItem({
 function FolderRailItem({
   entry,
   index,
+  nested = false,
   expanded,
-  heads,
+  revealed,
+  renaming,
   activeGraphId,
-  menuOpen,
   dropActive,
-  onOpenMenu,
-  onCloseMenu,
-  onOpenGraph,
+  lifted,
+  onRevealEnter,
+  onRevealLeave,
+  onCommitRename,
+  onCancelRename,
   onRemoveFolder,
-  onRemoveGraph,
-  onGraphPointerDown,
+  onFolderPointerDown,
   onPointerMove,
   onPointerUp,
+  renderChild,
 }: {
-  entry: Extract<SessionGraphRailEntry, { kind: 'folder' }>
-  index: number
+  entry: SessionGraphRailFolderEntry
+  index?: number
+  nested?: boolean
   expanded: boolean
-  heads: ChatSessionHead[]
+  revealed: boolean
+  renaming: boolean
   activeGraphId: string | null
-  menuOpen: boolean
   dropActive: boolean
-  onOpenMenu: () => void
-  onCloseMenu: () => void
-  onOpenGraph: (graphId: string) => void
+  lifted: boolean
+  onRevealEnter: () => void
+  onRevealLeave: () => void
+  onCommitRename: (title: string) => void
+  onCancelRename: () => void
   onRemoveFolder: () => void
-  onRemoveGraph: (graphId: string) => void
-  onGraphPointerDown: Props['onGraphPointerDown']
+  onFolderPointerDown: Props['onFolderPointerDown']
   onPointerMove: Props['onPointerMove']
   onPointerUp: Props['onPointerUp']
+  renderChild: (child: SessionGraphRailEntry) => ReactNode
 }) {
   const { ts } = useI18n()
   const title = entry.title.trim() || ts('chat.sessionGraph.folderUntitled')
-  const containsActive = entry.graphIds.includes(activeGraphId ?? '')
-
-  if (expanded) {
-    return (
-      <div
-        className={`${styles.folderBlock} ${dropActive ? styles.itemDropTarget : ''}`}
-        data-rail-entry-index={index}
-        data-session-graph-drop="folder"
-        data-folder-id={entry.id}
-      >
-        <div className={styles.itemWrap}>
-          <button
-            type="button"
-            className={`${styles.item} ${styles.folderHeader} ${
-              containsActive ? styles.itemActive : ''
-            }`}
-            aria-label={title}
-            title={title}
-          >
-            <span className={styles.icon}>
-              <Folder size={18} strokeWidth={2} aria-hidden />
-            </span>
-            <span className={styles.label}>
-              <span className={styles.labelTitle}>{title}</span>
-              <span className={styles.labelMeta}>
-                {ts('chat.sessionGraph.folderCount', { count: entry.graphIds.length })}
-              </span>
-            </span>
-          </button>
-          <button
-            type="button"
-            className={styles.deleteButton}
-            data-session-drag-ignore=""
-            aria-label={ts('chat.sessionGraph.removeFolder')}
-            title={ts('chat.sessionGraph.removeFolder')}
-            onClick={onRemoveFolder}
-          >
-            <X size={12} strokeWidth={2.25} aria-hidden />
-          </button>
-        </div>
-        <div className={styles.folderChildren}>
-          {entry.graphIds.map((graphId) => {
-            const graphTitle = graphRailTitle(heads, graphId, ts('chat.history.untitled'))
-            const rep = pickGraphRepresentative(heads, graphId)
-            const task = classifySessionTask(graphTitle, rep?.responsibility)
-            const TaskIcon = TASK_ICON[task]
-            return (
-              <div
-                key={graphId}
-                className={styles.itemWrap}
-                data-session-graph-drop="graph"
-                data-graph-id={graphId}
-              >
-                <button
-                  type="button"
-                  className={`${styles.item} ${styles.folderChild} ${
-                    graphId === activeGraphId ? styles.itemActive : ''
-                  }`}
-                  data-task={task}
-                  aria-current={graphId === activeGraphId ? 'true' : undefined}
-                  aria-label={graphTitle}
-                  title={graphTitle}
-                  onClick={() => onOpenGraph(graphId)}
-                  onPointerDown={(event) => onGraphPointerDown(event, graphId, graphTitle)}
-                  onPointerMove={onPointerMove}
-                  onPointerUp={onPointerUp}
-                  onPointerCancel={onPointerUp}
-                >
-                  <span className={styles.icon}>
-                    <TaskIcon size={16} strokeWidth={2} aria-hidden />
-                  </span>
-                  <span className={styles.label}>
-                    <span className={styles.labelTitle}>{graphTitle}</span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.deleteButton}
-                  data-session-drag-ignore=""
-                  aria-label={ts('chat.sessionGraph.removeGraph')}
-                  title={ts('chat.sessionGraph.removeGraph')}
-                  onClick={() => onRemoveGraph(graphId)}
-                >
-                  <X size={12} strokeWidth={2.25} aria-hidden />
-                </button>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    )
-  }
+  const containsActive = folderContainsActive(entry, activeGraphId)
+  const itemCount = countFolderItems(entry)
+  const showOpen = expanded && (revealed || renaming)
 
   return (
-    <div className={styles.folderCollapsedWrap} data-rail-entry-index={index}>
-      <div
-        className={`${styles.itemWrap} ${dropActive ? styles.itemDropTarget : ''}`}
-        data-session-graph-drop="folder"
-        data-folder-id={entry.id}
-      >
+    <div
+      className={`${styles.folderBlock} ${dropActive ? styles.itemDropTarget : ''} ${
+        showOpen ? styles.folderBlockRevealed : ''
+      } ${lifted ? styles.itemLifted : ''}`}
+      data-rail-entry-index={index}
+      data-rail-nested={nested ? 'true' : undefined}
+      data-session-graph-drop="folder"
+      data-folder-id={entry.id}
+      data-folder-revealed={showOpen ? 'true' : 'false'}
+      onPointerEnter={onRevealEnter}
+      onPointerLeave={onRevealLeave}
+    >
+      <div className={styles.itemWrap}>
         <button
           type="button"
-          className={`${styles.item} ${containsActive ? styles.itemActive : ''}`}
+          className={`${styles.item} ${styles.folderHeader} ${
+            nested ? styles.folderChild : ''
+          } ${containsActive ? styles.itemActive : ''}`}
           aria-label={title}
           title={title}
-          aria-expanded={menuOpen}
-          onClick={onOpenMenu}
+          aria-expanded={showOpen}
+          onPointerDown={(event) => onFolderPointerDown(event, entry.id, title)}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
         >
           <span className={styles.icon}>
-            <Folder size={18} strokeWidth={2} aria-hidden />
+            <span className={`${styles.folderIcon} ${showOpen ? styles.folderIconHidden : ''}`}>
+              <Folder size={nested ? 16 : 18} strokeWidth={2} aria-hidden />
+            </span>
+            <span
+              className={`${styles.folderIcon} ${styles.folderIconOpen} ${
+                showOpen ? '' : styles.folderIconHidden
+              }`}
+            >
+              <FolderOpen size={nested ? 16 : 18} strokeWidth={2} aria-hidden />
+            </span>
           </span>
-          {entry.graphIds.length > 0 ? (
+          {expanded ? (
+            renaming ? (
+              <FolderRenameField
+                initialValue={entry.title}
+                ariaLabel={ts('chat.sessionGraph.renameFolder')}
+                onCommit={onCommitRename}
+                onCancel={onCancelRename}
+              />
+            ) : (
+              <span className={styles.label}>
+                <span className={styles.labelTitle}>{title}</span>
+                <span className={styles.labelMeta}>
+                  {ts('chat.sessionGraph.folderCount', { count: itemCount })}
+                </span>
+              </span>
+            )
+          ) : itemCount > 0 ? (
             <span className={styles.folderBadge} aria-hidden>
-              {entry.graphIds.length}
+              {itemCount}
             </span>
           ) : null}
         </button>
@@ -570,36 +615,82 @@ function FolderRailItem({
           <X size={12} strokeWidth={2.25} aria-hidden />
         </button>
       </div>
-      {menuOpen ? (
-        <div className={styles.folderMenu} data-rail-folder-menu="" role="menu">
-          <div className={styles.folderMenuTitle}>{title}</div>
-          {entry.graphIds.length === 0 ? (
-            <div className={styles.folderMenuEmpty}>{ts('chat.sessionGraph.folderEmpty')}</div>
-          ) : (
-            entry.graphIds.map((graphId) => {
-              const graphTitle = graphRailTitle(heads, graphId, ts('chat.history.untitled'))
-              return (
-                <button
-                  key={graphId}
-                  type="button"
-                  className={styles.folderMenuItem}
-                  role="menuitem"
-                  onClick={() => onOpenGraph(graphId)}
-                >
-                  {graphTitle}
-                </button>
-              )
-            })
-          )}
-          <button
-            type="button"
-            className={styles.folderMenuDismiss}
-            onClick={onCloseMenu}
-          >
-            {ts('chat.sessionGraph.folderDismiss')}
-          </button>
+      {expanded ? (
+        <div
+          className={`${styles.folderChildren} ${showOpen ? styles.folderChildrenOpen : ''}`}
+          data-folder-children=""
+        >
+          <div className={styles.folderChildrenInner}>
+            {entry.children.length === 0 ? (
+              <div className={styles.folderEmpty}>{ts('chat.sessionGraph.folderEmpty')}</div>
+            ) : (
+              entry.children.map((child) => renderChild(child))
+            )}
+          </div>
         </div>
       ) : null}
     </div>
+  )
+}
+
+function FolderRenameField({
+  initialValue,
+  ariaLabel,
+  onCommit,
+  onCancel,
+}: {
+  initialValue: string
+  ariaLabel: string
+  onCommit: (title: string) => void
+  onCancel: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const [value, setValue] = useState(initialValue)
+  const committedRef = useRef(false)
+
+  useEffect(() => {
+    const input = inputRef.current
+    if (!input) return
+    input.focus()
+    input.select()
+  }, [])
+
+  const commit = () => {
+    if (committedRef.current) return
+    committedRef.current = true
+    onCommit(value)
+  }
+
+  const cancel = () => {
+    if (committedRef.current) return
+    committedRef.current = true
+    onCancel()
+  }
+
+  return (
+    <form
+      className={styles.renameForm}
+      data-session-drag-ignore=""
+      onSubmit={(event: FormEvent) => {
+        event.preventDefault()
+        commit()
+      }}
+    >
+      <input
+        ref={inputRef}
+        className={styles.renameInput}
+        value={value}
+        aria-label={ariaLabel}
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            event.stopPropagation()
+            cancel()
+          }
+        }}
+      />
+    </form>
   )
 }

@@ -6,8 +6,10 @@ import {
   classifyMacHostApp,
   createArrowStroke,
   createDraftSpatialPin,
+  emptyPinComposerHub,
   headFromSpatialPin,
   normalizeSpatialPinUrl,
+  PinComposerHubSchema,
   SpatialPinSchema,
 } from "./spatial-pin.js";
 
@@ -152,5 +154,64 @@ describe("spatial-pin contracts", () => {
     expect(content).toContain("arrow=#2");
     expect(content).toContain("anchor=left");
     expect(content).toContain("color=#4c7dff");
+  });
+
+  it("round-trips compose hub and embeds hub lines in user content", () => {
+    const hub = PinComposerHubSchema.parse({
+      ...emptyPinComposerHub(),
+      researchEnabled: true,
+      repo: { label: "acme/app", branch: "main" },
+      folders: ["app/builder"],
+      skillIds: ["motion"],
+      references: [
+        {
+          kind: "image",
+          id: "ref_1",
+          assetPath: ".projectos/spatial-pins/assets/x.png",
+        },
+        {
+          kind: "github",
+          id: "ref_gh",
+          url: "https://github.com/acme/design-system",
+          owner: "acme",
+          repo: "design-system",
+          label: "acme/design-system",
+        },
+        {
+          kind: "url",
+          id: "ref_url",
+          url: "https://docs.example.com/api",
+          label: "docs.example.com",
+        },
+      ],
+      subagents: [
+        { id: "s1", name: "Explorer", brief: "Map files", enabled: true },
+      ],
+    });
+    const pin = createDraftSpatialPin({
+      id: "pin_hub",
+      projectId: "proj_1",
+      location: {
+        surface: "workspace",
+        url: "spatial://workspace/%2Ftmp%2Fdemo",
+        workspacePath: "/tmp/demo",
+      },
+    });
+    pin.composer.prompt = "Create a night sky";
+    pin.composer.hub = hub;
+    const parsed = SpatialPinSchema.parse(pin);
+    expect(parsed.composer.hub?.skillIds).toEqual(["motion"]);
+    const content = buildSpatialPinUserContent(parsed);
+    expect(content).toContain("## Compose hub");
+    expect(content).toContain("hub.repo=acme/app @main");
+    expect(content).toContain("hub.scopes=app/builder");
+    expect(content).toContain("hub.skills=motion");
+    expect(content).toContain("hub.research=enabled");
+    expect(content).toContain("Explorer");
+    expect(content).toContain("## External references (persistent context)");
+    expect(content).toContain("GitHub reference");
+    expect(content).toContain("https://github.com/acme/design-system");
+    expect(content).toContain("Website reference");
+    expect(content).toContain("https://docs.example.com/api");
   });
 });

@@ -98,7 +98,7 @@ source of truth：
 
 必需：
 
-- workflow preset marketplace 或 curated library。
+- Capability Marketplace 六类已落地（MCP / Skill / Rules / Agent / Workflow / Stencil；权威切片见 [`features/Capability-Marketplace-Dev-Plan.md`](features/Capability-Marketplace-Dev-Plan.md)）。
 - multi-agent orchestration。
 - project memory versioning。
 - advanced architecture views。
