@@ -11,10 +11,11 @@
 3. **Scripted executor** `PROJECTOS_SCRIPTED_REQUEST_DECISION=1` calls production `host.requestDecision` before proposal (dev/demo harness, not private orchestrator intent injection).
 4. **Public Agent approve → decision → same-run proposal** (`intent.test.ts`): extract → approve → prepare → confirm → `listRunDecisions` pending → `resolveRunDecision` → `awaiting_review` + scripted marker diff; no model call.
 
-## Desktop Electron (private evidence)
-- Isolated userData; daily Chromium userData meta stable.
-- Product preload IPC: openWorkspace → listExecutors(scripted) → extract/approve/prepare/confirm → resolveRunDecision → same-run `awaiting_review` + proposal bytes; file unchanged until apply.
-- **Gap (explicit):** `PendingRunDecisions` DOM card did not mount for IPC-started runs (store must own the run via composer). Card `onResolve` shares the same `resolveRunDecision` product API proven above. Composer-path card click still **未证** this head; DeepSeek live `requestDecision` deferred until card path is store-owned (ledger 30/35 untouched, HTTP Δ=0).
+## Desktop Electron (private evidence under `_private_r5_evidence/`)
+- Isolated userData; daily Chromium userData meta stable (both probes).
+- Product preload IPC decision path: openWorkspace → listExecutors(scripted) → extract/approve/prepare/confirm → resolveRunDecision → same-run `awaiting_review` + proposal; file unchanged until apply.
+- Product preload IPC Settings/Diff verify: empty command + out-of-range timeout **rejected** on `updateSettings`; valid command saved; Diff-approved `runVerification` success/`passed`, non-zero/`failed`, timeout/`failed+timedOut`, cancelAgentRun abort/`failed` (not false passed/not_run).
+- **Gaps (explicit):** `PendingRunDecisions` **DOM card Continue** still Partial (store-owned composer run); Settings **chrome** open thin; product preview/build/test **UX** entry 未测; uncertain desktop apply/undo + Electron restart 未测. DeepSeek live `requestDecision` deferred (ledger 30/35 untouched, HTTP Δ=0).
 
 ## Still not stage acceptance
-Ask global tool-loop Partial by design (progress.md); 3 UX reds locked; desktop Settings/Diff verify UI + preview/build/test product UX + uncertain desktop apply/undo + restart Electron still **未测 / thin** vs product entry this batch. Continue next.
+Ask global tool-loop Partial by design; 3 UX reds locked; above desktop gaps remain. **Not 交验.**
