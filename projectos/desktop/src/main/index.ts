@@ -25,7 +25,11 @@ import { startSpatialPinBridge, stopSpatialPinBridge } from './spatialPinBridge.
 loadDesktopEnvFiles()
 // Must run before ready / any Chromium persistence so FileSecretStore and
 // session paths cannot silently fall back to the daily profile.
-applyIsolatedUserDataPath(app)
+const isolation = applyIsolatedUserDataPath(app)
+if (isolation.abortBootstrap) {
+  // app.exit was already requested; do not register IPC, windows, or quit hooks.
+  console.error('[projectos] Aborting desktop bootstrap after isolation failure')
+} else {
 installParentExitGuard()
 
 function resolveInitialWorkspacePath(): string | undefined {
@@ -92,3 +96,4 @@ app.on('before-quit', (event) => {
   stopSpatialPinBridge()
   quitCoordinator.handleBeforeQuit(event)
 })
+}

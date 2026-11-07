@@ -11,7 +11,11 @@ import { WorkspaceTransactionCoordinator } from '../../../services/workspace-tra
 import { DependencyImpactScanner } from '../../../services/dependency-impact-scanner.js'
 import { join } from 'node:path'
 import { assertAllowedExternalUrl } from './externalUrlPolicy.js'
-import { resolveSampleWorkspaceRoot, resolveUserDataPath } from './paths.js'
+import {
+  resolveSampleWorkspaceRoot,
+  resolveSecretsUserDataPath,
+  resolveUserDataPath,
+} from './paths.js'
 
 let service: ProjectOSLocalApi | null = null
 
@@ -20,6 +24,10 @@ export function getProjectOsService(): ProjectOSLocalApi {
     const workspaceStore = new ProjectOSWorkspaceStore()
     const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel()
     const userDataPath = resolveUserDataPath()
+    // Secrets may use a separate supported root (PROJECTOS_SECRETS_USER_DATA)
+    // so isolated Chromium profiles can reuse configured API key refs without
+    // copying the daily profile/session tree or dumping secret values.
+    const secretsUserDataPath = resolveSecretsUserDataPath()
     service = new ProjectOSLocalApi({
       // The scripted executor needs no model, so it ships only in development
       // builds, or in a demo build that sets PROJECTOS_SCRIPTED_EXECUTOR=1.
@@ -27,7 +35,7 @@ export function getProjectOsService(): ProjectOSLocalApi {
         scripted: !app.isPackaged || process.env.PROJECTOS_SCRIPTED_EXECUTOR === '1',
       }),
       sampleWorkspaceRoot: resolveSampleWorkspaceRoot(),
-      secretStore: new FileSecretStore(userDataPath),
+      secretStore: new FileSecretStore(secretsUserDataPath),
       verificationCommandApprovalStore: new FileVerificationCommandApprovalStore(userDataPath),
       auditDirectory: join(userDataPath, 'governance-audit'),
       requireDurableApprovals: true,

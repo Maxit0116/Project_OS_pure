@@ -1,15 +1,27 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   applyIsolatedUserDataPath,
+  canonicalizePath,
   defaultProjectOsUserDataPath,
+  isForbiddenProfilePath,
   parseUserDataDirFromArgv,
+  pathIsInsideOrEqual,
   pathsEqual,
   resolveConfiguredUserDataDir,
   type ElectronPathApp,
+  type ElectronPathName,
 } from './applyIsolatedUserDataPath.js'
 
 const tempRoots: string[] = []
@@ -34,13 +46,16 @@ function mockApp(initialUserData: string): ElectronPathApp & {
   const paths: Record<string, string> = {
     userData: initialUserData,
     sessionData: initialUserData,
+    logs: join(initialUserData, 'logs'),
+    crashDumps: join(initialUserData, 'Crashpad'),
+    temp: join(initialUserData, 'tmp'),
   }
   return {
     paths,
-    getPath(name) {
+    getPath(name: ElectronPathName) {
       return paths[name]!
     },
-    setPath(name, path) {
+    setPath(name: ElectronPathName, path: string) {
       paths[name] = path
     },
     exit: vi.fn(),
@@ -63,10 +78,10 @@ describe('applyIsolatedUserDataPath', () => {
     expect(pathsEqual(resolved!.path, '/tmp/from-env')).toBe(true)
   })
 
-  it('sets userData and sessionData before ready and writes marker', () => {
+  it('sets userData/session/logs/crash/temp before ready and writes marker', () => {
     const isolate = tempDir()
     const home = tempDir()
-    const daily = defaultProjectOsUserDataPath(home)
+    const daily = defaultProjectOsUserDataPath(home, 'darwin')
     const app = mockApp(daily)
     const result = applyIsolatedUserDataPath(app, {
       env: {
@@ -76,41 +91,45 @@ describe('applyIsolatedUserDataPath', () => {
       },
       argv: ['node', 'app'],
       homeDir: home,
+      platformName: 'darwin',
       now: () => new Date('2026-11-07T10:00:00.000Z'),
     })
     expect(result.applied).toBe(true)
+    expect(result.abortBootstrap).toBe(false)
     expect(result.rejectedReason).toBeNull()
-    expect(app.paths.userData).toBe(isolate)
-    expect(app.paths.sessionData).toBe(isolate)
+    expect(canonicalizePath(app.paths.userData)).toBe(canonicalizePath(isolate))
+    expect(canonicalizePath(app.paths.sessionData)).toBe(canonicalizePath(isolate))
+    expect(app.paths.logs).toContain(join('logs'))
+    expect(app.paths.crashDumps).toContain('Crashpad')
     expect(app.exit).not.toHaveBeenCalled()
     const marker = JSON.parse(
       readFileSync(join(isolate, 'projectos-isolation-marker.json'), 'utf8'),
-    ) as { effectivePath: string; source: string }
-    expect(marker.effectivePath).toBe(isolate)
-    expect(marker.source).toBe('env')
+    ) as { getPathSnapshot: Record<string, string>; redirectedPaths: Record<string, string> }
+    expect(marker.getPathSnapshot.userData).toBeTruthy()
+    expect(marker.redirectedPaths.logs).toContain('logs')
   })
 
-  it('exits when isolation is required but no override is configured', () => {
+  it('exits and aborts when isolation is required but no override is configured', () => {
     const home = tempDir()
-    const daily = defaultProjectOsUserDataPath(home)
+    const daily = defaultProjectOsUserDataPath(home, 'darwin')
     const app = mockApp(daily)
     const result = applyIsolatedUserDataPath(app, {
       env: { PROJECTOS_REQUIRE_ISOLATED_USER_DATA: 'true' },
       argv: ['node', 'app'],
       homeDir: home,
+      platformName: 'darwin',
       log: () => undefined,
     })
     expect(result.applied).toBe(false)
+    expect(result.abortBootstrap).toBe(true)
     expect(result.rejectedReason).toMatch(/neither PROJECTOS_USER_DATA_DIR/)
     expect(app.exit).toHaveBeenCalledWith(2)
   })
 
-  it('exits when required isolation still resolves to the daily profile', () => {
+  it('rejects daily path equality before mkdir and does not create the daily dir', () => {
     const home = tempDir()
-    const daily = defaultProjectOsUserDataPath(home)
-    const app = mockApp(daily)
-    // Force setPath to be a no-op so effective path stays daily.
-    app.setPath = () => undefined
+    const daily = defaultProjectOsUserDataPath(home, 'darwin')
+    const app = mockApp(join(home, 'other-initial'))
     const result = applyIsolatedUserDataPath(app, {
       env: {
         PROJECTOS_USER_DATA_DIR: daily,
@@ -118,9 +137,68 @@ describe('applyIsolatedUserDataPath', () => {
       },
       argv: ['node', 'app'],
       homeDir: home,
+      platformName: 'darwin',
       log: () => undefined,
     })
-    expect(result.rejectedReason).toMatch(/daily projectos-desktop profile/)
+    expect(result.abortBootstrap).toBe(true)
+    expect(result.applied).toBe(false)
     expect(app.exit).toHaveBeenCalledWith(2)
+    // Must not mkdir the forbidden daily root as a side effect of rejection.
+    expect(existsSync(daily)).toBe(false)
+  })
+
+  it('rejects a subdirectory of the daily profile root', () => {
+    const home = tempDir()
+    const daily = defaultProjectOsUserDataPath(home, 'darwin')
+    mkdirSync(daily, { recursive: true })
+    const nested = join(daily, 'nested-probe')
+    const app = mockApp(join(home, 'other'))
+    const result = applyIsolatedUserDataPath(app, {
+      env: {
+        PROJECTOS_USER_DATA_DIR: nested,
+        PROJECTOS_REQUIRE_ISOLATED_USER_DATA: '1',
+      },
+      argv: ['node', 'app'],
+      homeDir: home,
+      platformName: 'darwin',
+      log: () => undefined,
+    })
+    expect(result.abortBootstrap).toBe(true)
+    expect(result.rejectedReason).toMatch(/nest under the daily profile/)
+    expect(existsSync(nested)).toBe(false)
+  })
+
+  it('rejects a symlink whose realpath is the daily profile', () => {
+    const home = tempDir()
+    const daily = defaultProjectOsUserDataPath(home, 'darwin')
+    mkdirSync(daily, { recursive: true })
+    const linkParent = tempDir()
+    const link = join(linkParent, 'alias-userdata')
+    symlinkSync(daily, link)
+    expect(pathIsInsideOrEqual(link, daily)).toBe(true)
+    const app = mockApp(join(home, 'other'))
+    const result = applyIsolatedUserDataPath(app, {
+      env: {
+        PROJECTOS_USER_DATA_DIR: link,
+        PROJECTOS_REQUIRE_ISOLATED_USER_DATA: '1',
+      },
+      argv: ['node', 'app'],
+      homeDir: home,
+      platformName: 'darwin',
+      log: () => undefined,
+    })
+    expect(result.abortBootstrap).toBe(true)
+    expect(result.rejectedReason).toMatch(/symlink|daily profile/)
+  })
+
+  it('path helpers treat realpath aliases as equal', () => {
+    const root = tempDir()
+    const real = join(root, 'real')
+    mkdirSync(real, { recursive: true })
+    writeFileSync(join(real, 'x'), '1')
+    const link = join(root, 'link')
+    symlinkSync(real, link)
+    expect(pathsEqual(link, real)).toBe(true)
+    expect(isForbiddenProfilePath(join(link, 'child'), [real]).forbidden).toBe(true)
   })
 })
