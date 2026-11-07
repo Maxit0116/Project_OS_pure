@@ -46,6 +46,75 @@ function copySampleWorkspace(): string {
 }
 
 describe("agent runs after restart", () => {
+  it("awaiting_review snapshot with backup does not replay writes on openWorkspace", async () => {
+    const workspaceRoot = copySampleWorkspace();
+    const project = JSON.parse(
+      readFileSync(join(workspaceRoot, ".projectos", "project.json"), "utf8"),
+    ) as { projectId: string };
+    const runsDir = join(workspaceRoot, ".projectos", "agent-runs");
+    mkdirSync(runsDir, { recursive: true });
+    const runId = "run_disk_awaiting_review";
+    // Same durable shape as the running→interrupted fixture, but snapshot was
+    // still awaiting_review when the process died (apply already on disk).
+    writeFileSync(join(runsDir, `${runId}.jsonl`), [
+      JSON.stringify({
+        eventId: "evt_1",
+        runId,
+        timestamp: "2026-10-20T00:00:00.000Z",
+        type: "run_started",
+      }),
+      JSON.stringify({
+        eventId: "evt_2",
+        runId,
+        timestamp: "2026-10-20T00:00:01.000Z",
+        type: "apply_result",
+        payload: {
+          filesWritten: ["app/login/page.tsx"],
+          backupId: "backup-awaiting-review",
+          outcome: "applied",
+        },
+      }),
+      "{not-json",
+      "",
+    ].join("\n"), "utf8");
+    writeFileSync(join(runsDir, `${runId}.run.json`), `${JSON.stringify({
+      runId,
+      projectId: project.projectId,
+      kind: "feature_change",
+      status: "awaiting_review",
+      relatedNodeIds: ["feat_login"],
+      relatedFiles: ["app/login/page.tsx"],
+      scope: {
+        kind: "leaf-file",
+        nodeId: "feat_login",
+        filePath: "app/login/page.tsx",
+      },
+      role: "leaf_file_editor",
+      rootRunId: runId,
+      startedAt: "2026-10-20T00:00:00.000Z",
+    })}\n`, "utf8");
+
+    const pagePath = join(workspaceRoot, "app/login/page.tsx");
+    const before = readFileSync(pagePath, "utf8");
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: workspaceRoot });
+    await api.openWorkspace(workspaceRoot);
+
+    const run = await api.getAgentRun(runId);
+    expect(run.status).toBe("interrupted");
+    const firstApply = await api.applyDiff(runId);
+    const secondApply = await api.applyDiff(runId);
+    expect(firstApply).toMatchObject({
+      applied: true,
+      backupId: "backup-awaiting-review",
+      outcome: "applied",
+    });
+    expect(secondApply).toEqual(firstApply);
+    expect(readFileSync(pagePath, "utf8")).toBe(before);
+    await expect(api.continueAgentRun(runId)).rejects.toMatchObject({
+      code: "diff_apply_failed",
+    });
+  });
+
   it("reads an interrupted run, returns the existing apply, and pauses its loop", async () => {
     const workspaceRoot = copySampleWorkspace();
     const project = JSON.parse(

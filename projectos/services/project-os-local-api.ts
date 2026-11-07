@@ -659,6 +659,7 @@ export interface VerificationRunnerDependency {
   run(
     commands: ExecCommand[],
     cwd: string,
+    signal?: AbortSignal,
   ): Promise<Array<VerificationCommandResult & { toolResult?: ToolResult }>>;
 }
 
@@ -932,6 +933,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly agentMemoryRoot: string | undefined;
   private readonly memoryProposalDelayMs: number;
   private readonly memoryProposalTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** In-flight Diff/API verification aborts keyed by runId (cancelAgentRun clears wait). */
+  private readonly verificationAbortByRunId = new Map<string, AbortController>();
   private readonly orchestrator: AgentOrchestrator;
   /** Agent Pool index context keyed by runId (definition / pool / session). */
   private readonly agentPoolRunContextByRunId = new Map<
@@ -4736,6 +4739,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   }
 
   async cancelAgentRun(runId: string): Promise<AgentRun> {
+    const verificationAbort = this.verificationAbortByRunId.get(runId);
+    if (verificationAbort && !verificationAbort.signal.aborted) {
+      verificationAbort.abort();
+    }
     const orchestratorCancelled = this.orchestrator.cancelRun(runId);
     if (orchestratorCancelled) {
       const workspace = this.workspacesByProjectId.get(orchestratorCancelled.run.projectId);
@@ -5584,7 +5591,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     if (alreadyApplied) return alreadyApplied;
     if (!this.orchestrator.getRun(runId)) {
       const disk = this.loadDiskRun(runId);
-      if (disk?.log.applyResult && disk.log.terminalStatus) {
+      // Durable apply already on disk — return it whether reconcile has stamped a
+      // terminal status yet or the snapshot is still awaiting_review/interrupted.
+      // Never fall through to fixture scenario replay for an existing backup.
+      if (disk?.log.applyResult) {
         return disk.log.applyResult;
       }
     }
@@ -5969,11 +5979,18 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         "Verification execution is not available in this runtime",
       );
     }
+    const previousAbort = this.verificationAbortByRunId.get(runId);
+    if (previousAbort && !previousAbort.signal.aborted) {
+      previousAbort.abort();
+    }
+    const abortController = new AbortController();
+    this.verificationAbortByRunId.set(runId, abortController);
     let commandResults;
     try {
       commandResults = await this.verificationRunner.run(
         commands,
         workspace.workspaceRoot,
+        abortController.signal,
       );
     } catch (error) {
       if (error instanceof ProjectOSError && error.code === "tool_policy_denied") {
@@ -6001,6 +6018,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         });
       }
       throw error;
+    } finally {
+      if (this.verificationAbortByRunId.get(runId) === abortController) {
+        this.verificationAbortByRunId.delete(runId);
+      }
     }
     return this.finishVerificationEvidence(runId, workspace, {
       commands: commandResults.map((result) => ({

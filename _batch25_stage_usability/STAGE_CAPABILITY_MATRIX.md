@@ -17,14 +17,14 @@ Evidence layers (do not mix):
 | Ask grounding + context | Usable | Ask scoped to node/file | Cites in-bundle files; secrets withheld | Global Ask: 0 files by design | S1 live | **Partial**: global Ask has no tool-loop (documented, not a silent hole) |
 | Plan clarify → execute handoff | Usable | Plan mode → approve → Agent | Intent card → run | Clarification pause | Unit + prior desktop | OK foundation; live same-session re-prove = budget |
 | Agent tools / delegate / scope auth | Usable | Agent hierarchical plan | Scoped child writes only | OOS / cross-run steal fail-closed | Batch O LocalApi | OK (reuse) |
-| File ops / verify commands | Usable | Apply + Diff verification approval + General settings editor | Commands run after approve; fail/timeout honest | empty/timeout rejected on save; not false passed/not_run | S2/S3; **R3** settings draft validate + Diff-approved timeout | Settings validate + Diff-approved timeout proven; cancel-during-verify still thin |
-| Preview / build / test | Stage S0/fixtures | fixtures + desktop build + sample tsc | Gates green except known UX reds | — | Prior trusted gates | Re-run this batch after code change |
+| File ops / verify commands | Usable | Apply + Diff verification approval + General settings editor | Commands run after approve; fail/timeout/cancel honest | empty/timeout rejected on save; not false passed/not_run | S2/S3; **R3** settings+timeout; **R4** non-zero exit + cancelAgentRun abort | Diff-approved success/fail/timeout/cancel proven via product runner |
+| Preview / build / test | Stage S0/fixtures | fixtures + desktop build + sample tsc | Gates green except known UX reds | — | **R4** trusted gates on this head | Expected 3 UX reds; not acceptance |
 | Diff Auto commit | Usable when criteria fully satisfied | `changeExecutionPolicy=automatic` | Write + backup | Cancel@barrier / budget → no write | Batch O/Q + automatic-path suite | OK |
 | Diff review_first | Usable | `review_first` | Stops at awaiting_review | User applies | Unit/API | OK |
-| Uncertain criteria policy | **Must not hard-fail / must not Auto-commit** | Batch / leaf proposal / greenfield prepare | `verdict=valid` + `awaiting_review` + `reason=uncertain_criteria` | Unsatisfied still hard-fail | **R** delegated; **R3** leaf apply/undo; greenfield live-binding expire + cancel revoke | **Whole-tree uncertain apply loop still not separately proven** |
+| Uncertain criteria policy | **Must not hard-fail / must not Auto-commit** | Batch / leaf / whole-tree / greenfield | `verdict=valid` + `awaiting_review` + `reason=uncertain_criteria` | Unsatisfied still hard-fail; expire/cancel refuse write | **R–R4** delegated+leaf+whole-tree+greenfield Auto pause→apply→undo; expire/cancel | OK for stage surfaces; not acceptance alone |
 | Backup / Undo honesty | Usable | Diff Undo / restoreApplyBackup | Bytes restored; chat no longer claims applied | Manual recovery message if restore fails | Batch Q real; Batch R message rewrite | OK |
 | Cancel / timeout / model fail / bad JSON / budget / run conflict | Usable fail-closed | Stop / cancelAgentRun / budget | No write; recoverable | Cross-run steal refused; **R3** cancel revokes awaiting_review apply | Batch O; **R3** greenfield cancel | OK (reuse + R3 revoke) |
-| Restart / history persist | Partial stage | Relaunch Electron / openWorkspace reconcile | Profiles persist; agent-run history kept; pending decisions durable without silent write resume | Corrupt lines isolated; legacy model_request normalized | S1; R2 recovery; **R3** decision restart no auto-write | Mid-run resume after process death still not silent auto-write (correct) |
+| Restart / history persist | Partial stage | Relaunch Electron / openWorkspace reconcile | Profiles persist; agent-run history kept; pending decisions durable without silent write resume | Corrupt lines isolated; legacy model_request normalized; **R4** awaiting_review+backup no replay | S1; R2/R3; **R4** product reopen | Mid-run resume after process death still not silent auto-write (correct) |
 | Mid-run pause → resume same run (H3) | **Usable same-process** | `requestDecision` + existing waiting-decision card | Create wait → card answer → same run continues; cancel/timeout supersede no write | Cross-ws/run/stale refused; restart answer ≠ write resume | **R3** orchestrator + LocalApi product path | **Implemented**; not stage acceptance alone |
 | S4 kill mid-run | Later gate | — | — | — | Not S3 deliverable | Out of this stage claim |
 | 3 UX contract reds | Locked expectations | fullgate | 3 reds expected | Prefer technical fix keeping visuals | Prior gates | **Unchanged**; do not weaken |
@@ -47,5 +47,10 @@ Evidence layers (do not mix):
 - Leaf uncertain Auto pause → human apply/backup/undo; greenfield expired live binding refuse; cancel awaiting_review revokes apply.
 - Child-fail `handleRunEvent` sanitize path test; verification command draft validate; Diff-approved real-runner timeout honest failed.
 
+## Batch R4 code deltas
+- Whole-tree + greenfield Auto uncertain pause → human apply/backup/undo.
+- `applyDiff` returns durable disk `applyResult` without requiring terminalStatus (no fixture replay after awaiting_review crash).
+- VerificationRunner/LocalApi AbortSignal; Diff-approved cancel + non-zero exit honesty.
+
 ## Readiness (not human acceptance)
-H3 same-process mid-run is usable; leaf uncertain + greenfield expire/cancel refuse-write proven. **Still not Terran acceptance**: whole-tree uncertain apply loop not separately proven; product preview/build/test re-gate pending this head; Ask global tool-loop by design; 3 UX reds locked; real-model budget only for representative E2E if needed.
+H3 same-process mid-run usable; uncertain surfaces (delegated/leaf/whole-tree/greenfield) pause→apply→undo proven; Diff verify success/fail/timeout/cancel honest; restart awaiting_review no replay. **Still not Terran acceptance**: Ask global tool-loop by design; 3 UX reds locked; real-model mid-run decision E2E only if budget remains after offline gates.

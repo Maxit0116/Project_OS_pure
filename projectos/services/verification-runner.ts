@@ -22,6 +22,7 @@ export class VerificationRunner {
   async run(
     commands: ExecCommand[],
     cwd: string,
+    signal?: AbortSignal,
   ): Promise<VerificationCommandExecution[]> {
     const policy = writeCapabilityContext({
       mode: "change",
@@ -29,6 +30,26 @@ export class VerificationRunner {
     });
     const results: VerificationCommandExecution[] = [];
     for (const command of commands) {
+      if (signal?.aborted) {
+        results.push({
+          command,
+          status: "failed",
+          exitCode: null,
+          durationMs: 0,
+          timedOut: false,
+          outputTruncated: false,
+          output: "Verification cancelled before the command started.",
+          toolResult: {
+            tool: "run_verification",
+            ok: false,
+            exitCode: null,
+            summary: "Verification cancelled before the command started.",
+            output: "",
+            truncated: false,
+          },
+        });
+        continue;
+      }
       const sandboxed = await runHarnessShell({
         workspaceRoot: cwd,
         command,
@@ -36,6 +57,7 @@ export class VerificationRunner {
         policyTool: "run_verification",
         sandboxApprovalResolved: true,
         policyAskResolved: true,
+        ...(signal ? { signal } : {}),
       });
       results.push({
         command: sandboxed.command,

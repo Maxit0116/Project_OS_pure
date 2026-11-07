@@ -1141,6 +1141,69 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     expect(result.results[0]).toMatchObject({ status: "failed", timedOut: true });
   });
 
+  it("Diff-approved verification: cancelAgentRun aborts in-flight command as failed, never false passed/not_run", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      verificationRunner: new VerificationRunner(),
+    });
+    const project = await api.openSampleWorkspace();
+    await api.updateSettings(project.projectId, {
+      verification: {
+        commands: [{
+          command: process.execPath,
+          args: ["-e", "setTimeout(() => {}, 15000)"],
+          timeoutMs: 20_000,
+        }],
+      },
+    });
+    await approveConfiguredVerification(api, project.projectId);
+    const refinement = await api.refinePrompt({
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawPrompt: "Add Google login and redirect users to profile after successful sign in.",
+    });
+    const run = await api.confirmExecution(refinement.id);
+    const pending = api.runVerification(run.runId);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await api.cancelAgentRun(run.runId);
+    const result = await pending;
+    expect(result.status).toBe("failed");
+    expect(result.status).not.toBe("passed");
+    expect(result.status).not.toBe("not_run");
+    expect(result.results[0]).toMatchObject({ status: "failed", timedOut: false });
+  });
+
+  it("Diff-approved verification: real runner non-zero exit is failed, never false passed/not_run", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      verificationRunner: new VerificationRunner(),
+    });
+    const project = await api.openSampleWorkspace();
+    await api.updateSettings(project.projectId, {
+      verification: {
+        commands: [{
+          command: process.execPath,
+          args: ["-e", "process.exit(2)"],
+          timeoutMs: 5_000,
+        }],
+      },
+    });
+    await approveConfiguredVerification(api, project.projectId);
+    const refinement = await api.refinePrompt({
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawPrompt: "Add Google login and redirect users to profile after successful sign in.",
+    });
+    const run = await api.confirmExecution(refinement.id);
+    const result = await api.runVerification(run.runId);
+    expect(result.status).toBe("failed");
+    expect(result.status).not.toBe("passed");
+    expect(result.status).not.toBe("not_run");
+    expect(result.results[0]).toMatchObject({ status: "failed", exitCode: 2, timedOut: false });
+  });
+
   it("settings reject empty verification command and out-of-range timeout", async () => {
     const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
     const project = await api.openSampleWorkspace();
@@ -2066,6 +2129,78 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     await api.cancelAgentRun(run.runId);
     await expect(api.applyDiff(run.runId)).rejects.toThrow();
     expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(0);
+    expect(greenfieldFilePaths().every((path) => !existsSync(join(tempWorkspaceRoot, path)))).toBe(true);
+  });
+
+  it("automatic path: greenfield uncertain criteria pause for review and write nothing", async () => {
+    const tempWorkspaceRoot = copyEmptyGraphWorkspace();
+    const store = new ProjectOSWorkspaceStore();
+    const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      workspaceStore: store,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new GreenfieldInitializationGateway({
+        uncertainCriteriaOnBatch: true,
+      }),
+      runEventPersistence: "memory",
+      writeTransactionRuntime: { module: writeTransactionModule, kernel },
+      workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(store, kernel),
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      rawRequest: "Initialize the complete product graph automatically.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
+    });
+    expect((await waitForRunStatus(api, run.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
+    const events = await api.getAgentRunEvents(run.runId);
+    expect(events.some((event) =>
+      event.type === "run_completed" &&
+      (event.payload as { reason?: string; outcome?: string } | undefined)?.reason ===
+        "uncertain_criteria" &&
+      (event.payload as { outcome?: string } | undefined)?.outcome ===
+        "greenfield_tranche_uncertain_awaiting_review"
+    )).toBe(true);
+    expect(events.some((event) => event.type === "apply_result")).toBe(false);
+    expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(0);
+    expect(greenfieldFilePaths().every((path) => !existsSync(join(tempWorkspaceRoot, path)))).toBe(true);
+  });
+
+  it("automatic path: greenfield uncertain human applyDiff writes backup and undoes", async () => {
+    const tempWorkspaceRoot = copyEmptyGraphWorkspace();
+    const store = new ProjectOSWorkspaceStore();
+    const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      workspaceStore: store,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new GreenfieldInitializationGateway({
+        uncertainCriteriaOnBatch: true,
+      }),
+      runEventPersistence: "memory",
+      writeTransactionRuntime: { module: writeTransactionModule, kernel },
+      workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(store, kernel),
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      rawRequest: "Initialize the complete product graph automatically.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
+    });
+    expect((await waitForRunStatus(api, run.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
+    const applied = await api.applyDiff(run.runId);
+    expect(applied.applied).toBe(true);
+    expect(applied.backupId).toBeTruthy();
+    expect(greenfieldFilePaths().some((path) => existsSync(join(tempWorkspaceRoot, path)))).toBe(true);
+    const restored = await api.restoreApplyBackup(project.projectId, applied.backupId!);
+    expect(restored.restored).toBe(true);
     expect(greenfieldFilePaths().every((path) => !existsSync(join(tempWorkspaceRoot, path)))).toBe(true);
   });
 
@@ -4539,6 +4674,90 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     }
   });
 
+  it("automatic path: whole-tree uncertain criteria pause for review and write nothing", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const before = new Map(delegatedPaths.map((filePath) => [
+      filePath,
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"),
+    ]));
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new RecursiveHierarchyGateway({ uncertainCriteriaOnWholeTree: true }),
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run: root } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      rawRequest: "Update login consistently across the product.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
+    });
+    expect((await waitForRunStatus(api, root.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
+    const events = await api.getAgentRunEvents(root.runId);
+    expect(events.some((event) =>
+      event.type === "batch_validation_result" && event.payload?.verdict === "valid"
+    )).toBe(true);
+    expect(events.some((event) =>
+      event.type === "run_completed" &&
+      (event.payload as { reason?: string; outcome?: string } | undefined)?.reason ===
+        "uncertain_criteria"
+    )).toBe(true);
+    expect(events.some((event) =>
+      event.type === "run_completed" &&
+      (event.payload as { outcome?: string } | undefined)?.outcome ===
+        "whole_tree_validated_uncertain_awaiting_review"
+    )).toBe(true);
+    expect(events.some((event) => event.type === "apply_result")).toBe(false);
+    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before.get(filePath));
+    }
+  });
+
+  it("automatic path: whole-tree uncertain human applyDiff writes backup and undoes", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const before = new Map(delegatedPaths.map((filePath) => [
+      filePath,
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"),
+    ]));
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new RecursiveHierarchyGateway({ uncertainCriteriaOnWholeTree: true }),
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run: root } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      rawRequest: "Update login consistently across the product.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
+    });
+    expect((await waitForRunStatus(api, root.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before.get(filePath));
+    }
+    const applied = await api.applyDiff(root.runId);
+    expect(applied.applied).toBe(true);
+    expect(applied.backupId).toBeTruthy();
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8"))
+        .not.toBe(before.get(filePath));
+    }
+    const restored = await api.restoreApplyBackup(project.projectId, applied.backupId!);
+    expect(restored.restored).toBe(true);
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before.get(filePath));
+    }
+  });
+
   it("keeps a failed whole-tree verification applied and undoable while erroring every run", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
@@ -5371,12 +5590,30 @@ function flattenSemanticPaths(tree: Awaited<ReturnType<ProjectOSLocalApi["getSem
 class GreenfieldInitializationGateway extends ModelGateway {
   readonly requests: ModelGatewayRequest[] = [];
   private batchCount = 0;
+  private readonly beforeSecondTrancheCommit?: () => void;
+  private readonly onValidateCreatedFile?: () => void;
+  private readonly uncertainCriteriaOnBatch: boolean;
 
   constructor(
-    private readonly beforeSecondTrancheCommit?: () => void,
-    private readonly onValidateCreatedFile?: () => void,
+    beforeSecondTrancheCommitOrOptions?: (() => void) | {
+      beforeSecondTrancheCommit?: () => void;
+      onValidateCreatedFile?: () => void;
+      uncertainCriteriaOnBatch?: boolean;
+    },
+    onValidateCreatedFile?: () => void,
   ) {
     super({ secretStore: new InMemorySecretStore() });
+    if (typeof beforeSecondTrancheCommitOrOptions === "function" || beforeSecondTrancheCommitOrOptions === undefined) {
+      this.beforeSecondTrancheCommit = beforeSecondTrancheCommitOrOptions;
+      this.onValidateCreatedFile = onValidateCreatedFile;
+      this.uncertainCriteriaOnBatch = false;
+    } else {
+      this.beforeSecondTrancheCommit = beforeSecondTrancheCommitOrOptions.beforeSecondTrancheCommit;
+      this.onValidateCreatedFile = beforeSecondTrancheCommitOrOptions.onValidateCreatedFile;
+      this.uncertainCriteriaOnBatch = Boolean(
+        beforeSecondTrancheCommitOrOptions.uncertainCriteriaOnBatch,
+      );
+    }
   }
 
   override async complete(
@@ -5450,6 +5687,7 @@ class GreenfieldInitializationGateway extends ModelGateway {
         ? input.delegationPlan.tasks
         : [];
       const evidence = Array.isArray(input.childEvidence) ? input.childEvidence : [];
+      const uncertain = this.uncertainCriteriaOnBatch;
       output = JSON.stringify({
         verdict: "valid",
         tasks: plan.map((rawTask, index) => {
@@ -5465,14 +5703,18 @@ class GreenfieldInitializationGateway extends ModelGateway {
             status: "consistent",
             criteria: criteria.map((criterion) => ({
               criterion,
-              status: "satisfied",
-              explanation: "The independently validated leaf satisfies this criterion.",
+              status: uncertain ? "uncertain" : "satisfied",
+              explanation: uncertain
+                ? "The validator cannot confirm this greenfield criterion from the available evidence."
+                : "The independently validated leaf satisfies this criterion.",
             })),
             summary: "The leaf is consistent with the tranche.",
           };
         }),
         crossFileAssessment: { status: "consistent", summary: "All tranche files are mutually consistent." },
-        summary: "The initialization tranche is valid.",
+        summary: uncertain
+          ? "The initialization tranche is reviewable but some criteria remain uncertain."
+          : "The initialization tranche is valid.",
         rationale: "Every server-derived task passed independent validation.",
       });
     } else {
@@ -6434,7 +6676,10 @@ class NodeDelegationGateway extends ModelGateway {
 class RecursiveHierarchyGateway extends ModelGateway {
   readonly requests: ModelGatewayRequest[] = [];
 
-  constructor(private readonly options: { onWholeTreeValidation?: () => void } = {}) {
+  constructor(private readonly options: {
+    onWholeTreeValidation?: () => void;
+    uncertainCriteriaOnWholeTree?: boolean;
+  } = {}) {
     super({ secretStore: new InMemorySecretStore() });
   }
 
@@ -6538,6 +6783,7 @@ class RecursiveHierarchyGateway extends ModelGateway {
         ? input.transactionPlan
         : undefined;
       const leaves = transactionPlan ? transactionPlan.leaves as unknown[] : [];
+      const uncertain = Boolean(this.options.uncertainCriteriaOnWholeTree);
       output = JSON.stringify({
         verdict: "valid",
         tasks: leaves.map((rawLeaf) => {
@@ -6552,8 +6798,10 @@ class RecursiveHierarchyGateway extends ModelGateway {
             status: "consistent",
             criteria: criteria.map((criterion) => ({
               criterion,
-              status: "satisfied",
-              explanation: "The leaf proposal satisfies this criterion.",
+              status: uncertain ? "uncertain" : "satisfied",
+              explanation: uncertain
+                ? "The validator cannot confirm this whole-tree criterion from the available evidence."
+                : "The leaf proposal satisfies this criterion.",
             })),
             summary: "The leaf is consistent with the whole-tree plan.",
           };
@@ -6562,7 +6810,9 @@ class RecursiveHierarchyGateway extends ModelGateway {
           status: "consistent",
           summary: "All recursively delegated leaves are mutually consistent.",
         },
-        summary: "The whole-tree batch is valid.",
+        summary: uncertain
+          ? "The whole-tree batch is reviewable but some criteria remain uncertain."
+          : "The whole-tree batch is valid.",
         rationale: "Every leaf and interface was reviewed as one transaction.",
       });
       this.options.onWholeTreeValidation?.();
