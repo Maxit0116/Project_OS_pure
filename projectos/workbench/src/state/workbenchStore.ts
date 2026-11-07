@@ -4336,7 +4336,23 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     try {
       const refinement = await client.buildPlan(pendingPlan.id)
       if (!isCurrentBuild()) return
-      set({ pendingRefinement: refinement, refinementConfirmed: false })
+      // buildPlan still returns PromptRefinement; surface model→deterministic
+      // fallback the same way the legacy refinePrompt path did (redacted system line).
+      set((current) => ({
+        pendingRefinement: refinement,
+        refinementConfirmed: false,
+        messages: refinement.fallback
+          ? [...current.messages, createFallbackChatMessage(refinement.fallback, current.locale)]
+          : current.messages,
+      }))
+      if (refinement.fallback) {
+        pushToast({
+          type: 'warning',
+          message: sanitizeErrorMessage(
+            refinement.fallback.providerMessage ?? refinement.fallback.message,
+          ),
+        })
+      }
       let started = false
       await get().confirmRefinement(undefined, () => {
         if (!isCurrentBuild()) return
