@@ -3173,15 +3173,17 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     const orch = getLocalApiInternals(api).orchestrator as unknown as {
       getRun(runId: string): {
         batchValidationResult?: unknown;
-        validatedBatchBinding?: string;
+        validatedBatchBinding?: string | undefined;
       } | undefined;
     };
     const stateNew = orch.getRun(newRun.runId);
     const stateOld = orch.getRun(oldRun.runId);
     expect(stateNew).toBeTruthy();
     expect(stateOld?.batchValidationResult).toBeTruthy();
+    const stolenBinding = stateOld!.validatedBatchBinding;
+    expect(stolenBinding).toEqual(expect.any(String));
     stateNew!.batchValidationResult = stateOld!.batchValidationResult;
-    stateNew!.validatedBatchBinding = stateOld!.validatedBatchBinding;
+    stateNew!.validatedBatchBinding = stolenBinding;
     await expect(api.applyDiff(newRun.runId)).rejects.toMatchObject({
       code: expect.stringMatching(/proposal_validation_failed|diff_scope_violation|operation_cancelled|run_not_found/),
     });
