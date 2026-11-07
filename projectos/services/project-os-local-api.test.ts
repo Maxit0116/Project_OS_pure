@@ -2955,7 +2955,6 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     };
     const orch = getLocalApiInternals(api).orchestrator as unknown as {
       nodeGroupExecution: GroupExec;
-      assertActiveForCommit(runId: string): void;
     };
     const original = orch.nodeGroupExecution;
     let releaseCommit!: () => void;
@@ -2963,21 +2962,34 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
       releaseCommit = resolve;
     });
     let enteredCommit = false;
-    let commitSawCancel: string | undefined;
+    let productionCommitError: string | undefined;
+    let productionCommitReturnedApplied: boolean | undefined;
+    let resolveCommitAttempt!: () => void;
+    const commitAttemptDone = new Promise<void>((resolve) => {
+      resolveCommitAttempt = resolve;
+    });
+    // Barrier only — must NOT call assertActiveForCommit here; production
+    // original.commit → beforeCommit owns the refuse-write gate.
     orch.nodeGroupExecution = {
       verify: (...args) => original.verify(...args),
       commit: async (...args) => {
         enteredCommit = true;
-        // Hold until the test's async cancelAgentRun is confirmed, then resume.
         await commitHeld;
-        const parentRun = args[1] as { runId?: string };
         try {
-          orch.assertActiveForCommit(String(parentRun?.runId ?? ""));
+          const result = await original.commit(...args);
+          productionCommitReturnedApplied = result.applied === true &&
+            result.outcome === "applied";
+          return result;
         } catch (error) {
-          commitSawCancel = error instanceof ProjectOSError ? error.code : "other";
+          productionCommitError = error instanceof ProjectOSError
+            ? error.code
+            : error instanceof Error
+              ? error.name
+              : "other";
           throw error;
+        } finally {
+          resolveCommitAttempt();
         }
-        return original.commit(...args);
       },
     };
 
@@ -2997,6 +3009,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     const cancelled = await api.cancelAgentRun(parent.runId);
     expect(cancelled.status).toBe("cancelled");
     releaseCommit();
+    await commitAttemptDone;
 
     const settleDeadline = Date.now() + 20_000;
     let settled = await api.getAgentRun(parent.runId);
@@ -3010,7 +3023,9 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
       settled = await api.getAgentRun(parent.runId);
     }
     expect(["cancelled", "error"]).toContain(settled.status);
-    expect(commitSawCancel).toBe("operation_cancelled");
+    // Production beforeCommit must refuse; wrapper must not have applied.
+    expect(productionCommitReturnedApplied).not.toBe(true);
+    expect(productionCommitError).toBe("operation_cancelled");
     expect((await api.getAgentRunEvents(parent.runId)).some((event) =>
       event.type === "apply_result" && event.payload?.outcome === "applied"
     )).toBe(false);
@@ -3040,7 +3055,6 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     };
     const orch = getLocalApiInternals(api).orchestrator as unknown as {
       nodeGroupExecution: GroupExec;
-      assertActiveForCommit(runId: string): void;
     };
     const original = orch.nodeGroupExecution;
     let releaseCommit!: () => void;
@@ -3048,13 +3062,21 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
       releaseCommit = resolve;
     });
     let enteredCommit = false;
+    let resolveCommitAttempt!: () => void;
+    const commitAttemptDone = new Promise<void>((resolve) => {
+      resolveCommitAttempt = resolve;
+    });
     orch.nodeGroupExecution = {
       verify: (...args) => original.verify(...args),
       commit: async (...args) => {
         enteredCommit = true;
         await commitHeld;
-        orch.assertActiveForCommit(String((args[1] as { runId?: string })?.runId ?? ""));
-        return original.commit(...args);
+        try {
+          // Production beforeCommit must refuse; wrapper does not pre-assert.
+          return await original.commit(...args);
+        } finally {
+          resolveCommitAttempt();
+        }
       },
     };
 
@@ -3075,6 +3097,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
 
     await api.cancelAgentRun(parent.runId);
     releaseCommit();
+    await commitAttemptDone;
     const settleDeadline = Date.now() + 20_000;
     let settled = await api.getAgentRun(parent.runId);
     while (
@@ -3090,12 +3113,149 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
 
     // Public apply after cancel must not revive a residual valid batch into a write.
     await expect(api.applyDiff(parent.runId)).rejects.toMatchObject({
-      code: expect.stringMatching(/cancelled|run_not_found|proposal_validation_failed|diff_|agent_orchestration/),
+      code: "operation_cancelled",
     });
     delegatedPaths.forEach((filePath, index) => {
       expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before[index]);
     });
     expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+  });
+
+  it("automatic path: old run valid cannot authorize a different run's apply/write", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const before = delegatedPaths.map((filePath) =>
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"));
+    const gatewayOptions = { exhaustBudgetOnBatch: false };
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new NodeDelegationGateway(delegatedPaths, [], gatewayOptions),
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "review_first");
+
+    const { run: oldRun } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
+    });
+    expect((await waitForRunStatus(api, oldRun.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
+    const oldEvents = await api.getAgentRunEvents(oldRun.runId);
+    expect(oldEvents.some((event) =>
+      event.type === "batch_validation_result" && event.payload?.verdict === "valid"
+    )).toBe(true);
+
+    // Second run on the same LocalApi/Orchestrator: budget-closed before parent valid.
+    gatewayOptions.exhaustBudgetOnBatch = true;
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run: newRun } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
+    });
+    expect((await waitForRunStatus(api, newRun.runId, "error")).status).toBe("error");
+    expect(newRun.runId).not.toBe(oldRun.runId);
+    const newEvents = await api.getAgentRunEvents(newRun.runId);
+    expect(newEvents.some((event) =>
+      event.type === "batch_validation_result" && event.payload?.verdict === "valid"
+    )).toBe(false);
+
+    await expect(api.applyDiff(newRun.runId)).rejects.toMatchObject({
+      code: "proposal_validation_failed",
+    });
+
+    // Steal old run's valid onto the new run — binding must still fail closed.
+    const orch = getLocalApiInternals(api).orchestrator as unknown as {
+      getRun(runId: string): {
+        batchValidationResult?: unknown;
+        validatedBatchBinding?: string;
+      } | undefined;
+    };
+    const stateNew = orch.getRun(newRun.runId);
+    const stateOld = orch.getRun(oldRun.runId);
+    expect(stateNew).toBeTruthy();
+    expect(stateOld?.batchValidationResult).toBeTruthy();
+    stateNew!.batchValidationResult = stateOld!.batchValidationResult;
+    stateNew!.validatedBatchBinding = stateOld!.validatedBatchBinding;
+    await expect(api.applyDiff(newRun.runId)).rejects.toMatchObject({
+      code: expect.stringMatching(/proposal_validation_failed|diff_scope_violation|operation_cancelled|run_not_found/),
+    });
+
+    delegatedPaths.forEach((filePath, index) => {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before[index]);
+    });
+    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+
+    // Positive control: full validation on a fresh automatic run still commits.
+    gatewayOptions.exhaustBudgetOnBatch = false;
+    const { run: okRun } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
+    });
+    expect((await waitForRunStatus(api, okRun.runId, "complete")).status).toBe("complete");
+    const okState = getLocalApiInternals(api).orchestrator.getRun(okRun.runId) as {
+      applyResult?: ApplyResult;
+    } | undefined;
+    expect(okState?.applyResult?.backupId).toBeTruthy();
+    expect(okState?.applyResult?.applied).toBe(true);
+  });
+
+  it("automatic path: cancel after successful commit does not undo the atomic write", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const before = new Map(delegatedPaths.map((filePath) => [
+      filePath,
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"),
+    ]));
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new NodeDelegationGateway(delegatedPaths),
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
+    });
+    expect((await waitForRunStatus(api, parent.runId, "complete")).status).toBe("complete");
+    const afterCommit = new Map(delegatedPaths.map((filePath) => [
+      filePath,
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"),
+    ]));
+    for (const filePath of delegatedPaths) {
+      expect(afterCommit.get(filePath)).not.toBe(before.get(filePath));
+    }
+    const parentState = getLocalApiInternals(api).orchestrator.getRun(parent.runId) as {
+      applyResult?: ApplyResult;
+    } | undefined;
+    expect(parentState?.applyResult?.applied).toBe(true);
+    const backupId = parentState?.applyResult?.backupId;
+    expect(backupId).toBeTruthy();
+
+    // Public cancel after atomic commit must not reverse the write. Undo is explicit restore.
+    const cancelled = await api.cancelAgentRun(parent.runId);
+    expect(cancelled.status).toBe("complete");
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8"))
+        .toBe(afterCommit.get(filePath));
+    }
+    expect(existsSync(join(
+      tempWorkspaceRoot,
+      ".projectos",
+      "apply-backups",
+      backupId!,
+    ))).toBe(true);
   });
 
   it("rechecks snapshot freshness after batch validation and commits no agent writes when stale", async () => {
