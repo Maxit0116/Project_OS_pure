@@ -14,6 +14,7 @@ import type {
   ProjectGraph,
   StructureScanMode,
 } from "../contracts/graph.js";
+import { PROJECT_GRAPH_LIMITS } from "../contracts/graph.js";
 import { sourceKindPriority } from "../shared/c4-architecture-views/index.js";
 
 export type ScanLanguage = "zh-CN" | "en";
@@ -322,9 +323,17 @@ export function componentBudget(sourceFileCount: number): { min: number; max: nu
   return { min: Math.min(bounds.min, files), max: Math.min(bounds.max, files) };
 }
 
-/** Files one component may mount; large repositories need more than the small-project default of 12. */
+/**
+ * Files one component may mount; large repositories need more than the small-project default of 12.
+ * The cap was 120, so a map holds at most 120 × components files: gitea (3,480 source files, 25
+ * components) left 653 of them out of the index, where Ask's search and Agent's targets come from.
+ * The bound is now the graph's own per-node limit.
+ */
 export function filesPerComponentCap(sourceFileCount: number, componentCount: number): number {
-  return Math.min(120, Math.max(12, Math.ceil((2 * sourceFileCount) / Math.max(1, componentCount))));
+  return Math.min(
+    PROJECT_GRAPH_LIMITS.linkedFilesPerNode,
+    Math.max(12, Math.ceil((2 * sourceFileCount) / Math.max(1, componentCount))),
+  );
 }
 
 export interface ComponentFileHint {
@@ -782,6 +791,52 @@ export function classifyRepoFileType(relativePath: string): FileEntry["type"] {
   return "other";
 }
 
+const CSHARP_TYPE_DECLARATION =
+  /^\s*(?:(?:public|internal|private|protected|static|abstract|sealed|partial|readonly|file|ref|unsafe|new)\s+)*(?:class|interface|record(?:\s+(?:class|struct))?|struct|enum)\s+([A-Za-z_]\w*)/gmu;
+const CSHARP_USING = /^\s*(global\s+)?using\s+(?!static\b)(?![\w.]+\s*=)([\w.]+)\s*;/gmu;
+const MAX_CSHARP_REFERENCES = 40;
+
+/**
+ * Which C# files each C# file uses. A `using` line names a namespace, not a file, so the import
+ * parsers found nothing in C# and eShopOnWeb's map was refused for having no code-level edges. A file
+ * uses another when it names a type the other declares, in a namespace it can see: its own, a parent
+ * of it, one of its `using`s, or a `global using` anywhere in the project.
+ */
+export function resolveCSharpReferences(bodies: ReadonlyMap<string, string>): Map<string, string[]> {
+  const declaredBy = new Map<string, Array<{ path: string; namespace: string }>>();
+  const namespaceOf = new Map<string, string>();
+  const globalUsings = new Set<string>();
+  for (const [path, body] of bodies) {
+    if (!path.toLowerCase().endsWith(".cs")) continue;
+    const namespace = /^\s*namespace\s+([\w.]+)/mu.exec(body)?.[1] ?? "";
+    namespaceOf.set(path, namespace);
+    for (const match of body.matchAll(CSHARP_TYPE_DECLARATION)) {
+      const list = declaredBy.get(match[1]!) ?? [];
+      list.push({ path, namespace });
+      declaredBy.set(match[1]!, list);
+    }
+    for (const match of body.matchAll(CSHARP_USING)) {
+      if (match[1]) globalUsings.add(match[2]!);
+    }
+  }
+  const references = new Map<string, string[]>();
+  for (const [path, namespace] of namespaceOf) {
+    const body = bodies.get(path) ?? "";
+    const visible = new Set<string>([namespace, ...globalUsings]);
+    const parts = namespace.split(".");
+    for (let length = parts.length - 1; length > 0; length -= 1) visible.add(parts.slice(0, length).join("."));
+    for (const match of body.matchAll(CSHARP_USING)) visible.add(match[2]!);
+    const targets = new Set<string>();
+    for (const word of new Set(body.match(/[A-Za-z_]\w*/gu) ?? [])) {
+      for (const declaration of declaredBy.get(word) ?? []) {
+        if (declaration.path !== path && visible.has(declaration.namespace)) targets.add(declaration.path);
+      }
+    }
+    references.set(path, [...targets].sort().slice(0, MAX_CSHARP_REFERENCES));
+  }
+  return references;
+}
+
 export function buildFileIndexAndRelations(input: {
   workspaceRoot: string;
   assignments: Map<string, string[]>;
@@ -794,6 +849,7 @@ export function buildFileIndexAndRelations(input: {
   const importsByPath = new Map<string, string[]>();
   const exportsByPath = new Map<string, string[]>();
 
+  const bodies = new Map<string, string>();
   for (const path of allPaths) {
     const absolute = join(input.workspaceRoot, path);
     let body = "";
@@ -804,7 +860,13 @@ export function buildFileIndexAndRelations(input: {
     } catch {
       body = "";
     }
-    const resolved: string[] = [];
+    bodies.set(path, body);
+  }
+  const csharpReferences = resolveCSharpReferences(bodies);
+
+  for (const path of allPaths) {
+    const body = bodies.get(path) ?? "";
+    const resolved: string[] = [...(csharpReferences.get(path) ?? [])];
     for (const spec of parseImportSpecs(body)) {
       const target = resolveImportPath(path, spec, allPaths);
       if (target && target !== path) resolved.push(target);
@@ -1014,6 +1076,31 @@ export function pruneDanglingEdges(
       nodeIds.has(edge.source) &&
       nodeIds.has(edge.target),
   );
+}
+
+/**
+ * Edge ids made unique. The model names edges itself, and its two rounds can give two different
+ * edges the same id (ripgrep: two `e_search_walker`), which made the whole map unpersistable. An exact
+ * repeat (same endpoints and relation) is dropped; a different edge under a used id is renamed.
+ */
+export function uniqueEdgeIds(edges: FunctionalEdge[]): FunctionalEdge[] {
+  const byId = new Map<string, FunctionalEdge>();
+  const result: FunctionalEdge[] = [];
+  for (const edge of edges) {
+    const existing = byId.get(edge.id);
+    if (!existing) {
+      byId.set(edge.id, edge);
+      result.push(edge);
+      continue;
+    }
+    if (existing.source === edge.source && existing.target === edge.target && existing.relation === edge.relation) continue;
+    let suffix = 2;
+    while (byId.has(`${edge.id}_${suffix}`)) suffix += 1;
+    const renamed = { ...edge, id: `${edge.id}_${suffix}` };
+    byId.set(renamed.id, renamed);
+    result.push(renamed);
+  }
+  return result;
 }
 
 export function mergeStructureGraphs(input: {

@@ -11,7 +11,7 @@ import type {
   CodeTestCandidate,
 } from "../../contracts/code-intelligence.js";
 import { CodeImpactResultSchema } from "../../contracts/code-intelligence.js";
-import { parseGoImports, parseImportSpecs, resolveImportPath } from "../structure-graph-l2.js";
+import { parseGoImports, parseImportSpecs, resolveCSharpReferences, resolveImportPath } from "../structure-graph-l2.js";
 
 /**
  * Impact for the languages the TypeScript import scanner does not read (Python, Go, Rust, the JVM
@@ -91,6 +91,13 @@ export function buildImportImpact(input: {
     for (const spec of parseImportSpecs(source)) {
       const target = resolveImportPath(path, spec, allPaths);
       if (target && languageOf.get(target) !== undefined) record(path, target);
+    }
+  }
+
+  if (family === "dotnet") {
+    // C# names namespaces, not files: references come from the types a file uses.
+    for (const [importer, targets] of resolveCSharpReferences(sources)) {
+      for (const target of targets) record(importer, target);
     }
   }
 

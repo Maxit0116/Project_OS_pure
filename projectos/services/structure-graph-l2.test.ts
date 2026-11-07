@@ -28,6 +28,8 @@ import {
   parseRustImports,
   pruneDanglingEdges,
   resolveImportPath,
+  resolveCSharpReferences,
+  uniqueEdgeIds,
 } from "./structure-graph-l2.js";
 import type { FunctionalEdge, FunctionalNode, ProjectGraph } from "../contracts/graph.js";
 
@@ -495,7 +497,9 @@ describe("structure-graph-l2 helpers", () => {
     it("lets a component of a large repository hold more than 12 files", () => {
       expect(filesPerComponentCap(20, 5)).toBe(12);
       expect(filesPerComponentCap(700, 11)).toBeGreaterThan(100);
-      expect(filesPerComponentCap(100000, 2)).toBe(120);
+      expect(filesPerComponentCap(100000, 2)).toBe(2_048);
+      // gitea: 3,480 source files in 25 components fit (the old cap of 120 held 3,000).
+      expect(filesPerComponentCap(3_480, 25) * 25).toBeGreaterThanOrEqual(3_480);
     });
 
     it("does not reject a small project because its components cannot each own a pair of files", () => {
@@ -594,5 +598,44 @@ describe("structure-graph-l2 helpers", () => {
       expect(resolve("app.crud")).toBe("backend/app/crud.py");
       expect(resolve("fastapi.testclient")).toBeNull();
     });
+  });
+});
+
+describe("second round of repositories", () => {
+  it("keeps one edge per id: an exact repeat is dropped, a different edge under a used id is renamed", () => {
+    // ripgrep: the model named two different edges e_search_walker and the map could not be saved.
+    const edge = (id: string, source: string, target: string) =>
+      ({ id, source, target, relation: "depends_on", label: "uses", confidence: 0.8, evidence: "model" }) as unknown as FunctionalEdge;
+    const result = uniqueEdgeIds([
+      edge("e_search_walker", "search", "walker"),
+      edge("e_search_walker", "search", "walker"),
+      edge("e_search_walker", "search", "printer"),
+      edge("e_search_walker_2", "cli", "search"),
+    ]);
+    expect(result.map((item) => `${item.id}:${item.source}->${item.target}`)).toEqual([
+      "e_search_walker:search->walker",
+      "e_search_walker_2:search->printer",
+      "e_search_walker_2_2:cli->search",
+    ]);
+  });
+
+  it("links C# files through the types they use in the namespaces they can see", () => {
+    // eShopOnWeb: `using` names a namespace, so no C# file had an import and the map was refused.
+    const bodies = new Map<string, string>([
+      ["src/Core/Entities/Basket.cs", "namespace Shop.Core.Entities;\npublic class Basket { public List<BasketItem> Items { get; } }\n"],
+      ["src/Core/Entities/BasketItem.cs", "namespace Shop.Core.Entities;\npublic class BasketItem {}\n"],
+      ["src/Core/Interfaces/IBasketService.cs", "namespace Shop.Core.Interfaces;\nusing Shop.Core.Entities;\npublic interface IBasketService { Basket Get(); }\n"],
+      ["src/Web/Services/BasketViewModelService.cs", "using Shop.Core.Interfaces;\nnamespace Shop.Web.Services\n{\n    public class BasketViewModelService { private readonly IBasketService _service; Basket b; }\n}\n"],
+      ["src/Web/GlobalUsings.cs", "global using Shop.Core.Entities;\n"],
+      ["src/Other/Basket.cs", "namespace Other.Things;\npublic class Basket {}\n"],
+    ]);
+    const references = resolveCSharpReferences(bodies);
+    expect(references.get("src/Core/Entities/Basket.cs")).toEqual(["src/Core/Entities/BasketItem.cs"]);
+    expect(references.get("src/Core/Interfaces/IBasketService.cs")).toEqual(["src/Core/Entities/Basket.cs"]);
+    // Basket comes through the global using; Other.Things.Basket is not visible.
+    expect(references.get("src/Web/Services/BasketViewModelService.cs")).toEqual([
+      "src/Core/Entities/Basket.cs",
+      "src/Core/Interfaces/IBasketService.cs",
+    ]);
   });
 });

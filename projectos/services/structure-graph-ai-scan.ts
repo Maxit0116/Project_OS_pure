@@ -45,6 +45,7 @@ import {
   listRepoFiles,
   mergeStructureGraphs,
   pruneDanglingEdges,
+  uniqueEdgeIds,
   rebuildHierarchy,
   sampleRepoFiles,
   summarizeRepoDirectories,
@@ -1196,13 +1197,13 @@ function assembleFromRounds(input: {
   });
 
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const edges = pruneDanglingEdges(
+  const edges = uniqueEdgeIds(pruneDanglingEdges(
     [
       ...asRecordArray(input.roundA.edges),
       ...asRecordArray(input.roundB.edges),
     ].map((raw, index) => normalizeEdge(raw, index)),
     nodeIds,
-  );
+  ));
 
   const graph: ProjectGraph = {
     version: "0.5.0",
