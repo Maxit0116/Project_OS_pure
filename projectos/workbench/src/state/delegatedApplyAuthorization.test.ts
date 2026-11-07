@@ -33,7 +33,7 @@ function baseDelegatedState(overrides: Record<string, unknown> = {}) {
   return {
     project: { projectId: 'p', name: 'SYNTHETIC', rootPath: '/tmp' } as never,
     activeRunId: 'run_parent',
-    locale: 'en',
+    locale: 'en' as const,
     diffReviewOnlyReason: null as string | null,
     diffReady: true,
     generatedDiff: {
