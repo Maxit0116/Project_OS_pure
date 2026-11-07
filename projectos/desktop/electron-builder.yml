@@ -24,9 +24,14 @@ mac:
   # No Developer ID yet (owner decision): electron-builder skips signing, and scripts/adhoc-sign.cjs
   # then signs the bundle ad hoc so that its seal is consistent. Not notarized.
   identity: null
+  # Apple silicon and Intel: node-pty is the only native module and ships prebuilt binaries for both.
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  # Name both builds by architecture (the x64 one had none): Project OS-0.1.0-x64.dmg.
+  artifactName: "${productName}-${version}-${arch}.${ext}"
   category: public.app-category.developer-tools
   hardenedRuntime: false
   gatekeeperAssess: false

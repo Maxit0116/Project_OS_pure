@@ -40,6 +40,15 @@ function main() {
 
   const prebuild = ensureDirBinaries(PREBUILD_DIR)
   const buildRelease = ensureDirBinaries(BUILD_RELEASE_DIR)
+  // The packages for other architectures too: the Intel build packs prebuilds/darwin-x64, and
+  // node-pty ships its spawn-helper without the execute bit, so every terminal failed to start there
+  // ("posix_spawnp failed") while the Apple silicon build, fixed by this script, worked.
+  const prebuildsRoot = path.join(NODE_PTY_ROOT, 'prebuilds')
+  if (fs.existsSync(prebuildsRoot)) {
+    for (const dir of fs.readdirSync(prebuildsRoot)) {
+      if (dir.startsWith(`${process.platform}-`)) ensureDirBinaries(path.join(prebuildsRoot, dir))
+    }
+  }
 
   const hasSpawnHelper = prebuild.spawnHelper || buildRelease.spawnHelper
   const hasPtyNode = prebuild.ptyNode || buildRelease.ptyNode
