@@ -394,7 +394,12 @@ describe('computeLayeredArchitectureLayout', () => {
     const ys = new Set(projected.nodes.map((node) => result.positionsById[node.id]!.y))
     expect(ys.size).toBeGreaterThan(3)
 
-    const memberIds = projected.nodes.map((node) => node.id)
+    // Band geometry wraps infrastructure members only (same contract as the
+    // sibling layer-band separation test), not every projected node.
+    const memberIds = projected.nodes
+      .filter((node) => node.layer === 'infrastructure')
+      .map((node) => node.id)
+    expect(memberIds.length).toBeGreaterThan(0)
     const xs = memberIds.map((id) => result.positionsById[id]!.x)
     const minX = Math.min(...xs)
     const maxX = Math.max(...xs) + NODE_WIDTH
