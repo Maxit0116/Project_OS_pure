@@ -96,6 +96,26 @@ export class ScriptedExecutorAdapter implements NodeExecutorAdapter {
       queue.push({ type: "progress", taskId: task.taskId, message: `scripted executor reading ${path}`, timestamp: now() });
       const read = await waitForHost(host.readSource({ taskId: task.taskId, path }), controller.signal);
       if (read.kind === "cancelled") return cancelled();
+      // Dev/demo only: exercise the production host.requestDecision → waiting-decision
+      // card → same-run resume path without inventing a private orchestrator intent.
+      if (process.env.PROJECTOS_SCRIPTED_REQUEST_DECISION === "1") {
+        const question = "Scripted executor asks: continue with the marker comment?";
+        const decision = await waitForHost(
+          host.requestDecision(
+            { taskId: task.taskId, question },
+            { signal: controller.signal },
+          ),
+          controller.signal,
+        );
+        if (decision.kind === "cancelled") return cancelled();
+        queue.push({
+          type: "decision_requested",
+          taskId: task.taskId,
+          decisionId: decision.value.decisionId,
+          question,
+          timestamp: now(),
+        });
+      }
       // Request text must not be able to close the comment and inject content.
       const objective = task.objective
         .replace(/\s+/g, " ")

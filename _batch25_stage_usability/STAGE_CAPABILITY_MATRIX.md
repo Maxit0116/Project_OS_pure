@@ -25,7 +25,7 @@ Evidence layers (do not mix):
 | Backup / Undo honesty | Usable | Diff Undo / restoreApplyBackup | Bytes restored; chat no longer claims applied | Manual recovery message if restore fails | Batch Q real; Batch R message rewrite | OK |
 | Cancel / timeout / model fail / bad JSON / budget / run conflict | Usable fail-closed | Stop / cancelAgentRun / budget | No write; recoverable | Cross-run steal refused; **R3** cancel revokes awaiting_review apply | Batch O; **R3** greenfield cancel | OK (reuse + R3 revoke) |
 | Restart / history persist | Partial stage | Relaunch Electron / openWorkspace reconcile | Profiles persist; agent-run history kept; pending decisions durable without silent write resume | Corrupt lines isolated; legacy model_request normalized; **R4** awaiting_review+backup no replay | S1; R2/R3; **R4** product reopen | Mid-run resume after process death still not silent auto-write (correct) |
-| Mid-run pause → resume same run (H3) | **Usable same-process** | `requestDecision` + existing waiting-decision card | Create wait → card answer → same run continues; cancel/timeout supersede no write | Cross-ws/run/stale refused; restart answer ≠ write resume | **R3** orchestrator + LocalApi product path | **Implemented**; not stage acceptance alone |
+| Mid-run pause → resume same run (H3) | **Usable same-process API**; desktop card Partial | `requestDecision` + waiting-decision card | Create wait → answer → same run continues; cancel/timeout supersede no write | Cross-ws/stale/scope/intent/root refused; restart answer ≠ write | **R3–R5** LocalApi + public scripted approve; **R5** Electron IPC resolve; card DOM store-owned path 未证 | API usable; Electron card click still Partial |
 | S4 kill mid-run | Later gate | — | — | — | Not S3 deliverable | Out of this stage claim |
 | 3 UX contract reds | Locked expectations | fullgate | 3 reds expected | Prefer technical fix keeping visuals | Prior gates | **Unchanged**; do not weaken |
 
@@ -52,5 +52,10 @@ Evidence layers (do not mix):
 - `applyDiff` returns durable disk `applyResult` without requiring terminalStatus (no fixture replay after awaiting_review crash).
 - VerificationRunner/LocalApi AbortSignal; Diff-approved cancel + non-zero exit honesty.
 
+## Batch R5 code deltas
+- H3 rejection API suite (timeout/stale/cross-ws/scope/intent/cancel/foreign-root).
+- Scripted `PROJECTOS_SCRIPTED_REQUEST_DECISION` + public Agent approve→decision→proposal test.
+- Desktop private probe (untracked): product IPC same-run resume; card DOM still Partial.
+
 ## Readiness (not human acceptance)
-H3 same-process mid-run usable; uncertain surfaces (delegated/leaf/whole-tree/greenfield) pause→apply→undo proven; Diff verify success/fail/timeout/cancel honest; restart awaiting_review no replay. **Still not Terran acceptance**: Ask global tool-loop by design; 3 UX reds locked; real-model mid-run decision E2E only if budget remains after offline gates.
+API H3 + uncertain + Diff-verify honesty remain. **Still not Terran acceptance**: Electron waiting-decision **card** click store-owned path 未证; Settings/Diff verify **UI** + product preview/build/test UX + uncertain **desktop** apply/undo + Electron restart 未测/thin; Ask global tool-loop Partial by design; 3 UX reds locked; DeepSeek decision E2E not spent this batch (ledger untouched).

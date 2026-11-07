@@ -620,6 +620,11 @@ export interface ProjectOSLocalApiOptions {
   agentMemoryRoot?: string;
   /** Tests use 0. Production waits so an in-progress follow-up is not summarized. */
   memoryProposalDelayMs?: number;
+  /**
+   * Optional leaf pipeline budget override (tests / probes). Production omits
+   * this and uses the hardcoded harness defaults.
+   */
+  pipelineBudget?: Partial<import("./harness/pipeline-budget.js").LeafPipelineBudget>;
   /** Tests inject a fake MCP session manager; production creates a real one. */
   mcpSessionManager?: McpSessionManager;
   /** Directory for MCP catalog disk cache. Defaults under agentMemoryRoot/auditDirectory/tmpdir. */
@@ -1218,6 +1223,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ? { eventPersistence: options.runEventPersistence }
         : {}),
       ...(options.auditDirectory ? { auditDirectory: options.auditDirectory } : {}),
+      ...(options.pipelineBudget ? { pipelineBudget: options.pipelineBudget } : {}),
       createDecisionStore: (workspace) => this.durableRunStateFor(workspace),
     });
   }

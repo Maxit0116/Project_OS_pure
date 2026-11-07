@@ -419,6 +419,55 @@ describe("SH-2 runtime executor selection", () => {
     expect(diff.files[0]!.after).toMatch(/Scripted executor \(no model\)/u);
   });
 
+  it("public Agent approve → scripted requestDecision → card answer → same-run proposal", async () => {
+    const previous = process.env.PROJECTOS_SCRIPTED_REQUEST_DECISION;
+    process.env.PROJECTOS_SCRIPTED_REQUEST_DECISION = "1";
+    try {
+      const { api, project, complete, root, original } = await setupRuntime();
+      const draft = await api.extractRequestIntent({
+        projectId: project.projectId,
+        nodeId: "feat_checkout",
+        filePath: "app/checkout/page.tsx",
+        rawRequest: "Change the checkout heading",
+        executorSelection: selection,
+      });
+      await api.approveRequestIntent(project.projectId, draft.id, draft.revision, []);
+      const refinement = await api.prepareIntentExecution(project.projectId, draft.id);
+      const run = await api.confirmExecution(refinement.id);
+
+      const pending = await vi.waitFor(async () => {
+        const listed = await api.listRunDecisions(project.projectId, run.runId);
+        const decision = listed.find((entry) => entry.status === "pending");
+        expect(decision).toBeTruthy();
+        return decision!;
+      });
+      expect(pending.question).toMatch(/continue with the marker comment/i);
+      expect(readFileSync(join(root, "app/checkout/page.tsx"), "utf8")).toBe(original);
+
+      await api.resolveRunDecision(
+        project.projectId,
+        pending.id,
+        pending.revision,
+        { optionId: "continue" },
+      );
+      const finished = await vi.waitFor(async () => {
+        const current = await api.getAgentRun(run.runId);
+        expect(current.status).toBe("awaiting_review");
+        return current;
+      });
+      expect(finished.executor).toMatchObject({ kind: "runtime", executorId: "scripted" });
+      expect(complete).not.toHaveBeenCalled();
+      const answered = await api.listRunDecisions(project.projectId, run.runId);
+      expect(answered.some((entry) => entry.id === pending.id && entry.status === "resolved")).toBe(true);
+      const diff = await api.getDiff(run.runId);
+      expect(diff.files[0]!.after).toMatch(/Scripted executor \(no model\)/u);
+      expect(readFileSync(join(root, "app/checkout/page.tsx"), "utf8")).toBe(original);
+    } finally {
+      if (previous === undefined) delete process.env.PROJECTOS_SCRIPTED_REQUEST_DECISION;
+      else process.env.PROJECTOS_SCRIPTED_REQUEST_DECISION = previous;
+    }
+  });
+
   it("names no validator for a dev stand-in even when a default model exists", async () => {
     const { api, project } = await setupRuntime(true, true);
     const draft = await api.extractRequestIntent({
