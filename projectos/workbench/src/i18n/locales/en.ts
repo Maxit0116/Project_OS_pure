@@ -2536,6 +2536,7 @@ const en = {
   diff: {
     title: 'Diff Review',
     reviewOnly: 'Review only — not validated, cannot be applied',
+    validatingProposal: 'Proposal generated — independent validation still running; Apply stays blocked until validation finishes',
     willChange: 'Will change {count} file(s)',
     applied: 'Applied',
     appliedFiles: 'Applied ({count} files)',

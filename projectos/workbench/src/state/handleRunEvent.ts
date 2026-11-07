@@ -190,6 +190,17 @@ export function reduceRunEventState(
     }
   }
 
+  if (event.type === 'diff_proposed') {
+    // Surface the proposal in the Diff panel while independent validation runs.
+    // Apply stays blocked via review-only until `diff_ready` clears the gate.
+    patch.diffReviewOnlyReason = getStoreMessage(
+      state.locale,
+      'diff.validatingProposal',
+    )
+    patch.centerTab = 'code'
+    patch.codeSubTab = 'diff'
+  }
+
   if (event.type === 'diff_ready') {
     patch.diffReady = true
     patch.flowStatus = 'awaiting_review'
@@ -390,7 +401,8 @@ export function handleRunEvent(
     get().pushToast({ type: 'error', message: sanitizedMessage })
   }
 
-  if (event.type === 'diff_ready') {
+  if (event.type === 'diff_proposed' || event.type === 'diff_ready') {
+    // diff_proposed: preview under review-only. diff_ready: validated / applyable.
     void get().loadDiff(event.runId)
   }
 

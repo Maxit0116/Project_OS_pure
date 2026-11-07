@@ -2495,6 +2495,7 @@ const zh = {
   diff: {
     title: 'Diff 审核',
     reviewOnly: '仅供审阅 — 未经验证，无法应用',
+    validatingProposal: '已生成提案 — 独立验证仍在进行；验证完成前无法应用',
     willChange: '将修改 {count} 个文件',
     applied: '已应用',
     appliedFiles: '已应用 ({count} 个文件)',

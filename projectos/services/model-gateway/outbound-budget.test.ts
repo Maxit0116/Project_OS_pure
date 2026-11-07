@@ -1,6 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProjectOSError } from "../../errors.js";
@@ -10,6 +12,25 @@ import {
   OUTBOUND_BUDGET_LIMIT_ENV,
   OUTBOUND_BUDGET_PATH_ENV,
 } from "./outbound-budget.js";
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+function runBudgetWorker(
+  scriptName: string,
+  env: NodeJS.ProcessEnv,
+): { status: number | null; stdout: string; stderr: string } {
+  const viteNode = join(here, "../../node_modules/.bin/vite-node");
+  const result = spawnSync(viteNode, [join(here, scriptName)], {
+    env: { ...process.env, ...env },
+    encoding: "utf8",
+    cwd: join(here, "../.."),
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
 
 const dirs: string[] = [];
 
@@ -131,5 +152,42 @@ describe("FileOutboundBudget", () => {
     expect(() => second.reserve()).toThrow(/does not match/i);
     // Original ledger untouched length.
     expect(JSON.parse(readFileSync(path, "utf8")).reservations).toHaveLength(1);
+  });
+
+  it("cross-process competitors cannot exceed the shared durable ledger limit", () => {
+    const path = tempLedger();
+    writeFileSync(
+      path,
+      JSON.stringify({ version: 1, limit: 4, reservations: [] }, null, 2),
+      "utf8",
+    );
+    const results = Array.from({ length: 3 }, () =>
+      runBudgetWorker("outbound-budget-cross-process-worker.ts", {
+        LEDGER_PATH: path,
+        LEDGER_LIMIT: "4",
+        ATTEMPTS: "8",
+      }),
+    );
+    for (const result of results) {
+      expect(result.status, result.stderr).toBe(0);
+    }
+    const parsed = results.map((result) => JSON.parse(result.stdout.trim()));
+    const totalOk = parsed.reduce((sum, row) => sum + row.ok, 0);
+    const totalOther = parsed.reduce((sum, row) => sum + row.other, 0);
+    expect(totalOk).toBe(4);
+    expect(totalOther).toBe(0);
+    expect(JSON.parse(readFileSync(path, "utf8")).reservations).toHaveLength(4);
+  });
+
+  it("corrupt ledger keeps fail-closed across process restart", () => {
+    const path = tempLedger();
+    const budget = createFileOutboundBudget(path, 2);
+    budget.reserve();
+    writeFileSync(path, "{broken", "utf8");
+    const probe = runBudgetWorker("outbound-budget-corrupt-probe-worker.ts", {
+      LEDGER_PATH: path,
+    });
+    expect(probe.status, probe.stderr).toBe(0);
+    expect(probe.stdout.trim()).toBe("model_outbound_budget_unavailable");
   });
 });

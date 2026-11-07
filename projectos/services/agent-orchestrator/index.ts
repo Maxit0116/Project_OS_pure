@@ -5956,7 +5956,11 @@ export class AgentOrchestrator {
           );
           continue;
         }
-        this.emitFailedStep(workspace, state, validateStep, error);
+        // Cancel after diff_proposed must not stamp a false model_error step_failed
+        // that hides the already-proposed diff; keep state.diff for resume/getDiff.
+        if (!(error instanceof AgentRunCancelledError)) {
+          this.emitFailedStep(workspace, state, validateStep, error);
+        }
         throw error;
       }
     }

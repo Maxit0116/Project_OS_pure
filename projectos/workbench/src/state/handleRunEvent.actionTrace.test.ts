@@ -155,6 +155,38 @@ describe('Agent Flow action trace state', () => {
     expect(agentActionMetadata(action)).toEqual(['modify · app/login/page.tsx'])
   })
 
+  it('surfaces diff_proposed as review-only Diff preview until diff_ready clears the gate', () => {
+    const proposed = AgentRunEventSchema.parse({
+      eventId: 'evt_proposed',
+      runId: 'run_leaf',
+      timestamp: '2026-11-07T00:00:00.000Z',
+      type: 'diff_proposed',
+      payload: {
+        files: [{ path: 'macos/Package.swift', operation: 'modify' }],
+      },
+    })
+    const afterProposed = reduceRunEventState(baseState(), proposed)
+    expect(afterProposed.diffReady).toBeUndefined()
+    expect(afterProposed.diffReviewOnlyReason).toMatch(/validation/i)
+    expect(afterProposed.centerTab).toBe('code')
+    expect(afterProposed.codeSubTab).toBe('diff')
+
+    const ready = AgentRunEventSchema.parse({
+      eventId: 'evt_ready',
+      runId: 'run_leaf',
+      timestamp: '2026-11-07T00:00:01.000Z',
+      type: 'diff_ready',
+      payload: { fileCount: 1, paths: ['macos/Package.swift'] },
+    })
+    const afterReady = reduceRunEventState(
+      { ...baseState(), ...afterProposed },
+      ready,
+    )
+    expect(afterReady.diffReady).toBe(true)
+    expect(afterReady.flowStatus).toBe('awaiting_review')
+    expect(afterReady.diffReviewOnlyReason).toBeNull()
+  })
+
   it('returns no metadata for an unknown future action type', () => {
     expect(agentActionMetadata({
       type: 'future_action',

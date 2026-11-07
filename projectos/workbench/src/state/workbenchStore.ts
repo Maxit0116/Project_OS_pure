@@ -4168,7 +4168,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
               const overlayBase =
                 current.executionOverlay ??
                 emptyExecutionOverlay(rootRunId, childEvent.timestamp)
-              return {
+              const next: Partial<WorkbenchState> = {
                 delegatedRunTraces: {
                   ...current.delegatedRunTraces,
                   [childRunId]: {
@@ -4183,7 +4183,29 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
                   fileIndex,
                 ),
               }
+              if (childEvent.type === 'diff_proposed') {
+                next.diffReviewOnlyReason = getStoreMessage(
+                  current.locale,
+                  'diff.validatingProposal',
+                )
+                next.centerTab = 'code'
+                next.codeSubTab = 'diff'
+              }
+              if (childEvent.type === 'diff_ready') {
+                // Child is validated; keep Apply gated on parent batch awaiting_review /
+                // diffReady from the parent stream. Preview remains available.
+                next.diffReviewOnlyReason = getStoreMessage(
+                  current.locale,
+                  'diff.reviewOnly',
+                )
+                next.centerTab = 'code'
+                next.codeSubTab = 'diff'
+              }
+              return next
             })
+            if (childEvent.type === 'diff_proposed' || childEvent.type === 'diff_ready') {
+              void get().loadDiff(childRunId)
+            }
             refreshRunDecisionsIfDue()
             if (childEvent.type === 'task_delegated') {
               ensureChildSubscription(childEvent, childRunId, rootRunId)
@@ -5158,10 +5180,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   loadDiff: async (requestedRunId) => {
-    const { client, activeRunId, project, editorBuffers, locale } = get()
+    const { client, activeRunId, project, editorBuffers, locale, delegatedRunTraces } = get()
     const targetRunId = requestedRunId ?? activeRunId
     if (!targetRunId) return
-    if (targetRunId !== activeRunId) {
+    // Parent activeRunId normally owns the UI; allow an explicitly requested
+    // delegated child so diff_proposed/diff_ready previews are not dropped.
+    if (
+      targetRunId !== activeRunId &&
+      !Object.prototype.hasOwnProperty.call(delegatedRunTraces, targetRunId)
+    ) {
       return
     }
     try {
