@@ -39,12 +39,9 @@ export function selectPendingChangesDrawerUndoMode(state: {
   applyResult: { applied: boolean; backupId?: string } | null
   settings: { execution: { changeExecutionPolicy: 'review_first' | 'automatic' } } | null
 }): PendingChangesDrawerUndoMode {
-  const policy = state.settings?.execution.changeExecutionPolicy ?? 'review_first'
-  if (
-    policy === 'automatic' &&
-    state.applyResult?.applied &&
-    state.applyResult.backupId
-  ) {
+  // Any applied run with a restore backup must map 「全部撤销」to undoCurrentApply.
+  // Previously only automatic did this; review_first uncertain→human Apply then lost Undo.
+  if (state.applyResult?.applied && state.applyResult.backupId) {
     return 'restore'
   }
   return 'dismiss'

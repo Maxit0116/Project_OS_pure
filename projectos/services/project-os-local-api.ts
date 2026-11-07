@@ -3106,6 +3106,22 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       intent,
       this.resolveRuntimeSelection(workspace, intent.executorSelection),
     );
+    // Opt-in synthetic only: deterministic Electron probes of whole-tree Auto.
+    // Clears bound entry scope so confirmExecution opens the global planner path
+    // (same seam as LocalApi unit-test forceGlobalPlanner). Default desktop unchanged.
+    if (
+      process.env.PROJECTOS_DETERMINISTIC_AGENT_GATEWAY === "1" &&
+      process.env.PROJECTOS_DETERMINISTIC_FORCE_GLOBAL_PLANNER === "1"
+    ) {
+      const stored = this.refinementsById.get(refinement.id);
+      if (stored) {
+        stored.requestedScope = {
+          ...stored.requestedScope,
+          nodeId: undefined as unknown as string,
+          selectedFilePath: undefined,
+        };
+      }
+    }
     return refinement;
   }
 

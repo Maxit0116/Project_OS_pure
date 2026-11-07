@@ -43,10 +43,16 @@ function discoveryFinalIntentOutput(input: {
 export class DeterministicLoginChangeGateway extends ModelGateway {
   readonly synthetic = true as const;
   private readonly uncertainCriteria: boolean;
+  private readonly midRunClarification: boolean;
+  private midRunClarificationAsked = false;
 
-  constructor(options: { uncertainCriteria?: boolean } = {}) {
+  constructor(options: {
+    uncertainCriteria?: boolean;
+    midRunClarification?: boolean;
+  } = {}) {
     super({ secretStore: new InMemorySecretStore() });
     this.uncertainCriteria = options.uncertainCriteria === true;
+    this.midRunClarification = options.midRunClarification === true;
   }
 
   override async complete(
@@ -62,8 +68,41 @@ export class DeterministicLoginChangeGateway extends ModelGateway {
       : isRecord(input.fileEditPlan) && typeof input.fileEditPlan.path === "string"
         ? input.fileEditPlan.path
         : undefined;
+    const stepOutputs = Array.isArray(input.stepOutputs)
+      ? input.stepOutputs.filter((item): item is string => typeof item === "string")
+      : [];
+    const hasClarificationAnswer = stepOutputs.some((item) =>
+      /User clarification for the authorized edit/i.test(item),
+    );
 
     let output: string;
+
+    // H3 synthetic: one material missing-intent ask (not Continue), then edit after answer.
+    if (
+      this.midRunClarification &&
+      !this.midRunClarificationAsked &&
+      !hasClarificationAnswer &&
+      request.requestKind === "change_generation"
+    ) {
+      this.midRunClarificationAsked = true;
+      output = JSON.stringify({
+        action: "clarify",
+        question:
+          "Login heading copy is not fixed by the approved intent or the current file snapshot. Which heading should the login page use?",
+        options: [
+          { id: "welcome_back", label: "Welcome Back" },
+          { id: "sign_in", label: "Sign in" },
+        ],
+      });
+      return {
+        requestId: `deterministic_${Date.now()}`,
+        provider: "deterministic-fixture",
+        model: "fixture-model",
+        output,
+        usage: { inputTokens: 10, outputTokens: 10 },
+        latencyMs: 1,
+      };
+    }
 
     if (request.requestKind === "chat_title") {
       output = JSON.stringify({
@@ -91,7 +130,7 @@ export class DeterministicLoginChangeGateway extends ModelGateway {
         affectedFiles: [...DELEGATED_PATHS],
         confidence: 1,
       });
-    } else if (mode === "plan_node_delegation" || mode === "plan_graph_delegation") {
+    } else if (mode === "plan_node_delegation") {
       output = JSON.stringify({
         objective: "Update the login experience across delegated files",
         tasks: DELEGATED_PATHS.map((path) => ({
@@ -102,6 +141,37 @@ export class DeterministicLoginChangeGateway extends ModelGateway {
         contracts: [],
         rationale: "The tasks map the node request to its owned files.",
       });
+    } else if (mode === "plan_graph_delegation") {
+      // Mirror RecursiveHierarchyGateway: recurse by architecture level until leaf-file.
+      const immediateTargets = isRecord(input.immediateTargets) ? input.immediateTargets : {};
+      const kind = immediateTargets.kind;
+      const level = immediateTargets.level;
+      if (kind === "leaf-file") {
+        output = JSON.stringify({
+          objective: "Update both login implementation files",
+          tasks: DELEGATED_PATHS.map((path) => ({
+            path,
+            objective: `Apply the login change in ${path}`,
+            acceptanceCriteria: [`Delegated change for ${path} is present`],
+          })),
+          rationale: "The component owns both leaf files.",
+        });
+      } else {
+        const nodeId = level === "context"
+          ? "system_saas_starter"
+          : level === "container"
+            ? "container_next_web"
+            : "feat_login";
+        output = JSON.stringify({
+          objective: `Delegate the login change to ${nodeId}`,
+          tasks: [{
+            nodeId,
+            objective: `Plan the login change in ${nodeId}`,
+            acceptanceCriteria: ["The delegated login behavior is updated"],
+          }],
+          rationale: "The task follows one immediate architecture layer.",
+        });
+      }
     } else if (mode === "locate_plan") {
       const path = selectedPath ?? "app/login/page.tsx";
       output = JSON.stringify({
@@ -195,10 +265,13 @@ export class DeterministicLoginChangeGateway extends ModelGateway {
           : "All tasks and interfaces were reviewed together.",
       });
     } else if (selectedPath === "app/login/page.tsx" || (!selectedPath && mode === undefined)) {
+      const heading = hasClarificationAnswer && stepOutputs.some((item) => /Sign in/i.test(item))
+        ? "Sign in"
+        : "Welcome Back";
       output = JSON.stringify({
         summary: "Update the delegated login heading",
         path: "app/login/page.tsx",
-        edits: [{ search: "<h1>Demo access</h1>", replace: "<h1>Welcome Back</h1>" }],
+        edits: [{ search: "<h1>Demo access</h1>", replace: `<h1>${heading}</h1>` }],
       });
     } else if (selectedPath === "components/LoginForm.tsx") {
       output = JSON.stringify({
@@ -236,5 +309,7 @@ export function createDeterministicAgentGatewayFromEnv(
     // Opt-in only: synthetic Electron/desktop proof of automatic→awaiting_review
     // when criteria are uncertain. Does not invent mid-run Continue cards.
     uncertainCriteria: env.PROJECTOS_DETERMINISTIC_UNCERTAIN_CRITERIA === "1",
+    // Opt-in only: one substantive missing-intent clarify → waiting-decision → same-root resume.
+    midRunClarification: env.PROJECTOS_DETERMINISTIC_MIDRUN_CLARIFICATION === "1",
   });
 }

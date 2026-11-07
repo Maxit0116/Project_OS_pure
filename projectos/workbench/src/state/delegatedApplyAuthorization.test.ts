@@ -286,6 +286,37 @@ describe('delegated Apply authorization (SYNTHETIC)', () => {
     expect(applyDiff).not.toHaveBeenCalled()
   })
 
+  it('heals sticky review-only after parent batch valid when late child raced', async () => {
+    const applyDiff = vi.fn(async () => ({
+      runId: 'run_parent',
+      applied: true,
+      filesChanged: ['a.ts'],
+      backupId: 'bak_1',
+      outcome: 'applied' as const,
+      verificationStatus: 'not_run' as const,
+    }))
+    useWorkbenchStore.setState({
+      ...baseDelegatedState({
+        // Sticky gate left by a late child diff_ready after parent already unlocked.
+        diffReviewOnlyReason:
+          'Child proposal is ready for preview — Apply stays blocked until parent batch validation completes',
+        flowActions: [parentBatchValid],
+        flowStatus: 'awaiting_review',
+      }),
+      client: {
+        applyDiff,
+        getProjectGraph: vi.fn(async () => ({ nodes: [], edges: [], fileIndex: [] })),
+        getSemanticTree: vi.fn(async () => ({ roots: [] })),
+        getCurrentWork: vi.fn(async () => null),
+        listFileTimeline: vi.fn(async () => []),
+      } as unknown as ProjectOSApi,
+    })
+
+    await useWorkbenchStore.getState().applyCurrentDiff()
+    expect(applyDiff).toHaveBeenCalledWith('run_parent')
+    expect(useWorkbenchStore.getState().diffReviewOnlyReason).toBeNull()
+  })
+
   it('allows applyCurrentDiff after parent batch_validation_result is valid', async () => {
     const applyDiff = vi.fn(async () => ({
       runId: 'run_parent',

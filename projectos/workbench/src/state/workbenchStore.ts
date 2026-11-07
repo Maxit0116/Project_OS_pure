@@ -112,7 +112,11 @@ import {
   handleRunEvent,
   type FlowCorrection,
 } from './handleRunEvent'
-import { delegatedParentBatchAllowsApply } from './parentBatchApplyAuthorization'
+import {
+  delegatedParentBatchAllowsApply,
+  hasAuthorizingParentBatchValid,
+  isApplyAuthorizationRevoked,
+} from './parentBatchApplyAuthorization'
 import { createWorkbenchClient } from '../data/workbenchClient'
 import { enrichGeneratedDiffFiles } from '../components/DiffReview/resolveDiffFileContent'
 import { computeDiffFileStats } from '../components/PendingChangesDrawer/diffFileStats'
@@ -4205,21 +4209,36 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
                   fileIndex,
                 ),
               }
+              // Child preview must not re-block Apply after the parent batch already
+              // unlocked (late/replayed child events race past batch_validation_result).
+              const parentBatchUnlocked = hasAuthorizingParentBatchValid({
+                activeRunId: current.activeRunId ?? rootRunId,
+                flowActions: current.flowActions ?? [],
+              })
+              const applyRevoked = isApplyAuthorizationRevoked({
+                activeRunId: current.activeRunId ?? rootRunId,
+                revokedApplyRunIds: current.revokedApplyRunIds,
+                flowStatus: current.flowStatus,
+              })
               if (childEvent.type === 'diff_proposed') {
-                next.diffReviewOnlyReason = getStoreMessage(
-                  current.locale,
-                  'diff.validatingProposal',
-                )
+                if (!parentBatchUnlocked && !applyRevoked) {
+                  next.diffReviewOnlyReason = getStoreMessage(
+                    current.locale,
+                    'diff.validatingProposal',
+                  )
+                }
                 next.centerTab = 'code'
                 next.codeSubTab = 'diff'
               }
               if (childEvent.type === 'diff_ready') {
                 // Preview OK; Apply stays blocked until parent batch_validation_result
                 // is valid — child validation alone must not authorize group apply.
-                next.diffReviewOnlyReason = getStoreMessage(
-                  current.locale,
-                  'diff.awaitingParentBatchValidation',
-                )
+                if (!parentBatchUnlocked && !applyRevoked) {
+                  next.diffReviewOnlyReason = getStoreMessage(
+                    current.locale,
+                    'diff.awaitingParentBatchValidation',
+                  )
+                }
                 next.centerTab = 'code'
                 next.codeSubTab = 'diff'
               }
@@ -5233,10 +5252,26 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         current.activeRunId !== activeRunId ||
         current.project?.projectId !== project?.projectId
       ) return
+      const hasDelegatedChildren =
+        Object.keys(current.delegatedRunTraces ?? {}).length > 0 ||
+        (current.flowDelegationEvents ?? []).some((event) => event.type === 'task_delegated')
+      const parentAllowsApply = current.activeRunId
+        ? delegatedParentBatchAllowsApply({
+            activeRunId: current.activeRunId,
+            hasDelegatedChildren,
+            flowActions: current.flowActions ?? [],
+            revokedApplyRunIds: current.revokedApplyRunIds,
+            flowStatus: current.flowStatus,
+          }).allowed
+        : false
       set({
         generatedDiff: { ...generatedDiff, files: enrichedFiles },
         diffFileStats,
         error: null,
+        // Heal sticky review-only if parent batch already unlocked Apply.
+        ...(parentAllowsApply && current.diffReviewOnlyReason
+          ? { diffReviewOnlyReason: null }
+          : {}),
         ...(targetRunId !== pendingChangesDrawerDismissedRunId
           ? { pendingChangesDrawerExpanded: true }
           : {}),
@@ -5296,10 +5331,6 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       revokedApplyRunIds,
     } = get()
     if (!project || !activeRunId) return
-    if (diffReviewOnlyReason) {
-      pushToast({ type: 'warning', message: diffReviewOnlyReason })
-      return
-    }
     const hasDelegatedChildren =
       Object.keys(delegatedRunTraces ?? {}).length > 0 ||
       (flowDelegationEvents ?? []).some((event) => event.type === 'task_delegated')
@@ -5317,9 +5348,14 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ? 'diff.applyBlockedAfterCancel'
           : 'diff.awaitingParentBatchValidation',
       )
-      pushToast({ type: 'warning', message })
+      pushToast({ type: 'warning', message: diffReviewOnlyReason ?? message })
       set({ diffReviewOnlyReason: message })
       return
+    }
+    // Parent batch already authorizes Apply — clear sticky review-only left by a
+    // late/replayed child diff_ready that raced past batch_validation_result.
+    if (diffReviewOnlyReason) {
+      set({ diffReviewOnlyReason: null })
     }
     try {
       const applyResult = await client.applyDiff(activeRunId)
@@ -5328,11 +5364,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         client.getSemanticTree(project.projectId),
         client.getCurrentWork(project.projectId),
       ])
-      if (
-        get().project?.projectId !== project.projectId ||
-        get().activeRunId !== activeRunId
-      ) return
-      const bounceIds = selectedNodeId ? [selectedNodeId] : []
+      // Disk may already be written. Never drop applyResult just because the user
+      // (or a child loadDiff) changed activeRunId during the await — Undo needs it.
+      if (get().project?.projectId !== project.projectId) return
+      const stillOnAppliedRun = get().activeRunId === activeRunId
+      const bounceIds = stillOnAppliedRun && selectedNodeId ? [selectedNodeId] : []
       pushToast({
         type: 'success',
         message: getStoreMessage(locale, 'toast.applySuccess', { count: applyResult.filesChanged.length }),
@@ -5381,27 +5417,33 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           applyResult,
           verificationResult: null,
           verificationCommandApproval: null,
-          currentWork,
-          graph,
-          tree,
-          editorBuffers: generatedDiff
-            ? applyDiffToBuffers(editorBuffers, generatedDiff)
-            : editorBuffers,
-          editorSavedBuffers: generatedDiff
-            ? applyDiffToBuffers(current.editorSavedBuffers, generatedDiff)
-            : current.editorSavedBuffers,
-          flowStatus: 'complete' as const,
-          bouncingNodeIds: bounceIds,
+          ...(stillOnAppliedRun
+            ? {
+                currentWork,
+                graph,
+                tree,
+                editorBuffers: generatedDiff
+                  ? applyDiffToBuffers(editorBuffers, generatedDiff)
+                  : editorBuffers,
+                editorSavedBuffers: generatedDiff
+                  ? applyDiffToBuffers(current.editorSavedBuffers, generatedDiff)
+                  : current.editorSavedBuffers,
+                flowStatus: 'complete' as const,
+                bouncingNodeIds: bounceIds,
+              }
+            : {}),
           conversationCheckpoints: checkpoints,
           messages,
         }
       })
-      if (generatedDiff) {
+      if (stillOnAppliedRun && generatedDiff) {
         for (const file of generatedDiff.files) {
           void useFileTimelineStore.getState().refresh(file.path)
         }
       }
-      setTimeout(() => set({ bouncingNodeIds: [] }), 600)
+      if (stillOnAppliedRun) {
+        setTimeout(() => set({ bouncingNodeIds: [] }), 600)
+      }
       scheduleChatSessionPersist()
     } catch (err) {
       set({ error: errorMessage(err, 'Failed to apply diff') })
