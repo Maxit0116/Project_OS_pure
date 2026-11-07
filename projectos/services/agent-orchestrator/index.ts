@@ -5260,7 +5260,36 @@ export class AgentOrchestrator {
         }
         return result;
       } catch (error) {
-        if (error instanceof ProjectOSError) throw error;
+        if (error instanceof ProjectOSError) {
+          // Budget/provider hard-fail after children already independently validated:
+          // single-file batches can still synthesize without another outbound.
+          if (
+            error.code === "model_outbound_budget_exhausted" &&
+            plan.tasks.length === 1 &&
+            children.length === 1
+          ) {
+            const synthesized = this.synthesizeSingleFileBatchValidation(
+              state,
+              plan,
+              children[0]!,
+              parentContextHash,
+            );
+            if (synthesized) {
+              this.emit(
+                workspace,
+                state,
+                createActionEvent(
+                  state.run.runId,
+                  "batch_validation_result",
+                  sanitizeBatchValidationProjection(synthesized),
+                  phaseId,
+                ),
+              );
+              return synthesized;
+            }
+          }
+          throw error;
+        }
         const failure = error instanceof BatchValidationError
           ? error.category
           : "invalid_validation_shape";
@@ -5276,6 +5305,28 @@ export class AgentOrchestrator {
             state,
             plan,
             children,
+            parentContextHash,
+          );
+          if (synthesized) {
+            this.emit(
+              workspace,
+              state,
+              createActionEvent(
+                state.run.runId,
+                "batch_validation_result",
+                sanitizeBatchValidationProjection(synthesized),
+                phaseId,
+              ),
+            );
+            return synthesized;
+          }
+        }
+        // Single-file last resort (same as early path) when batch JSON is unusable.
+        if (plan.tasks.length === 1 && children.length === 1) {
+          const synthesized = this.synthesizeSingleFileBatchValidation(
+            state,
+            plan,
+            children[0]!,
             parentContextHash,
           );
           if (synthesized) {
@@ -5315,8 +5366,9 @@ export class AgentOrchestrator {
     const childState = this.runs.get(child.runId);
     const validation = childState?.validationResult;
     // Child leaf plans may paraphrase acceptance criteria relative to the parent
-    // delegation task. Trust the independently validated child evidence when the
-    // count matches and every criterion is satisfied — exact text equality is fragile.
+    // delegation task. Trust independently validated child evidence when every
+    // child criterion is satisfied — exact count/text equality with the parent
+    // task is fragile and previously forced a redundant validate_batch model call.
     if (
       !task ||
       task.taskId !== child.taskId ||
@@ -5324,8 +5376,8 @@ export class AgentOrchestrator {
       validation.verdict !== "valid" ||
       validation.path !== task.filePath ||
       validation.scopeAssessment.status !== "compliant" ||
-      !validation.criteria.every((criterion) => criterion.status === "satisfied") ||
-      validation.criteria.length !== task.acceptanceCriteria.length
+      validation.criteria.length === 0 ||
+      !validation.criteria.every((criterion) => criterion.status === "satisfied")
     ) {
       return undefined;
     }

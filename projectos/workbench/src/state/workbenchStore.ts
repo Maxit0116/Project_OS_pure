@@ -4192,12 +4192,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
                 next.codeSubTab = 'diff'
               }
               if (childEvent.type === 'diff_ready') {
-                // Child is validated; keep Apply gated on parent batch awaiting_review /
-                // diffReady from the parent stream. Preview remains available.
-                next.diffReviewOnlyReason = getStoreMessage(
-                  current.locale,
-                  'diff.reviewOnly',
-                )
+                // Child proposal is independently validated. Clear the validating
+                // review-only gate so Diff preview stays visible; parent
+                // `batch_validation_result` still drives "Apply all delegated".
+                next.diffReviewOnlyReason = null
                 next.centerTab = 'code'
                 next.codeSubTab = 'diff'
               }
