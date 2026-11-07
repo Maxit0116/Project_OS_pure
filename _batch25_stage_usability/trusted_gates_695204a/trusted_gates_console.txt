@@ -2,4 +2,5 @@ HEAD=695204a5695e8bdbb443caebfd3bfb557d4b7b07
 EXITS npm_ci=0 core_tsc=0 wb_tsc=0 wb_test_tsc=0 desktop_tsc=0 desktop_build=0 fixtures=0 fullgate=1
 files=2 failed | 482 passed (484)
 tests=3 failed | 2509 passed (2512)
-log=/Users/terran/Projects/_projectos_isolates/Project_OS_pure_wt_batch2/_batch25_stage_usability/trusted_gates_695204a/trusted_gates.log
+log=<private-archive>/trusted_gates_695204a/trusted_gates.log
+path_redacted=true
