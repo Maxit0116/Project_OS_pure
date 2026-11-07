@@ -8,6 +8,7 @@ import Button from '../ui/Button'
 import PresentationModeToggle from './PresentationModeToggle'
 import SettingsGroup from './SettingsGroup'
 import SettingsRow from './SettingsRow'
+import { validateVerificationCommands } from './verificationCommandDraft'
 import styles from './SettingsPanel.module.css'
 
 const DEFAULT_VERIFY_COMMAND: ExecCommand = {
@@ -35,15 +36,14 @@ export default function GeneralSettingsSection() {
   const saveVerificationCommands = async (commands: ExecCommand[]) => {
     setVerifyError(null)
     try {
-      for (const entry of commands) {
-        if (!entry.command.trim()) {
-          setVerifyError(ts('settings.verificationCommandRequired'))
-          return
-        }
-        if (entry.timeoutMs < 100 || entry.timeoutMs > 300_000) {
-          setVerifyError(ts('settings.verificationTimeoutInvalid'))
-          return
-        }
+      const invalid = validateVerificationCommands(commands)
+      if (invalid === 'command_required') {
+        setVerifyError(ts('settings.verificationCommandRequired'))
+        return
+      }
+      if (invalid === 'timeout_invalid') {
+        setVerifyError(ts('settings.verificationTimeoutInvalid'))
+        return
       }
       await updateSettings({
         verification: { commands },

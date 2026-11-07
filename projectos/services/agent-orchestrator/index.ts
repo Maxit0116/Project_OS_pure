@@ -20,6 +20,8 @@ import {
 import { ProjectOSModelExecutor } from "../harness/project-os-model-executor.js";
 import { ExecutorRegistry } from "../harness/executor-registry.js";
 import type { RequestIntent } from "../../contracts/request-intent.js";
+import type { RunCheckpoint, RunDecision } from "../../contracts/run-state.js";
+import type { DurableRunStateStore } from "../harness/durable-run-state.js";
 import { createHash } from "node:crypto";
 import { mkdirSync, appendFileSync, readFileSync } from "node:fs";
 import { z } from "zod";
@@ -565,6 +567,13 @@ export interface AgentOrchestratorOptions {
    * still emits run events. This is not a "trust this run" switch.
    */
   auditDirectory?: string;
+  /**
+   * Durable decision store for mid-run `requestDecision`. Unset keeps the
+   * host operation unsupported (tests without a projectos root).
+   */
+  createDecisionStore?: (
+    workspace: LoadedProjectOSWorkspace,
+  ) => Pick<DurableRunStateStore, "saveDecision" | "loadDecision" | "supersedeDecision" | "saveCheckpoint" | "loadCheckpoint">;
   /** Fired after a root run_completed event is persisted. Must not throw into the run. */
   onRootRunCompleted?: (
     workspace: LoadedProjectOSWorkspace,
@@ -898,6 +907,17 @@ interface HierarchyExpansionBudget {
   inheritedCriteriaByRunId: Map<string, string[]>;
 }
 
+interface PendingDecisionWait {
+  decisionId: string;
+  projectId: string;
+  runId: string;
+  rootRunId: string;
+  scopeBindingHash: string;
+  authorizedIntentId?: string;
+  resolve: (decision: RunDecision) => void;
+  reject: (error: Error) => void;
+}
+
 interface HierarchyExpansionReservation {
   budget: HierarchyExpansionBudget;
   inheritedCriteriaByTaskId: Map<string, string[]>;
@@ -935,6 +955,14 @@ export class AgentOrchestrator {
     | undefined;
   private readonly pipelineBudget: LeafPipelineBudget;
   private readonly auditDirectory: string | undefined;
+  private readonly createDecisionStore:
+    | ((
+        workspace: LoadedProjectOSWorkspace,
+      ) => Pick<
+        DurableRunStateStore,
+        "saveDecision" | "loadDecision" | "supersedeDecision" | "saveCheckpoint" | "loadCheckpoint"
+      >)
+    | undefined;
   private readonly runs = new Map<string, OrchestratorRunState>();
   private readonly inFlightRunIds = new Set<string>();
   private readonly runAbortControllers = new Map<string, AbortController>();
@@ -947,6 +975,8 @@ export class AgentOrchestrator {
     string,
     Set<(trace: AgentTransientTrace) => void>
   >();
+  /** Live mid-run decision waiters. Restart clears these — never auto-resume writes. */
+  private readonly pendingDecisionWaits = new Map<string, PendingDecisionWait>();
 
   constructor(options: AgentOrchestratorOptions) {
     this.gateway = options.gateway;
@@ -967,6 +997,7 @@ export class AgentOrchestrator {
     this.onEventPersisted = options.onEventPersisted;
     this.pipelineBudget = resolveLeafPipelineBudget(options.pipelineBudget);
     this.auditDirectory = options.auditDirectory;
+    this.createDecisionStore = options.createDecisionStore;
   }
 
   hasInFlightWork(projectId: string): boolean {
@@ -1292,13 +1323,123 @@ export class AgentOrchestrator {
     return this.runs.get(runId);
   }
 
+  /** True when a live mid-run waiter still exists for this decision (same process only). */
+  hasActiveDecisionWait(decisionId: string): boolean {
+    return this.pendingDecisionWaits.has(decisionId);
+  }
+
+  /**
+   * Wake a live `requestDecision` waiter after LocalApi persists the answer.
+   * Returns false when no waiter exists (restart / foreign resolve) — caller must
+   * not invent a write resume from that alone.
+   */
+  notifyDecisionAnswer(decision: RunDecision): boolean {
+    const wait = this.pendingDecisionWaits.get(decision.id);
+    if (!wait) return false;
+    if (
+      wait.projectId !== decision.projectId ||
+      wait.runId !== decision.runId ||
+      wait.rootRunId !== decision.rootRunId
+    ) {
+      wait.reject(new ProjectOSError(
+        "agent_orchestration_failed",
+        `Decision '${decision.id}' binding does not match the waiting run`,
+        {
+          details: {
+            expectedProjectId: wait.projectId,
+            expectedRunId: wait.runId,
+            expectedRootRunId: wait.rootRunId,
+          },
+        },
+      ));
+      this.pendingDecisionWaits.delete(decision.id);
+      return true;
+    }
+    if (
+      decision.scopeBindingHash &&
+      decision.scopeBindingHash !== wait.scopeBindingHash
+    ) {
+      wait.reject(new ProjectOSError(
+        "agent_orchestration_failed",
+        `Decision '${decision.id}' scope binding no longer matches the waiting run`,
+      ));
+      this.pendingDecisionWaits.delete(decision.id);
+      return true;
+    }
+    if (
+      wait.authorizedIntentId &&
+      decision.authorizedIntentId &&
+      wait.authorizedIntentId !== decision.authorizedIntentId
+    ) {
+      wait.reject(new ProjectOSError(
+        "agent_orchestration_failed",
+        `Decision '${decision.id}' authorization identity does not match the waiting run`,
+      ));
+      this.pendingDecisionWaits.delete(decision.id);
+      return true;
+    }
+    this.pendingDecisionWaits.delete(decision.id);
+    if (decision.status === "declined") {
+      wait.reject(new ProjectOSError(
+        "operation_cancelled",
+        `Decision '${decision.id}' was declined; no files were written`,
+        { details: { decisionId: decision.id } },
+      ));
+      return true;
+    }
+    if (decision.status !== "resolved") {
+      wait.reject(new ProjectOSError(
+        "operation_cancelled",
+        `Decision '${decision.id}' ended as '${decision.status}' without authorizing continuation`,
+        { details: { decisionId: decision.id, status: decision.status } },
+      ));
+      return true;
+    }
+    wait.resolve(decision);
+    return true;
+  }
+
   /**
    * Abort an in-flight run without removing it from memory.
    * Marks the run `cancelled` so clients can stop streaming and show Stop UI.
    * Does not apply partial writes — apply only happens after a successful generate path.
+   * Also revokes a pending `awaiting_review` apply authorization so Cancel cannot
+   * leave a later Apply that still writes.
    */
   cancelRun(runId: string): OrchestratorRunState | undefined {
+    const state = this.runs.get(runId);
+    if (state?.run.status === "awaiting_review") {
+      return this.revokeAwaitingReviewOnCancel(runId);
+    }
     return this.abortInFlightRun(runId, "cancelled");
+  }
+
+  private revokeAwaitingReviewOnCancel(runId: string): OrchestratorRunState | undefined {
+    const state = this.runs.get(runId);
+    if (!state || state.run.status !== "awaiting_review") return state;
+    const family = !state.run.parentRunId
+      ? [...this.runs.entries()]
+          .filter(
+            ([candidateRunId, candidate]) =>
+              candidateRunId === runId || candidate.run.rootRunId === runId,
+          )
+          .map(([candidateRunId]) => candidateRunId)
+      : [runId];
+    for (const candidateRunId of family) {
+      const candidate = this.runs.get(candidateRunId);
+      if (!candidate || candidate.run.status !== "awaiting_review") continue;
+      delete candidate.greenfieldPreparedTranche;
+      candidate.status = "error";
+      candidate.run.status = "cancelled";
+      candidate.run.completedAt ??= new Date().toISOString();
+      this.inFlightRunIds.delete(candidateRunId);
+      this.runAbortControllers.get(candidateRunId)?.abort();
+      this.runAbortControllers.delete(candidateRunId);
+    }
+    if (!state.run.parentRunId) {
+      this.releaseRunReservations(runId);
+    }
+    return this.runs.get(runId);
   }
 
   /**
@@ -1319,6 +1460,7 @@ export class AgentOrchestrator {
     for (const candidateRunId of runIds) {
       this.runAbortControllers.get(candidateRunId)?.abort();
     }
+    // Live decision waits clear via requestRunDecision abort listeners (supersede + no write).
     if (!state.run.parentRunId) {
       this.releaseRunReservations(runId);
     }
@@ -1974,6 +2116,37 @@ export class AgentOrchestrator {
     switch (result.outcome) {
       case "completed":
         break;
+      case "waiting": {
+        // Parked without a write. Blocking requestDecision already recorded the
+        // durable decision; restart must not auto-continue from this alone.
+        state.run.status = "awaiting_review";
+        state.status = "complete";
+        state.run.completedAt ??= new Date().toISOString();
+        this.emit(
+          workspace,
+          state,
+          createActionEvent(runId, "decision_summary", {
+            summary: `Waiting for decision ${result.decisionId}`,
+          }, step.id),
+        );
+        this.emit(
+          workspace,
+          state,
+          createEvent(
+            runId,
+            "step_completed",
+            completeStep(
+              step,
+              `${binding.label} is waiting for decision ${result.decisionId}.`,
+            ),
+          ),
+        );
+        this.emit(workspace, state, createEvent(runId, "run_completed", undefined, {
+          status: "awaiting_review",
+          writes: "none",
+        }));
+        return;
+      }
       case "failed":
         return fail(result.reason || "Executor failed without a reason");
       case "cancelled":
@@ -2132,6 +2305,232 @@ export class AgentOrchestrator {
   }
 
   /**
+   * Create a durable clarification decision, emit for the existing waiting-decision card,
+   * and block until the same project/run answers — or cancel/timeout clears the wait
+   * without authorizing a write.
+   */
+  private async requestRunDecision(
+    workspace: LoadedProjectOSWorkspace,
+    state: OrchestratorRunState,
+    stepId: string,
+    question: string,
+    signal?: AbortSignal,
+  ): Promise<{ decisionId: string }> {
+    if (!this.createDecisionStore) {
+      throw new ProjectOSError(
+        "not_implemented",
+        "Host operation 'request_decision' is not available to a leaf task yet",
+      );
+    }
+    const trimmed = question.trim();
+    if (!trimmed) {
+      throw new ProjectOSError("agent_orchestration_failed", "Decision question is empty");
+    }
+    const runId = state.run.runId;
+    const rootRunId = state.run.rootRunId ?? runId;
+    const projectId = state.run.projectId;
+    if (projectId !== workspace.project.projectId) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        "Decision project binding does not match the open workspace",
+      );
+    }
+    for (const wait of this.pendingDecisionWaits.values()) {
+      if (wait.runId === runId) {
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          `Run '${runId}' already has a pending decision wait`,
+          { details: { decisionId: wait.decisionId } },
+        );
+      }
+    }
+
+    const bundle = state.localContext;
+    if (!bundle) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        "A decision wait requires the current leaf scope binding",
+      );
+    }
+    const scopeNodeId =
+      state.run.scope && "nodeId" in state.run.scope ? state.run.scope.nodeId : undefined;
+    const scopeBindingHash = createHash("sha256")
+      .update(JSON.stringify({
+        projectId,
+        runId,
+        rootRunId,
+        nodeId: scopeNodeId ?? null,
+        contextHash: bundle.bundleHash,
+        read: [...bundle.allowedReadPaths].sort(),
+        write: [...bundle.allowedWritePaths].sort(),
+      }))
+      .digest("hex");
+    const authorizedIntentId = state.approvedIntent?.id;
+    const decisionId = `decision_${createHash("sha256")
+      .update(`${runId}:${Date.now()}:${trimmed}`)
+      .digest("hex")
+      .slice(0, 24)}`;
+    const store = this.createDecisionStore(workspace);
+    const createdAt = new Date().toISOString();
+    const decision: RunDecision = {
+      version: "0.1.0",
+      id: decisionId,
+      projectId,
+      rootRunId,
+      runId,
+      ...(scopeNodeId ? { nodeId: scopeNodeId } : {}),
+      kind: "clarification",
+      question: trimmed,
+      options: [
+        { id: "continue", label: "Continue" },
+        { id: "stop", label: "Stop" },
+      ],
+      scopeBindingHash,
+      ...(authorizedIntentId ? { authorizedIntentId } : {}),
+      status: "pending",
+      revision: 1,
+      createdAt,
+    };
+    store.saveDecision(decision);
+    this.persistDecisionWaitCheckpoint(store, decision, "pending");
+
+    this.emit(
+      workspace,
+      state,
+      createActionEvent(runId, "decision_summary", {
+        summary: trimmed.length > 400 ? `${trimmed.slice(0, 397)}...` : trimmed,
+      }, stepId),
+    );
+
+    const runAbort = this.runAbortControllers.get(runId)?.signal;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let removeAbortListeners = () => {};
+    try {
+      const answered = await new Promise<RunDecision>((resolve, reject) => {
+        let settled = false;
+        const succeed = (value: RunDecision) => {
+          if (settled) return;
+          settled = true;
+          this.pendingDecisionWaits.delete(decisionId);
+          removeAbortListeners();
+          resolve(value);
+        };
+        const fail = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          this.pendingDecisionWaits.delete(decisionId);
+          removeAbortListeners();
+          reject(error);
+        };
+        this.pendingDecisionWaits.set(decisionId, {
+          decisionId,
+          projectId,
+          runId,
+          rootRunId,
+          scopeBindingHash,
+          ...(authorizedIntentId ? { authorizedIntentId } : {}),
+          resolve: succeed,
+          reject: fail,
+        });
+
+        const onAbort = () => {
+          store.supersedeDecision(decisionId);
+          this.persistDecisionWaitCheckpoint(store, decision, "cleared");
+          fail(new ProjectOSError(
+            "operation_cancelled",
+            `Decision '${decisionId}' was cancelled before an answer; no files were written`,
+            { details: { decisionId, runId } },
+          ));
+        };
+        if (signal?.aborted || runAbort?.aborted) {
+          onAbort();
+          return;
+        }
+        signal?.addEventListener("abort", onAbort, { once: true });
+        runAbort?.addEventListener("abort", onAbort, { once: true });
+        removeAbortListeners = () => {
+          signal?.removeEventListener("abort", onAbort);
+          runAbort?.removeEventListener("abort", onAbort);
+        };
+
+        const remainingMs = Math.max(
+          0,
+          this.pipelineBudget.maxWallClockMs - (Date.now() - (state.pipelineStartedAt ?? Date.now())),
+        );
+        timeoutId = setTimeout(() => {
+          store.supersedeDecision(decisionId);
+          this.persistDecisionWaitCheckpoint(store, decision, "cleared");
+          fail(new ProjectOSError(
+            "pipeline_budget_exceeded",
+            `Decision '${decisionId}' timed out within the run budget; no files were written`,
+            { details: { decisionId, runId, reason: "wall_clock" } },
+          ));
+        }, remainingMs);
+      });
+      this.persistDecisionWaitCheckpoint(store, answered, "cleared");
+      this.assertRunActive(state);
+      if (
+        answered.scopeBindingHash &&
+        answered.scopeBindingHash !== scopeBindingHash
+      ) {
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          `Decision '${decisionId}' scope binding changed before resume`,
+        );
+      }
+      return { decisionId: answered.id };
+    } catch (error) {
+      this.pendingDecisionWaits.delete(decisionId);
+      const latest = store.loadDecision(decisionId);
+      if (latest?.status === "pending") {
+        store.supersedeDecision(decisionId);
+        this.persistDecisionWaitCheckpoint(store, decision, "cleared");
+      }
+      throw error;
+    } finally {
+      removeAbortListeners();
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
+  }
+
+  private persistDecisionWaitCheckpoint(
+    store: Pick<DurableRunStateStore, "saveCheckpoint" | "loadCheckpoint">,
+    decision: RunDecision,
+    mode: "pending" | "cleared",
+  ): void {
+    const checkpointId = `checkpoint_decision_wait_${decision.rootRunId}`;
+    const existing = store.loadCheckpoint(checkpointId);
+    const pendingDecisionIds = mode === "pending"
+      ? Array.from(new Set([...(existing?.pendingDecisionIds ?? []), decision.id]))
+      : (existing?.pendingDecisionIds ?? []).filter((id) => id !== decision.id);
+    const checkpoint: RunCheckpoint = {
+      version: "0.1.0",
+      id: checkpointId,
+      projectId: decision.projectId,
+      rootRunId: decision.rootRunId,
+      taskIds: existing?.taskIds?.length ? existing.taskIds : [`task_decision_${decision.runId}`],
+      completedTaskIds: existing?.completedTaskIds ?? [],
+      executorSelections: existing?.executorSelections ?? {},
+      pendingDecisionIds,
+      budgetUsage: existing?.budgetUsage ?? {
+        activeTimeMs: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        spendCents: 0,
+        reservedActiveTimeMs: 0,
+        reservedInputTokens: 0,
+        reservedOutputTokens: 0,
+        reservedSpendCents: 0,
+        reservedConcurrency: 0,
+      },
+      publication: existing?.publication ?? "not_applied",
+      transactionReceiptIds: existing?.transactionReceiptIds ?? [],
+      updatedAt: new Date().toISOString(),
+    };
+    store.saveCheckpoint(checkpoint);
+  }
+
+  /**
    * The server side of the harness host for one leaf task. Reads are limited to the task's
    * paths; a proposal is staged only after the server's scope check and only if it starts
    * from the file the task was given (the executor's own `before` is never trusted).
@@ -2173,7 +2572,10 @@ export class AgentOrchestrator {
       },
       consultNode: async () => unsupported("consult_node"),
       delegate: async () => unsupported("delegate"),
-      requestDecision: async () => unsupported("request_decision"),
+      requestDecision: async (_task, input, options) => {
+        this.assertRunActive(state);
+        return this.requestRunDecision(workspace, state, stepId, input.question, options?.signal);
+      },
       readSource: async (_task, path) => {
         this.assertRunActive(state);
         const content = this.readWorkspaceFile(workspace, state, path, stepId);

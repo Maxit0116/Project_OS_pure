@@ -61,6 +61,15 @@ describe("durable run state", () => {
     expect(() => store.resolveDecision("decision_1", 1, { optionId: "approve" })).toThrow(/stale|no longer/);
   });
 
+  it("supersedes a pending decision without treating it as an authorizing answer", () => {
+    const root = mkdtempSync(join(tmpdir(), "run-state-")); roots.push(root);
+    const store = new DurableRunStateStore(join(root, ".projectos"));
+    store.saveDecision(decision());
+    expect(store.supersedeDecision("decision_1")?.status).toBe("superseded");
+    expect(() => store.resolveDecision("decision_1", 2, { optionId: "approve" }))
+      .toThrow(/no longer pending/);
+  });
+
   it("persists a checkpoint separately from publication receipts", () => {
     const root = mkdtempSync(join(tmpdir(), "run-state-")); roots.push(root);
     const store = new DurableRunStateStore(join(root, ".projectos"));

@@ -1111,6 +1111,47 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     }]);
   });
 
+  it("Diff-approved verification: real runner timeout is failed+timedOut, never false passed/not_run", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      verificationRunner: new VerificationRunner(),
+    });
+    const project = await api.openSampleWorkspace();
+    await api.updateSettings(project.projectId, {
+      verification: {
+        commands: [{
+          command: process.execPath,
+          args: ["-e", "setTimeout(() => {}, 5000)"],
+          timeoutMs: 100,
+        }],
+      },
+    });
+    await approveConfiguredVerification(api, project.projectId);
+    const refinement = await api.refinePrompt({
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawPrompt: "Add Google login and redirect users to profile after successful sign in.",
+    });
+    const run = await api.confirmExecution(refinement.id);
+    const result = await api.runVerification(run.runId);
+    expect(result.status).toBe("failed");
+    expect(result.status).not.toBe("passed");
+    expect(result.status).not.toBe("not_run");
+    expect(result.results[0]).toMatchObject({ status: "failed", timedOut: true });
+  });
+
+  it("settings reject empty verification command and out-of-range timeout", async () => {
+    const api = new ProjectOSLocalApi({ sampleWorkspaceRoot: copySampleWorkspace() });
+    const project = await api.openSampleWorkspace();
+    await expect(api.updateSettings(project.projectId, {
+      verification: { commands: [{ command: " ", args: [], timeoutMs: 5_000 }] },
+    })).rejects.toThrow();
+    await expect(api.updateSettings(project.projectId, {
+      verification: { commands: [{ command: "npm", args: ["test"], timeoutMs: 50 }] },
+    })).rejects.toThrow();
+  });
+
   it("requires exact user approval before executing project verification commands", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
     const firstMarker = join(tempWorkspaceRoot, "verification-approved-first.txt");
@@ -1950,6 +1991,81 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     expect((await api.getProjectGraph(project.projectId)).fileIndex).toEqual([]);
     expect((await api.getSemanticTree(project.projectId)).roots).toEqual([]);
     expect(existsSync(join(tempWorkspaceRoot, ".projectos", "graph-product-overlay.json"))).toBe(false);
+    expect(greenfieldFilePaths().every((path) => !existsSync(join(tempWorkspaceRoot, path)))).toBe(true);
+  });
+
+  it("greenfield: expired live child binding refuses apply without writing", async () => {
+    const tempWorkspaceRoot = copyEmptyGraphWorkspace();
+    const store = new ProjectOSWorkspaceStore();
+    const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      workspaceStore: store,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new GreenfieldInitializationGateway(),
+      runEventPersistence: "memory",
+      writeTransactionRuntime: { module: writeTransactionModule, kernel },
+      workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(store, kernel),
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "review_first");
+    const { run } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      rawRequest: "Initialize the complete product graph with explicit tranche review.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
+    });
+    expect((await waitForRunStatus(api, run.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
+    expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(0);
+
+    const orch = getLocalApiInternals(api).orchestrator as unknown as {
+      runs: Map<string, {
+        greenfieldPreparedTranche?: { children: Array<{ runId: string }> };
+        validatedDiffJson?: string;
+      }>;
+    };
+    const parentState = orch.runs.get(run.runId);
+    const childRunId = parentState?.greenfieldPreparedTranche?.children[0]?.runId;
+    expect(childRunId).toBeTruthy();
+    const childState = orch.runs.get(childRunId!);
+    expect(childState).toBeTruthy();
+    // Expire the live binding the prepare step pinned.
+    childState!.validatedDiffJson = JSON.stringify({ tampered: true });
+
+    await expect(api.applyDiff(run.runId)).rejects.toMatchObject({
+      code: "proposal_validation_failed",
+    });
+    expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(0);
+    expect(greenfieldFilePaths().every((path) => !existsSync(join(tempWorkspaceRoot, path)))).toBe(true);
+  });
+
+  it("greenfield: cancel after awaiting_review refuses later apply without writing", async () => {
+    const tempWorkspaceRoot = copyEmptyGraphWorkspace();
+    const store = new ProjectOSWorkspaceStore();
+    const kernel = new writeTransactionModule.RecoverableWriteTransactionKernel();
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      workspaceStore: store,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new GreenfieldInitializationGateway(),
+      runEventPersistence: "memory",
+      writeTransactionRuntime: { module: writeTransactionModule, kernel },
+      workspaceTransactionCoordinator: new WorkspaceTransactionCoordinator(store, kernel),
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "review_first");
+    const { run } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      rawRequest: "Initialize the complete product graph with explicit tranche review.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
+    });
+    expect((await waitForRunStatus(api, run.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
+    await api.cancelAgentRun(run.runId);
+    await expect(api.applyDiff(run.runId)).rejects.toThrow();
+    expect((await api.getProjectGraph(project.projectId)).nodes).toHaveLength(0);
     expect(greenfieldFilePaths().every((path) => !existsSync(join(tempWorkspaceRoot, path)))).toBe(true);
   });
 
@@ -2960,6 +3076,50 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
       expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8"))
         .toBe(before.get(filePath));
     }
+  });
+
+  it("leaf proposal uncertain: automatic writes nothing then human applyDiff backup/undo", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const selectedPath = "app/login/page.tsx";
+    const targetPath = join(tempWorkspaceRoot, selectedPath);
+    const before = readFileSync(targetPath, "utf8");
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new AutomaticChangeGateway({ uncertainCriteriaOnProposal: true }),
+      runEventPersistence: "memory",
+      verificationRunner: {
+        async run() {
+          return [];
+        },
+      },
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      filePath: selectedPath,
+      rawRequest: "Change the login heading to welcome returning users.",
+      deferOrchestratorStart: false,
+    });
+    expect((await waitForRunStatus(api, run.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
+    expect(readFileSync(targetPath, "utf8")).toBe(before);
+    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+    const events = await api.getAgentRunEvents(run.runId);
+    expect(events.some((event) =>
+      event.type === "run_completed" &&
+      (event.payload as { reason?: string } | undefined)?.reason === "uncertain_criteria"
+    )).toBe(true);
+
+    const applied = await api.applyDiff(run.runId);
+    expect(applied.applied).toBe(true);
+    expect(applied.backupId).toBeTruthy();
+    expect(readFileSync(targetPath, "utf8")).not.toBe(before);
+    const restored = await api.restoreApplyBackup(project.projectId, applied.backupId!);
+    expect(restored.restored).toBe(true);
+    expect(readFileSync(targetPath, "utf8")).toBe(before);
   });
 
   it("automatic path: cancel during parent batch validation writes nothing", async () => {
@@ -5948,7 +6108,7 @@ class NodeDeletionGateway extends ModelGateway {
 class AutomaticChangeGateway extends ModelGateway {
   readonly requests: ModelGatewayRequest[] = [];
 
-  constructor() {
+  constructor(private readonly options: { uncertainCriteriaOnProposal?: boolean } = {}) {
     super({ secretStore: new InMemorySecretStore() });
   }
 
@@ -5992,15 +6152,21 @@ class AutomaticChangeGateway extends ModelGateway {
         verdict: "valid",
         criteria: [{
           criterion: "The login heading welcomes returning users",
-          status: "satisfied",
-          explanation: "The proposed heading says Welcome Back.",
+          status: this.options.uncertainCriteriaOnProposal ? "uncertain" : "satisfied",
+          explanation: this.options.uncertainCriteriaOnProposal
+            ? "The heading change looks plausible but needs human review."
+            : "The proposed heading says Welcome Back.",
         }],
         scopeAssessment: {
           status: "compliant",
           explanation: "Only the authorized login page changes.",
         },
-        summary: "The scoped proposal meets its acceptance criterion.",
-        rationale: "The exact heading replacement implements the requested outcome.",
+        summary: this.options.uncertainCriteriaOnProposal
+          ? "Proposal is reviewable with uncertain criteria."
+          : "The scoped proposal meets its acceptance criterion.",
+        rationale: this.options.uncertainCriteriaOnProposal
+          ? "Uncertain criteria must pause automatic apply."
+          : "The exact heading replacement implements the requested outcome.",
       });
     } else if (
       isRecord(request.input) &&

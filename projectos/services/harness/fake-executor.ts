@@ -16,6 +16,12 @@ export interface FakeExecutorScenario {
   answer?: string;
   evidence?: string[];
   decisionQuestion?: string;
+  /**
+   * When true, always return `waiting` after requestDecision.
+   * When false, continue into proposal/answer after the host returns.
+   * Default: park only when no follow-on scenario work is configured.
+   */
+  parkAfterDecision?: boolean;
   escalationReason?: string;
   failureReason?: string;
 }
@@ -102,7 +108,18 @@ export class FakeExecutorAdapter implements NodeExecutorAdapter {
         }
         const decision = requested.value;
         queue.push({ type: "decision_requested", taskId: task.taskId, decisionId: decision.decisionId, question: this.scenario.decisionQuestion, timestamp: now() });
-        return ExecutorResultSchema.parse({ outcome: "waiting", taskId: task.taskId, decisionId: decision.decisionId });
+        const hasFollowOn =
+          Boolean(this.scenario.proposal) ||
+          Boolean(this.scenario.answer) ||
+          Boolean(this.scenario.delegationPlan) ||
+          Boolean(this.scenario.failureReason) ||
+          Boolean(this.scenario.escalationReason);
+        const park =
+          this.scenario.parkAfterDecision === true ||
+          (this.scenario.parkAfterDecision !== false && !hasFollowOn);
+        if (park) {
+          return ExecutorResultSchema.parse({ outcome: "waiting", taskId: task.taskId, decisionId: decision.decisionId });
+        }
       }
       if (cancelled) {
         queue.push({ type: "task_cancelled", taskId: task.taskId, reason: cancelReason || "cancelled", timestamp: now() });

@@ -97,6 +97,19 @@ export class DurableRunStateStore {
     });
   }
 
+  /** Clear a pending wait without applying an answer (cancel / timeout / budget). */
+  supersedeDecision(decisionId: string): RunDecision | null {
+    const current = this.loadDecision(decisionId);
+    if (!current) return null;
+    if (current.status !== "pending") return cloneJson(current);
+    return this.saveDecision({
+      ...current,
+      status: "superseded",
+      revision: current.revision + 1,
+      resolvedAt: new Date().toISOString(),
+    });
+  }
+
   saveCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
     const parsed = RunCheckpointSchema.parse(checkpoint);
     if (!safeId(parsed.id)) throw new Error("Unsafe checkpoint id");

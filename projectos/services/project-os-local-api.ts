@@ -1215,6 +1215,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ? { eventPersistence: options.runEventPersistence }
         : {}),
       ...(options.auditDirectory ? { auditDirectory: options.auditDirectory } : {}),
+      createDecisionStore: (workspace) => this.durableRunStateFor(workspace),
     });
   }
 
@@ -4868,20 +4869,73 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     status: "resolved" | "declined" = "resolved",
   ): Promise<RunDecision> {
     const workspace = this.requireLoadedWorkspace(projectId);
+    if (workspace.project.projectId !== projectId) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        `Refusing to resolve decision '${decisionId}' across workspace boundary`,
+      );
+    }
     const store = this.durableRunStateFor(workspace);
     const current = store.loadDecision(decisionId);
     if (!current || current.projectId !== projectId) {
       throw new ProjectOSError(
-        "run_not_found",
+        "decision_not_found",
         `Run decision '${decisionId}' was not found in project '${projectId}'`,
       );
     }
-    return store.resolveDecision(
-      decisionId,
-      expectedRevision,
-      answer,
-      status,
-    );
+    if (current.status !== "pending") {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        `Run decision '${decisionId}' is '${current.status}' and cannot be answered again`,
+      );
+    }
+    const liveWait = this.orchestrator.hasActiveDecisionWait(decisionId);
+    if (liveWait) {
+      const liveRun = this.orchestrator.getRun(current.runId);
+      if (!liveRun || liveRun.run.projectId !== projectId) {
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          `Refusing to resolve decision '${decisionId}' for a foreign or missing run`,
+          { details: { runId: current.runId, projectId } },
+        );
+      }
+      if ((liveRun.run.rootRunId ?? liveRun.run.runId) !== current.rootRunId) {
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          `Refusing to resolve decision '${decisionId}' across run roots`,
+        );
+      }
+    }
+    let resolved: RunDecision;
+    try {
+      resolved = store.resolveDecision(
+        decisionId,
+        expectedRevision,
+        answer,
+        status,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/stale/i.test(message)) {
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          `Run decision '${decisionId}' revision is stale`,
+          { cause: error },
+        );
+      }
+      if (/no longer pending|not found|not one of/i.test(message)) {
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          message,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    // Wake the same-process waiter when present. No waiter (restart) means the
+    // answer is durable for the card/history only — never auto-resume writes.
+    this.orchestrator.notifyDecisionAnswer(resolved);
+    return resolved;
   }
 
   async getRunCheckpoint(

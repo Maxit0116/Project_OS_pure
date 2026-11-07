@@ -16,6 +16,13 @@ export const RunDecisionSchema = z.object({
   question: z.string().trim().min(1),
   options: z.array(z.object({ id: z.string().min(1), label: z.string().trim().min(1) }).strict()).min(1),
   recommendation: z.string().trim().min(1).optional(),
+  /**
+   * Hash of the leaf scope in force when the decision was created.
+   * Resolve/resume must not widen beyond this binding.
+   */
+  scopeBindingHash: z.string().min(1).optional(),
+  /** Approved intent id that authorized the waiting run, when present. */
+  authorizedIntentId: z.string().min(1).optional(),
   status: RunDecisionStatusSchema,
   revision: z.number().int().positive(),
   answer: z.object({ optionId: z.string().min(1), text: z.string().optional() }).strict().optional(),
