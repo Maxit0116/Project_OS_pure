@@ -8,6 +8,14 @@ function task(): ExecutorTask {
   return {
     taskId: "task_model_1",
     runId: "run_1",
+    rootRunId: "run_1",
+    projectId: "project_model_1",
+    executorBindingId: "binding_model_1",
+    scope: {
+      kind: "leaf-file",
+      nodeId: "feat_login",
+      filePath: "app/login/page.tsx",
+    },
     mode: "change",
     role: "leaf",
     objective: "Change the login page heading",

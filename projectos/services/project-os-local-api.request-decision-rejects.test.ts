@@ -80,7 +80,11 @@ function refinement(): PromptRefinement {
   };
 }
 
-function localContext(projectId: string, displayName: string, framework: string): LocalContextBundle {
+function localContext(
+  projectId: string,
+  displayName: string,
+  framework: "unknown" | "nextjs-app" | "nextjs-pages" | "node",
+): LocalContextBundle {
   return {
     version: "0.2.0",
     projectId,
@@ -94,7 +98,7 @@ function localContext(projectId: string, displayName: string, framework: string)
       synopsis: "login",
       synopsisSource: "derived_project_graph",
       graphAnalyzedAt: new Date().toISOString(),
-      graphAnalysisStatus: "ready",
+      graphAnalysisStatus: "complete",
       synopsisOmittedNodeCount: 0,
     },
     neighborhood: {
