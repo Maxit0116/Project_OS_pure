@@ -1,0 +1,10 @@
+{
+  "label": "SOURCE",
+  "root": "/Users/terran/Projects/Project_OS_pure",
+  "files": {
+    "projectos/services/agent-orchestrator/index.ts": "3bc6ea23664b380c66e551ca30dbce7d81063949be6bbb43f53069698755f11e",
+    "projectos/services/project-os-local-api.ts": "9c4f0472a2a0c3774af5264ca7e580c6ab90adfc28e766bc53543f82f30edb4a",
+    "projectos/workbench/src/state/workbenchStore.ts": "55d00e8445b2b882580271ab8d3d57bcd8d74fe8032a6fe9f92540598f23fee2",
+    "projectos/services/model-gateway/deterministic-login-change-gateway.ts": null
+  }
+}

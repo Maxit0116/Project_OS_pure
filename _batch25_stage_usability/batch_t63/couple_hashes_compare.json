@@ -1,0 +1,30 @@
+{
+  "isolate_head": "1263e3d7f9eb7c8862764f8fd97d255cb06afe1b",
+  "source_head": "3b38f1448e639f61cf39bc567ccaedb4ab1d5e68",
+  "isolate": {
+    "label": "ISOLATE",
+    "root": "/Users/terran/Projects/_projectos_isolates/Project_OS_pure_wt_batch2",
+    "files": {
+      "projectos/services/agent-orchestrator/index.ts": "7d302e009448d0061ad322a3440b9b6e9b89636df204243cd48daedac4a7ddbc",
+      "projectos/services/project-os-local-api.ts": "2d7997132d99bdf16c3a518c0d680c518732eabffc26a0dcc70334e796df0337",
+      "projectos/workbench/src/state/workbenchStore.ts": "8e94b80748553c12e57b789e2e32fdb30c1eef8b1fe9c599912c814ce3d46c85",
+      "projectos/services/model-gateway/deterministic-login-change-gateway.ts": "ebfe7ff31c56eb162a26d1ea5ce8a7724cfede09677662487da5785ebe5be53a"
+    }
+  },
+  "source": {
+    "label": "SOURCE",
+    "root": "/Users/terran/Projects/Project_OS_pure",
+    "files": {
+      "projectos/services/agent-orchestrator/index.ts": "3bc6ea23664b380c66e551ca30dbce7d81063949be6bbb43f53069698755f11e",
+      "projectos/services/project-os-local-api.ts": "9c4f0472a2a0c3774af5264ca7e580c6ab90adfc28e766bc53543f82f30edb4a",
+      "projectos/workbench/src/state/workbenchStore.ts": "55d00e8445b2b882580271ab8d3d57bcd8d74fe8032a6fe9f92540598f23fee2",
+      "projectos/services/model-gateway/deterministic-login-change-gateway.ts": null
+    }
+  },
+  "equal_per_file": {
+    "projectos/services/agent-orchestrator/index.ts": false,
+    "projectos/services/project-os-local-api.ts": false,
+    "projectos/workbench/src/state/workbenchStore.ts": false,
+    "projectos/services/model-gateway/deterministic-login-change-gateway.ts": false
+  }
+}
