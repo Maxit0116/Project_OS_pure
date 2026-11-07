@@ -1,4 +1,7 @@
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { app, BrowserWindow, dialog } from 'electron'
+import { applyIsolatedUserDataPath } from './applyIsolatedUserDataPath.js'
 import { createMainWindow } from './createWindow.js'
 import { registerProjectOsIpc } from './registerProjectOsIpc.js'
 import { registerNotificationIpc } from './registerNotificationIpc.js'
@@ -20,7 +23,17 @@ import {
 import { startSpatialPinBridge, stopSpatialPinBridge } from './spatialPinBridge.js'
 
 loadDesktopEnvFiles()
+// Must run before ready / any Chromium persistence so FileSecretStore and
+// session paths cannot silently fall back to the daily profile.
+applyIsolatedUserDataPath(app)
 installParentExitGuard()
+
+function resolveInitialWorkspacePath(): string | undefined {
+  const fromEnv = process.env.PROJECTOS_INITIAL_WORKSPACE?.trim()
+  if (!fromEnv) return undefined
+  const absolute = resolve(fromEnv)
+  return existsSync(absolute) ? absolute : undefined
+}
 
 void app.whenReady().then(() => {
   installAppMenu()
@@ -34,11 +47,11 @@ void app.whenReady().then(() => {
   registerLspIpc()
   registerSpatialPinOverlay()
   startSpatialPinBridge()
-  createMainWindow()
+  createMainWindow(resolveInitialWorkspacePath())
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow()
+      createMainWindow(resolveInitialWorkspacePath())
     }
   })
 }).catch((error: unknown) => {
