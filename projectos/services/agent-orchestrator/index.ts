@@ -1556,6 +1556,40 @@ export class AgentOrchestrator {
     }
   }
 
+  /**
+   * Publication / beforeCommit gate: Stop/cancel that won the race before durable
+   * write must refuse commit. Does not roll back an already-committed backup.
+   */
+  assertActiveForCommit(runId: string): void {
+    const state = this.runs.get(runId);
+    if (!state) {
+      throw new ProjectOSError(
+        "run_not_found",
+        `Run '${runId}' is unavailable at the commit boundary`,
+      );
+    }
+    if (
+      state.run.status === "cancelled" ||
+      state.run.status === "interrupted"
+    ) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        `Run '${runId}' was cancelled before commit; no files were written`,
+      );
+    }
+    try {
+      this.assertRunActive(state);
+    } catch (error) {
+      if (error instanceof AgentRunCancelledError) {
+        throw new ProjectOSError(
+          "operation_cancelled",
+          `Run '${runId}' was cancelled before commit; no files were written`,
+        );
+      }
+      throw error;
+    }
+  }
+
   private releaseRunReservations(runId: string): void {
     try {
       this.nodeDeletion?.release(runId);

@@ -8,6 +8,7 @@ import { ProjectOSLocalApi } from '../../../services/project-os-local-api.js'
 import { createExecutorRegistry } from '../../../services/harness/default-executors.js'
 import { LocalContextAssembler } from '../../../services/local-context-assembler.js'
 import { ModelGateway } from '../../../services/model-gateway/gateway.js'
+import { createDeterministicAgentGatewayFromEnv } from '../../../services/model-gateway/deterministic-login-change-gateway.js'
 import { resolveOutboundBudgetFromEnv } from '../../../services/model-gateway/outbound-budget.js'
 import { VerificationRunner } from '../../../services/verification-runner.js'
 import * as writeTransactionModule from '../../../services/recoverable-write-transaction.js'
@@ -37,7 +38,9 @@ export function getProjectOsService(): ProjectOSLocalApi {
     const completesLog = join(logsDir, 'model-gateway-completes.jsonl')
     // Opt-in only: unset env ⇒ daily desktop has no test outbound budget.
     const outboundBudget = resolveOutboundBudgetFromEnv(process.env)
-    const modelGateway = new ModelGateway({
+    // Opt-in SYNTHETIC gateway for isolate Electron probes (0 HTTP). Default desktop unchanged.
+    const deterministicGateway = createDeterministicAgentGatewayFromEnv(process.env)
+    const modelGateway = deterministicGateway ?? new ModelGateway({
       secretStore,
       ...(outboundBudget ? { outboundBudget } : {}),
       onSettled: (event) => {

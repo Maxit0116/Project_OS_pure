@@ -2812,6 +2812,23 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     )).toBe(false);
     expect(events.some((event) => event.type === "apply_result")).toBe(false);
     expect(events.some((event) => event.type === "task_delegated")).toBe(true);
+    // Child proposals remain previewable after budget-closed batch (no valid / no write).
+    const childRunIds = events
+      .filter((event) => event.type === "task_delegated" && "childRunId" in event.payload)
+      .map((event) => (event.payload as { childRunId: string }).childRunId);
+    expect(childRunIds.length).toBeGreaterThan(0);
+    for (const childRunId of childRunIds) {
+      const childEvents = await api.getAgentRunEvents(childRunId);
+      expect(
+        childEvents.some((event) => event.type === "diff_proposed") ||
+          childEvents.some((event) => event.type === "diff_ready"),
+      ).toBe(true);
+      await expect(api.getDiff(childRunId)).resolves.toMatchObject({
+        files: expect.arrayContaining([
+          expect.objectContaining({ path: expect.any(String) }),
+        ]),
+      });
+    }
     expect(gateway.requests.filter((request) =>
       isRecord(request.input) && request.input.mode === "validate_delegated_batch"
     ).length).toBeGreaterThan(0);
@@ -2912,6 +2929,169 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     expect(events.some((event) =>
       event.type === "apply_result" && event.payload?.outcome === "applied"
     )).toBe(false);
+    delegatedPaths.forEach((filePath, index) => {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before[index]);
+    });
+    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+  });
+
+  it("automatic path: async public cancelAgentRun at commit barrier writes nothing", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const before = delegatedPaths.map((filePath) =>
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"));
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new NodeDelegationGateway(delegatedPaths),
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+
+    type GroupExec = {
+      commit: (...args: unknown[]) => Promise<ApplyResult>;
+      verify: (...args: unknown[]) => Promise<unknown>;
+    };
+    const orch = getLocalApiInternals(api).orchestrator as unknown as {
+      nodeGroupExecution: GroupExec;
+      assertActiveForCommit(runId: string): void;
+    };
+    const original = orch.nodeGroupExecution;
+    let releaseCommit!: () => void;
+    const commitHeld = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    let enteredCommit = false;
+    let commitSawCancel: string | undefined;
+    orch.nodeGroupExecution = {
+      verify: (...args) => original.verify(...args),
+      commit: async (...args) => {
+        enteredCommit = true;
+        // Hold until the test's async cancelAgentRun is confirmed, then resume.
+        await commitHeld;
+        const parentRun = args[1] as { runId?: string };
+        try {
+          orch.assertActiveForCommit(String(parentRun?.runId ?? ""));
+        } catch (error) {
+          commitSawCancel = error instanceof ProjectOSError ? error.code : "other";
+          throw error;
+        }
+        return original.commit(...args);
+      },
+    };
+
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
+    });
+
+    const gateDeadline = Date.now() + 20_000;
+    while (!enteredCommit && Date.now() < gateDeadline) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    expect(enteredCommit).toBe(true);
+
+    const cancelled = await api.cancelAgentRun(parent.runId);
+    expect(cancelled.status).toBe("cancelled");
+    releaseCommit();
+
+    const settleDeadline = Date.now() + 20_000;
+    let settled = await api.getAgentRun(parent.runId);
+    while (
+      settled.status !== "cancelled" &&
+      settled.status !== "error" &&
+      settled.status !== "complete" &&
+      Date.now() < settleDeadline
+    ) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      settled = await api.getAgentRun(parent.runId);
+    }
+    expect(["cancelled", "error"]).toContain(settled.status);
+    expect(commitSawCancel).toBe("operation_cancelled");
+    expect((await api.getAgentRunEvents(parent.runId)).some((event) =>
+      event.type === "apply_result" && event.payload?.outcome === "applied"
+    )).toBe(false);
+    delegatedPaths.forEach((filePath, index) => {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before[index]);
+    });
+    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+  });
+
+  it("automatic path: applyDiff after cancel refuses write even if batch was valid", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const before = delegatedPaths.map((filePath) =>
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"));
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new NodeDelegationGateway(delegatedPaths),
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+
+    type GroupExec = {
+      commit: (...args: unknown[]) => Promise<ApplyResult>;
+      verify: (...args: unknown[]) => Promise<unknown>;
+    };
+    const orch = getLocalApiInternals(api).orchestrator as unknown as {
+      nodeGroupExecution: GroupExec;
+      assertActiveForCommit(runId: string): void;
+    };
+    const original = orch.nodeGroupExecution;
+    let releaseCommit!: () => void;
+    const commitHeld = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    let enteredCommit = false;
+    orch.nodeGroupExecution = {
+      verify: (...args) => original.verify(...args),
+      commit: async (...args) => {
+        enteredCommit = true;
+        await commitHeld;
+        orch.assertActiveForCommit(String((args[1] as { runId?: string })?.runId ?? ""));
+        return original.commit(...args);
+      },
+    };
+
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
+    });
+    const gateDeadline = Date.now() + 20_000;
+    while (!enteredCommit && Date.now() < gateDeadline) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    expect(enteredCommit).toBe(true);
+    expect((await api.getAgentRunEvents(parent.runId)).some((event) =>
+      event.type === "batch_validation_result" && event.payload?.verdict === "valid"
+    )).toBe(true);
+
+    await api.cancelAgentRun(parent.runId);
+    releaseCommit();
+    const settleDeadline = Date.now() + 20_000;
+    let settled = await api.getAgentRun(parent.runId);
+    while (
+      settled.status !== "cancelled" &&
+      settled.status !== "error" &&
+      settled.status !== "complete" &&
+      Date.now() < settleDeadline
+    ) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      settled = await api.getAgentRun(parent.runId);
+    }
+    expect(["cancelled", "error"]).toContain(settled.status);
+
+    // Public apply after cancel must not revive a residual valid batch into a write.
+    await expect(api.applyDiff(parent.runId)).rejects.toMatchObject({
+      code: expect.stringMatching(/cancelled|run_not_found|proposal_validation_failed|diff_|agent_orchestration/),
+    });
     delegatedPaths.forEach((filePath, index) => {
       expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before[index]);
     });

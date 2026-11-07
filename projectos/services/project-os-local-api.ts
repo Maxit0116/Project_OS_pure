@@ -5503,6 +5503,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     if (!state) {
       throw new ProjectOSError("run_not_found", `Run '${runId}' is unavailable at the publication boundary`);
     }
+    // Async Stop/cancel must linearize before durable write (not only UI Apply gates).
+    this.orchestrator.assertActiveForCommit(runId);
     const currentWorkspace = this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
     await this.assertApprovedIntentAllowsPublication(state, currentWorkspace, proposedDiff, createdFiles);
   }
@@ -5707,6 +5709,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         );
       }
       this.orchestrator.requireValidatedBatch(runId);
+      this.orchestrator.assertActiveForCommit(runId);
       const workspace = this.requireLoadedWorkspace(orchestratorRun.run.projectId);
       let result: ApplyResult;
       try {
@@ -14305,6 +14308,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         const currentWorkspace = this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
         const orchestratorState = this.orchestrator.getRun(runId);
         if (orchestratorState) {
+          // Stop/cancel that beat commit must refuse durable write (Auto + Apply).
+          this.orchestrator.assertActiveForCommit(runId);
           await this.assertApprovedIntentAllowsPublication(
             orchestratorState,
             currentWorkspace,
