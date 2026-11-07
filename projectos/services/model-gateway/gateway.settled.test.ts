@@ -193,7 +193,7 @@ describe("ModelGateway onSettled", () => {
       redactionPolicy: "none",
     };
     await gateway.complete(profile, request);
-    expect(settled[0]?.reservationId).toBeTruthy();
+    expect(settled[0]?.status).toBe("ok");
     expect(budget.snapshot().reservations).toHaveLength(1);
     await expect(gateway.complete(profile, request)).rejects.toBeInstanceOf(ProjectOSError);
     await expect(gateway.complete(profile, request)).rejects.toMatchObject({
@@ -201,5 +201,58 @@ describe("ModelGateway onSettled", () => {
     });
     // Exhaustion rejects before fetch — still only one reservation.
     expect(budget.snapshot().reservations).toHaveLength(1);
+  });
+
+  it("reserves one budget slot per HTTP attempt including transient retries (fake adapter)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pos-gw-budget-retry-"));
+    budgetDirs.push(dir);
+    const budget = createFileOutboundBudget(join(dir, "ledger.json"), 3);
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw Object.assign(new TypeError("fetch failed"), {
+            cause: { code: "ECONNRESET" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    const secrets = new InMemorySecretStore();
+    await secrets.set("model-key", "secret");
+    const gateway = new ModelGateway({ secretStore: secrets, outboundBudget: budget });
+    await gateway.complete(
+      {
+        id: "model-test",
+        name: "Test",
+        provider: "custom",
+        apiFormat: "openai_chat",
+        model: "test-model",
+        baseUrl: "http://127.0.0.1:4000/v1",
+        apiKeyRef: "model-key",
+      },
+      {
+        projectId: "project-test",
+        requestKind: "question_answer",
+        input: { question: "ping" },
+        modelPreference: "model-test",
+        redactionPolicy: "none",
+      },
+    );
+    expect(calls).toBe(2);
+    // Failed attempt + successful attempt — no double-count at gateway layer.
+    expect(budget.snapshot().reservations).toHaveLength(2);
+    expect(budget.snapshot().reservations.map((row) => row.status)).toEqual([
+      "failed",
+      "ok",
+    ]);
   });
 });

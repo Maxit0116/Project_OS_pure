@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -154,19 +154,41 @@ describe("FileOutboundBudget", () => {
     expect(JSON.parse(readFileSync(path, "utf8")).reservations).toHaveLength(1);
   });
 
-  it("cross-process competitors cannot exceed the shared durable ledger limit", () => {
+  it("truly parallel child processes cannot exceed the shared durable ledger limit", async () => {
     const path = tempLedger();
     writeFileSync(
       path,
       JSON.stringify({ version: 1, limit: 4, reservations: [] }, null, 2),
       "utf8",
     );
-    const results = Array.from({ length: 3 }, () =>
-      runBudgetWorker("outbound-budget-cross-process-worker.ts", {
-        LEDGER_PATH: path,
-        LEDGER_LIMIT: "4",
-        ATTEMPTS: "8",
+    const viteNode = join(here, "../../node_modules/.bin/vite-node");
+    const script = join(here, "outbound-budget-cross-process-worker.ts");
+    const children = Array.from({ length: 3 }, () =>
+      spawn(viteNode, [script], {
+        env: {
+          ...process.env,
+          LEDGER_PATH: path,
+          LEDGER_LIMIT: "4",
+          ATTEMPTS: "8",
+        },
+        cwd: join(here, "../.."),
       }),
+    );
+    const results = await Promise.all(
+      children.map(
+        (child) =>
+          new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+            let stdout = "";
+            let stderr = "";
+            child.stdout.on("data", (chunk) => {
+              stdout += String(chunk);
+            });
+            child.stderr.on("data", (chunk) => {
+              stderr += String(chunk);
+            });
+            child.on("close", (status) => resolve({ status, stdout, stderr }));
+          }),
+      ),
     );
     for (const result of results) {
       expect(result.status, result.stderr).toBe(0);

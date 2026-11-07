@@ -108,6 +108,7 @@ import type {
 import { AgentRunSchema } from "../../contracts/agent-run.js";
 import { GeneratedDiffSchema } from "../../contracts/diff.js";
 import { ProjectOSError } from "../../errors.js";
+import { childValidationCoversParentAcceptance } from "./single-file-batch-coverage.js";
 import type { LoadedProjectOSWorkspace } from "../../persistence/workspace-store.js";
 import { cloneJson } from "../../utils/json.js";
 import { resolveContainedPath } from "../../utils/path-containment.js";
@@ -5260,36 +5261,9 @@ export class AgentOrchestrator {
         }
         return result;
       } catch (error) {
-        if (error instanceof ProjectOSError) {
-          // Budget/provider hard-fail after children already independently validated:
-          // single-file batches can still synthesize without another outbound.
-          if (
-            error.code === "model_outbound_budget_exhausted" &&
-            plan.tasks.length === 1 &&
-            children.length === 1
-          ) {
-            const synthesized = this.synthesizeSingleFileBatchValidation(
-              state,
-              plan,
-              children[0]!,
-              parentContextHash,
-            );
-            if (synthesized) {
-              this.emit(
-                workspace,
-                state,
-                createActionEvent(
-                  state.run.runId,
-                  "batch_validation_result",
-                  sanitizeBatchValidationProjection(synthesized),
-                  phaseId,
-                ),
-              );
-              return synthesized;
-            }
-          }
-          throw error;
-        }
+        // Budget exhaustion / other ProjectOSError must NOT promote an unverified
+        // batch to valid — that would skip full parent acceptance coverage.
+        if (error instanceof ProjectOSError) throw error;
         const failure = error instanceof BatchValidationError
           ? error.category
           : "invalid_validation_shape";
@@ -5297,36 +5271,13 @@ export class AgentOrchestrator {
           firstFailure = failure;
           continue;
         }
-        // Last resort for multi-file: if every leaf already independently validated,
-        // synthesize a batch result with an explicit synthesized rationale rather than
-        // hard-failing when the batch model cannot return usable JSON.
+        // Last resort for multi-file only (pre-existing): every leaf already
+        // independently validated. Single-file JSON failure does not synthesize.
         if (plan.tasks.length === children.length && children.length > 1) {
           const synthesized = this.synthesizeIndependentChildBatchValidation(
             state,
             plan,
             children,
-            parentContextHash,
-          );
-          if (synthesized) {
-            this.emit(
-              workspace,
-              state,
-              createActionEvent(
-                state.run.runId,
-                "batch_validation_result",
-                sanitizeBatchValidationProjection(synthesized),
-                phaseId,
-              ),
-            );
-            return synthesized;
-          }
-        }
-        // Single-file last resort (same as early path) when batch JSON is unusable.
-        if (plan.tasks.length === 1 && children.length === 1) {
-          const synthesized = this.synthesizeSingleFileBatchValidation(
-            state,
-            plan,
-            children[0]!,
             parentContextHash,
           );
           if (synthesized) {
@@ -5365,19 +5316,20 @@ export class AgentOrchestrator {
     const task = plan.tasks[0];
     const childState = this.runs.get(child.runId);
     const validation = childState?.validationResult;
-    // Child leaf plans may paraphrase acceptance criteria relative to the parent
-    // delegation task. Trust independently validated child evidence when every
-    // child criterion is satisfied — exact count/text equality with the parent
-    // task is fragile and previously forced a redundant validate_batch model call.
+    // Full parent acceptance coverage is required. Budget exhaustion or unusable
+    // batch JSON must not bypass this gate by promoting incomplete evidence.
     if (
       !task ||
       task.taskId !== child.taskId ||
       !validation ||
-      validation.verdict !== "valid" ||
-      validation.path !== task.filePath ||
-      validation.scopeAssessment.status !== "compliant" ||
-      validation.criteria.length === 0 ||
-      !validation.criteria.every((criterion) => criterion.status === "satisfied")
+      !childValidationCoversParentAcceptance({
+        parentAcceptanceCriteria: task.acceptanceCriteria,
+        childCriteria: validation.criteria,
+        childVerdict: validation.verdict,
+        childPath: validation.path,
+        parentPath: task.filePath,
+        scopeStatus: validation.scopeAssessment.status,
+      })
     ) {
       return undefined;
     }
@@ -5393,9 +5345,9 @@ export class AgentOrchestrator {
         childRunId: child.runId,
         path: task.filePath,
         status: "consistent",
-        criteria: validation.criteria.map((criterion) => ({
-          criterion: sanitizePlanText(criterion.criterion, 300, "Acceptance criterion"),
-          status: criterion.status,
+        criteria: task.acceptanceCriteria.map((parentCriterion) => ({
+          criterion: sanitizePlanText(parentCriterion, 300, "Acceptance criterion"),
+          status: "satisfied" as const,
         })),
         summary: sanitizeValidationNarrative(
           validation.summary,

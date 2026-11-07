@@ -4192,10 +4192,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
                 next.codeSubTab = 'diff'
               }
               if (childEvent.type === 'diff_ready') {
-                // Child proposal is independently validated. Clear the validating
-                // review-only gate so Diff preview stays visible; parent
-                // `batch_validation_result` still drives "Apply all delegated".
-                next.diffReviewOnlyReason = null
+                // Preview OK; Apply stays blocked until parent batch_validation_result
+                // is valid — child validation alone must not authorize group apply.
+                next.diffReviewOnlyReason = getStoreMessage(
+                  current.locale,
+                  'diff.awaitingParentBatchValidation',
+                )
                 next.centerTab = 'code'
                 next.codeSubTab = 'diff'
               }
@@ -5252,10 +5254,37 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   applyCurrentDiff: async () => {
-    const { client, project, activeRunId, generatedDiff, editorBuffers, pushToast, locale, selectedNodeId, diffReviewOnlyReason } = get()
+    const {
+      client,
+      project,
+      activeRunId,
+      generatedDiff,
+      editorBuffers,
+      pushToast,
+      locale,
+      selectedNodeId,
+      diffReviewOnlyReason,
+      delegatedRunTraces,
+      flowDelegationEvents,
+      flowActions,
+    } = get()
     if (!project || !activeRunId) return
     if (diffReviewOnlyReason) {
       pushToast({ type: 'warning', message: diffReviewOnlyReason })
+      return
+    }
+    const hasDelegatedChildren =
+      Object.keys(delegatedRunTraces ?? {}).length > 0 ||
+      (flowDelegationEvents ?? []).some((event) => event.type === 'task_delegated')
+    const parentBatchValid = (flowActions ?? []).some(
+      (event) =>
+        event.type === 'batch_validation_result' &&
+        event.payload?.verdict === 'valid',
+    )
+    if (hasDelegatedChildren && !parentBatchValid) {
+      const message = getStoreMessage(locale, 'diff.awaitingParentBatchValidation')
+      pushToast({ type: 'warning', message })
+      set({ diffReviewOnlyReason: message })
       return
     }
     try {

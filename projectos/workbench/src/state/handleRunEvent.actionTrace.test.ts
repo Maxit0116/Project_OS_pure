@@ -155,7 +155,7 @@ describe('Agent Flow action trace state', () => {
     expect(agentActionMetadata(action)).toEqual(['modify · app/login/page.tsx'])
   })
 
-  it('surfaces diff_proposed as review-only Diff preview until diff_ready clears the gate', () => {
+  it('surfaces diff_proposed as review-only Diff preview until diff_ready', () => {
     const proposed = AgentRunEventSchema.parse({
       eventId: 'evt_proposed',
       runId: 'run_leaf',
@@ -185,6 +185,54 @@ describe('Agent Flow action trace state', () => {
     expect(afterReady.diffReady).toBe(true)
     expect(afterReady.flowStatus).toBe('awaiting_review')
     expect(afterReady.diffReviewOnlyReason).toBeNull()
+  })
+
+  it('keeps Apply blocked until parent batch_validation_result is valid', () => {
+    const task = {
+      taskId: 'task_1',
+      childRunId: 'run_child',
+      path: 'macos/Package.swift',
+      status: 'consistent' as const,
+      criteria: [{ criterion: 'Append comment', status: 'satisfied' as const }],
+    }
+    const invalid = AgentRunEventSchema.parse({
+      eventId: 'evt_batch_invalid',
+      runId: 'run_parent',
+      timestamp: '2026-11-07T00:00:02.000Z',
+      type: 'batch_validation_result',
+      payload: {
+        planId: 'plan_1',
+        verdict: 'invalid',
+        tasks: [{ ...task, status: 'inconsistent' }],
+        crossFileStatus: 'inconsistent',
+        summary: 'Parent batch rejected',
+        rationale: 'Criteria incomplete',
+      },
+    })
+    const afterInvalid = reduceRunEventState(baseState(), invalid)
+    expect(afterInvalid.diffReviewOnlyReason).toMatch(/batch/i)
+
+    const valid = AgentRunEventSchema.parse({
+      eventId: 'evt_batch_valid',
+      runId: 'run_parent',
+      timestamp: '2026-11-07T00:00:03.000Z',
+      type: 'batch_validation_result',
+      payload: {
+        planId: 'plan_1',
+        verdict: 'valid',
+        tasks: [task],
+        crossFileStatus: 'consistent',
+        summary: 'Parent batch accepted',
+        rationale: 'All parent criteria covered',
+      },
+    })
+    const afterValid = reduceRunEventState(
+      { ...baseState(), ...afterInvalid },
+      valid,
+    )
+    expect(afterValid.diffReviewOnlyReason).toBeNull()
+    expect(afterValid.diffReady).toBe(true)
+    expect(afterValid.flowStatus).toBe('awaiting_review')
   })
 
   it('returns no metadata for an unknown future action type', () => {

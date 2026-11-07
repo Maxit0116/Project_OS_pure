@@ -10,6 +10,7 @@ import type { ModelToolCall, ModelToolDefinition } from "../../contracts/model-g
 import { normalizeModelProfile } from "../../contracts/settings.js";
 import { ProjectOSError } from "../../errors.js";
 import type { SecretStore } from "../../persistence/secret-store.js";
+import { getOutboundBudgetGate } from "./outbound-budget-context.js";
 
 export interface ProviderImagePart {
   mimeType: "image/png" | "image/jpeg";
@@ -261,13 +262,39 @@ async function fetchWithTimeout(
 ): Promise<Response> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= PROVIDER_FETCH_TRANSIENT_RETRIES; attempt += 1) {
+    const budget = getOutboundBudgetGate();
+    // One durable reservation per HTTP attempt (including transient retries).
+    // No reserve ⇒ no fetch when a budget gate is active.
+    const reservationId = budget ? budget.reserve().reservationId : undefined;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const abort = () => controller.abort();
     signal?.addEventListener("abort", abort, { once: true });
     try {
-      return await fetch(url, { ...init, signal: controller.signal });
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      if (budget && reservationId) {
+        budget.settle(reservationId, {
+          status: "ok",
+          usageStatus: "missing",
+          inputTokens: 0,
+          outputTokens: 0,
+        });
+      }
+      return response;
     } catch (error) {
+      const cancelled = Boolean(signal?.aborted);
+      if (budget && reservationId) {
+        try {
+          budget.settle(reservationId, {
+            status: cancelled ? "cancelled" : "failed",
+            usageStatus: "missing",
+            inputTokens: 0,
+            outputTokens: 0,
+          });
+        } catch {
+          /* settle must not mask the transport error */
+        }
+      }
       if (error instanceof Error && error.name === "AbortError") {
         if (signal?.aborted) throw new Error("Model request cancelled");
         throw new Error(`Model request timed out after ${timeoutMs / 1000}s`);

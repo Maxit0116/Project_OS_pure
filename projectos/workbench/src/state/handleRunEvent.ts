@@ -211,6 +211,21 @@ export function reduceRunEventState(
         : null
   }
 
+  if (event.type === 'batch_validation_result') {
+    const verdict = (event.payload as { verdict?: unknown } | undefined)?.verdict
+    if (verdict === 'valid') {
+      patch.diffReviewOnlyReason = null
+      patch.diffReady = true
+      patch.flowStatus = 'awaiting_review'
+    } else {
+      // Invalid / incomplete parent batch must not unlock Apply.
+      patch.diffReviewOnlyReason = getStoreMessage(
+        state.locale,
+        'diff.awaitingParentBatchValidation',
+      )
+    }
+  }
+
   if (event.type === 'apply_result') {
     patch.applyResult = {
       runId: event.runId,
