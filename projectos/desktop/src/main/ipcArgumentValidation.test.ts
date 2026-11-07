@@ -72,6 +72,17 @@ describe('privileged IPC argument validation', () => {
     expect(() => parseDiffReadyNotificationPayload({
       title: 'Diff ready', body: 'Review', destination: 'diff', runIds: ['run_one', 'run_one'],
     })).toThrow('Notification payload is invalid')
+    // Regression: empty runIds (historical ask merge) must stay rejected.
+    expect(() => parseDiffReadyNotificationPayload({
+      title: 'Done', body: 'Ask finished', destination: 'ask', runIds: [],
+    })).toThrow('Notification payload is invalid')
+    // Synthesized ask runId from mergeDiffReadyCompletions must be accepted.
+    expect(parseDiffReadyNotificationPayload({
+      title: 'Done',
+      body: 'Ask finished',
+      destination: 'ask',
+      runIds: ['ask:10:0'],
+    })).toMatchObject({ destination: 'ask', runIds: ['ask:10:0'] })
     expect(() => parseWindowTitle('ProjectOS\nspoofed')).toThrow('Window title is invalid')
     expect(parseWindowTitle('ProjectOS — Sample')).toBe('ProjectOS — Sample')
   })

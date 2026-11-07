@@ -1,0 +1,135 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { ProjectOSError } from "../../errors.js";
+import {
+  createFileOutboundBudget,
+  resolveOutboundBudgetFromEnv,
+  OUTBOUND_BUDGET_LIMIT_ENV,
+  OUTBOUND_BUDGET_PATH_ENV,
+} from "./outbound-budget.js";
+
+const dirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of dirs.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+});
+
+function tempLedger(): string {
+  const dir = mkdtempSync(join(tmpdir(), "pos-outbound-budget-"));
+  dirs.push(dir);
+  return join(dir, "ledger.json");
+}
+
+describe("resolveOutboundBudgetFromEnv", () => {
+  it("returns null when both env vars are unset (daily default)", () => {
+    expect(resolveOutboundBudgetFromEnv({})).toBeNull();
+  });
+
+  it("fail-closes when only one env var is set", () => {
+    expect(() =>
+      resolveOutboundBudgetFromEnv({ [OUTBOUND_BUDGET_PATH_ENV]: "/tmp/x" }),
+    ).toThrow(ProjectOSError);
+    expect(() =>
+      resolveOutboundBudgetFromEnv({ [OUTBOUND_BUDGET_LIMIT_ENV]: "10" }),
+    ).toThrow(ProjectOSError);
+  });
+});
+
+describe("FileOutboundBudget", () => {
+  it("reserves up to the limit then rejects without sending a slot", () => {
+    const path = tempLedger();
+    const budget = createFileOutboundBudget(path, 2);
+    const a = budget.reserve();
+    const b = budget.reserve();
+    expect(a.reservationId).not.toBe(b.reservationId);
+    try {
+      budget.reserve();
+      expect.unreachable("expected budget exhaustion");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ProjectOSError);
+      expect((error as ProjectOSError).code).toBe("model_outbound_budget_exhausted");
+    }
+    const snap = budget.snapshot();
+    expect(snap.reservations).toHaveLength(2);
+  });
+
+  it("settle records outcome but never frees a slot (no refund)", () => {
+    const path = tempLedger();
+    const budget = createFileOutboundBudget(path, 1);
+    const { reservationId } = budget.reserve();
+    budget.settle(reservationId, {
+      status: "failed",
+      usageStatus: "missing",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    expect(() => budget.reserve()).toThrow(/exhausted/i);
+    const row = budget.snapshot().reservations[0]!;
+    expect(row.state).toBe("settled");
+    expect(row.status).toBe("failed");
+  });
+
+  it("survives process restart by reading the same durable ledger", () => {
+    const path = tempLedger();
+    const first = createFileOutboundBudget(path, 3);
+    first.reserve();
+    first.reserve();
+    const second = createFileOutboundBudget(path, 3);
+    expect(second.snapshot().reservations).toHaveLength(2);
+    second.reserve();
+    expect(() => second.reserve()).toThrow(/exhausted/i);
+  });
+
+  it("rejects concurrent over-reserve via exclusive lock", async () => {
+    const path = tempLedger();
+    const budget = createFileOutboundBudget(path, 5);
+    const workers = Array.from({ length: 12 }, () =>
+      Promise.resolve().then(() => {
+        try {
+          return { ok: true as const, id: budget.reserve().reservationId };
+        } catch (error) {
+          return {
+            ok: false as const,
+            code: error instanceof ProjectOSError ? error.code : "other",
+          };
+        }
+      }),
+    );
+    const results = await Promise.all(workers);
+    const reserved = results.filter((row) => row.ok);
+    const rejected = results.filter((row) => !row.ok);
+    expect(reserved).toHaveLength(5);
+    expect(rejected.length).toBe(7);
+    expect(
+      rejected.every((row) => row.code === "model_outbound_budget_exhausted"),
+    ).toBe(true);
+    expect(budget.snapshot().reservations).toHaveLength(5);
+  });
+
+  it("fail-closes on corrupt ledger JSON", () => {
+    const path = tempLedger();
+    writeFileSync(path, "{not-json", "utf8");
+    const budget = createFileOutboundBudget(path, 2);
+    expect(() => budget.reserve()).toThrow(ProjectOSError);
+    expect(() => budget.reserve()).toThrow(/corrupt/i);
+  });
+
+  it("fail-closes when configured limit disagrees with ledger limit", () => {
+    const path = tempLedger();
+    const first = createFileOutboundBudget(path, 2);
+    first.reserve();
+    const second = createFileOutboundBudget(path, 5);
+    expect(() => second.reserve()).toThrow(/does not match/i);
+    // Original ledger untouched length.
+    expect(JSON.parse(readFileSync(path, "utf8")).reservations).toHaveLength(1);
+  });
+});

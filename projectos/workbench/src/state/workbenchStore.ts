@@ -3660,6 +3660,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         }))
         get().maybeNotifyAgentComplete({
           kind: 'ask',
+          // System notify IPC requires non-empty runIds; reuse answer id as the ask handle.
+          runId: answer.id,
           summary: truncateDiffReadySummary(visiblePrompt),
           completedAt: Date.now(),
         })

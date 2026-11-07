@@ -1,12 +1,26 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModelGatewayRequest } from "../../contracts/model-gateway.js";
+import { ProjectOSError } from "../../errors.js";
 import { InMemorySecretStore } from "../../persistence/secret-store.js";
 import { ModelGateway, type ModelGatewaySettledEvent } from "./gateway.js";
+import { createFileOutboundBudget } from "./outbound-budget.js";
+
+const budgetDirs: string[] = [];
 
 describe("ModelGateway onSettled", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    for (const dir of budgetDirs.splice(0)) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
   });
 
   it("reports ok with usage for a successful complete", async () => {
@@ -100,5 +114,92 @@ describe("ModelGateway onSettled", () => {
     expect(settled).toHaveLength(1);
     expect(settled[0]?.status).toBe("cancelled");
     expect(settled[0]?.usageStatus).toBe("missing");
+  });
+
+  it("does not reserve budget when already aborted before any provider outbound", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pos-gw-budget-"));
+    budgetDirs.push(dir);
+    const budget = createFileOutboundBudget(join(dir, "ledger.json"), 1);
+    const secrets = new InMemorySecretStore();
+    await secrets.set("model-key", "secret");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const gateway = new ModelGateway({ secretStore: secrets, outboundBudget: budget });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      gateway.complete(
+        {
+          id: "model-test",
+          name: "Test",
+          provider: "custom",
+          apiFormat: "openai_chat",
+          model: "test-model",
+          baseUrl: "http://127.0.0.1:4000/v1",
+          apiKeyRef: "model-key",
+        },
+        {
+          projectId: "project-test",
+          requestKind: "question_answer",
+          input: { question: "ping" },
+          modelPreference: "model-test",
+          redactionPolicy: "none",
+        },
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ code: "operation_cancelled" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(budget.snapshot().reservations).toHaveLength(0);
+  });
+
+  it("reserves before fake-provider outbound and blocks the next call when exhausted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pos-gw-budget-"));
+    budgetDirs.push(dir);
+    const budget = createFileOutboundBudget(join(dir, "ledger.json"), 1);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const secrets = new InMemorySecretStore();
+    await secrets.set("model-key", "secret");
+    const settled: ModelGatewaySettledEvent[] = [];
+    const gateway = new ModelGateway({
+      secretStore: secrets,
+      outboundBudget: budget,
+      onSettled: (event) => settled.push(event),
+    });
+    const profile = {
+      id: "model-test",
+      name: "Test",
+      provider: "custom" as const,
+      apiFormat: "openai_chat" as const,
+      model: "test-model",
+      baseUrl: "http://127.0.0.1:4000/v1",
+      apiKeyRef: "model-key",
+    };
+    const request: ModelGatewayRequest = {
+      projectId: "project-test",
+      requestKind: "question_answer",
+      input: { question: "ping" },
+      modelPreference: "model-test",
+      redactionPolicy: "none",
+    };
+    await gateway.complete(profile, request);
+    expect(settled[0]?.reservationId).toBeTruthy();
+    expect(budget.snapshot().reservations).toHaveLength(1);
+    await expect(gateway.complete(profile, request)).rejects.toBeInstanceOf(ProjectOSError);
+    await expect(gateway.complete(profile, request)).rejects.toMatchObject({
+      code: "model_outbound_budget_exhausted",
+    });
+    // Exhaustion rejects before fetch — still only one reservation.
+    expect(budget.snapshot().reservations).toHaveLength(1);
   });
 });

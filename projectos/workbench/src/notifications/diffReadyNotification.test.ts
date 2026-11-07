@@ -204,6 +204,10 @@ describe('diffReadyNotification', () => {
     )
     expect(ask.destination).toBe('ask')
     expect(ask.body).toContain('How does auth work?')
+    // Regression: ask without runId must still emit a non-empty unique runIds
+    // list so notify:showDiffReady IPC validation cannot reject the payload.
+    expect(ask.runIds).toHaveLength(1)
+    expect(ask.runIds[0]).toMatch(/^ask:/)
 
     const batch = mergeDiffReadyCompletions(
       [
@@ -225,6 +229,19 @@ describe('diffReadyNotification', () => {
     expect(batch.runIds).toEqual(['run_1', 'run_2'])
     expect(batch.body).toContain('2 tasks')
     expect(batch.body).toContain('5 file')
+  })
+
+  it('synthesizes unique runIds when ask completions omit runId (system notify contract)', () => {
+    const merged = mergeDiffReadyCompletions(
+      [
+        completion({ kind: 'ask', summary: 'Q1', completedAt: 10 }),
+        completion({ kind: 'ask', summary: 'Q2', completedAt: 10 }),
+      ],
+      'en',
+    )
+    expect(merged.runIds).toHaveLength(2)
+    expect(new Set(merged.runIds).size).toBe(2)
+    expect(merged.runIds.every((id) => id.length > 0 && !id.includes('\0'))).toBe(true)
   })
 
   it('truncates long summaries', () => {

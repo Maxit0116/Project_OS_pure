@@ -108,11 +108,36 @@ export function resolveNotificationChannelForCompletions(
   })
 }
 
+/**
+ * Build runIds that always satisfy desktop `parseDiffReadyNotificationPayload`
+ * (non-empty, unique, bounded). Missing `runId` historically produced `[]` and
+ * made `notify:showDiffReady` throw "Notification payload is invalid".
+ */
+export function runIdsForDiffReadyCompletions(
+  items: DiffReadyCompletion[],
+): string[] {
+  const seen = new Set<string>()
+  return items.map((item, index) => {
+    const base =
+      item.runId && item.runId.trim() && !item.runId.includes('\0')
+        ? item.runId.trim().slice(0, 256)
+        : `${item.kind}:${item.completedAt}:${index}`
+    let candidate = base
+    let suffix = 0
+    while (seen.has(candidate)) {
+      suffix += 1
+      candidate = `${base}#${suffix}`.slice(0, 256)
+    }
+    seen.add(candidate)
+    return candidate
+  })
+}
+
 export function mergeDiffReadyCompletions(
   items: DiffReadyCompletion[],
   locale: Locale,
 ): { title: string; body: string; destination: AgentCompletionKind; runIds: string[] } {
-  const runIds = items.flatMap((item) => (item.runId ? [item.runId] : []))
+  const runIds = runIdsForDiffReadyCompletions(items)
   const title = getStoreMessage(locale, 'diffReadyNotify.title')
 
   if (items.length === 1) {

@@ -8,6 +8,7 @@ import { ProjectOSLocalApi } from '../../../services/project-os-local-api.js'
 import { createExecutorRegistry } from '../../../services/harness/default-executors.js'
 import { LocalContextAssembler } from '../../../services/local-context-assembler.js'
 import { ModelGateway } from '../../../services/model-gateway/gateway.js'
+import { resolveOutboundBudgetFromEnv } from '../../../services/model-gateway/outbound-budget.js'
 import { VerificationRunner } from '../../../services/verification-runner.js'
 import * as writeTransactionModule from '../../../services/recoverable-write-transaction.js'
 import { WorkspaceTransactionCoordinator } from '../../../services/workspace-transaction-coordinator.js'
@@ -34,8 +35,11 @@ export function getProjectOsService(): ProjectOSLocalApi {
     const logsDir = join(userDataPath, 'logs')
     mkdirSync(logsDir, { recursive: true })
     const completesLog = join(logsDir, 'model-gateway-completes.jsonl')
+    // Opt-in only: unset env ⇒ daily desktop has no test outbound budget.
+    const outboundBudget = resolveOutboundBudgetFromEnv(process.env)
     const modelGateway = new ModelGateway({
       secretStore,
+      ...(outboundBudget ? { outboundBudget } : {}),
       onSettled: (event) => {
         // Metadata only — never secret values. Isolate Chromium userData only.
         appendFileSync(

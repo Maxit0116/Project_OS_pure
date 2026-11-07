@@ -20,6 +20,7 @@ import {
   type ProviderCompleteInput,
   type ProviderMessage,
 } from "./providers.js";
+import type { OutboundBudgetGate } from "./outbound-budget.js";
 
 /** One settled provider-facing gateway call (success, failure, or cancel). */
 export interface ModelGatewaySettledEvent {
@@ -31,6 +32,8 @@ export interface ModelGatewaySettledEvent {
   outputTokens: number;
   provider?: string;
   model?: string;
+  /** Present when an opt-in outbound budget reservation was consumed for this call. */
+  reservationId?: string;
 }
 
 export interface ModelGatewayOptions {
@@ -40,6 +43,11 @@ export interface ModelGatewayOptions {
    * provider round-trip inside a tool loop). Never includes secret values.
    */
   onSettled?: (event: ModelGatewaySettledEvent) => void;
+  /**
+   * Opt-in hard budget: reserve one slot immediately before each real provider
+   * outbound. Daily runs leave this unset.
+   */
+  outboundBudget?: OutboundBudgetGate;
 }
 
 export interface ModelToolExecutionResult {
@@ -81,10 +89,12 @@ export interface ModelToolLoopOptions {
 export class ModelGateway {
   private readonly secretStore: SecretStore;
   private readonly onSettled: ((event: ModelGatewaySettledEvent) => void) | undefined;
+  private readonly outboundBudget: OutboundBudgetGate | undefined;
 
   constructor(options: ModelGatewayOptions) {
     this.secretStore = options.secretStore;
     this.onSettled = options.onSettled;
+    this.outboundBudget = options.outboundBudget;
   }
 
   private settle(event: ModelGatewaySettledEvent): void {
@@ -92,6 +102,28 @@ export class ModelGateway {
       this.onSettled?.(event);
     } catch {
       // Observers must not break model calls.
+    }
+  }
+
+  private reserveOutboundOrThrow(): string | undefined {
+    if (!this.outboundBudget) return undefined;
+    return this.outboundBudget.reserve().reservationId;
+  }
+
+  private settleOutbound(
+    reservationId: string | undefined,
+    outcome: {
+      status: "ok" | "failed" | "cancelled";
+      usageStatus: "reported" | "missing";
+      inputTokens: number;
+      outputTokens: number;
+    },
+  ): void {
+    if (!reservationId || !this.outboundBudget) return;
+    try {
+      this.outboundBudget.settle(reservationId, outcome);
+    } catch {
+      // Never mask the provider error with a settle failure.
     }
   }
 
@@ -112,16 +144,8 @@ export class ModelGateway {
     }
 
     if (options?.signal?.aborted) {
+      // No provider outbound — do not reserve budget (not a counted call).
       const requestId = newModelRequestId();
-      this.settle({
-        requestId,
-        status: "cancelled",
-        usageStatus: "missing",
-        inputTokens: 0,
-        outputTokens: 0,
-        provider: modelProfileLabel(profile),
-        model: profile.model,
-      });
       throw new ProjectOSError(
         "operation_cancelled",
         "Model request cancelled",
@@ -136,11 +160,18 @@ export class ModelGateway {
       ...this.buildProviderInput(request),
       ...(deadline.signal ? { signal: deadline.signal } : {}),
     };
+    const reservationId = this.reserveOutboundOrThrow();
     let result;
     try {
       result = await adapter.complete(resolved, apiKey, input);
     } catch (error) {
       const cancelled = Boolean(options?.signal?.aborted);
+      this.settleOutbound(reservationId, {
+        status: cancelled ? "cancelled" : "failed",
+        usageStatus: "missing",
+        inputTokens: 0,
+        outputTokens: 0,
+      });
       this.settle({
         requestId,
         status: cancelled ? "cancelled" : "failed",
@@ -149,6 +180,7 @@ export class ModelGateway {
         outputTokens: 0,
         provider: modelProfileLabel(profile),
         model: profile.model,
+        ...(reservationId ? { reservationId } : {}),
       });
       if (cancelled) {
         throw new ProjectOSError(
@@ -167,15 +199,24 @@ export class ModelGateway {
       ? redactText(result.reasoning, request.redactionPolicy)
       : undefined;
     const usageReported = result.usageReported !== false;
+    const inputTokens = usageReported ? result.inputTokens : 0;
+    const outputTokens = usageReported ? result.outputTokens : 0;
 
+    this.settleOutbound(reservationId, {
+      status: "ok",
+      usageStatus: usageReported ? "reported" : "missing",
+      inputTokens,
+      outputTokens,
+    });
     this.settle({
       requestId,
       status: "ok",
       usageStatus: usageReported ? "reported" : "missing",
-      inputTokens: usageReported ? result.inputTokens : 0,
-      outputTokens: usageReported ? result.outputTokens : 0,
+      inputTokens,
+      outputTokens,
       provider: modelProfileLabel(profile),
       model: profile.model,
+      ...(reservationId ? { reservationId } : {}),
     });
 
     return {
@@ -185,10 +226,7 @@ export class ModelGateway {
       output,
       ...(reasoning ? { reasoning } : {}),
       ...(result.finishReason ? { finishReason: result.finishReason } : {}),
-      usage: {
-        inputTokens: usageReported ? result.inputTokens : 0,
-        outputTokens: usageReported ? result.outputTokens : 0,
-      },
+      usage: { inputTokens, outputTokens },
       usageStatus: usageReported ? "reported" : "missing",
       latencyMs: Date.now() - started,
     };
@@ -237,16 +275,8 @@ export class ModelGateway {
 
     for (let iteration = 0; iteration < maxIterations; iteration += 1) {
       const roundId = `${requestId}#${iteration}`;
+      // Pre-outbound limit/cancel: no provider HTTP — do not reserve budget.
       if (Date.now() - started >= maxTotalDurationMs) {
-        this.settle({
-          requestId: roundId,
-          status: "failed",
-          usageStatus: "missing",
-          inputTokens: 0,
-          outputTokens: 0,
-          provider: modelProfileLabel(profile),
-          model: profile.model,
-        });
         throw new ProjectOSError(
           "external_agent_failed",
           `Model exceeded the ${maxTotalDurationMs}ms MCP tool-loop time limit`,
@@ -254,15 +284,6 @@ export class ModelGateway {
         );
       }
       if (options.signal?.aborted) {
-        this.settle({
-          requestId: roundId,
-          status: "cancelled",
-          usageStatus: "missing",
-          inputTokens: 0,
-          outputTokens: 0,
-          provider: modelProfileLabel(profile),
-          model: profile.model,
-        });
         throw new ProjectOSError(
           "external_agent_failed",
           "MCP tool loop was cancelled",
@@ -276,11 +297,18 @@ export class ModelGateway {
         tools: options.tools,
         ...(deadline.signal ? { signal: deadline.signal } : {}),
       };
+      const reservationId = this.reserveOutboundOrThrow();
       let result;
       try {
         result = await adapter.complete(resolved, apiKey, providerInput);
       } catch (error) {
         const cancelled = Boolean(options.signal?.aborted);
+        this.settleOutbound(reservationId, {
+          status: cancelled ? "cancelled" : "failed",
+          usageStatus: "missing",
+          inputTokens: 0,
+          outputTokens: 0,
+        });
         this.settle({
           requestId: roundId,
           status: cancelled ? "cancelled" : "failed",
@@ -289,6 +317,7 @@ export class ModelGateway {
           outputTokens: 0,
           provider: modelProfileLabel(profile),
           model: profile.model,
+          ...(reservationId ? { reservationId } : {}),
         });
         if (cancelled) {
           throw new ProjectOSError(
@@ -310,14 +339,23 @@ export class ModelGateway {
       }
       if (result.usageReported === false) usageMissing = true;
       const roundReported = result.usageReported !== false;
+      const roundIn = roundReported ? result.inputTokens : 0;
+      const roundOut = roundReported ? result.outputTokens : 0;
+      this.settleOutbound(reservationId, {
+        status: "ok",
+        usageStatus: roundReported ? "reported" : "missing",
+        inputTokens: roundIn,
+        outputTokens: roundOut,
+      });
       this.settle({
         requestId: roundId,
         status: "ok",
         usageStatus: roundReported ? "reported" : "missing",
-        inputTokens: roundReported ? result.inputTokens : 0,
-        outputTokens: roundReported ? result.outputTokens : 0,
+        inputTokens: roundIn,
+        outputTokens: roundOut,
         provider: modelProfileLabel(profile),
         model: profile.model,
+        ...(reservationId ? { reservationId } : {}),
       });
       inputTokens += result.usageReported === false ? 0 : result.inputTokens;
       outputTokens += result.usageReported === false ? 0 : result.outputTokens;
@@ -430,15 +468,7 @@ export class ModelGateway {
       }
     }
 
-    this.settle({
-      requestId: `${requestId}#limit`,
-      status: "failed",
-      usageStatus: usageMissing ? "missing" : "reported",
-      inputTokens: 0,
-      outputTokens: 0,
-      provider: modelProfileLabel(profile),
-      model: profile.model,
-    });
+    // Iteration cap is local control flow — no provider outbound / no budget slot.
     throw new ProjectOSError(
       "external_agent_failed",
       `Model exceeded the ${maxIterations} MCP tool-loop iteration limit`,
@@ -458,11 +488,28 @@ export class ModelGateway {
         latencyMs: Date.now() - started,
       };
     }
-    const result = await adapter.testConnection(resolved, apiKey);
-    return {
-      ...result,
-      latencyMs: Date.now() - started,
-    };
+    const reservationId = this.reserveOutboundOrThrow();
+    try {
+      const result = await adapter.testConnection(resolved, apiKey);
+      this.settleOutbound(reservationId, {
+        status: result.ok === false ? "failed" : "ok",
+        usageStatus: "missing",
+        inputTokens: 0,
+        outputTokens: 0,
+      });
+      return {
+        ...result,
+        latencyMs: Date.now() - started,
+      };
+    } catch (error) {
+      this.settleOutbound(reservationId, {
+        status: "failed",
+        usageStatus: "missing",
+        inputTokens: 0,
+        outputTokens: 0,
+      });
+      throw error;
+    }
   }
 
   async listModels(profile: ModelProfile) {
@@ -472,7 +519,25 @@ export class ModelGateway {
       return [{ id: profile.model, name: profile.model }];
     }
     const apiKey = await resolveApiKey(this.secretStore, resolved);
-    return adapter.listModels(resolved, apiKey);
+    const reservationId = this.reserveOutboundOrThrow();
+    try {
+      const models = await adapter.listModels(resolved, apiKey);
+      this.settleOutbound(reservationId, {
+        status: "ok",
+        usageStatus: "missing",
+        inputTokens: 0,
+        outputTokens: 0,
+      });
+      return models;
+    } catch (error) {
+      this.settleOutbound(reservationId, {
+        status: "failed",
+        usageStatus: "missing",
+        inputTokens: 0,
+        outputTokens: 0,
+      });
+      throw error;
+    }
   }
 
   private buildProviderInput(request: ModelGatewayRequest): ProviderCompleteInput {

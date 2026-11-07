@@ -47,6 +47,10 @@ export type ProjectOSErrorCode =
   | "verification_unavailable"
   | "verification_approval_required"
   | "pipeline_budget_exceeded"
+  /** Opt-in test/isolate outbound budget reached; no provider request was sent. */
+  | "model_outbound_budget_exhausted"
+  /** Opt-in outbound budget ledger unavailable (lock/corrupt); fail-closed, no send. */
+  | "model_outbound_budget_unavailable"
   | "backup_not_found"
   | "undo_stale"
   | "restore_failed"
