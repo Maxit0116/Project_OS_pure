@@ -2869,7 +2869,7 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     const gateway = new NodeDelegationGateway(delegatedPaths, [], {
       onBatchValidation: () => {
         if (!apiRef) return;
-        const orch = getLocalApiInternals(apiRef).orchestrator as {
+        const orch = getLocalApiInternals(apiRef).orchestrator as unknown as {
           runs: Map<string, { run: { status: string } }>;
           cancelRun(id: string): unknown;
         };
