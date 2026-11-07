@@ -12,6 +12,7 @@ import {
   graphNeedsAiScan,
   parseProjectGraphFromModelOutput,
   resolveArchitecture,
+  elementTypeFromId,
   isRetryableGateFailure,
   runStructureGraphAiScan,
 } from "./structure-graph-ai-scan.js";
@@ -426,6 +427,36 @@ describe("structure-graph-ai-scan", () => {
     expect(prompts[1]).toContain("PREVIOUS ATTEMPT REFUSED");
     expect(prompts[1]).toContain("thin_file_mounts");
     expect(prompts[1]).toContain("use fewer, each owning at least two source files");
+  });
+
+  it("reads the element type from `type`, `kind` or the id when the model leaves out level and elementType", async () => {
+    // more-itertools, live: every round A node came as { id: "person_developer", type: "person" } with no
+    // level, so none was a context or container and the map was refused (missing_container).
+    const { root, projectId } = makeTempRepo();
+    const heuristic = buildHeuristicProjectGraph({ projectId, projectName: "demo", projectType: "node", workspaceRoot: root });
+    const original = JSON.parse(roundAJson()) as { nodes: Array<Record<string, unknown>> };
+    const stripped = {
+      ...original,
+      nodes: original.nodes.map((node, index) => {
+        const { level: _level, elementType, ...rest } = node;
+        return index % 2 === 0 ? { ...rest, type: elementType } : rest;
+      }),
+    };
+    const complete = vi.fn(async (_profile, request) => {
+      const task = (request.input as { task?: string }).task;
+      return gatewayResponse(task === "structure_graph_round_a" ? JSON.stringify(stripped) : roundBJson());
+    });
+    const scanned = await runStructureGraphAiScan({
+      workspaceRoot: root, projectId, displayName: "demo", graph: heuristic, profile: mockProfile(),
+      gateway: { complete } as unknown as ModelGateway,
+    });
+    expect(scanned.analysisStatus).toBe("complete");
+    for (const node of original.nodes) {
+      expect(scanned.nodes.find((candidate) => candidate.id === node.id)?.level).toBe(node.level);
+    }
+    expect(elementTypeFromId("person_developer")).toBe("person");
+    expect(elementTypeFromId("container_tests")).toBe("container");
+    expect(elementTypeFromId("auth_service")).toBeUndefined();
   });
 
   it("asks only once more, and not at all for a failure another round cannot fix", () => {

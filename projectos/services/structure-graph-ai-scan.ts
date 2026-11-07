@@ -880,29 +880,33 @@ function normalizeNode(
     ? raw.tags.filter((tag): tag is string => typeof tag === "string")
     : [];
   if (!tags.includes(AI_SCAN_GRAPH_GENERATOR_TAG)) tags.push(AI_SCAN_GRAPH_GENERATOR_TAG);
+  // The model sometimes names the element type `type` or `kind`, or only in the id ("person_developer",
+  // "container_tests"). Without it every node of a more-itertools map had no level, was counted as a
+  // component without code, and the map was refused (missing_container, components_without_code:7).
+  const declaredType = raw.elementType ?? raw.type ?? raw.kind ?? elementTypeFromId(id);
   const level =
     raw.level === "context" ||
     raw.level === "container" ||
     raw.level === "component" ||
     raw.level === "code"
       ? raw.level
-      : raw.elementType === "person" ||
-          raw.elementType === "software_system" ||
-          raw.elementType === "external_system"
+      : declaredType === "person" ||
+          declaredType === "software_system" ||
+          declaredType === "external_system"
         ? "context"
-        : raw.elementType === "container" || raw.elementType === "data_store"
+        : declaredType === "container" || declaredType === "data_store"
           ? "container"
-          : raw.elementType === "component"
+          : declaredType === "component"
             ? "component"
             : undefined;
   let elementType: FunctionalNode["elementType"] =
-    raw.elementType === "person" ||
-    raw.elementType === "software_system" ||
-    raw.elementType === "external_system" ||
-    raw.elementType === "container" ||
-    raw.elementType === "component" ||
-    raw.elementType === "data_store"
-      ? raw.elementType
+    declaredType === "person" ||
+    declaredType === "software_system" ||
+    declaredType === "external_system" ||
+    declaredType === "container" ||
+    declaredType === "component" ||
+    declaredType === "data_store"
+      ? declaredType
       : undefined;
   if (!elementType && level === "context") elementType = "software_system";
   if (!elementType && level === "container") elementType = "container";
@@ -1025,6 +1029,20 @@ function asScanCancellationError(error: unknown): ProjectOSError | null {
     }
   }
   return null;
+}
+
+const ELEMENT_TYPE_ID_PREFIXES: Array<[RegExp, string]> = [
+  [/^(?:person|actor|user)_/u, "person"],
+  [/^(?:software_system|system)_/u, "software_system"],
+  [/^(?:external|ext)_/u, "external_system"],
+  [/^(?:data_store|datastore|db|database)_/u, "data_store"],
+  [/^container_/u, "container"],
+  [/^component_/u, "component"],
+];
+
+/** The element type an id spells out ("person_developer" → person), if any. */
+export function elementTypeFromId(id: string): string | undefined {
+  return ELEMENT_TYPE_ID_PREFIXES.find(([pattern]) => pattern.test(id))?.[1];
 }
 
 /** Gate failures a second round B can fix: components without code, too few files, directory shells. */
