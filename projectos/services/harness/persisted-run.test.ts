@@ -7,6 +7,7 @@ import type { AgentRun } from "../../contracts/agent-run.js";
 import { reconcileInterruptedAgentRuns } from "./interrupted-runs.js";
 import {
   loadPersistedAgentRun,
+  parsePersistedRunLog,
   readableRunStatus,
   writeRunSnapshot,
 } from "./persisted-run.js";
@@ -69,6 +70,60 @@ describe("persisted agent runs", () => {
     expect(loaded?.log.corruptLines).toEqual([3]);
     const snapshot = JSON.parse(readFileSync(join(dir, "run_disk.run.json"), "utf8")) as AgentRun;
     expect(snapshot.status).toBe("interrupted");
+  });
+
+  it("keeps legacy model_request history instead of marking it corrupt", () => {
+    const legacy = {
+      eventId: "evt_legacy_mr",
+      runId: "run_disk",
+      timestamp: "2026-10-16T16:37:46.664Z",
+      type: "model_request",
+      phaseId: "run_disk_plan_delegation",
+      payload: {
+        stage: "plan",
+        provider: "DeepSeek",
+        model: "deepseek-v4-flash",
+        durationMs: 4423,
+        status: "ok",
+        tokenUsage: { input: 1402, output: 632 },
+      },
+    };
+    const log = parsePersistedRunLog(
+      "run_disk",
+      [
+        JSON.stringify({
+          eventId: "evt_1",
+          runId: "run_disk",
+          timestamp: "2026-10-16T16:37:42.241Z",
+          type: "run_started",
+        }),
+        JSON.stringify(legacy),
+        JSON.stringify({
+          eventId: "evt_fail",
+          runId: "run_disk",
+          timestamp: "2026-10-16T16:37:52.190Z",
+          type: "step_failed",
+          payload: { message: "stopped" },
+        }),
+        "{partial",
+      ].join("\n") + "\n",
+    );
+    expect(log.corruptLines).toEqual([4]);
+    expect(log.legacyNormalizedLines).toEqual([2]);
+    expect(log.events).toHaveLength(3);
+    expect(log.events[1]).toMatchObject({
+      type: "model_request",
+      payload: {
+        stage: "plan",
+        requestId: "legacy_evt_legacy_mr",
+        requestKind: "agent_step",
+        backend: "model",
+        usage: "reported",
+        tokenUsage: { input: 1402, output: 632 },
+      },
+    });
+    expect(log.terminalStatus).toBe("error");
+    expect(log.writes).toBe("none");
   });
 
   it("does not invent a run when the snapshot is unreadable", () => {

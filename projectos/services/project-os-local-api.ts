@@ -1262,12 +1262,28 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       refreshProjectStencilOverlay(workspace.workspaceRoot);
       const recoveredRuns = reconcileInterruptedAgentRuns(workspace.projectOSRoot);
       for (const note of recoveredRuns) {
-        if (!note.corruptLines?.length && !note.snapshotUpdateFailed) continue;
-        console.warn("[projectos] agent run recovery skipped unreadable log lines", {
-          runId: note.runId,
-          lines: note.corruptLines ?? [],
-          snapshotUpdateFailed: note.snapshotUpdateFailed === true,
-        });
+        if (
+          !note.corruptLines?.length &&
+          !note.legacyNormalizedLines?.length &&
+          !note.snapshotUpdateFailed
+        ) {
+          continue;
+        }
+        if (note.corruptLines?.length || note.snapshotUpdateFailed) {
+          console.warn("[projectos] agent run recovery skipped unreadable log lines", {
+            runId: note.runId,
+            lines: note.corruptLines ?? [],
+            snapshotUpdateFailed: note.snapshotUpdateFailed === true,
+            alreadyTerminal: note.alreadyTerminal === true,
+          });
+        }
+        if (note.legacyNormalizedLines?.length) {
+          console.info("[projectos] agent run recovery kept legacy model_request lines", {
+            runId: note.runId,
+            lines: note.legacyNormalizedLines,
+            alreadyTerminal: note.alreadyTerminal === true,
+          });
+        }
       }
     }
     if (this.workspacesByProjectId.size > 0) {

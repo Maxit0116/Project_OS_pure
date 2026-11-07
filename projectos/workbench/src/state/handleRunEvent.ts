@@ -278,27 +278,29 @@ export function reduceRunEventState(
         const messageId = `automatic_apply_${event.runId}`
         patch.centerTab = 'code'
         patch.codeSubTab = 'diff'
+        // Rewrite an earlier not_run / stale summary when verification later finishes.
+        const content = getStoreMessage(
+          state.locale,
+          status === 'passed'
+            ? 'chat.automaticApplyPassed'
+            : status === 'failed'
+              ? 'chat.automaticApplyFailed'
+              : 'chat.automaticApplyNotRun',
+          { count: state.applyResult.filesChanged.length },
+        )
+        const nextMessage = {
+          id: messageId,
+          role: 'assistant' as const,
+          // One sentence per outcome: "verified" must never be claimed for a run that was not checked.
+          content,
+          format: 'markdown' as const,
+          timestamp: event.timestamp,
+        }
         patch.messages = state.messages.some((message) => message.id === messageId)
-          ? state.messages
-          : [
-              ...state.messages,
-              {
-                id: messageId,
-                role: 'assistant',
-                // One sentence per outcome: "verified" must never be claimed for a run that was not checked.
-                content: getStoreMessage(
-                  state.locale,
-                  status === 'passed'
-                    ? 'chat.automaticApplyPassed'
-                    : status === 'failed'
-                      ? 'chat.automaticApplyFailed'
-                      : 'chat.automaticApplyNotRun',
-                  { count: state.applyResult.filesChanged.length },
-                ),
-                format: 'markdown',
-                timestamp: event.timestamp,
-              },
-            ]
+          ? state.messages.map((message) =>
+              message.id === messageId ? { ...message, ...nextMessage } : message,
+            )
+          : [...state.messages, nextMessage]
       }
     }
   }

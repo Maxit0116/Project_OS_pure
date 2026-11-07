@@ -3997,7 +3997,7 @@ export class AgentOrchestrator {
       !plan ||
       state.run.parentRunId ||
       state.run.status !== "awaiting_review" ||
-      state.executionPolicy !== "review_first" ||
+      // Human apply after pause (review_first or uncertain under automatic).
       !prepared ||
       !nextTranche ||
       prepared.trancheId !== nextTranche.trancheId ||
@@ -4006,6 +4006,7 @@ export class AgentOrchestrator {
       prepared.validation.planId !== nextTranche.trancheId ||
       prepared.validation.verdict !== "valid" ||
       prepared.validation.tasks.length !== tasks.length ||
+      // Freshness: prepared validation must still match live child diffs / criteria.
       prepared.children.some((child) => {
         const childState = this.runs.get(child.runId);
         return !childState ||

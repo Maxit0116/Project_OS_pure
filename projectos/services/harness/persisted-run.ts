@@ -21,6 +21,11 @@ export interface PersistedRunLog {
   events: AgentRunEvent[];
   /** 1-based source lines that were not valid events. */
   corruptLines: number[];
+  /**
+   * 1-based lines that were readable only after legacy coercion (kept in history;
+   * not treated as success by inventing missing usage).
+   */
+  legacyNormalizedLines: number[];
   /** Null while the log has no terminal event. Disk readers must not treat that as running. */
   terminalStatus: "complete" | "error" | "cancelled" | "interrupted" | null;
   writes: "applied" | "none" | "unknown";
@@ -75,6 +80,7 @@ export function readPersistedRunLog(
       runId,
       events: [],
       corruptLines: [1],
+      legacyNormalizedLines: [],
       terminalStatus: null,
       writes: "unknown",
     };
@@ -82,15 +88,108 @@ export function readPersistedRunLog(
   return parsePersistedRunLog(runId, raw);
 }
 
+/**
+ * Upgrade known historical on-disk event shapes so recovery keeps real history.
+ * Does not invent usage when the legacy row never reported any.
+ */
+export function coerceLegacyPersistedEventJson(value: unknown): {
+  value: unknown;
+  normalized: boolean;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { value, normalized: false };
+  }
+  const event = value as Record<string, unknown>;
+  if (event.type !== "model_request") {
+    return { value, normalized: false };
+  }
+  const payload = event.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { value, normalized: false };
+  }
+  const body = payload as Record<string, unknown>;
+  const alreadyModern =
+    typeof body.requestId === "string" &&
+    typeof body.requestKind === "string" &&
+    typeof body.backend === "string" &&
+    typeof body.usage === "string";
+  if (alreadyModern) {
+    return { value, normalized: false };
+  }
+  if (
+    typeof body.stage !== "string" ||
+    typeof body.provider !== "string" ||
+    typeof body.model !== "string"
+  ) {
+    return { value, normalized: false };
+  }
+  const tokenUsage =
+    body.tokenUsage &&
+    typeof body.tokenUsage === "object" &&
+    !Array.isArray(body.tokenUsage)
+      ? (body.tokenUsage as Record<string, unknown>)
+      : undefined;
+  const input =
+    typeof tokenUsage?.input === "number" && Number.isFinite(tokenUsage.input)
+      ? Math.max(0, Math.trunc(tokenUsage.input))
+      : 0;
+  const output =
+    typeof tokenUsage?.output === "number" && Number.isFinite(tokenUsage.output)
+      ? Math.max(0, Math.trunc(tokenUsage.output))
+      : 0;
+  const durationMs =
+    typeof body.durationMs === "number" && Number.isFinite(body.durationMs)
+      ? Math.max(0, Math.trunc(body.durationMs))
+      : 0;
+  const eventId =
+    typeof event.eventId === "string" && event.eventId.length > 0
+      ? event.eventId
+      : "unknown";
+  return {
+    normalized: true,
+    value: {
+      ...event,
+      payload: {
+        stage: body.stage,
+        requestId:
+          typeof body.requestId === "string" && body.requestId.length > 0
+            ? body.requestId
+            : `legacy_${eventId}`,
+        requestKind:
+          typeof body.requestKind === "string" && body.requestKind.length > 0
+            ? body.requestKind
+            : "agent_step",
+        provider: body.provider,
+        model: body.model,
+        durationMs,
+        status: body.status === "failed" ? "failed" : "ok",
+        backend: body.backend === "fixture" ? "fixture" : "model",
+        // Legacy rows that only carried token counts are treated as reported;
+        // rows without tokenUsage stay missing (zeros are not an estimate).
+        usage:
+          body.usage === "missing"
+            ? "missing"
+            : tokenUsage
+              ? "reported"
+              : "missing",
+        tokenUsage: { input, output },
+      },
+    },
+  };
+}
+
 export function parsePersistedRunLog(runId: string, raw: string): PersistedRunLog {
   const events: AgentRunEvent[] = [];
   const corruptLines: number[] = [];
+  const legacyNormalizedLines: number[] = [];
   const lines = raw.split("\n");
   for (let index = 0; index < lines.length; index += 1) {
     const trimmed = lines[index]?.trim() ?? "";
     if (!trimmed) continue;
     try {
-      const parsed = AgentRunEventSchema.safeParse(JSON.parse(trimmed));
+      const original = JSON.parse(trimmed) as unknown;
+      const coerced = coerceLegacyPersistedEventJson(original);
+      const parsed = AgentRunEventSchema.safeParse(coerced.value);
       if (!parsed.success) {
         corruptLines.push(index + 1);
         continue;
@@ -98,6 +197,9 @@ export function parsePersistedRunLog(runId: string, raw: string): PersistedRunLo
       if (parsed.data.runId !== runId) {
         corruptLines.push(index + 1);
         continue;
+      }
+      if (coerced.normalized) {
+        legacyNormalizedLines.push(index + 1);
       }
       events.push(parsed.data);
     } catch {
@@ -132,6 +234,7 @@ export function parsePersistedRunLog(runId: string, raw: string): PersistedRunLo
     runId,
     events,
     corruptLines,
+    legacyNormalizedLines,
     terminalStatus,
     writes,
     ...(backupId ? { backupId } : {}),

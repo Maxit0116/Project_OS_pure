@@ -2917,6 +2917,51 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
   });
 
+  it("automatic path: human apply after uncertain review writes backup and undoes", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const before = new Map(delegatedPaths.map((filePath) => [
+      filePath,
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"),
+    ]));
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new NodeDelegationGateway(delegatedPaths, [], {
+        uncertainCriteriaOnBatch: true,
+      }),
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
+    });
+    expect((await waitForRunStatus(api, parent.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8"))
+        .toBe(before.get(filePath));
+    }
+    // Explicit product applyDiff is the human review authorization — not verdict alone.
+    const applied = await api.applyDiff(parent.runId);
+    expect(applied.applied).toBe(true);
+    expect(applied.backupId).toBeTruthy();
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8"))
+        .not.toBe(before.get(filePath));
+    }
+    const restored = await api.restoreApplyBackup(project.projectId, applied.backupId!);
+    expect(restored.restored).toBe(true);
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8"))
+        .toBe(before.get(filePath));
+    }
+  });
+
   it("automatic path: cancel during parent batch validation writes nothing", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];

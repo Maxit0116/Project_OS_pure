@@ -14,6 +14,8 @@ export interface InterruptedRunNote {
   backupId?: string;
   /** 1-based lines that were skipped instead of treated as success. */
   corruptLines?: number[];
+  /** 1-based lines kept after legacy shape coercion (history preserved). */
+  legacyNormalizedLines?: number[];
   /** The log was already terminal. Corrupt lines are reported and the file is not rewritten. */
   alreadyTerminal?: boolean;
   snapshotUpdateFailed?: boolean;
@@ -37,10 +39,13 @@ export function reconcileInterruptedAgentRuns(projectOSRoot: string): Interrupte
     if (!log) continue;
     if (log.events.length === 0 && log.corruptLines.length === 0) continue;
     if (log.terminalStatus) {
-      if (log.corruptLines.length > 0) {
+      if (log.corruptLines.length > 0 || log.legacyNormalizedLines.length > 0) {
         notes.push({
           runId,
-          corruptLines: log.corruptLines,
+          ...(log.corruptLines.length > 0 ? { corruptLines: log.corruptLines } : {}),
+          ...(log.legacyNormalizedLines.length > 0
+            ? { legacyNormalizedLines: log.legacyNormalizedLines }
+            : {}),
           alreadyTerminal: true,
           ...(log.backupId ? { backupId: log.backupId } : {}),
         });
@@ -60,6 +65,9 @@ export function reconcileInterruptedAgentRuns(projectOSRoot: string): Interrupte
       runId,
       ...(log.backupId ? { backupId: log.backupId } : {}),
       ...(log.corruptLines.length > 0 ? { corruptLines: log.corruptLines } : {}),
+      ...(log.legacyNormalizedLines.length > 0
+        ? { legacyNormalizedLines: log.legacyNormalizedLines }
+        : {}),
       ...(snapshotUpdateFailed ? { snapshotUpdateFailed: true } : {}),
     });
   }

@@ -17,5 +17,8 @@ export function sanitizeErrorMessage(value: unknown): string {
       "$1[redacted]",
     )
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gu, "[redacted]")
+    // Absolute home / tmp paths must not reach chat toasts as raw filesystem text.
+    .replace(/\/(?:Users|home)\/[^\s"',}]+/gu, "[path]")
+    .replace(/\/(?:var\/folders|tmp|private\/var\/folders)\/[^\s"',}]+/gu, "[path]")
     .slice(0, MAX_DIAGNOSTIC_LENGTH);
 }

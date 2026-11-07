@@ -412,6 +412,39 @@ describe('Agent Flow action trace state', () => {
     expect(verificationPatch.messages?.[0]?.content).not.toContain('Changed and verified')
   })
 
+  it('rewrites an earlier not-yet-verified summary when verification later passes', () => {
+    const apply = parse({
+      eventId: 'evt_apply',
+      runId: 'run_rewrite',
+      timestamp: '2026-07-18T00:00:00.000Z',
+      type: 'apply_result',
+      phaseId: 'step_apply',
+      payload: { filesWritten: ['lib/data.ts'], backupId: 'backup-rewrite', outcome: 'applied' },
+    })
+    const applied = { ...baseState(), ...reduceRunEventState(baseState(), apply) }
+    const notRun = reduceRunEventState(applied, parse({
+      eventId: 'evt_verification_pending',
+      runId: 'run_rewrite',
+      timestamp: '2026-07-18T00:00:01.000Z',
+      type: 'verification_completed',
+      payload: { status: 'not_run' },
+    }))
+    expect(notRun.messages?.[0]?.content).toMatch(/not verified|尚未验证/i)
+    const afterPass = reduceRunEventState(
+      { ...applied, ...notRun },
+      parse({
+        eventId: 'evt_verification_passed',
+        runId: 'run_rewrite',
+        timestamp: '2026-07-18T00:00:02.000Z',
+        type: 'verification_completed',
+        payload: { status: 'passed' },
+      }),
+    )
+    const content = afterPass.messages?.find((message) => message.id === 'automatic_apply_run_rewrite')?.content ?? ''
+    expect(content).toMatch(/Changed and verified|已修改并验证通过/i)
+    expect(content).not.toMatch(/not verified|尚未验证/i)
+  })
+
   it.each([
     ['passed', 'Changed and verified', 'not verified'],
     ['failed', 'verification failed', 'Changed and verified'],
