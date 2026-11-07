@@ -16,6 +16,7 @@ import { ProjectOSError } from "../errors.js";
 import { ModelGateway } from "./model-gateway/index.js";
 import { orderedModelOutputSources } from "./model-json-output.js";
 import { separateLeadingThinkBlock } from "./model-gateway/providers.js";
+import { answerMaxOutputTokens } from "./grounded-answer-service.js";
 
 const PLAN_SYSTEM_PROMPT = `You create implementation plans for a graph-driven IDE.
 Respond with JSON only using this shape:
@@ -138,7 +139,8 @@ export class PlanService {
         localContext: input.localContext,
       },
       redactionPolicy: "secrets_and_paths",
-      maxOutputTokens: 4096,
+      // The plan's own 4,096 plus room for reasoning, which the provider counts against the same limit.
+      maxOutputTokens: answerMaxOutputTokens(input.thinkingDepth) + 2048,
       thinkingDepth: input.thinkingDepth,
       ...(input.images?.length ? { images: input.images } : {}),
     });
