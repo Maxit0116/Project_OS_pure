@@ -97,10 +97,10 @@ describe('applyIsolatedUserDataPath', () => {
     expect(result.applied).toBe(true)
     expect(result.abortBootstrap).toBe(false)
     expect(result.rejectedReason).toBeNull()
-    expect(canonicalizePath(app.paths.userData)).toBe(canonicalizePath(isolate))
-    expect(canonicalizePath(app.paths.sessionData)).toBe(canonicalizePath(isolate))
-    expect(app.paths.logs).toContain(join('logs'))
-    expect(app.paths.crashDumps).toContain('Crashpad')
+    expect(canonicalizePath(app.getPath('userData'))).toBe(canonicalizePath(isolate))
+    expect(canonicalizePath(app.getPath('sessionData'))).toBe(canonicalizePath(isolate))
+    expect(app.getPath('logs')).toContain(join('logs'))
+    expect(app.getPath('crashDumps')).toContain('Crashpad')
     expect(app.exit).not.toHaveBeenCalled()
     const marker = JSON.parse(
       readFileSync(join(isolate, 'projectos-isolation-marker.json'), 'utf8'),
