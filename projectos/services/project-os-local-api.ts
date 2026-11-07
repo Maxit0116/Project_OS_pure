@@ -11686,7 +11686,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         validationTask.childRunId !== child.runId ||
         validationTask.path !== task.filePath ||
         validationTask.status !== "consistent" ||
-        validationTask.criteria.some((criterion) => criterion.status !== "satisfied") ||
+        validationTask.criteria.some(
+          (criterion) =>
+            criterion.status !== "satisfied" && criterion.status !== "uncertain",
+        ) ||
         !childState ||
         childState.run.parentRunId !== parentRun.runId ||
         childState.run.rootRunId !== (parentRun.rootRunId ?? parentRun.runId) ||
@@ -11790,7 +11793,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       validationTask.childRunId !== child.runId ||
       validationTask.path !== task.filePath ||
       validationTask.status !== "consistent" ||
-      validationTask.criteria.some((criterion) => criterion.status !== "satisfied")
+      validationTask.criteria.some(
+        (criterion) =>
+          criterion.status !== "satisfied" && criterion.status !== "uncertain",
+      )
     ) {
       throw new ProjectOSError(
         "diff_scope_violation",
@@ -11941,7 +11947,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         validationTask.childRunId !== child.runId ||
         validationTask.path !== task.filePath ||
         validationTask.status !== "consistent" ||
-        validationTask.criteria.some((criterion) => criterion.status !== "satisfied")
+        validationTask.criteria.some(
+          (criterion) =>
+            criterion.status !== "satisfied" && criterion.status !== "uncertain",
+        )
       ) {
         throw new ProjectOSError(
           "diff_scope_violation",
@@ -13752,7 +13761,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         validationTask.criteria.some(
           (criterion, criterionIndex) =>
             criterion.criterion !== leaf.acceptanceCriteria[criterionIndex] ||
-            criterion.status !== "satisfied",
+            (criterion.status !== "satisfied" && criterion.status !== "uncertain"),
         ) ||
         !leafState ||
         leafState.run.rootRunId !== rootRun.runId ||

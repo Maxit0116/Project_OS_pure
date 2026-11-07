@@ -110,6 +110,12 @@ import { GeneratedDiffSchema } from "../../contracts/diff.js";
 import { ProjectOSError } from "../../errors.js";
 import { childValidationCoversParentAcceptance } from "./single-file-batch-coverage.js";
 import { mayAttemptBatchSynthesisAfterError } from "./batch-validation-error-policy.js";
+import {
+  batchValidationNeedsHumanReview,
+  isEvidenceValidBatchValidation,
+  isEvidenceValidProposalValidation,
+  proposalValidationNeedsHumanReview,
+} from "./batch-validation-evidence.js";
 import type { LoadedProjectOSWorkspace } from "../../persistence/workspace-store.js";
 import { cloneJson } from "../../utils/json.js";
 import { resolveContainedPath } from "../../utils/path-containment.js";
@@ -2519,9 +2525,32 @@ export class AgentOrchestrator {
           reason: "child_failure",
         }),
       );
+      const failedDetails = failed.map((result) => {
+        const childState = this.runs.get(result.runId);
+        const childError = childState?.events
+          ?.slice()
+          .reverse()
+          .find((event) => event.type === "step_failed");
+        const payload =
+          childError && childError.type === "step_failed"
+            ? (childError.payload as { error?: string; message?: string } | undefined)
+            : undefined;
+        const detail =
+          String(payload?.error ?? payload?.message ?? "").trim() ||
+          childState?.run.status ||
+          "unknown_failure";
+        return `${result.taskId || result.runId}: ${detail.slice(0, 160)}`;
+      });
       const error = new ProjectOSError(
         "agent_orchestration_failed",
-        "A delegated file task failed; the complete request remains unapplied",
+        `Delegated file task failed (${failed.length}/${results.length}); the complete request remains unapplied. ${failedDetails.join(" · ")}`,
+        {
+          details: {
+            failedChildRunIds: failed.map((result) => result.runId),
+            failedTaskIds: failed.map((result) => result.taskId),
+            failedDetails,
+          },
+        },
       );
       this.emitFailedStep(workspace, state, delegateStep, error);
       throw error;
@@ -2577,19 +2606,28 @@ export class AgentOrchestrator {
       throw error;
     }
 
-    if (state.executionPolicy === "review_first") {
-      state.run.status = "awaiting_review";
-      state.status = "complete";
-      state.run.completedAt = new Date().toISOString();
-      this.emit(
-        workspace,
-        state,
-        createEvent(state.run.runId, "run_completed", undefined, {
-          outcome: "batch_validated_awaiting_group_apply",
-          filesApplied: 0,
-        }),
-      );
-      return;
+    {
+      const batchValidation = state.batchValidationResult;
+      const uncertainReview =
+        batchValidation !== undefined &&
+        batchValidationNeedsHumanReview(batchValidation);
+      if (state.executionPolicy === "review_first" || uncertainReview) {
+        state.run.status = "awaiting_review";
+        state.status = "complete";
+        state.run.completedAt = new Date().toISOString();
+        this.emit(
+          workspace,
+          state,
+          createEvent(state.run.runId, "run_completed", undefined, {
+            outcome: uncertainReview
+              ? "batch_validated_uncertain_awaiting_review"
+              : "batch_validated_awaiting_group_apply",
+            filesApplied: 0,
+            ...(uncertainReview ? { reason: "uncertain_criteria" } : {}),
+          }),
+        );
+        return;
+      }
     }
 
     await this.applyAndVerifyDelegatedGroup(workspace, state, plan);
@@ -2889,9 +2927,32 @@ export class AgentOrchestrator {
           reason: "child_failure",
         }),
       );
+      const failedDetails = failed.map((result) => {
+        const childState = this.runs.get(result.runId);
+        const childError = childState?.events
+          ?.slice()
+          .reverse()
+          .find((event) => event.type === "step_failed");
+        const payload =
+          childError && childError.type === "step_failed"
+            ? (childError.payload as { error?: string; message?: string } | undefined)
+            : undefined;
+        const detail =
+          String(payload?.error ?? payload?.message ?? "").trim() ||
+          childState?.run.status ||
+          "unknown_failure";
+        return `${result.taskId || result.runId}: ${detail.slice(0, 160)}`;
+      });
       const error = new ProjectOSError(
         "agent_orchestration_failed",
-        "One or more delegated subtrees failed; no files were applied",
+        `Delegated subtree failed (${failed.length}/${results.length}); no files were applied. ${failedDetails.join(" · ")}`,
+        {
+          details: {
+            failedChildRunIds: failed.map((result) => result.runId),
+            failedTaskIds: failed.map((result) => result.taskId),
+            failedDetails,
+          },
+        },
       );
       this.emitFailedStep(workspace, state, delegateStep, error);
       throw error;
@@ -2949,19 +3010,28 @@ export class AgentOrchestrator {
       throw error;
     }
 
-    if (state.executionPolicy === "review_first") {
-      state.run.status = "awaiting_review";
-      state.status = "complete";
-      state.run.completedAt = new Date().toISOString();
-      this.emit(
-        workspace,
-        state,
-        createEvent(state.run.runId, "run_completed", undefined, {
-          outcome: "whole_tree_validated_awaiting_group_apply",
-          filesApplied: 0,
-        }),
-      );
-      return;
+    {
+      const batchValidation = state.batchValidationResult;
+      const uncertainReview =
+        batchValidation !== undefined &&
+        batchValidationNeedsHumanReview(batchValidation);
+      if (state.executionPolicy === "review_first" || uncertainReview) {
+        state.run.status = "awaiting_review";
+        state.status = "complete";
+        state.run.completedAt = new Date().toISOString();
+        this.emit(
+          workspace,
+          state,
+          createEvent(state.run.runId, "run_completed", undefined, {
+            outcome: uncertainReview
+              ? "whole_tree_validated_uncertain_awaiting_review"
+              : "whole_tree_validated_awaiting_group_apply",
+            filesApplied: 0,
+            ...(uncertainReview ? { reason: "uncertain_criteria" } : {}),
+          }),
+        );
+        return;
+      }
     }
     await this.applyAndVerifyWholeTree(workspace, state, transactionPlan);
   }
@@ -3727,7 +3797,11 @@ export class AgentOrchestrator {
           ));
         }
 
-        if (state.executionPolicy === "review_first" && !approvedPrepared) {
+        if (
+          (state.executionPolicy === "review_first" ||
+            batchValidationNeedsHumanReview(validation)) &&
+          !approvedPrepared
+        ) {
           state.greenfieldPreparedTranche = {
             trancheId: tranche.trancheId,
             children: children.map((child) => ({ ...child })),
@@ -3737,10 +3811,15 @@ export class AgentOrchestrator {
           state.status = "complete";
           state.run.completedAt = new Date().toISOString();
           this.emit(workspace, state, createEvent(state.run.runId, "run_completed", undefined, {
-            outcome: "greenfield_tranche_validated_awaiting_apply",
+            outcome: batchValidationNeedsHumanReview(validation)
+              ? "greenfield_tranche_uncertain_awaiting_review"
+              : "greenfield_tranche_validated_awaiting_apply",
             trancheOrder: tranche.order,
             totalTranches: plan.tranches.length,
             filesApplied: state.greenfieldCommitted.flatMap((entry) => entry.filePaths).length,
+            ...(batchValidationNeedsHumanReview(validation)
+              ? { reason: "uncertain_criteria" }
+              : {}),
           }));
           return lastCommittedResult;
         }
@@ -6025,7 +6104,12 @@ export class AgentOrchestrator {
       }),
     );
 
-    if (state.executionPolicy === "review_first") {
+    const needsReview =
+      state.executionPolicy === "review_first" ||
+      (state.validationResult
+        ? proposalValidationNeedsHumanReview(state.validationResult)
+        : false);
+    if (needsReview) {
       this.emit(
         workspace,
         state,
@@ -6047,7 +6131,11 @@ export class AgentOrchestrator {
         workspace,
         state,
         createEvent(state.run.runId, "run_completed", undefined, {
-          executionPolicy: "review_first",
+          executionPolicy: state.executionPolicy,
+          ...(state.validationResult &&
+          proposalValidationNeedsHumanReview(state.validationResult)
+            ? { reason: "uncertain_criteria" }
+            : {}),
         }),
       );
       return;
@@ -9050,17 +9138,6 @@ function parseBatchValidation(
   );
 }
 
-function isEvidenceValidBatchValidation(
-  parsed: z.infer<typeof ModelBatchValidationSchema>,
-): boolean {
-  // Trust per-criterion evidence over task/cross-file/top-level status labels.
-  // Models often mark every criterion satisfied while emitting inconsistent/invalid
-  // (e.g. complaining the bug is already absent / fix is a no-op).
-  return parsed.tasks.every((task) =>
-    task.criteria.every((criterion) => criterion.status === "satisfied"),
-  );
-}
-
 function safeBatchValidationFailureLabel(
   category: BatchValidationFailureCategory,
 ): string {
@@ -9189,15 +9266,6 @@ async function sha256Utf8(value: string): Promise<string> {
     .join("")}`;
 }
 
-function isEvidenceValidProposalValidation(
-  parsed: z.infer<typeof ModelProposalValidationOutputSchema>,
-): boolean {
-  // Trust criterion + scope evidence over the model's top-level verdict.
-  // Models often mark every criterion satisfied and scope compliant while
-  // still emitting verdict:"invalid", which previously rejected good proposals.
-  return parsed.scopeAssessment.status === "compliant" &&
-    parsed.criteria.every((criterion) => criterion.status === "satisfied");
-}
 
 function parseProposalValidation(
   output: string,

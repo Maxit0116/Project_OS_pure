@@ -225,6 +225,15 @@ describe('post-apply trust store', () => {
         backupId: 'backup-trust',
       },
       editorBuffers: { 'app/login/page.tsx': 'after' },
+      messages: [
+        {
+          id: 'automatic_apply_run-trust',
+          role: 'assistant',
+          content: '**Changed and verified:** 1 file(s)',
+          format: 'markdown',
+          timestamp: '2026-07-18T00:00:00.000Z',
+        },
+      ],
     })
 
     await useWorkbenchStore.getState().undoCurrentApply()
@@ -235,5 +244,9 @@ describe('post-apply trust store', () => {
     )
     expect(useWorkbenchStore.getState().editorBuffers['app/login/page.tsx']).toBe('before')
     expect(useWorkbenchStore.getState().applyResult).toBeNull()
+    const undone = useWorkbenchStore.getState().messages.find(
+      (message) => message.id === 'automatic_apply_run-trust',
+    )
+    expect(undone?.content).toMatch(/undo|撤销|restored|恢复/i)
   })
 })

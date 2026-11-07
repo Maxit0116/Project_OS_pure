@@ -1184,6 +1184,7 @@ const zh = {
     automaticApplyPassed: '**已修改并验证通过：**改了 {count} 个文件',
     automaticApplyFailed: '**已修改，但验证失败：**改了 {count} 个文件 · 可在 Diff 审核中撤销本次修改',
     automaticApplyNotRun: '**已修改，但尚未验证：**改了 {count} 个文件 · 验证命令尚未运行（未配置，或在等待你批准），所以没有检查任何内容',
+    automaticApplyUndone: '**已撤销修改：**从备份恢复了 {count} 个文件 · 此前的「已应用」状态不再成立',
     refining: '正在理解你的需求…',
     welcomeMessage: '你好！请选择节点或文件。提问请使用「提问」，需要修改文件时请切换到 Agent。',
     resetMessage: '演示已重置。选择一个功能节点开始。',

@@ -2877,6 +2877,46 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     }
   });
 
+  it("automatic path: uncertain batch criteria pause for review and write nothing", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const before = delegatedPaths.map((filePath) =>
+      readFileSync(join(tempWorkspaceRoot, filePath), "utf8"));
+    const gateway = new NodeDelegationGateway(delegatedPaths, [], {
+      uncertainCriteriaOnBatch: true,
+    });
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: gateway,
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    const { run: parent } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      nodeId: "feat_login",
+      rawRequest: "Update the login experience across its owned files.",
+      deferOrchestratorStart: false,
+    });
+    expect((await waitForRunStatus(api, parent.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
+    const events = await api.getAgentRunEvents(parent.runId);
+    expect(events.some((event) =>
+      event.type === "batch_validation_result" && event.payload?.verdict === "valid"
+    )).toBe(true);
+    expect(events.some((event) =>
+      event.type === "run_completed" &&
+      (event.payload as { reason?: string; outcome?: string } | undefined)?.reason ===
+        "uncertain_criteria"
+    )).toBe(true);
+    expect(events.some((event) => event.type === "apply_result")).toBe(false);
+    delegatedPaths.forEach((filePath, index) => {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toBe(before[index]);
+    });
+    expect(existsSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"))).toBe(false);
+  });
+
   it("automatic path: cancel during parent batch validation writes nothing", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
@@ -5983,6 +6023,8 @@ class NodeDelegationGateway extends ModelGateway {
       invalidProposalPaths?: string[];
       /** SYNTHETIC: throw budget exhaustion when parent validate_batch is attempted. */
       exhaustBudgetOnBatch?: boolean;
+      /** SYNTHETIC: mark batch criteria uncertain (valid → human review, no auto-commit). */
+      uncertainCriteriaOnBatch?: boolean;
     } = {},
   ) {
     super({ secretStore: new InMemorySecretStore() });
@@ -6128,8 +6170,10 @@ class NodeDelegationGateway extends ModelGateway {
             status: "consistent",
             criteria: criteria.map((item) => ({
               criterion: item,
-              status: "satisfied",
-              explanation: "The independently validated proposal satisfies this criterion.",
+              status: this.options.uncertainCriteriaOnBatch ? "uncertain" : "satisfied",
+              explanation: this.options.uncertainCriteriaOnBatch
+                ? "The validator cannot confirm this criterion from the available evidence."
+                : "The independently validated proposal satisfies this criterion.",
             })),
             summary: "The child proposal is consistent with its delegated task.",
           };
@@ -6138,7 +6182,9 @@ class NodeDelegationGateway extends ModelGateway {
           status: "consistent",
           summary: "The delegated proposals are mutually consistent.",
         },
-        summary: "The complete delegated batch is valid.",
+        summary: this.options.uncertainCriteriaOnBatch
+          ? "The batch is reviewable but some criteria remain uncertain."
+          : "The complete delegated batch is valid.",
         rationale: "All tasks and interfaces were reviewed together.",
       });
       this.options.onBatchValidation?.();

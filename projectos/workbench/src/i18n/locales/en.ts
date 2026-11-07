@@ -1195,6 +1195,7 @@ const en = {
     automaticApplyPassed: '**Changed and verified:** {count} file(s) · verification passed',
     automaticApplyFailed: '**Changed, but verification failed:** {count} file(s) · you can undo this change in Diff review',
     automaticApplyNotRun: '**Changed, not verified:** {count} file(s) · verification has not run (none is configured, or it is waiting for your approval), so nothing was checked',
+    automaticApplyUndone: '**Changes undone:** {count} file(s) restored from backup · previous “applied” status no longer applies',
     refining: 'Refining prompt…',
     welcomeMessage: 'Select a node or file. Use Ask for questions, or switch to Agent when you want to edit a file.',
     resetMessage: 'Demo reset complete. Select a feature to begin.',

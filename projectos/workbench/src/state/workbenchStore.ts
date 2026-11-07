@@ -5487,7 +5487,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   undoCurrentApply: async () => {
-    const { client, project, applyResult, generatedDiff, editorBuffers, pushToast, locale } = get()
+    const {
+      client,
+      project,
+      applyResult,
+      generatedDiff,
+      editorBuffers,
+      messages,
+      pushToast,
+      locale,
+    } = get()
     if (!project || !applyResult?.backupId) return
     set({ undoLoading: true })
     try {
@@ -5501,6 +5510,22 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       for (const file of generatedDiff?.files ?? []) {
         if (file.before !== undefined) nextBuffers[file.path] = file.before
       }
+      const undoneRunId = applyResult.runId
+      const fileCount = applyResult.filesChanged.length
+      const undoneMessageId = `automatic_apply_${undoneRunId}`
+      const undoneContent = getStoreMessage(locale, 'chat.automaticApplyUndone', {
+        count: fileCount,
+      })
+      const nextMessages = messages.map((message) =>
+        message.id === undoneMessageId
+          ? {
+              ...message,
+              content: undoneContent,
+              timestamp: new Date().toISOString(),
+            }
+          : message,
+      )
+      const hasUndoneMessage = nextMessages.some((message) => message.id === undoneMessageId)
       set({
         applyResult: null,
         verificationResult: null,
@@ -5509,6 +5534,18 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         currentWork,
         editorBuffers: nextBuffers,
         editorSavedBuffers: nextBuffers,
+        messages: hasUndoneMessage
+          ? nextMessages
+          : [
+              ...nextMessages,
+              {
+                id: undoneMessageId,
+                role: 'assistant' as const,
+                content: undoneContent,
+                format: 'markdown' as const,
+                timestamp: new Date().toISOString(),
+              },
+            ],
       })
       for (const file of generatedDiff?.files ?? []) {
         void useFileTimelineStore.getState().refresh(file.path)
