@@ -54,6 +54,13 @@ export const FeatureEntrySchema = z.object({
   status: z.enum(["planned", "implemented", "deprecated"]).optional(),
   locked: z.boolean().optional(),
   thesisId: z.string().min(1).optional(),
+  /**
+   * Optional thesis slice fields written by writePlannedFeatureFromThesis.
+   * Curated fixtures may omit them; when present they match FirstPrinciplesThesis.
+   */
+  mvp: z.string().trim().min(1).max(800).optional(),
+  successSignal: z.string().trim().min(1).max(500).optional(),
+  nonGoals: z.array(z.string().trim().min(1).max(240)).max(12).optional(),
   triggers: z.array(FeatureTriggerSchema).optional(),
   steps: z.array(FeatureStepSchema).default([]),
   flow: z.array(FeatureFlowEdgeSchema).optional(),

@@ -39,13 +39,14 @@ jobs:
       - name: Install
         run: npm ci
       - name: Unit tests (features story-map + planned write)
-        # Real coverage for the on-disk features.json contract and the
-        # first-principles locked write path. Does not claim features_scan /
-        # features_sync / SDD / staleness tools (those services are not present).
+        # Honest scope: Zod story-map schema + fixture integrity + real
+        # writePlannedFeatureFromThesis → parseFeaturesFile compatibility and
+        # locked no-overwrite. Does NOT restore features_scan / features_sync /
+        # SDD / staleness / query agent tools (not present on this branch).
         run: npm run test:features
       - name: features:check
         # Scoped tsc (contracts/features + scripts/features-check only).
-        # Does not run the full package build, which typechecks desktop/ and
-        # requires Electron deps that this job does not install.
+        # Full package type/build remains a separate gate. Does not install
+        # desktop Electron deps and does not claim scan/sync tooling.
         run: |
           npm run features:check -- ../sample-graph-saas/.projectos/features.json ./client/sample-projectos-fixtures/features.json

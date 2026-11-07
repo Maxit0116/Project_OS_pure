@@ -7,22 +7,13 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import {
-  collectFeaturesIntegrityIssues,
-  FeaturesFileSchema,
-} from "../contracts/features.js";
+import { parseFeaturesFile } from "../contracts/features.js";
 
 function checkPath(pathArg: string): void {
   const absolute = resolve(pathArg);
   const raw = JSON.parse(readFileSync(absolute, "utf8")) as unknown;
-  const parsed = FeaturesFileSchema.parse(raw);
-  const issues = collectFeaturesIntegrityIssues(parsed);
-  if (issues.length > 0) {
-    for (const issue of issues) {
-      console.error(`${absolute}: ${issue.path}: ${issue.message}`);
-    }
-    throw new Error(`features.json integrity failed for ${absolute}`);
-  }
+  // Same gate as parseFeaturesFile: Zod .strict() shape + referential integrity.
+  const parsed = parseFeaturesFile(raw);
   console.log(
     `features:check ok ${absolute} (epics=${parsed.epics.length}, features=${parsed.features.length})`,
   );
