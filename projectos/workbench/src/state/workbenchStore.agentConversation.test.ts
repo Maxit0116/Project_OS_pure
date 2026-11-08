@@ -13,6 +13,7 @@ import { emptyComposerDraft } from '@contracts/index'
 import { createMockSampleWorkspace, MockProjectOSApiClient } from '../../../client/mock-project-os-api-client.js'
 import { ProjectOSError } from '../../../errors.js'
 import { useChatSessionStore } from './chatSessionStore'
+import { architectureFileNodeId } from '../components/FunctionMap/architectureView'
 import { canSubmitAgentPrompt, useWorkbenchStore } from './workbenchStore'
 
 const mockClient = new MockProjectOSApiClient()
@@ -592,8 +593,38 @@ describe('agent conversation routing', () => {
     await useWorkbenchStore.getState().sendPrompt('Change it')
     expect(extractRequestIntent).toHaveBeenCalledWith(expect.objectContaining({
       nodeId: 'feat_login',
-      filePath: undefined,
       rawRequest: 'Change it',
+    }))
+    // No file was chosen, so none is sent.
+    expect((extractRequestIntent.mock.calls as unknown[][])[0]?.[0]).not.toHaveProperty('filePath', expect.anything())
+  })
+
+  it('tells the server the component and file, not the view-only id of a code-level box, when Agent starts', async () => {
+    const extractRequestIntent = vi.fn(async () => requestIntent('sample-graph-saas', 'intent-code-box', 'Change it'))
+    const workspace = createMockSampleWorkspace()
+    const boxId = architectureFileNodeId('feat_login', 'src/login.ts')
+    useWorkbenchStore.setState({
+      client: { extractRequestIntent } as unknown as ProjectOSApi,
+      project: workspace.project,
+      graph: { ...workspace.graph, fileIndex: [{ path: 'src/login.ts', type: 'other', nodeIds: ['feat_login'], imports: [], exports: [] }] } as never,
+      settings: {
+        ...workspace.settings,
+        presentationMode: false,
+        execution: { ...workspace.settings.execution, mode: 'model', defaultModelProfileId: 'model-1' },
+        modelProfiles: [{ id: 'model-1', name: 'Model', provider: 'ollama', model: 'model', apiKeyRef: '' }],
+      },
+      selectedModelProfileId: 'model-1',
+      selectedNodeId: boxId,
+      selectedFilePath: null,
+      pendingFileOwnerChoice: null,
+      fileScopeError: null,
+      chatMode: 'change',
+    })
+
+    await useWorkbenchStore.getState().sendPrompt('Change it')
+    expect(extractRequestIntent).toHaveBeenCalledWith(expect.objectContaining({
+      nodeId: 'feat_login',
+      filePath: 'src/login.ts',
     }))
   })
 

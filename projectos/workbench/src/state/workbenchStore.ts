@@ -395,6 +395,43 @@ export function conversationScopeFromSelection(state: {
 }
 
 /**
+ * The node id the server can look up. A code-level box on the map has a view-only id
+ * (`code_file_…`) the graph does not contain: it stands for a file inside a component, so the
+ * component is what the server is told. Nothing when the graph cannot say which.
+ */
+export function serverNodeIdFor(
+  fileIndex: ReadonlyArray<{ path: string; nodeIds: string[] }> | undefined,
+  nodeId: string,
+): string | undefined {
+  if (!nodeId.startsWith('code_file_')) return nodeId
+  return resolveProjectedCodeNode(fileIndex, nodeId)?.nodeId
+}
+
+/**
+ * The node and file an Agent request names from the current selection (the same rule as
+ * conversationScopeFromSelection, for the calls that take `nodeId` and `filePath` separately).
+ */
+export function requestTargetFromSelection(state: {
+  selectedNodeId: string | null
+  selectedFilePath: string | null
+  graph: { fileIndex: ReadonlyArray<{ path: string; nodeIds: string[] }> } | null
+}): { nodeId?: string; filePath?: string } {
+  const { selectedNodeId, selectedFilePath } = state
+  if (selectedNodeId?.startsWith('code_file_')) {
+    const projected = resolveProjectedCodeNode(state.graph?.fileIndex, selectedNodeId)
+    const filePath = selectedFilePath ?? projected?.filePath
+    return {
+      ...(projected ? { nodeId: projected.nodeId } : {}),
+      ...(projected && filePath ? { filePath } : selectedFilePath ? { filePath: selectedFilePath } : {}),
+    }
+  }
+  return {
+    ...(selectedNodeId ? { nodeId: selectedNodeId } : {}),
+    ...(selectedFilePath ? { filePath: selectedFilePath } : {}),
+  }
+}
+
+/**
  * The executor a request carries. A chosen runtime applies to Agent-mode changes
  * only; Ask, Plan and Debug always use the selected model. Fixture and
  * presentation modes never carry a live choice.
@@ -3959,8 +3996,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         const intent = await client.extractRequestIntent({
           projectId: project.projectId,
           rawRequest: rawPrompt.trim(),
-          nodeId: selectedNodeId ?? undefined,
-          filePath: selectedFilePath ?? undefined,
+          ...requestTargetFromSelection(state),
           ...composerFieldsWithMode,
           executorSelection,
         })
@@ -4013,8 +4049,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     try {
       const refinement = await client.refinePrompt({
         projectId: project.projectId,
-        nodeId: selectedNodeId ?? undefined,
-        filePath: selectedFilePath ?? undefined,
+        ...requestTargetFromSelection(state),
         rawPrompt: agentPrompt,
         workforceAgentDefinitionId: get().activeAgentDefinitionId,
         ...chatSessionRequestFields(),
@@ -7784,8 +7819,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       pushToast({ type: 'info', message: 'No recorded answer to write' })
       return
     }
-    const relatedNodeIds =
-      chatAnchor?.kind === 'node' ? [chatAnchor.id] : selectedNodeId ? [selectedNodeId] : []
+    const anchoredId = chatAnchor?.kind === 'node' ? chatAnchor.id : selectedNodeId
+    const relatedNodeId = anchoredId ? serverNodeIdFor(get().graph?.fileIndex, anchoredId) : undefined
+    const relatedNodeIds = relatedNodeId ? [relatedNodeId] : []
     await saveDecision({
       title: 'Anchored answer',
       date: new Date().toISOString(),
@@ -8036,10 +8072,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     if (!project) return
 
     const title = options?.title?.trim() || undefined
-    const anchorNodeId = options?.anchorNodeId
-    const scope: 'project' | 'node' =
-      anchorNodeId || selectedNodeId ? 'node' : 'project'
-    const nodeId = anchorNodeId ?? selectedNodeId ?? undefined
+    const requestedNodeId = options?.anchorNodeId ?? selectedNodeId ?? undefined
+    const nodeId = requestedNodeId ? serverNodeIdFor(get().graph?.fileIndex, requestedNodeId) : undefined
+    const scope: 'project' | 'node' = nodeId ? 'node' : 'project'
     const size = MAP_ARTIFACT_DEFAULT_SIZES[type]
     const base = {
       type,
@@ -8087,10 +8122,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const { client, project, selectedNodeId, pushToast, locale } = get()
     if (!project) return
 
-    const anchorNodeId = options?.anchorNodeId
-    const scope: 'project' | 'node' =
-      anchorNodeId || selectedNodeId ? 'node' : 'project'
-    const nodeId = anchorNodeId ?? selectedNodeId ?? undefined
+    const requestedNodeId = options?.anchorNodeId ?? selectedNodeId ?? undefined
+    const nodeId = requestedNodeId ? serverNodeIdFor(get().graph?.fileIndex, requestedNodeId) : undefined
+    const scope: 'project' | 'node' = nodeId ? 'node' : 'project'
 
     const input = {
       scope,
