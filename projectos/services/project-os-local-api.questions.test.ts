@@ -100,6 +100,6 @@ describe("a question the agent put to the person", () => {
 
     expect((await api.listRunDecisions(project.projectId, "run_q"))[0]).toMatchObject({ status: "superseded" });
     // A superseded question cannot be answered later.
-    await expect(api.resolveRunDecision(project.projectId, decision.id, 2, { optionId: "option_1" })).rejects.toThrow(/no longer pending/iu);
+    await expect(api.resolveRunDecision(project.projectId, decision.id, 2, { optionId: "option_1" })).rejects.toThrow(/cannot be answered again|no longer pending/iu);
   });
 });

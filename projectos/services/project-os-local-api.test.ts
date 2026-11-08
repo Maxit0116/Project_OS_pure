@@ -5246,14 +5246,15 @@ function getLocalApiInternals(api: ProjectOSLocalApi): LocalApiTestInternals {
 
 /** A request for the whole product, taken the way the app takes it: intent, approval, then execution. */
 async function runApprovedGlobalRequest(api: ProjectOSLocalApi, projectId: string) {
-  const intent = await api.extractRequestIntent({
+  // The approved intent now binds its entry node, so confirming plans at that node. These runs mean to
+  // start from the global planner, as the other whole-tree tests do.
+  const { run } = await approveAndConfirmModelExecution(api, {
     projectId,
     rawRequest: "Update login consistently across the product.",
-    executorSelection: { kind: "model", modelProfileId: "fixture-model" },
+    deferOrchestratorStart: false,
+    forceGlobalPlanner: true,
   });
-  await api.approveRequestIntent(projectId, intent.id, intent.revision);
-  const refinement = await api.prepareIntentExecution(projectId, intent.id);
-  return api.confirmExecution(refinement.id);
+  return run;
 }
 
 async function enableModelExecution(

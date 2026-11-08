@@ -2379,7 +2379,7 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
 
       expect(harness.root.run.status).toBe("awaiting_review");
       const completed = harness.root.events.find((event) => event.type === "run_completed");
-      expect(completed).toMatchObject({ payload: { outcome: "whole_tree_validated_awaiting_group_apply", filesApplied: 0 } });
+      expect(completed).toMatchObject({ payload: { outcome: "whole_tree_validated_uncertain_awaiting_review", filesApplied: 0 } });
       expect(harness.root.batchReviewReason).toMatch(/could not be confirmed by reading the code/u);
       const summary = harness.root.events.find((event) => event.type === "decision_summary");
       expect(summary).toMatchObject({ payload: { summary: expect.stringMatching(/Review needed before anything is applied/u) } });
@@ -4835,7 +4835,7 @@ describe("editing a file too large to send whole", () => {
 
     expect(requests[0]?.systemPrompt).not.toContain("too large to show whole");
     expect(JSON.stringify(requests[0]?.input)).toContain('"content":"SELECTED_CONTEXT_MARKER"');
-    expect(requests[1]?.systemPrompt).toContain("The after value must be the complete modified file source");
+    expect(requests[1]?.systemPrompt).toContain("after is the complete modified file source");
     expect(requests[2]?.input).toMatchObject({ snapshot: { selectedFileContent: "SELECTED_CONTEXT_MARKER" } });
   });
 });

@@ -49,7 +49,6 @@ import {
   type BatchValidationResult,
 } from "../../contracts/batch-validation.js";
 import type { VerificationRunResult } from "../../contracts/exec-command.js";
-import type { RunDecision } from "../../contracts/run-state.js";
 import {
   ASK_USER_STAGES,
   MAX_RUN_QUESTIONS,
@@ -137,7 +136,6 @@ import { mayAttemptBatchSynthesisAfterError } from "./batch-validation-error-pol
 import {
   batchValidationNeedsHumanReview,
   isEvidenceValidBatchValidation,
-  isEvidenceValidProposalValidation,
   proposalValidationNeedsHumanReview,
 } from "./batch-validation-evidence.js";
 import type { LoadedProjectOSWorkspace } from "../../persistence/workspace-store.js";
@@ -3840,9 +3838,15 @@ export class AgentOrchestrator {
           "unknown_failure";
         return `${result.taskId || result.runId}: ${detail.slice(0, 160)}`;
       });
+      // The first reason a child gave, without the generic prefix a nested planner already added. The
+      // wording is parsed by the web app (userFacingError.ts) to explain the failure in plain language, so
+      // the per-child detail stays in `details`, not in the sentence.
+      const firstReason = failed
+        .map((result) => failureReasons.get(result.taskId)?.replace(/^One or more delegated subtrees failed; no files were applied:?\s*/u, ""))
+        .find((reason) => Boolean(reason));
       const error = new ProjectOSError(
         "agent_orchestration_failed",
-        `Delegated subtree failed (${failed.length}/${results.length}); no files were applied. ${failedDetails.join(" · ")}`,
+        `One or more delegated subtrees failed; no files were applied${firstReason ? `: ${firstReason}` : ""}`.slice(0, 600),
         {
           details: {
             failedChildRunIds: failed.map((result) => result.runId),
@@ -5796,7 +5800,9 @@ export class AgentOrchestrator {
         // person, not to throw away the work: live, about 25 model calls were discarded this way.
         const uncertainCriteria = parsed.tasks.flatMap((task) =>
           task.criteria.filter((criterion) => criterion.status === "uncertain"));
-        const needsReview = !semanticallyValid &&
+        // isEvidenceValidBatchValidation already counts "uncertain" as reviewable, so a review with doubts
+        // is both valid and in need of a person: the reason below must be given in exactly that case.
+        const needsReview = semanticallyValid &&
           uncertainCriteria.length > 0 &&
           parsed.tasks.every((task) => task.criteria.every((criterion) => criterion.status !== "unsatisfied")) &&
           parsed.crossFileAssessment.status !== "inconsistent";
@@ -5810,10 +5816,10 @@ export class AgentOrchestrator {
             taskId: task.taskId,
             childRunId: task.childRunId,
             path: task.path,
-            status: semanticallyValid
-              ? "consistent"
-              : needsReview
-                ? task.criteria.some((criterion) => criterion.status === "uncertain") ? "uncertain" : "consistent"
+            status: needsReview
+              ? task.criteria.some((criterion) => criterion.status === "uncertain") ? "uncertain" : "consistent"
+              : semanticallyValid
+                ? "consistent"
                 : task.status,
             criteria: task.criteria.map((criterion) => ({
               criterion: criterion.criterion,
