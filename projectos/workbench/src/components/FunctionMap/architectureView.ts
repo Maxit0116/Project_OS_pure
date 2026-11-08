@@ -16,6 +16,8 @@ import {
   viewsForLevel,
   type ArchitectureViewScope,
 } from '../../../../shared/c4-architecture-views/index.js'
+import type { Locale } from '../../i18n/types'
+import { getStoreMessage } from '../../i18n/storeMessages'
 
 export type { ArchitectureViewScope }
 export {
@@ -234,19 +236,50 @@ function withoutTerminalPunctuation(value: string): string {
   return value.trim().replace(/[。.!！?？]+$/, '')
 }
 
-function importLabel(file: FileEntry | undefined, fallbackPurpose: string): string {
-  const namedExports = file?.exports.filter((name) => name !== 'default') ?? []
-  const importedCapability =
-    namedExports.length > 0
-      ? namedExports.join('、')
-      : withoutTerminalPunctuation(fallbackPurpose)
-  return `导入：${importedCapability}`
+const MAX_NAMES_IN_CONNECTION = 2
+
+function stemOfPath(path: string): string {
+  const parts = path.split('/')
+  const base = parts[parts.length - 1] ?? path
+  const stem = base.replace(/\.[^.]+$/u, '')
+  // `index.ts` says nothing; the folder it stands for does.
+  return stem === 'index' && parts.length > 1 ? (parts[parts.length - 2] ?? stem) : stem || base
+}
+
+/**
+ * What a link from one file to another is for: the functions or components it takes from the target,
+ * said in the interface language ("Uses AddUser" / "用到 AddUser"), not the two file names with an arrow.
+ */
+export function fileLinkLabel(
+  targetFile: FileEntry | undefined,
+  targetPath: string,
+  language: Locale,
+): string {
+  const named = targetFile?.exports.filter((name) => name && name !== 'default') ?? []
+  const shown = (named.length > 0 ? named : [stemOfPath(targetPath)]).slice(0, MAX_NAMES_IN_CONNECTION)
+  const names = shown.join(getStoreMessage(language, 'map.connection.listSeparator'))
+  const more = named.length > MAX_NAMES_IN_CONNECTION ? '…' : ''
+  return getStoreMessage(language, 'map.connection.uses', { names: `${names}${more}` })
+}
+
+function fileLinkPurpose(sourcePurpose: string, language: Locale): string {
+  return getStoreMessage(language, 'map.connection.usedFor', {
+    purpose: withoutTerminalPunctuation(sourcePurpose),
+  })
+}
+
+/** The label the scan saves for a file link, "a.tsx → b.tsx": a placeholder, not something somebody wrote. */
+function isPlaceholderFileLabel(label: string | undefined): boolean {
+  const text = label?.trim()
+  if (!text) return true
+  return /^[^\s→]+\s*(?:→|->)\s*[^\s→]+$/u.test(text)
 }
 
 function projectInternalFileView(
   component: FunctionalNode,
   fileRelations: FileRelation[],
   fileIndex: FileEntry[],
+  language: Locale,
 ): { nodes: FunctionalNode[]; edges: FunctionalEdge[] } {
   const filesByPath = new Map(fileIndex.map((file) => [file.path, file]))
   const linkedByPath = new Map(component.linkedFiles.map((file) => [file.path, file]))
@@ -269,13 +302,21 @@ function projectInternalFileView(
     const source = nodeIdByPath.get(relation.sourcePath)
     const target = nodeIdByPath.get(relation.targetPath)
     if (!source || !target) return []
+    const placeholder = isPlaceholderFileLabel(relation.label)
+    const sourcePurpose = linkedByPath.get(relation.sourcePath)?.summary
     return [{
       id: relation.id,
       source,
       target,
       relation: relation.relation,
-      label: relation.label,
-      ...(relation.purpose ? { purpose: relation.purpose } : {}),
+      label: placeholder
+        ? fileLinkLabel(filesByPath.get(relation.targetPath), relation.targetPath, language)
+        : relation.label,
+      ...(relation.purpose
+        ? { purpose: relation.purpose }
+        : placeholder && sourcePurpose?.trim()
+          ? { purpose: fileLinkPurpose(sourcePurpose, language) }
+          : {}),
       ...(relation.technology ? { technology: relation.technology } : {}),
       confidence: relation.confidence,
       evidence: relation.evidence,
@@ -294,14 +335,13 @@ function projectInternalFileView(
       const targetId = nodeIdByPath.get(targetPath)
       if (!targetId || explicitKeys.has(`${sourceId}\u0000${targetId}`)) continue
       const sourcePurpose = linkedByPath.get(sourcePath)?.summary ?? '完成当前文件的职责。'
-      const targetPurpose = linkedByPath.get(targetPath)?.summary ?? '提供当前文件需要的能力。'
       importEdges.push({
         id: `arch_file_import_${sourceId}_${targetId}`,
         source: sourceId,
         target: targetId,
         relation: 'imports',
-        label: importLabel(filesByPath.get(targetPath), targetPurpose),
-        purpose: `用于：${withoutTerminalPunctuation(sourcePurpose)}`,
+        label: fileLinkLabel(filesByPath.get(targetPath), targetPath, language),
+        purpose: fileLinkPurpose(sourcePurpose, language),
         confidence: 1,
         evidence: `${sourcePath} -> ${targetPath}`,
       })
@@ -359,6 +399,8 @@ export interface ProjectArchitectureViewOptions {
   viewKey?: string
   /** When true (default), lift cross-level edges to visible ancestors. */
   liftRelationships?: boolean
+  /** The language the file-to-file connection text is said in. Chinese when left out. */
+  language?: Locale
 }
 
 export function projectArchitectureView(
@@ -395,7 +437,7 @@ export function projectArchitectureView(
         )
       : undefined
     const fileGraph = component
-      ? projectInternalFileView(component, fileRelations, fileIndex)
+      ? projectInternalFileView(component, fileRelations, fileIndex, options.language ?? 'zh')
       : { nodes: [], edges: [] }
     return effectiveScope.focusNodeId
       ? focusOneHop(fileGraph.nodes, fileGraph.edges, effectiveScope.focusNodeId)

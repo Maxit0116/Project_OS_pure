@@ -524,6 +524,7 @@ describe("structure-graph-ai-scan", () => {
       expect(prompt).toContain("Language for names: Chinese");
       expect(prompt).toContain("Write for a reader who does not code");
       expect(prompt).toContain("never just a protocol");
+      expect(prompt).toContain("names the function");
     }
     expect(prompts[0]).toContain("the language the person reads the app in");
   });
@@ -558,6 +559,39 @@ describe("structure-graph-ai-scan", () => {
     expect(rewritten.nodes.find((node) => node.id === "component_auth")?.name).toBe("Identity access (中文)");
     // The one the model left out keeps its text.
     expect(rewritten.nodes.find((node) => node.id === "component_billing")?.name).toBe("Billing checkout");
+  });
+
+  it("rewrites only the connection labels, as functions, showing the model what each connects", async () => {
+    const { root, projectId } = makeTempRepo();
+    const heuristic = buildHeuristicProjectGraph({ projectId, projectName: "demo", projectType: "node", workspaceRoot: root });
+    const scanned = await runStructureGraphAiScan({
+      workspaceRoot: root, projectId, displayName: "demo", graph: heuristic, profile: mockProfile(),
+      gateway: { complete: vi.fn(async (_p, request) => gatewayResponse((request.input as { task?: string }).task === "structure_graph_round_a" ? roundAJson() : roundBJson())) } as unknown as ModelGateway,
+    });
+    expect((scanned.edges ?? []).length).toBeGreaterThan(0);
+    const requests: Array<{ systemPrompt: string; items: Record<string, Record<string, unknown>> }> = [];
+    const complete = vi.fn(async (_profile, request) => {
+      const items = (request.input as { items: Record<string, Record<string, unknown>> }).items;
+      requests.push({ systemPrompt: String(request.systemPrompt ?? ""), items });
+      return gatewayResponse(JSON.stringify({ items: Object.fromEntries(Object.keys(items).map((key) => [key, { label: `Look up ${key}` }])) }));
+    });
+    const rewritten = await runStructureGraphAiScan({
+      workspaceRoot: root, projectId, displayName: "demo", graph: scanned, profile: mockProfile(),
+      gateway: { complete } as unknown as ModelGateway, language: "en", scanMode: "connections",
+    });
+    const edges = scanned.edges ?? [];
+    expect(requests.flatMap((request) => Object.keys(request.items)).sort()).toEqual(edges.map((edge) => `e:${edge.id}`).sort());
+    // The model sees both ends and the label it is replacing, and is told what a good label is.
+    const first = edges[0]!;
+    const shown = requests[0]!.items[`e:${first.id}`]!;
+    const nameOf = (id: string) => scanned.nodes.find((node) => node.id === id)?.name;
+    expect(shown).toMatchObject({ from: { name: nameOf(first.source) }, to: { name: nameOf(first.target) } });
+    expect(requests[0]!.systemPrompt).toContain("names the function");
+    expect(requests[0]!.systemPrompt).toContain("English");
+    // Only labels change.
+    expect(rewritten.edges?.map((edge) => edge.label)).toEqual(edges.map((edge) => `Look up e:${edge.id}`));
+    expect(rewritten.nodes).toEqual(scanned.nodes);
+    expect(rewritten.edges?.map((edge) => edge.id)).toEqual(edges.map((edge) => edge.id));
   });
 
   it("asks only once more, and not at all for a failure another round cannot fix", () => {

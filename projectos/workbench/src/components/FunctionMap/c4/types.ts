@@ -1,3 +1,4 @@
+import type { Locale } from '../../../i18n/types'
 import type {
   ArchitectureLevel,
   ArchitectureView,
@@ -37,6 +38,8 @@ export interface C4DiagramInput {
   viewKey?: string
   fileIndex?: FileEntry[]
   fileRelations?: FileRelation[]
+  /** The language file-to-file connection text is said in (Chinese when left out). */
+  language?: Locale
 }
 
 export interface C4DiagramNode {

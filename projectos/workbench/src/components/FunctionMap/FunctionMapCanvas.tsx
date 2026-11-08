@@ -1078,6 +1078,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       ...(activeViewKey ? { viewKey: activeViewKey } : {}),
       fileIndex,
       fileRelations,
+      language: locale,
     })
   }, [
     architecture,
@@ -1089,6 +1090,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     graphEdges,
     fileIndex,
     fileRelations,
+    locale,
   ])
   const [c4Diagram, setC4Diagram] = useState<C4Diagram | null>(c4DiagramBase)
   // Layout must not fit the pre-ELK grid. The first camera is the laid-out
@@ -1143,6 +1145,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         {
           views: architectureViews,
           ...(activeViewKey ? { viewKey: activeViewKey } : {}),
+          language: locale,
         },
       ),
     [
@@ -1154,6 +1157,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       activeViewKey,
       fileIndex,
       fileRelations,
+      locale,
     ],
   )
 

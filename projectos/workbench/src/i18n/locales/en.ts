@@ -2967,6 +2967,8 @@ const en = {
     artifactsHint: 'Show notes, plans, terminals, and work groups',
     translateStructure: 'Rewrite this map in {language}',
     translatingStructure: 'Rewriting the map in your language…',
+    rewriteConnections: 'Rewrite connections as functions',
+    rewritingConnections: 'Rewriting the connections…',
     detail: {
       label: 'Detail',
       simple: 'Simple',
@@ -3027,6 +3029,11 @@ const en = {
       openModuleMap: 'Open feature modules',
       openGraph: 'Open internal file map',
       moreFiles: '+{count} more files',
+    },
+    connection: {
+      uses: 'Uses {names}',
+      usedFor: 'Used for: {purpose}',
+      listSeparator: ', ',
     },
     liveGraph: {
       unmappedTitle: 'Activity outside this graph',

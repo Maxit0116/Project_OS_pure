@@ -409,6 +409,17 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
                   {ts('map.translateStructure', { language: interfaceLocale === 'zh' ? '中文' : 'English' })}
                 </button>
               ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                className={contextMenuStyles.menuItem}
+                onClick={() => {
+                  closeDisplayMenu()
+                  void rescanStructureGraph({ mode: 'connections' })
+                }}
+              >
+                {ts('map.rewriteConnections')}
+              </button>
               <div className={contextMenuStyles.separator} aria-hidden />
               <div className={contextMenuStyles.groupLabel} aria-hidden>
                 {ts('map.displayMenuStructure')}

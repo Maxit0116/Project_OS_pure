@@ -1140,13 +1140,65 @@ async function translateGraphText(input: RunStructureGraphAiScanInput): Promise<
   return applyMapText(input.graph, translated);
 }
 
+const CONNECTION_BATCH_SIZE = 20;
+
+/**
+ * Rewrites only the connection labels, each as the function one part uses the other for ("Look up a user",
+ * "查询用户"), in the interface language. The model is shown both ends and the label it replaces, since a
+ * good label needs to know what is connected; ids, structure and every other text stay as they are.
+ */
+async function rewriteConnectionLabels(input: RunStructureGraphAiScanInput): Promise<ProjectGraph> {
+  const language = input.language ?? "en";
+  const target = language === "zh-CN" ? "Chinese (Simplified)" : "English";
+  const byId = new Map(input.graph.nodes.map((node) => [node.id, node]));
+  const end = (id: string) => {
+    const node = byId.get(id);
+    return { name: node?.name ?? id, ...(node?.summary ? { summary: node.summary } : {}) };
+  };
+  const items = (input.graph.edges ?? []).flatMap((edge) =>
+    byId.has(edge.source) && byId.has(edge.target)
+      ? [{
+          key: `e:${edge.id}`,
+          fields: {
+            from: end(edge.source),
+            to: end(edge.target),
+            ...(edge.label ? { now: edge.label } : {}),
+            ...(edge.technology ? { technology: edge.technology } : {}),
+          },
+        }]
+      : [],
+  );
+  const rewritten = new Map<string, Record<string, string>>();
+  for (let start = 0; start < items.length; start += CONNECTION_BATCH_SIZE) {
+    const batch = items.slice(start, start + CONNECTION_BATCH_SIZE);
+    const answer = await completeJsonRound(
+      input,
+      [
+        `Write the label of each connection between two parts of a software map, in ${target}.`,
+        "Each item shows the part it starts from (from), the part it goes to (to), the label it has now (now) and the technology it uses.",
+        "The label names the function the first part uses the second for, as a short verb phrase of at most six words (\"Look up a user\", \"Send the reset email\", \"Save the order\"); in Chinese at most fourteen characters (\"查询用户\", \"发送重置邮件\").",
+        "Write for a reader who does not code: no protocol, library or framework names, and not \"API call\", \"query\" or \"request\" on their own. If the current label already says the function, keep it.",
+        "Return one JSON object: { items: { \"<key>\": { \"label\": \"<label>\" } } } with every key you were given.",
+      ].join("\n"),
+      "structure_graph_connections",
+      { items: Object.fromEntries(batch.map((item) => [item.key, item.fields])) },
+    );
+    const returned = (answer.items ?? answer) as Record<string, unknown>;
+    for (const item of batch) {
+      const value = returned[item.key] as { label?: unknown } | undefined;
+      if (value && typeof value.label === "string") rewritten.set(item.key, { label: value.label });
+    }
+  }
+  return applyMapText(input.graph, rewritten);
+}
+
 /**
  * Who reads the map: often someone who builds with AI and does not code. Names say what a part is for,
  * summaries what it does for the user, connections what is asked for or sent; technology goes in its
  * own field, where the technical view shows it.
  */
 const PLAIN_LANGUAGE_NOTE =
-  "Write for a reader who does not code. A name says what the part is FOR in everyday words (\"Sign in and sign up\", \"Order history\"), not the technology (not \"AuthService\" or \"React router module\"). The summary is one plain sentence about what it does for the user. Do not put framework, library or protocol names in names, summaries or edge labels; put them only in the technology field. An edge label says in a few plain words what is asked for or sent (\"Checks the password\", \"Sends the order\"), never just a protocol.";
+  "Write for a reader who does not code. A name says what the part is FOR in everyday words (\"Sign in and sign up\", \"Order history\"), not the technology (not \"AuthService\" or \"React router module\"). The summary is one plain sentence about what it does for the user. Do not put framework, library or protocol names in names, summaries or edge labels; put them only in the technology field. An edge label names the function the first part uses the second for, as a short verb phrase (\"Look up a user\", \"Send the reset email\", \"Save the order\"), never just a protocol and not a library, an \"API call\" or a \"query\".";
 
 /** Gate failures a second round B can fix: components without code, too few files, directory shells. */
 export function isRetryableGateFailure(reasons: readonly string[]): boolean {
@@ -1505,6 +1557,16 @@ export async function runStructureGraphAiScan(
       emitStep("step_skipped", stepId);
     }
     return translated;
+  }
+
+  if (scanMode === "connections") {
+    emitStep("step_started", "map_components");
+    const rewritten = await rewriteConnectionLabels(input);
+    emitStep("step_completed", "map_components", `${rewritten.edges?.length ?? 0} connections`);
+    for (const stepId of ["map_context", "link_code", "validate_save"] as const) {
+      emitStep("step_skipped", stepId);
+    }
+    return rewritten;
   }
 
   if (scanMode === "acceptRefine") {

@@ -2534,7 +2534,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     set({ structureRescanLoading: true })
     attachStructureScanSubscription(project.projectId, client, locale, get, set)
     // The rewrite is written in the project's interface language: make sure it is the current one.
-    if (mode === 'translate') await syncInterfaceLanguage(get)
+    if (mode === 'translate' || mode === 'connections') await syncInterfaceLanguage(get)
     const loadingKey =
       mode === 'refine' || mode === 'acceptRefine'
         ? 'map.refiningStructure'
@@ -2544,7 +2544,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             ? 'map.refiningStructure'
             : mode === 'translate'
               ? 'map.translatingStructure'
-              : 'map.regeneratingStructure'
+              : mode === 'connections'
+                ? 'map.rewritingConnections'
+                : 'map.regeneratingStructure'
     pushToast({
       type: 'info',
       message: getStoreMessage(locale, loadingKey),

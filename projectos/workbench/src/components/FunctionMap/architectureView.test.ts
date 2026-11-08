@@ -411,7 +411,7 @@ describe('projectArchitectureView', () => {
     expect(projected.edges).toMatchObject([
       {
         relation: 'imports',
-        label: '导入：validateCredentials',
+        label: '用到 validateCredentials',
         purpose: '用于：验证登录信息并返回会话',
       },
     ])
@@ -421,6 +421,49 @@ describe('projectArchitectureView', () => {
         expect.objectContaining({ name: 'middleware.ts', layer: 'interface' }),
       ]),
     )
+  })
+
+  describe('what a file-to-file connection says', () => {
+    const files = (paths: string[]) => {
+      const component = node('admin', 'component', 'web')
+      component.linkedFiles = paths.map((path) => ({ path, role: 'supporting' as const, summary: `${path} 负责展示` }))
+      const fileIndex: FileEntry[] = [
+        { path: 'src/admin.tsx', type: 'page', nodeIds: ['admin'], imports: ['./AddUser', './columns'], exports: ['Route'] },
+        { path: 'src/AddUser.tsx', type: 'other', nodeIds: ['admin'], imports: [], exports: ['default'] },
+        { path: 'src/columns.tsx', type: 'other', nodeIds: ['admin'], imports: [], exports: ['UserTableData', 'columns', 'sortColumns'] },
+      ]
+      return { component, fileIndex }
+    }
+    const paths = ['src/admin.tsx', 'src/AddUser.tsx', 'src/columns.tsx']
+
+    it('names the functions it takes from the file, in the interface language', () => {
+      const { component, fileIndex } = files(paths)
+      const view = (language: 'en' | 'zh') =>
+        projectArchitectureView([component], [], 'code', { parentId: 'admin' }, fileIndex, [], { language })
+          .edges.map((item) => item.label)
+      expect(view('en')).toEqual(['Uses AddUser', 'Uses UserTableData, columns…'])
+      expect(view('zh')).toEqual(['用到 AddUser', '用到 UserTableData、columns…'])
+    })
+
+    it('replaces the saved "a.tsx → b.tsx" text, and keeps a label somebody wrote', () => {
+      const { component, fileIndex } = files(paths)
+      const saved = (label: string): FileRelation[] => [
+        { ...relation('adm_add', 'src/admin.tsx', 'src/AddUser.tsx'), label },
+      ]
+      const labelOf = (label: string, language: 'en' | 'zh') =>
+        projectArchitectureView([component], [], 'code', { parentId: 'admin' }, fileIndex, saved(label), { language })
+          .edges.find((item) => item.id === 'adm_add')?.label
+      expect(labelOf('admin.tsx → AddUser.tsx', 'en')).toBe('Uses AddUser')
+      expect(labelOf('admin.tsx → AddUser.tsx', 'zh')).toBe('用到 AddUser')
+      expect(labelOf('Opens the add-user dialog', 'en')).toBe('Opens the add-user dialog')
+    })
+
+    it('keeps the Chinese wording when no language is given', () => {
+      const { component, fileIndex } = files(paths)
+      const labels = projectArchitectureView([component], [], 'code', { parentId: 'admin' }, fileIndex)
+        .edges.map((item) => item.label)
+      expect(labels[0]).toBe('用到 AddUser')
+    })
   })
 
   it('resolves root aliases and relative imports to real file-index paths', () => {

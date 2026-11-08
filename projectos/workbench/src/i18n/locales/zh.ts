@@ -2925,6 +2925,8 @@ const zh = {
     artifactsHint: '显示笔记、计划、终端与 WorkGroup',
     translateStructure: '用{language}重写这张地图',
     translatingStructure: '正在用你的语言重写地图…',
+    rewriteConnections: '把连线改写成功能说明',
+    rewritingConnections: '正在改写连线…',
     detail: {
       label: '详细程度',
       simple: '简单',
@@ -2985,6 +2987,11 @@ const zh = {
       openModuleMap: '查看功能模块',
       openGraph: '查看内部文件图',
       moreFiles: '另有 {count} 个文件',
+    },
+    connection: {
+      uses: '用到 {names}',
+      usedFor: '用于：{purpose}',
+      listSeparator: '、',
     },
     liveGraph: {
       unmappedTitle: '未入图资源活动',

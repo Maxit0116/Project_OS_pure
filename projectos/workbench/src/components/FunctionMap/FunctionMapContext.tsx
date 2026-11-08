@@ -1052,6 +1052,7 @@ export function FunctionMapProvider({
     !layerFocusSuppressed && Boolean(selectedFocusCandidate)
   const selectedFocusInScope = isLayerFocusActive ? selectedFocusCandidate : undefined
 
+  const language = useWorkbenchStore((s) => s.locale)
   const projectedGraph = useMemo(() => {
     const projected = projectArchitectureView(
       nodes,
@@ -1068,6 +1069,7 @@ export function FunctionMapProvider({
       {
         views: architectureViews,
         ...(activeViewKey ? { viewKey: activeViewKey } : {}),
+        language,
       },
     )
     let nextNodes = projected.nodes
@@ -1100,6 +1102,7 @@ export function FunctionMapProvider({
     selectedFocusInScope,
     hideHeuristicNodes,
     confidencePerspective,
+    language,
   ])
 
   const centerTab = useWorkbenchStore((s) => s.centerTab)

@@ -631,6 +631,8 @@ export const StructureScanModeSchema = z.enum([
   "acceptRefine",
   /** Rewrite the map's text (names, summaries, connection labels) in the interface language; structure unchanged. */
   "translate",
+  /** Rewrite only the connection labels as the function one part uses the other for, in the interface language. */
+  "connections",
 ]);
 
 export const StructureScanOptionsSchema = z

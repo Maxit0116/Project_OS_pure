@@ -75,6 +75,7 @@ export function buildDiagram(input: C4DiagramInput): C4Diagram {
         {
           views: input.views,
           viewKey: input.viewKey,
+          ...(input.language ? { language: input.language } : {}),
         },
       )
       return buildContextDiagram({
