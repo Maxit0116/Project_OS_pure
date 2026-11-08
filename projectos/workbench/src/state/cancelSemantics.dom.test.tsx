@@ -30,10 +30,10 @@ function baseState(): RunEventStoreSlice {
     executionOverlay: null,
     activeRunId: 'run_root',
     diffReady: false,
-    diffReviewOnlyReason: null,
     revokedApplyRunIds: [],
-    error: null,
-  } as RunEventStoreSlice
+    messages: [],
+    graph: null,
+  }
 }
 
 describe('cancel / Stop product DOM + state regressions (unpaid)', () => {
