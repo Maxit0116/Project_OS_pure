@@ -1,5 +1,5 @@
 {
-  "head": "9c374cdfdb15aca1b582fbc761c03015aace9bee",
+  "head": "aee676942e355c6877e2a8ea789b0b2fc390adf9",
   "exits": {
     "npm_ci": 0,
     "core_tsc": 0,
@@ -11,9 +11,9 @@
     "fullgate": 1
   },
   "tsconfig_test": "workbench/tsconfig.test.json",
-  "fullgate_files_line": "2 failed | 486 passed (488)",
-  "fullgate_tests_line": "3 failed | 2538 passed (2541)",
-  "log": "<private-archive>/_batch25_stage_usability/trusted_gates_9c374cd/trusted_gates.log",
-  "console": "<private-archive>/_batch25_stage_usability/trusted_gates_9c374cd/trusted_gates_console.txt",
+  "fullgate_files_line": "2 failed | 487 passed (489)",
+  "fullgate_tests_line": "3 failed | 2542 passed (2545)",
+  "log": "<private-archive>/_batch25_stage_usability/trusted_gates_aee6769/trusted_gates.log",
+  "console": "<private-archive>/_batch25_stage_usability/trusted_gates_aee6769/trusted_gates_console.txt",
   "known_ux_red_expected_fullgate_nonzero": true
 }

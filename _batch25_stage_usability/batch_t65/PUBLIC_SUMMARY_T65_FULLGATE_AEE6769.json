@@ -1,0 +1,34 @@
+{
+  "kind": "tip_fullgate",
+  "tip": "aee676942e355c6877e2a8ea789b0b2fc390adf9",
+  "tip7": "aee6769",
+  "parent": "938a5fb4b0721455702d4817474be61b463f8e92",
+  "wrapper_exit": 0,
+  "fullgate_exit": 1,
+  "exits": {
+    "npm_ci": 0,
+    "core_tsc": 0,
+    "wb_tsc": 0,
+    "wb_test_tsc": 0,
+    "desktop_tsc": 0,
+    "desktop_build": 0,
+    "fixtures": 0,
+    "fullgate": 1
+  },
+  "fullgate_files_line": "2 failed | 487 passed (489)",
+  "fullgate_tests_line": "3 failed | 2542 passed (2545)",
+  "locked_ux_reds": 3,
+  "request_decision_timeout_flake": "stabilized",
+  "log": "<private-archive>/_batch25_stage_usability/trusted_gates_aee6769/trusted_gates.log",
+  "console": "<private-archive>/_batch25_stage_usability/trusted_gates_aee6769/trusted_gates_console.txt",
+  "finished_at": "2026-11-08T03:10:56Z",
+  "couple_after_fullgate": true,
+  "secrets_sha256_16": "08e354c69d666b40",
+  "couple_exit0": true,
+  "ledger": {
+    "reserved": 193,
+    "limit": 200,
+    "missingCount": 42
+  },
+  "sessionCap_note": "probe sessionCap=24 vs product LIVE_BATCH_DEFAULT 16 (probe-only)"
+}

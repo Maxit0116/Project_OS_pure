@@ -1,13 +1,21 @@
 {
   "for_independent_review": true,
   "premature_acceptance": false,
-  "tip": "9c374cd",
+  "tip": "aee676942e355c6877e2a8ea789b0b2fc390adf9",
+  "tip7": "aee6769",
+  "parent": "938a5fb4b0721455702d4817474be61b463f8e92",
+  "parent_chain": [
+    "edc5e61",
+    "938a5fb",
+    "aee6769"
+  ],
   "artifacts": [
     "BATCH_T65_REPORT.md",
     "PUBLIC_SUMMARY_T65_LIVE_H3_ANSWER.json",
     "PUBLIC_SUMMARY_T65_LIVE_H3_STOP.json",
     "PUBLIC_SUMMARY_T64_CHILDFAIL_SANITIZE.json",
     "PUBLIC_SUMMARY_T65_FULLGATE_9C374CD.json",
+    "PUBLIC_SUMMARY_T65_FULLGATE_AEE6769.json",
     "COST_LEDGER_SNAPSHOT.json",
     "couple_hashes_compare_end.json",
     "couple_hashes_end_SOURCE.json",
@@ -31,7 +39,23 @@
     "siblingSkippedWithoutStart": true
   },
   "childfail_excerpt": "Delegated file task failed; [path] api_key=[redacted] Bearer [redacted]",
+  "tip_fullgate": {
+    "wrapper_exit": 0,
+    "fullgate_exit": 1,
+    "files": "2 failed | 487 passed (489)",
+    "tests": "3 failed | 2542 passed (2545)",
+    "locked_ux_reds_only": true,
+    "after_tests_and_path_redact": true,
+    "couple_and_secrets_after_fullgate": true
+  },
   "couple_four_hashes_unchanged": true,
   "secrets_sha256_16": "08e354c69d666b40",
-  "writtenAt": "2026-11-08T02:12:51.101902Z"
+  "ledger": {
+    "reserved": 193,
+    "limit": 200,
+    "missingCount": 42,
+    "missing_not_settled": true
+  },
+  "sessionCap_note": "probe sessionCap=24 vs product LIVE_BATCH_DEFAULT 16 (probe-only)",
+  "writtenAt": "2026-11-08T03:12:30.000000Z"
 }
