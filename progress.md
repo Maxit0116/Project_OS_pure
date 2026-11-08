@@ -1,5 +1,13 @@
 # Progress
 
+## 2026-11-08 (S10) - the map for people who do not code, and language options
+
+- **Asked:** language options (interface English or Chinese), the node level showing the names of the nodes that carry the first intention and function with the file names under them, connections too, tailored to vibe coders. Details in `build_plan.md` §0 ("S10").
+- **Done:** Simple (default) and Technical views of the map (file names under each feature, plain connection labels and level names, no framework tags); system-language default, a language switch on the start screen, the map's text written in the interface language in plain words, and a translate scan mode that rewrites an existing map in the other language keeping every id; fixes for Ask with a code-level box selected, overlapping feature boxes and a default-language regression in tests.
+- **Verified:** workbench, contracts and scan suites (1,337 tests): no failure outside the baseline; five typechecks 0; live in the dev app on a fresh English-system data folder (English start screen, Features view with file names, switch to Chinese, map rewritten in Chinese with the same ids, no overlaps, language remembered).
+- **Not done:** per-file descriptions are not rewritten by translate; the detail panel still shows technical terms in Simple view; the packaged app was not rebuilt this round; a first-open legend for non-coders.
+- Commits c08d2c4 to 3368e55 (nine), nothing pushed; `58a7752` and `607b727` from earlier today are also unpushed.
+
 ## 2026-11-07 (S9) - merging origin/graph, Keychain storage, Developer ID build prepared
 
 - **Asked:** "1,3, yes. 2 after merging": run external repositories' own tests (1), merge `origin/graph` (3), then signing, Keychain and a second Mac (2). Details are in `build_plan.md` §0 ("S9").
