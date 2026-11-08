@@ -496,3 +496,169 @@ describe("thinking depth body mapping", () => {
     });
   });
 });
+
+describe("provider HTTP contract matrix (openai_chat + anthropic_messages)", () => {
+  const openAi = normalizeModelProfile({
+    id: "contract-openai",
+    name: "OpenAI",
+    provider: "openai",
+    model: "gpt-4o-mini",
+    apiKeyRef: "openai-key",
+  });
+  const anthropic = normalizeModelProfile({
+    id: "contract-anthropic",
+    name: "Anthropic",
+    provider: "anthropic",
+    model: "claude-3-5-haiku-latest",
+    apiKeyRef: "anthropic-key",
+  });
+  const customDeepSeekShape = normalizeModelProfile({
+    id: "contract-custom-ds",
+    name: "DeepSeek-compatible",
+    provider: "custom",
+    apiFormat: "openai_chat",
+    model: "deepseek-chat",
+    baseUrl: "https://api.deepseek.com",
+    apiKeyRef: "ds-key",
+  });
+
+  const formats: Array<{
+    label: string;
+    format: "openai_chat" | "anthropic_messages";
+    profile: ReturnType<typeof normalizeModelProfile>;
+    okBody: unknown;
+  }> = [
+    {
+      label: "openai_chat",
+      format: "openai_chat",
+      profile: openAi,
+      okBody: {
+        choices: [{
+          message: {
+            role: "assistant",
+            content: "OK",
+            tool_calls: [{
+              id: "call_1",
+              type: "function",
+              function: { name: "ping", arguments: "{\"x\":1}" },
+            }],
+          },
+          finish_reason: "tool_calls",
+        }],
+        usage: { prompt_tokens: 11, completion_tokens: 3 },
+      },
+    },
+    {
+      label: "anthropic_messages",
+      format: "anthropic_messages",
+      profile: anthropic,
+      okBody: {
+        id: "msg_1",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: "OK" }],
+        model: "claude-3-5-haiku-latest",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 9, output_tokens: 2 },
+      },
+    },
+    {
+      label: "custom openai_chat (DeepSeek-shaped)",
+      format: "openai_chat",
+      profile: customDeepSeekShape,
+      okBody: {
+        choices: [{ message: { role: "assistant", content: "OK" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 5, completion_tokens: 1 },
+      },
+    },
+  ];
+
+  for (const entry of formats) {
+    describe(entry.label, () => {
+      it("maps HTTP 401 to model_connection_failed without leaking body", async () => {
+        vi.stubGlobal("fetch", vi.fn(async () => new Response("api-key-leak-secret", { status: 401 })));
+        const failure = await createProviderAdapter(entry.format)
+          .complete(entry.profile, "secret", { userPrompt: "hi" })
+          .catch((error: unknown) => error);
+        expect(failure).toMatchObject({
+          code: "model_connection_failed",
+          message: "Model provider request failed (HTTP 401)",
+        });
+        expect((failure as Error).message).not.toContain("api-key-leak-secret");
+      });
+
+      it("maps HTTP 429 rate limit without leaking body", async () => {
+        vi.stubGlobal("fetch", vi.fn(async () => new Response("rate-limit-body", { status: 429 })));
+        const failure = await createProviderAdapter(entry.format)
+          .complete(entry.profile, "secret", { userPrompt: "hi" })
+          .catch((error: unknown) => error);
+        expect(failure).toMatchObject({
+          code: "model_connection_failed",
+          message: "Model provider request failed (HTTP 429)",
+        });
+        expect((failure as Error).message).not.toContain("rate-limit-body");
+      });
+
+      it("rejects malformed JSON success", async () => {
+        vi.stubGlobal("fetch", vi.fn(async () => new Response("{not-json", { status: 200 })));
+        await expect(createProviderAdapter(entry.format).complete(
+          entry.profile,
+          "secret",
+          { userPrompt: "hi" },
+        )).rejects.toMatchObject({
+          code: "model_connection_failed",
+          message: "Model provider returned invalid JSON",
+        });
+      });
+
+      it("honors abort before completion", async () => {
+        const controller = new AbortController();
+        vi.stubGlobal("fetch", vi.fn((_url: string | URL | Request, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+            }, { once: true });
+          }),
+        ));
+        const pending = createProviderAdapter(entry.format).complete(
+          entry.profile,
+          "secret",
+          { userPrompt: "hi", signal: controller.signal },
+        );
+        controller.abort();
+        await expect(pending).rejects.toMatchObject({
+          name: expect.stringMatching(/AbortError|Error/u),
+        });
+      });
+
+      it("parses a successful official-shaped response with usage semantics", async () => {
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(
+          JSON.stringify(entry.okBody),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )));
+        const result = await createProviderAdapter(entry.format).complete(
+          entry.profile,
+          "secret",
+          { userPrompt: "hi" },
+        );
+        expect(result.output).toContain("OK");
+        expect(result.usageReported).toBe(true);
+        expect(result.inputTokens).toBeGreaterThan(0);
+        expect(result.outputTokens).toBeGreaterThan(0);
+        if (entry.format === "openai_chat" && entry.label === "openai_chat") {
+          expect(result.toolCalls?.length).toBe(1);
+          expect(result.toolCalls?.[0]?.name).toBe("ping");
+        }
+      });
+    });
+  }
+
+  it("documents supported apiFormat surface (not every vendor brand)", () => {
+    expect(createProviderAdapter("openai_chat").constructor.name).toMatch(/OpenAi/);
+    expect(createProviderAdapter("anthropic_messages").constructor.name).toMatch(/Anthropic/);
+    expect(createProviderAdapter("ollama_chat").constructor.name).toMatch(/Ollama/);
+    // Unknown brands use custom + openai_chat (OpenAI-compatible subset), not a native adapter.
+    expect(customDeepSeekShape.apiFormat).toBe("openai_chat");
+    expect(customDeepSeekShape.provider).toBe("custom");
+  });
+});
