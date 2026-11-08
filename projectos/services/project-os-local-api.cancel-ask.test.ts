@@ -150,4 +150,60 @@ describe("ProjectOSLocalApi cancelAsk", () => {
     await expect(intentPromise).rejects.toMatchObject({ code: "operation_cancelled" });
     expect(await api.cancelAsk(project.projectId)).toBe(false);
   });
+
+  it("cancelAsk aborts in-flight createPlan without publishing a plan", async () => {
+    const workspaceRoot = copyWorkspace();
+    const gateway = new HangingAskGateway();
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: workspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: gateway,
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+
+    const planPromise = api.createPlan({
+      projectId: project.projectId,
+      scope: { kind: "global" },
+      objective: "Outline a short plan for the selected feature",
+      executorSelection: { kind: "model", modelProfileId: "fixture-model" },
+    });
+
+    for (let i = 0; i < 80 && gateway.completeCalls === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(gateway.completeCalls).toBeGreaterThanOrEqual(1);
+
+    expect(await api.cancelAsk(project.projectId)).toBe(true);
+    await expect(planPromise).rejects.toMatchObject({ code: "operation_cancelled" });
+    expect(await api.cancelAsk(project.projectId)).toBe(false);
+  });
+
+  it("cancelAsk aborts refinePrompt and does not fall back to deterministic fixture", async () => {
+    const workspaceRoot = copyWorkspace();
+    const gateway = new HangingAskGateway();
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: workspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: gateway,
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+
+    const refinePromise = api.refinePrompt({
+      projectId: project.projectId,
+      rawPrompt: "Change the login heading carefully",
+      executorSelection: { kind: "model", modelProfileId: "fixture-model" },
+    });
+
+    for (let i = 0; i < 80 && gateway.completeCalls === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(gateway.completeCalls).toBeGreaterThanOrEqual(1);
+
+    expect(await api.cancelAsk(project.projectId)).toBe(true);
+    await expect(refinePromise).rejects.toMatchObject({ code: "operation_cancelled" });
+    // Cancelled refine must not surface a deterministic_fixture / fallback success.
+    expect(await api.cancelAsk(project.projectId)).toBe(false);
+  });
 });
