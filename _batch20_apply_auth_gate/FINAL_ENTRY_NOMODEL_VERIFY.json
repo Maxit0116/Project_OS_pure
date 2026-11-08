@@ -1,0 +1,37 @@
+{
+  "ok": true,
+  "at": "2026-11-08T08:17:40.599756+00:00",
+  "entry": "human_acceptance_84d8afb/launch_human_acceptance.sh",
+  "tipLock": {
+    "head": "6a3a3499b1c2b8ef000a9ac6735b3e1f3266811b",
+    "expected": "6a3a3499b1c2b8ef000a9ac6735b3e1f3266811b",
+    "ok": true,
+    "mismatchRejectProbe": true
+  },
+  "productTreeEquivalentTo": "e81e87d17bee5947b9c1e333caddbcde835f56ba",
+  "marker": {
+    "refreshed": true,
+    "afterAt": "2026-11-08T08:17:39.673Z",
+    "afterPid": 49457,
+    "launcherPid": 49457,
+    "pidMatchesMarker": true,
+    "sha16_after": "790df4fbdac61986"
+  },
+  "windowHint": {
+    "electronUserdataProcessSeen": true
+  },
+  "dailySecrets": {
+    "unchanged": true,
+    "sha16": "08e354c69d666b40"
+  },
+  "ledger": {
+    "limit": 1000,
+    "uniqueIds": 302,
+    "reservationsLen": 302,
+    "sha16": "51767b7c35b29ac7",
+    "legacyGapSlots": 27
+  },
+  "cdpArgsEmptyArrayFix": true,
+  "noModelCalls": true,
+  "relockPass": true
+}

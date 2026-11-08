@@ -89,10 +89,10 @@ export type GenerateDiagramDeps = {
   input: GenerateDiagramInput;
   profile?: ModelProfile | null | undefined;
   gateway?: ModelGateway | null | undefined;
-  projectId?: string;
+  projectId?: string | undefined;
   vendorRoot?: string | undefined;
   /** Force sample HTML (tests / mock). */
-  useSample?: boolean;
+  useSample?: boolean | undefined;
 };
 
 export async function generateDiagramArtifact(

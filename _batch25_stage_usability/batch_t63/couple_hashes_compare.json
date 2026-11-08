@@ -1,0 +1,38 @@
+{
+  "at": "2026-11-08T01:13:25.301534+00:00",
+  "settings_equal": false,
+  "graph_equal": true,
+  "semantic_equal": true,
+  "cv_equal": true,
+  "SOURCE": {
+    "settings": "f4614b36efdfbe91",
+    "graph": "a05a885a888c4d54",
+    "semantic_tree_file": "b36f354651971f89",
+    "cv_ContentView_swift": "ed8eeeada6000ba7"
+  },
+  "ISOLATE": {
+    "settings": "672457f01926a75c",
+    "graph": "a05a885a888c4d54",
+    "semantic_tree_file": "b36f354651971f89",
+    "cv_ContentView_swift": "ed8eeeada6000ba7"
+  },
+  "matches_prior_baseline": true,
+  "secrets_ro": {
+    "at": "2026-11-08T01:13:13.768297+00:00",
+    "items": [
+      {
+        "path_basename": "secrets.json",
+        "size": 348,
+        "mtimeMs": 1793266446049.7793,
+        "sha256_16": "08e354c69d666b40"
+      }
+    ],
+    "note": "basename/size/mtime/sha16 only; no secret values"
+  },
+  "ledger": {
+    "limit": 100,
+    "reserved": 91,
+    "reported": 67,
+    "missing": 24
+  }
+}

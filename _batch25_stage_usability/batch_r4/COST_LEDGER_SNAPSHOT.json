@@ -1,0 +1,7 @@
+{
+  "path": "_batch20_apply_auth_gate/outbound_budget_ledger_batch20.json",
+  "limit": 35,
+  "reservationCount": 30,
+  "httpDeltaThisBatch": 0,
+  "note": "R4 offline product API/orchestrator regressions; no DeepSeek HTTP; ledger PATH/30/35 untouched"
+}

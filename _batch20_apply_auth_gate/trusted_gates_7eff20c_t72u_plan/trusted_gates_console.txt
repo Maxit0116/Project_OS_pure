@@ -1,0 +1,4 @@
+HEAD=7eff20cc22961acc62208f7dff0755259ccb68a6
+EXITS core_tsc=0 wb_tsc=0 wb_test_tsc=0 desktop_tsc=0 desktop_build=0 fixtures=0 fullgate=0
+files=494 passed (494)
+tests=2656 passed (2656)

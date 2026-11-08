@@ -32,10 +32,12 @@
     "fixtures:restore": "npm run build --silent && node dist/scripts/sample-fixture-reconciler.js restore",
     "fixtures:scaffold": "npm run build --silent && node dist/scripts/sample-fixture-reconciler.js scaffold",
     "fixtures:sync": "npm run build --silent && node dist/scripts/sample-fixture-reconciler.js sync",
+    "features:check": "tsc -p tsconfig.features-check.json && node dist/scripts/features-check.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "env PROJECTOS_REQUIRE_REAL_PREVIEW=1 vitest run --maxWorkers=1 --minWorkers=1",
     "test:unit": "vitest run",
-    "test:agent-flow": "vitest run services/agent-orchestrator/index.test.ts services/project-os-local-api.test.ts services/model-json-output.test.ts"
+    "test:agent-flow": "vitest run services/agent-orchestrator/index.test.ts services/project-os-local-api.test.ts services/model-json-output.test.ts",
+    "test:features": "vitest run contracts/features.test.ts contracts/features-cli.integration.test.ts services/first-principles/fp-extensions.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

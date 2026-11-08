@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "contracts/features.ts",
+    "scripts/features-check.ts"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "desktop",
+    "workbench"
+  ]
+}

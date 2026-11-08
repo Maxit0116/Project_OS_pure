@@ -1,0 +1,32 @@
+{
+  "at": "2026-11-07T23:23:31.132964+00:00",
+  "path": "_batch20_apply_auth_gate/outbound_budget_ledger_batch20.json",
+  "action": "raise_count_cap_only",
+  "old_limit": 50,
+  "new_limit": 100,
+  "reservations_preserved": 47,
+  "status_counts": {
+    "ok": 40,
+    "failed": 7,
+    "usage_missing": 8,
+    "inflight_reserved": 0
+  },
+  "rationale": {
+    "fee_budget_cny": 10,
+    "assumed_rate": "DeepSeek Flash weekend idle: input 1 CNY/MTok, output 4 CNY/MTok (prior independent check; not live balance verify)",
+    "known_reported_tokens": {
+      "input": 114062,
+      "output": 15470,
+      "est_cny": 0.1759
+    },
+    "unknown_rows": 8,
+    "unknown_worst_reserve_p95_cny": 0.0787,
+    "conservative_spent_est_cny": 0.2546,
+    "new_slots": 53,
+    "new_slots_worst_p95x1p5_cny": 0.782,
+    "total_if_new_slots_all_used_cny": 1.0367,
+    "headroom_vs_10cny": true,
+    "note": "missing/failed/inflight never treated as free; settle never refunds slots; rate may differ if non-Flash — stop if observed cost diverges"
+  },
+  "authorization": "t63u 2026-11-08 Terran: raise request count cap within ~10 CNY, same ledger PATH, no reset/recharge"
+}

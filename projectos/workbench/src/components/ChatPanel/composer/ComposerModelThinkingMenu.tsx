@@ -4,6 +4,7 @@ import { modelProfileLabel } from '@contracts/index'
 import { useI18n } from '../../../i18n'
 import { GlassLens } from '../../Glass'
 import Chip from '../../ui/Chip'
+import ModelPickerMenu from './ModelPickerMenu'
 import styles from './ComposerControlBar.module.css'
 
 const THINKING_DEPTHS: ThinkingDepth[] = ['off', 'low', 'medium', 'high']
@@ -16,15 +17,17 @@ export interface ComposerModelThinkingMenuProps {
   presentationMode?: boolean
   compact?: boolean
   disabled?: boolean
-  onSelectModel: (profileId: string) => void
+  /** May resolve to `false` when selection failed (menu stays open). */
+  onSelectModel: (profileId: string) => void | boolean | Promise<void | boolean>
+  modelSelectionPending?: boolean
+  /** Registered agent runtimes; omitted or empty in a production build. */
+  runtimes?: ExecutorOption[]
+  selectedRuntimeId?: string | null
+  onSelectRuntime?: (executorId: string | null) => void
   onSelectThinkingDepth: (depth: ThinkingDepth) => void
   /** When there are no model profiles — open Settings (Chat) or bridge (Overlay). */
   onConfigureModels?: () => void
   className?: string
-  /** Registered agent runtimes an Agent request may run on instead of a model; empty in a production build. */
-  runtimes?: ExecutorOption[]
-  selectedRuntimeId?: string | null
-  onSelectRuntime?: (executorId: string | null) => void
 }
 
 export default function ComposerModelThinkingMenu({
@@ -35,12 +38,13 @@ export default function ComposerModelThinkingMenu({
   compact = false,
   disabled = false,
   onSelectModel,
-  onSelectThinkingDepth,
-  onConfigureModels,
-  className,
+  modelSelectionPending = false,
   runtimes = [],
   selectedRuntimeId = null,
   onSelectRuntime,
+  onSelectThinkingDepth,
+  onConfigureModels,
+  className,
 }: ComposerModelThinkingMenuProps) {
   const { ts } = useI18n()
   const [open, setOpen] = useState(false)
@@ -131,9 +135,11 @@ export default function ComposerModelThinkingMenu({
         }}
       >
         <span className={styles.chipLabel}>{modelThinkingLabel}</span>
-        <span className={styles.chipMeta}>
-          · {thinkingLabel(thinkingDepth)}
-        </span>{' '}
+        {activeRuntime ? null : (
+          <span className={styles.chipMeta}>
+            · {thinkingLabel(thinkingDepth)}
+          </span>
+        )}{' '}
         {compact ? null : null}▾
       </Chip>
       {open ? (
@@ -143,46 +149,32 @@ export default function ComposerModelThinkingMenu({
             tint="overlay"
             className={`${styles.dropdown} ${styles.dropdownWide} glass-overlay-enter`}
           >
-            <div className={styles.sectionLabel}>{ts('composer.modelSection')}</div>
-            {modelProfiles.map((profile) => (
-              <button
-                key={profile.id}
-                type="button"
-                className={`${styles.menuItem} ${
-                  profile.id === selectedModelProfileId ? styles.menuItemActive : ''
-                }`}
-                onClick={() => {
-                  onSelectModel(profile.id)
+            <ModelPickerMenu
+              profiles={modelProfiles}
+              selectedId={selectedModelProfileId}
+              pending={modelSelectionPending}
+              runtimes={runtimes}
+              selectedRuntimeId={selectedRuntimeId}
+              onSelectRuntime={
+                onSelectRuntime
+                  ? (executorId) => {
+                      onSelectRuntime(executorId)
+                      if (executorId !== null) setOpen(false)
+                    }
+                  : undefined
+              }
+              onSelect={(id) => {
+                void Promise.resolve(onSelectModel(id)).then((selected) => {
+                  if (selected === false) return
+                  onSelectRuntime?.(null)
                   setOpen(false)
-                }}
-              >
-                {modelProfileLabel(profile)}
-              </button>
-            ))}
-            {hasRuntimes ? (
-              <div role="group" aria-label={ts('composer.runtimeSection')}>
-                <div className={styles.sectionDivider} />
-                <div className={styles.sectionLabel}>{ts('composer.runtimeSection')}</div>
-                {runtimes.map((runtime) => {
-                  const active = runtime.executorId === selectedRuntimeId
-                  return (
-                    <button
-                      key={runtime.executorId}
-                      type="button"
-                      className={`${styles.menuItem} ${active ? styles.menuItemActive : ''}`}
-                      aria-pressed={active}
-                      onClick={() => {
-                        onSelectRuntime?.(active ? null : runtime.executorId)
-                        setOpen(false)
-                      }}
-                    >
-                      {runtime.label}
-                    </button>
-                  )
-                })}
-                <p className={styles.modelHint}>{ts('composer.runtimeHelp')}</p>
-              </div>
-            ) : null}
+                })
+              }}
+              onManage={() => {
+                setOpen(false)
+                onConfigureModels?.()
+              }}
+            />
             <div className={styles.sectionDivider} />
             <div className={styles.sectionLabel}>{ts('chat.thinkingDepth')}</div>
             {THINKING_DEPTHS.map((depth) => (

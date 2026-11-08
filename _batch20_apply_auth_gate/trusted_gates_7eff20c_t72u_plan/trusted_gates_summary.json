@@ -1,0 +1,22 @@
+{
+  "head": "7eff20cc22961acc62208f7dff0755259ccb68a6",
+  "exits": {
+    "npm_ci": null,
+    "core_tsc": 0,
+    "wb_tsc": 0,
+    "wb_test_tsc": 0,
+    "desktop_tsc": 0,
+    "desktop_build": 0,
+    "fixtures": 0,
+    "fullgate": 0
+  },
+  "fullgate_files_line": "494 passed (494)",
+  "fullgate_tests_line": "2656 passed (2656)",
+  "note": "npm_ci skipped (existing node_modules); fullgate log also under trusted_gates_98f2908_t72u_plan/fullgate.log from pre-rename run dir",
+  "plan_regressions": {
+    "plan-service": "pass",
+    "plan-service.http-fixture": "pass",
+    "model-json-output": "pass",
+    "workbenchStore.agentConversation Plan clarification": "pass"
+  }
+}

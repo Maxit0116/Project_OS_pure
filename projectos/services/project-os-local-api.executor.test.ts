@@ -19,9 +19,28 @@ async function setup() {
   const gateway = new ModelGateway({secretStore: new InMemorySecretStore()});
   const complete = vi.spyOn(gateway, 'complete').mockImplementation(async (profile, request) => ({
     requestId: 'test-call', projectId: workspace.project.projectId, provider: profile.provider, model: profile.model, latencyMs: 1,
-    output: request.requestKind === 'prompt_refinement'
-      ? JSON.stringify({ understood: 'Improve the login heading', ambiguities: [], suggestions: [], affectedNodeIds: [], affectedFiles: [], confidence: 0.9 })
-      : 'The project contains a login capability.', usage: { inputTokens: 10, outputTokens: 10 },
+    output: request.requestKind === 'request_intent'
+      ? JSON.stringify({
+        action: 'final',
+        intent: {
+          goal: 'Improve the login heading',
+          kind: 'change',
+          touches: [{
+            nodeId: 'feat_login',
+            reason: 'Owns the login surface',
+            allow: { editExisting: true, addParts: false, deletePartIds: [] },
+          }],
+          structuralProposals: [],
+          assumptions: [],
+          outOfScope: [],
+          acceptance: ['Login heading improved'],
+          questions: [],
+        },
+      })
+      : request.requestKind === 'prompt_refinement'
+        ? JSON.stringify({ understood: 'Improve the login heading', ambiguities: [], suggestions: [], affectedNodeIds: [], affectedFiles: [], confidence: 0.9 })
+        : 'The project contains a login capability.',
+    usage: { inputTokens: 10, outputTokens: 10 },
   }));
   const api = new MockProjectOSApiClient({workspace, modelGateway: gateway});
   const project = await api.openSampleWorkspace();
@@ -31,14 +50,23 @@ async function setup() {
 describe('request executor binding', () => {
   it('keeps the model selected for refinement when settings change before confirmation', async () => {
     const {api,project,complete,settings} = await setup();
-    const refinement = await api.refinePrompt({ projectId: project.projectId, rawPrompt: 'Improve the login heading',
-      executorSelection: {kind:'model',modelProfileId:'b'} });
+    const draft = await api.extractRequestIntent({
+      projectId: project.projectId,
+      rawRequest: 'Improve the login heading',
+      executorSelection: { kind: 'model', modelProfileId: 'b' },
+    });
     expect(complete.mock.calls[0]?.[0].id).toBe('b');
+    await api.approveRequestIntent(project.projectId, draft.id, draft.revision);
     await api.updateSettings(project.projectId, {modelProfiles: [settings.modelProfiles[0]!],
       execution: {...settings.execution, thinkingDepth:'off', mode:'fixture'}});
+    vi.spyOn(api as unknown as { maybeStartPendingOrchestratorRun: (runId: string) => void }, 'maybeStartPendingOrchestratorRun')
+      .mockImplementation(() => {});
+    const refinement = await api.prepareIntentExecution(project.projectId, draft.id);
     const run = await api.confirmExecution(refinement.id);
     expect(run.executor).toMatchObject({modelProfileId:'b',model:'model-b',thinkingDepth:'medium'});
-    expect(run.scope.kind).toBe('global');
+    // Intent touch locks execution to the owning component (feat_login) via the
+    // node-plan pipeline (component scope is modify-only and rejects create/delete).
+    expect(run.scope).toMatchObject({ kind: 'node-plan', nodeId: 'feat_login' });
     expect(complete.mock.calls.every(([profile]) => profile.id === 'b')).toBe(true);
   });
 

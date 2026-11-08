@@ -1,13 +1,33 @@
 import { describe, expect, it } from 'vitest'
 
-import type { AgentActionEvent, AgentRunEvent, ProjectOSApi } from '@contracts/index'
+import type {
+  AgentActionEvent,
+  AgentRunEvent,
+  ProjectGraph,
+  ProjectOSApi,
+} from '@contracts/index'
 import { AgentRunEventSchema } from '@contracts/index'
 import { agentActionMetadata } from '../components/AgentFlow/AgentActionRow'
 import {
   checkpointPatchForAppliedResult,
+  isAgentDelegationEvent,
   reduceRunEventState,
   type RunEventStoreSlice,
 } from './handleRunEvent'
+
+function graphWithMappedFile(path: string, nodeIds: string[]): ProjectGraph {
+  return {
+    version: '0.5.0',
+    projectId: 'p_live',
+    projectName: 'Live',
+    projectType: 'nextjs-app',
+    analyzedAt: '2026-10-20T00:00:00.000Z',
+    analysisStatus: 'complete',
+    nodes: [],
+    edges: [],
+    fileIndex: [{ path, nodeIds, type: 'page', imports: [], exports: [] }],
+  }
+}
 
 function baseState(): RunEventStoreSlice {
   return {
@@ -29,6 +49,7 @@ function baseState(): RunEventStoreSlice {
     highlightedFilePaths: [],
     executionOverlay: null,
     diffReady: false,
+    revokedApplyRunIds: [],
     messages: [],
     graph: null,
   }
@@ -42,9 +63,7 @@ describe('Live Graph execution overlay', () => {
   it('projects file_read onto mapped nodes from graph.fileIndex', () => {
     const state = {
       ...baseState(),
-      graph: {
-        fileIndex: [{ path: 'app/login/page.tsx', nodeIds: ['code_login'], type: 'page', imports: [], exports: [] }],
-      } as RunEventStoreSlice['graph'],
+      graph: graphWithMappedFile('app/login/page.tsx', ['code_login']),
     }
     const action = parse({
       eventId: 'evt_live_read',
@@ -59,11 +78,7 @@ describe('Live Graph execution overlay', () => {
   })
 
   it('merges child run events into the same overlay without wiping parent activity', () => {
-    const graph = {
-      fileIndex: [
-        { path: 'app/login/page.tsx', nodeIds: ['code_login'], type: 'page', imports: [], exports: [] },
-      ],
-    } as RunEventStoreSlice['graph']
+    const graph = graphWithMappedFile('app/login/page.tsx', ['code_login'])
     const parent = parse({
       eventId: 'evt_parent',
       runId: 'run_parent',
@@ -139,6 +154,128 @@ describe('Agent Flow action trace state', () => {
     if (action.type !== 'diff_proposed') throw new Error('Expected action event')
 
     expect(agentActionMetadata(action)).toEqual(['modify · app/login/page.tsx'])
+  })
+
+  it('surfaces diff_proposed as review-only Diff preview until diff_ready', () => {
+    const proposed = AgentRunEventSchema.parse({
+      eventId: 'evt_proposed',
+      runId: 'run_leaf',
+      timestamp: '2026-11-07T00:00:00.000Z',
+      type: 'diff_proposed',
+      payload: {
+        files: [{ path: 'macos/Package.swift', operation: 'modify' }],
+      },
+    })
+    const afterProposed = reduceRunEventState(baseState(), proposed)
+    expect(afterProposed.diffReady).toBeUndefined()
+    expect(afterProposed.diffReviewOnlyReason).toMatch(/validation/i)
+    expect(afterProposed.centerTab).toBe('code')
+    expect(afterProposed.codeSubTab).toBe('diff')
+
+    const ready = AgentRunEventSchema.parse({
+      eventId: 'evt_ready',
+      runId: 'run_leaf',
+      timestamp: '2026-11-07T00:00:01.000Z',
+      type: 'diff_ready',
+      payload: { fileCount: 1, paths: ['macos/Package.swift'] },
+    })
+    const afterReady = reduceRunEventState(
+      { ...baseState(), ...afterProposed },
+      ready,
+    )
+    expect(afterReady.diffReady).toBe(true)
+    expect(afterReady.flowStatus).toBe('awaiting_review')
+    expect(afterReady.diffReviewOnlyReason).toBeNull()
+  })
+
+  it('keeps Apply blocked until parent batch_validation_result is valid', () => {
+    const task = {
+      taskId: 'task_1',
+      childRunId: 'run_child',
+      path: 'macos/Package.swift',
+      status: 'consistent' as const,
+      criteria: [{ criterion: 'Append comment', status: 'satisfied' as const }],
+    }
+    const invalid = AgentRunEventSchema.parse({
+      eventId: 'evt_batch_invalid',
+      runId: 'run_parent',
+      timestamp: '2026-11-07T00:00:02.000Z',
+      type: 'batch_validation_result',
+      payload: {
+        planId: 'plan_1',
+        verdict: 'invalid',
+        tasks: [{ ...task, status: 'inconsistent' }],
+        crossFileStatus: 'inconsistent',
+        summary: 'Parent batch rejected',
+        rationale: 'Criteria incomplete',
+      },
+    })
+    const afterInvalid = reduceRunEventState(baseState(), invalid)
+    expect(afterInvalid.diffReviewOnlyReason).toMatch(/batch/i)
+
+    const valid = AgentRunEventSchema.parse({
+      eventId: 'evt_batch_valid',
+      runId: 'run_parent',
+      timestamp: '2026-11-07T00:00:03.000Z',
+      type: 'batch_validation_result',
+      payload: {
+        planId: 'plan_1',
+        verdict: 'valid',
+        tasks: [task],
+        crossFileStatus: 'consistent',
+        summary: 'Parent batch accepted',
+        rationale: 'All parent criteria covered',
+      },
+    })
+    const afterValid = reduceRunEventState(
+      { ...baseState(), ...afterInvalid },
+      valid,
+    )
+    expect(afterValid.diffReviewOnlyReason).toBeNull()
+    expect(afterValid.diffReady).toBe(true)
+    expect(afterValid.flowStatus).toBe('awaiting_review')
+  })
+
+  it('keeps Apply blocked when late parent batch valid arrives after cancel', () => {
+    const cancelled = AgentRunEventSchema.parse({
+      eventId: 'evt_cancel',
+      runId: 'run_parent',
+      timestamp: '2026-11-07T00:00:04.000Z',
+      type: 'run_cancelled',
+    })
+    const afterCancel = reduceRunEventState(baseState(), cancelled)
+    expect(afterCancel.flowStatus).toBe('cancelled')
+    expect(afterCancel.revokedApplyRunIds).toContain('run_parent')
+    expect(afterCancel.diffReviewOnlyReason).toMatch(/cancel/i)
+
+    const lateValid = AgentRunEventSchema.parse({
+      eventId: 'evt_batch_late',
+      runId: 'run_parent',
+      timestamp: '2026-11-07T00:00:05.000Z',
+      type: 'batch_validation_result',
+      payload: {
+        planId: 'plan_1',
+        verdict: 'valid',
+        tasks: [
+          {
+            taskId: 'task_1',
+            childRunId: 'run_child',
+            path: 'macos/Package.swift',
+            status: 'consistent',
+            criteria: [{ criterion: 'Append comment', status: 'satisfied' }],
+          },
+        ],
+        crossFileStatus: 'consistent',
+        summary: 'Late valid',
+        rationale: 'Must not unlock after cancel',
+      },
+    })
+    const afterLate = reduceRunEventState(
+      { ...baseState(), ...afterCancel },
+      lateValid,
+    )
+    expect(afterLate.diffReviewOnlyReason).toMatch(/cancel/i)
+    expect(afterLate.flowStatus).not.toBe('awaiting_review')
   })
 
   it('returns no metadata for an unknown future action type', () => {
@@ -275,6 +412,39 @@ describe('Agent Flow action trace state', () => {
     expect(verificationPatch.messages?.[0]?.content).not.toContain('Changed and verified')
   })
 
+  it('rewrites an earlier not-yet-verified summary when verification later passes', () => {
+    const apply = parse({
+      eventId: 'evt_apply',
+      runId: 'run_rewrite',
+      timestamp: '2026-07-18T00:00:00.000Z',
+      type: 'apply_result',
+      phaseId: 'step_apply',
+      payload: { filesWritten: ['lib/data.ts'], backupId: 'backup-rewrite', outcome: 'applied' },
+    })
+    const applied = { ...baseState(), ...reduceRunEventState(baseState(), apply) }
+    const notRun = reduceRunEventState(applied, parse({
+      eventId: 'evt_verification_pending',
+      runId: 'run_rewrite',
+      timestamp: '2026-07-18T00:00:01.000Z',
+      type: 'verification_completed',
+      payload: { status: 'not_run' },
+    }))
+    expect(notRun.messages?.[0]?.content).toMatch(/not verified|尚未验证/i)
+    const afterPass = reduceRunEventState(
+      { ...applied, ...notRun },
+      parse({
+        eventId: 'evt_verification_passed',
+        runId: 'run_rewrite',
+        timestamp: '2026-07-18T00:00:02.000Z',
+        type: 'verification_completed',
+        payload: { status: 'passed' },
+      }),
+    )
+    const content = afterPass.messages?.find((message) => message.id === 'automatic_apply_run_rewrite')?.content ?? ''
+    expect(content).toMatch(/Changed and verified|已修改并验证通过/i)
+    expect(content).not.toMatch(/not verified|尚未验证/i)
+  })
+
   it.each([
     ['passed', 'Changed and verified', 'not verified'],
     ['failed', 'verification failed', 'Changed and verified'],
@@ -317,6 +487,10 @@ describe('Agent Flow action trace state', () => {
         filePath: 'app/login/page.tsx',
       },
     })
+    expect(isAgentDelegationEvent(delegated)).toBe(true)
+    if (!isAgentDelegationEvent(delegated)) {
+      throw new Error('expected task_delegated to be a delegation event')
+    }
 
     const patch = reduceRunEventState(baseState(), delegated)
     expect(patch.flowDelegationEvents).toEqual([delegated])

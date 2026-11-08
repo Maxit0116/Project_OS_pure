@@ -1,0 +1,11 @@
+{
+  "head": "9c374cdfdb15aca1b582fbc761c03015aace9bee",
+  "FINISHED_AT": "2026-11-08T02:12:32Z",
+  "WRAPPER_EXIT": 0,
+  "FULLGATE_EXIT": 1,
+  "known_ux_red_expected_fullgate_nonzero": true,
+  "fullgate_files_line": "2 failed | 486 passed (488)",
+  "fullgate_tests_line": "3 failed | 2538 passed (2541)",
+  "sole_dir": "trusted_gates_9c374cd",
+  "note": "Tip fullgate after H3 product fixes; UX 3-red locked expected nonzero."
+}

@@ -163,14 +163,15 @@ export function createHubReferenceFromInput(
     } catch {
       return null;
     }
+    const leafLabel = url.split("/").pop() || url;
     if (VIDEO_EXT.test(url)) {
-      return { kind: "video", id, url, label: url.split("/").pop() };
+      return { kind: "video", id, url, label: leafLabel };
     }
     if (AUDIO_EXT.test(url)) {
-      return { kind: "audio", id, url, label: url.split("/").pop() };
+      return { kind: "audio", id, url, label: leafLabel };
     }
     if (IMAGE_EXT.test(url)) {
-      return { kind: "image", id, url, label: url.split("/").pop() };
+      return { kind: "image", id, url, label: leafLabel };
     }
     return {
       kind: "url",

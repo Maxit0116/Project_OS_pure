@@ -1,0 +1,83 @@
+{
+  "probe": "electron_t65_live_h3_stop",
+  "headHint": "ee7fda7+stop-no-sibling-dispatch",
+  "layer": "live_deepseek + strict_api_awaiting_review + cross_component",
+  "implementedBounds": {
+    "maxOutputTokens": 2048,
+    "maxInputChars": 48000,
+    "sessionCap": 24,
+    "ledgerLimitEnv": "200",
+    "evidence": [
+      "outbound-request-bounds.ts",
+      "gateway.ts applyOutboundRequestBounds",
+      "projectOsService.ts"
+    ]
+  },
+  "coverage": {
+    "processStartIsolated": true,
+    "deepseekSelected": true,
+    "agentMode": true,
+    "noLeafFilePick": true,
+    "composerSend": true,
+    "intentApproveUi": true,
+    "waitingDecisionCard": true,
+    "clarifyNotForcedOptions": true,
+    "answeredOrStopped": true,
+    "apiAwaitingReview": false,
+    "proposalFilesAtLeast2": false,
+    "sameRootClarifyToProposal": false,
+    "filesUnchangedOnDisk": true,
+    "afterStopStatus": "error",
+    "childRunsAfterStop": [
+      {
+        "runId": "run_2a725c47-ef4c-4086-99cc-b9a504333a0f",
+        "parentRunId": null,
+        "status": "error",
+        "relatedFiles": [],
+        "scope": {
+          "kind": "node-plan",
+          "nodeId": "feat_login"
+        }
+      },
+      {
+        "runId": "run_a170a397-a494-4d13-ad08-91190eaf8ad7",
+        "parentRunId": "run_2a725c47-ef4c-4086-99cc-b9a504333a0f",
+        "status": "error",
+        "relatedFiles": [
+          "app/login/page.tsx"
+        ],
+        "scope": {
+          "kind": "leaf-file",
+          "nodeId": "feat_login",
+          "filePath": "app/login/page.tsx"
+        }
+      }
+    ],
+    "noNewDispatchAfterStop": true
+  },
+  "budget": {
+    "pre": {
+      "limit": 200,
+      "reserved": 176,
+      "remaining": 24,
+      "reportedCount": 138,
+      "missingCount": 38,
+      "reportedInputTokens": 492276,
+      "reportedOutputTokens": 66024
+    },
+    "post": {
+      "limit": 200,
+      "reserved": 193,
+      "remaining": 7,
+      "reportedCount": 151,
+      "missingCount": 42,
+      "reportedInputTokens": 543048,
+      "reportedOutputTokens": 71706
+    },
+    "delta": 17
+  },
+  "secretsUnchanged": true,
+  "errors": [],
+  "ok": true,
+  "finishedAt": "2026-11-08T02:01:46.272Z"
+}

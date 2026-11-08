@@ -1,0 +1,23 @@
+{
+  "probe": "electron_t64_childfail_sanitize",
+  "headHint": "9606fcf",
+  "layer": "synthetic_force_child_fail + real_electron_dom_event_chain",
+  "coverage": {
+    "processStartIsolated": true,
+    "agentMode": true,
+    "composerSend": true,
+    "childFailSeen": true,
+    "sanitizedInChat": true,
+    "rawSecretAbsent": true,
+    "rawHomePathAbsent": true
+  },
+  "errors": [],
+  "finishedAt": "2026-11-08T00:59:14.663Z",
+  "sanitizedExcerpt": {
+    "source": "agent_run_event.step_failed.outputSummary",
+    "runId": "run_5042a4a9-9849-40fe-855b-11f478129438",
+    "eventId": "evt_6002cdd7-cd07-40c0-ad7b-ca25d93d8f57",
+    "rendered_sanitized": "Delegated file task failed; [path] api_key=[redacted] Bearer [redacted]",
+    "note": "Never echoes original secret bait; fixture bait was synthetic."
+  }
+}

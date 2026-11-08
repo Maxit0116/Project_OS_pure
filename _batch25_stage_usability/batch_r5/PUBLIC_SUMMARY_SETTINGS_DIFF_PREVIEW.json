@@ -1,0 +1,20 @@
+{
+  "probe": "electron_settings_diff_preview",
+  "headHint": "ff70bf2",
+  "coverage": {
+    "processStartIsolated": true,
+    "designPreviewStartButtonFound": false,
+    "designPreviewAbsentExpected": true,
+    "productLabEntryFound": true,
+    "browserTabFound": true,
+    "terminalDockHint": true,
+    "settingsUiOpened": true,
+    "verificationCommandSaved": true,
+    "verificationInvalidFeedback": true,
+    "diffVerifyUiLabelsSeen": false
+  },
+  "designPreviewDocNote": "progress.md 2026-10-24: Design Preview runtime removed in Pure cut; do not replay wholesale. Product alternatives: Browser tab + Terminal/Product Lab npm run dev + Settings verification.",
+  "dailyUserDataStable": true,
+  "errors": [],
+  "finishedAt": "2026-11-07T19:41:56.868Z"
+}

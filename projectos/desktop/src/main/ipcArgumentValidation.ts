@@ -12,6 +12,7 @@ const PROJECTOS_IPC_SIGNATURES = {
   analyzeWorkspace: ['string', 'record'],
   getStructureScanProgress: ['string'],
   cancelStructureScan: ['string'],
+  cancelAsk: ['string'],
   getProjectGraph: ['string'],
   getSemanticTree: ['string'],
   listWorkspaceDirectory: ['string', 'string'],

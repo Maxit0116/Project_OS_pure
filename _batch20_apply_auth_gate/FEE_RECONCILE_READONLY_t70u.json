@@ -1,0 +1,47 @@
+{
+  "at": "2026-11-08T08:32:40.089007+00:00",
+  "authorization": "Terran t70u 2026-11-08 16:28 Asia/Shanghai: continue remaining original-scope work; no new paid calls this pass",
+  "ledger": {
+    "limit": 1000,
+    "uniqueIds": 302,
+    "sha16": "51767b7c35b29ac7"
+  },
+  "buckets": {
+    "reported": 218,
+    "missing": 74,
+    "reserved": 10,
+    "unknownRows": 84
+  },
+  "unknownBreakdown": {
+    "missingSettled": 74,
+    "missingStatus": {
+      "failed": 63,
+      "ok": 10,
+      "cancelled": 1
+    },
+    "reservedUnknown": 10,
+    "note": "84 unknown = 74 missing + 10 reserved; unknown ≠ ¥0"
+  },
+  "reportedOnly": {
+    "inputTokens": 867534,
+    "outputTokens": 109233,
+    "estCny_offPeak_missNoCacheHit": 1.3045,
+    "estCny_peak_missNoCacheHit": 2.6089,
+    "rateSource": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing.md",
+    "rateNote": "deepseek-flash / deepseek-v4-flash alias; off-peak cache-miss in1/out4 CNY/MTok; peak 2/8; cache-hit would be lower — ledger has no cache-hit field so miss band used",
+    "notASettledBill": true
+  },
+  "gatewayLogReconcile": {
+    "method": "reservationId match against isolate model-gateway-completes.jsonl corpus (14 files / 191 events)",
+    "missingRowsMatchedToCompletes": 0,
+    "conclusion": "Cannot convert any of 74 missing rows into confirmed tokens from existing completes by id; do not invent usage"
+  },
+  "cannotProveTotalRmbLeq10": true,
+  "why": "reported-only band ≈¥1.30–2.61 under official flash miss rates, but 84 unknown rows remain; total including unknown cannot be certified ≤¥10 without provider billing export or new evidence",
+  "noNewPaidCallsThisPass": true,
+  "legacy27": {
+    "count": 27,
+    "claim": "continuity_slots_not_original_id_restore",
+    "unchanged": true
+  }
+}

@@ -72,7 +72,8 @@ export const IntentQuestionSchema = z.object({
 export const RequestIntentDraftSchema = z.object({
   goal: z.string().trim().min(1),
   kind: z.enum(["change", "add_node", "delete_node", "mixed"]),
-  touches: z.array(IntentTouchSchema.strip()).min(1),
+  // Empty touches are reserved for empty-graph greenfield initialization.
+  touches: z.array(IntentTouchSchema.strip()).min(0),
   structuralProposals: z.array(z.discriminatedUnion("kind", [
     z.object({
       kind: z.literal("add_node"),
@@ -102,7 +103,8 @@ export const RequestIntentSchema = z.object({
   goal: z.string().trim().min(1),
   kind: z.enum(["change", "add_node", "delete_node", "mixed"]),
   entryNodeId: z.string().min(1).nullable(),
-  touches: z.array(IntentTouchSchema).min(1),
+  // Empty touches are reserved for empty-graph greenfield initialization.
+  touches: z.array(IntentTouchSchema).min(0),
   structuralEffects: z.array(IntentStructuralEffectSchema),
   assumptions: z.array(z.string().trim().min(1)),
   outOfScope: z.array(z.string().trim().min(1)),

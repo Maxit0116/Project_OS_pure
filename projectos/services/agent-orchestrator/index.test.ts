@@ -43,6 +43,7 @@ import { ExecutorRegistry } from "../harness/executor-registry.js";
 import type { NodeExecutorAdapter } from "../harness/executor-adapter.js";
 import type { ExecutorTask } from "../../contracts/executor-adapter.js";
 import { FakeExecutorAdapter, type FakeExecutorScenario } from "../harness/fake-executor.js";
+import { DurableRunStateStore } from "../harness/durable-run-state.js";
 import { buildVerificationEvidence } from "../verification-evidence.js";
 import { CREATE_FILE_MAX_BYTES } from "../create-file-content.js";
 
@@ -3005,6 +3006,409 @@ describe("AgentOrchestrator runtime executor dispatch", () => {
     expect(state.run.status).toBe("error");
     expect(state.events.map((event) => event.type)).toEqual(expect.arrayContaining(["step_started", "step_failed"]));
     expect(validateAgentRunEventSequence(state.events)).toEqual([]);
+  });
+
+  it("requestDecision waits for the card answer then continues the same run to a proposal", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orch-decision-resume-"));
+    temporaryRoots.push(root);
+    const store = new DurableRunStateStore(join(root, ".projectos"));
+    const proposal = proposalFor("app/login/page.tsx");
+    const executors = new ExecutorRegistry();
+    executors.register(new FakeExecutorAdapter({
+      decisionQuestion: "Proceed with the login edit?",
+      proposal,
+    }));
+    const workspace = new ProjectOSWorkspaceStore().loadWorkspace(sampleWorkspaceRoot);
+    const orchestrator = new AgentOrchestrator({
+      gateway: {
+        async complete() {
+          throw new Error("The model gateway must not be used");
+        },
+      } as unknown as ModelGateway,
+      settingsService: new SettingsService(new InMemorySecretStore()),
+      eventPersistence: "memory",
+      executors,
+      createDecisionStore: () => store,
+      pipelineBudget: { maxWallClockMs: 20_000 },
+      validateGeneratedDiffScope(candidateRunId, diff) {
+        const file = diff.files[0];
+        if (
+          diff.runId !== candidateRunId ||
+          diff.files.length !== 1 ||
+          file?.path !== "app/login/page.tsx"
+        ) {
+          throw new ProjectOSError("diff_scope_violation", `Diff for '${candidateRunId}' violates its scope`);
+        }
+      },
+    });
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      runId,
+      runtimeExecutor: { executorId: "fake", label: "Scripted executor" },
+      approvedIntent: runtimeIntent(workspace),
+      localContext: localContextBundle(workspace),
+      executionPolicy: "review_first",
+    });
+
+    const started = orchestrator.startRun(workspace, runId, toolContext());
+    let pending = store.listDecisions(runId).find((decision) => decision.status === "pending");
+    for (let attempt = 0; attempt < 100 && !pending; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      pending = store.listDecisions(runId).find((decision) => decision.status === "pending");
+    }
+    expect(pending).toMatchObject({
+      projectId: workspace.project.projectId,
+      runId,
+      rootRunId: runId,
+      kind: "clarification",
+      authorizedIntentId: "intent_runtime_leaf",
+    });
+    expect(pending?.scopeBindingHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(orchestrator.hasActiveDecisionWait(pending!.id)).toBe(true);
+    expect(store.loadCheckpoint(`checkpoint_decision_wait_${runId}`)?.pendingDecisionIds)
+      .toEqual([pending!.id]);
+
+    const resolved = store.resolveDecision(pending!.id, pending!.revision, { optionId: "continue" });
+    expect(orchestrator.notifyDecisionAnswer(resolved)).toBe(true);
+    await started;
+
+    expect(state.diff).toEqual(proposal.diff);
+    expect(state.run.status).toBe("awaiting_review");
+    expect(store.loadDecision(pending!.id)?.status).toBe("resolved");
+    expect(store.loadCheckpoint(`checkpoint_decision_wait_${runId}`)?.pendingDecisionIds).toEqual([]);
+    expect(state.events.some((event) => event.type === "decision_summary")).toBe(true);
+  });
+
+  it("built-in model clarify JSON parks on waiting-decision then resumes the same root", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orch-model-clarify-"));
+    temporaryRoots.push(root);
+    const store = new DurableRunStateStore(join(root, ".projectos"));
+    const clarifyOutput = JSON.stringify({
+      action: "clarify",
+      question: "Which login heading should the page use?",
+      options: [
+        { id: "welcome_back", label: "Welcome Back" },
+        { id: "sign_in", label: "Sign in" },
+      ],
+    });
+    const editOutput = JSON.stringify({
+      summary: "Apply the clarified login heading",
+      path: "app/login/page.tsx",
+      edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "Welcome Back" }],
+    });
+    const secretStore = new InMemorySecretStore();
+    const modelRequests: ModelGatewayRequest[] = [];
+    let generationIndex = 0;
+    const generationOutputs = [clarifyOutput, editOutput];
+    const gateway = {
+      async complete(_profile: unknown, request: ModelGatewayRequest) {
+        modelRequests.push(request);
+        const mode = isRecord(request.input) && typeof request.input.mode === "string"
+          ? request.input.mode
+          : undefined;
+        if (mode === "locate_plan") {
+          return {
+            requestId: "req_plan",
+            provider: "test",
+            model: "test-model",
+            output: validFileEditPlanOutput(),
+            usage: { inputTokens: 1, outputTokens: 1 },
+            latencyMs: 1,
+          };
+        }
+        if (mode === "validate_proposal") {
+          return {
+            requestId: "req_validate",
+            provider: "test",
+            model: "test-model",
+            output: validProposalValidationOutput(),
+            usage: { inputTokens: 1, outputTokens: 1 },
+            latencyMs: 1,
+          };
+        }
+        const selected = generationOutputs[Math.min(generationIndex++, generationOutputs.length - 1)]!;
+        return {
+          requestId: `req_gen_${generationIndex}`,
+          provider: "test",
+          model: "test-model",
+          output: selected,
+          usage: { inputTokens: 1, outputTokens: 1 },
+          latencyMs: 1,
+        };
+      },
+    } as unknown as ModelGateway;
+    const modelWorkspace = new ProjectOSWorkspaceStore().loadWorkspace(sampleWorkspaceRoot);
+    modelWorkspace.settings = ProjectOSSettingsSchema.parse({
+      ...modelWorkspace.settings,
+      execution: {
+        ...modelWorkspace.settings.execution,
+        mode: "model",
+        defaultAgentProfileId: "default-feature",
+        defaultModelProfileId: "test-model",
+        thinkingDepth: "off",
+      },
+      modelProfiles: [{
+        id: "test-model",
+        name: "Test Model",
+        provider: "custom",
+        apiFormat: "openai_chat",
+        model: "test-model",
+        baseUrl: "https://example.invalid",
+        apiKeyRef: "model_profile:test-model",
+        isDefault: true,
+      }],
+      agentProfiles: modelWorkspace.settings.agentProfiles.map((profile) =>
+        profile.id === "default-feature"
+          ? { ...profile, modelProfileId: "test-model", enabledTools: [], stepSequence: [] }
+          : profile,
+      ),
+    });
+    const modelOrchestrator = new AgentOrchestrator({
+      gateway,
+      settingsService: new SettingsService(secretStore),
+      eventPersistence: "memory",
+      createDecisionStore: () => store,
+      pipelineBudget: { maxWallClockMs: 20_000 },
+      validateGeneratedDiffScope(candidateRunId, diff) {
+        const file = diff.files[0];
+        if (
+          diff.runId !== candidateRunId ||
+          diff.files.length !== 1 ||
+          file?.path !== "app/login/page.tsx"
+        ) {
+          throw new ProjectOSError("diff_scope_violation", `Diff for '${candidateRunId}' violates its scope`);
+        }
+      },
+    });
+    const clarifyRunId = "run_model_clarify";
+    const state = modelOrchestrator.createRun(modelWorkspace, refinement(), "feature_change", {
+      runId: clarifyRunId,
+      approvedIntent: {
+        ...runtimeIntent(modelWorkspace),
+        id: "intent_model_clarify",
+        executorSelection: { kind: "model", modelProfileId: "test-model" },
+      },
+      localContext: localContextBundle(modelWorkspace),
+      executionPolicy: "review_first",
+    });
+
+    const started = modelOrchestrator.startRun(modelWorkspace, clarifyRunId, toolContext());
+    let pending = store.listDecisions(clarifyRunId).find((decision) => decision.status === "pending");
+    for (let attempt = 0; attempt < 150 && !pending; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      pending = store.listDecisions(clarifyRunId).find((decision) => decision.status === "pending");
+    }
+    expect(pending).toMatchObject({
+      runId: clarifyRunId,
+      rootRunId: clarifyRunId,
+      kind: "clarification",
+      question: "Which login heading should the page use?",
+    });
+    expect(pending?.options.map((option) => option.id)).toEqual(
+      expect.arrayContaining(["welcome_back", "sign_in", "stop"]),
+    );
+    expect(pending?.options.some((option) => option.id === "continue")).toBe(false);
+    expect(modelOrchestrator.hasActiveDecisionWait(pending!.id)).toBe(true);
+
+    const resolved = store.resolveDecision(pending!.id, pending!.revision, { optionId: "welcome_back" });
+    expect(modelOrchestrator.notifyDecisionAnswer(resolved)).toBe(true);
+    await started;
+
+    expect(state.run.status).toBe("awaiting_review");
+    expect(state.diff?.files[0]?.after).toContain("Welcome Back");
+    const generations = modelRequests.filter((request) => request.requestKind === "change_generation");
+    expect(generations.length).toBeGreaterThanOrEqual(2);
+    const resumed = generations.find((request) => {
+      const outputs = Array.isArray((request.input as { stepOutputs?: unknown }).stepOutputs)
+        ? (request.input as { stepOutputs: string[] }).stepOutputs
+        : [];
+      return outputs.some((item) => /User clarification for the authorized edit/i.test(item));
+    });
+    expect(resumed).toBeTruthy();
+  });
+
+  it("built-in model clarify Stop declines without staging a proposal", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orch-model-clarify-stop-"));
+    temporaryRoots.push(root);
+    const store = new DurableRunStateStore(join(root, ".projectos"));
+    const clarifyOutput = JSON.stringify({
+      action: "clarify",
+      question: "Which login heading should the page use?",
+      options: [
+        { id: "welcome_back", label: "Welcome Back" },
+        { id: "sign_in", label: "Sign in" },
+      ],
+    });
+    const secretStore = new InMemorySecretStore();
+    const gateway = {
+      async complete(_profile: unknown, request: ModelGatewayRequest) {
+        const mode = isRecord(request.input) && typeof request.input.mode === "string"
+          ? request.input.mode
+          : undefined;
+        if (mode === "locate_plan") {
+          return {
+            requestId: "req_plan",
+            provider: "test",
+            model: "test-model",
+            output: validFileEditPlanOutput(),
+            usage: { inputTokens: 1, outputTokens: 1 },
+            latencyMs: 1,
+          };
+        }
+        return {
+          requestId: "req_clarify",
+          provider: "test",
+          model: "test-model",
+          output: clarifyOutput,
+          usage: { inputTokens: 1, outputTokens: 1 },
+          latencyMs: 1,
+        };
+      },
+    } as unknown as ModelGateway;
+    const modelWorkspace = new ProjectOSWorkspaceStore().loadWorkspace(sampleWorkspaceRoot);
+    modelWorkspace.settings = ProjectOSSettingsSchema.parse({
+      ...modelWorkspace.settings,
+      execution: {
+        ...modelWorkspace.settings.execution,
+        mode: "model",
+        defaultAgentProfileId: "default-feature",
+        defaultModelProfileId: "test-model",
+        thinkingDepth: "off",
+      },
+      modelProfiles: [{
+        id: "test-model",
+        name: "Test Model",
+        provider: "custom",
+        apiFormat: "openai_chat",
+        model: "test-model",
+        baseUrl: "https://example.invalid",
+        apiKeyRef: "model_profile:test-model",
+        isDefault: true,
+      }],
+      agentProfiles: modelWorkspace.settings.agentProfiles.map((profile) =>
+        profile.id === "default-feature"
+          ? { ...profile, modelProfileId: "test-model", enabledTools: [], stepSequence: [] }
+          : profile,
+      ),
+    });
+    const modelOrchestrator = new AgentOrchestrator({
+      gateway,
+      settingsService: new SettingsService(secretStore),
+      eventPersistence: "memory",
+      createDecisionStore: () => store,
+      pipelineBudget: { maxWallClockMs: 20_000 },
+      validateGeneratedDiffScope() {},
+    });
+    const clarifyRunId = "run_model_clarify_stop";
+    const state = modelOrchestrator.createRun(modelWorkspace, refinement(), "feature_change", {
+      runId: clarifyRunId,
+      approvedIntent: {
+        ...runtimeIntent(modelWorkspace),
+        id: "intent_model_clarify_stop",
+        executorSelection: { kind: "model", modelProfileId: "test-model" },
+      },
+      localContext: localContextBundle(modelWorkspace),
+      executionPolicy: "review_first",
+    });
+    const started = modelOrchestrator.startRun(modelWorkspace, clarifyRunId, toolContext());
+    let pending = store.listDecisions(clarifyRunId).find((decision) => decision.status === "pending");
+    for (let attempt = 0; attempt < 150 && !pending; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      pending = store.listDecisions(clarifyRunId).find((decision) => decision.status === "pending");
+    }
+    expect(pending).toBeTruthy();
+    const declined = store.resolveDecision(
+      pending!.id,
+      pending!.revision,
+      { optionId: "stop" },
+      "declined",
+    );
+    expect(modelOrchestrator.notifyDecisionAnswer(declined)).toBe(true);
+    await expect(started).rejects.toMatchObject({ code: "operation_cancelled" });
+    expect(state.diff).toBeUndefined();
+    expect(state.run.status).toBe("cancelled");
+    expect(state.events.some((event) => event.type === "run_cancelled")).toBe(true);
+    expect(state.events.some((event) => event.type === "step_failed")).toBe(false);
+  });
+
+  it("requestDecision cancel supersedes the wait and does not stage a proposal", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orch-decision-cancel-"));
+    temporaryRoots.push(root);
+    const store = new DurableRunStateStore(join(root, ".projectos"));
+    const executors = new ExecutorRegistry();
+    executors.register(new FakeExecutorAdapter({
+      decisionQuestion: "Abortable clarification?",
+      proposal: proposalFor("app/login/page.tsx"),
+    }));
+    const workspace = new ProjectOSWorkspaceStore().loadWorkspace(sampleWorkspaceRoot);
+    const orchestrator = new AgentOrchestrator({
+      gateway: {
+        async complete() {
+          throw new Error("The model gateway must not be used");
+        },
+      } as unknown as ModelGateway,
+      settingsService: new SettingsService(new InMemorySecretStore()),
+      eventPersistence: "memory",
+      executors,
+      createDecisionStore: () => store,
+      pipelineBudget: { maxWallClockMs: 20_000 },
+      validateGeneratedDiffScope() {},
+    });
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      runId,
+      runtimeExecutor: { executorId: "fake" },
+      approvedIntent: runtimeIntent(workspace),
+      localContext: localContextBundle(workspace),
+    });
+
+    const started = orchestrator.startRun(workspace, runId, toolContext());
+    let pending = store.listDecisions(runId).find((decision) => decision.status === "pending");
+    for (let attempt = 0; attempt < 100 && !pending; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      pending = store.listDecisions(runId).find((decision) => decision.status === "pending");
+    }
+    expect(pending).toBeTruthy();
+    orchestrator.cancelRun(runId);
+    // startRun swallows AgentRunCancelledError; decision abort still clears wait without write.
+    await started;
+    expect(state.diff).toBeUndefined();
+    expect(state.run.status).toBe("cancelled");
+    expect(store.loadDecision(pending!.id)?.status).toBe("superseded");
+    expect(store.loadCheckpoint(`checkpoint_decision_wait_${runId}`)?.pendingDecisionIds).toEqual([]);
+    expect(orchestrator.hasActiveDecisionWait(pending!.id)).toBe(false);
+  });
+
+  it("resolving a durable decision after restart does not invent a write resume", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orch-decision-restart-"));
+    temporaryRoots.push(root);
+    const store = new DurableRunStateStore(join(root, ".projectos"));
+    store.saveDecision({
+      version: "0.1.0",
+      id: "decision_restart_orphan",
+      projectId: "proj_restart",
+      rootRunId: "run_restart",
+      runId: "run_restart",
+      kind: "clarification",
+      question: "Orphan after restart?",
+      options: [{ id: "continue", label: "Continue" }, { id: "stop", label: "Stop" }],
+      status: "pending",
+      revision: 1,
+      createdAt: new Date().toISOString(),
+      scopeBindingHash: "a".repeat(64),
+    });
+    const orchestrator = new AgentOrchestrator({
+      gateway: {
+        async complete() {
+          throw new Error("unused");
+        },
+      } as unknown as ModelGateway,
+      settingsService: new SettingsService(new InMemorySecretStore()),
+      eventPersistence: "memory",
+      validateGeneratedDiffScope() {},
+      createDecisionStore: () => store,
+    });
+    const resolved = store.resolveDecision("decision_restart_orphan", 1, { optionId: "continue" });
+    expect(orchestrator.notifyDecisionAnswer(resolved)).toBe(false);
+    expect(orchestrator.hasActiveDecisionWait("decision_restart_orphan")).toBe(false);
   });
 
   describe("independent validation of a runtime proposal", () => {

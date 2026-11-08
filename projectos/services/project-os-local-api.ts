@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+
 import { resolveModelExecution, type ModelExecutionSnapshot } from "./harness/executor-selection.js";
 import { ExecutorRegistry } from "./harness/executor-registry.js";
 import type { ExecutorOption, ExecutorSelection } from "../contracts/executor-selection.js";
@@ -16,8 +18,6 @@ import {
   RequestIntentService,
   uncoveredFileOwnerIds,
 } from "./request-intent-service.js";
-import { spawnSync } from "node:child_process";
-
 import type { AgentRun } from "../contracts/agent-run.js";
 import {
   ExtractRequestIntentRequestSchema,
@@ -615,7 +615,6 @@ export interface ProjectOSLocalApiOptions {
   dependencyImpactScanner?: DependencyImpactScannerDependency;
   /** Desktop main injects shell.openExternal; tests may omit. */
   openExternalUrl?: (url: string) => Promise<void>;
-  /** Desktop main injects shell.openExternal; tests may omit. */
   /**
    * Directory for personal agent memory (`<userData>/agent-memory`).
    * Omit in tests that are not exercising memory.
@@ -623,6 +622,11 @@ export interface ProjectOSLocalApiOptions {
   agentMemoryRoot?: string;
   /** Tests use 0. Production waits so an in-progress follow-up is not summarized. */
   memoryProposalDelayMs?: number;
+  /**
+   * Optional leaf pipeline budget override (tests / probes). Production omits
+   * this and uses the hardcoded harness defaults.
+   */
+  pipelineBudget?: Partial<import("./harness/pipeline-budget.js").LeafPipelineBudget>;
   /** Tests inject a fake MCP session manager; production creates a real one. */
   mcpSessionManager?: McpSessionManager;
   /** Directory for MCP catalog disk cache. Defaults under agentMemoryRoot/auditDirectory/tmpdir. */
@@ -662,6 +666,7 @@ export interface VerificationRunnerDependency {
   run(
     commands: ExecCommand[],
     cwd: string,
+    signal?: AbortSignal,
   ): Promise<Array<VerificationCommandResult & { toolResult?: ToolResult }>>;
 }
 
@@ -963,6 +968,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly agentMemoryRoot: string | undefined;
   private readonly memoryProposalDelayMs: number;
   private readonly memoryProposalTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** In-flight Diff/API verification aborts keyed by runId (cancelAgentRun clears wait). */
+  private readonly verificationAbortByRunId = new Map<string, AbortController>();
   private readonly orchestrator: AgentOrchestrator;
   /** Agent Pool index context keyed by runId (definition / pool / session). */
   private readonly agentPoolRunContextByRunId = new Map<
@@ -983,12 +990,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly refinementsById = new Map<string, StoredRefinement>();
   private readonly pendingIntentConfirmations = new Map<string, Promise<AgentRun>>();
   private readonly plansById = new Map<string, ImplementationPlan>();
-  private readonly planExecutions = new Map<string, ModelExecutionSnapshot>();
-  private readonly debugExecutions = new Map<string, ModelExecutionSnapshot>();
   private readonly thesisSessionsById = new Map<
     string,
     import("../contracts/first-principles.js").FirstPrinciplesSession
   >();
+  private readonly planExecutions = new Map<string, ModelExecutionSnapshot>();
+  private readonly debugExecutions = new Map<string, ModelExecutionSnapshot>();
   private readonly debugSessionsById = new Map<string, DebugSessionStoreState>();
   private readonly activeOrchestratorRuns = new Map<string, ActiveOrchestratorRun>();
   private readonly pendingOrchestratorStarts = new Map<
@@ -1003,6 +1010,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly structureScanProgress = new StructureScanProgressTracker();
   private readonly structureScanInflight = new Map<string, Promise<void>>();
   private readonly structureScanAbortByProjectId = new Map<string, AbortController>();
+  /** In-flight Ask HTTP; Stop must abort here (IPC cannot pass AbortSignal). */
+  private readonly askAbortByProjectId = new Map<string, AbortController>();
   private readonly boundRunAuthorizations = new Map<
     string,
     BoundRunAuthorization
@@ -1258,6 +1267,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ? { eventPersistence: options.runEventPersistence }
         : {}),
       ...(options.auditDirectory ? { auditDirectory: options.auditDirectory } : {}),
+      ...(options.pipelineBudget ? { pipelineBudget: options.pipelineBudget } : {}),
+      createDecisionStore: (workspace) => this.durableRunStateFor(workspace),
     });
   }
 
@@ -1305,12 +1316,28 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       refreshProjectStencilOverlay(workspace.workspaceRoot);
       const recoveredRuns = reconcileInterruptedAgentRuns(workspace.projectOSRoot);
       for (const note of recoveredRuns) {
-        if (!note.corruptLines?.length && !note.snapshotUpdateFailed) continue;
-        console.warn("[projectos] agent run recovery skipped unreadable log lines", {
-          runId: note.runId,
-          lines: note.corruptLines ?? [],
-          snapshotUpdateFailed: note.snapshotUpdateFailed === true,
-        });
+        if (
+          !note.corruptLines?.length &&
+          !note.legacyNormalizedLines?.length &&
+          !note.snapshotUpdateFailed
+        ) {
+          continue;
+        }
+        if (note.corruptLines?.length || note.snapshotUpdateFailed) {
+          console.warn("[projectos] agent run recovery skipped unreadable log lines", {
+            runId: note.runId,
+            lines: note.corruptLines ?? [],
+            snapshotUpdateFailed: note.snapshotUpdateFailed === true,
+            alreadyTerminal: note.alreadyTerminal === true,
+          });
+        }
+        if (note.legacyNormalizedLines?.length) {
+          console.info("[projectos] agent run recovery kept legacy model_request lines", {
+            runId: note.runId,
+            lines: note.legacyNormalizedLines,
+            alreadyTerminal: note.alreadyTerminal === true,
+          });
+        }
       }
     }
     if (this.workspacesByProjectId.size > 0) {
@@ -1409,6 +1436,37 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       controller.abort();
     }
     return true;
+  }
+
+  /**
+   * Abort an in-flight Ask or Agent intent-discovery model turn for the project.
+   * Renderer Stop cannot pass AbortSignal across IPC; this is the durable cancel path.
+   */
+  async cancelAsk(projectId: string): Promise<boolean> {
+    this.requireLoadedWorkspace(projectId);
+    const controller = this.askAbortByProjectId.get(projectId);
+    if (!controller || controller.signal.aborted) {
+      return false;
+    }
+    controller.abort();
+    return true;
+  }
+
+  /** Install a fresh AbortController for the project's in-flight model turn. */
+  private beginProjectModelTurnAbort(projectId: string): AbortController {
+    this.askAbortByProjectId.get(projectId)?.abort();
+    const controller = new AbortController();
+    this.askAbortByProjectId.set(projectId, controller);
+    return controller;
+  }
+
+  private endProjectModelTurnAbort(
+    projectId: string,
+    controller: AbortController,
+  ): void {
+    if (this.askAbortByProjectId.get(projectId) === controller) {
+      this.askAbortByProjectId.delete(projectId);
+    }
   }
 
   /**
@@ -2720,6 +2778,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         "A configured model profile is required for grounded answers",
       );
     }
+    const askAbort = this.beginProjectModelTurnAbort(parsedRequest.projectId);
+    try {
+    if (askAbort.signal.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
     const responseLanguage = resolveResponseLanguage(
       parsedRequest.question,
       parsedRequest.language,
@@ -2762,6 +2828,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       );
       localContext = fileContext.localContext;
       largeFileNote = fileContext.largeFileNote;
+    }
+    if (askAbort.signal.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
     }
     const augmented = await this.augmentComposerContext(
       workspace,
@@ -2841,22 +2913,29 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     });
     const instructionAppendix = assembled.instructions;
     const mcp = await this.buildAskMcpOptions(workspace);
+    if (askAbort.signal.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
     const result = await this.groundedAnswerService.answer({
-      projectId: parsedRequest.projectId,
-      question: parsedRequest.question,
-      localContext: augmented.bundle,
-      profile,
-      thinkingDepth: modelExecution?.thinkingDepth,
-      responseLanguage,
-      supplementalMarkdown,
-      ...(instructionAppendix.trim()
-        ? { instructionAppendix }
-        : {}),
-      ...(parsedRequest.images?.length
-        ? { images: parsedRequest.images }
-        : {}),
-      ...(mcp ? { mcp } : {}),
-    });
+        projectId: parsedRequest.projectId,
+        question: parsedRequest.question,
+        localContext: augmented.bundle,
+        profile,
+        thinkingDepth: modelExecution?.thinkingDepth,
+        responseLanguage,
+        supplementalMarkdown,
+        signal: askAbort.signal,
+        ...(instructionAppendix.trim()
+          ? { instructionAppendix }
+          : {}),
+        ...(parsedRequest.images?.length
+          ? { images: parsedRequest.images }
+          : {}),
+        ...(mcp ? { mcp } : {}),
+      });
     const usedMcp = (result.mcpToolCalls?.length ?? 0) > 0;
     const contextSummary = summarizeLocalContext(augmented.bundle);
     const parsed = AgentAnswerResultSchema.parse({
@@ -2912,6 +2991,75 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
     }
     return parsed;
+    } finally {
+      this.endProjectModelTurnAbort(parsedRequest.projectId, askAbort);
+    }
+  }
+
+  private async buildAskMcpOptions(
+    workspace: LoadedProjectOSWorkspace,
+  ): Promise<GroundedAnswerMcpOptions | undefined> {
+    const servers = (workspace.settings.mcpServers ?? []).filter((server) => server.enabled);
+    if (servers.length === 0) return undefined;
+    const permissionRules = loadToolPermissionDocument(workspace.workspaceRoot).rules;
+    const toolsByServerId = new Map<string, Awaited<ReturnType<typeof listServerToolDescriptors>>>();
+    for (const server of servers) {
+      try {
+        const client = await this.mcpSessionManager.getClient({
+          projectId: workspace.project.projectId,
+          config: server,
+          workspaceRoot: workspace.workspaceRoot,
+          secretStore: this.secretStore,
+        });
+        toolsByServerId.set(server.id, await listServerToolDescriptors(client));
+      } catch {
+        // Honest: a failed server simply contributes no tools for this Ask turn.
+      }
+    }
+    const catalog = buildMcpToolCatalog({
+      servers,
+      toolsByServerId,
+      permissionRules,
+    });
+    if (catalog.length === 0) return undefined;
+    const serverById = new Map(servers.map((server) => [server.id, server]));
+    return {
+      tools: catalog.map((entry) => entry.modelTool),
+      toolPolicy: {
+        context: readCapabilityContext({
+          mode: "ask",
+          allowedReadPaths: [],
+        }),
+        rules: permissionRules,
+        workspaceRoot: workspace.workspaceRoot,
+      },
+      executeTool: async (call, signal) => {
+        const listed = catalog.find((entry) => entry.qualifiedName === call.name);
+        const serverId = listed?.serverId;
+        if (!serverId || !serverById.has(serverId)) {
+          return {
+            isError: true,
+            content: `MCP tool '${call.name}' is not in the Ask catalog`,
+          };
+        }
+        return executeMcpToolCall({
+          call,
+          signal,
+          getClient: async (id) => {
+            const config = serverById.get(id);
+            if (!config) {
+              throw new Error(`MCP server '${id}' is not configured`);
+            }
+            return this.mcpSessionManager.getClient({
+              projectId: workspace.project.projectId,
+              config,
+              workspaceRoot: workspace.workspaceRoot,
+              secretStore: this.secretStore,
+            });
+          },
+        });
+      },
+    };
   }
 
   async getGlobalAgentContext(
@@ -2960,14 +3108,20 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       );
     }
     const globalContext = await this.createGlobalPlanningContext(workspace, "en");
-    const intent = await this.intentExtractionService.extract({
-      request: fileOwner ? { ...parsedRequest, nodeId: fileOwner.nodeId } : parsedRequest,
-      graph: workspace.graph,
-      globalContext,
-      execution,
-      inspectNode: async (nodeId) => this.assembleNodeLocalContext(workspace, nodeId, "en"),
-    });
-    return this.durableRunStateFor(workspace).saveIntent(intent);
+    const turnAbort = this.beginProjectModelTurnAbort(parsedRequest.projectId);
+    try {
+      const intent = await this.intentExtractionService.extract({
+        request: fileOwner ? { ...parsedRequest, nodeId: fileOwner.nodeId } : parsedRequest,
+        graph: workspace.graph,
+        globalContext,
+        execution,
+        signal: turnAbort.signal,
+        inspectNode: async (nodeId) => this.assembleNodeLocalContext(workspace, nodeId, "en"),
+      });
+      return this.durableRunStateFor(workspace).saveIntent(intent);
+    } finally {
+      this.endProjectModelTurnAbort(parsedRequest.projectId, turnAbort);
+    }
   }
 
   async approveRequestIntent(
@@ -3081,6 +3235,22 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       intent,
       this.resolveRuntimeSelection(workspace, intent.executorSelection),
     );
+    // Opt-in synthetic only: deterministic Electron probes of whole-tree Auto.
+    // Clears bound entry scope so confirmExecution opens the global planner path
+    // (same seam as LocalApi unit-test forceGlobalPlanner). Default desktop unchanged.
+    if (
+      process.env.PROJECTOS_DETERMINISTIC_AGENT_GATEWAY === "1" &&
+      process.env.PROJECTOS_DETERMINISTIC_FORCE_GLOBAL_PLANNER === "1"
+    ) {
+      const stored = this.refinementsById.get(refinement.id);
+      if (stored) {
+        stored.requestedScope = {
+          ...stored.requestedScope,
+          nodeId: undefined as unknown as string,
+          selectedFilePath: undefined,
+        };
+      }
+    }
     return refinement;
   }
 
@@ -3187,72 +3357,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
       return this.requestIntentService.normalizeDraft(workspace.graph, draft);
     });
-  }
-
-  private async buildAskMcpOptions(
-    workspace: LoadedProjectOSWorkspace,
-  ): Promise<GroundedAnswerMcpOptions | undefined> {
-    const servers = (workspace.settings.mcpServers ?? []).filter((server) => server.enabled);
-    if (servers.length === 0) return undefined;
-    const permissionRules = loadToolPermissionDocument(workspace.workspaceRoot).rules;
-    const toolsByServerId = new Map<string, Awaited<ReturnType<typeof listServerToolDescriptors>>>();
-    for (const server of servers) {
-      try {
-        const client = await this.mcpSessionManager.getClient({
-          projectId: workspace.project.projectId,
-          config: server,
-          workspaceRoot: workspace.workspaceRoot,
-          secretStore: this.secretStore,
-        });
-        toolsByServerId.set(server.id, await listServerToolDescriptors(client));
-      } catch {
-        // Honest: a failed server simply contributes no tools for this Ask turn.
-      }
-    }
-    const catalog = buildMcpToolCatalog({
-      servers,
-      toolsByServerId,
-      permissionRules,
-    });
-    if (catalog.length === 0) return undefined;
-    const serverById = new Map(servers.map((server) => [server.id, server]));
-    return {
-      tools: catalog.map((entry) => entry.modelTool),
-      toolPolicy: {
-        context: readCapabilityContext({
-          mode: "ask",
-          allowedReadPaths: [],
-        }),
-        rules: permissionRules,
-        workspaceRoot: workspace.workspaceRoot,
-      },
-      executeTool: async (call, signal) => {
-        const listed = catalog.find((entry) => entry.qualifiedName === call.name);
-        const serverId = listed?.serverId;
-        if (!serverId || !serverById.has(serverId)) {
-          return {
-            isError: true,
-            content: `MCP tool '${call.name}' is not in the Ask catalog`,
-          };
-        }
-        return executeMcpToolCall({
-          call,
-          signal,
-          getClient: async (id) => {
-            const config = serverById.get(id);
-            if (!config) {
-              throw new Error(`MCP server '${id}' is not configured`);
-            }
-            return this.mcpSessionManager.getClient({
-              projectId: workspace.project.projectId,
-              config,
-              workspaceRoot: workspace.workspaceRoot,
-              secretStore: this.secretStore,
-            });
-          },
-        });
-      },
-    };
   }
 
   async listSkills(projectId: string): Promise<ListSkillsResult> {
@@ -3588,6 +3692,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         "A configured model profile is required to create a plan",
       );
     }
+    const planAbort = this.beginProjectModelTurnAbort(parsedRequest.projectId);
+    try {
+    if (planAbort.signal.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
     const { resolvedScope, localContext } = await this.resolveConversationContext(
       parsedRequest.projectId,
       parsedRequest.scope,
@@ -3650,6 +3762,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ...this.attachmentOmissions(augmented.attachmentSummary.explicitAttachments),
       ],
     });
+    if (planAbort.signal.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
     const created = await this.planService.createPlan({
       projectId: parsedRequest.projectId,
       scope: resolvedScope,
@@ -3658,6 +3776,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       profile,
       thinkingDepth: modelExecution?.thinkingDepth,
       clarifyingAnswers: parsedRequest.clarifyingAnswers,
+      signal: planAbort.signal,
       ...(parsedRequest.existingQuestions !== undefined
         ? { existingQuestions: parsedRequest.existingQuestions }
         : {}),
@@ -3697,6 +3816,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       planAssembly.assembly,
     );
     return plan;
+    } finally {
+      this.endProjectModelTurnAbort(parsedRequest.projectId, planAbort);
+    }
   }
 
   async updatePlan(request: UpdatePlanRequest): Promise<ImplementationPlan> {
@@ -4333,7 +4455,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     if (!route.forceFixture && route.backend === "model") {
       const profile = selectedExecution?.profile;
       if (profile) {
+        const refineAbort = this.beginProjectModelTurnAbort(request.projectId);
         try {
+          if (refineAbort.signal.aborted) {
+            throw new ProjectOSError(
+              "operation_cancelled",
+              "Model request cancelled",
+            );
+          }
           const context = request.nodeId
             ? await this.getNodeContext(request.projectId, request.nodeId)
             : request.filePath
@@ -4353,6 +4482,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             responseLanguage,
             supplementalMarkdown,
             knownNodeIds: new Set(workspace.graph.nodes.map((node) => node.id)),
+            signal: refineAbort.signal,
           });
           const refinement: PromptRefinement = ensureAlignmentOnRefinement(
             {
@@ -4371,6 +4501,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           );
           return refinement;
         } catch (error) {
+          if (
+            error instanceof ProjectOSError &&
+            error.code === "operation_cancelled"
+          ) {
+            throw error;
+          }
           console.error("[projectos] model refinement failed", error);
           this.fallbackNotices.set(
             request.projectId,
@@ -4383,6 +4519,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             message: "Model refinement failed; using deterministic fallback.",
             providerMessage: sanitizeErrorMessage(error),
           };
+        } finally {
+          this.endProjectModelTurnAbort(request.projectId, refineAbort);
         }
       }
     }
@@ -4630,7 +4768,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
                 scope: isGlobalPlan
                   ? { kind: "global" }
                   : isNodePlan
-                  ? { kind: requestedNode!.level as "context" | "container" | "component", nodeId: requestedNodeId! }
+                  ? {
+                      // Components use the node-plan pipeline (create/delete/modify
+                      // file tasks). Hierarchy `component` scope is modify-only and
+                      // rejects create/delete plan shapes.
+                      kind: requestedNode!.level === "component"
+                        ? "node-plan"
+                        : requestedNode!.level as "context" | "container",
+                      nodeId: requestedNodeId!,
+                    }
                   : {
                       kind: "leaf-file",
                       nodeId: requestedNodeId!,
@@ -4694,9 +4840,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             workspace: projectWorkspace,
             runId: runState.run.runId,
           });
-          if (refinement.sourcePlanId) {
-            this.updatePlanBuildStatus(projectWorkspace, refinement.sourcePlanId, "building");
-          }
           try {
             const sessionId = stored.chatSessionId ?? null;
             const workforceId = stored.workforceAgentDefinitionId?.trim() || null;
@@ -4752,6 +4895,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           } catch (error) {
             console.error("[projectos] chat agent pool bind failed", error);
           }
+          if (refinement.sourcePlanId) {
+            this.updatePlanBuildStatus(projectWorkspace, refinement.sourcePlanId, "building");
+          }
           this.maybeStartPendingOrchestratorRun(runState.run.runId);
           return {
             ...cloneJson(runState.run),
@@ -4778,6 +4924,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   }
 
   async cancelAgentRun(runId: string): Promise<AgentRun> {
+    const verificationAbort = this.verificationAbortByRunId.get(runId);
+    if (verificationAbort && !verificationAbort.signal.aborted) {
+      verificationAbort.abort();
+    }
     const orchestratorCancelled = this.orchestrator.cancelRun(runId);
     if (orchestratorCancelled) {
       const workspace = this.workspacesByProjectId.get(orchestratorCancelled.run.projectId);
@@ -4911,22 +5061,72 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     status: "resolved" | "declined" = "resolved",
   ): Promise<RunDecision> {
     const workspace = this.requireLoadedWorkspace(projectId);
+    if (workspace.project.projectId !== projectId) {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        `Refusing to resolve decision '${decisionId}' across workspace boundary`,
+      );
+    }
     const store = this.durableRunStateFor(workspace);
     const current = store.loadDecision(decisionId);
     if (!current || current.projectId !== projectId) {
       throw new ProjectOSError(
-        "run_not_found",
+        "decision_not_found",
         `Run decision '${decisionId}' was not found in project '${projectId}'`,
       );
     }
-    const resolved = store.resolveDecision(
-      decisionId,
-      expectedRevision,
-      answer,
-      status,
-    );
-    // A run may be waiting on this answer (a question the agent asked mid-run); wake it.
-    this.orchestrator.deliverDecision(resolved);
+    if (current.status !== "pending") {
+      throw new ProjectOSError(
+        "agent_orchestration_failed",
+        `Run decision '${decisionId}' is '${current.status}' and cannot be answered again`,
+      );
+    }
+    const liveWait = this.orchestrator.hasActiveDecisionWait(decisionId);
+    if (liveWait) {
+      const liveRun = this.orchestrator.getRun(current.runId);
+      if (!liveRun || liveRun.run.projectId !== projectId) {
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          `Refusing to resolve decision '${decisionId}' for a foreign or missing run`,
+          { details: { runId: current.runId, projectId } },
+        );
+      }
+      if ((liveRun.run.rootRunId ?? liveRun.run.runId) !== current.rootRunId) {
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          `Refusing to resolve decision '${decisionId}' across run roots`,
+        );
+      }
+    }
+    let resolved: RunDecision;
+    try {
+      resolved = store.resolveDecision(
+        decisionId,
+        expectedRevision,
+        answer,
+        status,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/stale/i.test(message)) {
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          `Run decision '${decisionId}' revision is stale`,
+          { cause: error },
+        );
+      }
+      if (/no longer pending|not found|not one of/i.test(message)) {
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          message,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    // Wake the same-process waiter when present. No waiter (restart) means the
+    // answer is durable for the card/history only — never auto-resume writes.
+    this.orchestrator.notifyDecisionAnswer(resolved);
     return resolved;
   }
 
@@ -5371,13 +5571,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async getDiff(runId: string): Promise<GeneratedDiff> {
     const orchestratorRun = this.orchestrator.getRun(runId);
     if (orchestratorRun?.diff) {
-      return GeneratedDiffSchema.parse(cloneJson(orchestratorRun.diff));
+      // Parent-owned diffs must still fail closed on bound child mismatches;
+      // otherwise a child binding would be skipped whenever the parent has .diff.
+      this.assertBoundChildDiffScopes(orchestratorRun);
+      return this.returnScopedDiff(runId, orchestratorRun.diff);
     }
 
     if (orchestratorRun) {
       const aggregated = this.aggregateOrchestratorRunDiff(orchestratorRun);
       if (aggregated) {
-        return aggregated;
+        return this.returnScopedDiff(runId, aggregated);
       }
       throw new ProjectOSError(
         "diff_not_found",
@@ -5393,7 +5596,28 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       );
     }
 
-    return GeneratedDiffSchema.parse(cloneJson(scenario.diff));
+    return this.returnScopedDiff(runId, scenario.diff);
+  }
+
+  /**
+   * A diff read uses the same scope check as apply when this run already has a
+   * bound authorization. Scenario and orchestrator diffs with no binding stay
+   * readable; getDiff does not invent an authorization for them.
+   * (PR4 reviewed logic — minimal port; does not restore removed private maps.)
+   */
+  private returnScopedDiff(runId: string, diff: GeneratedDiff): GeneratedDiff {
+    const parsed = GeneratedDiffSchema.parse(cloneJson(diff));
+    if (this.runHasDiffAuthorization(runId)) {
+      this.validateGeneratedDiffScope(runId, parsed);
+    }
+    return parsed;
+  }
+
+  private runHasDiffAuthorization(runId: string): boolean {
+    return this.boundFixtureDiffAuthorizations.has(runId)
+      || this.boundCreateRunAuthorizations.has(runId)
+      || this.boundDeleteRunAuthorizations.has(runId)
+      || this.boundRunAuthorizations.has(runId);
   }
 
   private async assertApprovedIntentAllowsPublication(
@@ -5408,6 +5632,24 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         throw new ProjectOSError(
           "diff_scope_violation",
           "Model-backed publication has no approved request intent",
+        );
+      }
+      return;
+    }
+    // Greenfield mutates the graph across ordered tranches. The empty-graph
+    // intent is fixed at confirm; tranche publication is gated by greenfield
+    // bindings / expectedGraphHash, not by per-file single-node intent scope.
+    if (state.greenfieldPlan) {
+      if (!this.requestIntentService.isApprovalValid(intent)) {
+        throw new ProjectOSError(
+          "diff_stale",
+          "Approved intent is invalid or the project graph changed before publication",
+        );
+      }
+      if (state.run.scope?.kind !== "global" || intent.touches.length > 0) {
+        throw new ProjectOSError(
+          "diff_scope_violation",
+          "Greenfield graph publication is not supported through a single-node intent",
         );
       }
       return;
@@ -5445,14 +5687,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     )) {
       throw new ProjectOSError("diff_scope_violation", "Node deletion is outside the approved structural intent");
     }
-    if (state.greenfieldPlan) {
-      throw new ProjectOSError(
-        "diff_scope_violation",
-        "Greenfield graph publication is not supported through a single-node intent",
-      );
-    }
     for (const task of state.delegationPlan?.tasks ?? []) {
       const operation = task.operation === "create" ? "create" : task.operation === "delete" ? "delete" : "modify";
+      const impact = state.delegationPlan?.impactAnalysis;
+      // Server-derived direct-importer repairs are authorized by the impact
+      // scan for an approved delete target, not by re-touching every owner.
+      const isServerDerivedImporterRepair =
+        impact?.kind === "file_delete" &&
+        operation === "modify" &&
+        impact.directImporters.includes(task.filePath);
+      if (isServerDerivedImporterRepair) continue;
       if (!intentAllowsFile(intent, workspace.graph, task.filePath, operation, state.delegationPlan?.nodeId)) {
         throw new ProjectOSError("diff_scope_violation", `Delegated ${operation} for '${task.filePath}' exceeds approved intent`);
       }
@@ -5473,7 +5717,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     if (!scaffold && !deletion) {
       const diff = proposedDiff ?? state.diff;
       if (diff) {
+        const impact = state.delegationPlan?.impactAnalysis;
         for (const file of diff.files) {
+          if (
+            impact?.kind === "file_delete" &&
+            file.changeType === "modify" &&
+            impact.directImporters.includes(file.path)
+          ) {
+            continue;
+          }
           const nodeId = "nodeId" in state.run.scope
             ? state.run.scope.nodeId
             : state.delegationPlan?.nodeId ?? state.wholeTreeTransactionPlan?.leaves.find((leaf) => leaf.filePath === file.path)?.nodeId;
@@ -5513,6 +5765,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     if (!state) {
       throw new ProjectOSError("run_not_found", `Run '${runId}' is unavailable at the publication boundary`);
     }
+    // Async Stop/cancel must linearize before durable write (not only UI Apply gates).
+    this.orchestrator.assertActiveForCommit(runId);
     const currentWorkspace = this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
     await this.assertApprovedIntentAllowsPublication(state, currentWorkspace, proposedDiff, createdFiles);
   }
@@ -5548,7 +5802,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     if (alreadyApplied) return alreadyApplied;
     if (!this.orchestrator.getRun(runId)) {
       const disk = this.loadDiskRun(runId);
-      if (disk?.log.applyResult && disk.log.terminalStatus) {
+      // Durable apply already on disk — return it whether reconcile has stamped a
+      // terminal status yet or the snapshot is still awaiting_review/interrupted.
+      // Never fall through to fixture scenario replay for an existing backup.
+      if (disk?.log.applyResult) {
         return disk.log.applyResult;
       }
     }
@@ -5712,29 +5969,37 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         });
         throw error;
       }
+      // Record apply_result BEFORE post-apply verification. Verification may throw
+      // (approval_required / runner missing); disk+backup already exist and Undo
+      // must remain reachable via apply_result + applyResult in the UI.
+      this.orchestrator.recordWholeTreeApply(workspace, runId, result);
       if (result.applied && result.outcome === "applied") {
-        const verification = await this.verifyAfterApply(runId, workspace);
-        if (verification.results.length === 0) {
-          this.orchestrator.recordVerificationResult(
-            workspace,
-            runId,
-            undefined,
-            verification.status,
-          );
-        } else {
-          for (const commandResult of verification.results) {
+        try {
+          const verification = await this.executeConfiguredVerification(runId, workspace);
+          if (verification.results.length === 0) {
             this.orchestrator.recordVerificationResult(
               workspace,
               runId,
-              formatExecCommandForDisplay(commandResult.command),
-              commandResult.status,
+              undefined,
+              verification.status,
             );
+          } else {
+            for (const commandResult of verification.results) {
+              this.orchestrator.recordVerificationResult(
+                workspace,
+                runId,
+                formatExecCommandForDisplay(commandResult.command),
+                commandResult.status,
+              );
+            }
           }
+          result = { ...result, verificationStatus: verification.status };
+          this.orchestrator.recordWholeTreeApply(workspace, runId, result);
+        } catch {
+          // Keep applied outcome; Diff can still request verification / Undo.
+          result = { ...result, verificationStatus: "not_run" };
+          this.orchestrator.recordWholeTreeApply(workspace, runId, result);
         }
-        result = { ...result, verificationStatus: verification.status };
-      }
-      this.orchestrator.recordWholeTreeApply(workspace, runId, result);
-      if (result.applied && result.outcome === "applied") {
         this.orchestrator.finalizeWholeTreeRun(
           workspace,
           runId,
@@ -5753,6 +6018,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         );
       }
       this.orchestrator.requireValidatedBatch(runId);
+      this.orchestrator.assertActiveForCommit(runId);
       const workspace = this.requireLoadedWorkspace(orchestratorRun.run.projectId);
       let result: ApplyResult;
       try {
@@ -5773,28 +6039,35 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         });
         throw error;
       }
+      // Same honesty as whole-tree: apply_result before verification can throw.
+      this.orchestrator.recordDelegatedGroupApply(workspace, runId, result);
       if (result.applied && result.outcome === "applied") {
-        const verification = await this.verifyAfterApply(runId, workspace);
-        if (verification.results.length === 0) {
-          this.orchestrator.recordVerificationResult(
-            workspace,
-            runId,
-            undefined,
-            verification.status,
-          );
-        } else {
-          for (const commandResult of verification.results) {
+        try {
+          const verification = await this.executeConfiguredVerification(runId, workspace);
+          if (verification.results.length === 0) {
             this.orchestrator.recordVerificationResult(
               workspace,
               runId,
-              formatExecCommandForDisplay(commandResult.command),
-              commandResult.status,
+              undefined,
+              verification.status,
             );
+          } else {
+            for (const commandResult of verification.results) {
+              this.orchestrator.recordVerificationResult(
+                workspace,
+                runId,
+                formatExecCommandForDisplay(commandResult.command),
+                commandResult.status,
+              );
+            }
           }
+          result = { ...result, verificationStatus: verification.status };
+          this.orchestrator.recordDelegatedGroupApply(workspace, runId, result);
+        } catch {
+          result = { ...result, verificationStatus: "not_run" };
+          this.orchestrator.recordDelegatedGroupApply(workspace, runId, result);
         }
-        result = { ...result, verificationStatus: verification.status };
       }
-      this.orchestrator.recordDelegatedGroupApply(workspace, runId, result);
       return result;
     }
     if (orchestratorRun?.run.parentRunId) {
@@ -5819,7 +6092,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
 
     const diff = GeneratedDiffSchema.parse(cloneJson(scenario.diff));
     const run = this.registeredRunsByRunId.get(runId)?.run ?? scenario.run;
-    await this.authorizeFixtureDiff(runId, workspace, run, scenario.files, diff);
+    if (this.runHasDiffAuthorization(runId)) {
+      // Existing create/delete/modify/fixture binding wins; scenario metadata
+      // must not widen or replace it (PR4 reviewed).
+      this.validateGeneratedDiffScope(runId, diff);
+    } else {
+      await this.authorizeFixtureDiff(runId, workspace, run, scenario.files, diff);
+    }
     return this.applyDiffFromGenerated(runId, diff, run);
   }
 
@@ -5963,11 +6242,18 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         "Verification execution is not available in this runtime",
       );
     }
+    const previousAbort = this.verificationAbortByRunId.get(runId);
+    if (previousAbort && !previousAbort.signal.aborted) {
+      previousAbort.abort();
+    }
+    const abortController = new AbortController();
+    this.verificationAbortByRunId.set(runId, abortController);
     let commandResults;
     try {
       commandResults = await this.verificationRunner.run(
         commands,
         workspace.workspaceRoot,
+        abortController.signal,
       );
     } catch (error) {
       if (error instanceof ProjectOSError && error.code === "tool_policy_denied") {
@@ -5995,6 +6281,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         });
       }
       throw error;
+    } finally {
+      if (this.verificationAbortByRunId.get(runId) === abortController) {
+        this.verificationAbortByRunId.delete(runId);
+      }
     }
     return this.finishVerificationEvidence(runId, workspace, {
       commands: commandResults.map((result) => ({
@@ -10686,6 +10976,44 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return notice;
   }
 
+  /**
+   * Re-validate every bound child reachable from this run. Used when the parent
+   * already has its own `.diff` so aggregation is skipped.
+   */
+  private assertBoundChildDiffScopes(state: OrchestratorRunState): void {
+    const visit = (childRunId: string) => {
+      const childState = this.orchestrator.getRun(childRunId);
+      if (!childState) return;
+      if (childState.diff?.files.length) {
+        if (this.runHasDiffAuthorization(childRunId)) {
+          this.validateGeneratedDiffScope(childRunId, childState.diff);
+        }
+      } else {
+        const nested = this.aggregateOrchestratorRunDiff(childState);
+        if (nested && this.runHasDiffAuthorization(childRunId)) {
+          this.validateGeneratedDiffScope(childRunId, nested);
+        }
+      }
+      for (const child of childState.delegatedChildren ?? []) visit(child.runId);
+      for (const child of childState.delegatedHierarchyChildren ?? []) visit(child.runId);
+      for (const child of childState.scaffoldChildren ?? []) visit(child.runId);
+      for (const child of childState.deletionChildren ?? []) visit(child.runId);
+      for (const child of childState.greenfieldChildren ?? []) visit(child.runId);
+      for (const leaf of childState.wholeTreeTransactionPlan?.leaves ?? []) {
+        visit(leaf.childRunId);
+      }
+    };
+
+    for (const child of state.delegatedChildren ?? []) visit(child.runId);
+    for (const child of state.delegatedHierarchyChildren ?? []) visit(child.runId);
+    for (const child of state.scaffoldChildren ?? []) visit(child.runId);
+    for (const child of state.deletionChildren ?? []) visit(child.runId);
+    for (const child of state.greenfieldChildren ?? []) visit(child.runId);
+    for (const leaf of state.wholeTreeTransactionPlan?.leaves ?? []) {
+      visit(leaf.childRunId);
+    }
+  }
+
   private aggregateOrchestratorRunDiff(
     state: OrchestratorRunState,
   ): GeneratedDiff | undefined {
@@ -10696,6 +11024,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const childState = this.orchestrator.getRun(childRunId);
       if (!childState) return;
       if (childState.diff?.files.length) {
+        if (this.runHasDiffAuthorization(childRunId)) {
+          this.validateGeneratedDiffScope(childRunId, childState.diff);
+        }
         for (const file of childState.diff.files) {
           if (seenPaths.has(file.path)) continue;
           seenPaths.add(file.path);
@@ -10705,6 +11036,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       }
       const nested = this.aggregateOrchestratorRunDiff(childState);
       if (!nested) return;
+      if (this.runHasDiffAuthorization(childRunId)) {
+        this.validateGeneratedDiffScope(childRunId, nested);
+      }
       for (const file of nested.files) {
         if (seenPaths.has(file.path)) continue;
         seenPaths.add(file.path);
@@ -11745,7 +12079,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         validationTask.childRunId !== child.runId ||
         validationTask.path !== task.filePath ||
         validationTask.status !== "consistent" ||
-        validationTask.criteria.some((criterion) => criterion.status !== "satisfied") ||
+        validationTask.criteria.some(
+          (criterion) =>
+            criterion.status !== "satisfied" && criterion.status !== "uncertain",
+        ) ||
         !childState ||
         childState.run.parentRunId !== parentRun.runId ||
         childState.run.rootRunId !== (parentRun.rootRunId ?? parentRun.runId) ||
@@ -11849,7 +12186,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       validationTask.childRunId !== child.runId ||
       validationTask.path !== task.filePath ||
       validationTask.status !== "consistent" ||
-      validationTask.criteria.some((criterion) => criterion.status !== "satisfied")
+      validationTask.criteria.some(
+        (criterion) =>
+          criterion.status !== "satisfied" && criterion.status !== "uncertain",
+      )
     ) {
       throw new ProjectOSError(
         "diff_scope_violation",
@@ -12000,7 +12340,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         validationTask.childRunId !== child.runId ||
         validationTask.path !== task.filePath ||
         validationTask.status !== "consistent" ||
-        validationTask.criteria.some((criterion) => criterion.status !== "satisfied")
+        validationTask.criteria.some(
+          (criterion) =>
+            criterion.status !== "satisfied" && criterion.status !== "uncertain",
+        )
       ) {
         throw new ProjectOSError(
           "diff_scope_violation",
@@ -13970,6 +14313,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     scenarioFiles: readonly string[],
     diff: GeneratedDiff,
   ): Promise<void> {
+    if (this.runHasDiffAuthorization(runId)) {
+      throw diffScopeViolation(
+        runId,
+        "already has a bound write authorization that scenario metadata cannot replace",
+      );
+    }
     const nodeId = fixtureAuthorizationNodeId(runId, run);
     const node = workspace.graph.nodes.find((item) => item.id === nodeId);
     if (!node) {
@@ -14033,6 +14382,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
     }
 
+    // Recheck after the runtime await: a binding that arrived while loading must
+    // win; do not install fixture authorization over it (PR4 reviewed).
+    if (this.runHasDiffAuthorization(runId)) {
+      throw diffScopeViolation(
+        runId,
+        "already has a bound write authorization that scenario metadata cannot replace",
+      );
+    }
     this.boundFixtureDiffAuthorizations.set(runId, {
       projectId: workspace.project.projectId,
       nodeId,
@@ -14047,7 +14404,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const fixtureAuthorization = this.boundFixtureDiffAuthorizations.get(runId);
     if (fixtureAuthorization) {
       this.validateFixtureDiffScope(runId, diff, fixtureAuthorization);
-      return;
     }
     const createAuthorization = this.boundCreateRunAuthorizations.get(runId);
     if (createAuthorization) {
@@ -14087,7 +14443,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           { cause: error },
         );
       }
-      return;
     }
     const deleteAuthorization = this.boundDeleteRunAuthorizations.get(runId);
     if (deleteAuthorization) {
@@ -14130,11 +14485,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           `delete target '${deleteAuthorization.targetPath}' no longer matches its authorized file identity`,
         );
       }
-      return;
     }
     const authorization = this.boundRunAuthorizations.get(runId);
     if (!authorization) {
-      throw diffScopeViolation(runId, "has no bound write authorization");
+      if (!fixtureAuthorization && !createAuthorization && !deleteAuthorization) {
+        throw diffScopeViolation(runId, "has no bound write authorization");
+      }
+      return;
     }
     if (diff.runId !== runId) {
       throw diffScopeViolation(
@@ -14210,12 +14567,20 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       if (!this.orchestrator.getRun(runId)) {
         return;
       }
-      const message = sanitizeErrorMessage(error);
-      this.orchestrator.failRun(workspace, runId, error);
-      this.fallbackNotices.set(
-        workspace.project.projectId,
-        `Agent orchestration failed: ${message}`,
-      );
+      const cancelled =
+        error instanceof ProjectOSError && error.code === "operation_cancelled";
+      if (cancelled) {
+        // Ensure durable cancelled + run_cancelled without the failure notice path.
+        this.orchestrator.failRun(workspace, runId, error);
+        this.orchestrator.recordCancellation(workspace, runId);
+      } else {
+        const message = sanitizeErrorMessage(error);
+        this.orchestrator.failRun(workspace, runId, error);
+        this.fallbackNotices.set(
+          workspace.project.projectId,
+          `Agent orchestration failed: ${message}`,
+        );
+      }
     } finally {
       const state = this.orchestrator.getRun(runId);
       const planId = state?.refinement.sourcePlanId;
@@ -14352,16 +14717,36 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         const currentWorkspace = this.workspaceStore.loadWorkspace(workspace.workspaceRoot);
         const orchestratorState = this.orchestrator.getRun(runId);
         if (orchestratorState) {
+          // Stop/cancel that beat commit must refuse durable write (Auto + Apply).
+          this.orchestrator.assertActiveForCommit(runId);
           await this.assertApprovedIntentAllowsPublication(
             orchestratorState,
             currentWorkspace,
             substantiveDiff,
           );
-        } else if (run.kind !== "demo") {
-          throw new ProjectOSError(
-            "run_not_found",
-            `Run '${runId}' is unavailable at the publication boundary`,
-          );
+        } else if (run.kind === "demo") {
+          // Demo scenarios publish without an in-memory orchestrator.
+        } else {
+          // Deterministic scenario prefabs (feature_change / debug_fix) may
+          // publish only after fixture authorization is bound. Presence of a
+          // registered scenario alone is not enough (re-check at commit).
+          // Open model feature_change without an orchestrator still fails
+          // closed as run_not_found (R1) — not a missing-intent code.
+          try {
+            this.requireScenarioForRun(runId);
+          } catch {
+            throw new ProjectOSError(
+              "run_not_found",
+              `Run '${runId}' is unavailable at the publication boundary`,
+            );
+          }
+          if (!this.runHasDiffAuthorization(runId)) {
+            throw new ProjectOSError(
+              "diff_scope_violation",
+              `Scenario publication for run '${runId}' requires bound fixture authorization`,
+            );
+          }
+          this.validateGeneratedDiffScope(runId, substantiveDiff);
         }
         await beforeCommit?.();
       },
@@ -14374,6 +14759,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           }
         : {}),
     });
+    if (transaction.outcome === "committed") {
+      this.adoptCommittedFileIdentity(runId, transaction.committedFiles ?? []);
+    }
     if (transaction.outcome === "recovery_required") {
       const reason = `Apply failed and ${transaction.filesChanged.length} file(s) could not be restored; recover from backup '${transaction.backupId}'.`;
       return ApplyResultSchema.parse({
@@ -14416,6 +14804,49 @@ export class ProjectOSLocalApi implements ProjectOSApi {
 
   protected commitStagedFile(temporaryPath: string, targetPath: string): void {
     renameSync(temporaryPath, targetPath);
+  }
+
+  /**
+   * After this run's transaction installs a file, remember that file's
+   * identity. The inode comes from the temporary file the transaction wrote,
+   * not from a fresh stat of the path, so a user replacement is not adopted.
+   */
+  private adoptCommittedFileIdentity(
+    runId: string,
+    committedFiles: ReadonlyArray<{
+      path: string;
+      canonicalPath: string;
+      device: number;
+      inode: number;
+    }>,
+  ): void {
+    const committedByPath = new Map(committedFiles.map((file) => [file.path, file]));
+    const modify = this.boundRunAuthorizations.get(runId);
+    const committedModify = modify ? committedByPath.get(modify.selectedFilePath) : undefined;
+    if (
+      modify &&
+      committedModify &&
+      committedModify.canonicalPath === modify.allowedWriteTarget.canonicalPath
+    ) {
+      modify.allowedWriteTarget = {
+        relativePath: modify.allowedWriteTarget.relativePath,
+        canonicalPath: modify.allowedWriteTarget.canonicalPath,
+        device: committedModify.device,
+        inode: committedModify.inode,
+      };
+    }
+    const fixture = this.boundFixtureDiffAuthorizations.get(runId);
+    if (!fixture) return;
+    for (const [path, file] of fixture.files) {
+      const committed = committedByPath.get(path);
+      if (!committed || committed.canonicalPath !== file.canonicalPath) continue;
+      fixture.files.set(path, {
+        relativePath: file.relativePath,
+        canonicalPath: file.canonicalPath,
+        device: committed.device,
+        inode: committed.inode,
+      });
+    }
   }
 
   private getWriteTransactionRuntime(): Promise<WriteTransactionRuntime> {

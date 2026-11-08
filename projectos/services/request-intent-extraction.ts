@@ -1,4 +1,6 @@
 import { z } from "zod";
+
+import { ProjectOSError } from "../errors.js";
 import type { ProjectGraph } from "../contracts/graph.js";
 import {
   RequestIntentDraftSchema,
@@ -18,6 +20,7 @@ import { RequestIntentService } from "./request-intent-service.js";
 
 const DISCOVERY_SYSTEM_PROMPT = `You are the master agent planning a software change from repository evidence.
 Begin with the immediate graph. You may inspect a node, list its children, read a file present in an inspected node's context, or consult a node for a focused read-only answer. Choose one action at a time and use only supplied node ids and file paths. After enough evidence, return a final intent. Ask the user only about material product choices that code and repository evidence cannot answer. Do not claim a file was read unless it appears in observations or that tests were run.
+Prefer questions: [] when the only open choice is customer-facing copy/wording (heading text, button label, microcopy). Those choices are resolved after intent approval by the authorized edit step's action:"clarify" card; blocking them at planning prevents the same-root clarify→resume path. Reserve intent.questions for scope, approach, or structural decisions that change which capabilities or files are touched.
 structuralProposals is only for adding a node, deleting a node, or connecting two existing nodes (kinds add_node, delete_node, connect_nodes); a code-level dependency between existing capabilities is not a structural change, so leave it empty. In each touch, list under files the existing files you expect that capability's change to edit, with paths exactly as supplied. Write the human-readable text of a final intent (goal, touch reasons, assumptions, out of scope, acceptance criteria, questions) in the language of the user's request, while keeping node ids, file paths and code identifiers exactly as supplied.
 Act by calling exactly one tool: inspect_node, list_children, read_source or consult_node to gather evidence, or final once you have enough. If tools are unavailable, reply with one JSON object matching outputSchema.`;
 const CONSULT_SYSTEM_PROMPT = `You are a read-only specialist answering one focused question about a software node. Use only the supplied node context, cite relevant file paths when possible, and say when evidence is insufficient. Do not propose changes, invoke tools, or claim checks were run. Return a concise plain-text answer.`;
@@ -154,6 +157,8 @@ export class RequestIntentExtractionService {
     globalContext: GlobalContextBundle;
     execution: ModelExecutionSnapshot;
     inspectNode?: (nodeId: string) => Promise<NodeContextBundle>;
+    /** When aborted (Stop during intent discovery), gateway settles cancelled. */
+    signal?: AbortSignal;
     /** Called for every model attempt at a discovery step, so a caller can keep a trace of retries. */
     onModelAttempt?: (attempt: StructuredAttempt) => void;
   }): Promise<RequestIntent> {
@@ -167,22 +172,44 @@ export class RequestIntentExtractionService {
       executorSelection: request.executorSelection,
       outputSchema: DISCOVERY_OUTPUT_SCHEMA,
     };
-    const complete = (value: unknown, systemPrompt: string, maxOutputTokens: number) => this.gateway.complete(execution.profile, {
-      projectId: request.projectId,
-      requestKind: "request_intent",
-      modelPreference: execution.profile.id,
-      systemPrompt,
-      input: value,
-      thinkingDepth: execution.thinkingDepth,
-      redactionPolicy: "secrets_and_paths",
-      maxOutputTokens,
-    });
+    const complete = (value: unknown, systemPrompt: string, maxOutputTokens: number) => {
+      if (input.signal?.aborted) {
+        throw new ProjectOSError(
+          "operation_cancelled",
+          "Model request cancelled",
+        );
+      }
+      return this.gateway.complete(
+        execution.profile,
+        {
+          projectId: request.projectId,
+          requestKind: "request_intent",
+          modelPreference: execution.profile.id,
+          systemPrompt,
+          input: value,
+          thinkingDepth: execution.thinkingDepth,
+          redactionPolicy: "secrets_and_paths",
+          maxOutputTokens,
+        },
+        input.signal ? { signal: input.signal } : undefined,
+      );
+    };
     // One discovery step, run the way every structured model step is: the actions are tools, an
     // answer that does not fit is sent back with the exact field and reason, and a cut-off reply is
-    // asked again with more room, and `onModelAttempt` reports each try.
+    // asked again with more room, and `onModelAttempt` reports each try. AbortSignal cancels mid-step.
     const parseAction = async (value: unknown) => {
+      if (input.signal?.aborted) {
+        throw new ProjectOSError(
+          "operation_cancelled",
+          "Model request cancelled",
+        );
+      }
       const result = await runStructuredStep(
-        (modelRequest) => this.gateway.complete(execution.profile, modelRequest),
+        (modelRequest) => this.gateway.complete(
+          execution.profile,
+          modelRequest,
+          input.signal ? { signal: input.signal } : undefined,
+        ),
         {
           projectId: request.projectId,
           requestKind: "request_intent",
@@ -225,6 +252,12 @@ export class RequestIntentExtractionService {
     let actionCount = 0;
 
     while (!draft) {
+      if (input.signal?.aborted) {
+        throw new ProjectOSError(
+          "operation_cancelled",
+          "Model request cancelled",
+        );
+      }
       const exhausted = actionCount >= MAX_DISCOVERY_ACTIONS;
       const action = await parseAction({
         ...initialInput,

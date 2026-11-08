@@ -2,21 +2,27 @@ name: Features CI
 on:
   push:
     paths:
-      - 'projectos/contracts/features*.ts'
-      - 'projectos/services/features*.ts'
-      - 'projectos/scripts/**'
-      - 'projectos/features/**'
+      - 'projectos/contracts/features.ts'
+      - 'projectos/contracts/features.test.ts'
+      - 'projectos/contracts/features-cli.integration.test.ts'
+      - 'projectos/scripts/features-check.ts'
+      - 'projectos/services/first-principles/features-write.ts'
+      - 'projectos/services/first-principles/fp-extensions.test.ts'
       - 'sample-graph-saas/.projectos/features.json'
       - 'projectos/client/sample-projectos-fixtures/features.json'
+      - 'projectos/package.json'
       - '.github/workflows/features.yml'
   pull_request:
     paths:
-      - 'projectos/contracts/features*.ts'
-      - 'projectos/services/features*.ts'
-      - 'projectos/scripts/**'
-      - 'projectos/features/**'
+      - 'projectos/contracts/features.ts'
+      - 'projectos/contracts/features.test.ts'
+      - 'projectos/contracts/features-cli.integration.test.ts'
+      - 'projectos/scripts/features-check.ts'
+      - 'projectos/services/first-principles/features-write.ts'
+      - 'projectos/services/first-principles/fp-extensions.test.ts'
       - 'sample-graph-saas/.projectos/features.json'
       - 'projectos/client/sample-projectos-fixtures/features.json'
+      - 'projectos/package.json'
       - '.github/workflows/features.yml'
 
 jobs:
@@ -34,9 +40,15 @@ jobs:
           cache-dependency-path: projectos/package-lock.json
       - name: Install
         run: npm ci
-      - name: Unit tests (features)
-        run: npx vitest run contracts/features.test.ts contracts/features.sample.test.ts contracts/features-query.test.ts services/features-sync.test.ts services/features-sdd.test.ts services/features-staleness.test.ts services/agent-tools/features-tools.test.ts
+      - name: Unit tests (features story-map + planned write)
+        # Honest scope: Zod story-map schema + fixture integrity + real
+        # writePlannedFeatureFromThesis → parseFeaturesFile compatibility and
+        # locked no-overwrite. Does NOT restore features_scan / features_sync /
+        # SDD / staleness / query agent tools (not present on this branch).
+        run: npm run test:features
       - name: features:check
+        # Scoped tsc (contracts/features + scripts/features-check only).
+        # Full package type/build remains a separate gate. Does not install
+        # desktop Electron deps and does not claim scan/sync tooling.
         run: |
-          npm run features:check -- ../sample-graph-saas/.projectos/features.json
-          npm run features:check -- ./client/sample-projectos-fixtures/features.json
+          npm run features:check -- ../sample-graph-saas/.projectos/features.json ./client/sample-projectos-fixtures/features.json

@@ -253,6 +253,10 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("cancelStructureScan", projectId);
   }
 
+  cancelAsk(projectId: string): Promise<boolean> {
+    return this.invoke("cancelAsk", projectId);
+  }
+
   getProjectGraph(projectId: string): Promise<ProjectGraph> {
     return this.invoke("getProjectGraph", projectId);
   }

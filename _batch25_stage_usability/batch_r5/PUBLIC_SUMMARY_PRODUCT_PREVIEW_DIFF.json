@@ -1,0 +1,24 @@
+{
+  "probe": "electron_product_lab_diff_followup",
+  "headHint": "ff70bf2",
+  "workspaceMode": "reuse_deepseek_proposal",
+  "designPreviewDocNote": "progress.md: Do not replay the old Design Preview implementation wholesale; its runtime was removed in the Pure cut. Product alternatives: Product Lab (topBar) + Browser tab + Terminal start (npm run dev) + Settings verification.",
+  "coverage": {
+    "processStartIsolated": true,
+    "designPreviewStartButtonFound": false,
+    "designPreviewAbsentExpected": true,
+    "productLabClicked": true,
+    "productLabToastOrCard": true,
+    "browserTabOpenedOrPresent": true,
+    "terminalDockHint": true,
+    "diffPanelOpened": false,
+    "verificationUiSuccess": false,
+    "verificationUiFail": false,
+    "verificationUiTimeout": false,
+    "verificationUiCancel": false,
+    "verificationUiAny": false
+  },
+  "dailyUserDataStable": true,
+  "errors": [],
+  "finishedAt": "2026-11-07T20:01:54.381Z"
+}

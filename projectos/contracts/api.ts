@@ -212,6 +212,11 @@ export interface ProjectOSApi {
   ): Disposable;
   /** Cancel an in-flight structure scan; keeps the previous graph on disk. */
   cancelStructureScan(projectId: string): Promise<boolean>;
+  /**
+   * Abort an in-flight Ask (or Agent intent-discovery) model turn for the project.
+   * Renderer Stop cannot pass AbortSignal across IPC; this is the durable cancel path.
+   */
+  cancelAsk(projectId: string): Promise<boolean>;
   getProjectGraph(projectId: string): Promise<ProjectGraph>;
   getSemanticTree(projectId: string): Promise<SemanticTree>;
   listWorkspaceDirectory(

@@ -32,3 +32,12 @@ deepseek_api.md
 
 # Local REA/Node tooling (not for commit)
 .tooling/
+
+_private_r5_evidence/
+
+# Local gate/run raw evidence (keep short redacted summaries only; do not ignore product test fixtures)
+_batch25_stage_usability/**/gates_run.out
+_batch25_stage_usability/**/gates_nohup.out
+_batch25_stage_usability/**/trusted_gates.log
+_batch25_stage_usability/gates_*.out
+_batch25_stage_usability/trusted_gates_*/trusted_gates.log

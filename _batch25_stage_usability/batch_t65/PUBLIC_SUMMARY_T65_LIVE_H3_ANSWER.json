@@ -1,0 +1,66 @@
+{
+  "probe": "electron_t65_live_h3_answer",
+  "headHint": "ee7fda7+clarify-answers-inject",
+  "layer": "live_deepseek + strict_api_awaiting_review + cross_component",
+  "implementedBounds": {
+    "maxOutputTokens": 2048,
+    "maxInputChars": 48000,
+    "sessionCap": 24,
+    "ledgerLimitEnv": "180",
+    "evidence": [
+      "outbound-request-bounds.ts",
+      "gateway.ts applyOutboundRequestBounds",
+      "projectOsService.ts"
+    ]
+  },
+  "coverage": {
+    "processStartIsolated": true,
+    "deepseekSelected": true,
+    "agentMode": true,
+    "noLeafFilePick": true,
+    "composerSend": true,
+    "intentApproveUi": true,
+    "waitingDecisionCard": true,
+    "clarifyNotForcedOptions": true,
+    "answeredOrStopped": true,
+    "apiAwaitingReview": true,
+    "proposalFilesAtLeast2": true,
+    "sameRootClarifyToProposal": true,
+    "filesUnchangedOnDisk": true,
+    "afterStopStatus": null,
+    "childRunsAfterStop": null,
+    "noNewDispatchAfterStop": null
+  },
+  "proposalFiles": [
+    "app/login/page.tsx",
+    "components/LoginForm.tsx"
+  ],
+  "clarify": {
+    "decisionId": "decision_9ecf22801b6ebc2ee7e7cfbd",
+    "optionId": "sign-in-demo",
+    "forcedNamedOptionsFromProbe": false
+  },
+  "rootRunId": "run_60460feb-672a-4925-a10c-a850ff05d511",
+  "apiStatus": "awaiting_review",
+  "scope": {
+    "kind": "node-plan",
+    "nodeId": "feat_login"
+  },
+  "budget": {
+    "post": {
+      "limit": 180,
+      "reserved": 159,
+      "remaining": 21,
+      "reportedCount": 125,
+      "missingCount": 34,
+      "reportedInputTokens": 441682,
+      "reportedOutputTokens": 59831
+    },
+    "note": "rescored; no additional live calls"
+  },
+  "secretsUnchanged": true,
+  "errors": [],
+  "ok": true,
+  "finishedAt": "2026-11-08T01:57:23.583448Z",
+  "rescoredFromWorkspace": true
+}

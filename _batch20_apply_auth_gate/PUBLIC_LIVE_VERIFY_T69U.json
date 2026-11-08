@@ -1,0 +1,49 @@
+{
+  "batch": "t69u",
+  "tip": "e81e87d17bee5947b9c1e333caddbcde835f56ba",
+  "verdict": "PASS",
+  "proofs": {
+    "ask": "mode=Ask confirmed → mid-run Stop → cancelAsk cancelled settle (same-tip reuse after prior live pass)",
+    "agent": "mode=Agent confirmed → discovery → real Approve-and-start → ≥2 task_delegated + first child_run_started → Stop → durable: no later child_run_started + no disk write"
+  },
+  "budget": {
+    "ledgerLimit": 1000,
+    "uniqueReservationIds": 302,
+    "reported": 218,
+    "missing": 74,
+    "reservedUnknown": 10,
+    "unknownRows": 84,
+    "estCnyReportedOnly_offPeakMiss": 1.3045,
+    "authorizedRmbCap": 10,
+    "cannotProveTotalIncludingUnknownLeq10": true,
+    "recharge": false,
+    "legacyGapSlots": 27,
+    "continuityClaim": "continuity_slots_not_original_id_restore"
+  },
+  "productChange": null,
+  "fullgate": "not required — tip locked, no product fix",
+  "merge": false,
+  "privateRaw": "not published",
+  "ledgerContinuityRepair": {
+    "uniqueReservationIds": 302,
+    "limit": 1000,
+    "claim": "continuity_slots_not_original_id_restore",
+    "legacyGapSlots": 27,
+    "audit": "_batch20_apply_auth_gate/LEDGER_CONTINUITY_RESTORE_T69U_AUDIT.json",
+    "at": "2026-11-08T08:04:58.270812+00:00"
+  },
+  "finalFreeze": {
+    "at": "2026-11-08T08:17:38.949312+00:00",
+    "launcherHead": "57167245b02dddddd70944f844a3b7b13658ff45",
+    "productTreeEquivalent": "e81e87d17bee5947b9c1e333caddbcde835f56ba",
+    "entryNomodelVerifyOk": true,
+    "ledgerUniqueIds": 302,
+    "limit": 1000,
+    "continuityClaim": "continuity_slots_not_original_id_restore",
+    "fullgate": "reusable e81e87d 494/2648 — not re-run",
+    "merge": false,
+    "newModelCalls": false
+  },
+  "t70u_fee_reconcile": "_batch20_apply_auth_gate/FEE_RECONCILE_READONLY_t70u.json",
+  "freezeStatus": "lifted_by_t70u_continue_remaining_work"
+}

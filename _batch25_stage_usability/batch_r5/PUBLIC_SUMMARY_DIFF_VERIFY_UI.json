@@ -1,0 +1,36 @@
+{
+  "probe": "electron_diff_verify_ui",
+  "headHint": "ff70bf2",
+  "coverage": {
+    "processStartIsolated": true,
+    "scriptedRuntimeSelected": true,
+    "agentMode": true,
+    "loginFileSelected": true,
+    "composerSend": true,
+    "intentApproveUi": true,
+    "continueClickedOnCard": true,
+    "sameRunAwaitingReview": true,
+    "diffPanelOpened": true,
+    "applied": false,
+    "verificationBadgePassed": false,
+    "verificationBadgeFailed": false,
+    "verificationBadgeNotRun": false,
+    "verificationToastSeen": false,
+    "runVerifyButtonSeen": false,
+    "timeoutAsTimedOutFieldNote": true,
+    "cancelNotVerificationBadgeNote": true,
+    "reviewOnlyVisible": true,
+    "applyBlockedByReviewOnly": true,
+    "verificationNotRunCopyVisible": true
+  },
+  "verificationStatusModel": "UI badges: passed/failed/not_run only. timeout→command timedOut/failed; cancel→run cancel copy, not verification badge.",
+  "dailyUserDataStable": true,
+  "errors": [],
+  "finishedAt": "2026-11-07T20:06:25.159Z",
+  "honestNotes": [
+    "Scripted Diff panel opened with visible copy: Diff 审核 / 将修改 1 个文件 / 仅供审阅 — 未经验证，无法应用 / 验证结果.",
+    "Scripted proposals are product-blocked from Apply (reviewOnlyReason: development stand-in), so post-apply verification_* badges cannot be exercised on scripted path.",
+    "DeepSeek same-run proposal also emitted verification_result status=not_run (Settings commands not auto-executed on this path); badge passed/failed still needs Apply + runVerification UI.",
+    "Schema Diff badges are only passed|failed|not_run; timeout is command.timedOut→failed; cancel is run-level copy, not verification_* badge."
+  ]
+}

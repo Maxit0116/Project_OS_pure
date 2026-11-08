@@ -15,7 +15,7 @@ const profile: ModelProfile = {
   name: "test",
   provider: "openai",
   model: "gpt-test",
-  apiKeyRef: "test",
+  apiKeyRef: "test-key",
   apiFormat: "openai_chat",
   isDefault: true,
 };

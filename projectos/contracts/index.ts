@@ -92,6 +92,7 @@ export * from "./ui-wireframe-pack.js";
 export * from "./reminder-graph.js";
 export * from "./product-lab.js";
 export * from "./first-principles.js";
+export * from "./features.js";
 export * from "./live-graph.js";
 export * from "./agent-pool-trace.js";
 export * from "./agent-workforce.js";

@@ -97,10 +97,11 @@ export class DurableRunStateStore {
     });
   }
 
-  /** A question nobody can answer any more (its run ended): mark it so it is not shown as waiting. */
+  /** Clear a pending wait without applying an answer (cancel / timeout / budget). */
   supersedeDecision(decisionId: string): RunDecision | null {
     const current = this.loadDecision(decisionId);
-    if (!current || current.status !== "pending") return current;
+    if (!current) return null;
+    if (current.status !== "pending") return cloneJson(current);
     return this.saveDecision({
       ...current,
       status: "superseded",

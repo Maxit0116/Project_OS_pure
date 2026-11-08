@@ -22,6 +22,36 @@ import type {
 
 export { deriveChatSessionTitle } from '@contracts/index'
 
+/** Fields chat-session persist helpers actually read (tests may pass a Pick). */
+export type ChatSessionSyncState = Pick<
+  WorkbenchState,
+  | 'messages'
+  | 'chatMode'
+  | 'composerDraft'
+  | 'globalAgentActive'
+  | 'selectedFilePath'
+  | 'selectedNodeId'
+  | 'pendingFileOwnerChoice'
+  | 'fileScopeError'
+  | 'graph'
+  | 'flowStatus'
+  | 'pendingRefinement'
+  | 'refinementConfirmed'
+  | 'refineLoading'
+  | 'activeRunId'
+  | 'latestAskTrace'
+  | 'pendingPlan'
+  | 'planConfirmed'
+  | 'latestPlanTrace'
+  | 'debugSession'
+  | 'agentFlowSubject'
+  | 'activeCustomModeSkillId'
+  | 'customModePreviousChatMode'
+  | 'activeAgentDefinitionId'
+  | 'conversationCheckpoints'
+  | 'latestContextAssembly'
+>
+
 export function resolvePersistedChatSessionTitle(
   existingHead: ChatSessionHead | undefined,
 ): string {
@@ -32,7 +62,7 @@ export function resolvePersistedChatSessionTitle(
   return existingHead.title.trim()
 }
 
-export function deriveChatSessionSubtitle(state: WorkbenchState): string | undefined {
+export function deriveChatSessionSubtitle(state: ChatSessionSyncState): string | undefined {
   if (
     state.globalAgentActive ||
     (!state.selectedNodeId &&
@@ -56,7 +86,7 @@ export function deriveChatSessionSubtitle(state: WorkbenchState): string | undef
   return summary.length <= 60 ? summary : `${summary.slice(0, 59)}…`
 }
 
-export function deriveChatSessionStatus(state: WorkbenchState): ChatSessionStatus {
+export function deriveChatSessionStatus(state: ChatSessionSyncState): ChatSessionStatus {
   if (state.flowStatus === 'awaiting_review') return 'awaiting_review'
   if (state.pendingIntent?.status === 'draft') return 'awaiting_review'
   if (state.pendingRefinement && !state.refinementConfirmed) return 'awaiting_review'
@@ -68,7 +98,7 @@ export function deriveChatSessionStatus(state: WorkbenchState): ChatSessionStatu
   return 'idle'
 }
 
-export function buildChatSessionSnapshot(state: WorkbenchState): ChatSessionSnapshot {
+export function buildChatSessionSnapshot(state: ChatSessionSyncState): ChatSessionSnapshot {
   return {
     pendingRefinement: state.pendingRefinement,
     refinementConfirmed: state.refinementConfirmed,
@@ -95,7 +125,7 @@ export function buildChatSessionSnapshot(state: WorkbenchState): ChatSessionSnap
 }
 
 export function buildChatSessionRecord(
-  state: WorkbenchState,
+  state: ChatSessionSyncState,
   sessionId: string,
   existingHead: ChatSessionHead | undefined,
 ): ChatSessionRecord {
@@ -173,13 +203,48 @@ export interface HydratedChatSessionState {
   pendingIntent: WorkbenchState['pendingIntent']
 }
 
+/**
+ * Persistable session modes include `team_memory`; the workbench chat surface
+ * still treats that as Ask (existing hydrate policy). Do not invent a new rail
+ * mode here — report first if product wants a distinct team_memory UI.
+ */
+function toWorkbenchChatMode(
+  mode: ChatSessionRecord['head']['chatMode'] | ChatSessionRecord['messages'][number]['chatMode'],
+): ChatMode | undefined {
+  if (!mode || mode === 'team_memory') {
+    return mode === 'team_memory' ? 'ask' : undefined
+  }
+  return mode
+}
+
+function toWorkbenchChatMessage(
+  message: ChatSessionRecord['messages'][number],
+): ChatMessage {
+  const chatMode = toWorkbenchChatMode(message.chatMode)
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    timestamp: message.timestamp,
+    ...(message.format ? { format: message.format } : {}),
+    ...(message.notice ? { notice: message.notice } : {}),
+    ...(message.attachments ? { attachments: message.attachments } : {}),
+    ...(message.invokedSkillId ? { invokedSkillId: message.invokedSkillId } : {}),
+    ...(message.explorationTrace ? { explorationTrace: message.explorationTrace } : {}),
+    ...(message.retrievalSummary ? { retrievalSummary: message.retrievalSummary } : {}),
+    ...(message.checkpointId ? { checkpointId: message.checkpointId } : {}),
+    ...(chatMode ? { chatMode } : {}),
+  }
+}
+
 export function hydrateChatSessionState(record: ChatSessionRecord): HydratedChatSessionState {
   const snapshot = record.snapshot
   const previousMode = snapshot?.customModePreviousChatMode
+  const headMode = toWorkbenchChatMode(record.head.chatMode) ?? 'ask'
   return {
-    messages: record.messages,
+    messages: record.messages.map(toWorkbenchChatMessage),
     composerDraft: record.draftComposer ?? emptyComposerDraft(record.draftInput ?? ''),
-    chatMode: record.head.chatMode === 'team_memory' ? 'ask' : record.head.chatMode,
+    chatMode: headMode,
     pendingRefinement: snapshot?.pendingRefinement ?? null,
     refinementConfirmed: snapshot?.refinementConfirmed ?? false,
     pendingPlan: snapshot?.pendingPlan ?? null,

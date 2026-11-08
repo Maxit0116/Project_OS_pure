@@ -1138,6 +1138,7 @@ const en = {
     diffStale: 'The file changed after this change was prepared, so it can no longer be applied. Ask again so the change is prepared on the current file.',
     debugTargetUnresolved: 'Project OS could not tell which file to fix. Select the file (or the feature it belongs to) in the tree, then start the debug session again.',
     modelOutputInvalid: 'The model replied in a form Project OS could not use, even after one retry. Nothing was changed. Try again, or pick another model in Settings → Models.',
+    operationCancelled: 'Stopped — nothing was written. You can send a new request when ready.',
     providerRejectedKey: 'The model provider rejected the API key (HTTP {status}). Check the key in Settings → Models.',
     providerPaymentRequired: 'The model provider says the account has insufficient balance (HTTP {status}). Top up the account or use another key.',
     providerNotFound: 'The model provider could not find that model or endpoint (HTTP {status}). Check the model name and Base URL in Settings → Models.',
@@ -1215,6 +1216,7 @@ const en = {
     automaticApplyPassed: '**Changed and verified:** {count} file(s) · verification passed',
     automaticApplyFailed: '**Changed, but verification failed:** {count} file(s) · you can undo this change in Diff review',
     automaticApplyNotRun: '**Changed, not verified:** {count} file(s) · verification has not run (none is configured, or it is waiting for your approval), so nothing was checked',
+    automaticApplyUndone: '**Changes undone:** {count} file(s) restored from backup · previous “applied” status no longer applies',
     refining: 'Refining prompt…',
     welcomeMessage: 'Select a node or file. Use Ask for questions, or switch to Agent when you want to edit a file.',
     resetMessage: 'Demo reset complete. Select a feature to begin.',
@@ -2590,6 +2592,11 @@ const en = {
   diff: {
     title: 'Diff Review',
     reviewOnly: 'Review only — not validated, cannot be applied',
+    validatingProposal: 'Proposal generated — independent validation still running; Apply stays blocked until validation finishes',
+    awaitingParentBatchValidation:
+      'Child proposal is ready for preview — Apply stays blocked until parent batch validation completes',
+    applyBlockedAfterCancel:
+      'Run was cancelled — Apply stays blocked even if a late parent batch validation arrives',
     unmetTitle: 'The independent review says this change does not meet:',
     unmetHint: 'Nothing has been written yet. Read the change, then apply it anyway or reword your request.',
     applyAnyway: 'Apply anyway',
@@ -3379,6 +3386,7 @@ const en = {
     groups: {
       presentation: 'Presentation',
       execution: 'Execution',
+      verification: 'Verification commands',
       power: 'Power',
     },
     saved: 'Settings saved',
@@ -3432,6 +3440,16 @@ const en = {
     changeExecutionPolicyDesc: 'Automatic applies validated changes immediately; review-first waits for your approval.',
     changePolicyAutomatic: 'Automatic (recommended)',
     changePolicyReviewFirst: 'Review before applying',
+    verificationHelp:
+      'Project verification commands run after an applied change. Diff review still asks you to approve the exact command set before execution.',
+    verificationEmpty: 'No verification commands configured yet.',
+    verificationCommand: 'Command',
+    verificationArgs: 'Arguments',
+    verificationTimeout: 'Timeout (ms)',
+    verificationAdd: 'Add command',
+    verificationRemove: 'Remove',
+    verificationCommandRequired: 'Each verification command needs a non-empty executable name.',
+    verificationTimeoutInvalid: 'Timeout must be between 100 and 300000 ms.',
     chatModeSwitch: 'Mode switch behavior',
     chatModeSwitchDesc: 'Cursor-like default: Ask / Plan / Agent / Debug can share one chat so turn history stays continuous.',
     chatModeSwitchNewSession: 'New chat on mode switch',
@@ -3570,7 +3588,7 @@ const en = {
     notifyOnPendingDecision: 'Notify when a run needs a decision',
     notifyOnPendingDecisionDesc:
       'Alert when a run pauses for your input. Opening the alert shows the recorded decision; it never approves it.',
-    notificationsSummary: 'Agent, decision and Reminder alerts',
+    notificationsSummary: 'Agent, Reminder, and decision alerts',
     notificationsOff: 'Off',
     gesture: {
       showCursor: 'Show hand pointer',

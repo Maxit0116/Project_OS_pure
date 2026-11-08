@@ -112,6 +112,11 @@ import {
   handleRunEvent,
   type FlowCorrection,
 } from './handleRunEvent'
+import {
+  delegatedParentBatchAllowsApply,
+  hasAuthorizingParentBatchValid,
+  isApplyAuthorizationRevoked,
+} from './parentBatchApplyAuthorization'
 import { createWorkbenchClient } from '../data/workbenchClient'
 import { enrichGeneratedDiffFiles } from '../components/DiffReview/resolveDiffFileContent'
 import { computeDiffFileStats } from '../components/PendingChangesDrawer/diffFileStats'
@@ -288,11 +293,13 @@ export type AgentFlowSubject = 'ask' | 'run' | 'plan' | 'debug'
 export type LatestAskTrace =
   | { status: 'running'; scope: AgentConversationScope }
   | { status: 'complete'; scope: AgentConversationScope; result: AgentAnswerResult }
+  | { status: 'cancelled'; scope: AgentConversationScope }
   | { status: 'error'; scope: AgentConversationScope; message: string }
 export type LatestPlanTrace =
   | { status: 'running'; scope: AgentConversationScope }
   | { status: 'complete'; scope: AgentConversationScope; result: import('@contracts/index').ImplementationPlan }
   | { status: 'needs_clarification'; scope: AgentConversationScope; result: import('@contracts/index').ImplementationPlan }
+  | { status: 'cancelled'; scope: AgentConversationScope }
   | { status: 'error'; scope: AgentConversationScope; message: string }
 export type { FlowCorrection } from './handleRunEvent'
 
@@ -673,7 +680,7 @@ export interface WorkbenchState {
   delegatedRunTraces: Record<string, DelegatedRunTrace>
   flowTransientTraces: AgentTransientTrace[]
   flowCorrections: FlowCorrection[]
-  flowStatus: 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error' | 'interrupted'
+  flowStatus: 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error' | 'cancelled' | 'interrupted'
   /** Live Graph overlay driven by run events (see Live-Graph Dev Plan Phase 1). */
   executionOverlay: import('@contracts/index').ExecutionOverlay | null
   /** Phase 2: focus a task/phase so only its nodes and execution edges stay emphasized. */
@@ -683,6 +690,8 @@ export interface WorkbenchState {
   diffReady: boolean
   /** Set when the run's proposal can be reviewed but not applied (no independent validation). */
   diffReviewOnlyReason: string | null
+  /** Run ids whose Apply auth was revoked (cancel/interrupt); late valid must not unlock. */
+  revokedApplyRunIds: string[]
   /** Requirements the independent review says a held change does not meet; Apply becomes "apply anyway". */
   diffUnmetRequirements: UnmetRequirement[]
   generatedDiff: GeneratedDiff | null
@@ -796,7 +805,7 @@ export interface WorkbenchState {
   dismissPendingChanges: () => void
   undoAllPendingChanges: () => Promise<void>
   navigateFromAgentNotification: (
-    destination: 'ask' | 'diff' | 'decisions' | 'reminder',
+    destination: 'ask' | 'diff' | 'reminder' | 'decisions',
     runId?: string,
     decisionId?: string,
   ) => Promise<void>
@@ -1232,6 +1241,7 @@ export async function reconcileStaleFlowStatus(
     const run = await client.getAgentRun(activeRunId)
     if (run.status === 'running' || run.status === 'queued') return 'running'
     if (run.status === 'awaiting_review') return 'awaiting_review'
+    if (run.status === 'cancelled') return 'cancelled'
     if (run.status === 'error') return 'error'
     // These used to fall through to "complete", which told a person an interrupted or stopped run had finished.
     if (run.status === 'interrupted') return 'interrupted'
@@ -1267,6 +1277,14 @@ function isStructureScanCancellation(error: unknown): boolean {
   if (code === 'operation_cancelled') return true
   const message = error instanceof Error ? error.message : ''
   return /structure map generation was cancelled|operation_cancelled/i.test(message)
+}
+
+function isOperationCancelled(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const code = 'code' in error ? String((error as { code?: unknown }).code ?? '') : ''
+  if (code === 'operation_cancelled') return true
+  const message = error instanceof Error ? error.message : String(error)
+  return /operation_cancelled|Model request cancelled/i.test(message)
 }
 
 function ensureBuffer(buffers: Record<string, string>, path: string): Record<string, string> {
@@ -1673,6 +1691,7 @@ const initialTransientState = {
   liveGraphPausedRunId: null as string | null,
   diffReady: false,
   diffReviewOnlyReason: null,
+  revokedApplyRunIds: [] as string[],
   diffUnmetRequirements: [],
   generatedDiff: null as GeneratedDiff | null,
   applyResult: null as ApplyResult | null,
@@ -3069,11 +3088,26 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   stopAgentRun: async () => {
-    const { client, activeRunId, flowStatus, refineLoading, pushToast, locale, executionOverlay, graph } =
-      get()
+    const {
+      client,
+      project,
+      activeRunId,
+      flowStatus,
+      refineLoading,
+      latestAskTrace,
+      latestPlanTrace,
+      pushToast,
+      locale,
+      executionOverlay,
+      graph,
+    } = get()
     if (!activeRunId && flowStatus !== 'running' && !refineLoading) return
 
     const runId = activeRunId
+    const askWasRunning = refineLoading && latestAskTrace?.status === 'running'
+    const askScope = askWasRunning ? latestAskTrace.scope : null
+    const planWasRunning = refineLoading && latestPlanTrace?.status === 'running'
+    const planScope = planWasRunning ? latestPlanTrace.scope : null
     disposeActiveRunSubscriptions(get, set)
     const settledOverlay =
       runId && executionOverlay?.runId === runId
@@ -3093,6 +3127,23 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       refineLoading: false,
       activeRunId: null,
       executionOverlay: settledOverlay,
+      ...(askWasRunning && askScope
+        ? { latestAskTrace: { status: 'cancelled' as const, scope: askScope } }
+        : {}),
+      ...(planWasRunning && planScope
+        ? { latestPlanTrace: { status: 'cancelled' as const, scope: planScope } }
+        : {}),
+      ...(runId
+        ? {
+            revokedApplyRunIds: [
+              ...new Set([...(get().revokedApplyRunIds ?? []), runId]),
+            ],
+            diffReviewOnlyReason: getStoreMessage(
+              locale,
+              'diff.applyBlockedAfterCancel',
+            ),
+          }
+        : {}),
     })
 
     if (client && runId && typeof client.cancelAgentRun === 'function') {
@@ -3100,6 +3151,14 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         await client.cancelAgentRun(runId)
       } catch (error) {
         console.error('[workbench] cancelAgentRun failed', error)
+      }
+    }
+    // Ask / intent-discovery cannot pass AbortSignal over IPC — abort on the main process.
+    if (client && project && refineLoading && typeof client.cancelAsk === 'function') {
+      try {
+        await client.cancelAsk(project.projectId)
+      } catch (error) {
+        console.error('[workbench] cancelAsk failed', error)
       }
     }
 
@@ -3661,6 +3720,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
         })
+        if (get().latestAskTrace?.status === 'cancelled') {
+          set({ refineLoading: false })
+          return
+        }
         set((current) => ({
           refineLoading: false,
           lastAnchoredAnswer: { answer: answer.answer, recorded: false },
@@ -3683,6 +3746,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         }))
         notifyMemoryWrite(pushToast, get().locale, answer.memoryWrite)
       } catch (error) {
+        if (isOperationCancelled(error) || get().latestAskTrace?.status === 'cancelled') {
+          set({
+            refineLoading: false,
+            latestAskTrace: { status: 'cancelled', scope: askScope },
+          })
+          return
+        }
         set({
           refineLoading: false,
           latestAskTrace: {
@@ -3751,6 +3821,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
         })
+        if (get().latestAskTrace?.status === 'cancelled') {
+          set({ refineLoading: false })
+          return
+        }
         set((current) => ({
           refineLoading: false,
           latestAskTrace: {
@@ -3789,11 +3863,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         }))
         get().maybeNotifyAgentComplete({
           kind: 'ask',
+          // System notify IPC requires non-empty runIds; reuse answer id as the ask handle.
+          runId: answer.id,
           summary: truncateDiffReadySummary(visiblePrompt),
           completedAt: Date.now(),
         })
         notifyMemoryWrite(pushToast, get().locale, answer.memoryWrite)
       } catch (error) {
+        if (isOperationCancelled(error) || get().latestAskTrace?.status === 'cancelled') {
+          set({
+            refineLoading: false,
+            latestAskTrace: { status: 'cancelled', scope: askScope },
+          })
+          return
+        }
         const ownershipFailure = readFileOwnershipFailure(error)
         if (selectedFilePath && ownershipFailure?.code === 'ownership_ambiguous') {
           set({
@@ -3868,6 +3951,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
         }))
+        if (
+          get().latestPlanTrace?.status === 'cancelled' ||
+          !get().refineLoading
+        ) {
+          set({ refineLoading: false })
+          return
+        }
         if (plan.status === 'needs_clarification') {
           const questions = plan.clarifyingQuestions ?? []
           const questionText = questions.length
@@ -3906,6 +3996,17 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           })
         }
       } catch (error) {
+        if (
+          isOperationCancelled(error) ||
+          get().latestPlanTrace?.status === 'cancelled' ||
+          !get().refineLoading
+        ) {
+          set({
+            refineLoading: false,
+            latestPlanTrace: { status: 'cancelled', scope: planScope },
+          })
+          return
+        }
         set((current) => ({
           refineLoading: false,
           latestPlanTrace: {
@@ -4002,12 +4103,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ...composerFieldsWithMode,
           executorSelection,
         })
+        // Drop late intent if Stop already cleared the in-flight turn.
+        if (!get().refineLoading) {
+          return
+        }
         set({
           pendingIntent: intent,
           rightPanelTab: 'chat',
           refineLoading: false,
         })
       } catch (error) {
+        if (isOperationCancelled(error) || !get().refineLoading) {
+          set({ refineLoading: false })
+          return
+        }
         set({
           refineLoading: false,
           error: errorMessage(error, 'Failed to prepare request intent'),
@@ -4057,6 +4166,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         ...chatSessionRequestFields(),
         ...composerFieldsWithMode,
       })
+      // Drop late refine if Stop already cleared the in-flight turn.
+      if (!get().refineLoading) {
+        return
+      }
       set((state) => ({
         pendingRefinement: refinement,
         rightPanelTab: 'chat',
@@ -4084,6 +4197,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         set({ pendingRefinement: null })
       }
     } catch (err) {
+      if (isOperationCancelled(err) || !get().refineLoading) {
+        set({ refineLoading: false })
+        return
+      }
       set({
         refineLoading: false,
         error: errorMessage(err, 'Failed to refine prompt'),
@@ -4133,6 +4250,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         agentFlowSubject: 'run',
         diffReady: false,
         diffReviewOnlyReason: null,
+        revokedApplyRunIds: [],
         diffUnmetRequirements: [],
         generatedDiff: null,
         applyResult: null,
@@ -4158,6 +4276,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       }
 
       const handledRunEventIds = new Set<string>()
+      /** Snapshot watermark — live events with runSequence <= this are ignored (DevPlan §7.4). */
+      let snapshotWatermark: number | null = null
       let lastDecisionRefreshAt = 0
       const refreshRunDecisionsIfDue = () => {
         const rootRunId = run.rootRunId ?? run.runId
@@ -4168,12 +4288,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         lastDecisionRefreshAt = now
         void get().loadRunDecisions(rootRunId)
       }
-      /** Snapshot watermark — live events with runSequence <= this are ignored (DevPlan §7.4). */
-      let snapshotWatermark: number | null = null
-      const applyRunEvent = (event: AgentRunEvent) => {
+      const applyRunEvent = (
+        event: AgentRunEvent,
+        options?: { fromSnapshot?: boolean },
+      ) => {
         if (!isCurrentRunSubscription()) return
         if (handledRunEventIds.has(event.eventId)) return
+        // Live-only filter (Agent-Pool §7.4): after a snapshot is applied, ignore
+        // overlapping live deliveries. Snapshot events themselves must still apply.
         if (
+          !options?.fromSnapshot &&
           typeof event.runSequence === 'number' &&
           snapshotWatermark != null &&
           event.runSequence <= snapshotWatermark
@@ -4273,7 +4397,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
               const overlayBase =
                 current.executionOverlay ??
                 emptyExecutionOverlay(rootRunId, childEvent.timestamp)
-              return {
+              const next: Partial<WorkbenchState> = {
                 delegatedRunTraces: {
                   ...current.delegatedRunTraces,
                   [childRunId]: {
@@ -4288,7 +4412,44 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
                   fileIndex,
                 ),
               }
+              // Child preview must not re-block Apply after the parent batch already
+              // unlocked (late/replayed child events race past batch_validation_result).
+              const parentBatchUnlocked = hasAuthorizingParentBatchValid({
+                activeRunId: current.activeRunId ?? rootRunId,
+                flowActions: current.flowActions ?? [],
+              })
+              const applyRevoked = isApplyAuthorizationRevoked({
+                activeRunId: current.activeRunId ?? rootRunId,
+                revokedApplyRunIds: current.revokedApplyRunIds,
+                flowStatus: current.flowStatus,
+              })
+              if (childEvent.type === 'diff_proposed') {
+                if (!parentBatchUnlocked && !applyRevoked) {
+                  next.diffReviewOnlyReason = getStoreMessage(
+                    current.locale,
+                    'diff.validatingProposal',
+                  )
+                }
+                next.centerTab = 'code'
+                next.codeSubTab = 'diff'
+              }
+              if (childEvent.type === 'diff_ready') {
+                // Preview OK; Apply stays blocked until parent batch_validation_result
+                // is valid — child validation alone must not authorize group apply.
+                if (!parentBatchUnlocked && !applyRevoked) {
+                  next.diffReviewOnlyReason = getStoreMessage(
+                    current.locale,
+                    'diff.awaitingParentBatchValidation',
+                  )
+                }
+                next.centerTab = 'code'
+                next.codeSubTab = 'diff'
+              }
+              return next
             })
+            if (childEvent.type === 'diff_proposed' || childEvent.type === 'diff_ready') {
+              void get().loadDiff(childRunId)
+            }
             refreshRunDecisionsIfDue()
             if (childEvent.type === 'task_delegated') {
               ensureChildSubscription(childEvent, childRunId, rootRunId)
@@ -4322,11 +4483,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         try {
           const snapshot = await client.getAgentRunEventSnapshot(run.runId)
           if (!isCurrentRunSubscription()) return
-          snapshotWatermark = snapshot.watermark
-          if (snapshot.events.length === 0) return
+          // Apply snapshot first, then raise watermark — never the reverse.
+          // Fast synthetic/model runs finish before live subscribe; reversing
+          // left flowStatus stuck on "running" with an empty Diff panel.
           for (const event of snapshot.events) {
-            applyRunEvent(event as AgentRunEvent)
+            applyRunEvent(event as AgentRunEvent, { fromSnapshot: true })
           }
+          snapshotWatermark = snapshot.watermark
         } catch (error) {
           // Fallback for older transports / partial mocks.
           try {
@@ -4443,7 +4606,23 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     try {
       const refinement = await client.buildPlan(pendingPlan.id)
       if (!isCurrentBuild()) return
-      set({ pendingRefinement: refinement, refinementConfirmed: false })
+      // buildPlan still returns PromptRefinement; surface model→deterministic
+      // fallback the same way the legacy refinePrompt path did (redacted system line).
+      set((current) => ({
+        pendingRefinement: refinement,
+        refinementConfirmed: false,
+        messages: refinement.fallback
+          ? [...current.messages, createFallbackChatMessage(refinement.fallback, current.locale)]
+          : current.messages,
+      }))
+      if (refinement.fallback) {
+        pushToast({
+          type: 'warning',
+          message: sanitizeErrorMessage(
+            refinement.fallback.providerMessage ?? refinement.fallback.message,
+          ),
+        })
+      }
       let started = false
       await get().confirmRefinement(undefined, () => {
         if (!isCurrentBuild()) return
@@ -5106,6 +5285,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         liveGraphPausedRunId: null,
       diffReady: false,
       diffReviewOnlyReason: null,
+      revokedApplyRunIds: [],
       diffUnmetRequirements: [],
       generatedDiff: null,
       applyResult: null,
@@ -5278,10 +5458,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   loadDiff: async (requestedRunId) => {
-    const { client, activeRunId, project, editorBuffers, locale } = get()
+    const { client, activeRunId, project, editorBuffers, locale, delegatedRunTraces } = get()
     const targetRunId = requestedRunId ?? activeRunId
     if (!targetRunId) return
-    if (targetRunId !== activeRunId) {
+    // Parent activeRunId normally owns the UI; allow an explicitly requested
+    // delegated child so diff_proposed/diff_ready previews are not dropped.
+    if (
+      targetRunId !== activeRunId &&
+      !Object.prototype.hasOwnProperty.call(delegatedRunTraces, targetRunId)
+    ) {
       return
     }
     try {
@@ -5301,10 +5486,30 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         current.activeRunId !== activeRunId ||
         current.project?.projectId !== project?.projectId
       ) return
+      const hasDelegatedChildren =
+        Object.keys(current.delegatedRunTraces ?? {}).length > 0 ||
+        (current.flowDelegationEvents ?? []).some((event) => event.type === 'task_delegated')
+      const parentAllowsApply = current.activeRunId
+        ? delegatedParentBatchAllowsApply({
+            activeRunId: current.activeRunId,
+            hasDelegatedChildren,
+            flowActions: current.flowActions ?? [],
+            revokedApplyRunIds: current.revokedApplyRunIds,
+            flowStatus: current.flowStatus,
+          }).allowed
+        : false
       set({
         generatedDiff: { ...generatedDiff, files: enrichedFiles },
         diffFileStats,
         error: null,
+        // Heal sticky review-only only for delegated parents whose batch already
+        // unlocked Apply (late child diff_ready race). Never clear leaf/non-delegated
+        // validatingProposal — loadDiff runs on diff_proposed before validation finishes.
+        ...(hasDelegatedChildren &&
+        parentAllowsApply &&
+        current.diffReviewOnlyReason
+          ? { diffReviewOnlyReason: null }
+          : {}),
         ...(targetRunId !== pendingChangesDrawerDismissedRunId
           ? { pendingChangesDrawerExpanded: true }
           : {}),
@@ -5348,11 +5553,53 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   applyCurrentDiff: async (options) => {
-    const { client, project, activeRunId, generatedDiff, editorBuffers, pushToast, locale, selectedNodeId, diffReviewOnlyReason } = get()
+    const {
+      client,
+      project,
+      activeRunId,
+      generatedDiff,
+      editorBuffers,
+      pushToast,
+      locale,
+      selectedNodeId,
+      diffReviewOnlyReason,
+      delegatedRunTraces,
+      flowDelegationEvents,
+      flowActions,
+      flowStatus,
+      revokedApplyRunIds,
+    } = get()
     if (!project || !activeRunId) return
-    if (diffReviewOnlyReason) {
-      pushToast({ type: 'warning', message: diffReviewOnlyReason })
+    const hasDelegatedChildren =
+      Object.keys(delegatedRunTraces ?? {}).length > 0 ||
+      (flowDelegationEvents ?? []).some((event) => event.type === 'task_delegated')
+    const auth = delegatedParentBatchAllowsApply({
+      activeRunId,
+      hasDelegatedChildren,
+      flowActions: flowActions ?? [],
+      revokedApplyRunIds,
+      flowStatus,
+    })
+    if (!auth.allowed) {
+      const message = getStoreMessage(
+        locale,
+        auth.reason === 'revoked'
+          ? 'diff.applyBlockedAfterCancel'
+          : 'diff.awaitingParentBatchValidation',
+      )
+      pushToast({ type: 'warning', message: diffReviewOnlyReason ?? message })
+      set({ diffReviewOnlyReason: message })
       return
+    }
+    if (diffReviewOnlyReason) {
+      // Delegated parent already batch-authorized: clear sticky review-only left by a
+      // late/replayed child diff_ready. Leaf/non-delegated validatingProposal must block.
+      if (hasDelegatedChildren) {
+        set({ diffReviewOnlyReason: null })
+      } else {
+        pushToast({ type: 'warning', message: diffReviewOnlyReason })
+        return
+      }
     }
     try {
       // "Apply anyway" is its own server call: the ordinary Apply is refused for a change the review
@@ -5365,11 +5612,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         client.getSemanticTree(project.projectId),
         client.getCurrentWork(project.projectId),
       ])
-      if (
-        get().project?.projectId !== project.projectId ||
-        get().activeRunId !== activeRunId
-      ) return
-      const bounceIds = selectedNodeId ? [selectedNodeId] : []
+      // Disk may already be written. Never drop applyResult just because the user
+      // (or a child loadDiff) changed activeRunId during the await — Undo needs it.
+      if (get().project?.projectId !== project.projectId) return
+      const stillOnAppliedRun = get().activeRunId === activeRunId
+      const bounceIds = stillOnAppliedRun && selectedNodeId ? [selectedNodeId] : []
       pushToast({
         type: 'success',
         message: getStoreMessage(locale, 'toast.applySuccess', { count: applyResult.filesChanged.length }),
@@ -5419,27 +5666,33 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           diffUnmetRequirements: [],
           verificationResult: null,
           verificationCommandApproval: null,
-          currentWork,
-          graph,
-          tree,
-          editorBuffers: generatedDiff
-            ? applyDiffToBuffers(editorBuffers, generatedDiff)
-            : editorBuffers,
-          editorSavedBuffers: generatedDiff
-            ? applyDiffToBuffers(current.editorSavedBuffers, generatedDiff)
-            : current.editorSavedBuffers,
-          flowStatus: 'complete' as const,
-          bouncingNodeIds: bounceIds,
+          ...(stillOnAppliedRun
+            ? {
+                currentWork,
+                graph,
+                tree,
+                editorBuffers: generatedDiff
+                  ? applyDiffToBuffers(editorBuffers, generatedDiff)
+                  : editorBuffers,
+                editorSavedBuffers: generatedDiff
+                  ? applyDiffToBuffers(current.editorSavedBuffers, generatedDiff)
+                  : current.editorSavedBuffers,
+                flowStatus: 'complete' as const,
+                bouncingNodeIds: bounceIds,
+              }
+            : {}),
           conversationCheckpoints: checkpoints,
           messages,
         }
       })
-      if (generatedDiff) {
+      if (stillOnAppliedRun && generatedDiff) {
         for (const file of generatedDiff.files) {
           void useFileTimelineStore.getState().refresh(file.path)
         }
       }
-      setTimeout(() => set({ bouncingNodeIds: [] }), 600)
+      if (stillOnAppliedRun) {
+        setTimeout(() => set({ bouncingNodeIds: [] }), 600)
+      }
       scheduleChatSessionPersist()
     } catch (err) {
       // The change was held for unmet requirements and the screen did not know (the run was opened
@@ -5449,6 +5702,36 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       if (refused) {
         const unmet = unmetRequirementsFromMessage(err instanceof Error ? err.message : '')
         if (unmet.length > 0) set({ diffUnmetRequirements: unmet })
+      }
+      // Disk+backup may already be committed when post-apply verification throws.
+      // Recover parent applyResult from persisted apply_result so DOM Undo stays linked.
+      try {
+        if (get().project?.projectId === project.projectId) {
+          const events = await client.getAgentRunEvents(activeRunId)
+          const applyEvt = [...events].reverse().find((event) => event.type === 'apply_result')
+          const payload = applyEvt && applyEvt.type === 'apply_result' ? applyEvt.payload : null
+          if (
+            payload &&
+            payload.outcome === 'applied' &&
+            typeof payload.backupId === 'string' &&
+            payload.backupId.length > 0
+          ) {
+            set({
+              applyResult: {
+                runId: activeRunId,
+                applied: true,
+                filesChanged: Array.isArray(payload.filesWritten) ? payload.filesWritten : [],
+                verificationStatus: 'not_run',
+                outcome: 'applied',
+                backupId: payload.backupId,
+              },
+              error: errorMessage(err, 'Failed to apply diff'),
+            })
+            return
+          }
+        }
+      } catch {
+        /* fall through to surface the original apply error */
       }
       set({ error: errorMessage(err, 'Failed to apply diff') })
     }
@@ -5541,7 +5824,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   undoCurrentApply: async () => {
-    const { client, project, applyResult, generatedDiff, editorBuffers, pushToast, locale } = get()
+    const {
+      client,
+      project,
+      applyResult,
+      generatedDiff,
+      editorBuffers,
+      messages,
+      pushToast,
+      locale,
+    } = get()
     if (!project || !applyResult?.backupId) return
     set({ undoLoading: true })
     try {
@@ -5555,6 +5847,22 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       for (const file of generatedDiff?.files ?? []) {
         if (file.before !== undefined) nextBuffers[file.path] = file.before
       }
+      const undoneRunId = applyResult.runId
+      const fileCount = applyResult.filesChanged.length
+      const undoneMessageId = `automatic_apply_${undoneRunId}`
+      const undoneContent = getStoreMessage(locale, 'chat.automaticApplyUndone', {
+        count: fileCount,
+      })
+      const nextMessages = messages.map((message) =>
+        message.id === undoneMessageId
+          ? {
+              ...message,
+              content: undoneContent,
+              timestamp: new Date().toISOString(),
+            }
+          : message,
+      )
+      const hasUndoneMessage = nextMessages.some((message) => message.id === undoneMessageId)
       set({
         applyResult: null,
         verificationResult: null,
@@ -5563,6 +5871,18 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         currentWork,
         editorBuffers: nextBuffers,
         editorSavedBuffers: nextBuffers,
+        messages: hasUndoneMessage
+          ? nextMessages
+          : [
+              ...nextMessages,
+              {
+                id: undoneMessageId,
+                role: 'assistant' as const,
+                content: undoneContent,
+                format: 'markdown' as const,
+                timestamp: new Date().toISOString(),
+              },
+            ],
       })
       for (const file of generatedDiff?.files ?? []) {
         void useFileTimelineStore.getState().refresh(file.path)

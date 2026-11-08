@@ -25,9 +25,9 @@ export type EnsureDiagramDesignSkillPackOptions = {
   /** Local mirror of skills/diagram-design (optional offline source). */
   vendorRoot?: string | undefined;
   /** Override fetch for tests. */
-  fetchImpl?: typeof fetch;
+  fetchImpl?: typeof fetch | undefined;
   /** Skip network; only vendor/fixture. */
-  offline?: boolean;
+  offline?: boolean | undefined;
 };
 
 function skillStatus(workspaceRoot: string): DiagramSkillPackStatus {

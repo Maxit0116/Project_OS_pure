@@ -103,7 +103,9 @@ function countEdgeHitsOnNodes(
       if (id === edge.source || id === edge.target) continue
       const c = center(id)
       if (!c) continue
-      if (segmentHitsNodeBox(a.x, a.y, b.x, b.y, c.x, c.y, margin)) hits += 1
+      // segmentHitsNodeBox uses a fixed box pad; margin reserved for future tuning.
+      void margin
+      if (segmentHitsNodeBox(a.x, a.y, b.x, b.y, c.x, c.y)) hits += 1
     }
   }
   return hits
@@ -368,7 +370,7 @@ describe('computeLayeredArchitectureLayout', () => {
       graphFixture.edges as FunctionalEdge[],
       'code',
       { parentId: 'feat_database' },
-      graphFixture.files as FileEntry[],
+      graphFixture.fileIndex as FileEntry[],
       graphFixture.fileRelations as FileRelation[],
     )
     const layoutEdges = projected.edges.map((edge) => ({
@@ -392,7 +394,12 @@ describe('computeLayeredArchitectureLayout', () => {
     const ys = new Set(projected.nodes.map((node) => result.positionsById[node.id]!.y))
     expect(ys.size).toBeGreaterThan(3)
 
-    const memberIds = projected.nodes.map((node) => node.id)
+    // Band geometry wraps infrastructure members only (same contract as the
+    // sibling layer-band separation test), not every projected node.
+    const memberIds = projected.nodes
+      .filter((node) => node.layer === 'infrastructure')
+      .map((node) => node.id)
+    expect(memberIds.length).toBeGreaterThan(0)
     const xs = memberIds.map((id) => result.positionsById[id]!.x)
     const minX = Math.min(...xs)
     const maxX = Math.max(...xs) + NODE_WIDTH

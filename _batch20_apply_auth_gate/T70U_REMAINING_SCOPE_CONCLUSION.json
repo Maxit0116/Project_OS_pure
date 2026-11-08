@@ -1,0 +1,36 @@
+{
+  "at": "2026-11-08T08:32:40.091469+00:00",
+  "t70u": "Terran 16:28 continue remaining original-scope work — freeze lifted",
+  "alreadyComplete_doNotRedo": [
+    "e81e87d product tip + fullgate 494/2648 all 0",
+    "t69 live Ask cancelAsk cancelled settle",
+    "t69 live Agent ≥2 task_delegated + first child_run_started Stop + no later child/disk write",
+    "launcher HEAD lock + no-CDP entry verify",
+    "ledger LIMIT 1000 + continuity 27 legacy slots → 302 unique ids"
+  ],
+  "fixableOriginalScopeThisPass": [
+    "stale delivery docs claiming live proofs still blocked / rem0 / reserved 275",
+    "active ledger git-checkout wipe risk (operational protect via skip-worktree + assert script)",
+    "readonly fee reconcile vs official flash rates + existing gateway logs (no new paid calls)"
+  ],
+  "notCodeable_needTerranDecisionOrExternal": [
+    {
+      "item": "prove total RMB including 84 unknown ≤ ~¥10",
+      "need": "provider billing export or accept reported-only band + unknown residual"
+    },
+    {
+      "item": "cross-vendor live",
+      "need": "explicit new vendor credentials authorization"
+    },
+    {
+      "item": "human UX acceptance on frozen launcher",
+      "need": "Terran manual session"
+    }
+  ],
+  "explicitlyNotOpening": [
+    "global Ask-loop",
+    "native SSE",
+    "new product roadmap items from progress.md S4+/H3 mid-run question"
+  ],
+  "productCodeChangesThisPass": false
+}

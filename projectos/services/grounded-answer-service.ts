@@ -80,6 +80,8 @@ export interface GroundedAnswerInput {
   instructionAppendix?: string;
   images?: Array<{ mimeType: "image/png" | "image/jpeg"; base64: string }>;
   mcp?: GroundedAnswerMcpOptions;
+  /** When aborted (Ask Stop), gateway must settle cancelled and stop HTTP/retries. */
+  signal?: AbortSignal;
 }
 
 export interface GroundedAnswerOutput {
@@ -177,6 +179,12 @@ export class GroundedAnswerService {
       ...(input.images?.length ? { images: input.images } : {}),
     };
 
+    if (input.signal?.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
     const mcpToolCalls: AskMcpToolCall[] = [];
     const response = input.mcp?.tools.length
       ? await this.gateway.completeWithTools(input.profile, request, {
@@ -189,8 +197,13 @@ export class GroundedAnswerService {
           onToolCall: (event) => {
             mcpToolCalls.push(toAskMcpToolCall(event));
           },
+          ...(input.signal ? { signal: input.signal } : {}),
         })
-      : await this.gateway.complete(input.profile, request);
+      : await this.gateway.complete(
+          input.profile,
+          request,
+          input.signal ? { signal: input.signal } : undefined,
+        );
 
     const answer = redactText(response.output, "secrets_and_paths").trim();
     const reasoning = response.reasoning

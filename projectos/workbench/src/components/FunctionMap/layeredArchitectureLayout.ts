@@ -158,7 +158,11 @@ function separateNodeBoxFromEdge(
   const corridorHalf = NODE_WIDTH / 2 + NUDGE_MIN_SEP
 
   if (Math.abs(dxs) <= Math.abs(dys) * 1.15) {
-    const corridorX = (ax + bx) / 2
+    // Corridor must follow the edge at this node's Y — midpoint X misses diagonal
+    // cross-layer edges and leaves blockers on the true segment.
+    const t = Math.abs(dys) < 1e-12 ? 0.5 : (cy - ay) / dys
+    const clampedT = Math.max(0, Math.min(1, t))
+    const corridorX = ax + clampedT * dxs
     const corridorLeft = corridorX - corridorHalf
     const corridorRight = corridorX + corridorHalf
     const nodeLeft = position.x
@@ -893,11 +897,26 @@ export function computeLayeredArchitectureLayout(
 
   trimHorizontalSlackInLayers(layerPlans, positionsById)
   separateVerticalColumnStacksInLayers(layerPlans, positionsById)
-  resolveLayoutOverlapsOnly(positionsById, layerIndexById)
+  // Trim/stack can recreate overlaps or edge-through-node hits; clear them again.
+  if (validEdges.length > 0) {
+    resolveLayoutCollisions(positionsById, layerIndexById, validEdges)
+    if (countEdgeHitsOnNodes(positionsById, validEdges) === 0) {
+      compactSeparatedLayout(
+        positionsById,
+        layerPlans,
+        validEdges,
+        area.originX + BAND_PADDING,
+      )
+    }
+  } else {
+    resolveLayoutOverlapsOnly(positionsById, layerIndexById)
+  }
   normalizeLayoutMinX(positionsById, bands, area.originX)
   refitAllBands(bands, layerPlans, positionsById)
   enforceMinimumBandSeparation(bands, layerPlans, positionsById)
   refitAllBands(bands, layerPlans, positionsById)
+  // Refit uses nodeMin - BAND_PADDING; shift so bands never sit left of the area origin.
+  normalizeLayoutMinX(positionsById, bands, area.originX)
 
   const finalBounds = boundsFromPositions(positionsById)
   const layoutHeight = Math.max(

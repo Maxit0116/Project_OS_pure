@@ -1,9 +1,25 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModelGatewayRequest } from "../../contracts/model-gateway.js";
 import { InMemorySecretStore } from "../../persistence/secret-store.js";
 import { readCapabilityContext } from "../harness/tool-policy.js";
 import { ModelGateway } from "./gateway.js";
+import { createFileOutboundBudget } from "./outbound-budget.js";
+
+const budgetDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of budgetDirs.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+});
 
 describe("ModelGateway MCP tool loop", () => {
   afterEach(() => {
@@ -226,5 +242,121 @@ describe("ModelGateway MCP tool loop", () => {
       details: { requestId: expect.stringMatching(/^req_/) },
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reserves one outbound budget slot per completeWithTools provider round", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pos-tools-budget-"));
+    budgetDirs.push(dir);
+    const budget = createFileOutboundBudget(join(dir, "ledger.json"), 3);
+    let fetchCount = 0;
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      // Every HTTP attempt must already have a reserved slot (no uncounted outbound).
+      expect(budget.snapshot().reservations.length).toBeGreaterThanOrEqual(fetchCount + 1);
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            choices: [{
+              message: {
+                content: null,
+                tool_calls: [{
+                  id: "call-1",
+                  type: "function",
+                  function: {
+                    name: "mcp:demo:lookup",
+                    arguments: JSON.stringify({ query: "x" }),
+                  },
+                }],
+              },
+              finish_reason: "tool_calls",
+            }],
+            usage: { prompt_tokens: 5, completion_tokens: 2 },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [{
+            message: { content: "done" },
+            finish_reason: "stop",
+          }],
+          usage: { prompt_tokens: 8, completion_tokens: 3 },
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const secrets = new InMemorySecretStore();
+    await secrets.set("model-key", "secret");
+    const gateway = new ModelGateway({ secretStore: secrets, outboundBudget: budget });
+    const result = await gateway.completeWithTools({
+      id: "model-test",
+      name: "Test model",
+      provider: "custom",
+      apiFormat: "openai_chat",
+      model: "test-model",
+      baseUrl: "http://127.0.0.1:4000/v1",
+      apiKeyRef: "model-key",
+    }, {
+      projectId: "project-test",
+      requestKind: "question_answer",
+      input: { question: "Find" },
+      modelPreference: "model-test",
+      redactionPolicy: "none",
+    }, {
+      tools: [{
+        type: "function",
+        function: {
+          name: "mcp:demo:lookup",
+          description: "Look something up",
+          parameters: { type: "object" },
+        },
+      }],
+      executeTool: async () => ({ content: JSON.stringify({ ok: true }) }),
+    });
+    expect(result.output).toBe("done");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(budget.snapshot().reservations).toHaveLength(2);
+    expect(
+      budget.snapshot().reservations.every((row) => row.state === "settled"),
+    ).toBe(true);
+    // Third call would still be allowed by limit=3; exhaustion is separate.
+    await expect(
+      gateway.complete({
+        id: "model-test",
+        name: "Test model",
+        provider: "custom",
+        apiFormat: "openai_chat",
+        model: "test-model",
+        baseUrl: "http://127.0.0.1:4000/v1",
+        apiKeyRef: "model-key",
+      }, {
+        projectId: "project-test",
+        requestKind: "question_answer",
+        input: { question: "again" },
+        modelPreference: "model-test",
+        redactionPolicy: "none",
+      }),
+    ).resolves.toMatchObject({ output: "done" });
+    expect(budget.snapshot().reservations).toHaveLength(3);
+    await expect(
+      gateway.complete({
+        id: "model-test",
+        name: "Test model",
+        provider: "custom",
+        apiFormat: "openai_chat",
+        model: "test-model",
+        baseUrl: "http://127.0.0.1:4000/v1",
+        apiKeyRef: "model-key",
+      }, {
+        projectId: "project-test",
+        requestKind: "question_answer",
+        input: { question: "blocked" },
+        modelPreference: "model-test",
+        redactionPolicy: "none",
+      }),
+    ).rejects.toMatchObject({ code: "model_outbound_budget_exhausted" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });

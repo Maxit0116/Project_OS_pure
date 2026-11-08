@@ -272,4 +272,34 @@ describe("request intent routing and approval", () => {
     expect(intentAllowsNodeDeletion(intent, "feat_checkout", 2, 3)).toBe(true);
     expect(intentAllowsNodeDeletion(intent, "feat_checkout", 2, 4)).toBe(false);
   });
+
+  describe("empty-touch controls", () => {
+    const emptyGraph = ProjectGraphSchema.parse({
+      ...graph,
+      nodes: [],
+      edges: [],
+      fileRelations: [],
+      fileIndex: [],
+      topology: { rootIds: [], maxDepth: 0, totalNodes: 0 },
+    });
+
+    it("rejects empty touches on a nonempty sample graph", () => {
+      const service = new RequestIntentService();
+      expect(() => service.normalizeDraft(graph, draft([]))).toThrow(/at least one touched node/u);
+    });
+
+    it("allows empty touches on an empty graph with the same projectId and sets entryNodeId null", () => {
+      const service = new RequestIntentService();
+      const normalized = service.normalizeDraft(emptyGraph, draft([]));
+      expect(normalized.touches).toEqual([]);
+      expect(normalized.entryNodeId).toBeNull();
+      expect(normalized.projectId).toBe(graph.projectId);
+    });
+
+    it("rejects nonempty touches on an empty product graph", () => {
+      const service = new RequestIntentService();
+      expect(() => service.normalizeDraft(emptyGraph, draft(["feat_checkout"])))
+        .toThrow(/cannot touch nodes on an empty product graph/u);
+    });
+  });
 });

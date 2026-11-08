@@ -18,13 +18,13 @@ const demoSymbol: DocumentSymbolItem = {
   children: [],
 }
 
-const documentSymbol = vi.fn(async () => [demoSymbol])
+const documentSymbol = vi.fn(async (_filePath: string) => [demoSymbol])
 
 vi.mock('../lsp/lspClient', () => ({
   lspClient: {
     isAvailable: () => true,
     getUnavailableReason: () => null,
-    documentSymbol: (...args: unknown[]) => documentSymbol(...args),
+    documentSymbol: (filePath: string) => documentSymbol(filePath),
   },
 }))
 

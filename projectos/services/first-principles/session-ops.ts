@@ -237,7 +237,9 @@ export function createFirstPrinciplesSession(input: {
 
 export function answerFirstPrinciplesTurn(
   session: FirstPrinciplesSession,
-  rawAnswer: Omit<FirstPrinciplesAnswer, "answeredAt"> & { answeredAt?: string | undefined },
+  rawAnswer: Omit<FirstPrinciplesAnswer, "answeredAt"> & {
+    answeredAt?: string | undefined;
+  },
   options: AnswerTurnOptions = {},
 ): FirstPrinciplesSession {
   if (
@@ -448,16 +450,17 @@ export function resolveFirstPrinciplesConflict(
     }
   } else {
     const text = rephraseText?.trim() || conflict.summary;
+    const rephrased: (typeof atomicClaims)[number] = {
+      id: `claim_rephrase_${conflict.id}`,
+      text,
+      status: "assumed",
+    };
     atomicClaims = [
       ...atomicClaims.filter(
         (claim) =>
           claim.id !== conflict.leftClaimId && claim.id !== conflict.rightClaimId,
       ),
-      {
-        id: `claim_rephrase_${conflict.id}`,
-        text,
-        status: "assumed" as const,
-      },
+      rephrased,
     ].slice(-24);
   }
 

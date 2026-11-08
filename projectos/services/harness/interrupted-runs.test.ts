@@ -98,4 +98,73 @@ describe("reconcileInterruptedAgentRuns", () => {
     const raw = readFileSync(join(dir, "run_done.jsonl"), "utf8");
     expect(raw).not.toContain("run_interrupted");
   });
+
+  it("reports legacy-normalized lines without rewriting a terminal log or inventing a backup", () => {
+    const root = mkdtempSync(join(tmpdir(), "pos-interrupt-"));
+    const dir = join(root, "agent-runs");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "run_legacy.jsonl"), [
+      JSON.stringify({
+        eventId: "evt_1",
+        runId: "run_legacy",
+        timestamp: "2026-10-20T00:00:00.000Z",
+        type: "run_started",
+      }),
+      JSON.stringify({
+        eventId: "evt_2",
+        runId: "run_legacy",
+        timestamp: "2026-10-20T00:00:01.000Z",
+        type: "model_request",
+        phaseId: "phase_plan",
+        payload: {
+          stage: "plan",
+          provider: "DeepSeek",
+          model: "deepseek-v4-flash",
+          durationMs: 10,
+          status: "ok",
+          tokenUsage: { input: 1, output: 2 },
+        },
+      }),
+      JSON.stringify({
+        eventId: "evt_3",
+        runId: "run_legacy",
+        timestamp: "2026-10-20T00:00:02.000Z",
+        type: "step_failed",
+        payload: { message: "stopped" },
+      }),
+      "",
+    ].join("\n"), "utf8");
+
+    const notes = reconcileInterruptedAgentRuns(root);
+    expect(notes).toEqual([{
+      runId: "run_legacy",
+      legacyNormalizedLines: [2],
+      alreadyTerminal: true,
+    }]);
+    const raw = readFileSync(join(dir, "run_legacy.jsonl"), "utf8");
+    expect(raw).not.toContain("run_interrupted");
+    expect(raw).not.toContain("backupId");
+  });
+
+  it("does not reconcile another workspace's agent-runs directory", () => {
+    const rootA = mkdtempSync(join(tmpdir(), "pos-interrupt-a-"));
+    const rootB = mkdtempSync(join(tmpdir(), "pos-interrupt-b-"));
+    mkdirSync(join(rootA, "agent-runs"), { recursive: true });
+    mkdirSync(join(rootB, "agent-runs"), { recursive: true });
+    writeFileSync(join(rootA, "agent-runs", "run_a.jsonl"), `${JSON.stringify({
+      eventId: "evt_a",
+      runId: "run_a",
+      timestamp: "2026-10-20T00:00:00.000Z",
+      type: "run_started",
+    })}\n`, "utf8");
+    writeFileSync(join(rootB, "agent-runs", "run_b.jsonl"), `${JSON.stringify({
+      eventId: "evt_b",
+      runId: "run_b",
+      timestamp: "2026-10-20T00:00:00.000Z",
+      type: "run_started",
+    })}\n`, "utf8");
+
+    expect(reconcileInterruptedAgentRuns(rootA).map((note) => note.runId)).toEqual(["run_a"]);
+    expect(reconcileInterruptedAgentRuns(rootB).map((note) => note.runId)).toEqual(["run_b"]);
+  });
 });

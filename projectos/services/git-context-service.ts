@@ -555,7 +555,7 @@ export function createGitBranch(
     from?: string | undefined;
     checkout?: boolean | undefined;
     /** Push the new branch to origin after local create (GitHub Graph default). */
-    push?: boolean;
+    push?: boolean | undefined;
   } & GitAuthOptions = {},
 ): GitMutationResult {
   const name = branch.trim();
@@ -888,8 +888,8 @@ export function rollbackGitBranch(
   branch: string,
   options: {
     to?: string | undefined;
-    mode?: "hard" | "mixed";
-    push?: boolean;
+    mode?: "hard" | "mixed" | undefined;
+    push?: boolean | undefined;
   } & GitAuthOptions = {},
 ): GitMutationResult {
   const name = branch.trim();
@@ -1196,7 +1196,10 @@ const COMMIT_PATCH_MAX_CHARS = 100_000;
 export function getGitCommitShow(
   workspaceRoot: string,
   sha: string,
-  options: { includePatch?: boolean | undefined; maxPatchChars?: number } = {},
+  options: {
+    includePatch?: boolean | undefined;
+    maxPatchChars?: number | undefined;
+  } = {},
 ): GitCommitDetailResult {
   const name = sha.trim();
   if (!name) return { ok: false, message: "Commit sha is required." };
@@ -1239,20 +1242,23 @@ export function getGitCommitShow(
     "-M",
     fullSha,
   ]);
-  const statusByPath = new Map<string, { status: string; previousPath?: string | undefined }>();
+  const statusByPath = new Map<
+    string,
+    { status: string; previousPath?: string | undefined }
+  >();
   if (nameStatus.ok) {
     for (const line of nameStatus.stdout.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       const parts = trimmed.split(/\t/u);
       const code = parts[0] ?? "M";
-      if (code.startsWith("R") && parts.length >= 3) {
-        statusByPath.set(parts[2]!, {
+      if (code.startsWith("R") && parts.length >= 3 && parts[1] && parts[2]) {
+        statusByPath.set(parts[2], {
           status: "renamed",
           previousPath: parts[1],
         });
-      } else if (code.startsWith("C") && parts.length >= 3) {
-        statusByPath.set(parts[2]!, {
+      } else if (code.startsWith("C") && parts.length >= 3 && parts[1] && parts[2]) {
+        statusByPath.set(parts[2], {
           status: "copied",
           previousPath: parts[1],
         });
@@ -1281,11 +1287,19 @@ export function getGitCommitShow(
         parts[1] === "-" ? undefined : Number.parseInt(parts[1]!, 10);
       const path = parts[2]!;
       const mapped = statusByPath.get(path) ?? { status: "modified" };
+      const finiteAdditions =
+        typeof additions === "number" && Number.isFinite(additions)
+          ? additions
+          : undefined;
+      const finiteDeletions =
+        typeof deletions === "number" && Number.isFinite(deletions)
+          ? deletions
+          : undefined;
       files.push({
         path,
         status: mapped.status,
-        ...(additions !== undefined && Number.isFinite(additions) ? { additions } : {}),
-        ...(deletions !== undefined && Number.isFinite(deletions) ? { deletions } : {}),
+        ...(finiteAdditions !== undefined ? { additions: finiteAdditions } : {}),
+        ...(finiteDeletions !== undefined ? { deletions: finiteDeletions } : {}),
         ...(mapped.previousPath ? { previousPath: mapped.previousPath } : {}),
       });
       statusByPath.delete(path);
@@ -1352,8 +1366,8 @@ export interface ListedPullRequest {
 }
 
 export type GithubApiOptions = {
-  accessToken?: string;
-  fetchImpl?: typeof fetch;
+  accessToken?: string | undefined;
+  fetchImpl?: typeof fetch | undefined;
 };
 
 function listGithubPullRequestsViaGh(workspaceRoot: string): {
@@ -1573,9 +1587,10 @@ export async function createGithubPullRequest(
   }
   const output = (result.stdout || "").trim();
   const urlMatch = output.match(/https:\/\/github\.com\/\S+/);
+  const url = urlMatch?.[0];
   return {
     ok: true,
-    ...(urlMatch?.[0] !== undefined ? { url: urlMatch[0] } : {}),
+    ...(url ? { url } : {}),
     message: output || "Pull request created.",
   };
 }

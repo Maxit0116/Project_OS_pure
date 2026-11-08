@@ -13,6 +13,31 @@ import { FakeExecutorAdapter } from "./harness/fake-executor.js";
 const roots: string[] = [];
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
+/** DiscoveryActionSchema requires `{ action: "final", intent }` — bare intent drafts are invalid. */
+function finalIntentOutput(intent: Record<string, unknown>): string {
+  return JSON.stringify({ action: "final", intent });
+}
+
+const DEFAULT_RECEIPT_INTENT = {
+  goal: "Send one receipt after a successful payment",
+  kind: "change",
+  touches: [{
+    nodeId: "feat_checkout",
+    reason: "Owns subscription payment success",
+    allow: { editExisting: true, addParts: false, deletePartIds: [] },
+  }],
+  structuralProposals: [],
+  assumptions: ["Use the existing receipt template"],
+  outOfScope: ["Do not change payment processing"],
+  acceptance: ["A successful subscription payment sends one receipt"],
+  questions: [{
+    id: "recipient",
+    text: "Which receipt address should be used?",
+    options: [{ id: "account", label: "Account email" }, { id: "custom", label: "Another address" }],
+    recommendation: "Use the account email",
+  }],
+};
+
 async function setup() {
   const root = mkdtempSync(join(tmpdir(), "request-intent-api-"));
   roots.push(root);
@@ -28,31 +53,13 @@ async function setup() {
   }];
   workspace.settings = settings;
   const gateway = new ModelGateway({ secretStore: new InMemorySecretStore() });
-  const complete = vi.spyOn(gateway, "complete").mockImplementation(async (profile, request) => ({
+  const complete = vi.spyOn(gateway, "complete").mockImplementation(async (profile) => ({
     requestId: "intent-test",
     projectId: workspace.project.projectId,
     provider: profile.provider,
     model: profile.model,
     latencyMs: 1,
-    output: JSON.stringify({
-      goal: "Send one receipt after a successful payment",
-      kind: "change",
-      touches: [{
-        nodeId: "feat_checkout",
-        reason: "Owns subscription payment success",
-        allow: { editExisting: true, addParts: false, deletePartIds: [] },
-      }],
-      structuralProposals: [],
-      assumptions: ["Use the existing receipt template"],
-      outOfScope: ["Do not change payment processing"],
-      acceptance: ["A successful subscription payment sends one receipt"],
-      questions: [{
-        id: "recipient",
-        text: "Which receipt address should be used?",
-        options: [{ id: "account", label: "Account email" }, { id: "custom", label: "Another address" }],
-        recommendation: "Use the account email",
-      }],
-    }),
+    output: finalIntentOutput(DEFAULT_RECEIPT_INTENT),
     usage: { inputTokens: 100, outputTokens: 80 },
   }));
   const api = new MockProjectOSApiClient({ workspace, modelGateway: gateway });
@@ -63,28 +70,41 @@ async function setup() {
 describe("RequestIntent API", () => {
   it("drills into the selected graph branch before finalizing intent scope", async () => {
     const { api, project, complete } = await setup();
-    const responseFor = (nodeId: string) => ({
+    const base = {
       requestId: "intent-drilldown-test",
       projectId: project.projectId,
       provider: "ollama",
       model: "model_1",
       latencyMs: 1,
-      output: JSON.stringify({
-        goal: "Send one receipt after a successful payment",
-        kind: "change",
-        touches: [{ nodeId, reason: "Owns the receipt flow", allow: { editExisting: true, addParts: false, deletePartIds: [] } }],
-        structuralProposals: [],
-        assumptions: [],
-        outOfScope: [],
-        acceptance: ["A successful payment sends one receipt"],
-        questions: [],
-      }),
       usage: { inputTokens: 20, outputTokens: 30 },
-    });
-    complete.mockImplementationOnce(async () => responseFor("container_next_web"));
+    };
+    complete.mockImplementationOnce(async () => ({
+      ...base,
+      output: JSON.stringify({
+        action: "list_children",
+        nodeId: "system_saas_starter",
+        reason: "Locate the checkout surface under the product system",
+      }),
+    }));
     complete.mockImplementationOnce(async (_profile, request) => {
-      expect(request.input).toHaveProperty("discoveredNodeContexts");
-      return responseFor("feat_checkout");
+      expect(request.input).toHaveProperty("observations");
+      return {
+        ...base,
+        output: finalIntentOutput({
+          goal: "Send one receipt after a successful payment",
+          kind: "change",
+          touches: [{
+            nodeId: "feat_checkout",
+            reason: "Owns the receipt flow",
+            allow: { editExisting: true, addParts: false, deletePartIds: [] },
+          }],
+          structuralProposals: [],
+          assumptions: [],
+          outOfScope: [],
+          acceptance: ["A successful payment sends one receipt"],
+          questions: [],
+        }),
+      };
     });
 
     const intent = await api.extractRequestIntent({
@@ -153,7 +173,7 @@ describe("RequestIntent API", () => {
       provider: profile.provider,
       model: profile.model,
       latencyMs: 1,
-      output: JSON.stringify({
+      output: finalIntentOutput({
         goal: "Add receipt delivery",
         kind: "add_node",
         touches: [{
@@ -201,7 +221,9 @@ describe("RequestIntent API", () => {
     });
   });
 
-  it("rejects publication plans outside the approved files and scaffold wiring", async () => {
+  // INTERNAL: unit-covers assertApprovedIntentAllowsPublication directly.
+  // Public OOS apply coverage lives in approved-intent-public-apply / publication-scope.
+  it("INTERNAL: rejects publication plans outside the approved files and scaffold wiring", async () => {
     const { api, project, complete, workspace } = await setup();
     complete.mockImplementationOnce(async (profile) => ({
       requestId: "intent-structural-review",
@@ -209,7 +231,7 @@ describe("RequestIntent API", () => {
       provider: profile.provider,
       model: profile.model,
       latencyMs: 1,
-      output: JSON.stringify({
+      output: finalIntentOutput({
         goal: "Add receipt delivery",
         kind: "mixed",
         touches: [{
@@ -274,7 +296,9 @@ describe("RequestIntent API", () => {
       .rejects.toThrow(/outside the approved structural intent/u);
   });
 
-  it("rejects model publication when the run has no server-approved intent", async () => {
+  // INTERNAL: private assert helper. Public missing-intent reject is in
+  // approved-intent-public-apply (confirmExecution without approve).
+  it("INTERNAL: rejects model publication when the run has no server-approved intent", async () => {
     const { api, workspace } = await setup();
     const internals = api as unknown as {
       assertApprovedIntentAllowsPublication(state: unknown, workspace: unknown, diff?: unknown): Promise<void>
@@ -393,6 +417,55 @@ describe("SH-2 runtime executor selection", () => {
       expect.objectContaining({ path: "app/checkout/page.tsx", changeType: "modify", before: original }),
     ]);
     expect(diff.files[0]!.after).toMatch(/Scripted executor \(no model\)/u);
+  });
+
+  it("public Agent approve → scripted requestDecision → card answer → same-run proposal", async () => {
+    const previous = process.env.PROJECTOS_SCRIPTED_REQUEST_DECISION;
+    process.env.PROJECTOS_SCRIPTED_REQUEST_DECISION = "1";
+    try {
+      const { api, project, complete, root, original } = await setupRuntime();
+      const draft = await api.extractRequestIntent({
+        projectId: project.projectId,
+        nodeId: "feat_checkout",
+        filePath: "app/checkout/page.tsx",
+        rawRequest: "Change the checkout heading",
+        executorSelection: selection,
+      });
+      await api.approveRequestIntent(project.projectId, draft.id, draft.revision, []);
+      const refinement = await api.prepareIntentExecution(project.projectId, draft.id);
+      const run = await api.confirmExecution(refinement.id);
+
+      const pending = await vi.waitFor(async () => {
+        const listed = await api.listRunDecisions(project.projectId, run.runId);
+        const decision = listed.find((entry) => entry.status === "pending");
+        expect(decision).toBeTruthy();
+        return decision!;
+      });
+      expect(pending.question).toMatch(/continue with the marker comment/i);
+      expect(readFileSync(join(root, "app/checkout/page.tsx"), "utf8")).toBe(original);
+
+      await api.resolveRunDecision(
+        project.projectId,
+        pending.id,
+        pending.revision,
+        { optionId: "continue" },
+      );
+      const finished = await vi.waitFor(async () => {
+        const current = await api.getAgentRun(run.runId);
+        expect(current.status).toBe("awaiting_review");
+        return current;
+      });
+      expect(finished.executor).toMatchObject({ kind: "runtime", executorId: "scripted" });
+      expect(complete).not.toHaveBeenCalled();
+      const answered = await api.listRunDecisions(project.projectId, run.runId);
+      expect(answered.some((entry) => entry.id === pending.id && entry.status === "resolved")).toBe(true);
+      const diff = await api.getDiff(run.runId);
+      expect(diff.files[0]!.after).toMatch(/Scripted executor \(no model\)/u);
+      expect(readFileSync(join(root, "app/checkout/page.tsx"), "utf8")).toBe(original);
+    } finally {
+      if (previous === undefined) delete process.env.PROJECTOS_SCRIPTED_REQUEST_DECISION;
+      else process.env.PROJECTOS_SCRIPTED_REQUEST_DECISION = previous;
+    }
   });
 
   it("names no validator for a dev stand-in even when a default model exists", async () => {

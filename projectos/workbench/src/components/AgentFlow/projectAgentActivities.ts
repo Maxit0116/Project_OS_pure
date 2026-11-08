@@ -53,6 +53,7 @@ export interface ActivityAskResult {
 export type ActivityAskTrace =
   | { status: 'running'; scope: AgentConversationScope }
   | { status: 'complete'; scope: AgentConversationScope; result: ActivityAskResult }
+  | { status: 'cancelled'; scope: AgentConversationScope }
   | { status: 'error'; scope: AgentConversationScope; message: string }
 
 export interface ActivityPlanResult {
@@ -65,6 +66,7 @@ export interface ActivityPlanResult {
 export type ActivityPlanTrace =
   | { status: 'running' }
   | { status: 'complete' | 'needs_clarification'; result: ActivityPlanResult }
+  | { status: 'cancelled' }
   | { status: 'error'; message: string }
 
 export interface ActivityProjectionInput {
@@ -501,6 +503,8 @@ export function projectAgentActivities(
       startedAt,
       detail: { kind: 'thinking', content: '', truncated: false },
     })
+  } else if (ask?.status === 'cancelled') {
+    // Stop already surfaces chat.agentStopped; do not project a failed ask activity.
   } else if (ask?.status === 'error' && (input.flowSubject === undefined || input.flowSubject === 'ask')) {
     activities.push({
       id: 'ask:thinking',
@@ -601,6 +605,8 @@ export function projectAgentActivities(
       startedAt,
       detail: { kind: 'planning', objective: '', anchors: [], acceptanceCriteria: [] },
     })
+  } else if (plan?.status === 'cancelled') {
+    // Stop already surfaces chat.agentStopped; do not project a failed plan activity.
   } else if (plan?.status === 'error' && (input.flowSubject === undefined || input.flowSubject === 'plan')) {
     activities.push({
       id: 'plan:planning',

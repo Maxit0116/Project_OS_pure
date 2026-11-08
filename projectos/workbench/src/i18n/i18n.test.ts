@@ -23,7 +23,9 @@ function stringLeaves(tree: object, prefix = ''): Map<string, string> {
 }
 
 function placeholders(message: string): string[] {
-  return [...message.matchAll(/\{([^}]+)\}/g)]
+  // Only real i18n keys (`{count}`, `{message}`); ignore prose/JSON examples like
+  // `{ kind: "agent", listing }` that appear in marketplace help copy.
+  return [...message.matchAll(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g)]
     .map((match) => match[1])
     .sort()
 }

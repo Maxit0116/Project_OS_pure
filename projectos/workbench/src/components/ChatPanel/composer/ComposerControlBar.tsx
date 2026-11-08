@@ -50,6 +50,7 @@ export default function ComposerControlBar({
   onUsageToggle,
 }: ComposerControlBarProps) {
   const settings = useWorkbenchStore((s) => s.settings)
+  const modelSelectionPending = useWorkbenchStore((s) => s.modelSelectionPending)
   const selectedModelProfileId = useWorkbenchStore((s) => s.selectedModelProfileId)
   const selectChatModel = useWorkbenchStore((s) => s.selectChatModel)
   const setThinkingDepth = useWorkbenchStore((s) => s.setThinkingDepth)
@@ -163,8 +164,9 @@ export default function ComposerControlBar({
           presentationMode={presentationMode}
           onSelectModel={(profileId) => {
             selectRuntimeExecutor(null)
-            void selectChatModel(profileId)
+            return selectChatModel(profileId)
           }}
+          modelSelectionPending={modelSelectionPending}
           runtimes={chatMode === 'change' ? executorOptions : []}
           selectedRuntimeId={chatMode === 'change' ? selectedRuntimeId : null}
           onSelectRuntime={selectRuntimeExecutor}
@@ -197,7 +199,7 @@ export default function ComposerControlBar({
           <button
             type="submit"
             className={`${styles.iconAction} ${styles.sendAction}`}
-            disabled={submitDisabled}
+            disabled={submitDisabled || modelSelectionPending}
             aria-label={ts('common.send')}
             title={ts('common.send')}
           >

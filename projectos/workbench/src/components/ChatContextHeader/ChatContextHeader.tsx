@@ -269,6 +269,7 @@ export default function ChatContextHeader() {
         )}
       </button>
       {blockingScope}
+      {/* Context usage lives in the composer ContextUsageCard — not duplicated in the header. */}
 
       {expanded && (
         <div id={DROPDOWN_PANEL_ID} className={styles.dropdownPanel}>

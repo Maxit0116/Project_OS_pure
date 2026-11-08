@@ -1,5 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 import type { SecretStore } from "./secret-store.js";
 
@@ -20,8 +20,56 @@ export interface SecretCipher {
   decrypt(cipherText: string): string;
 }
 
+export class SecretStoreReadOnlyError extends Error {
+  readonly code = "SECRET_STORE_READ_ONLY";
+
+  constructor(operation: "set" | "delete" | "persist") {
+    super(
+      `Secret store is read-only; ${operation} is not allowed for PROJECTOS_SECRETS_USER_DATA reuse`,
+    );
+    this.name = "SecretStoreReadOnlyError";
+  }
+}
+
+export interface FileSecretStoreOptions {
+  /**
+   * When true, get/has work but set/delete/persist throw and the constructor
+   * never creates the secrets directory or secrets.json.
+   */
+  readOnly?: boolean;
+  /** Optional at-rest cipher (desktop passes Electron safeStorage / Keychain). */
+  cipher?: SecretCipher;
+}
+
+function isSecretCipher(value: unknown): value is SecretCipher {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as SecretCipher).isAvailable === "function" &&
+    typeof (value as SecretCipher).encrypt === "function" &&
+    typeof (value as SecretCipher).decrypt === "function"
+  );
+}
+
+function normalizeOptions(
+  optionsOrCipher?: FileSecretStoreOptions | SecretCipher,
+): FileSecretStoreOptions {
+  if (optionsOrCipher === undefined) return {};
+  if (isSecretCipher(optionsOrCipher)) return { cipher: optionsOrCipher };
+  return optionsOrCipher;
+}
+
+/**
+ * File-backed secret store at `{userDataPath}/secrets.json`.
+ *
+ * Read-only mode is required when reusing an external secrets root (e.g. the
+ * daily desktop profile) from an isolated Chromium userData so the isolate
+ * process cannot mutate shared credentials.
+ */
 export class FileSecretStore implements SecretStore {
   private readonly filePath: string;
+  private readonly readOnly: boolean;
+  private readonly cipher: SecretCipher | undefined;
   private cache: Record<string, string> | null = null;
   /**
    * Ciphertext that could not be decrypted (the Keychain refused, or the key changed). It is kept in
@@ -30,17 +78,48 @@ export class FileSecretStore implements SecretStore {
    */
   private undecryptable: Record<string, string> = {};
 
-  constructor(userDataPath: string, private readonly cipher?: SecretCipher) {
-    mkdirSync(userDataPath, { recursive: true });
-    this.filePath = join(userDataPath, "secrets.json");
-    // A file made by an earlier build may be readable by other accounts; fix it at start-up, not only on the next write.
-    if (existsSync(this.filePath)) {
-      try {
-        chmodSync(this.filePath, 0o600);
-      } catch {
-        // Not ours to change (read-only volume, other owner): reading still works, and the failure is not fatal.
+  constructor(
+    userDataPath: string,
+    optionsOrCipher: FileSecretStoreOptions | SecretCipher = {},
+  ) {
+    const options = normalizeOptions(optionsOrCipher);
+    this.readOnly = options.readOnly === true;
+    this.cipher = options.cipher;
+    const absolute = resolve(userDataPath);
+    if (this.readOnly) {
+      if (!existsSync(absolute)) {
+        throw new Error(
+          `Read-only secret store root does not exist: ${absolute}`,
+        );
+      }
+      // Prefer realpath so symlink aliases cannot bypass boundary checks done by callers.
+      const canonical = realpathSync(absolute);
+      this.filePath = join(canonical, "secrets.json");
+      if (!existsSync(this.filePath)) {
+        throw new Error(
+          `Read-only secret store requires an existing secrets.json under ${canonical}`,
+        );
+      }
+    } else {
+      mkdirSync(absolute, { recursive: true });
+      this.filePath = join(absolute, "secrets.json");
+      // A file made by an earlier build may be readable by other accounts; fix it at start-up, not only on the next write.
+      if (existsSync(this.filePath)) {
+        try {
+          chmodSync(this.filePath, 0o600);
+        } catch {
+          // Not ours to change (read-only volume, other owner): reading still works, and the failure is not fatal.
+        }
       }
     }
+  }
+
+  get durablePath(): string {
+    return this.filePath;
+  }
+
+  get isReadOnly(): boolean {
+    return this.readOnly;
   }
 
   private loadCache(): Record<string, string> {
@@ -69,7 +148,14 @@ export class FileSecretStore implements SecretStore {
     }
     this.cache = cache;
     // A file written in plain text by an earlier build is encrypted as soon as it is read.
-    if (Object.keys(parsed.secrets ?? {}).length > 0 && this.cipherAvailable()) this.persist();
+    // Skip migration writes in read-only reuse so isolates cannot mutate shared credentials.
+    if (
+      !this.readOnly &&
+      Object.keys(parsed.secrets ?? {}).length > 0 &&
+      this.cipherAvailable()
+    ) {
+      this.persist();
+    }
     return this.cache;
   }
 
@@ -82,6 +168,9 @@ export class FileSecretStore implements SecretStore {
   }
 
   private persist(): void {
+    if (this.readOnly) {
+      throw new SecretStoreReadOnlyError("persist");
+    }
     const secrets = this.loadCache();
     let payload: SecretFilePayload;
     if (this.cipherAvailable()) {
@@ -101,6 +190,9 @@ export class FileSecretStore implements SecretStore {
   }
 
   async set(ref: string, value: string): Promise<void> {
+    if (this.readOnly) {
+      throw new SecretStoreReadOnlyError("set");
+    }
     this.loadCache()[ref] = value;
     delete this.undecryptable[ref];
     this.persist();
@@ -111,6 +203,9 @@ export class FileSecretStore implements SecretStore {
   }
 
   async delete(ref: string): Promise<void> {
+    if (this.readOnly) {
+      throw new SecretStoreReadOnlyError("delete");
+    }
     delete this.loadCache()[ref];
     delete this.undecryptable[ref];
     this.persist();

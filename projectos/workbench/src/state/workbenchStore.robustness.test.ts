@@ -232,6 +232,63 @@ describe('run event polling fallback', () => {
       expect.arrayContaining([expect.objectContaining({ type: 'error', message: 'Recovered failure' })]),
     )
   })
+
+  it('applies sequenced snapshot events before raising the live watermark', async () => {
+    // Fast synthetic/model runs finish before live subscribe. Snapshot must
+    // hydrate Diff/awaiting_review even when every event has runSequence <= watermark.
+    const workspace = createMockSampleWorkspace()
+    const run = runFixture('run-snapshot-watermark')
+    const events: AgentRunEvent[] = [
+      { ...stepStarted(run.runId), runSequence: 1 },
+      {
+        eventId: 'evt_snap_diff',
+        runId: run.runId,
+        timestamp: run.startedAt,
+        type: 'diff_ready',
+        runSequence: 2,
+        payload: { files: ['app/login/page.tsx'] },
+      },
+      {
+        eventId: 'evt_snap_complete',
+        runId: run.runId,
+        timestamp: run.startedAt,
+        type: 'run_completed',
+        runSequence: 3,
+        payload: { reason: 'uncertain_criteria' },
+      },
+    ]
+    const getDiff = vi.fn(async () => ({
+      runId: run.runId,
+      summary: 'Snapshot hydrated diff',
+      files: [{ path: 'app/login/page.tsx', before: 'a', after: 'b' }],
+    }))
+    const getProjectGraph = vi.fn(async () => workspace.graph)
+    const getSemanticTree = vi.fn(async () => workspace.semanticTree)
+    const client = {
+      confirmExecution: vi.fn(async () => run),
+      streamAgentRun: vi.fn(() => ({ dispose: vi.fn() })),
+      getAgentRunEventSnapshot: vi.fn(async () => ({
+        runId: run.runId,
+        events,
+        watermark: 3,
+        watermarkEventId: 'evt_snap_complete',
+      })),
+      getDiff,
+      getProjectGraph,
+      getSemanticTree,
+    } as unknown as ProjectOSApi
+    setWorkspace(client)
+    useWorkbenchStore.setState({ pendingRefinement: refinementFixture() })
+
+    await useWorkbenchStore.getState().confirmRefinement()
+
+    await vi.waitFor(() => {
+      expect(getDiff).toHaveBeenCalledWith(run.runId)
+      expect(useWorkbenchStore.getState().generatedDiff?.runId).toBe(run.runId)
+      expect(useWorkbenchStore.getState().diffReady).toBe(true)
+      expect(useWorkbenchStore.getState().flowStatus).toBe('awaiting_review')
+    })
+  })
 })
 
 describe('active run result binding', () => {
@@ -378,6 +435,7 @@ function runFixture(runId: string): AgentRun {
     status: 'running',
     relatedNodeIds: ['feat_login'],
     relatedFiles: ['app/login/page.tsx'],
+    scope: { kind: 'component', nodeId: 'feat_login' },
     startedAt: '2026-07-21T00:00:00.000Z',
   }
 }

@@ -36,6 +36,7 @@ describe('privileged IPC argument validation', () => {
     expect(PROJECTOS_IPC_METHODS).toContain('getAccountProfile')
     expect(PROJECTOS_IPC_METHODS).toContain('saveGitHubOAuthClientId')
     expect(PROJECTOS_IPC_METHODS).toContain('importGitHubAuthFromGhCli')
+    expect(PROJECTOS_IPC_METHODS).toContain('cancelAsk')
     expect(PROJECTOS_IPC_METHODS as readonly string[]).not.toContain(
       'restoreDeterministicDesignMutationBackup',
     )
@@ -68,6 +69,12 @@ describe('privileged IPC argument validation', () => {
       runIds: ['run_one'],
     })
     expect(parseDiffReadyNotificationPayload({
+      title: 'Reminder ready',
+      body: 'Marketplace can start',
+      destination: 'reminder',
+      runIds: ['reminder:r1'],
+    }).destination).toBe('reminder')
+    expect(parseDiffReadyNotificationPayload({
       title: 'Decision needed',
       body: 'Choose whether to continue',
       destination: 'decisions',
@@ -77,18 +84,19 @@ describe('privileged IPC argument validation', () => {
     expect(() => parseDiffReadyNotificationPayload({
       title: 'Decision needed', body: 'Choose', destination: 'decisions', runIds: ['run_one'],
     })).toThrow('Notification payload is invalid')
-    expect(parseDiffReadyNotificationPayload({
-      title: 'Reminder ready',
-      body: 'Marketplace can start',
-      destination: 'reminder',
-      runIds: ['reminder:r1'],
-    }).destination).toBe('reminder')
     expect(() => parseDiffReadyNotificationPayload({
       title: 'Diff ready', body: 'Review', destination: 'diff', runIds: ['run_one', 'run_one'],
     })).toThrow('Notification payload is invalid')
     expect(() => parseDiffReadyNotificationPayload({
       title: 'Diff ready', body: 'Review', runIds: [],
     })).toThrow('Notification payload is invalid')
+    // Synthesized ask runId from mergeDiffReadyCompletions must be accepted.
+    expect(parseDiffReadyNotificationPayload({
+      title: 'Done',
+      body: 'Ask finished',
+      destination: 'ask',
+      runIds: ['ask:10:0'],
+    })).toMatchObject({ destination: 'ask', runIds: ['ask:10:0'] })
     expect(() => parseWindowTitle('ProjectOS\nspoofed')).toThrow('Window title is invalid')
     expect(parseWindowTitle('ProjectOS — Sample')).toBe('ProjectOS — Sample')
   })

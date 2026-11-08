@@ -58,6 +58,7 @@ export function userFacingErrorMessage(error: unknown, locale: Locale): string {
     : ''
   if (code === 'model_not_configured') return getStoreMessage(locale, 'errors.modelNotConfigured')
   if (code === 'model_output_invalid') return getStoreMessage(locale, 'errors.modelOutputInvalid')
+  if (code === 'operation_cancelled') return getStoreMessage(locale, 'errors.operationCancelled')
   if (code === 'debug_target_unresolved') return getStoreMessage(locale, 'errors.debugTargetUnresolved')
   if (code === 'diff_stale') return getStoreMessage(locale, 'errors.diffStale')
   if (code === 'review_unmet_requirements') {

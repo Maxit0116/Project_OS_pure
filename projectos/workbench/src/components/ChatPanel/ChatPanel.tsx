@@ -79,10 +79,6 @@ export default function ChatPanel() {
   const approveRequestIntent = useWorkbenchStore((s) => s.approveRequestIntent)
   const reviseRequestIntent = useWorkbenchStore((s) => s.reviseRequestIntent)
   const pendingPlan = useWorkbenchStore((s) => s.pendingPlan)
-  const runDecisions = useWorkbenchStore((s) => s.runDecisions)
-  const focusedDecisionId = useWorkbenchStore((s) => s.focusedDecisionId)
-  const decisionResolvingIds = useWorkbenchStore((s) => s.decisionResolvingIds)
-  const resolveRunDecision = useWorkbenchStore((s) => s.resolveRunDecision)
   const activeChatSessionId = useChatSessionStore((s) => s.activeSessionId)
   const labChatSessionId = useProductLabStore((s) => {
     const id = s.document.activeSessionId
@@ -98,6 +94,10 @@ export default function ChatPanel() {
   const pendingDiagramSummary = useDiagramGraphStore((s) => s.pendingSummary)
   const pendingWireframeSummary = useWireframePackStore((s) => s.pendingSummary)
   const reviewingPoolTask = useAgentPoolStore((s) => s.reviewingTaskSnapshot)
+  const runDecisions = useWorkbenchStore((s) => s.runDecisions)
+  const focusedDecisionId = useWorkbenchStore((s) => s.focusedDecisionId)
+  const decisionResolvingIds = useWorkbenchStore((s) => s.decisionResolvingIds)
+  const resolveRunDecision = useWorkbenchStore((s) => s.resolveRunDecision)
   const planConfirmed = useWorkbenchStore((s) => s.planConfirmed)
   const debugSession = useWorkbenchStore((s) => s.debugSession)
   const refinementConfirmed = useWorkbenchStore((s) => s.refinementConfirmed)
@@ -416,6 +416,7 @@ export default function ChatPanel() {
           <div className={styles.suggestPlanBanner}>{ts('context.globalAgentEmptyHint')}</div>
         ) : null}
         {inheritedDigest ? <InheritedSessionCard digest={inheritedDigest} /> : null}
+        {showLabCard ? <ProductLabCard /> : null}
         <PendingRunDecisions
           decisions={runDecisions}
           resolvingIds={decisionResolvingIds}
@@ -423,7 +424,6 @@ export default function ChatPanel() {
           onResolve={(decision, optionId, text, status) =>
             void resolveRunDecision(decision, optionId, text, status)}
         />
-        {showLabCard ? <ProductLabCard /> : null}
         {messages.map((msg) => {
           const spatialPin = msg.role === 'user' && parseSpatialPinChatContent(msg.content)
           const attachments = spatialPin

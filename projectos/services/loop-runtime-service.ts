@@ -664,12 +664,15 @@ function stepActionNode(
 
   const approvedPayload = next.pendingActionPayload;
   const approvedDecision = latestArtifact(next, "human_decision");
-  const hasApproval =
-    Boolean(approvedPayload) ||
-    (approvedDecision &&
-      typeof approvedDecision.data === "object" &&
-      approvedDecision.data !== null &&
-      /approve/i.test(String((approvedDecision.data as { choice?: string }).choice ?? "")));
+  const hasApproval = Boolean(
+    approvedPayload ||
+      (approvedDecision &&
+        typeof approvedDecision.data === "object" &&
+        approvedDecision.data !== null &&
+        /approve/i.test(
+          String((approvedDecision.data as { choice?: string }).choice ?? ""),
+        )),
+  );
 
   if (requiresApproval && !hasApproval) {
     next = pushEvent(
@@ -748,7 +751,7 @@ function stepGithubAction(
   }
 
   if (githubResult.deferred) {
-    let next: LoopInstance = {
+    const queued = {
       ...instance,
       pendingActionPayload: undefined,
       pendingGithubOp: {
@@ -759,12 +762,17 @@ function stepGithubAction(
       },
       status: "running" as const,
     };
-    next = pushEvent(next, {
+    const withEvent = pushEvent(queued, {
       type: "message",
       nodeId: node.id,
       message: githubResult.message ?? `GitHub ${operation} queued for settle`,
     });
-    return replaceInstance(doc, next);
+    return replaceInstance(doc, {
+      ...withEvent,
+      pendingActionPayload: undefined,
+      pendingGithubOp: queued.pendingGithubOp,
+      status: "running" as const,
+    });
   }
 
   if (!githubResult.ok) {

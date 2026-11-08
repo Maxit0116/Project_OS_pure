@@ -11,6 +11,10 @@ import { normalizeModelProfile } from "../../contracts/settings.js";
 import { ProjectOSError } from "../../errors.js";
 import { sanitizeErrorMessage } from "../../utils/sanitize-error-message.js";
 import type { SecretStore } from "../../persistence/secret-store.js";
+import type {
+  OutboundBudgetGate,
+  OutboundReservationAuditMeta,
+} from "./outbound-budget.js";
 
 export interface ProviderImagePart {
   mimeType: "image/png" | "image/jpeg";
@@ -26,6 +30,10 @@ export interface ProviderCompleteInput {
   maxOutputTokens?: number;
   thinkingDepth?: ThinkingDepth;
   images?: ProviderImagePart[];
+  /** Opt-in: reserve one ledger slot before each HTTP attempt (incl. retries). */
+  outboundBudget?: OutboundBudgetGate;
+  /** Safe audit fields stamped onto each reservation (no secrets/prompts). */
+  outboundBudgetMeta?: OutboundReservationAuditMeta;
 }
 
 export function buildOpenAiUserContent(
@@ -78,6 +86,11 @@ export interface ProviderCompleteResult {
   outputTokens: number;
   /** False when the provider omitted usage. Tokens are then 0, not an estimate. */
   usageReported?: boolean;
+  /**
+   * Opt-in budget reservation id for the successful HTTP attempt that produced
+   * this result (settled missing at fetch; gateway annotates by this id).
+   */
+  outboundReservationId?: string;
 }
 
 export interface ModelProviderAdapter {
@@ -89,10 +102,12 @@ export interface ModelProviderAdapter {
   listModels?(
     profile: ResolvedModelProfile,
     apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<Array<{ id: string; name: string }>>;
   testConnection(
     profile: ResolvedModelProfile,
     apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<{ ok: boolean; message?: string }>;
 }
 
@@ -152,6 +167,9 @@ const OllamaResponseSchema = z.object({
       }),
     })).optional(),
   }),
+  // Official /api/chat usage counters when the host reports them.
+  prompt_eval_count: OptionalTokenCountSchema,
+  eval_count: OptionalTokenCountSchema,
 });
 
 const OllamaModelsResponseSchema = z.object({
@@ -287,6 +305,11 @@ function isTransientProviderFetchError(error: unknown): boolean {
   );
 }
 
+type FetchWithBudgetResult = {
+  response: Response;
+  reservationId?: string;
+};
+
 export type NetworkFailureKind = "dns" | "refused" | "unreachable" | "timeout" | "connection";
 
 /**
@@ -376,16 +399,47 @@ async function fetchWithTimeout(
   init: RequestInit,
   timeoutMs = PROVIDER_FETCH_TIMEOUT_MS,
   signal?: AbortSignal,
-): Promise<Response> {
+  budget?: OutboundBudgetGate,
+  budgetMeta?: OutboundReservationAuditMeta,
+): Promise<FetchWithBudgetResult> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= PROVIDER_FETCH_TRANSIENT_RETRIES; attempt += 1) {
+    if (signal?.aborted) {
+      throw new Error("Model request cancelled");
+    }
+    // One durable reservation per HTTP attempt (including transient retries).
+    const reservationId = budget
+      ? budget.reserve(budgetMeta).reservationId
+      : undefined;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const abort = () => controller.abort();
     signal?.addEventListener("abort", abort, { once: true });
     try {
-      return await fetch(url, { ...init, signal: controller.signal });
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      if (budget && reservationId) {
+        budget.settle(reservationId, {
+          status: "ok",
+          usageStatus: "missing",
+          inputTokens: 0,
+          outputTokens: 0,
+        });
+      }
+      return { response, ...(reservationId ? { reservationId } : {}) };
     } catch (error) {
+      const cancelled = Boolean(signal?.aborted);
+      if (budget && reservationId) {
+        try {
+          budget.settle(reservationId, {
+            status: cancelled ? "cancelled" : "failed",
+            usageStatus: "missing",
+            inputTokens: 0,
+            outputTokens: 0,
+          });
+        } catch {
+          /* settle must not mask the transport error */
+        }
+      }
       if (error instanceof Error && error.name === "AbortError") {
         if (signal?.aborted) throw new Error("Model request cancelled");
         throw new ProjectOSError(
@@ -395,6 +449,10 @@ async function fetchWithTimeout(
         );
       }
       lastError = error;
+      // Caller abort must never burn further retry slots as "transient".
+      if (signal?.aborted) {
+        throw new Error("Model request cancelled");
+      }
       if (
         !isTransientProviderFetchError(error) ||
         attempt === PROVIDER_FETCH_TRANSIENT_RETRIES
@@ -709,16 +767,18 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
     apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
+    let reservationId: string | undefined;
     const body = await withBodyRetry(async (readBody) => {
-      const response = await fetchWithTimeout(openAiChatCompletionsUrl(profile.baseUrl), {
+      const fetched = await fetchWithTimeout(openAiChatCompletionsUrl(profile.baseUrl), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       },
       body: JSON.stringify(buildOpenAiChatBody(profile, input)),
-    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
-      return parseProviderJson(await readBody(response), OpenAiResponseSchema);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget, input.outboundBudgetMeta);
+      reservationId = fetched.reservationId;
+      return parseProviderJson(await readBody(fetched.response), OpenAiResponseSchema);
     }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
     const choice = body.choices[0]!;
     const message = extractOpenAiMessageParts(choice.message);
@@ -736,17 +796,20 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
       ...providerUsage(body.usage
         ? { input: body.usage.prompt_tokens, output: body.usage.completion_tokens }
         : undefined),
+      ...(reservationId ? { outboundReservationId: reservationId } : {}),
     };
   }
 
   async testConnection(
     profile: ResolvedModelProfile,
     apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<{ ok: boolean; message?: string }> {
     return testProviderConnection(() =>
       this.complete(profile, apiKey, {
         userPrompt: "Reply with OK",
         maxOutputTokens: 8,
+        ...(outboundBudget ? { outboundBudget } : {}),
       }),
     );
   }
@@ -758,8 +821,9 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
     apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
+    let reservationId: string | undefined;
     const body = await withBodyRetry(async (readBody) => {
-      const response = await fetchWithTimeout(anthropicMessagesUrl(profile.baseUrl), {
+      const fetched = await fetchWithTimeout(anthropicMessagesUrl(profile.baseUrl), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -767,8 +831,9 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
         ...(apiKey ? { "x-api-key": apiKey } : {}),
       },
       body: JSON.stringify(buildAnthropicMessagesBody(profile, input)),
-    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
-      return parseProviderJson(await readBody(response), AnthropicResponseSchema);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget, input.outboundBudgetMeta);
+      reservationId = fetched.reservationId;
+      return parseProviderJson(await readBody(fetched.response), AnthropicResponseSchema);
     }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
     const output = body.content
       .filter((part): part is { type: "text"; text: string } => part.type === "text")
@@ -792,17 +857,20 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
       ...providerUsage(body.usage
         ? { input: body.usage.input_tokens, output: body.usage.output_tokens }
         : undefined),
+      ...(reservationId ? { outboundReservationId: reservationId } : {}),
     };
   }
 
   async testConnection(
     profile: ResolvedModelProfile,
     apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<{ ok: boolean; message?: string }> {
     return testProviderConnection(() =>
       this.complete(profile, apiKey, {
         userPrompt: "Reply with OK",
         maxOutputTokens: 8,
+        ...(outboundBudget ? { outboundBudget } : {}),
       }),
     );
   }
@@ -814,8 +882,9 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
     _apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
+    let reservationId: string | undefined;
     const body = await withBodyRetry(async (readBody) => {
-      const response = await fetchWithTimeout(ollamaChatUrl(profile.baseUrl), {
+      const fetched = await fetchWithTimeout(ollamaChatUrl(profile.baseUrl), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -847,10 +916,13 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
         ],
         ...(input.tools?.length ? { tools: input.tools } : {}),
       }),
-    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
-      return parseProviderJson(await readBody(response), OllamaResponseSchema);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget, input.outboundBudgetMeta);
+      reservationId = fetched.reservationId;
+      return parseProviderJson(await readBody(fetched.response), OllamaResponseSchema);
     }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
     const output = body.message.content ?? "";
+    const hasUsage =
+      body.prompt_eval_count !== undefined || body.eval_count !== undefined;
     return {
       output,
       ...(body.message.tool_calls?.length
@@ -864,18 +936,27 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
             })),
           }
         : {}),
-      ...providerUsage(undefined),
+      ...providerUsage(
+        hasUsage
+          ? { input: body.prompt_eval_count, output: body.eval_count }
+          : undefined,
+      ),
+      ...(reservationId ? { outboundReservationId: reservationId } : {}),
     };
   }
 
   async listModels(
     profile: ResolvedModelProfile,
     _apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<Array<{ id: string; name: string }>> {
     const body = await withBodyRetry(async (readBody) => {
-      const response = await fetchWithTimeout(
+      const { response } = await fetchWithTimeout(
         `${normalizeBaseUrl(profile.baseUrl)}/api/tags`,
         { method: "GET" },
+        PROVIDER_FETCH_TIMEOUT_MS,
+        undefined,
+        outboundBudget,
       );
       return parseProviderJson(await readBody(response), OllamaModelsResponseSchema);
     }, PROVIDER_FETCH_TIMEOUT_MS, undefined);
@@ -888,11 +969,13 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
   async testConnection(
     profile: ResolvedModelProfile,
     apiKey: string | undefined,
+    outboundBudget?: OutboundBudgetGate,
   ): Promise<{ ok: boolean; message?: string }> {
     return testProviderConnection(() =>
       this.complete(profile, apiKey, {
         userPrompt: "Reply with OK",
         maxOutputTokens: 8,
+        ...(outboundBudget ? { outboundBudget } : {}),
       }),
     );
   }

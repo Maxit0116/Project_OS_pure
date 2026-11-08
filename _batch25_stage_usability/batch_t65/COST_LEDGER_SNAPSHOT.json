@@ -1,0 +1,10 @@
+{
+  "limit": 200,
+  "reserved": 193,
+  "remaining": 7,
+  "reportedCount": 151,
+  "missingCount": 42,
+  "reportedInputTokens": 543048,
+  "reportedOutputTokens": 71706,
+  "note": "missing usage never treated as 0 / never called settled; probe sessionCap=24 vs LIVE_BATCH_DEFAULT 16 is probe-only raise (documented). UTF16 chars not token hard bound."
+}

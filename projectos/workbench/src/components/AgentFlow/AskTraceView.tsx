@@ -21,6 +21,18 @@ export default function AskTraceView({ trace }: { trace: LatestAskTrace }) {
     )
   }
 
+  if (trace.status === 'cancelled') {
+    return (
+      <div className={styles.trace}>
+        <ScopeSummary scope={trace.scope} />
+        <section className={styles.card} data-ask-trace="cancelled">
+          <h3>{ts('chat.agentStopped')}</h3>
+          <p>{ts('chat.agentStoppedMessage')}</p>
+        </section>
+      </div>
+    )
+  }
+
   if (trace.status === 'error') {
     return (
       <div className={styles.trace}>

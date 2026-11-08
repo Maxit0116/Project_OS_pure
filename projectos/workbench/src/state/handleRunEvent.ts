@@ -26,6 +26,7 @@ import { truncateDiffReadySummary } from '../notifications/diffReadyNotification
 import type { CenterTab, ChatMessage, CodeSubTab } from './workbenchStore'
 import { logRunEventToActivity } from './activityLogFromRunEvent'
 import { useChatSessionStore } from './chatSessionStore'
+import { shouldUnlockApplyOnParentBatchValid } from './parentBatchApplyAuthorization'
 import { parseUnmetRequirements, type UnmetRequirement } from './unmetRequirements'
 
 export interface FlowCorrection {
@@ -35,7 +36,14 @@ export interface FlowCorrection {
   timestamp: string
 }
 
-export type FlowStatus = 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error' | 'interrupted'
+export type FlowStatus =
+  | 'idle'
+  | 'running'
+  | 'complete'
+  | 'awaiting_review'
+  | 'error'
+  | 'cancelled'
+  | 'interrupted'
 
 export interface RunEventStoreSlice {
   client: ProjectOSApi
@@ -59,6 +67,8 @@ export interface RunEventStoreSlice {
   executionOverlay: ExecutionOverlay | null
   diffReady: boolean
   diffReviewOnlyReason?: string | null
+  /** Run ids whose Apply authorization was revoked (cancel / interrupt). */
+  revokedApplyRunIds?: string[]
   diffUnmetRequirements?: UnmetRequirement[]
   messages: ChatMessage[]
   conversationCheckpoints?: ConversationCheckpointDraft[]
@@ -157,13 +167,18 @@ export function reduceRunEventState(
     patch.flowSteps = upsertFlowStep(state.flowSteps, { ...event.step, status: 'complete' })
   }
 
-  // The app was closed or killed while the run was live. It is not a failure of the work, and
-  // nothing was re-applied; saying "error" hid both facts.
-  if (event.type === 'run_interrupted') {
-    patch.flowStatus = 'interrupted'
-  }
-  if (event.type === 'run_cancelled') {
-    patch.flowStatus = 'error'
+  if (event.type === 'run_interrupted' || event.type === 'run_cancelled') {
+    // Stop/cancel is not an unexpected failure — keep Apply blocked.
+    // Interrupted (app closed/killed) is distinct from cancelled (user Stop).
+    patch.flowStatus = event.type === 'run_cancelled' ? 'cancelled' : 'interrupted'
+    const revoked = new Set(state.revokedApplyRunIds ?? [])
+    revoked.add(event.runId)
+    patch.revokedApplyRunIds = [...revoked]
+    // Sticky block: late parent batch `valid` must not unlock Apply after cancel.
+    patch.diffReviewOnlyReason = getStoreMessage(
+      state.locale,
+      'diff.applyBlockedAfterCancel',
+    )
   }
 
   if (event.type === 'step_failed') {
@@ -198,6 +213,17 @@ export function reduceRunEventState(
     }
   }
 
+  if (event.type === 'diff_proposed') {
+    // Surface the proposal in the Diff panel while independent validation runs.
+    // Apply stays blocked via review-only until `diff_ready` clears the gate.
+    patch.diffReviewOnlyReason = getStoreMessage(
+      state.locale,
+      'diff.validatingProposal',
+    )
+    patch.centerTab = 'code'
+    patch.codeSubTab = 'diff'
+  }
+
   if (event.type === 'diff_ready') {
     patch.diffReady = true
     patch.flowStatus = 'awaiting_review'
@@ -207,6 +233,36 @@ export function reduceRunEventState(
       reviewOnly?.reviewOnly === true && typeof reviewOnly.reviewOnlyReason === 'string'
         ? reviewOnly.reviewOnlyReason
         : null
+  }
+
+  if (event.type === 'batch_validation_result') {
+    const verdict = (event.payload as { verdict?: unknown } | undefined)?.verdict
+    if (verdict === 'valid') {
+      if (
+        shouldUnlockApplyOnParentBatchValid({
+          runId: event.runId,
+          revokedApplyRunIds: state.revokedApplyRunIds,
+          flowStatus: state.flowStatus,
+        })
+      ) {
+        patch.diffReviewOnlyReason = null
+        patch.diffReady = true
+        patch.flowStatus = 'awaiting_review'
+      } else {
+        // Cancel/interrupt already revoked Apply for this run — keep blocked.
+        patch.diffReviewOnlyReason = getStoreMessage(
+          state.locale,
+          'diff.applyBlockedAfterCancel',
+        )
+        patch.diffReady = true // preview may still show; Apply stays gated
+      }
+    } else {
+      // Invalid / incomplete parent batch must not unlock Apply.
+      patch.diffReviewOnlyReason = getStoreMessage(
+        state.locale,
+        'diff.awaitingParentBatchValidation',
+      )
+    }
   }
 
   if (event.type === 'apply_result') {
@@ -235,27 +291,29 @@ export function reduceRunEventState(
         const messageId = `automatic_apply_${event.runId}`
         patch.centerTab = 'code'
         patch.codeSubTab = 'diff'
+        // Rewrite an earlier not_run / stale summary when verification later finishes.
+        const content = getStoreMessage(
+          state.locale,
+          status === 'passed'
+            ? 'chat.automaticApplyPassed'
+            : status === 'failed'
+              ? 'chat.automaticApplyFailed'
+              : 'chat.automaticApplyNotRun',
+          { count: state.applyResult.filesChanged.length },
+        )
+        const nextMessage = {
+          id: messageId,
+          role: 'assistant' as const,
+          // One sentence per outcome: "verified" must never be claimed for a run that was not checked.
+          content,
+          format: 'markdown' as const,
+          timestamp: event.timestamp,
+        }
         patch.messages = state.messages.some((message) => message.id === messageId)
-          ? state.messages
-          : [
-              ...state.messages,
-              {
-                id: messageId,
-                role: 'assistant',
-                // One sentence per outcome: "verified" must never be claimed for a run that was not checked.
-                content: getStoreMessage(
-                  state.locale,
-                  status === 'passed'
-                    ? 'chat.automaticApplyPassed'
-                    : status === 'failed'
-                      ? 'chat.automaticApplyFailed'
-                      : 'chat.automaticApplyNotRun',
-                  { count: state.applyResult.filesChanged.length },
-                ),
-                format: 'markdown',
-                timestamp: event.timestamp,
-              },
-            ]
+          ? state.messages.map((message) =>
+              message.id === messageId ? { ...message, ...nextMessage } : message,
+            )
+          : [...state.messages, nextMessage]
       }
     }
   }
@@ -401,7 +459,8 @@ export function handleRunEvent(
     get().pushToast({ type: 'error', message: sanitizedMessage })
   }
 
-  if (event.type === 'diff_ready') {
+  if (event.type === 'diff_proposed' || event.type === 'diff_ready') {
+    // diff_proposed: preview under review-only. diff_ready: validated / applyable.
     void get().loadDiff(event.runId)
   }
 

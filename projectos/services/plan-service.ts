@@ -14,9 +14,12 @@ import type { AgentConversationScope } from "../contracts/agent-conversation.js"
 import type { ModelProfile, ThinkingDepth } from "../contracts/settings.js";
 import { ProjectOSError } from "../errors.js";
 import { ModelGateway } from "./model-gateway/index.js";
-import { orderedModelOutputSources } from "./model-json-output.js";
+import {
+  orderedModelOutputSources,
+  resolveImplementationPlanMaxOutputTokens,
+  shouldRetryImplementationPlanForTruncation,
+} from "./model-json-output.js";
 import { separateLeadingThinkBlock } from "./model-gateway/providers.js";
-import { answerMaxOutputTokens } from "./grounded-answer-service.js";
 
 const PLAN_SYSTEM_PROMPT = `You create implementation plans for a graph-driven IDE.
 Respond with JSON only using this shape:
@@ -111,41 +114,126 @@ export interface PlanServiceInput {
   existingCreatedAt?: string;
   supplementalMarkdown?: string;
   images?: Array<{ mimeType: "image/png" | "image/jpeg"; base64: string }>;
+  /** When aborted (Stop during plan), gateway settles cancelled. */
+  signal?: AbortSignal;
 }
 
 export class PlanService {
   constructor(private readonly gateway: ModelGateway) {}
 
   async createPlan(input: PlanServiceInput): Promise<ImplementationPlan> {
-    const response = await this.gateway.complete(input.profile, {
-      projectId: input.projectId,
-      requestKind: "implementation_plan",
-      modelPreference: input.profile.id,
-      systemPrompt: [
-        PLAN_SYSTEM_PROMPT,
-        ...(input.supplementalMarkdown?.trim()
-          ? [
-              "The user explicitly attached additional context. Treat it as authoritative supplemental material.",
-              input.supplementalMarkdown,
-            ]
-          : []),
-      ].join("\n"),
-      input: {
-        mode: "plan",
-        writeCapability: false,
-        objective: input.objective,
-        clarifyingAnswers: input.clarifyingAnswers ?? [],
-        existingQuestions: input.existingQuestions ?? [],
-        localContext: input.localContext,
-      },
-      redactionPolicy: "secrets_and_paths",
-      // The plan's own 4,096 plus room for reasoning, which the provider counts against the same limit.
-      maxOutputTokens: answerMaxOutputTokens(input.thinkingDepth) + 2048,
-      thinkingDepth: input.thinkingDepth,
-      ...(input.images?.length ? { images: input.images } : {}),
-    });
+    if (input.signal?.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
 
-    const parsed = parsePlanJson(response.output, response.reasoning);
+    const hasClarifyingAnswers = (input.clarifyingAnswers?.length ?? 0) > 0;
+    const systemPrompt = [
+      PLAN_SYSTEM_PROMPT,
+      ...(input.supplementalMarkdown?.trim()
+        ? [
+            "The user explicitly attached additional context. Treat it as authoritative supplemental material.",
+            input.supplementalMarkdown,
+          ]
+        : []),
+    ].join("\n");
+    const requestInput = {
+      mode: "plan" as const,
+      writeCapability: false,
+      objective: input.objective,
+      clarifyingAnswers: input.clarifyingAnswers ?? [],
+      existingQuestions: input.existingQuestions ?? [],
+      localContext: input.localContext,
+    };
+
+    let firstFailure: "response_truncated" | undefined;
+    let parsed: z.infer<typeof ModelPlanPayloadSchema> | undefined;
+    let lastTruncationFailure = false;
+    // Two attempts: initial budget, then one truncation-driven raise only.
+    // Parse succeeds first — near-cap stop/missing-reason complete JSON is never discarded.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (input.signal?.aborted) {
+        throw new ProjectOSError(
+          "operation_cancelled",
+          "Model request cancelled",
+        );
+      }
+      const maxOutputTokens = resolveImplementationPlanMaxOutputTokens(
+        attempt > 0,
+        firstFailure,
+        { hasClarifyingAnswers },
+      );
+      const response = await this.gateway.complete(
+        input.profile,
+        {
+          projectId: input.projectId,
+          requestKind: "implementation_plan",
+          modelPreference: input.profile.id,
+          systemPrompt,
+          input: requestInput,
+          redactionPolicy: "secrets_and_paths",
+          maxOutputTokens,
+          thinkingDepth: input.thinkingDepth,
+          ...(input.images?.length ? { images: input.images } : {}),
+        },
+        input.signal ? { signal: input.signal } : undefined,
+      );
+
+      try {
+        parsed = parsePlanJson(response.output, response.reasoning);
+        lastTruncationFailure = false;
+        break;
+      } catch (error) {
+        const truncSignal = shouldRetryImplementationPlanForTruncation(
+          response,
+          maxOutputTokens,
+        );
+        const cutJson = isPlanParseFailureLikelyTruncation(error);
+        // Budget retry only for likely cut JSON + trunc signal — never for complete schema-invalid.
+        const mayRetry = attempt === 0 && truncSignal && cutJson;
+        if (mayRetry) {
+          firstFailure = "response_truncated";
+          lastTruncationFailure = true;
+          // Abort after the failed attempt must not open a second HTTP call.
+          if (input.signal?.aborted) {
+            throw new ProjectOSError(
+              "operation_cancelled",
+              "Model request cancelled",
+            );
+          }
+          continue;
+        }
+        // Two-round truncation exhaustion: readable truncation error (not the inner parse wording).
+        if (attempt > 0 && lastTruncationFailure && cutJson) {
+          throw new ProjectOSError(
+            "plan_generation_failed",
+            "The model truncated the implementation plan JSON before it was complete",
+            { details: { planParseFailure: "malformed_json", exhaustedTruncationRetries: true } },
+          );
+        }
+        // Schema / non-truncation failures keep their original message.
+        throw error;
+      }
+    }
+
+    if (!parsed) {
+      // Safety net if the loop exits without parse or throw (should be unreachable).
+      throw new ProjectOSError(
+        "plan_generation_failed",
+        lastTruncationFailure
+          ? "The model truncated the implementation plan JSON before it was complete"
+          : "The model returned malformed implementation plan JSON",
+        {
+          details: {
+            planParseFailure: "malformed_json",
+            ...(lastTruncationFailure ? { exhaustedTruncationRetries: true } : {}),
+          },
+        },
+      );
+    }
+
     const now = new Date().toISOString();
     const mergedQuestions = mergeClarifyingQuestions(
       normalizeClarifyingQuestions(parsed.clarifyingQuestions ?? []),
@@ -284,7 +372,19 @@ export function sanitizePlanPayload(decoded: unknown): unknown {
   };
 }
 
-function parsePlanJson(
+export type PlanParseFailureKind = "malformed_json" | "invalid_schema";
+
+/** True only for cut/undecodable JSON — not for complete objects that fail the plan schema. */
+export function isPlanParseFailureLikelyTruncation(error: unknown): boolean {
+  return (
+    error instanceof ProjectOSError
+    && error.code === "plan_generation_failed"
+    && error.details?.planParseFailure === "malformed_json"
+  );
+}
+
+/** Exported for fixture regression: truncated/malformed plan bodies must fail closed. */
+export function parsePlanJson(
   output: string,
   reasoning?: string,
 ): z.infer<typeof ModelPlanPayloadSchema> {
@@ -306,11 +406,15 @@ function parsePlanJson(
     }
   }
 
+  const planParseFailure: PlanParseFailureKind = sawDecodedJson
+    ? "invalid_schema"
+    : "malformed_json";
   throw new ProjectOSError(
     "plan_generation_failed",
-    sawDecodedJson
+    planParseFailure === "invalid_schema"
       ? "The model returned an invalid implementation plan"
       : "The model returned malformed implementation plan JSON",
+    { details: { planParseFailure } },
   );
 }
 

@@ -1,0 +1,45 @@
+{
+  "description": "Sanitized LOCAL HTTP/unit fixture shaped like a cut implementation_plan JSON body. Not a real DeepSeek capture. Live gateway completes log (2026-11-08T08:43:51Z / 08:44:29Z) observed status=ok + outputTokens=4096 exactly; that log schema has no finishReason field — length is NOT a direct live observation. Fixture responses may set finish_reason=length only to exercise the OpenAI-chat protocol path.",
+  "liveEvidence": {
+    "requestKind": "implementation_plan",
+    "provider": "DeepSeek",
+    "model": "deepseek-v4-flash",
+    "gatewayStatus": "ok",
+    "maxOutputTokens": 4096,
+    "observedOutputTokens": 4096,
+    "observedInputTokensApprox": 6630,
+    "finishReasonInGatewayLog": false,
+    "finishReasonNote": "inferred-only for fixture protocol; do not cite as observed live field"
+  },
+  "truncatedOutput": "{\"objective\":\"Add idempotent event dedupe for sync\",\"steps\":[{\"id\":\"step_1\",\"description\":\"Define shared dedupe key contract\",\"affectedFiles\":[\"shared/events.ts\"],\"acceptanceCriteria\":[\"Key format documented\"]},{\"id\":\"step_2\",\"description\":\"Enforce unique constraint server-side\",\"affectedFiles\":[\"db/migrations/001.sql\"],\"acceptanceCriteria\":[\"Duplicate insert rejected\"]},{\"id\":\"step_3\",\"description\":\"Client write path uses the key\",\"affectedFiles\":[\"client/sync.ts\"],\"acceptanceCriteria\":[\"Retries do not double-count\"]}],\"todos\":[{\"id\":\"todo_1\",\"content\":\"Write migration\",\"status\":\"pending\"},{\"id\":\"todo_2\",\"content\":\"Wire client key generation\",\"status\":\"pending\"}],\"ambiguities\":[],\"clarifyingQuestions\":[],\"rationale\":\"Answers already chose the shared-contract path; this plan keeps the change",
+  "completeOutput": {
+    "objective": "Add idempotent event dedupe for sync",
+    "steps": [
+      {
+        "id": "step_1",
+        "description": "Define shared dedupe key contract",
+        "affectedFiles": ["shared/events.ts"],
+        "acceptanceCriteria": ["Key format documented"]
+      },
+      {
+        "id": "step_2",
+        "description": "Enforce unique constraint server-side",
+        "affectedFiles": ["db/migrations/001.sql"],
+        "acceptanceCriteria": ["Duplicate insert rejected"]
+      },
+      {
+        "id": "step_3",
+        "description": "Client write path uses the key",
+        "affectedFiles": ["client/sync.ts"],
+        "acceptanceCriteria": ["Retries do not double-count"]
+      }
+    ],
+    "todos": [
+      { "id": "todo_1", "content": "Write migration", "status": "pending" },
+      { "id": "todo_2", "content": "Wire client key generation", "status": "pending" }
+    ],
+    "ambiguities": [],
+    "clarifyingQuestions": [],
+    "rationale": "Answers already chose the shared-contract path; this plan keeps the change small and reviewable."
+  }
+}

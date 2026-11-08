@@ -11,6 +11,13 @@ describe('userFacingErrorMessage', () => {
     expect(userFacingErrorMessage(error, 'en')).not.toMatch(/Error invoking|ProjectOSError|grounded answers/u)
   })
 
+  it('turns Stop/decline into a cancelled sentence, not a failure', () => {
+    const error = new ProjectOSError('operation_cancelled', "Decision 'x' was declined; no files were written")
+    expect(userFacingErrorMessage(error, 'en')).toMatch(/Stopped/u)
+    expect(userFacingErrorMessage(error, 'zh')).toMatch(/已停止/u)
+    expect(userFacingErrorMessage(error, 'en')).not.toMatch(/declined; no files were written/u)
+  })
+
   it('says plainly that nothing changed when the model keeps returning unusable output', () => {
     const error = new ProjectOSError('model_output_invalid', 'The model did not return a usable planning step after a retry')
     expect(userFacingErrorMessage(error, 'en')).toMatch(/Nothing was changed/u)

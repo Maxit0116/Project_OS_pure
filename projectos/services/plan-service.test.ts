@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ImplementationPlanSchema,
@@ -6,13 +6,27 @@ import {
 } from "../contracts/implementation-plan.js";
 import { DebugSessionSchema } from "../contracts/debug-session.js";
 import { ChatSessionModeSchema } from "../contracts/chat-session.js";
-import { buildPromptFromPlan, mergeClarifyingQuestions, normalizeClarifyingQuestions, sanitizePlanPayload } from "./plan-service.js";
+import {
+  PlanService,
+  buildPromptFromPlan,
+  isPlanParseFailureLikelyTruncation,
+  mergeClarifyingQuestions,
+  normalizeClarifyingQuestions,
+  parsePlanJson,
+  sanitizePlanPayload,
+} from "./plan-service.js";
 import { buildInstrumentationSnippet } from "./debug-instrumentation-service.js";
 import { chooseRootCause, createInitialDebugSession, findHarnessRecordForSession, prepareManualDebugSession, resolveDebugFixFilePath } from "./debug-session-service.js";
 import graphFixture from "../client/sample-projectos-fixtures/graph.json" with { type: "json" };
 import authHarnessFixture from "../client/sample-projectos-fixtures/harness/err_auth_provider_callback.json" with { type: "json" };
+import truncatedPlanFixture from "./fixtures/implementation-plan-truncated-4096.json" with { type: "json" };
 import { HarnessRecordSchema } from "../contracts/harness.js";
 import { ProjectGraphSchema } from "../contracts/graph.js";
+import type { ModelGateway } from "./model-gateway/index.js";
+import type { AgentContextBundle } from "../contracts/local-context.js";
+import type { ModelProfile } from "../contracts/settings.js";
+import { ProjectOSError } from "../errors.js";
+import { isTruncatedModelOutput, shouldRetryImplementationPlanForTruncation } from "./model-json-output.js";
 
 describe("implementation plan contracts", () => {
   it("accepts plan and debug chat modes", () => {
@@ -138,6 +152,342 @@ describe("plan-service helpers", () => {
     );
     expect(prompt).toContain("Objective: Fix callback");
     expect(prompt).toContain("Normalize callback");
+  });
+});
+
+describe("implementation plan truncation regression (live acceptance shape)", () => {
+  const profile = {
+    id: "model_flash",
+    name: "flash",
+    provider: "custom",
+    apiFormat: "openai_chat",
+    model: "deepseek-v4-flash",
+    baseUrl: "http://127.0.0.1:9",
+    apiKeyRef: "ref",
+  } as ModelProfile;
+
+  const localContext = {
+    version: "0.1.0",
+    kind: "global",
+    projectId: "proj_1",
+    topLevelNodes: [],
+    bundleHash: "sha256:test",
+  } as unknown as AgentContextBundle;
+
+  it("old single-shot 4096 path: truncated fixture is detected and fails parse", () => {
+    const truncated = truncatedPlanFixture.truncatedOutput;
+    // Live settles omit finishReason; saturation alone is the observed signal.
+    expect(
+      isTruncatedModelOutput(
+        {
+          usage: {
+            outputTokens: truncatedPlanFixture.liveEvidence.observedOutputTokens,
+          },
+        },
+        truncatedPlanFixture.liveEvidence.maxOutputTokens,
+      ),
+    ).toBe(true);
+    expect(truncatedPlanFixture.liveEvidence.finishReasonInGatewayLog).toBe(false);
+    expect(() => parsePlanJson(truncated)).toThrow(/malformed implementation plan JSON/i);
+  });
+
+  it("new path: saturating 4096 retries at 8192 and returns a ready plan", async () => {
+    const caps: number[] = [];
+    const complete = vi.fn(async (_profile: unknown, request: { maxOutputTokens?: number }) => {
+      const max = request.maxOutputTokens ?? 0;
+      caps.push(max);
+      if (max <= 4096) {
+        return {
+          requestId: "plan_trunc",
+          provider: "DeepSeek",
+          model: "deepseek-v4-flash",
+          latencyMs: 1,
+          finishReason: "length",
+          usage: { inputTokens: 3986, outputTokens: 4096 },
+          output: truncatedPlanFixture.truncatedOutput,
+        };
+      }
+      return {
+        requestId: "plan_ok",
+        provider: "DeepSeek",
+        model: "deepseek-v4-flash",
+        latencyMs: 1,
+        finishReason: "stop",
+        usage: { inputTokens: 3986, outputTokens: 1800 },
+        output: JSON.stringify(truncatedPlanFixture.completeOutput),
+      };
+    });
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    const plan = await service.createPlan({
+      projectId: "proj_1",
+      scope: { kind: "global" },
+      objective: "Add idempotent event dedupe for sync",
+      localContext,
+      profile,
+      thinkingDepth: "medium",
+    });
+    expect(caps).toEqual([4096, 8192]);
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(plan.status).toBe("ready");
+    expect(plan.steps).toHaveLength(3);
+  });
+
+  it("clarification follow-up starts at 8192 so the live 4096 saturation class is skipped", async () => {
+    const caps: number[] = [];
+    const complete = vi.fn(async (_profile: unknown, request: { maxOutputTokens?: number }) => {
+      caps.push(request.maxOutputTokens ?? 0);
+      return {
+        requestId: "plan_ready",
+        provider: "DeepSeek",
+        model: "deepseek-v4-flash",
+        latencyMs: 1,
+        finishReason: "stop",
+        usage: { inputTokens: 6630, outputTokens: 5200 },
+        output: JSON.stringify(truncatedPlanFixture.completeOutput),
+      };
+    });
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    const plan = await service.createPlan({
+      projectId: "proj_1",
+      scope: { kind: "global" },
+      objective: "Add idempotent event dedupe for sync",
+      localContext,
+      profile,
+      thinkingDepth: "medium",
+      existingPlanId: "plan_existing",
+      clarifyingAnswers: [
+        { questionId: "q_1", answer: "Shared contract first", selectedOptionId: "q_1_opt_a" },
+      ],
+      existingQuestions: [{ id: "q_1", question: "Where first?" }],
+    });
+    expect(caps).toEqual([8192]);
+    expect(plan.status).toBe("ready");
+    expect(plan.id).toBe("plan_existing");
+  });
+
+  it("still fails closed when the raised budget is also truncated", async () => {
+    const complete = vi.fn(async (_profile: unknown, request: { maxOutputTokens?: number }) => ({
+      requestId: "plan_still_trunc",
+      provider: "DeepSeek",
+      model: "deepseek-v4-flash",
+      latencyMs: 1,
+      finishReason: "length",
+      usage: {
+        inputTokens: 6630,
+        outputTokens: request.maxOutputTokens ?? 4096,
+      },
+      output: truncatedPlanFixture.truncatedOutput,
+    }));
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    await expect(
+      service.createPlan({
+        projectId: "proj_1",
+        scope: { kind: "global" },
+        objective: "Add idempotent event dedupe for sync",
+        localContext,
+        profile,
+        thinkingDepth: "medium",
+      }),
+    ).rejects.toMatchObject({
+      code: "plan_generation_failed",
+      message: "The model truncated the implementation plan JSON before it was complete",
+      details: { exhaustedTruncationRetries: true },
+    });
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry complete schema-invalid JSON when finishReason is missing and tokens saturate", async () => {
+    const invalidComplete = JSON.stringify({
+      objective: "Add idempotent event dedupe for sync",
+      steps: "not-an-array",
+      todos: [],
+      ambiguities: [],
+      rationale: "complete object but schema-invalid",
+    });
+    expect(() => parsePlanJson(invalidComplete)).toThrow(/invalid implementation plan/i);
+    expect(
+      isPlanParseFailureLikelyTruncation(
+        (() => {
+          try {
+            parsePlanJson(invalidComplete);
+          } catch (error) {
+            return error;
+          }
+          return null;
+        })(),
+      ),
+    ).toBe(false);
+    const complete = vi.fn(async () => ({
+      requestId: "plan_schema_near_cap",
+      provider: "fixture",
+      model: "fixture-model",
+      latencyMs: 1,
+      // Live settles omit finishReason; saturation alone must NOT budget-retry schema errors.
+      usage: { inputTokens: 3900, outputTokens: 4096 },
+      output: invalidComplete,
+    }));
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    await expect(
+      service.createPlan({
+        projectId: "proj_1",
+        scope: { kind: "global" },
+        objective: "Add idempotent event dedupe for sync",
+        localContext,
+        profile,
+        thinkingDepth: "medium",
+      }),
+    ).rejects.toMatchObject({
+      code: "plan_generation_failed",
+      message: "The model returned an invalid implementation plan",
+      details: { planParseFailure: "invalid_schema" },
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a complete finishReason=stop plan that sits on the token cap (no second HTTP)", async () => {
+    const complete = vi.fn(async () => ({
+      requestId: "plan_stop_near_cap",
+      provider: "fixture",
+      model: "fixture-model",
+      latencyMs: 1,
+      finishReason: "stop",
+      usage: { inputTokens: 3900, outputTokens: 4096 },
+      output: JSON.stringify(truncatedPlanFixture.completeOutput),
+    }));
+    // Heuristic alone would flag truncation; Plan gate must not.
+    expect(
+      isTruncatedModelOutput({ finishReason: "stop", usage: { outputTokens: 4096 } }, 4096),
+    ).toBe(true);
+    expect(
+      shouldRetryImplementationPlanForTruncation(
+        { finishReason: "stop", usage: { outputTokens: 4096 } },
+        4096,
+      ),
+    ).toBe(false);
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    const plan = await service.createPlan({
+      projectId: "proj_1",
+      scope: { kind: "global" },
+      objective: "Add idempotent event dedupe for sync",
+      localContext,
+      profile,
+      thinkingDepth: "medium",
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(plan.status).toBe("ready");
+  });
+
+  it("keeps a complete plan when finishReason is missing and tokens saturate", async () => {
+    const complete = vi.fn(async () => ({
+      requestId: "plan_missing_reason_ok",
+      provider: "fixture",
+      model: "fixture-model",
+      latencyMs: 1,
+      usage: { inputTokens: 3900, outputTokens: 4096 },
+      output: JSON.stringify(truncatedPlanFixture.completeOutput),
+    }));
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    const plan = await service.createPlan({
+      projectId: "proj_1",
+      scope: { kind: "global" },
+      objective: "Add idempotent event dedupe for sync",
+      localContext,
+      profile,
+      thinkingDepth: "medium",
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(plan.status).toBe("ready");
+  });
+
+  it("retries once when finishReason is missing, tokens saturate, and JSON is cut (live settles shape)", async () => {
+    const caps: number[] = [];
+    const complete = vi.fn(async (_profile: unknown, request: { maxOutputTokens?: number }) => {
+      const max = request.maxOutputTokens ?? 0;
+      caps.push(max);
+      if (max <= 4096) {
+        return {
+          requestId: "plan_missing_reason_trunc",
+          provider: "fixture",
+          model: "fixture-model",
+          latencyMs: 1,
+          // No finishReason — matches model-gateway-completes.jsonl fields.
+          usage: { inputTokens: 6630, outputTokens: 4096 },
+          output: truncatedPlanFixture.truncatedOutput,
+        };
+      }
+      return {
+        requestId: "plan_missing_reason_retry_ok",
+        provider: "fixture",
+        model: "fixture-model",
+        latencyMs: 1,
+        usage: { inputTokens: 6630, outputTokens: 1800 },
+        output: JSON.stringify(truncatedPlanFixture.completeOutput),
+      };
+    });
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    const plan = await service.createPlan({
+      projectId: "proj_1",
+      scope: { kind: "global" },
+      objective: "Add idempotent event dedupe for sync",
+      localContext,
+      profile,
+      thinkingDepth: "medium",
+    });
+    expect(caps).toEqual([4096, 8192]);
+    expect(plan.status).toBe("ready");
+  });
+
+  it("does not budget-retry structural invalid JSON with finishReason=stop", async () => {
+    const complete = vi.fn(async () => ({
+      requestId: "plan_stop_invalid",
+      provider: "fixture",
+      model: "fixture-model",
+      latencyMs: 1,
+      finishReason: "stop",
+      usage: { inputTokens: 100, outputTokens: 50 },
+      output: '{"objective":"x","steps":"not-an-array"}',
+    }));
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    await expect(
+      service.createPlan({
+        projectId: "proj_1",
+        scope: { kind: "global" },
+        objective: "Add idempotent event dedupe for sync",
+        localContext,
+        profile,
+        thinkingDepth: "medium",
+      }),
+    ).rejects.toBeInstanceOf(ProjectOSError);
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("abort between truncated attempt and retry opens no second HTTP call", async () => {
+    const controller = new AbortController();
+    const complete = vi.fn(async () => {
+      controller.abort();
+      return {
+        requestId: "plan_abort_after_trunc",
+        provider: "fixture",
+        model: "fixture-model",
+        latencyMs: 1,
+        finishReason: "length",
+        usage: { inputTokens: 6630, outputTokens: 4096 },
+        output: truncatedPlanFixture.truncatedOutput,
+      };
+    });
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    await expect(
+      service.createPlan({
+        projectId: "proj_1",
+        scope: { kind: "global" },
+        objective: "Add idempotent event dedupe for sync",
+        localContext,
+        profile,
+        thinkingDepth: "medium",
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ code: "operation_cancelled" });
+    expect(complete).toHaveBeenCalledTimes(1);
   });
 });
 
