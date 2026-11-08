@@ -18,3 +18,8 @@
 Ledger raised in place (no reset); missing≠0. Session cap 24; max_out 2048; max_in_chars 48000.
 
 Independent main-agent review should verify the JSON summaries + product diffs; do not treat this note as 可验收 by itself.
+
+## Probe bounds note
+- Live H3 probe used `sessionCap=24`; product default `LIVE_BATCH_DEFAULT` session cap remains 16 unless env overrides. Difference is probe-only raise, not a product default change.
+- Ledger snapshot for closeout: **193/200 reserved, missing=42** (unknown — not treated as settled).
+- Added synthetic unit regressions: `projectos/services/agent-orchestrator/sibling-clarify-share.test.ts` (share / Stop-skip / cross-root isolation / no-intent answers inject).

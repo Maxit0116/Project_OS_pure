@@ -13,7 +13,7 @@
   "tsconfig_test": "workbench/tsconfig.test.json",
   "fullgate_files_line": "2 failed | 486 passed (488)",
   "fullgate_tests_line": "3 failed | 2538 passed (2541)",
-  "log": "/Users/terran/Projects/_projectos_isolates/Project_OS_pure_wt_batch2/_batch25_stage_usability/trusted_gates_9c374cd/trusted_gates.log",
-  "console": "/Users/terran/Projects/_projectos_isolates/Project_OS_pure_wt_batch2/_batch25_stage_usability/trusted_gates_9c374cd/trusted_gates_console.txt",
+  "log": "<private-archive>/_batch25_stage_usability/trusted_gates_9c374cd/trusted_gates.log",
+  "console": "<private-archive>/_batch25_stage_usability/trusted_gates_9c374cd/trusted_gates_console.txt",
   "known_ux_red_expected_fullgate_nonzero": true
 }
