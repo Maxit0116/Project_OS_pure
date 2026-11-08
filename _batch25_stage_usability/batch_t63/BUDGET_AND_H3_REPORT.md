@@ -23,10 +23,10 @@ Opt-in env (unset ⇒ daily desktop unchanged), wired in `ModelGateway` + `proje
 | --- | --- | --- | --- | --- |
 | Max output tokens | `PROJECTOS_MODEL_OUTBOUND_MAX_OUTPUT_TOKENS` | **2048** | clamps `max_tokens` / `maxOutputTokens` before HTTP | `outbound-request-bounds.ts` → `applyOutboundRequestBounds`; applied in `gateway.ts` `buildProviderInput` and each tool-loop round |
 | Max input chars | `PROJECTOS_MODEL_OUTBOUND_MAX_INPUT_CHARS` | **48000** | refuses oversized system+user/messages; no HTTP | same |
-| Session cap | `PROJECTOS_MODEL_OUTBOUND_SESSION_CAP` | **8** | wraps ledger gate; each HTTP/retry/tool-loop round already `reserve()`s one slot; blocks after N new reserves this process | `withOutboundSessionCap` |
+| Session cap | `PROJECTOS_MODEL_OUTBOUND_SESSION_CAP` | **16** | wraps ledger gate; each HTTP/retry/tool-loop round already `reserve()`s one slot; blocks after N new reserves this process | `withOutboundSessionCap` |
 | Count ledger | `PROJECTOS_MODEL_OUTBOUND_BUDGET_PATH` + `_LIMIT` | same PATH, limit **100** | atomic permanent reserve (no refund) | `outbound-budget.ts` |
 
-Constants: `LIVE_BATCH_DEFAULT_MAX_OUTPUT_TOKENS=2048`, `LIVE_BATCH_DEFAULT_MAX_INPUT_CHARS=48000`, `LIVE_BATCH_DEFAULT_SESSION_CAP=8`.
+Constants: `LIVE_BATCH_DEFAULT_MAX_OUTPUT_TOKENS=2048`, `LIVE_BATCH_DEFAULT_MAX_INPUT_CHARS=48000`, `LIVE_BATCH_DEFAULT_SESSION_CAP=16` (raised from 8 after a live Agent loop exhausted the process cap before intent approve UI).
 
 Fee accounting for live batch: report **provider-reported usage** from settled ledger annotations; keep missing usage as **unknown** (not 0). After a bounded small live batch, reconcile real CNY from reported tokens; adjust clamps only if fail-closed or context loss.
 
@@ -59,7 +59,17 @@ Fee accounting for live batch: report **provider-reported usage** from settled l
 | In-progress Stop copy | **OK** | Composer Stop only while `flowStatus==='running'`; SLOW_MS hold + click 停止 → chat `已停止 Agent`; Apply disabled. |
 | Child-fail sanitize DOM | **OK** | `FORCE_CHILD_FAIL=1` dirty throw → real event chain; chat shows sanitize tokens; no `/Users/terran/secret` / `sk-…` / `tok_live_…`. |
 
+## Live DeepSeek H3 (bounded; real provider)
+
+Implemented bounds used: max_out **2048**, max_in_chars **48000**, session_cap **16**, ledger 100.
+- Answer pass: clarify card `Which heading…` options Welcome Back / Sign in / Stop → answered Welcome Back → same-root awaiting_review UI; files unchanged until apply. **OK**
+- Separate Stop pass: same clarify card → Stop declined; files unchanged. **OK**
+- Not synthetic / not Continue-authorized-edit.
+
+Ledger after live batch: **91/100** (started this turn's live work near 47; includes failed attempts while tuning).
+Reported tokens (ledger annotations, cumulative): in **208321**, out **26450**; missingCount **24** (unknown — **not** treated as 0).
+This-turn reported Δ vs first live pre (47→91 window): in **+94259**, out **+10980** → idle Flash arithmetic ≈ **0.138 CNY** on reported only; missing still an open unknown margin under the ~10 CNY fee budget.
+
 ## Still open (not 交验)
 
-- Live DeepSeek H3 clarify→card→same-root+Stop under **implemented** bounds + ledger; report real usage (not 0.064 arithmetic)
-- Post-final-test Couple SOURCE/ISOLATE four-hashes + secrets RO meta + ledger Δ
+- Tip clean fullgate after product tip; Couple SOURCE/ISOLATE four-hashes + secrets RO meta + ledger Δ snapshot

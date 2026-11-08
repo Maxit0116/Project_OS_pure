@@ -23,7 +23,8 @@ export const OUTBOUND_SESSION_CAP_ENV = "PROJECTOS_MODEL_OUTBOUND_SESSION_CAP";
 /** Conservative live-batch defaults used when probes explicitly opt in. */
 export const LIVE_BATCH_DEFAULT_MAX_OUTPUT_TOKENS = 2048;
 export const LIVE_BATCH_DEFAULT_MAX_INPUT_CHARS = 48_000;
-export const LIVE_BATCH_DEFAULT_SESSION_CAP = 8;
+/** Full Agent intent→edit loops need several reserves; 8 starved a live H3 run. */
+export const LIVE_BATCH_DEFAULT_SESSION_CAP = 16;
 
 export type OutboundRequestBounds = {
   /** Hard clamp on provider max_tokens (and request.maxOutputTokens). */
