@@ -159,6 +159,9 @@ const OllamaResponseSchema = z.object({
       }).strict(),
     }).strict()).optional(),
   }),
+  // Official /api/chat usage counters when the host reports them.
+  prompt_eval_count: OptionalTokenCountSchema,
+  eval_count: OptionalTokenCountSchema,
 });
 
 const OllamaModelsResponseSchema = z.object({
@@ -768,6 +771,8 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
       OllamaResponseSchema,
     );
     const output = body.message.content ?? "";
+    const hasUsage =
+      body.prompt_eval_count !== undefined || body.eval_count !== undefined;
     return {
       output,
       ...(body.message.tool_calls?.length
@@ -781,7 +786,11 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
             })),
           }
         : {}),
-      ...providerUsage(undefined),
+      ...providerUsage(
+        hasUsage
+          ? { input: body.prompt_eval_count, output: body.eval_count }
+          : undefined,
+      ),
       ...(reservationId ? { outboundReservationId: reservationId } : {}),
     };
   }
