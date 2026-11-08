@@ -84,7 +84,7 @@ export function buildTaskAppendix(input: {
     lines.push("Direct referrers:", ...referrers.map((path) => `- ${path}`));
   }
   if (tests.length > 0) {
-    lines.push("Same-name tests:", ...tests.map((path) => `- ${path}`));
+    lines.push("Related tests:", ...tests.map((path) => `- ${path}`));
   }
   if (description) lines.push(description);
   let markdown = lines.join("\n");

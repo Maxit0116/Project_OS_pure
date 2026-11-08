@@ -168,3 +168,10 @@
   border-color: var(--tech-border-strong);
   box-shadow: var(--tech-shadow-focus);
 }
+
+.pendingHint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}

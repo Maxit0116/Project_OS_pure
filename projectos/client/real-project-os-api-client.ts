@@ -134,6 +134,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.listWorkspaceDirectory(projectId, relativePath);
   }
 
+  assignFileOwner(projectId: string, filePath: string, nodeId: string): Promise<ProjectGraph> {
+    return this.transport.assignFileOwner(projectId, filePath, nodeId);
+  }
+
   getWorkspaceGitStatus(projectId: string) {
     return this.transport.getWorkspaceGitStatus(projectId);
   }
@@ -762,6 +766,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   getDiff(runId: string): Promise<GeneratedDiff> {
     return this.transport.getDiff(runId);
+  }
+
+  applyDespiteUnmetRequirements(runId: string): Promise<ApplyResult> {
+    return this.transport.applyDespiteUnmetRequirements(runId);
   }
 
   applyDiff(runId: string): Promise<ApplyResult> {

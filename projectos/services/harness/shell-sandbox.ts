@@ -6,6 +6,8 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
+  statSync,
 } from "node:fs";
 import { basename, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 
@@ -123,11 +125,14 @@ function looksLikeNetworkBinary(command: string): boolean {
 function touchesProtectedPath(
   workspaceRoot: string,
   args: readonly string[],
+  commandDirectory: string = workspaceRoot,
 ): string | undefined {
   const root = resolve(workspaceRoot);
+  // A relative argument is relative to the folder the command runs in.
+  const base = resolve(commandDirectory);
   for (const arg of args) {
     if (!arg || arg.startsWith("-")) continue;
-    const candidate = isAbsolute(arg) ? normalize(arg) : resolve(root, arg);
+    const candidate = isAbsolute(arg) ? normalize(arg) : resolve(base, arg);
     let rel: string;
     try {
       rel = relative(root, candidate).replace(/\\/gu, "/");
@@ -189,6 +194,8 @@ export function classifyShellInvocation(input: {
   command: string;
   args: readonly string[];
   config?: ShellSandboxConfig;
+  /** The folder the command runs in, when not the workspace root. */
+  commandDirectory?: string;
 }): ShellSandboxClassification {
   const config = input.config ?? ShellSandboxConfigSchema.parse({ version: "0.1.0" });
   const reasons: string[] = [];
@@ -198,7 +205,7 @@ export function classifyShellInvocation(input: {
   const protectedHit = touchesProtectedPath(input.workspaceRoot, [
     input.command,
     ...input.args,
-  ]);
+  ], input.commandDirectory);
   if (protectedHit) {
     return ShellSandboxClassificationSchema.parse({
       decision: "deny",
@@ -296,18 +303,64 @@ export interface RunSandboxedCommandResult extends VerificationCommandResult {
 }
 
 /**
+ * The folder a command runs in: the workspace root, or the command's `cwd` inside it. The folder must
+ * exist and, with symbolic links resolved, stay inside the workspace.
+ */
+export function resolveCommandDirectory(
+  workspaceRoot: string,
+  cwd: string | undefined,
+): { path: string } | { problem: string } {
+  if (cwd === undefined) return { path: workspaceRoot };
+  if (isAbsolute(cwd) || cwd.split(/[\\/]/u).some((part) => part === "..")) {
+    return { problem: `'${cwd}' is not a folder inside the project` };
+  }
+  let real: string;
+  let root: string;
+  try {
+    root = realpathSync(workspaceRoot);
+    real = realpathSync(resolve(workspaceRoot, cwd));
+  } catch {
+    return { problem: `folder '${cwd}' does not exist in the project` };
+  }
+  const rel = relative(root, real);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    return { problem: `folder '${cwd}' leads outside the project` };
+  }
+  if (!statSync(real).isDirectory()) {
+    return { problem: `'${cwd}' is not a folder` };
+  }
+  return { path: real };
+}
+
+/**
  * Run a command under soft sandbox policy. Does not escalate to full access.
  */
 export async function runSandboxedCommand(
   input: RunSandboxedCommandInput,
 ): Promise<RunSandboxedCommandResult> {
   const config = input.config ?? loadShellSandboxConfig(input.cwd);
+  const directory = resolveCommandDirectory(input.cwd, input.command.cwd);
   const classification = classifyShellInvocation({
     workspaceRoot: input.cwd,
     command: input.command.command,
     args: input.command.args,
     config,
+    ...("path" in directory ? { commandDirectory: directory.path } : {}),
   });
+
+  if ("problem" in directory) {
+    return {
+      command: input.command,
+      status: "failed",
+      exitCode: null,
+      durationMs: 0,
+      timedOut: false,
+      outputTruncated: false,
+      output: `shell_cwd_invalid: ${directory.problem}`,
+      sandbox: classification,
+      blocked: true,
+    };
+  }
 
   if (classification.decision === "deny") {
     return {
@@ -370,7 +423,7 @@ export async function runSandboxedCommand(
 
   try {
     const before = fingerprintProtectedPaths(input.cwd);
-    const result = await spawnCaptured(input.command, input.cwd, config, input.signal);
+    const result = await spawnCaptured(input.command, directory.path, config, input.signal);
     const protectedPathsChanged = fingerprintProtectedPaths(input.cwd) !== before;
     const notice = "protected_paths_changed: review sandbox and permission files";
     return {

@@ -189,3 +189,20 @@ describe("chat-session-empty", () => {
     ).toEqual(["child", "parent"]);
   });
 });
+
+describe("a conversation waiting on the person", () => {
+  it("is not empty, though it has no message yet", () => {
+    // An Agent conversation keeps an unanswered intent card (S8); leaving it must not delete it.
+    const head: ChatSessionHead = {
+      id: "chat_waiting",
+      title: "New",
+      createdAt: "2026-07-17T00:00:00.000Z",
+      lastUpdatedAt: "2026-07-17T00:00:00.000Z",
+      chatMode: "change",
+      isArchived: false,
+      status: "awaiting_review",
+    };
+    expect(shouldDisposeEmptySession({ head, messages: [], heads: [head], pinnedIds: [] })).toBe(false);
+    expect(shouldDisposeEmptySession({ head: { ...head, status: "idle" }, messages: [], heads: [head], pinnedIds: [] })).toBe(true);
+  });
+});

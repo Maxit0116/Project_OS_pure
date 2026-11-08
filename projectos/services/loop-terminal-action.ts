@@ -1,5 +1,5 @@
 import type { ExecCommand } from "../contracts/exec-command.js";
-import type { CapabilityContext } from "../contracts/tool-policy.js";
+import type { CapabilityContext, ToolPermissionRule } from "../contracts/tool-policy.js";
 import { evaluateToolCall } from "./harness/tool-policy.js";
 
 const HIGH_RISK =
@@ -38,23 +38,7 @@ export function parseTerminalExecCommand(input: {
 export function evaluateTerminalPolicyDecision(input: {
   command: ExecCommand;
   policy: CapabilityContext;
-  permissionRules?: Array<{
-    effect: "allow" | "deny" | "ask";
-    tool:
-      | "read_file"
-      | "list_files"
-      | "git_status"
-      | "get_context"
-      | "grep_workspace"
-      | "generate_diff"
-      | "apply_diff"
-      | "run_verification"
-      | "shell"
-      | "mcp_tool"
-      | "fetch"
-      | "*";
-    match?: string | undefined;
-  }>;
+  permissionRules?: readonly ToolPermissionRule[];
 }): "allow" | "deny" | "ask" {
   const match = [input.command.command, ...input.command.args].join(" ");
   const decision = evaluateToolCall(

@@ -100,6 +100,14 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async assignFileOwner(
+    _projectId: string,
+    _filePath: string,
+    _nodeId: string,
+  ): Promise<ProjectGraph> {
+    return transportNotConnected();
+  }
+
   async getWorkspaceGitStatus(
     _projectId: string,
   ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitStatus> {
@@ -795,6 +803,10 @@ export class NotConnectedTransport implements ProjectOSApi {
   }
 
   async applyDiff(_runId: string): Promise<ApplyResult> {
+    return transportNotConnected();
+  }
+
+  async applyDespiteUnmetRequirements(_runId: string): Promise<ApplyResult> {
     return transportNotConnected();
   }
 

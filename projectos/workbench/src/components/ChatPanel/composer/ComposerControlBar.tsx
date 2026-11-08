@@ -53,11 +53,6 @@ export default function ComposerControlBar({
   const modelSelectionPending = useWorkbenchStore((s) => s.modelSelectionPending)
   const selectedModelProfileId = useWorkbenchStore((s) => s.selectedModelProfileId)
   const selectChatModel = useWorkbenchStore((s) => s.selectChatModel)
-  const executorOptions = useWorkbenchStore((s) => s.executorOptions)
-  const selectedRuntimeId = useWorkbenchStore((s) => s.selectedRuntimeId)
-  const loadExecutorOptions = useWorkbenchStore((s) => s.loadExecutorOptions)
-  const selectRuntimeExecutor = useWorkbenchStore((s) => s.selectRuntimeExecutor)
-  const projectId = useWorkbenchStore((s) => s.project?.projectId)
   const setThinkingDepth = useWorkbenchStore((s) => s.setThinkingDepth)
   const setSettingsOpen = useWorkbenchStore((s) => s.setSettingsOpen)
   const client = useWorkbenchStore((s) => s.client)
@@ -70,17 +65,24 @@ export default function ComposerControlBar({
   const exportCapabilityPack = useWorkbenchStore((s) => s.exportCapabilityPack)
   const pushToast = useWorkbenchStore((s) => s.pushToast)
   const askSubMode = useWorkbenchStore((s) => s.askSubMode)
+  // Registered agent runtimes (empty in a production build): an Agent request may run on one of them
+  // instead of a model profile.
+  const executorOptions = useWorkbenchStore((s) => s.executorOptions)
+  const selectedRuntimeId = useWorkbenchStore((s) => s.selectedRuntimeId)
+  const loadExecutorOptions = useWorkbenchStore((s) => s.loadExecutorOptions)
+  const selectRuntimeExecutor = useWorkbenchStore((s) => s.selectRuntimeExecutor)
   const setAskSubMode = useWorkbenchStore((s) => s.setAskSubMode)
   const { ts } = useI18n()
 
   const [workforceAgents, setWorkforceAgents] = useState<AgentDefinition[]>([])
   const [agentsLoading, setAgentsLoading] = useState(false)
   const [agentsLoaded, setAgentsLoaded] = useState(false)
+  const barRef = useRef<HTMLDivElement>(null)
+  const projectId = project?.projectId
 
   useEffect(() => {
     void loadExecutorOptions()
   }, [projectId, loadExecutorOptions])
-  const barRef = useRef<HTMLDivElement>(null)
 
   const loadWorkforceAgents = () => {
     if (!client?.listWorkforceAgents || !project || agentsLoaded || agentsLoading) return
@@ -160,10 +162,13 @@ export default function ComposerControlBar({
           selectedModelProfileId={selectedModelProfileId}
           thinkingDepth={thinkingDepth}
           presentationMode={presentationMode}
-          onSelectModel={(profileId) => selectChatModel(profileId)}
+          onSelectModel={(profileId) => {
+            selectRuntimeExecutor(null)
+            return selectChatModel(profileId)
+          }}
           modelSelectionPending={modelSelectionPending}
           runtimes={chatMode === 'change' ? executorOptions : []}
-          selectedRuntimeId={selectedRuntimeId}
+          selectedRuntimeId={chatMode === 'change' ? selectedRuntimeId : null}
           onSelectRuntime={selectRuntimeExecutor}
           onSelectThinkingDepth={(depth) => {
             void setThinkingDepth(depth)

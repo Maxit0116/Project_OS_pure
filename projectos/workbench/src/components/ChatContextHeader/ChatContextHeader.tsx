@@ -5,6 +5,7 @@ import { useI18n } from '../../i18n'
 import Chip from '../ui/Chip'
 import { SkeletonCard } from '../ui/Skeleton'
 import { resolveContextDropdownLabel } from './resolveContextDropdownLabel'
+import { suggestOwnersForFile } from '../../../../utils/file-owner-suggestions'
 import styles from './ChatContextHeader.module.css'
 
 const DROPDOWN_PANEL_ID = 'chat-context-dropdown-panel'
@@ -19,12 +20,14 @@ export default function ChatContextHeader() {
   const fileScopeError = useWorkbenchStore((s) => s.fileScopeError)
   const selectFile = useWorkbenchStore((s) => s.selectFile)
   const chooseFileOwner = useWorkbenchStore((s) => s.chooseFileOwner)
+  const assignFileOwner = useWorkbenchStore((s) => s.assignFileOwner)
   const chatMode = useWorkbenchStore((s) => s.chatMode)
   const lastAnchoredAnswer = useWorkbenchStore((s) => s.lastAnchoredAnswer)
   const writeAnchoredAnswerAsDecision = useWorkbenchStore((s) => s.writeAnchoredAnswerAsDecision)
   const { ts } = useI18n()
   const [expanded, setExpanded] = useState(false)
   const [filesExpanded, setFilesExpanded] = useState(false)
+  const [otherOwnerId, setOtherOwnerId] = useState('')
 
   const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId)
   const activeHandoffId = useWorkbenchStore((s) => s.activeHandoffId)
@@ -87,6 +90,19 @@ export default function ChatContextHeader() {
     </div>
   )
 
+  // For a file nobody owns: the nodes that own files beside it first, then every feature that owns
+  // any file, so there is always a way forward.
+  const unownedSuggestions = useMemo(
+    () => (fileScopeError === 'not_mapped' && graph && selectedFilePath
+      ? suggestOwnersForFile(graph, selectedFilePath)
+      : []),
+    [fileScopeError, graph, selectedFilePath],
+  )
+  const ownerCandidates = useMemo(
+    () => (graph?.nodes ?? []).filter((node) => node.level !== 'context' && (node.linkedFiles?.length ?? 0) > 0),
+    [graph],
+  )
+
   // Send stays disabled until a file has an owner. The reason and the choice must not sit inside the
   // collapsed dropdown, whose label only says that no context is loaded.
   const blockingScope = (pendingFileOwnerChoice || fileScopeError === 'not_mapped') && (
@@ -108,7 +124,57 @@ export default function ChatContextHeader() {
         </div>
       )}
       {fileScopeError === 'not_mapped' && (
-        <div className={styles.scopeError}>{ts('context.fileNotMapped')}</div>
+        <>
+          <div className={styles.scopeError}>{ts('context.fileNotMapped')}</div>
+          {selectedFilePath && graph && (
+            <div className={styles.ownerChoice}>
+              <strong>{ts('context.fileNotMappedHelp')}</strong>
+              <div className={styles.ownerButtons}>
+                {unownedSuggestions.map((suggestion) => {
+                  const node = graph.nodes.find((candidate) => candidate.id === suggestion.nodeId)
+                  return (
+                    <button
+                      type="button"
+                      key={suggestion.nodeId}
+                      onClick={() => void assignFileOwner(suggestion.nodeId)}
+                    >
+                      {ts('context.assignOwnerButton', { name: node?.name ?? suggestion.nodeId })}
+                      <span className={styles.ownerCaption}>
+                        {suggestion.sharedDirectory
+                          ? ts('context.assignOwnerSharedDir', {
+                            count: suggestion.filesInSharedDirectory,
+                            directory: suggestion.sharedDirectory,
+                          })
+                          : ts('context.assignOwnerSharedRoot')}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              {ownerCandidates.length > 0 && (
+                <div className={styles.ownerButtons}>
+                  <select
+                    aria-label={ts('context.assignOwnerOther')}
+                    value={otherOwnerId}
+                    onChange={(event) => setOtherOwnerId(event.target.value)}
+                  >
+                    <option value="">{ts('context.assignOwnerOther')}</option>
+                    {ownerCandidates.map((node) => (
+                      <option key={node.id} value={node.id}>{node.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!otherOwnerId}
+                    onClick={() => void assignFileOwner(otherOwnerId)}
+                  >
+                    {ts('context.assignOwnerOtherButton')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

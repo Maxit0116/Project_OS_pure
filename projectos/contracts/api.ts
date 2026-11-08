@@ -223,6 +223,8 @@ export interface ProjectOSApi {
     projectId: string,
     relativePath: string,
   ): Promise<WorkspaceDirectoryEntry[]>;
+  /** Give a file no node owns to one node (graph only), so Agent can change it. Returns the new graph. */
+  assignFileOwner(projectId: string, filePath: string, nodeId: string): Promise<ProjectGraph>;
   /** Current branch + dirty / ahead-behind for compose hub / status chrome. */
   getWorkspaceGitStatus(
     projectId: string,
@@ -594,6 +596,11 @@ export interface ProjectOSApi {
   ): Disposable;
   getDiff(runId: string): Promise<GeneratedDiff>;
   applyDiff(runId: string): Promise<ApplyResult>;
+  /**
+   * The person's explicit "apply anyway" for a change the server held because the independent review
+   * said some requirement is not met. The ordinary `applyDiff` refuses such a change.
+   */
+  applyDespiteUnmetRequirements(runId: string): Promise<ApplyResult>;
   runVerification(runId: string): Promise<VerificationRunResult>;
   getVerificationCommandApproval(projectId: string): Promise<VerificationCommandApprovalStatus>;
   approveVerificationCommands(

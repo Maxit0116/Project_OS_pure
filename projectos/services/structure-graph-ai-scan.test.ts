@@ -11,6 +11,9 @@ import {
   buildRepoScanContext,
   graphNeedsAiScan,
   parseProjectGraphFromModelOutput,
+  resolveArchitecture,
+  elementTypeFromId,
+  isRetryableGateFailure,
   runStructureGraphAiScan,
 } from "./structure-graph-ai-scan.js";
 import { buildHeuristicProjectGraph } from "./workspace-bootstrap.js";
@@ -389,6 +392,238 @@ describe("structure-graph-ai-scan", () => {
     expect(auth.linkedFiles.length).toBeGreaterThanOrEqual(2);
     expect(scanned.fileIndex.some((entry) => entry.imports.length > 0)).toBe(true);
     expect(scanned.nodes.some((node) => node.tags.includes("bootstrap"))).toBe(false);
+  });
+
+  it("asks for the components once more when the quality gate refuses them, saying why", async () => {
+    // more-itertools, packaged app: round B gave CI, docs and metadata components that own no code
+    // and the whole map fell back to a placeholder.
+    const { root, projectId } = makeTempRepo();
+    const heuristic = buildHeuristicProjectGraph({ projectId, projectName: "demo", projectType: "node", workspaceRoot: root });
+    const noCode = JSON.stringify({
+      // More components than the repository can give two files each: the gate refuses (thin_file_mounts).
+      components: ["CI pipeline", "Documentation site", "Project metadata", "Issue templates", "Release notes", "Changelog", "Funding", "Code of conduct"].map((name, index) => ({
+        id: `component_${index}`, name, parentId: "container_app", description: name, summary: name,
+        responsibility: name, layer: "application", pathHints: [`.github/${index}`],
+      })),
+      edges: [],
+    });
+    const prompts: string[] = [];
+    let roundBCalls = 0;
+    const complete = vi.fn(async (_profile, request) => {
+      const task = (request.input as { task?: string }).task;
+      if (task === "structure_graph_round_a") return gatewayResponse(roundAJson());
+      roundBCalls += 1;
+      prompts.push(String(request.systemPrompt ?? "") + JSON.stringify(request.input ?? ""));
+      return gatewayResponse(roundBCalls === 1 ? noCode : roundBJson());
+    });
+    const scanned = await runStructureGraphAiScan({
+      workspaceRoot: root, projectId, displayName: "demo", graph: heuristic, profile: mockProfile(),
+      gateway: { complete } as unknown as ModelGateway,
+    });
+    expect(complete).toHaveBeenCalledTimes(3);
+    expect(scanned.analysisStatus).toBe("complete");
+    expect(scanned.nodes.some((node) => node.name === "Identity access")).toBe(true);
+    expect(prompts[0]).not.toContain("PREVIOUS ATTEMPT REFUSED");
+    expect(prompts[1]).toContain("PREVIOUS ATTEMPT REFUSED");
+    expect(prompts[1]).toContain("thin_file_mounts");
+    expect(prompts[1]).toContain("use fewer, each owning at least two source files");
+  });
+
+  it("reads the element type from `type`, `kind` or the id when the model leaves out level and elementType", async () => {
+    // more-itertools, live: every round A node came as { id: "person_developer", type: "person" } with no
+    // level, so none was a context or container and the map was refused (missing_container).
+    const { root, projectId } = makeTempRepo();
+    const heuristic = buildHeuristicProjectGraph({ projectId, projectName: "demo", projectType: "node", workspaceRoot: root });
+    const original = JSON.parse(roundAJson()) as { nodes: Array<Record<string, unknown>> };
+    const stripped = {
+      ...original,
+      nodes: original.nodes.map((node, index) => {
+        const { level: _level, elementType, ...rest } = node;
+        return index % 2 === 0 ? { ...rest, type: elementType } : rest;
+      }),
+    };
+    const complete = vi.fn(async (_profile, request) => {
+      const task = (request.input as { task?: string }).task;
+      return gatewayResponse(task === "structure_graph_round_a" ? JSON.stringify(stripped) : roundBJson());
+    });
+    const scanned = await runStructureGraphAiScan({
+      workspaceRoot: root, projectId, displayName: "demo", graph: heuristic, profile: mockProfile(),
+      gateway: { complete } as unknown as ModelGateway,
+    });
+    expect(scanned.analysisStatus).toBe("complete");
+    for (const node of original.nodes) {
+      expect(scanned.nodes.find((candidate) => candidate.id === node.id)?.level).toBe(node.level);
+    }
+    expect(elementTypeFromId("person_developer")).toBe("person");
+    expect(elementTypeFromId("container_tests")).toBe("container");
+    expect(elementTypeFromId("auth_service")).toBeUndefined();
+  });
+
+  it("asks only once more, and not at all for a failure another round cannot fix", () => {
+    expect(isRetryableGateFailure(["components_without_code:3"])).toBe(true);
+    expect(isRetryableGateFailure(["thin_file_mounts:1<4"])).toBe(true);
+    expect(isRetryableGateFailure(["language_mismatch_expected_en", "invalid_edges:2"])).toBe(false);
+  });
+
+  describe("what the scan asks of the model, and what it shows it", () => {
+    const run = async (root: string, projectId: string, roundB: (request: any) => string) => {
+      const requests: any[] = [];
+      const complete = vi.fn(async (_profile, request) => {
+        requests.push(request);
+        const task = (request.input as { task?: string }).task;
+        return gatewayResponse(task === "structure_graph_round_a" ? roundAJson() : roundB(request));
+      });
+      const heuristic = buildHeuristicProjectGraph({ projectId, projectName: "demo", projectType: "node", workspaceRoot: root });
+      const scanned = await runStructureGraphAiScan({
+        workspaceRoot: root,
+        projectId,
+        displayName: "demo",
+        graph: heuristic,
+        profile: mockProfile(),
+        gateway: { complete } as unknown as ModelGateway,
+      });
+      return { scanned, requests };
+    };
+
+    it("asks without hidden reasoning, which only spent the output budget and made calls slow", async () => {
+      const { root, projectId } = makeTempRepo();
+      const { requests } = await run(root, projectId, () => roundBJson());
+      expect(requests.length).toBe(2);
+      for (const request of requests) expect(request.thinkingDepth).toBe("off");
+    });
+
+    it("tells the model how many components this repository can have, and where its files are", async () => {
+      const { root, projectId } = makeTempRepo();
+      const { requests } = await run(root, projectId, () => roundBJson());
+      const roundB = requests.find((request) => request.input.task === "structure_graph_round_b");
+      expect(roundB.systemPrompt).toMatch(/\d+–\d+ in total for this repository \(\d+ source files\)/u);
+      expect(roundB.systemPrompt).toContain("Never more components than half the number of source files");
+      expect(roundB.input.directories.some((entry: string) => entry.startsWith("src/auth/"))).toBe(true);
+    });
+
+    it("builds the map from the whole tree, not from the first 400 files in directory order", async () => {
+      const { root, projectId } = makeTempRepo();
+      mkdirSync(join(root, "aaa-docs"), { recursive: true });
+      for (let index = 0; index < 450; index += 1) {
+        writeFileSync(join(root, "aaa-docs", `page-${String(index).padStart(3, "0")}.md`), "# page\n");
+      }
+      mkdirSync(join(root, "zzz-engine", "core"), { recursive: true });
+      for (let index = 0; index < 8; index += 1) {
+        writeFileSync(join(root, "zzz-engine", "core", `part${index}.ts`), `export const p${index} = ${index};\n`);
+      }
+      const { scanned, requests } = await run(root, projectId, () =>
+        JSON.stringify({
+          components: [
+            { id: "component_engine", name: "Engine core", parentId: "container_app", description: "The engine", summary: "Runs the engine", responsibility: "Owns the engine", layer: "application", pathHints: ["zzz-engine/core"] },
+            { id: "component_auth", name: "Identity access", parentId: "container_app", description: "Login", summary: "Authenticates", responsibility: "Owns sign-in", layer: "application", pathHints: ["src/auth"] },
+            { id: "component_billing", name: "Billing", parentId: "container_app", description: "Plans", summary: "Charges", responsibility: "Owns billing", layer: "application", pathHints: ["src/billing"] },
+          ],
+          edges: [],
+        }),
+      );
+
+      const roundB = requests.find((request) => request.input.task === "structure_graph_round_b");
+      expect(roundB.input.files).toContain("zzz-engine/core/");
+      expect(roundB.input.directories.some((entry: string) => entry.startsWith("zzz-engine/core/"))).toBe(true);
+      const engine = scanned.nodes.find((node) => node.id === "component_engine")!;
+      expect(engine.linkedFiles.length).toBeGreaterThanOrEqual(8);
+      expect(scanned.fileIndex.some((entry) => entry.path === "zzz-engine/core/part7.ts")).toBe(true);
+    });
+
+    it("keeps a model's capability-named components for a small project instead of a placeholder map", async () => {
+      // more-itertools shape: a few source files, more components than files can fill in pairs.
+      const root = mkdtempSync(join(tmpdir(), "structure-graph-small-"));
+      mkdirSync(join(root, "lib"), { recursive: true });
+      mkdirSync(join(root, "tests"), { recursive: true });
+      writeFileSync(join(root, "README.md"), "# Tiny\nA small Python library.\n");
+      writeFileSync(join(root, "lib", "__init__.py"), "from .more import *\nfrom .recipes import *\n");
+      writeFileSync(join(root, "lib", "more.py"), "def chunked(x): return x\n");
+      writeFileSync(join(root, "lib", "recipes.py"), "def take(n, it): return it\n");
+      writeFileSync(join(root, "tests", "test_more.py"), "from lib.more import chunked\n");
+      writeFileSync(join(root, "tests", "test_recipes.py"), "from lib.recipes import take\n");
+      writeFileSync(join(root, "tests", "__init__.py"), "");
+      writeFileSync(join(root, "setup.py"), "from setuptools import setup\nsetup()\n");
+      const { scanned } = await run(root, "proj_small", () =>
+        JSON.stringify({
+          components: [
+            { id: "c_api", name: "Public API", parentId: "container_app", description: "d", summary: "s", responsibility: "r", layer: "application", pathHints: ["lib/__init__.py"] },
+            { id: "c_more", name: "Combinators", parentId: "container_app", description: "d", summary: "s", responsibility: "r", layer: "application", pathHints: ["lib/more.py"] },
+            { id: "c_recipes", name: "Recipes", parentId: "container_app", description: "d", summary: "s", responsibility: "r", layer: "application", pathHints: ["lib/recipes.py"] },
+            { id: "c_tests", name: "Test suite", parentId: "container_app", description: "d", summary: "s", responsibility: "r", layer: "application", pathHints: ["tests"] },
+          ],
+          edges: [],
+        }),
+      );
+      expect(scanned.analysisStatus).toBe("complete");
+      expect(scanned.nodes.some((node) => node.name === "Combinators")).toBe(true);
+    });
+  });
+
+  describe("an architecture block the model filled with project metadata", () => {
+    // Observed on the Python library more-itertools: round A returned `architecture: {projectId, repo,
+    // name, description, round, language}`. The assembled graph then failed validation ("notation:
+    // Invalid literal value, expected c4; defaultLevel: Required; layers: Required") and the scan kept
+    // a placeholder map although the model had produced a good one.
+    const metadataBlock = {
+      projectId: "30f3ac2a",
+      repo: "repo",
+      name: "demo",
+      description: "A demo",
+      round: "A",
+      language: "en",
+    };
+
+    it("still produces the map from the nodes the model returned", async () => {
+      const { root, projectId } = makeTempRepo();
+      const heuristic = buildHeuristicProjectGraph({
+        projectId,
+        projectName: "demo",
+        projectType: "node",
+        workspaceRoot: root,
+      });
+      const complete = vi.fn(async (_profile, request) => {
+        const task = (request.input as { task?: string }).task;
+        if (task !== "structure_graph_round_a") return gatewayResponse(roundBJson());
+        return gatewayResponse(
+          JSON.stringify({ ...JSON.parse(roundAJson()), architecture: metadataBlock }),
+        );
+      });
+
+      const scanned = await runStructureGraphAiScan({
+        workspaceRoot: root,
+        projectId,
+        displayName: "demo",
+        graph: heuristic,
+        profile: mockProfile(),
+        gateway: { complete } as unknown as ModelGateway,
+      });
+
+      expect(scanned.analysisStatus).toBe("complete");
+      expect(scanned.nodes.some((node) => node.name === "Identity access")).toBe(true);
+      expect(scanned.architecture?.notation).toBe("c4");
+    });
+
+    it("keeps the layers and level that are usable and replaces the rest", () => {
+      const resolved = resolveArchitecture(
+        {
+          ...metadataBlock,
+          defaultLevel: "context",
+          layers: [
+            { id: "core", label: "Core", order: 0, description: "Core logic" },
+            { id: "", label: "broken", order: "x" },
+          ],
+        },
+        "en",
+      );
+      expect(resolved.defaultLevel).toBe("context");
+      expect(resolved.layers.map((layer) => layer.id)).toEqual(["core"]);
+    });
+
+    it.each([undefined, null, "c4", 7, [], {}])("falls back to the defaults for %j", (raw) => {
+      const resolved = resolveArchitecture(raw, "en");
+      expect(resolved.notation).toBe("c4");
+      expect(resolved.layers.length).toBeGreaterThan(0);
+    });
   });
 
   describe("a model reply cut off at its output limit", () => {

@@ -48,8 +48,9 @@ describe("code intelligence", () => {
       "src/kept.ts",
       "src/note.py",
     ]);
+    // Python is read by text now (extract-declarations.ts), no longer unsupported.
     expect(first.inventory.files.find((file) => file.path === "src/note.py")?.language).toBe(
-      "unsupported",
+      "python",
     );
     expect(first.inventory.omissions.map((item) => item.reason).sort()).toEqual([
       "secret",
@@ -62,7 +63,7 @@ describe("code intelligence", () => {
     expect(inventoryText).not.toContain("sk-abcdefghijklmnopqrstuvwxyz");
     expect(inventoryText).not.toContain("BEGIN PRIVATE KEY");
     expect(inventoryText).not.toContain("\"symbols\"");
-    expect(first.symbols.files.map((file) => file.path)).not.toContain("src/note.py");
+    expect(first.symbols.files.find((file) => file.path === "src/note.py")?.symbols.map((symbol) => symbol.name)).toEqual(["note"]);
 
     const poisonedHash = "0".repeat(24);
     const poisoned = {
@@ -446,3 +447,79 @@ function workspace(files: Record<string, string>): string {
   }
   return root;
 }
+
+/**
+ * Symbol lookup, a file's referrers and its tests were TypeScript and JavaScript only: an Agent edit
+ * to a Python, Go or Java file got no list of the files that use it.
+ */
+describe("code intelligence beyond TypeScript", () => {
+  it("finds the public declarations of each language by its own rule", () => {
+    const root = workspace({
+      "app/crud.py": "import os\n\nMAX_ITEMS = 100\n_cache = {}\n\ndef get_user_by_email(session, email):\n    def inner():\n        pass\n    return None\n\nasync def create_user(session, user):\n    return user\n\ndef _private():\n    pass\n\nclass UserCreate(BaseModel):\n    email: str\n",
+      "store/user.go": "package store\n\ntype User struct {\n\tID int\n}\n\ntype Repo interface {\n\tFind(id int) User\n}\n\nfunc NewRepo() Repo { return nil }\n\nfunc (r *repo) Find(id int) User { return User{} }\n\nfunc helper() {}\n",
+      "src/lib.rs": "pub struct Engine {}\npub fn start() {}\nfn hidden() {}\npub(crate) enum Mode { A }\npub trait Plugin {}\n",
+      "src/main/java/org/x/OwnerController.java": "package org.x;\n\npublic class OwnerController {\n    private final OwnerRepository owners;\n\n    public String showOwner(int ownerId) {\n        return \"owner\";\n    }\n\n    private void hidden() {\n    }\n}\n",
+      "app/Orders.kt": "package app\n\ndata class Order(val id: Int)\n\nfun placeOrder(order: Order): Boolean = true\n\nprivate fun hidden() {}\n",
+      "lib/billing.rb": "module Billing\n  class Invoice\n    def total\n    end\n  end\nend\n",
+      "src/Cart.php": "<?php\nfinal class Cart {\n    public function add($item) {}\n    private function hidden() {}\n}\n",
+    });
+    const names = (path: string) => symbolsInFile({ workspaceRoot: root, projectId: PROJECT_ID, path }).symbols.map((symbol) => `${symbol.kind}:${symbol.name}`);
+    expect(names("app/crud.py")).toEqual(["const:MAX_ITEMS", "function:get_user_by_email", "function:create_user", "class:UserCreate"]);
+    expect(names("store/user.go")).toEqual(["class:User", "interface:Repo", "function:NewRepo", "function:Find"]);
+    expect(names("src/lib.rs")).toEqual(["class:Engine", "function:start", "enum:Mode", "interface:Plugin"]);
+    expect(names("src/main/java/org/x/OwnerController.java")).toEqual(["class:OwnerController", "function:showOwner"]);
+    expect(names("app/Orders.kt")).toEqual(["class:Order", "function:placeOrder"]);
+    expect(names("lib/billing.rb")).toEqual(["class:Billing", "class:Invoice", "function:total"]);
+    expect(names("src/Cart.php")).toEqual(["class:Cart", "function:add"]);
+    expect(lookupSymbols({ workspaceRoot: root, projectId: PROJECT_ID, name: "get_user_by_email" }).symbols.map((symbol) => symbol.path)).toEqual(["app/crud.py"]);
+  });
+
+  it("lists the Python files that import a module, the ones that use a name from it, and its tests", () => {
+    const root = workspace({
+      "app/__init__.py": "",
+      "app/crud.py": "def get_user_by_email(session, email):\n    return None\n\ndef create_user(session, user):\n    return user\n",
+      "app/api/routes/login.py": "from app import crud\n\ndef login(session, form):\n    return crud.get_user_by_email(session, form.username)\n",
+      "app/api/routes/users.py": "from app.crud import create_user\n\ndef register(session, user):\n    return create_user(session, user)\n",
+      "app/api/main.py": "from app.api.routes import login\n",
+      "app/api/routes/__init__.py": "",
+      "app/models.py": "class User:\n    pass\n",
+      "tests/test_crud.py": "from app.crud import create_user\n",
+    });
+    const impact = codeImpact({ workspaceRoot: root, projectId: PROJECT_ID, path: "app/crud.py", symbolName: "get_user_by_email" });
+    const files = [...impact.files.onGraph, ...impact.files.unlinked];
+    expect(files.filter((file) => file.distance === 1).map((file) => file.path).sort()).toEqual([
+      "app/api/routes/login.py", "app/api/routes/users.py", "tests/test_crud.py",
+    ]);
+    expect(files.find((file) => file.path === "app/api/main.py")?.distance).toBe(2);
+    expect(impact.symbols?.references.unlinked.map((file) => file.path)).toEqual(["app/api/routes/login.py"]);
+    expect(impact.tests.map((test) => test.path)).toEqual(["tests/test_crud.py"]);
+    expect(impact.omissions).toEqual([]);
+  });
+
+  it("treats a Go import as the whole package folder", () => {
+    const root = workspace({
+      "go.mod": "module github.com/acme/shop\n",
+      "internal/store/user.go": "package store\n\nfunc FindUser() {}\n",
+      "internal/store/order.go": "package store\n",
+      "internal/store/user_test.go": "package store\n",
+      "cmd/api/main.go": "package main\n\nimport (\n\t\"github.com/acme/shop/internal/store\"\n)\n\nfunc main() { store.FindUser() }\n",
+    });
+    const impact = codeImpact({ workspaceRoot: root, projectId: PROJECT_ID, path: "internal/store/user.go", symbolName: "FindUser" });
+    expect(impact.files.unlinked.map((file) => file.path)).toEqual(["cmd/api/main.go"]);
+    expect(impact.symbols?.references.unlinked.map((file) => file.path)).toEqual(["cmd/api/main.go"]);
+    expect(impact.tests.map((test) => test.path)).toEqual(["internal/store/user_test.go"]);
+  });
+
+  it("reads again a Python file an older index recorded as unsupported", () => {
+    const root = workspace({ "app/crud.py": "def create_user():\n    pass\n" });
+    const first = syncCodeIntelligence({ workspaceRoot: root, projectId: PROJECT_ID });
+    const inventoryPath = join(root, ".projectos/code-intelligence/inventory.json");
+    const symbolsPath = join(root, ".projectos/code-intelligence/symbols.json");
+    // What the index held before this change: same fingerprint, language unsupported, no symbols.
+    writeFileSync(inventoryPath, JSON.stringify({ ...first.inventory, files: first.inventory.files.map((file) => ({ ...file, language: "unsupported" })) }));
+    writeFileSync(symbolsPath, JSON.stringify({ ...first.symbols, files: [] }));
+    const again = syncCodeIntelligence({ workspaceRoot: root, projectId: PROJECT_ID });
+    expect(again.inventory.files[0]?.language).toBe("python");
+    expect(again.symbols.files[0]?.symbols.map((symbol) => symbol.name)).toEqual(["create_user"]);
+  });
+});

@@ -1,7 +1,7 @@
-import { app, shell } from 'electron'
+import { app, safeStorage, shell } from 'electron'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { FileSecretStore } from '../../../persistence/file-secret-store.js'
+import { FileSecretStore, type SecretCipher } from '../../../persistence/file-secret-store.js'
 import { FileVerificationCommandApprovalStore } from '../../../persistence/verification-command-approval-store.js'
 import { ProjectOSWorkspaceStore } from '../../../persistence/workspace-store.js'
 import { ProjectOSLocalApi } from '../../../services/project-os-local-api.js'
@@ -24,6 +24,18 @@ import {
 
 let service: ProjectOSLocalApi | null = null
 
+/**
+ * Model and GitHub keys are encrypted with Electron's safeStorage, whose key is kept in the macOS
+ * Keychain (item "projectos-desktop Safe Storage", named after the package). An ad hoc signed build is
+ * a new program to the Keychain after each rebuild, so macOS may ask once to let it use that item; a
+ * Developer ID build is not asked again.
+ */
+const keychainCipher: SecretCipher = {
+  isAvailable: () => app.isReady() && safeStorage.isEncryptionAvailable(),
+  encrypt: (plainText) => safeStorage.encryptString(plainText).toString('base64'),
+  decrypt: (cipherText) => safeStorage.decryptString(Buffer.from(cipherText, 'base64')),
+}
+
 export function getProjectOsService(): ProjectOSLocalApi {
   if (!service) {
     const workspaceStore = new ProjectOSWorkspaceStore()
@@ -33,7 +45,10 @@ export function getProjectOsService(): ProjectOSLocalApi {
     // External reuse is always read-only so isolate Chromium profiles cannot
     // mutate shared credentials; approvals/audit/memory stay on userDataPath.
     const secrets = resolveSecretsUserDataPath(process.env, userDataPath)
-    const secretStore = new FileSecretStore(secrets.path, { readOnly: secrets.readOnly })
+    const secretStore = new FileSecretStore(secrets.path, {
+      readOnly: secrets.readOnly,
+      cipher: keychainCipher,
+    })
     const logsDir = join(userDataPath, 'logs')
     mkdirSync(logsDir, { recursive: true })
     const completesLog = join(logsDir, 'model-gateway-completes.jsonl')

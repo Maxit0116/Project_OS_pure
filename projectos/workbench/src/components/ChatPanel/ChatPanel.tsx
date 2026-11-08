@@ -13,9 +13,9 @@ import { modelProfileLabel } from '@contracts/index'
 import PromptRefinementCard from './PromptRefinementCard'
 import RequestIntentCard from './RequestIntentCard'
 import PlanReviewCard from './PlanReviewCard'
+import PendingRunDecisions from './PendingRunDecisions'
 import AgentPoolAcceptanceCard from './AgentPoolAcceptanceCard'
 import { useAgentPoolStore } from '../AgentFlow/AgentPool/agentPoolStore'
-import PendingRunDecisions from './PendingRunDecisions'
 import DebugSessionPanel from './DebugSessionPanel'
 import { cycleChatMode } from './ChatModeSelector'
 import ChatMessageContent from './ChatMessageContent'
@@ -50,6 +50,7 @@ import WireframePackSummaryCard from '../WireframePack/WireframePackSummaryCard'
 import { useWireframePackStore } from '../../state/wireframePackStore'
 import AgentDraftCard from '../AgentWorkforce/AgentDraftCard'
 import { shouldSuggestPlanMode } from './suggestPlanMode'
+import { isDebugFixPending } from '../../state/debugFixPending'
 import ConversationNavRail from './ConversationNavRail'
 import { collectUserTurns, scrollTurnIntoView } from './conversationNavTurns'
 import FirstPrinciplesConflictCard from './FirstPrinciples/FirstPrinciplesConflictCard'
@@ -178,6 +179,13 @@ export default function ChatPanel() {
   const pendingChangesDrawerVisible = useWorkbenchStore(selectPendingChangesDrawerVisible)
   const pendingChangesUndoMode = useWorkbenchStore(selectPendingChangesDrawerUndoMode)
   const { ts } = useI18n()
+  const debugFixPending = isDebugFixPending(debugSession?.phase, flowStatus)
+  // Cleaning up before the fix is applied strands it (it was prepared against the instrumented
+  // file), so ask first; never refuse, or a person who does not want the fix keeps the probes.
+  const requestDebugCleanup = () => {
+    if (debugFixPending && !window.confirm(ts('debug.cleanupFixPendingConfirm'))) return
+    void markDebugFixed()
+  }
   const agentActivities = useMemo(() => projectAgentActivities({
     messages,
     latestAskTrace,
@@ -630,11 +638,52 @@ export default function ChatPanel() {
             fixInProgress={refineLoading || flowStatus === 'running'}
             onReproduced={() => void submitDebugRepro()}
             onConfirmFix={() => void confirmDebugFix()}
-            onMarkFixed={() => void markDebugFixed()}
+            fixPending={debugFixPending}
+            onMarkFixed={requestDebugCleanup}
             onConfirmBugAlignment={(bugs) => void confirmBugAlignment(bugs)}
             onMarkBugFixed={(bugId) => void markBugFixed(bugId)}
           />
         )}
+        {chatMode === 'debug' && debugSession && !refineLoading && flowStatus !== 'running' ? (
+          <div className={styles.debugChatCta}>
+            {debugSession.phase === 'hypothesize' ? (
+              <button
+                type="button"
+                className={styles.debugCtaButton}
+                onClick={() => void submitDebugRepro()}
+              >
+                {ts('debug.chatCtaContinue')}
+              </button>
+            ) : null}
+            {debugSession.phase === 'reproduce' ? (
+              <button
+                type="button"
+                className={styles.debugCtaButton}
+                onClick={() => void submitDebugRepro()}
+              >
+                {ts('debug.chatCtaReproduce')}
+              </button>
+            ) : null}
+            {debugSession.phase === 'fix' ? (
+              <button
+                type="button"
+                className={styles.debugCtaButton}
+                onClick={() => void confirmDebugFix()}
+              >
+                {ts('debug.chatCtaApplyFix')}
+              </button>
+            ) : null}
+            {debugSession.phase === 'verify' ? (
+              <button
+                type="button"
+                className={styles.debugCtaButton}
+                onClick={requestDebugCleanup}
+              >
+                {ts('debug.chatCtaMarkFixed')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {chatMode === 'ask' &&
         askSubMode === 'first_principles' &&
         pendingFirstPrinciples?.status === 'layer_active' ? (

@@ -436,15 +436,17 @@ export function resolveFirstPrinciplesConflict(
       return claim;
     });
     if (!conflict.rightClaimId) {
-      const rightClaim: (typeof atomicClaims)[number] = {
-        id: `claim_conflict_right_${conflict.id}`,
-        text: conflict.rightLabel,
-        status: "evidenced",
-      };
-      if (conflict.evidenceRefs?.length) {
-        rightClaim.evidenceRefs = conflict.evidenceRefs;
-      }
-      atomicClaims = [...atomicClaims, rightClaim].slice(-24);
+      atomicClaims = [
+        ...atomicClaims,
+        {
+          id: `claim_conflict_right_${conflict.id}`,
+          text: conflict.rightLabel,
+          status: "evidenced" as const,
+          ...(conflict.evidenceRefs?.length
+            ? { evidenceRefs: conflict.evidenceRefs }
+            : {}),
+        },
+      ].slice(-24);
     }
   } else {
     const text = rephraseText?.trim() || conflict.summary;

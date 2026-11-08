@@ -10,6 +10,7 @@ import type { ModelProfile } from "../contracts/settings.js";
 import { InMemorySecretStore } from "../persistence/secret-store.js";
 import type { ResolvedResponseLanguage } from "./agent-language-policy.js";
 import {
+  answerMaxOutputTokens,
   GroundedAnswerService,
   REASONING_MAX_BYTES,
   REASONING_MAX_CHARACTERS,
@@ -279,6 +280,7 @@ class QueuedGateway extends ModelGateway {
 function response(input: {
   output: string;
   reasoning?: string;
+  finishReason?: string;
 }): ModelGatewayResponse {
   return {
     requestId: "request-test",
@@ -286,6 +288,7 @@ function response(input: {
     model: "reasoning-model",
     output: input.output,
     ...(input.reasoning ? { reasoning: input.reasoning } : {}),
+    ...(input.finishReason ? { finishReason: input.finishReason } : {}),
     usage: { inputTokens: 10, outputTokens: 10 },
     latencyMs: 1,
   };
@@ -304,3 +307,46 @@ async function answerWith(
     responseLanguage,
   });
 }
+
+/**
+ * ripgrep, live: with 2,048 output tokens in all, DeepSeek spent them on reasoning and the person was
+ * told "The model returned an empty answer".
+ */
+describe("an answer that reasoning leaves no room for", () => {
+  const english: ResolvedResponseLanguage = { tag: "en", source: "detected", expectedScripts: ["latin"] };
+  const ask = (gateway: QueuedGateway, thinkingDepth: "off" | "medium") =>
+    new GroundedAnswerService(gateway).answer({
+      projectId: "project-test",
+      question: "How does ripgrep decide a file is binary?",
+      localContext,
+      profile,
+      thinkingDepth,
+      responseLanguage: english,
+    });
+
+  it("leaves room for reasoning on top of the answer", async () => {
+    const gateway = new QueuedGateway([response({ output: "It looks for a NUL byte in the first block." })]);
+    await ask(gateway, "medium");
+    expect(gateway.requests[0]?.maxOutputTokens).toBe(answerMaxOutputTokens("medium"));
+    expect(answerMaxOutputTokens("medium")).toBeGreaterThanOrEqual(8_192);
+    expect(answerMaxOutputTokens("off")).toBe(2_048);
+  });
+
+  it("asks again without reasoning when reasoning used the whole budget", async () => {
+    const gateway = new QueuedGateway([
+      response({ output: "", reasoning: "Let me think about the searcher...", finishReason: "length" }),
+      response({ output: "It looks for a NUL byte in the first block (crates/searcher)." }),
+    ]);
+    const result = await ask(gateway, "medium");
+    expect(result.answer).toContain("NUL byte");
+    expect(gateway.requests.map((request) => request.thinkingDepth)).toEqual(["medium", "off"]);
+    expect(gateway.requests[1]?.maxOutputTokens).toBe(2_048);
+  });
+
+  it("does not ask again when the answer was empty for another reason, or reasoning was already off", async () => {
+    await expect(ask(new QueuedGateway([response({ output: "", reasoning: "x", finishReason: "stop" })]), "medium"))
+      .rejects.toMatchObject({ code: "agent_answer_unavailable" });
+    await expect(ask(new QueuedGateway([response({ output: "", finishReason: "length" })]), "off"))
+      .rejects.toMatchObject({ code: "agent_answer_unavailable" });
+  });
+});

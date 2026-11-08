@@ -26,6 +26,12 @@ import { ProjectOSLocalApi } from "../project-os-local-api.js";
 import {
   AgentOrchestrator,
   boundUpstreamProposals,
+  alignBatchReview,
+  alignProposalReview,
+  classifyProposalValidation,
+  MAX_WHOLE_TREE_REPAIR_ROUNDS,
+  WHOLE_TREE_VALIDATION_MAX_OUTPUT_TOKENS,
+  WHOLE_TREE_VALIDATION_RETRY_MAX_OUTPUT_TOKENS,
   type AgentRunEventPersistence,
   type AutomaticLeafExecutionDependency,
   type GreenfieldInitializationDependency,
@@ -107,6 +113,53 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
         }],
       },
     });
+  });
+
+  it("keeps co-owners that were approved only for a shared file apart from the work a planner is given", async () => {
+    // Observed live: derived touches listed as capabilities led a planner to fan one request out to
+    // eight components, three of them only there because they share lib/db.ts.
+    const output = JSON.stringify({
+      summary: "Update the heading",
+      path: "app/login/page.tsx",
+      edits: [{ search: "SELECTED_CONTEXT_MARKER", replace: "UPDATED_MARKER" }],
+    });
+    const { orchestrator, workspace, requests } = createModelOrchestrator(output);
+    const approvedIntent: RequestIntent = {
+      version: "0.1.0",
+      id: "intent_shared_owner",
+      projectId: workspace.project.projectId,
+      rawRequest: "Change the heading",
+      goal: "Change the heading",
+      kind: "change",
+      entryNodeId: "feat_login",
+      touches: [
+        { nodeId: "feat_login", reason: "Owns the heading", allow: { editExisting: true, addParts: false, deletePartIds: [] } },
+        { nodeId: "feat_blog", reason: "Shares lib/db.ts with Account; changing the file also changes this capability.", allow: { editExisting: true, addParts: false, deletePartIds: [] }, derived: true },
+      ],
+      structuralEffects: [],
+      assumptions: [],
+      outOfScope: [],
+      acceptance: ["The heading is updated"],
+      questions: [],
+      executorSelection: { kind: "model", modelProfileId: "test-model" },
+      baseGraphHash: "sha256:approved_graph",
+      revision: 1,
+      status: "approved",
+      approvalHash: "sha256:approved_intent",
+      approvedAt: new Date().toISOString(),
+    };
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+      approvedIntent,
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    const generation = requests.find((request) => request.requestKind === "change_generation");
+    const context = (generation!.input as { approvedIntentContext: { touches: Array<{ nodeId: string }>; sharedFileCoOwners?: Array<{ nodeId: string }>; sharedFileCoOwnersNote?: string } }).approvedIntentContext;
+    expect(context.touches.map((touch) => touch.nodeId)).toEqual(["feat_login"]);
+    expect(context.sharedFileCoOwners?.map((owner) => owner.nodeId)).toEqual(["feat_blog"]);
+    expect(context.sharedFileCoOwnersNote).toMatch(/do not assign work to them/u);
   });
 
   it("passes the shared producer-consumer contract into the actual model task input", async () => {
@@ -333,7 +386,7 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
 
     await orchestrator.startRun(workspace, state.run.runId, toolContext());
 
-    expect(requests.map((request) => request.maxOutputTokens)).toEqual([4096, 8192, 16_384, 4096]);
+    expect(requests.map((request) => request.maxOutputTokens)).toEqual([4096, 8192, 16_384, 8192]);
     expect(requests[1]?.thinkingDepth).toBe("off");
     expect(requests[2]?.thinkingDepth).toBe("off");
     expect(requests[2]?.input).toMatchObject({
@@ -1840,6 +1893,18 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
       expect(plan.tasks.map((task) => task.interfaceContractIds)).toEqual([[contractId], [contractId]]);
     });
 
+    it("reads a producer listed among its own consumers as \"the other tasks\", instead of failing the plan", async () => {
+      // Observed live: "Contract participants must be unique delegated tasks", retry after retry.
+      const harness = createHierarchyBudgetHarness("plan-self-consumer");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.every((request) => request.planRetry === undefined)).toBe(true);
+      const contract = harness.root.hierarchyPlan!.contracts![0]!;
+      expect(contract.consumerTaskIds).toHaveLength(1);
+      expect(contract.consumerTaskIds).not.toContain(contract.producerTaskId);
+    });
+
     it("ignores a contract id the plan does not define, such as one inherited from the parent plan", async () => {
       // Observed live: a component planner copied its parent's namespaced contract id onto its tasks,
       // and the plan failed twice. Inherited contracts reach every child anyway.
@@ -1867,6 +1932,38 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
       ]);
     });
 
+    it("does not let a second task pick a file an earlier task of the request already took", async () => {
+      // Observed live: three sibling components were planned together and two picked lib/db.ts;
+      // the duplicate was only refused when the batch was assembled, after all the generation.
+      const harness = createHierarchyBudgetHarness("shared-file-sequential");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      const paths = harness.root.wholeTreeTransactionPlan!.leaves.map((leaf) => leaf.filePath);
+      expect(paths.filter((path) => path === "src/shared/index.ts")).toHaveLength(1);
+      expect(paths).toHaveLength(3);
+      // The later planner was never offered the claimed file.
+      const consumerPlan = harness.planRequests.find((request) =>
+        (request.tools![0]!.function.parameters as { properties: { tasks: { items: { properties: { path?: { enum: string[] } } } } } })
+          .properties.tasks.items.properties.path?.enum?.includes("src/consumer/index.ts"));
+      const offered = (consumerPlan!.tools![0]!.function.parameters as { properties: { tasks: { items: { properties: { path: { enum: string[] } } } } } })
+        .properties.tasks.items.properties.path.enum;
+      expect(offered).not.toContain("src/shared/index.ts");
+    });
+
+    it("sends back a plan that picks a file another planner took at the same moment, and says why", async () => {
+      const harness = createHierarchyBudgetHarness("shared-file-parallel");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      const paths = harness.root.wholeTreeTransactionPlan!.leaves.map((leaf) => leaf.filePath);
+      expect(paths.filter((path) => path === "src/shared/index.ts")).toHaveLength(1);
+      const corrections = harness.planRequests
+        .map((request) => request.planRetry as { problem?: string } | undefined)
+        .filter((retry) => retry?.problem?.includes("already being changed by another task"));
+      expect(corrections.length).toBeGreaterThanOrEqual(1);
+    });
+
     it("fits a long model rationale and objective into the plan limits instead of failing the plan", async () => {
       // Observed live: a 500+ character rationale was cut to 501 characters (500 plus an ellipsis) and
       // then rejected by the plan's own limit of 500, on the first attempt and on the retry.
@@ -1879,6 +1976,40 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
       expect(plan.rationale.length).toBeLessThanOrEqual(500);
       expect(plan.objective.length).toBeLessThanOrEqual(500);
       expect(plan.rationale.endsWith("…")).toBe(true);
+    });
+
+    it("gets a third attempt, because two corrections are not always enough", async () => {
+      const harness = createHierarchyBudgetHarness("contract-kind-twice-wrong");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.slice(0, 3).map((request) => Boolean(request.planRetry))).toEqual([false, true, true]);
+      expect(harness.root.hierarchyPlan?.contracts?.[0]?.identity.kind).toBe("endpoint");
+    });
+
+    it("offers the planner its answers as tools whose node ids and contract kinds are enums", async () => {
+      // The provider shapes the arguments, so the allowed delegation targets and the three contract
+      // kinds are constraints, not text the model has to remember (it wrote "function" live).
+      const harness = createHierarchyBudgetHarness("dependency-contract");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      const rootRequest = harness.planRequests[0]!;
+      const names = rootRequest.tools!.map((tool) => tool.function.name);
+      expect(names).toContain("submit_plan");
+      const plan = rootRequest.tools!.find((tool) => tool.function.name === "submit_plan")!.function.parameters as {
+        properties: { tasks: { items: { properties: { nodeId: { enum: string[] } } } }; contracts: { items: { properties: { identity: { properties: { kind: { enum: string[] } } } } } } };
+      };
+      // The first planner is the global one: it may only delegate to the two context nodes.
+      expect(plan.properties.tasks.items.properties.nodeId.enum).toEqual(
+        ["dependency_context_producer", "dependency_context_consumer"],
+      );
+      expect(plan.properties.contracts.items.properties.identity.properties.kind.enum).toEqual(["symbol", "endpoint", "message"]);
+      // Leaf-level planners are offered file paths, never node ids.
+      const leafRequest = harness.planRequests.find((request) =>
+        (request.tools![0]!.function.parameters as { properties: { tasks: { items: { properties: Record<string, unknown> } } } })
+          .properties.tasks.items.properties.path !== undefined);
+      expect(leafRequest).toBeDefined();
     });
 
     it("gives the one-layer planner more room than the gateway default, so reasoning cannot cut the plan off", async () => {
@@ -1898,7 +2029,7 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
         message: expect.stringContaining("invalid plan shape"),
         details: { failureCategory: "retry_also_invalid", problem: expect.stringContaining("identity.kind") },
       });
-      expect(harness.planRequests).toHaveLength(2);
+      expect(harness.planRequests).toHaveLength(3);
     });
   });
 
@@ -1928,6 +2059,375 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     }
   });
 
+  describe("a reviewer that copies the plan back imperfectly", () => {
+    it("is matched to the plan by position, with the server's own ids and criterion text", async () => {
+      // Observed live: one criterion of eleven came back reworded, the server wanted it byte for byte,
+      // and a four-file change failed after about 35 model calls.
+      const harness = createHierarchyBudgetHarness("batch-drifting-copy");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.wholeTreeReviews).toHaveLength(1);
+      expect(harness.root.run.status).toBe("awaiting_review");
+      const result = harness.root.batchValidationResult!;
+      const planned = harness.root.wholeTreeTransactionPlan!.leaves;
+      expect(result.tasks.map((task) => task.taskId)).toEqual(planned.map((leaf) => leaf.transactionTaskId));
+      expect(result.tasks.map((task) => task.path)).toEqual(planned.map((leaf) => leaf.filePath));
+      expect(JSON.stringify(result)).not.toContain("(reworded)");
+    });
+  });
+
+  describe("a whole-tree review that rejects one file", () => {
+    it("sends the reviewer's finding back to that file, regenerates it once, and reviews the batch again", async () => {
+      // Observed live: the reviewer caught a page that used `prisma.teamMember` (the model is
+      // `membership`), and the run, about 25 model calls, was lost.
+      const harness = createHierarchyBudgetHarness("batch-repairable");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.root.run.status).toBe("awaiting_review");
+      expect(harness.wholeTreeReviews).toHaveLength(2);
+      expect(harness.root.batchValidationResult?.verdict).toBe("valid");
+      // Only the rejected file was regenerated, and it was told what was wrong in the reviewer's words.
+      const byPath = (path: string) => harness.generationRequests.filter((request) => request.path === path);
+      expect(byPath("src/consumer/index.ts")).toHaveLength(2);
+      expect(byPath("src/producer/index.ts")).toHaveLength(1);
+      const repair = byPath("src/consumer/index.ts")[1]!;
+      expect(repair.systemPrompt).toMatch(/independent whole-tree review found this file inconsistent/u);
+      expect(repair.systemPrompt).toMatch(/prisma\.teamMember, a model that does not exist/u);
+      expect(byPath("src/consumer/index.ts")[0]!.systemPrompt).not.toMatch(/whole-tree review found/u);
+      // The root says what it is doing, and the repaired leaf is a finished, valid leaf again.
+      expect(harness.root.events.some((event) =>
+        event.type === "decision_summary" && /rejected src\/consumer\/index\.ts/u.test(JSON.stringify(event.payload)))).toBe(true);
+      const leaf = harness.allStates().find((state) => state.run.scope?.kind === "leaf-file" && state.run.scope.filePath === "src/consumer/index.ts")!;
+      expect(leaf.repairRounds).toBe(1);
+      expect(leaf.run.status).toBe("awaiting_review");
+      expect(leaf.validationResult?.verdict).toBe("valid");
+      expect(leaf.validatedDiffJson).toBe(JSON.stringify(leaf.diff));
+      expect(leaf.events.some((event) => event.type === "diff_ready" && (event.payload as { repair_attempt?: number })?.repair_attempt === 1)).toBe(true);
+    });
+
+    it("gives up after one repair, and fails when the files disagree with each other, instead of looping", async () => {
+      const harness = createHierarchyBudgetHarness("batch-inconsistent-files");
+
+      await expect(harness.orchestrator.startRun(harness.workspace, harness.root.run.runId))
+        .rejects.toMatchObject({ code: "proposal_validation_failed" });
+
+      expect(harness.wholeTreeReviews).toHaveLength(1 + MAX_WHOLE_TREE_REPAIR_ROUNDS);
+      expect(harness.generationRequests.filter((request) => request.path === "src/producer/index.ts")).toHaveLength(2);
+      // A person cannot judge files that disagree with each other by reading one requirement, so
+      // this is never held for an "apply anyway".
+      expect(harness.root.unmetRequirements).toBeUndefined();
+    });
+
+    it("holds the change after one repair when only a requirement stays unmet, instead of discarding it", async () => {
+      // The policy the owner chose after the live runs: a requirement the reviewer still calls unmet
+      // after one repair is shown to the person, who may read the change and apply it anyway.
+      const harness = createHierarchyBudgetHarness("batch-unsatisfied");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.wholeTreeReviews).toHaveLength(1 + MAX_WHOLE_TREE_REPAIR_ROUNDS);
+      expect(harness.root.run.status).toBe("awaiting_review");
+      // The record keeps the reviewer's real verdict.
+      expect(harness.root.batchValidationResult?.verdict).toBe("invalid");
+      expect(harness.root.unmetRequirements?.map((finding) => finding.path)).toEqual([
+        "src/producer/index.ts",
+        "src/consumer/index.ts",
+      ]);
+      const ready = harness.root.events.find((event) => event.type === "diff_ready");
+      expect(ready).toMatchObject({
+        payload: {
+          fileCount: 2,
+          unmetRequirements: [
+            { path: "src/producer/index.ts", problems: ["The delegated receipt contract is checked."] },
+            { path: "src/consumer/index.ts", problems: ["The delegated receipt contract is checked."] },
+          ],
+        },
+      });
+      expect(harness.root.events.filter((event) => event.type === "decision_summary").at(-1)).toMatchObject({
+        payload: { summary: expect.stringMatching(/Not applied yet: after one repair the independent review still says 2 requirements are not met/u) },
+      });
+      expect(harness.root.events.find((event) => event.type === "run_completed")).toMatchObject({ payload: { filesApplied: 0 } });
+      // The server holds it; nothing but the person's explicit choice lets it through.
+      expect(() => harness.orchestrator.requireValidatedWholeTree(harness.root.run.runId)).toThrow(/does not have independent validation/u);
+      expect(() => harness.orchestrator.requireValidatedWholeTree(harness.root.run.runId, { acceptUnmet: true })).not.toThrow();
+    });
+
+    it("says which file and which requirement the final rejection is about", async () => {
+      // Observed live: a criterion that could not be met as written ended the run with only "rejected
+      // the whole-tree proposal batch", and nothing said what to change in the request.
+      const harness = createHierarchyBudgetHarness("batch-inconsistent-files");
+
+      const failure = await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId)
+        .then(() => undefined, (error: unknown) => error as Error & { details?: { findings?: Array<{ path: string; problems: string[] }> } });
+
+      expect(failure?.message).toMatch(/rejected the whole-tree proposal batch: src\/producer\/index\.ts: The delegated receipt contract is checked\./u);
+      expect(failure?.details?.findings?.[0]).toMatchObject({ path: "src/producer/index.ts", problems: ["The delegated receipt contract is checked."] });
+    });
+  });
+
+  describe("a question the agent puts to the person in the middle of a run", () => {
+    /** A decision port that remembers what was asked, standing in for the durable store. */
+    function recordingPort() {
+      const opened: import("../../contracts/run-state.js").RunDecision[] = [];
+      const superseded: string[] = [];
+      return {
+        opened,
+        superseded,
+        port: {
+          open: (decision: import("../../contracts/run-state.js").RunDecision) => { opened.push(decision); },
+          supersede: (id: string) => { superseded.push(id); },
+        },
+      };
+    }
+    const answerOnceAsked = async (
+      harness: ReturnType<typeof createHierarchyBudgetHarness>,
+      recorder: ReturnType<typeof recordingPort>,
+      answerFor: (decision: import("../../contracts/run-state.js").RunDecision) => import("../../contracts/run-state.js").RunDecision,
+    ) => {
+      await vi.waitFor(() => expect(recorder.opened.length).toBeGreaterThan(0));
+      const asked = recorder.opened[recorder.opened.length - 1]!;
+      harness.orchestrator.deliverDecision(answerFor(asked));
+    };
+
+    it("waits for the answer, then asks the same step again with it, and finishes", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      await answerOnceAsked(harness, recorder, (asked) => ({
+        ...asked,
+        status: "resolved",
+        revision: 2,
+        answer: { optionId: "option_2", text: "use the billing contact" },
+        resolvedAt: new Date().toISOString(),
+      }));
+      await running;
+
+      // The question was recorded as a card the person can answer, in the server's own option ids.
+      expect(recorder.opened).toHaveLength(1);
+      expect(recorder.opened[0]).toMatchObject({
+        kind: "clarification",
+        status: "pending",
+        question: "Should the receipt be sent to the account email or to another address?",
+        rootRunId: harness.root.run.runId,
+        recommendation: "Account email",
+        options: [
+          { id: "option_1", label: "Account email" },
+          { id: "option_2", label: "Another address" },
+          { id: "decline", label: "Let Agent decide" },
+        ],
+      });
+      // The step was asked again with the answer, and the run went on to finish.
+      const withAnswer = harness.planRequests.find((request) => request.userAnswers !== undefined);
+      expect(withAnswer?.userAnswers).toEqual([
+        { question: "Should the receipt be sent to the account email or to another address?", answer: "Another address. use the billing contact" },
+      ]);
+      expect(withAnswer?.systemPrompt).toMatch(/userAnswers are the person's answers/u);
+      expect(harness.root.run.status).toBe("awaiting_review");
+      // The run said it was waiting and then that it went on, so the person can follow it in the flow.
+      const summaries = harness.root.events
+        .filter((event) => event.type === "decision_summary")
+        .map((event) => JSON.stringify(event.payload));
+      expect(summaries.some((text) => /Waiting for your answer: Should the receipt/u.test(text))).toBe(true);
+      expect(summaries.some((text) => /You answered: Another address\. use the billing contact\. Continuing\./u.test(text))).toBe(true);
+    });
+
+    it("carries the answer to every later step of the run, not only the one that asked", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      await answerOnceAsked(harness, recorder, (asked) => ({
+        ...asked, status: "resolved", revision: 2, answer: { optionId: "option_1" }, resolvedAt: new Date().toISOString(),
+      }));
+      await running;
+
+      const laterModes = harness.taskContextSeen.filter((seen) => seen.mode === "locate_plan" || seen.mode === "validate_proposal");
+      expect(laterModes.length).toBeGreaterThan(0);
+      expect(harness.root.answeredQuestions).toEqual([
+        { question: "Should the receipt be sent to the account email or to another address?", answer: "Account email" },
+      ]);
+    });
+
+    it("treats \"let Agent decide\" as an answer that tells the model to assume and say so", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      await answerOnceAsked(harness, recorder, (asked) => ({
+        ...asked, status: "declined", revision: 2, answer: { optionId: "decline" }, resolvedAt: new Date().toISOString(),
+      }));
+      await running;
+
+      expect(harness.root.answeredQuestions).toEqual([
+        { question: expect.any(String), answer: "The person left this to the agent.", leftToAgent: true },
+      ]);
+    });
+
+    it("asks at most twice in one run, then stops offering the question", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-always", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId).catch((error: unknown) => error);
+      for (let round = 1; round <= 2; round += 1) {
+        await vi.waitFor(() => expect(recorder.opened.length).toBe(round));
+        harness.orchestrator.deliverDecision({
+          ...recorder.opened[round - 1]!, status: "resolved", revision: 2, answer: { optionId: "option_1" }, resolvedAt: new Date().toISOString(),
+        });
+      }
+      await running;
+
+      expect(recorder.opened).toHaveLength(2);
+      // The third plan request no longer invites a question.
+      const prompts = harness.planRequests.map((request) => /You may ask the person one question/u.test(request.systemPrompt));
+      expect(prompts.slice(0, 3)).toEqual([true, true, false]);
+    });
+
+    it("never invites a question from a step that only judges (the reviewers)", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      await answerOnceAsked(harness, recorder, (asked) => ({
+        ...asked, status: "resolved", revision: 2, answer: { optionId: "option_1" }, resolvedAt: new Date().toISOString(),
+      }));
+      await running;
+
+      expect(harness.wholeTreeReviews.length).toBeGreaterThan(0);
+      expect(harness.wholeTreeReviews.every((review) => !/You may ask the person one question/u.test(review.systemPrompt))).toBe(true);
+      expect(harness.taskContextSeen.filter((seen) => seen.mode === "validate_proposal")
+        .every((seen) => !/You may ask the person one question/u.test(seen.systemPrompt))).toBe(true);
+    });
+
+    it("asks nothing when no decision port is configured, and a question-shaped reply is then just a bad reply", async () => {
+      const harness = createHierarchyBudgetHarness("ask-once");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.planRequests.every((request) => !/You may ask the person one question/u.test(request.systemPrompt))).toBe(true);
+      expect(harness.root.questionsAsked).toBeUndefined();
+    });
+
+    it("stops waiting, and takes the question off the screen, when the run is cancelled", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId).catch((error: unknown) => error);
+      await vi.waitFor(() => expect(recorder.opened).toHaveLength(1));
+      harness.orchestrator.cancelRun(harness.root.run.runId);
+      await running;
+
+      expect(recorder.superseded).toEqual([recorder.opened[0]!.id]);
+      expect(harness.root.run.status).toBe("cancelled");
+      // An answer that arrives too late is not delivered to anything.
+      expect(harness.orchestrator.deliverDecision({
+        ...recorder.opened[0]!, status: "resolved", revision: 2, answer: { optionId: "option_1" }, resolvedAt: new Date().toISOString(),
+      })).toBe(false);
+    });
+
+    it("does not count the person's thinking time against the run's wall clock", async () => {
+      const recorder = recordingPort();
+      const harness = createHierarchyBudgetHarness("ask-once", "review_first", { decisions: recorder.port });
+      const before = Date.now();
+
+      const running = harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      await vi.waitFor(() => expect(recorder.opened).toHaveLength(1));
+      const startedBeforeWait = harness.root.pipelineStartedAt;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 60));
+      harness.orchestrator.deliverDecision({
+        ...recorder.opened[0]!, status: "resolved", revision: 2, answer: { optionId: "option_1" }, resolvedAt: new Date().toISOString(),
+      });
+      await running;
+
+      if (startedBeforeWait !== undefined) {
+        expect(harness.root.pipelineStartedAt! - startedBeforeWait).toBeGreaterThanOrEqual(50);
+        expect(harness.root.pipelineStartedAt!).toBeGreaterThan(before);
+      }
+    });
+  });
+
+  describe("the whole-tree review's output budget", () => {
+    it("starts big and asks short, because a review of every criterion of every file was cut off live twice", async () => {
+      const harness = createHierarchyBudgetHarness("dependency-contract");
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      expect(harness.wholeTreeReviews[0]?.maxOutputTokens).toBe(WHOLE_TREE_VALIDATION_MAX_OUTPUT_TOKENS);
+      expect(WHOLE_TREE_VALIDATION_MAX_OUTPUT_TOKENS).toBeGreaterThanOrEqual(16_384);
+      expect(WHOLE_TREE_VALIDATION_RETRY_MAX_OUTPUT_TOKENS).toBeGreaterThanOrEqual(32_768);
+      expect(harness.wholeTreeReviews[0]?.systemPrompt).toMatch(/one or two sentences/u);
+    });
+
+    it("asks again with the larger budget when the review is cut off", async () => {
+      const harness = createHierarchyBudgetHarness("batch-truncated-once");
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+      expect(harness.wholeTreeReviews.map((review) => review.maxOutputTokens)).toEqual([
+        WHOLE_TREE_VALIDATION_MAX_OUTPUT_TOKENS,
+        WHOLE_TREE_VALIDATION_RETRY_MAX_OUTPUT_TOKENS,
+      ]);
+      expect(harness.root.batchValidationResult?.verdict).toBe("valid");
+    });
+  });
+
+  describe("a whole-tree review that cannot confirm every criterion", () => {
+    it("holds the change for the person's review instead of failing the run or applying it", async () => {
+      // Observed live: the reviewer called the batch valid, with three criteria "uncertain" (a build
+      // result, another page's wording), and the server threw away about 25 model calls.
+      const harness = createHierarchyBudgetHarness("batch-uncertain", "automatic");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.root.run.status).toBe("awaiting_review");
+      const completed = harness.root.events.find((event) => event.type === "run_completed");
+      expect(completed).toMatchObject({ payload: { outcome: "whole_tree_validated_awaiting_group_apply", filesApplied: 0 } });
+      expect(harness.root.batchReviewReason).toMatch(/could not be confirmed by reading the code/u);
+      const summary = harness.root.events.find((event) => event.type === "decision_summary");
+      expect(summary).toMatchObject({ payload: { summary: expect.stringMatching(/Review needed before anything is applied/u) } });
+      expect(harness.root.batchValidationResult?.verdict).toBe("valid");
+      expect(harness.root.batchValidationResult?.tasks.some((task) => task.status === "uncertain")).toBe(true);
+    });
+
+    it("holds the change when only a leaf reviewer was unsure, even though the combined review had no doubt", async () => {
+      // Observed live: an inherited criterion "npm run build passes" came back uncertain from the leaf
+      // reviewer (it cannot run a build) and failed the whole subtree.
+      const harness = createHierarchyBudgetHarness("leaf-uncertain", "automatic");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.root.run.status).toBe("awaiting_review");
+      expect(harness.root.batchReviewReason).toMatch(/could not be confirmed by reading the code/u);
+      expect(harness.root.events.find((event) => event.type === "run_completed")).toMatchObject({
+        payload: { filesApplied: 0 },
+      });
+      // The person needs an Apply bar for the held change: the root says its combined diff is ready.
+      const ready = harness.root.events.find((event) => event.type === "diff_ready");
+      expect(ready).toMatchObject({ payload: { fileCount: 2, paths: expect.arrayContaining(["src/producer/index.ts", "src/consumer/index.ts"]) } });
+      const leaf = harness.allStates().find((state) => state.run.role === "leaf_file_editor");
+      expect(leaf?.validationResult?.verdict).toBe("valid");
+      expect(leaf?.validationResult?.criteria.some((criterion) => criterion.status === "uncertain")).toBe(true);
+    });
+
+    it("never applies a batch with an unsatisfied criterion by itself, even when the policy is automatic", async () => {
+      const harness = createHierarchyBudgetHarness("batch-unsatisfied", "automatic");
+
+      await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId);
+
+      expect(harness.root.run.status).toBe("awaiting_review");
+      expect(harness.root.events.find((event) => event.type === "run_completed")).toMatchObject({ payload: { filesApplied: 0 } });
+      expect(harness.root.events.some((event) => event.type === "apply_result")).toBe(false);
+      expect(harness.root.unmetRequirements?.length).toBe(2);
+      expect(harness.root.batchReviewReason).toBeUndefined();
+    });
+
+    it("still rejects a batch whose files disagree with each other", async () => {
+      const harness = createHierarchyBudgetHarness("batch-inconsistent-files", "automatic");
+
+      await expect(harness.orchestrator.startRun(harness.workspace, harness.root.run.runId))
+        .rejects.toMatchObject({ code: "proposal_validation_failed" });
+      expect(harness.root.batchReviewReason).toBeUndefined();
+    });
+  });
+
   it("does not start consumers when their producer subtree fails", async () => {
     const harness = createHierarchyBudgetHarness("dependency-failed");
 
@@ -1947,6 +2447,19 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     expect(rootChildStarts).toEqual([producerTaskId]);
     expect(blockedConsumer).toMatchObject({ payload: { status: "blocked", failureCategory: "dependency_failed" } });
     expect(consumerState?.run.status).toBe("error");
+  });
+
+  it("says why the first subtree failed, not only that one did", async () => {
+    // Observed on a real repository: "One or more delegated subtrees failed" hid that the file to change
+    // was too large for Agent, and the person could not tell what to do about it.
+    const harness = createHierarchyBudgetHarness("dependency-failed");
+
+    const failure = await harness.orchestrator.startRun(harness.workspace, harness.root.run.runId)
+      .then(() => undefined, (error: unknown) => error as Error);
+
+    expect(failure?.message).toBe(
+      "One or more delegated subtrees failed; no files were applied: Model edit planning failed (malformed JSON)",
+    );
   });
 
   it("rejects a delegated planner whose actual scope is not deeper than its parent", async () => {
@@ -3208,6 +3721,8 @@ function createModelOrchestrator(
 }
 
 const DEPENDENCY_PLAN_MODES: ReadonlySet<string> = new Set([
+  "ask-once",
+  "ask-always",
   "dependency-contract",
   "dependency-failed",
   "contract-kind-retry",
@@ -3217,6 +3732,19 @@ const DEPENDENCY_PLAN_MODES: ReadonlySet<string> = new Set([
   "plan-unreferenced-contract",
   "plan-inherited-contract-id",
   "plan-numeric-examples",
+  "contract-kind-twice-wrong",
+  "batch-uncertain",
+  "batch-unsatisfied",
+  "batch-inconsistent-files",
+  "ask-once",
+  "ask-always",
+  "leaf-uncertain",
+  "batch-truncated-once",
+  "plan-self-consumer",
+  "batch-repairable",
+  "shared-file-sequential",
+  "shared-file-parallel",
+  "batch-drifting-copy",
 ]);
 
 type HierarchyBudgetHarnessMode =
@@ -3231,7 +3759,20 @@ type HierarchyBudgetHarnessMode =
   | "plan-long-text"
   | "plan-unreferenced-contract"
   | "plan-inherited-contract-id"
-  | "plan-numeric-examples";
+  | "plan-numeric-examples"
+  | "contract-kind-twice-wrong"
+  | "batch-uncertain"
+  | "batch-unsatisfied"
+  | "batch-inconsistent-files"
+  | "ask-once"
+  | "ask-always"
+  | "leaf-uncertain"
+  | "batch-truncated-once"
+  | "plan-self-consumer"
+  | "batch-repairable"
+  | "shared-file-sequential"
+  | "shared-file-parallel"
+  | "batch-drifting-copy";
 
 interface HierarchyBudgetNode {
   id: string;
@@ -3240,7 +3781,11 @@ interface HierarchyBudgetNode {
   files: string[];
 }
 
-function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
+function createHierarchyBudgetHarness(
+  mode: HierarchyBudgetHarnessMode,
+  rootPolicy: "review_first" | "automatic" = "review_first",
+  extra: { decisions?: import("./index.js").RunDecisionPort } = {},
+) {
   const workspace = new ProjectOSWorkspaceStore().loadWorkspace(sampleWorkspaceRoot);
   workspace.settings = ProjectOSSettingsSchema.parse({
     ...workspace.settings,
@@ -3279,7 +3824,9 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
       contextIds.push(contextId);
       nodes.set(contextId, { id: contextId, level: "context", children: [containerId], files: [] });
       nodes.set(containerId, { id: containerId, level: "container", children: [componentId], files: [] });
-      nodes.set(componentId, { id: componentId, level: "component", children: [], files: [file] });
+      // Two components that both own one file: each planner would pick it.
+      const sharesAFile = mode === "shared-file-sequential" || mode === "shared-file-parallel";
+      nodes.set(componentId, { id: componentId, level: "component", children: [], files: sharesAFile ? [file, "src/shared/index.ts"] : [file] });
     }
   } else if (mode === "leaf-cap") {
     for (let branch = 0; branch < 5; branch += 1) {
@@ -3344,7 +3891,10 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
     });
   }
 
-  const planRequests: Array<{ planRetry: unknown; systemPrompt: string; maxOutputTokens?: number }> = [];
+  const planRequests: Array<{ planRetry: unknown; userAnswers?: unknown; systemPrompt: string; maxOutputTokens?: number; tools?: Array<{ function: { name: string; parameters: Record<string, unknown> } }> }> = [];
+  let rootPlanCalls = 0;
+  const wholeTreeReviews: Array<{ maxOutputTokens?: number; systemPrompt: string }> = [];
+  const generationRequests: Array<{ path: string; systemPrompt: string }> = [];
   const taskContextSeen: Array<{ mode: string | undefined; path: string | undefined; upstream: unknown; systemPrompt: string }> = [];
   const counters = {
     plannerChildrenCreated: 0,
@@ -3382,31 +3932,76 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
       let output: string;
 
       if (requestMode === "validate_whole_tree_batch" && Array.isArray(transactionPlan?.leaves)) {
+        wholeTreeReviews.push({
+          ...(request.maxOutputTokens !== undefined ? { maxOutputTokens: request.maxOutputTokens } : {}),
+          systemPrompt: request.systemPrompt ?? "",
+        });
         output = JSON.stringify({
           verdict: "valid",
-          tasks: transactionPlan.leaves.filter(isRecord).map((leaf) => ({
-            taskId: leaf.transactionTaskId,
+          tasks: transactionPlan.leaves.filter(isRecord).map((leaf, leafIndex) => ({
+            // A reviewer that copies identity and criteria back imperfectly.
+            taskId: mode === "batch-drifting-copy" ? `copied_${leafIndex}` : leaf.transactionTaskId,
             childRunId: leaf.childRunId,
-            path: leaf.filePath,
+            path: mode === "batch-drifting-copy" ? `./${String(leaf.filePath)}` : leaf.filePath,
             status: "consistent",
             criteria: Array.isArray(leaf.acceptanceCriteria)
-              ? leaf.acceptanceCriteria.map((criterion) => ({ criterion, status: "satisfied", explanation: "The delegated receipt contract is satisfied." }))
+              ? leaf.acceptanceCriteria.map((criterion, criterionIndex) => {
+                  // The reviewer finds a real bug in the second file on its first look only.
+                  const repairableFault = mode === "batch-repairable" && wholeTreeReviews.length === 1 && leafIndex === 1 && criterionIndex === 0;
+                  return {
+                    criterion: mode === "batch-drifting-copy" ? `${String(criterion)} (reworded)` : criterion,
+                    // The reviewer cannot run a build or read another page: one criterion is "uncertain".
+                    status: criterionIndex === 0 && mode === "batch-uncertain" ? "uncertain"
+                      : (criterionIndex === 0 && (mode === "batch-unsatisfied" || mode === "batch-inconsistent-files")) || repairableFault ? "unsatisfied"
+                        : "satisfied",
+                    explanation: repairableFault
+                      ? "The consumer reads prisma.teamMember, a model that does not exist; the schema's model is membership."
+                      : "The delegated receipt contract is checked.",
+                  };
+                })
               : [],
             summary: "The delegated proposal satisfies its task contract.",
           })),
-          crossFileAssessment: { status: "consistent", summary: "The shared receipt interface is consistent." },
+          crossFileAssessment: mode === "batch-inconsistent-files"
+            ? { status: "inconsistent", summary: "The consumer calls a function the producer no longer exports." }
+            : { status: "consistent", summary: "The shared receipt interface is consistent." },
           summary: "The complete receipt change is consistent.",
           rationale: "The producer and consumer use the same interface contract.",
         });
       } else if (requestMode === "plan_graph_delegation") {
         planRequests.push({
           planRetry: input.planRetry,
+          ...(input.userAnswers !== undefined ? { userAnswers: input.userAnswers } : {}),
           systemPrompt: request.systemPrompt ?? "",
           ...(request.maxOutputTokens !== undefined ? { maxOutputTokens: request.maxOutputTokens } : {}),
+          ...(request.structured ? { tools: request.structured.tools as never } : {}),
         });
         // The model's natural word for a function is "function"; the contract schema only knows
         // symbol, endpoint and message. "contract-kind-retry" corrects itself once it is told why.
-        const contractKind = mode === "contract-kind-always-wrong" || (mode === "contract-kind-retry" && !input.planRetry)
+        const isRootPlan = immediateTargets?.kind === "planner" && allowedIds.length === 2;
+        if (isRootPlan) rootPlanCalls += 1;
+        const asksNow = isRootPlan && (mode === "ask-always" || (mode === "ask-once" && rootPlanCalls === 1));
+        if (asksNow) {
+          // The model cannot choose between two readings of the request and asks, as it was told it may.
+          return {
+            requestId: `request_ask_${rootPlanCalls}`,
+            provider: "test",
+            model: "test-model",
+            output: JSON.stringify({
+              ask_user: {
+                question: "Should the receipt be sent to the account email or to another address?",
+                options: [{ id: "a", label: "Account email" }, { id: "b", label: "Another address" }],
+                recommendation: "a",
+              },
+            }),
+            usage: { inputTokens: 1, outputTokens: 1 },
+            usageStatus: "reported",
+            latencyMs: 1,
+          } as never;
+        }
+        const contractKind = mode === "contract-kind-always-wrong" ||
+          (mode === "contract-kind-retry" && !input.planRetry) ||
+          (mode === "contract-kind-twice-wrong" && rootPlanCalls <= 2)
           ? "function"
           : "endpoint";
         if ((DEPENDENCY_PLAN_MODES.has(mode)) &&
@@ -3436,7 +4031,7 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
                 ...(extra ? { taskKeyNote: "ignored" } : {}),
                 taskKey: "consumer",
                 nodeId: allowedIds[1],
-                dependencyTaskKeys: ["producer"],
+                dependencyTaskKeys: mode === "shared-file-parallel" ? [] : ["producer"],
                 interfaceContractIds: contractRefs,
                 objective: "Display the receipt id",
                 acceptanceCriteria: ["The confirmation shows the endpoint receipt id"],
@@ -3445,7 +4040,7 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
             contracts: [{
               contractId: "contract_receipt",
               producerTaskKey: "producer",
-              consumerTaskKeys: ["consumer"],
+              consumerTaskKeys: mode === "plan-self-consumer" ? ["producer", "consumer", "consumer"] : ["consumer"],
               ...(extra ? { note: "ignored" } : {}),
               identity: { kind: contractKind, name: "POST /api/receipts" },
               behavior: "Creates one receipt for one successful payment",
@@ -3504,9 +4099,10 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
         output = JSON.stringify({
           path: selectedPath,
           verdict: "valid",
-          criteria: criteria.map((criterion) => ({
+          criteria: criteria.map((criterion, criterionIndex) => ({
             criterion,
-            status: "satisfied",
+            // A leaf reviewer cannot run the build an inherited criterion mentions.
+            status: mode === "leaf-uncertain" && criterionIndex === 0 ? "uncertain" : "satisfied",
             explanation: "The exact synthetic marker was changed.",
           })),
           scopeAssessment: {
@@ -3517,6 +4113,7 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
           rationale: "The proposal remains within its leaf scope.",
         });
       } else if (selectedPath) {
+        generationRequests.push({ path: selectedPath, systemPrompt: request.systemPrompt ?? "" });
         output = JSON.stringify({
           summary: `Change ${selectedPath}`,
           path: selectedPath,
@@ -3528,11 +4125,13 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
       } else {
         output = "{}";
       }
+      const cutOff = mode === "batch-truncated-once" && requestMode === "validate_whole_tree_batch" && wholeTreeReviews.length === 1;
       return {
         requestId: `request_budget_${crypto.randomUUID()}`,
         provider: "test",
         model: "test-model",
-        output,
+        output: cutOff ? output.slice(0, 40) : output,
+        ...(cutOff ? { finishReason: "length" } : {}),
         usage: { inputTokens: 1, outputTokens: 1 },
         latencyMs: 1,
       };
@@ -3623,6 +4222,7 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
       }
     },
     hierarchyDelegation,
+    ...(extra.decisions ? { decisions: extra.decisions } : {}),
   });
   const rootRunId = `run_budget_root_${mode}`;
   const root = orchestrator.createRun(workspace, {
@@ -3633,7 +4233,7 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
     affectedFiles: [],
   }, "feature_change", {
     runId: rootRunId,
-    executionPolicy: "review_first",
+    executionPolicy: rootPolicy,
     scope: { kind: "global" },
     rootRunId,
     role: "global",
@@ -3647,6 +4247,8 @@ function createHierarchyBudgetHarness(mode: HierarchyBudgetHarnessMode) {
     counters,
     planRequests,
     taskContextSeen,
+    wholeTreeReviews,
+    generationRequests,
     allStates: () => [root, ...childStates],
     allEvents: () => [root, ...childStates].flatMap((state) => state.events),
   };
@@ -3971,5 +4573,269 @@ describe("what a consumer is shown of its producers' proposals", () => {
   it("leaves a deletion as just its path", () => {
     const deletion = { taskId: "a", nodeId: "n", objective: "o", files: [{ path: "src/old.ts", changeType: "delete" as const }] };
     expect(boundUpstreamProposals([deletion])).toEqual([deletion]);
+  });
+});
+
+describe("how a leaf proposal's review reads", () => {
+  const review = (statuses: Array<"satisfied" | "unsatisfied" | "uncertain">, scope: "compliant" | "violation" = "compliant") => ({
+    path: "a.ts",
+    verdict: "valid" as const,
+    criteria: statuses.map((status, index) => ({ criterion: `c${index}`, status, explanation: "e" })),
+    scopeAssessment: { status: scope, explanation: "e" },
+    summary: "s",
+    rationale: "r",
+  });
+
+  it("is valid when everything is satisfied", () => {
+    expect(classifyProposalValidation(review(["satisfied", "satisfied"]))).toEqual({ valid: true, needsReview: false, uncertainCount: 0 });
+  });
+
+  it("needs review, but is not rejected, when the only doubt is uncertain criteria", () => {
+    expect(classifyProposalValidation(review(["satisfied", "uncertain", "uncertain"]))).toEqual({ valid: false, needsReview: true, uncertainCount: 2 });
+  });
+
+  it("fails on an unsatisfied criterion, however many others are uncertain or satisfied", () => {
+    expect(classifyProposalValidation(review(["uncertain", "unsatisfied"]))).toMatchObject({ valid: false, needsReview: false });
+  });
+
+  it("fails on a scope violation even when every criterion is satisfied", () => {
+    expect(classifyProposalValidation(review(["satisfied"], "violation"))).toMatchObject({ valid: false, needsReview: false });
+  });
+});
+
+describe("matching a reviewer's reply to the plan", () => {
+  const expected = [
+    { taskId: "t1", childRunId: "r1", path: "a.ts", criteria: ["first criterion", "second criterion"] },
+    { taskId: "t2", childRunId: "r2", path: "b.ts", criteria: ["only criterion"] },
+  ];
+  const reply = (tasks: Array<{ taskId: string; path: string; criteria: string[] }>) => ({
+    tasks: tasks.map((task) => ({
+      taskId: task.taskId,
+      childRunId: "copied",
+      path: task.path,
+      criteria: task.criteria.map((criterion) => ({ criterion })),
+    })),
+  });
+
+  it("keeps the server's identity and criterion text when the copy drifted", () => {
+    const parsed = reply([
+      { taskId: "t1", path: "./a.ts", criteria: ["first criterion, reworded", "second criterion"] },
+      { taskId: "t2", path: "b.ts", criteria: ["only criterion "] },
+    ]);
+    alignBatchReview(parsed, expected);
+    expect(parsed.tasks.map((task) => task.criteria.map((criterion) => criterion.criterion))).toEqual([
+      ["first criterion", "second criterion"],
+      ["only criterion"],
+    ]);
+    expect(parsed.tasks.map((task) => [task.taskId, task.childRunId, task.path])).toEqual([
+      ["t1", "r1", "a.ts"],
+      ["t2", "r2", "b.ts"],
+    ]);
+  });
+
+  it("puts tasks back in plan order when every id is present but they came in another order", () => {
+    const parsed = reply([
+      { taskId: "t2", path: "b.ts", criteria: ["x"] },
+      { taskId: "t1", path: "a.ts", criteria: ["x", "y"] },
+    ]);
+    alignBatchReview(parsed, expected);
+    expect(parsed.tasks.map((task) => task.taskId)).toEqual(["t1", "t2"]);
+    expect(parsed.tasks[0]!.criteria).toHaveLength(2);
+  });
+
+  it("falls back to position when the ids it sent back are not the plan's", () => {
+    const parsed = reply([
+      { taskId: "copied_0", path: "a", criteria: ["x", "y"] },
+      { taskId: "copied_1", path: "b", criteria: ["x"] },
+    ]);
+    alignBatchReview(parsed, expected);
+    expect(parsed.tasks.map((task) => task.taskId)).toEqual(["t1", "t2"]);
+  });
+
+  it("refuses a different number of tasks, saying how many were wanted", () => {
+    expect(() => alignBatchReview(reply([{ taskId: "t1", path: "a.ts", criteria: ["x", "y"] }]), expected))
+      .toThrow(expect.objectContaining({ category: "invalid_validation_shape", detail: expect.stringContaining("expected 2 entries") }));
+  });
+
+  it("refuses a different number of criteria, naming the file", () => {
+    const parsed = reply([
+      { taskId: "t1", path: "a.ts", criteria: ["x", "y"] },
+      { taskId: "t2", path: "b.ts", criteria: ["x", "y", "z"] },
+    ]);
+    expect(() => alignBatchReview(parsed, expected))
+      .toThrow(expect.objectContaining({ detail: expect.stringContaining("tasks.1 (b.ts): expected 1 criteria") }));
+  });
+
+  it("does the same for one file's review", () => {
+    const parsed = { path: "wrong.ts", criteria: [{ criterion: "reworded" }, { criterion: "also reworded" }] };
+    alignProposalReview(parsed, ["first criterion", "second criterion"], "a.ts");
+    expect(parsed).toEqual({ path: "a.ts", criteria: [{ criterion: "first criterion" }, { criterion: "second criterion" }] });
+    expect(() => alignProposalReview({ path: "a.ts", criteria: [{ criterion: "x" }] }, ["a", "b"], "a.ts"))
+      .toThrow(expect.objectContaining({ category: "invalid_validation_shape" }));
+  });
+});
+
+/**
+ * A file too large to send whole is edited through regions. Before, the context assembler refused it
+ * and the planner left it out: excalidraw's 93,000-token App.tsx could not be changed at all.
+ */
+describe("editing a file too large to send whole", () => {
+  function largeComponent(): string {
+    const lines: string[] = [];
+    for (let index = 0; index < 40; index += 1) lines.push(`import { helper${index} } from "./helpers/helper${index}";`);
+    lines.push("", "export class App extends React.Component<AppProps, AppState> {");
+    for (let index = 0; index < 2_400; index += 1) {
+      if (index === 1_200) {
+        lines.push(
+          "  private handleCanvasDoubleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {",
+          "    const sceneX = this.state.zoom.value * event.clientX;",
+          "    this.startTextEditing(sceneX);",
+          "  };",
+          "",
+        );
+      }
+      lines.push(
+        `  private handleThing${index} = (event: Event) => {`,
+        `    const value = helper${index % 40}(event, ${index});`,
+        `    this.setState({ counter${index}: value });`,
+        "  };",
+        "",
+      );
+    }
+    lines.push("}", "");
+    return lines.join("\n");
+  }
+
+  function largeContext(workspace: ReturnType<ProjectOSWorkspaceStore["loadWorkspace"]>, content: string): LocalContextBundle {
+    const bundle = localContextBundle(workspace);
+    return {
+      ...bundle,
+      fileManifest: bundle.fileManifest.map((file) =>
+        file.relationship === "selected"
+          ? { ...file, content, byteLength: content.length, includedByteLength: content.length }
+          : file,
+      ),
+      budget: { ...bundle.budget, selectedEstimatedTokens: Math.ceil(content.length / 4) },
+    };
+  }
+
+  const plan = validFileEditPlanOutput({
+    objective: "Select all text when the canvas is double-clicked",
+    targetDescription: "The canvas double-click handler",
+    anchors: ["App.handleCanvasDoubleClick"],
+  });
+  const edit = JSON.stringify({
+    summary: "Select all text on double-click",
+    path: "app/login/page.tsx",
+    edits: [{
+      search: "    this.startTextEditing(sceneX);",
+      replace: "    this.startTextEditing(sceneX, { selectAll: true });",
+    }],
+  });
+  const promptTokens = (request: ModelGatewayRequest | undefined) => Math.ceil(JSON.stringify(request?.input).length / 4);
+
+  it("locates, edits and validates it from regions, and applies the edit to the whole file", async () => {
+    const content = largeComponent();
+    expect(Math.ceil(content.length / 4)).toBeGreaterThan(60_000);
+    const { orchestrator, workspace, requests } = createModelOrchestrator(edit, [], sampleWorkspaceRoot, [{ output: plan }]);
+    const state = orchestrator.createRun(workspace, { ...refinement(), understood: "Double-clicking the canvas should select all text" }, "feature_change", {
+      localContext: largeContext(workspace, content),
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    expect(state.run.status).toBe("awaiting_review");
+    expect(requests).toHaveLength(3);
+    // No model call carries the file whole.
+    for (const request of requests) {
+      expect(JSON.stringify(request.input)).not.toContain("handleThing2000 =");
+      expect(promptTokens(request)).toBeLessThan(20_000);
+    }
+    const [locate, generate, validate] = requests;
+    expect(locate?.systemPrompt).toContain("too large to show whole");
+    const locateEntry = (locate?.input as { localContext: LocalContextBundle }).localContext.fileManifest[0] as unknown as Record<string, unknown>;
+    expect(locateEntry).toMatchObject({ relationship: "selected", disposition: "windowed" });
+    expect(JSON.stringify(locateEntry.view)).toContain("handleCanvasDoubleClick");
+
+    expect(generate?.systemPrompt).toContain('"edits":[{"search"');
+    expect(generate?.systemPrompt).toContain("Do not return the whole file");
+    expect(JSON.stringify(generate?.input)).toContain("    this.startTextEditing(sceneX);\\n  };");
+
+    const validation = validate?.input as { proposal: { files: Array<Record<string, unknown>> }; snapshot: Record<string, unknown> };
+    expect(validation.proposal.files[0]).toMatchObject({ representation: "hunks" });
+    expect(validation.proposal.files[0]).not.toHaveProperty("after");
+    expect(validation.snapshot).not.toHaveProperty("selectedFileContent");
+    expect(validation.snapshot).toHaveProperty("selectedFileView");
+
+    expect(state.diff?.files[0]?.before).toBe(content);
+    expect(state.diff?.files[0]?.after).toBe(
+      content.replace("    this.startTextEditing(sceneX);", "    this.startTextEditing(sceneX, { selectAll: true });"),
+    );
+  });
+
+  it("does not accept a whole file the model could not have seen, and asks again for edits", async () => {
+    const content = largeComponent();
+    const wholeFile = JSON.stringify({
+      summary: "Rewritten",
+      files: [{ path: "app/login/page.tsx", changeType: "modify", after: "export class App {}\n" }],
+    });
+    const { orchestrator, workspace, requests } = createModelOrchestrator(
+      [{ output: wholeFile }, { output: edit }],
+      [],
+      sampleWorkspaceRoot,
+      [{ output: plan }],
+    );
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: largeContext(workspace, content),
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    expect(requests).toHaveLength(4);
+    expect(requests[2]?.input).toMatchObject({
+      generationRetry: { reason: "invalid_edit_shape", instruction: expect.stringContaining("search/replace") },
+    });
+    expect(state.diff?.files[0]?.after).toContain("this.startTextEditing(sceneX, { selectAll: true });");
+    expect(state.diff?.files[0]?.after?.length).toBeGreaterThan(content.length);
+  });
+
+  it("tells the model when a search is not unique in the whole file, though it looked unique where it was shown", async () => {
+    const content = largeComponent();
+    const ambiguous = JSON.stringify({
+      summary: "Too short a search",
+      path: "app/login/page.tsx",
+      edits: [{ search: "  };", replace: "  }; // changed" }],
+    });
+    const { orchestrator, workspace, requests } = createModelOrchestrator(
+      [{ output: ambiguous }, { output: edit }],
+      [],
+      sampleWorkspaceRoot,
+      [{ output: plan }],
+    );
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: largeContext(workspace, content),
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    expect(requests[2]?.input).toMatchObject({
+      generationRetry: { reason: "search_ambiguous", instruction: expect.stringContaining("more than once") },
+    });
+    expect(requests[2]?.systemPrompt).toContain("search_ambiguous");
+    expect(state.run.status).toBe("awaiting_review");
+  });
+
+  it("still sends a file that fits whole, and asks for the complete file as before", async () => {
+    const { orchestrator, workspace, requests } = createModelOrchestrator(edit.replace("    this.startTextEditing(sceneX);", "SELECTED_CONTEXT_MARKER"));
+    const state = orchestrator.createRun(workspace, refinement(), "feature_change", {
+      localContext: localContextBundle(workspace),
+    });
+
+    await orchestrator.startRun(workspace, state.run.runId, toolContext());
+
+    expect(requests[0]?.systemPrompt).not.toContain("too large to show whole");
+    expect(JSON.stringify(requests[0]?.input)).toContain('"content":"SELECTED_CONTEXT_MARKER"');
+    expect(requests[1]?.systemPrompt).toContain("The after value must be the complete modified file source");
+    expect(requests[2]?.input).toMatchObject({ snapshot: { selectedFileContent: "SELECTED_CONTEXT_MARKER" } });
   });
 });

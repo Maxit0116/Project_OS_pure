@@ -15,6 +15,7 @@ import {
   DependencyImpactScanner,
   type ImportRelations,
 } from "../dependency-impact-scanner.js";
+import { buildImportImpact, isImportImpactLanguage } from "./import-impact.js";
 import { moduleClauses } from "./import-names.js";
 
 const TEST_FILE_PATTERN = /^(.+)\.(test|spec)\.[^.]+$/u;
@@ -41,6 +42,18 @@ export function buildCodeImpact(input: {
     return emptyImpact(input.path, inventoried.contentHash, input.symbolName, [
       { path: input.path, reason: "unsupported_language" },
     ]);
+  }
+  if (isImportImpactLanguage(inventoried.language)) {
+    return buildImportImpact({
+      workspaceRoot: input.workspaceRoot,
+      path: input.path,
+      language: inventoried.language,
+      contentHash: inventoried.contentHash,
+      inventory: input.inventory,
+      symbols: input.symbols,
+      symbolName: input.symbolName,
+      nodeIdsByPath: nodeIds,
+    });
   }
 
   let relations: ImportRelations;

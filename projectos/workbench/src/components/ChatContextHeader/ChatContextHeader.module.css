@@ -131,6 +131,12 @@
   cursor: pointer;
 }
 
+.ownerCaption {
+  margin-left: 6px;
+  color: var(--color-text-secondary);
+  font-size: 0.85em;
+}
+
 .scopeError {
   color: var(--color-danger, #d14343);
 }

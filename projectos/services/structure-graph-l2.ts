@@ -14,6 +14,7 @@ import type {
   ProjectGraph,
   StructureScanMode,
 } from "../contracts/graph.js";
+import { PROJECT_GRAPH_LIMITS } from "../contracts/graph.js";
 import { sourceKindPriority } from "../shared/c4-architecture-views/index.js";
 
 export type ScanLanguage = "zh-CN" | "en";
@@ -36,6 +37,12 @@ const SKIP_DIRS = new Set([
   ".cache",
   "target",
   "vendor",
+  "__pycache__",
+  "site-packages",
+  "obj",
+  "Pods",
+  "bower_components",
+  "jspm_packages",
 ]);
 
 const TEXT_EXTS = new Set([
@@ -53,6 +60,23 @@ const TEXT_EXTS = new Set([
   ".swift",
   ".vue",
   ".svelte",
+  ".c",
+  ".h",
+  ".cc",
+  ".cpp",
+  ".cxx",
+  ".hpp",
+  ".hh",
+  ".cs",
+  ".rb",
+  ".php",
+  ".scala",
+  ".dart",
+  ".m",
+  ".mm",
+  ".lua",
+  ".ex",
+  ".exs",
   ".md",
   ".json",
   ".yml",
@@ -108,6 +132,23 @@ const SOURCE_EXTS = new Set([
   ".swift",
   ".vue",
   ".svelte",
+  ".c",
+  ".h",
+  ".cc",
+  ".cpp",
+  ".cxx",
+  ".hpp",
+  ".hh",
+  ".cs",
+  ".rb",
+  ".php",
+  ".scala",
+  ".dart",
+  ".m",
+  ".mm",
+  ".lua",
+  ".ex",
+  ".exs",
 ]);
 
 export function detectReadmeLanguage(workspaceRoot: string): ScanLanguage {
@@ -133,18 +174,28 @@ export function isDirShellName(name: string): boolean {
   return / module$/u.test(normalized);
 }
 
-export function collectRepoFiles(workspaceRoot: string, limit = 400): string[] {
+/** The most files the scan will inventory; a repository larger than this is truncated in name order. */
+export const REPO_INVENTORY_LIMIT = 8_000;
+
+/**
+ * Every file the scan may know about, walked in name order so that two scans of the same tree agree.
+ * The walk used to stop at the first 400 files in directory order, so in a large repository the
+ * model was shown (and the map was built from) whichever directories sorted first, usually docs and
+ * examples, and never saw the code.
+ */
+export function listRepoFiles(workspaceRoot: string, cap = REPO_INVENTORY_LIMIT): string[] {
   const files: string[] = [];
   const walk = (absoluteDir: string): void => {
-    if (files.length >= limit) return;
+    if (files.length >= cap) return;
     let entries;
     try {
       entries = readdirSync(absoluteDir, { withFileTypes: true });
     } catch {
       return;
     }
+    entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
     for (const entry of entries) {
-      if (files.length >= limit) return;
+      if (files.length >= cap) return;
       if (entry.name.startsWith(".") && entry.name !== ".env.example") {
         if (SKIP_DIRS.has(entry.name)) continue;
         if (entry.name !== ".github" && entry.name !== ".agents") continue;
@@ -165,6 +216,124 @@ export function collectRepoFiles(workspaceRoot: string, limit = 400): string[] {
   };
   walk(workspaceRoot);
   return files;
+}
+
+const KEY_ROOT_FILES = /^(readme(\.[a-z-]+)?\.md|package\.json|pyproject\.toml|requirements\.txt|setup\.py|go\.mod|cargo\.toml|pom\.xml|build\.gradle(\.kts)?|dockerfile|docker-compose\.ya?ml)$/i;
+
+function sampleRank(file: string): number {
+  const ext = extname(file).toLowerCase();
+  if (SOURCE_EXTS.has(ext)) return 0;
+  if (ext === ".json" || ext === ".toml" || ext === ".yml" || ext === ".yaml" || ext === ".prisma" || ext === ".sql") {
+    return 1;
+  }
+  return 2;
+}
+
+/**
+ * At most `limit` files that represent the whole tree: the project's key root files first, then one
+ * file from each directory (to three levels deep) in turn, source files before configuration before
+ * documents, until the budget is spent. A directory with many files cannot crowd out the others.
+ */
+export function sampleRepoFiles(files: readonly string[], limit: number): string[] {
+  if (files.length <= limit) return [...files];
+  const picked = new Set<string>();
+  for (const file of files) {
+    if (picked.size >= limit) break;
+    if (!file.includes("/") && KEY_ROOT_FILES.test(file)) picked.add(file);
+  }
+  const buckets = new Map<string, string[]>();
+  for (const file of files) {
+    if (picked.has(file)) continue;
+    const key = file.split("/").slice(0, -1).slice(0, 3).join("/");
+    const list = buckets.get(key);
+    if (list) list.push(file);
+    else buckets.set(key, [file]);
+  }
+  for (const list of buckets.values()) {
+    list.sort(
+      (left, right) =>
+        sampleRank(left) - sampleRank(right) ||
+        left.split("/").length - right.split("/").length ||
+        left.localeCompare(right),
+    );
+  }
+  const depth = (key: string): number => (key === "" ? 0 : key.split("/").length);
+  const order = [...buckets.keys()].sort(
+    (left, right) => depth(left) - depth(right) || left.localeCompare(right),
+  );
+  for (let round = 0; picked.size < limit; round += 1) {
+    let progressed = false;
+    for (const key of order) {
+      const file = buckets.get(key)![round];
+      if (file === undefined) continue;
+      picked.add(file);
+      progressed = true;
+      if (picked.size >= limit) break;
+    }
+    if (!progressed) break;
+  }
+  return [...picked].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
+/**
+ * Where the files are: `dir/ (n files)` for the busiest directories (to three levels), so the model can
+ * see the whole tree's shape even when only a sample of its paths fits in the prompt.
+ */
+export function summarizeRepoDirectories(files: readonly string[], maxEntries = 60): string[] {
+  const counts = new Map<string, number>();
+  for (const file of files) {
+    const parts = file.split("/").slice(0, -1);
+    for (let depth = 1; depth <= Math.min(3, parts.length); depth += 1) {
+      const key = parts.slice(0, depth).join("/");
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, maxEntries)
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([dir, count]) => `${dir}/ (${count} files)`);
+}
+
+/** A representative list of at most `limit` files (the whole tree when it is small). */
+export function collectRepoFiles(workspaceRoot: string, limit = 400): string[] {
+  return sampleRepoFiles(listRepoFiles(workspaceRoot), limit);
+}
+
+/**
+ * How many components a map of this size should have. The model was always asked for "about 8 to 20",
+ * so a library with seven source files came back with eleven components that could not each own
+ * a file, and the quality gate threw the whole map away.
+ */
+export function componentBudget(sourceFileCount: number): { min: number; max: number } {
+  const bounds =
+    sourceFileCount < 6
+      ? { min: 2, max: 4 }
+      : sourceFileCount < 12
+        ? { min: 3, max: 6 }
+        : sourceFileCount < 30
+          ? { min: 4, max: 10 }
+          : sourceFileCount < 100
+            ? { min: 6, max: 16 }
+            : sourceFileCount < 300
+              ? { min: 8, max: 20 }
+              : { min: 10, max: 28 };
+  // Never more components than files.
+  const files = Math.max(1, sourceFileCount);
+  return { min: Math.min(bounds.min, files), max: Math.min(bounds.max, files) };
+}
+
+/**
+ * Files one component may mount; large repositories need more than the small-project default of 12.
+ * The cap was 120, so a map holds at most 120 × components files: gitea (3,480 source files, 25
+ * components) left 653 of them out of the index, where Ask's search and Agent's targets come from.
+ * The bound is now the graph's own per-node limit.
+ */
+export function filesPerComponentCap(sourceFileCount: number, componentCount: number): number {
+  return Math.min(
+    PROJECT_GRAPH_LIMITS.linkedFilesPerNode,
+    Math.max(12, Math.ceil((2 * sourceFileCount) / Math.max(1, componentCount))),
+  );
 }
 
 export interface ComponentFileHint {
@@ -359,6 +528,34 @@ export function parsePythonRelativeImports(source: string): string[] {
   return Array.from(new Set(specs));
 }
 
+/**
+ * Python `from app.core.config import settings`, `from app.models import user, item` and
+ * `import app.models`. Only the relative form (`from .x import y`) was read before, so a Python
+ * project, which imports its own modules by absolute package path, got no file dependencies at all.
+ * Each imported name is also offered as a submodule (`app.models.user`): `from pkg import mod`
+ * usually imports a module, and the resolver keeps only specs that name a file in the project.
+ */
+export function parsePythonAbsoluteImports(source: string): string[] {
+  const specs: string[] = [];
+  const fromPattern =
+    /^[ \t]*from[ \t]+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)[ \t]+import[ \t]+(\([^)]*\)|[^\n#]+)/gm;
+  for (const match of source.matchAll(fromPattern)) {
+    const pkg = match[1];
+    if (!pkg) continue;
+    specs.push(pkg);
+    const names = (match[2] ?? "")
+      .replace(/[()\\]/g, " ")
+      .split(",")
+      .map((part) => part.trim().split(/\s+as\s+/)[0]?.trim() ?? "")
+      .filter((name) => /^[A-Za-z_]\w*$/.test(name));
+    for (const name of names.slice(0, 24)) specs.push(`${pkg}.${name}`);
+  }
+  for (const match of source.matchAll(/^[ \t]*import[ \t]+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)/gm)) {
+    if (match[1]) specs.push(match[1]);
+  }
+  return Array.from(new Set(specs));
+}
+
 /** Go quoted import paths (`import "module/pkg"` and grouped import blocks). */
 export function parseGoImports(source: string): string[] {
   const specs: string[] = [];
@@ -395,6 +592,7 @@ export function parseImportSpecs(source: string): string[] {
       ...parseRelativeImports(source),
       ...parsePackageImports(source),
       ...parsePythonRelativeImports(source),
+      ...parsePythonAbsoluteImports(source),
       ...parseGoImports(source),
       ...parseRustImports(source),
     ]),
@@ -434,12 +632,21 @@ export function parseExports(source: string): string[] {
 
 function resolvePackageImportPath(spec: string, files: Set<string>): string | null {
   const classPath = spec.replace(/\./g, "/");
+  let packageInit: string | null = null;
   for (const file of files) {
     const normalized = file.split(sep).join("/");
     const stem = normalized.replace(/\.[^.]+$/, "");
     if (stem === classPath || stem.endsWith(`/${classPath}`)) return file;
+    // A Python package: `app.models` is app/models/__init__.py when there is no app/models.py.
+    if (
+      packageInit === null &&
+      normalized.endsWith(".py") &&
+      (stem === `${classPath}/__init__` || stem.endsWith(`/${classPath}/__init__`))
+    ) {
+      packageInit = file;
+    }
   }
-  return null;
+  return packageInit;
 }
 
 function resolvePythonRelativeImport(
@@ -584,6 +791,52 @@ export function classifyRepoFileType(relativePath: string): FileEntry["type"] {
   return "other";
 }
 
+const CSHARP_TYPE_DECLARATION =
+  /^\s*(?:(?:public|internal|private|protected|static|abstract|sealed|partial|readonly|file|ref|unsafe|new)\s+)*(?:class|interface|record(?:\s+(?:class|struct))?|struct|enum)\s+([A-Za-z_]\w*)/gmu;
+const CSHARP_USING = /^\s*(global\s+)?using\s+(?!static\b)(?![\w.]+\s*=)([\w.]+)\s*;/gmu;
+const MAX_CSHARP_REFERENCES = 40;
+
+/**
+ * Which C# files each C# file uses. A `using` line names a namespace, not a file, so the import
+ * parsers found nothing in C# and eShopOnWeb's map was refused for having no code-level edges. A file
+ * uses another when it names a type the other declares, in a namespace it can see: its own, a parent
+ * of it, one of its `using`s, or a `global using` anywhere in the project.
+ */
+export function resolveCSharpReferences(bodies: ReadonlyMap<string, string>): Map<string, string[]> {
+  const declaredBy = new Map<string, Array<{ path: string; namespace: string }>>();
+  const namespaceOf = new Map<string, string>();
+  const globalUsings = new Set<string>();
+  for (const [path, body] of bodies) {
+    if (!path.toLowerCase().endsWith(".cs")) continue;
+    const namespace = /^\s*namespace\s+([\w.]+)/mu.exec(body)?.[1] ?? "";
+    namespaceOf.set(path, namespace);
+    for (const match of body.matchAll(CSHARP_TYPE_DECLARATION)) {
+      const list = declaredBy.get(match[1]!) ?? [];
+      list.push({ path, namespace });
+      declaredBy.set(match[1]!, list);
+    }
+    for (const match of body.matchAll(CSHARP_USING)) {
+      if (match[1]) globalUsings.add(match[2]!);
+    }
+  }
+  const references = new Map<string, string[]>();
+  for (const [path, namespace] of namespaceOf) {
+    const body = bodies.get(path) ?? "";
+    const visible = new Set<string>([namespace, ...globalUsings]);
+    const parts = namespace.split(".");
+    for (let length = parts.length - 1; length > 0; length -= 1) visible.add(parts.slice(0, length).join("."));
+    for (const match of body.matchAll(CSHARP_USING)) visible.add(match[2]!);
+    const targets = new Set<string>();
+    for (const word of new Set(body.match(/[A-Za-z_]\w*/gu) ?? [])) {
+      for (const declaration of declaredBy.get(word) ?? []) {
+        if (declaration.path !== path && visible.has(declaration.namespace)) targets.add(declaration.path);
+      }
+    }
+    references.set(path, [...targets].sort().slice(0, MAX_CSHARP_REFERENCES));
+  }
+  return references;
+}
+
 export function buildFileIndexAndRelations(input: {
   workspaceRoot: string;
   assignments: Map<string, string[]>;
@@ -596,6 +849,7 @@ export function buildFileIndexAndRelations(input: {
   const importsByPath = new Map<string, string[]>();
   const exportsByPath = new Map<string, string[]>();
 
+  const bodies = new Map<string, string>();
   for (const path of allPaths) {
     const absolute = join(input.workspaceRoot, path);
     let body = "";
@@ -606,7 +860,13 @@ export function buildFileIndexAndRelations(input: {
     } catch {
       body = "";
     }
-    const resolved: string[] = [];
+    bodies.set(path, body);
+  }
+  const csharpReferences = resolveCSharpReferences(bodies);
+
+  for (const path of allPaths) {
+    const body = bodies.get(path) ?? "";
+    const resolved: string[] = [...(csharpReferences.get(path) ?? [])];
     for (const spec of parseImportSpecs(body)) {
       const target = resolveImportPath(path, spec, allPaths);
       if (target && target !== path) resolved.push(target);
@@ -690,10 +950,14 @@ export function assessL2GraphQuality(
     components.length === 0
       ? 0
       : components.filter((node) => node.linkedFiles.length >= 2).length;
+  // Two files per component is only possible when there are files enough: a small project cannot
+  // give most of its components a pair, and was rejected for it.
   const minRich =
     options.sourceFileCount < 6
       ? Math.min(1, components.length)
-      : Math.ceil(components.length * 0.5);
+      : options.sourceFileCount < 20
+        ? Math.min(Math.ceil(components.length * 0.5), Math.floor(options.sourceFileCount / 4))
+        : Math.ceil(components.length * 0.5);
   if (rich < minRich) {
     reasons.push(`thin_file_mounts:${rich}<${minRich}`);
   }
@@ -812,6 +1076,31 @@ export function pruneDanglingEdges(
       nodeIds.has(edge.source) &&
       nodeIds.has(edge.target),
   );
+}
+
+/**
+ * Edge ids made unique. The model names edges itself, and its two rounds can give two different
+ * edges the same id (ripgrep: two `e_search_walker`), which made the whole map unpersistable. An exact
+ * repeat (same endpoints and relation) is dropped; a different edge under a used id is renamed.
+ */
+export function uniqueEdgeIds(edges: FunctionalEdge[]): FunctionalEdge[] {
+  const byId = new Map<string, FunctionalEdge>();
+  const result: FunctionalEdge[] = [];
+  for (const edge of edges) {
+    const existing = byId.get(edge.id);
+    if (!existing) {
+      byId.set(edge.id, edge);
+      result.push(edge);
+      continue;
+    }
+    if (existing.source === edge.source && existing.target === edge.target && existing.relation === edge.relation) continue;
+    let suffix = 2;
+    while (byId.has(`${edge.id}_${suffix}`)) suffix += 1;
+    const renamed = { ...edge, id: `${edge.id}_${suffix}` };
+    byId.set(renamed.id, renamed);
+    result.push(renamed);
+  }
+  return result;
 }
 
 export function mergeStructureGraphs(input: {

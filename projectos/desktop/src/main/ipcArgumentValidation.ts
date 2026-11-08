@@ -16,6 +16,7 @@ const PROJECTOS_IPC_SIGNATURES = {
   getProjectGraph: ['string'],
   getSemanticTree: ['string'],
   listWorkspaceDirectory: ['string', 'string'],
+  assignFileOwner: ['string', 'string', 'string'],
   getWorkspaceGitStatus: ['string'],
   listWorkspaceGitBranches: ['string'],
   listWorkspaceGitCommits: ['string', 'record'],
@@ -127,6 +128,7 @@ const PROJECTOS_IPC_SIGNATURES = {
   getWorkforceAgent: ['string', 'string'],
   getDiff: ['string'],
   applyDiff: ['string'],
+  applyDespiteUnmetRequirements: ['string'],
   runVerification: ['string'],
   getVerificationCommandApproval: ['string'],
   approveVerificationCommands: ['string', 'string'],
@@ -383,7 +385,7 @@ export function parseTerminalResizeArgs(
 export function parseDiffReadyNotificationPayload(input: unknown): {
   title: string
   body: string
-  destination: 'ask' | 'diff' | 'reminder' | 'decisions'
+  destination: 'ask' | 'diff' | 'decisions' | 'reminder'
   runIds: string[]
   decisionId?: string
 } {
@@ -394,8 +396,9 @@ export function parseDiffReadyNotificationPayload(input: unknown): {
   if (
     typeof title !== 'string' || !title.trim() || title.length > 200 ||
     typeof body !== 'string' || !body.trim() || body.length > 2_000 ||
-    (destination !== 'ask' && destination !== 'diff' && destination !== 'reminder' && destination !== 'decisions') ||
-    !Array.isArray(runIds) || runIds.length === 0 || runIds.length > 128 ||
+    (destination !== 'ask' && destination !== 'diff' && destination !== 'decisions' && destination !== 'reminder') ||
+    // An answer to a question belongs to no run, so only a change, a decision or a reminder must name one.
+    !Array.isArray(runIds) || (runIds.length === 0 && destination !== 'ask') || runIds.length > 128 ||
     runIds.some((runId) =>
       typeof runId !== 'string' || !runId || runId.length > 256 || runId.includes('\0')) ||
     new Set(runIds).size !== runIds.length ||

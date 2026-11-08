@@ -84,6 +84,8 @@ export function shouldDisposeEmptySession(input: EmptySessionDisposalInput): boo
   if (chatSessionHasUserMessage(messages)) return false;
   if (composerDraftHasContent(draft ?? null)) return false;
   if (head.status === "running") return false;
+  // Waiting on the person (an intent card, a plan or a refinement to approve) is not empty.
+  if (head.status === "awaiting_review") return false;
   if (chatSessionHasChildren(heads, head.id)) return false;
 
   if (isDeferredEmptySessionShell(head, pinnedIds)) {

@@ -27,7 +27,7 @@ type ServicesChangedListener = (ports: ServicePort[]) => void
 type LspMessageListener = (message: string) => void
 type FocusChangeListener = (focused: boolean) => void
 type DiffReadyActivatedListener = (payload: {
-  destination: 'ask' | 'diff' | 'reminder' | 'decisions'
+  destination: 'ask' | 'diff' | 'decisions' | 'reminder'
   runIds: string[]
   decisionId?: string
 }) => void
@@ -93,7 +93,7 @@ ipcRenderer.on('window:focusChange', (_event, focused: boolean) => {
 })
 
 ipcRenderer.on('notify:diffReadyActivated', (_event, payload: {
-  destination: 'ask' | 'diff' | 'reminder' | 'decisions'
+  destination: 'ask' | 'diff' | 'decisions' | 'reminder'
   runIds: string[]
   decisionId?: string
 }) => {
@@ -258,7 +258,7 @@ const api = {
     showDiffReady(payload: {
       title: string
       body: string
-      destination: 'ask' | 'diff' | 'reminder' | 'decisions'
+      destination: 'ask' | 'diff' | 'decisions' | 'reminder'
       runIds: string[]
       decisionId?: string
     }): Promise<void> {

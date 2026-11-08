@@ -1,4 +1,5 @@
 import { z } from "zod";
+
 import { ProjectOSError } from "../errors.js";
 import type { ProjectGraph } from "../contracts/graph.js";
 import {
@@ -9,8 +10,10 @@ import {
   type RequestIntent,
 } from "../contracts/request-intent.js";
 import type { GlobalContextBundle, NodeContextBundle } from "../contracts/local-context.js";
+import type { ModelToolDefinition } from "../contracts/model-gateway.js";
 import { computeProjectGraphHash } from "./graph-change-set-engine.js";
 import { isTruncatedModelOutput, resolveModelStructuredOutput } from "./model-json-output.js";
+import { runStructuredStep, StructuredIssues, type StructuredAttempt } from "./structured-step.js";
 import type { ModelGateway } from "./model-gateway/index.js";
 import type { ModelExecutionSnapshot } from "./harness/executor-selection.js";
 import { RequestIntentService } from "./request-intent-service.js";
@@ -19,7 +22,7 @@ const DISCOVERY_SYSTEM_PROMPT = `You are the master agent planning a software ch
 Begin with the immediate graph. You may inspect a node, list its children, read a file present in an inspected node's context, or consult a node for a focused read-only answer. Choose one action at a time and use only supplied node ids and file paths. After enough evidence, return a final intent. Ask the user only about material product choices that code and repository evidence cannot answer. Do not claim a file was read unless it appears in observations or that tests were run.
 Prefer questions: [] when the only open choice is customer-facing copy/wording (heading text, button label, microcopy). Those choices are resolved after intent approval by the authorized edit step's action:"clarify" card; blocking them at planning prevents the same-root clarify→resume path. Reserve intent.questions for scope, approach, or structural decisions that change which capabilities or files are touched.
 structuralProposals is only for adding a node, deleting a node, or connecting two existing nodes (kinds add_node, delete_node, connect_nodes); a code-level dependency between existing capabilities is not a structural change, so leave it empty. In each touch, list under files the existing files you expect that capability's change to edit, with paths exactly as supplied. Write the human-readable text of a final intent (goal, touch reasons, assumptions, out of scope, acceptance criteria, questions) in the language of the user's request, while keeping node ids, file paths and code identifiers exactly as supplied.
-Return exactly one JSON object matching the supplied action schema.`;
+Act by calling exactly one tool: inspect_node, list_children, read_source or consult_node to gather evidence, or final once you have enough. If tools are unavailable, reply with one JSON object matching outputSchema.`;
 const CONSULT_SYSTEM_PROMPT = `You are a read-only specialist answering one focused question about a software node. Use only the supplied node context, cite relevant file paths when possible, and say when evidence is insufficient. Do not propose changes, invoke tools, or claim checks were run. Return a concise plain-text answer.`;
 
 const DiscoveryActionSchema = z.discriminatedUnion("action", [
@@ -58,6 +61,26 @@ const DISCOVERY_STEP_MAX_OUTPUT_TOKENS = 8192;
 const DISCOVERY_STEP_RETRY_MAX_OUTPUT_TOKENS = 16_384;
 const CONSULTATION_MAX_OUTPUT_TOKENS = 4096;
 const CONSULTATION_RETRY_MAX_OUTPUT_TOKENS = 8192;
+const INTENT_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    goal: { type: "string" },
+    kind: { enum: ["change", "add_node", "delete_node", "mixed"] },
+    touches: { type: "array", items: { type: "object", properties: { nodeId: { type: "string" }, reason: { type: "string" }, files: { type: "array", items: { type: "string" } }, allow: { type: "object", properties: { editExisting: { type: "boolean" }, addParts: { type: "boolean" }, deletePartIds: { type: "array", items: { type: "string" } } }, required: ["editExisting", "addParts", "deletePartIds"], additionalProperties: false } }, required: ["nodeId", "reason", "allow"], additionalProperties: false } },
+    structuralProposals: { type: "array", items: { oneOf: [
+      { type: "object", properties: { kind: { const: "add_node" }, parentNodeId: { type: "string" }, name: { type: "string" }, level: { enum: ["context", "container", "component"] }, wiring: { type: "array", items: { type: "object", properties: { existingNodeId: { type: "string" }, direction: { enum: ["from_new", "to_new"] }, relation: { type: "string" }, label: { type: "string" }, purpose: { type: "string" } }, required: ["existingNodeId", "direction", "relation", "label"] } } }, required: ["kind", "parentNodeId", "name", "level", "wiring"] },
+      { type: "object", properties: { kind: { const: "delete_node" }, nodeId: { type: "string" } }, required: ["kind", "nodeId"] },
+      { type: "object", properties: { kind: { const: "connect_nodes" }, sourceNodeId: { type: "string" }, targetNodeId: { type: "string" } }, required: ["kind", "sourceNodeId", "targetNodeId"] },
+    ] } },
+    assumptions: { type: "array", items: { type: "string" } },
+    outOfScope: { type: "array", items: { type: "string" } },
+    acceptance: { type: "array", items: { type: "string" } },
+    questions: { type: "array", items: { type: "object", properties: { id: { type: "string" }, text: { type: "string" }, options: { type: "array", items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" } }, required: ["id", "label"], additionalProperties: false } }, recommendation: { type: "string" } }, required: ["id", "text"], additionalProperties: false } },
+  },
+  required: ["goal", "kind", "touches", "structuralProposals", "assumptions", "outOfScope", "acceptance", "questions"],
+  additionalProperties: false,
+} as const;
+
 const DISCOVERY_OUTPUT_SCHEMA = {
   oneOf: [
     { type: "object", properties: { action: { const: "inspect_node" }, nodeId: { type: "string" }, reason: { type: "string" } }, required: ["action", "nodeId", "reason"], additionalProperties: false },
@@ -68,31 +91,59 @@ const DISCOVERY_OUTPUT_SCHEMA = {
       type: "object",
       properties: {
         action: { const: "final" },
-        intent: {
-          type: "object",
-          properties: {
-            goal: { type: "string" },
-            kind: { enum: ["change", "add_node", "delete_node", "mixed"] },
-            touches: { type: "array", items: { type: "object", properties: { nodeId: { type: "string" }, reason: { type: "string" }, files: { type: "array", items: { type: "string" } }, allow: { type: "object", properties: { editExisting: { type: "boolean" }, addParts: { type: "boolean" }, deletePartIds: { type: "array", items: { type: "string" } } }, required: ["editExisting", "addParts", "deletePartIds"], additionalProperties: false } }, required: ["nodeId", "reason", "allow"], additionalProperties: false } },
-            structuralProposals: { type: "array", items: { oneOf: [
-              { type: "object", properties: { kind: { const: "add_node" }, parentNodeId: { type: "string" }, name: { type: "string" }, level: { enum: ["context", "container", "component"] }, wiring: { type: "array", items: { type: "object", properties: { existingNodeId: { type: "string" }, direction: { enum: ["from_new", "to_new"] }, relation: { type: "string" }, label: { type: "string" }, purpose: { type: "string" } }, required: ["existingNodeId", "direction", "relation", "label"] } } }, required: ["kind", "parentNodeId", "name", "level", "wiring"] },
-              { type: "object", properties: { kind: { const: "delete_node" }, nodeId: { type: "string" } }, required: ["kind", "nodeId"] },
-              { type: "object", properties: { kind: { const: "connect_nodes" }, sourceNodeId: { type: "string" }, targetNodeId: { type: "string" } }, required: ["kind", "sourceNodeId", "targetNodeId"] },
-            ] } },
-            assumptions: { type: "array", items: { type: "string" } },
-            outOfScope: { type: "array", items: { type: "string" } },
-            acceptance: { type: "array", items: { type: "string" } },
-            questions: { type: "array", items: { type: "object", properties: { id: { type: "string" }, text: { type: "string" }, options: { type: "array", items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" } }, required: ["id", "label"], additionalProperties: false } }, recommendation: { type: "string" } }, required: ["id", "text"], additionalProperties: false } },
-          },
-          required: ["goal", "kind", "touches", "structuralProposals", "assumptions", "outOfScope", "acceptance", "questions"],
-          additionalProperties: false,
-        },
+        intent: INTENT_JSON_SCHEMA,
       },
       required: ["action", "intent"],
       additionalProperties: false,
     },
   ],
 } as const;
+
+const NODE_ID_PROPERTY = { type: "string", description: "A node id exactly as supplied" } as const;
+const DISCOVERY_TOOLS: ModelToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: "inspect_node",
+      description: "Read a node's description, children, relations and the source files you may read next.",
+      parameters: { type: "object", properties: { nodeId: NODE_ID_PROPERTY, reason: { type: "string" } }, required: ["nodeId", "reason"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_children",
+      description: "List a node's children.",
+      parameters: { type: "object", properties: { nodeId: NODE_ID_PROPERTY, reason: { type: "string" } }, required: ["nodeId", "reason"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_source",
+      description: "Read one file that appears in an inspected node's context.",
+      parameters: { type: "object", properties: { nodeId: NODE_ID_PROPERTY, path: { type: "string" }, question: { type: "string" } }, required: ["nodeId", "path", "question"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "consult_node",
+      description: "Ask a node one focused read-only question.",
+      parameters: { type: "object", properties: { nodeId: NODE_ID_PROPERTY, question: { type: "string" } }, required: ["nodeId", "question"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "final",
+      description: "You have enough evidence: return the intent for the person to approve.",
+      // Nested under `intent`, the same shape as the text format shown in outputSchema; a model that
+      // sees both and gets them to disagree wraps it anyway (it did, live, three times running).
+      parameters: { type: "object", properties: { intent: INTENT_JSON_SCHEMA }, required: ["intent"] },
+    },
+  },
+];
 
 export class RequestIntentExtractionService {
   constructor(
@@ -108,6 +159,8 @@ export class RequestIntentExtractionService {
     inspectNode?: (nodeId: string) => Promise<NodeContextBundle>;
     /** When aborted (Stop during intent discovery), gateway settles cancelled. */
     signal?: AbortSignal;
+    /** Called for every model attempt at a discovery step, so a caller can keep a trace of retries. */
+    onModelAttempt?: (attempt: StructuredAttempt) => void;
   }): Promise<RequestIntent> {
     const { request, graph, globalContext, execution } = input;
     const initialInput = {
@@ -141,57 +194,51 @@ export class RequestIntentExtractionService {
         input.signal ? { signal: input.signal } : undefined,
       );
     };
-    // Some providers occasionally answer a JSON-only request with something else (for example their
-    // own tool-call markup). One corrective retry recovers that; a second miss is reported as such.
+    // One discovery step, run the way every structured model step is: the actions are tools, an
+    // answer that does not fit is sent back with the exact field and reason, and a cut-off reply is
+    // asked again with more room, and `onModelAttempt` reports each try. AbortSignal cancels mid-step.
     const parseAction = async (value: unknown) => {
-      let correction: { previousReply: string; problem: string } | undefined;
-      let cutOff = false;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        if (input.signal?.aborted) {
-          throw new ProjectOSError(
-            "operation_cancelled",
-            "Model request cancelled",
-          );
-        }
-        const maxOutputTokens = attempt === 0 ? DISCOVERY_STEP_MAX_OUTPUT_TOKENS : DISCOVERY_STEP_RETRY_MAX_OUTPUT_TOKENS;
-        const response = await complete(correction
-          ? {
-              ...(value as Record<string, unknown>),
-              correction: {
-                problem: correction.problem,
-                previousReplyStartedWith: correction.previousReply,
-                instruction: "Reply again with exactly one JSON object matching the action schema. No tool-call markup, no prose, no code fences.",
-              },
-            }
-          : value, DISCOVERY_SYSTEM_PROMPT, maxOutputTokens);
-        if (isTruncatedModelOutput(response, maxOutputTokens)) {
-          // The reply ran out of room (usually the model's own reasoning used it). Nothing in it is
-          // worth correcting; ask again with a larger budget.
-          cutOff = true;
-          continue;
-        }
-        const jsonOutput = resolveModelStructuredOutput(response.output, response.reasoning)
-          .replace(/^```(?:json)?\s*/iu, "")
-          .replace(/\s*```$/u, "");
-        try {
-          return DiscoveryActionSchema.parse(JSON.parse(jsonOutput));
-        } catch (error) {
-          // Say which part did not fit; "did not match" alone leaves the model nothing to fix.
-          const issue = error instanceof z.ZodError ? error.issues[0] : undefined;
-          correction = {
-            previousReply: jsonOutput.trim().slice(0, 160),
-            problem: error instanceof SyntaxError
-              ? "the reply was not valid JSON"
-              : `the JSON did not match the action schema${issue ? ` (${issue.path.join(".") || "root"}: ${issue.message})`.slice(0, 300) : ""}`,
-          };
-        }
+      if (input.signal?.aborted) {
+        throw new ProjectOSError(
+          "operation_cancelled",
+          "Model request cancelled",
+        );
       }
-      throw new ProjectOSError(
-        "model_output_invalid",
-        cutOff
-          ? "The model's planning step was cut off at its output limit, even after a retry with a larger one"
-          : "The model did not return a usable planning step after a retry",
+      const result = await runStructuredStep(
+        (modelRequest) => this.gateway.complete(
+          execution.profile,
+          modelRequest,
+          input.signal ? { signal: input.signal } : undefined,
+        ),
+        {
+          projectId: request.projectId,
+          requestKind: "request_intent",
+          modelPreference: execution.profile.id,
+          systemPrompt: DISCOVERY_SYSTEM_PROMPT,
+          input: value,
+          thinkingDepth: execution.thinkingDepth,
+          redactionPolicy: "secrets_and_paths",
+        },
+        {
+          step: "intent_discovery",
+          tools: DISCOVERY_TOOLS,
+          maxOutputTokens: DISCOVERY_STEP_MAX_OUTPUT_TOKENS,
+          retryMaxOutputTokens: DISCOVERY_STEP_RETRY_MAX_OUTPUT_TOKENS,
+          ...(input.onModelAttempt ? { onAttempt: input.onModelAttempt } : {}),
+          accept: ({ tool, value: answer }) => {
+            if (tool === undefined) return DiscoveryActionSchema.parse(answer);
+            if (answer === null || typeof answer !== "object" || Array.isArray(answer)) {
+              throw new StructuredIssues([`the arguments of ${tool} must be a JSON object`]);
+            }
+            const args = answer as Record<string, unknown>;
+            return DiscoveryActionSchema.parse(tool === "final"
+              // Either `{intent: {...}}` or the intent's own fields: both mean the same thing.
+              ? { action: "final", intent: "intent" in args ? args.intent : args }
+              : { action: tool, ...args });
+          },
+        },
       );
+      return result.value;
     };
     const inspectNode = input.inspectNode;
     const observations: Array<Record<string, unknown>> = [];

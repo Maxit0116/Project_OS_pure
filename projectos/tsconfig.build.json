@@ -6,6 +6,7 @@
     "test-support",
     "dist",
     "node_modules",
+    "desktop/release",
     "workbench",
     "validation/node-compat.d.ts"
   ]

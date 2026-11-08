@@ -264,6 +264,23 @@ describe('chat failure diagnostics', () => {
     expect(systemMessage?.content).toContain('token=[redacted]')
     expect(systemMessage?.content).not.toContain('super-secret-value')
   })
+
+  it('says the model could not be reached when a step fails because the network is down', () => {
+    const event: AgentRunEvent = {
+      eventId: 'evt_failed_offline',
+      runId: 'run_failed_offline',
+      timestamp: '2026-07-17T00:00:00.000Z',
+      type: 'step_failed',
+      payload: { message: 'Model provider unreachable (dns): api.deepseek.com' },
+    }
+    useWorkbenchStore.setState({ messages: [], locale: 'en' })
+
+    handleRunEvent(event, useWorkbenchStore.setState, useWorkbenchStore.getState)
+
+    const content = useWorkbenchStore.getState().messages[0]?.content ?? ''
+    expect(content).toContain('could not reach the model service (api.deepseek.com)')
+    expect(content).not.toContain('Model provider unreachable (dns)')
+  })
 })
 
 function settingsWithModels(ids: string[]): ProjectOSSettings {

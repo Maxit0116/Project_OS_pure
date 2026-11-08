@@ -58,3 +58,46 @@ describe('DiffReviewPanel verification approval', () => {
     expect(html).toContain('&quot;timeoutMs&quot;:10000')
   })
 })
+
+describe('DiffReviewPanel for a change held over an unmet requirement', () => {
+  // renderToStaticMarkup reads the store's initial locale, so each text is matched in both languages.
+  const diff = {
+    runId: 'run-held',
+    summary: 'Held change',
+    files: [{ path: 'app/page.tsx', changeType: 'modify' as const, before: 'a', after: 'b' }],
+  }
+  const render = (unmetRequirements: Array<{ path: string; problems: string[] }>) =>
+    renderToStaticMarkup(
+      <DiffReviewPanel
+        diff={diff}
+        applyResult={null}
+        verificationResult={null}
+        verificationCommandApproval={null}
+        verificationLoading={false}
+        undoLoading={false}
+        unmetRequirements={unmetRequirements}
+        onApply={vi.fn()}
+        onVerify={vi.fn()}
+        onApproveVerification={vi.fn()}
+        onUndo={vi.fn()}
+      />,
+    )
+
+  it('lists what is unmet and offers Apply anyway instead of Apply', () => {
+    const html = render([{ path: 'app/page.tsx', problems: ['The heading must say Welcome'] }])
+    expect(html).toContain('data-testid="unmet-requirements"')
+    expect(html).toMatch(/The independent review says this change does not meet:|独立评审认为这项改动没有满足：/u)
+    expect(html).toContain('app/page.tsx')
+    expect(html).toContain('The heading must say Welcome')
+    expect(html).toMatch(/Apply anyway|仍然应用/u)
+    // The ordinary Apply label is gone: the only way through is the explicit one.
+    expect(html).not.toMatch(/>Apply<|>应用</u)
+  })
+
+  it('shows the ordinary Apply and no warning when nothing is unmet', () => {
+    const html = render([])
+    expect(html).not.toContain('unmet-requirements')
+    expect(html).not.toMatch(/Apply anyway|仍然应用/u)
+    expect(html).toMatch(/>Apply<|>应用</u)
+  })
+})

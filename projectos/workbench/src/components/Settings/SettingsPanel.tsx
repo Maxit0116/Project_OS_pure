@@ -10,6 +10,7 @@ import {
   Plug,
   Search,
   Settings2,
+  ShieldCheck,
   Sparkles,
   Wrench,
   X,
@@ -31,6 +32,7 @@ import ProjectDescriptionSection from './ProjectDescriptionSection'
 import SettingsNavRow from './SettingsNavRow'
 import SpatialPinSettingsSection from './SpatialPinSettingsSection'
 import TeamGithubSection from './TeamGithubSection'
+import VerificationSettingsSection from './VerificationSettingsSection'
 import ThemeSettingsSection from './ThemeSettingsSection'
 import styles from './SettingsPanel.module.css'
 
@@ -46,6 +48,7 @@ export type SettingsView =
   | 'teamGithub'
   | 'spatialPin'
   | 'harness'
+  | 'verification'
 
 const SETTINGS_VIEWS = new Set<string>([
   'language',
@@ -59,6 +62,7 @@ const SETTINGS_VIEWS = new Set<string>([
   'teamGithub',
   'spatialPin',
   'harness',
+  'verification',
 ])
 
 const DEFAULT_VIEW: SettingsView = 'project'
@@ -94,6 +98,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'models', labelKey: 'settings.tabs.models', icon: Sparkles },
       { id: 'agents', labelKey: 'settings.tabs.agents', icon: Bot },
       { id: 'mcp', labelKey: 'settings.tabs.mcp', icon: Plug },
+      { id: 'verification', labelKey: 'settings.tabs.verification', icon: ShieldCheck },
     ],
   },
   {
@@ -264,6 +269,7 @@ export default function SettingsPanel() {
             {view === 'teamGithub' && <TeamGithubSection />}
             {view === 'spatialPin' && <SpatialPinSettingsSection />}
             {view === 'harness' && <HarnessSettingsSection />}
+            {view === 'verification' && <VerificationSettingsSection />}
           </div>
         </div>
       </div>

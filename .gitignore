@@ -1,6 +1,8 @@
 node_modules/
 out/
 dist/
+# electron-builder output (dmg, zip and the unpacked app), produced by `npm run dist:mac`
+projectos/desktop/release/
 .next/
 *.db
 .env
@@ -23,13 +25,14 @@ api_key.md
 
 # Local research clones
 .tmp-codesee/
+
+# Local provider credentials (never commit)
+deepseek_api.md
 .tmp-skill-repos/
 
 # Local REA/Node tooling (not for commit)
 .tooling/
 
-# Local provider credentials (never commit)
-deepseek_api.md
 _private_r5_evidence/
 
 # Local gate/run raw evidence (keep short redacted summaries only; do not ignore product test fixtures)
@@ -38,4 +41,3 @@ _batch25_stage_usability/**/gates_nohup.out
 _batch25_stage_usability/**/trusted_gates.log
 _batch25_stage_usability/gates_*.out
 _batch25_stage_usability/trusted_gates_*/trusted_gates.log
-

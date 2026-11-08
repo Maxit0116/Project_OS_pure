@@ -250,6 +250,7 @@ import {
   type SaveModelProfileInput,
 } from './modelProfileMutations'
 import { resolveFileOwnerSelection } from './fileOwnerSelection'
+import { unmetRequirementsFromMessage, type UnmetRequirement } from './unmetRequirements'
 import { isNodeAgentArchitectureLevel } from '../components/FunctionMap/architectureView'
 import {
   closeEditorFileInLayout,
@@ -341,8 +342,11 @@ export interface ChatMessage {
   retrievalSummary?: import('@contracts/index').RetrievalSummary
   mcpToolCalls?: import('@contracts/index').AskMcpToolCall[]
   checkpointId?: string
-  /** Mode active when this user turn was sent (nav rail color / history). */
-  chatMode?: ChatMode
+  /**
+   * Mode active when this user turn was sent (nav rail color / history).
+   * Persisted turns can carry the stored session mode, including `team_memory`.
+   */
+  chatMode?: import('@contracts/index').ChatSessionMode
 }
 
 /** No node/file selection ⇒ whole-project (global) agent scope. */
@@ -394,7 +398,9 @@ export function canSubmitAgentPrompt(state: {
   modelSelectionPending?: boolean
 }): boolean {
   if (state.modelSelectionPending) return false
-  if (state.pendingIntent) return false
+  // The approval card is drawn only in Agent mode, so it can only hold up Agent mode: elsewhere the
+  // person would be facing a disabled Send with nothing on screen to say why.
+  if (state.pendingIntent && state.chatMode === 'change') return false
   if (isGlobalAgentScope(state)) {
     // M3.B: Ask/Debug/Anchored + Plan/Agent (global planner → leaf child runs)
     return (
@@ -595,7 +601,7 @@ export interface WorkbenchState {
   delegatedRunTraces: Record<string, DelegatedRunTrace>
   flowTransientTraces: AgentTransientTrace[]
   flowCorrections: FlowCorrection[]
-  flowStatus: 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error' | 'cancelled'
+  flowStatus: 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error' | 'cancelled' | 'interrupted'
   /** Live Graph overlay driven by run events (see Live-Graph Dev Plan Phase 1). */
   executionOverlay: import('@contracts/index').ExecutionOverlay | null
   /** Phase 2: focus a task/phase so only its nodes and execution edges stay emphasized. */
@@ -607,6 +613,8 @@ export interface WorkbenchState {
   diffReviewOnlyReason: string | null
   /** Run ids whose Apply auth was revoked (cancel/interrupt); late valid must not unlock. */
   revokedApplyRunIds: string[]
+  /** Requirements the independent review says a held change does not meet; Apply becomes "apply anyway". */
+  diffUnmetRequirements: UnmetRequirement[]
   generatedDiff: GeneratedDiff | null
   applyResult: ApplyResult | null
   verificationResult: VerificationRunResult | null
@@ -832,6 +840,8 @@ export interface WorkbenchState {
   openFileAgentChat: (filePath: string, preferredNodeId: string) => Promise<void>
   selectFile: (filePath: string, preferredNodeId?: string) => Promise<void>
   chooseFileOwner: (nodeId: string) => void
+  /** Give the selected file, which no node owns, to a node so Agent can change it. */
+  assignFileOwner: (nodeId: string) => Promise<void>
   clearSelection: () => void
   dismissError: () => void
   sendPrompt: (input: string | ComposerDraft) => Promise<void>
@@ -918,7 +928,7 @@ export interface WorkbenchState {
   confirmDebugFix: () => Promise<void>
   markDebugFixed: () => Promise<void>
   loadDiff: (runId?: string) => Promise<void>
-  applyCurrentDiff: () => Promise<void>
+  applyCurrentDiff: (options?: { anyway?: boolean }) => Promise<void>
   runCurrentVerification: () => Promise<void>
   approveAndRunCurrentVerification: () => Promise<void>
   undoCurrentApply: () => Promise<void>
@@ -1140,7 +1150,7 @@ function notifyMemoryWrite(
 
 type FlowStatus = WorkbenchState['flowStatus']
 
-async function reconcileStaleFlowStatus(
+export async function reconcileStaleFlowStatus(
   client: ProjectOSApi,
   activeRunId: string | null,
   flowStatus: FlowStatus,
@@ -1153,6 +1163,9 @@ async function reconcileStaleFlowStatus(
     if (run.status === 'awaiting_review') return 'awaiting_review'
     if (run.status === 'cancelled') return 'cancelled'
     if (run.status === 'error') return 'error'
+    // These used to fall through to "complete", which told a person an interrupted or stopped run had finished.
+    if (run.status === 'interrupted') return 'interrupted'
+    if (run.status === 'cancelled') return 'idle'
     return 'complete'
   } catch {
     return 'idle'
@@ -1599,6 +1612,7 @@ const initialTransientState = {
   diffReady: false,
   diffReviewOnlyReason: null,
   revokedApplyRunIds: [] as string[],
+  diffUnmetRequirements: [],
   generatedDiff: null as GeneratedDiff | null,
   applyResult: null as ApplyResult | null,
   verificationResult: null as VerificationRunResult | null,
@@ -3308,6 +3322,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
       if (fileContent !== null) {
         openLspDocumentIfReady(filePath, fileContent)
+        // The outline was first asked for while the server held the empty placeholder this file is
+        // opened with, so it came back with no symbols; ask again now that it has the real text.
+        useOutlineStore.getState().scheduleFetchOutline(filePath)
       }
     } catch (err) {
       if (!isCurrentRequest()) return
@@ -3327,6 +3344,33 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       pendingFileOwnerChoice: null,
       fileScopeError: null,
     })
+  },
+
+  assignFileOwner: async (nodeId) => {
+    const { client, project, selectedFilePath, fileScopeError, locale, pushToast } = get()
+    if (!project || !selectedFilePath || fileScopeError !== 'not_mapped') return
+    const projectId = project.projectId
+    const filePath = selectedFilePath
+    try {
+      await client.assignFileOwner(projectId, filePath, nodeId)
+      const [graph, tree] = await Promise.all([
+        client.getProjectGraph(projectId),
+        client.getSemanticTree(projectId),
+      ])
+      if (get().project?.projectId !== projectId || get().selectedFilePath !== filePath) return
+      set({ graph, tree })
+      pushToast({
+        type: 'success',
+        message: getStoreMessage(locale, 'context.fileAssigned', {
+          file: filePath,
+          name: graph.nodes.find((node) => node.id === nodeId)?.name ?? nodeId,
+        }),
+      })
+      // Select it the way a click in the tree does, so the context and scope follow the new owner.
+      await get().selectFile(filePath, nodeId)
+    } catch (error) {
+      set({ error: errorMessage(error, 'Failed to assign the file to a feature') })
+    }
   },
 
   clearSelection: () =>
@@ -4044,6 +4088,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         liveGraphPausedRunId: null,
       diffReady: false,
       diffReviewOnlyReason: null,
+      diffUnmetRequirements: [],
       diffReadyBanner: null,
       pendingChangesDrawerDismissedRunId: null,
       diffFileStats: [],
@@ -4145,6 +4190,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         diffReady: false,
         diffReviewOnlyReason: null,
         revokedApplyRunIds: [],
+        diffUnmetRequirements: [],
         generatedDiff: null,
         applyResult: null,
         verificationResult: null,
@@ -5179,6 +5225,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       diffReady: false,
       diffReviewOnlyReason: null,
       revokedApplyRunIds: [],
+      diffUnmetRequirements: [],
       generatedDiff: null,
       applyResult: null,
       verificationResult: null,
@@ -5223,6 +5270,36 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       })
       set({ runDisposable: disposable })
     } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: unknown }).code ?? '')
+        : ''
+      if (code === 'debug_target_unresolved') {
+        // A bug reported with no file selected, and no probes to say where it is: Agent's own
+        // discovery reads the project to find the file, and its intent card keeps the person in
+        // charge of what gets changed.
+        const { locale } = get()
+        set((current) => ({
+          refineLoading: false,
+          error: null,
+          chatMode: 'change',
+          messages: [
+            ...current.messages,
+            {
+              id: msgId(),
+              role: 'system' as const,
+              content: getStoreMessage(locale, 'debug.handoffMessage'),
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        }))
+        await get().sendPrompt(
+          getStoreMessage(locale, 'debug.handoffPrompt', {
+            bug: debugSession.bugDescription,
+            summary: debugSession.proposedFix?.summary ?? debugSession.bugDescription,
+          }),
+        )
+        return
+      }
       set({
         refineLoading: false,
         error: errorMessage(error, 'Failed to confirm debug fix'),
@@ -5403,6 +5480,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         set({
           diffReady: false,
           diffReviewOnlyReason: null,
+          diffUnmetRequirements: [],
           error: getStoreMessage(locale, 'diff.notAvailable', { status: runStatus }),
         })
         maybeNotifyDiffReady(targetRunId, 0)
@@ -5413,7 +5491,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
   },
 
-  applyCurrentDiff: async () => {
+  applyCurrentDiff: async (options) => {
     const {
       client,
       project,
@@ -5463,7 +5541,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       }
     }
     try {
-      const applyResult = await client.applyDiff(activeRunId)
+      // "Apply anyway" is its own server call: the ordinary Apply is refused for a change the review
+      // says does not meet a requirement, so it cannot be reached by accident.
+      const applyResult = options?.anyway
+        ? await client.applyDespiteUnmetRequirements(activeRunId)
+        : await client.applyDiff(activeRunId)
       const [graph, tree, currentWork] = await Promise.all([
         client.getProjectGraph(project.projectId),
         client.getSemanticTree(project.projectId),
@@ -5520,6 +5602,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             : current.messages
         return {
           applyResult,
+          diffUnmetRequirements: [],
           verificationResult: null,
           verificationCommandApproval: null,
           ...(stillOnAppliedRun
@@ -5551,6 +5634,14 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       }
       scheduleChatSessionPersist()
     } catch (err) {
+      // The change was held for unmet requirements and the screen did not know (the run was opened
+      // later): show them now, with the "apply anyway" choice, instead of only an error.
+      const refused = typeof err === 'object' && err !== null && 'code' in err &&
+        (err as { code?: string }).code === 'review_unmet_requirements'
+      if (refused) {
+        const unmet = unmetRequirementsFromMessage(err instanceof Error ? err.message : '')
+        if (unmet.length > 0) set({ diffUnmetRequirements: unmet })
+      }
       // Disk+backup may already be committed when post-apply verification throws.
       // Recover parent applyResult from persisted apply_result so DOM Undo stays linked.
       try {

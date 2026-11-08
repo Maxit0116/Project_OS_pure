@@ -6,6 +6,17 @@ export const CODE_INTELLIGENCE_VERSION = "0.1.0" as const;
 export const CodeIntelligenceLanguageSchema = z.enum([
   "typescript",
   "javascript",
+  // Read by text (code-intelligence/extract-declarations.ts, import-impact.ts), not by a compiler.
+  "python",
+  "go",
+  "rust",
+  "java",
+  "kotlin",
+  "scala",
+  "csharp",
+  "ruby",
+  "php",
+  "swift",
   "unsupported",
 ]);
 

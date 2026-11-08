@@ -444,7 +444,7 @@ describe("LocalContextAssembler", () => {
       "secret_risk",
       `token = 'sk-ant-api03-${"a".repeat(32)}'\n`,
     ],
-    ["oversized content", "src/selected.ts", "selected_file_too_large", "x".repeat(12_001)],
+    ["oversized content", "src/selected.ts", "selected_file_too_large", "x".repeat(48_001)],
   ])("fails closed when the selected file has %s", (_label, path, reason, content) => {
     const fixture = createFixture([linked(path, "primary")]);
     if (content instanceof Uint8Array) writeBytes(fixture.root, path, content);
@@ -452,6 +452,49 @@ describe("LocalContextAssembler", () => {
 
     expect(() => assemble(fixture.workspace, undefined, path)).toThrowError(
       expect.objectContaining({ code: "local_context_unavailable", message: expect.stringContaining(reason) }),
+    );
+  });
+
+  it("accepts a selected file of the size of an ordinary service file, and says how far over the limit a larger one is", () => {
+    // Observed on a real repository: article.service.ts, 12.7 KB (about 3,200 tokens), was refused by the old 3,000 limit.
+    const fixture = createFixture([linked("src/service.ts", "primary")]);
+    writeText(fixture.root, "src/service.ts", "x".repeat(12_728));
+    expect(() => assemble(fixture.workspace, undefined, "src/service.ts")).not.toThrow();
+
+    const tooBig = createFixture([linked("src/big.ts", "primary")]);
+    writeText(tooBig.root, "src/big.ts", "x".repeat(60_000));
+    expect(() => assemble(tooBig.workspace, undefined, "src/big.ts")).toThrowError(
+      expect.objectContaining({
+        code: "local_context_unavailable",
+        message: expect.stringContaining("(about 15000 tokens; the limit is 12000)"),
+      }),
+    );
+  });
+
+  it("keeps a file too large for a prompt exactly when an edit asks for it, up to the windowed limit", () => {
+    // An Agent edit shows such a file to the model as regions (agent-orchestrator/large-file-view.ts);
+    // the bundle still holds it whole, for the snapshot hash and for applying the edit.
+    const fixture = createFixture([linked("src/big.ts", "primary")]);
+    writeText(fixture.root, "src/big.ts", "x".repeat(372_000));
+    const forEdit = () => new LocalContextAssembler().assemble({
+      workspace: fixture.workspace,
+      nodeId: "node_selected",
+      selectedFilePath: "src/big.ts",
+      responseLanguage: "en",
+      assembledAt: ASSEMBLED_AT,
+      windowLargeSelectedFile: true,
+    });
+    const selected = forEdit().fileManifest.find((entry) => entry.relationship === "selected");
+    expect(selected).toMatchObject({ disposition: "exact", byteLength: 372_000 });
+    expect(selected?.content).toHaveLength(372_000);
+    // Without the flag (Ask, Plan, Debug send the bundle as it is) the prompt limit holds.
+    expect(() => assemble(fixture.workspace, undefined, "src/big.ts")).toThrowError(
+      expect.objectContaining({ message: expect.stringContaining("(about 93000 tokens; the limit is 12000)") }),
+    );
+
+    writeText(fixture.root, "src/big.ts", "x".repeat(1_000_400));
+    expect(forEdit).toThrowError(
+      expect.objectContaining({ message: expect.stringContaining("(about 250100 tokens; the limit is 250000)") }),
     );
   });
 

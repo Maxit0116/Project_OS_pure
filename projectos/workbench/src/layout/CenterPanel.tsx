@@ -33,6 +33,7 @@ export default function CenterPanel({ mapBleed }: Props) {
   const generatedDiff = useWorkbenchStore((s) => s.generatedDiff)
   const applyResult = useWorkbenchStore((s) => s.applyResult)
   const diffReviewOnlyReason = useWorkbenchStore((s) => s.diffReviewOnlyReason)
+  const diffUnmetRequirements = useWorkbenchStore((s) => s.diffUnmetRequirements)
   const applyCurrentDiff = useWorkbenchStore((s) => s.applyCurrentDiff)
   const verificationResult = useWorkbenchStore((s) => s.verificationResult)
   const verificationCommandApproval = useWorkbenchStore((s) => s.verificationCommandApproval)
@@ -151,7 +152,8 @@ export default function CenterPanel({ mapBleed }: Props) {
                   verificationLoading={verificationLoading}
                   undoLoading={undoLoading}
                   reviewOnlyReason={diffReviewOnlyReason}
-                  onApply={() => void applyCurrentDiff()}
+                  unmetRequirements={diffUnmetRequirements}
+                  onApply={() => void applyCurrentDiff(diffUnmetRequirements.length > 0 ? { anyway: true } : undefined)}
                   onVerify={() => void runCurrentVerification()}
                   onApproveVerification={() => void approveAndRunCurrentVerification()}
                   onUndo={() => void undoCurrentApply()}

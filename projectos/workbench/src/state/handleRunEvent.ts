@@ -21,11 +21,13 @@ import type { Locale } from '../i18n/types'
 import type { ToastType } from '../components/ui/Toast'
 import { getStoreMessage } from '../i18n/storeMessages'
 import { sanitizeErrorMessage } from '../../../utils/sanitize-error-message'
+import { userFacingProviderText } from '../errors/userFacingError'
 import { truncateDiffReadySummary } from '../notifications/diffReadyNotification'
 import type { CenterTab, ChatMessage, CodeSubTab } from './workbenchStore'
 import { logRunEventToActivity } from './activityLogFromRunEvent'
 import { useChatSessionStore } from './chatSessionStore'
 import { shouldUnlockApplyOnParentBatchValid } from './parentBatchApplyAuthorization'
+import { parseUnmetRequirements, type UnmetRequirement } from './unmetRequirements'
 
 export interface FlowCorrection {
   id: string
@@ -41,6 +43,7 @@ export type FlowStatus =
   | 'awaiting_review'
   | 'error'
   | 'cancelled'
+  | 'interrupted'
 
 export interface RunEventStoreSlice {
   client: ProjectOSApi
@@ -66,6 +69,7 @@ export interface RunEventStoreSlice {
   diffReviewOnlyReason?: string | null
   /** Run ids whose Apply authorization was revoked (cancel / interrupt). */
   revokedApplyRunIds?: string[]
+  diffUnmetRequirements?: UnmetRequirement[]
   messages: ChatMessage[]
   conversationCheckpoints?: ConversationCheckpointDraft[]
   applyResult?: ApplyResult | null
@@ -164,8 +168,9 @@ export function reduceRunEventState(
   }
 
   if (event.type === 'run_interrupted' || event.type === 'run_cancelled') {
-    // Stop/cancel is not an unexpected failure — keep Apply blocked, use cancelled status.
-    patch.flowStatus = event.type === 'run_cancelled' ? 'cancelled' : 'error'
+    // Stop/cancel is not an unexpected failure — keep Apply blocked.
+    // Interrupted (app closed/killed) is distinct from cancelled (user Stop).
+    patch.flowStatus = event.type === 'run_cancelled' ? 'cancelled' : 'interrupted'
     const revoked = new Set(state.revokedApplyRunIds ?? [])
     revoked.add(event.runId)
     patch.revokedApplyRunIds = [...revoked]
@@ -222,7 +227,8 @@ export function reduceRunEventState(
   if (event.type === 'diff_ready') {
     patch.diffReady = true
     patch.flowStatus = 'awaiting_review'
-    const reviewOnly = event.payload as { reviewOnly?: unknown; reviewOnlyReason?: unknown } | undefined
+    const reviewOnly = event.payload as { reviewOnly?: unknown; reviewOnlyReason?: unknown; unmetRequirements?: unknown } | undefined
+    patch.diffUnmetRequirements = parseUnmetRequirements(reviewOnly?.unmetRequirements)
     patch.diffReviewOnlyReason =
       reviewOnly?.reviewOnly === true && typeof reviewOnly.reviewOnlyReason === 'string'
         ? reviewOnly.reviewOnlyReason
@@ -431,7 +437,9 @@ export function handleRunEvent(
       event.step?.outputSummary ??
       (typeof payload.message === 'string' ? payload.message : undefined) ??
       getStoreMessage(get().locale, 'agentFlow.stepFailed')
-    const sanitizedMessage = sanitizeErrorMessage(message)
+    // A lost connection or a slow model gets its plain sentence here too, not the provider's raw text.
+    const sanitizedMessage =
+      userFacingProviderText(sanitizeErrorMessage(message), get().locale) ?? sanitizeErrorMessage(message)
     const systemMessageId = `failure_${event.eventId}`
     set((state) => ({
       messages: state.messages.some((item) => item.id === systemMessageId)

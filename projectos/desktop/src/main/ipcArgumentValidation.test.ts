@@ -42,6 +42,20 @@ describe('privileged IPC argument validation', () => {
     )
   })
 
+  it('accepts the notification for an answer to a question, which belongs to no run', () => {
+    // Observed on the built app: every Ask answer finished while the window was in the background raised
+    // "Notification payload is invalid", because the answer carries no run id and one was required.
+    expect(parseDiffReadyNotificationPayload({
+      title: 'Answer ready',
+      body: 'How favoriting works',
+      destination: 'ask',
+      runIds: [],
+    })).toEqual({ title: 'Answer ready', body: 'How favoriting works', destination: 'ask', runIds: [] })
+    // A change and a decision still have to name the run they are about.
+    expect(() => parseDiffReadyNotificationPayload({ title: 'Decision', body: 'Choose', destination: 'decisions', runIds: [], decisionId: 'd1' }))
+      .toThrow('Notification payload is invalid')
+  })
+
   it('bounds notifications and window titles before invoking OS APIs', () => {
     expect(parseDiffReadyNotificationPayload({
       title: 'Diff ready',
@@ -73,9 +87,8 @@ describe('privileged IPC argument validation', () => {
     expect(() => parseDiffReadyNotificationPayload({
       title: 'Diff ready', body: 'Review', destination: 'diff', runIds: ['run_one', 'run_one'],
     })).toThrow('Notification payload is invalid')
-    // Regression: empty runIds (historical ask merge) must stay rejected.
     expect(() => parseDiffReadyNotificationPayload({
-      title: 'Done', body: 'Ask finished', destination: 'ask', runIds: [],
+      title: 'Diff ready', body: 'Review', runIds: [],
     })).toThrow('Notification payload is invalid')
     // Synthesized ask runId from mergeDiffReadyCompletions must be accepted.
     expect(parseDiffReadyNotificationPayload({

@@ -4,6 +4,7 @@ import type { ContextPayload, ProjectOSApi } from '@contracts/index'
 import { createMockSampleWorkspace } from '../../../client/mock-project-os-api-client.js'
 import { initialEditorLayout } from '../components/CodeEditor/editorPaneHelpers'
 import { useWorkbenchStore } from './workbenchStore'
+import { useOutlineStore } from './outlineStore'
 
 const FILE_PATH = 'app/login/page.tsx'
 
@@ -64,6 +65,37 @@ describe('workbenchStore.selectFile', () => {
     expect(useWorkbenchStore.getState().editorBuffers[FILE_PATH]).toBe('cached buffer')
     expect(useWorkbenchStore.getState().selectedFilePath).toBe(FILE_PATH)
     expect(useWorkbenchStore.getState().contextLoading).toBe(false)
+  })
+
+  it('asks for the outline again once the file text has reached the language server', async () => {
+    const workspace = createMockSampleWorkspace()
+    const scheduleFetchOutline = vi.fn()
+    const originalSchedule = useOutlineStore.getState().scheduleFetchOutline
+    useOutlineStore.setState({ scheduleFetchOutline })
+    // Only the real client fetches file text from disk, which is where the empty placeholder comes from.
+    vi.stubEnv('VITE_PROJECTOS_CLIENT', 'real')
+    try {
+      useWorkbenchStore.setState({
+        client: {
+          getFileContext: vi.fn(async () => fileContext(workspace)),
+          getFileContent: vi.fn(async () => 'export const a = 1'),
+        } as unknown as ProjectOSApi,
+        project: workspace.project,
+        graph: workspace.graph,
+        tree: workspace.semanticTree,
+        editorBuffers: {},
+        editorSavedBuffers: {},
+        context: null,
+      })
+
+      await useWorkbenchStore.getState().selectFile(FILE_PATH)
+
+      expect(useWorkbenchStore.getState().editorBuffers[FILE_PATH]).toBe('export const a = 1')
+      expect(scheduleFetchOutline).toHaveBeenCalledWith(FILE_PATH)
+    } finally {
+      vi.unstubAllEnvs()
+      useOutlineStore.setState({ scheduleFetchOutline: originalSchedule })
+    }
   })
 
   it('does not overwrite a dirty buffer when re-selecting the same file', async () => {

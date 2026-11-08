@@ -272,6 +272,10 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("listWorkspaceDirectory", projectId, relativePath);
   }
 
+  assignFileOwner(projectId: string, filePath: string, nodeId: string): Promise<ProjectGraph> {
+    return this.invoke("assignFileOwner", projectId, filePath, nodeId);
+  }
+
   getWorkspaceGitStatus(
     projectId: string,
   ): Promise<import("../../contracts/workspace-git.js").WorkspaceGitStatus> {
@@ -1005,6 +1009,10 @@ export class IpcTransport implements ApiTransport {
 
   getDiff(runId: string): Promise<GeneratedDiff> {
     return this.invoke("getDiff", runId);
+  }
+
+  applyDespiteUnmetRequirements(runId: string): Promise<ApplyResult> {
+    return this.invoke("applyDespiteUnmetRequirements", runId);
   }
 
   applyDiff(runId: string): Promise<ApplyResult> {

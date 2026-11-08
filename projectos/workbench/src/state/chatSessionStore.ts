@@ -28,7 +28,7 @@ import {
   buildWelcomeMessages,
   hydrateChatSessionState,
 } from './chatSessionSync'
-import { useWorkbenchStore, type ChatMode } from './workbenchStore'
+import { reconcileStaleFlowStatus, useWorkbenchStore, type ChatMode } from './workbenchStore'
 
 const PERSIST_DEBOUNCE_MS = 500
 const TITLE_SUMMARIZE_DEBOUNCE_MS = 1500
@@ -230,8 +230,10 @@ interface ChatSessionStore {
 async function restoreRunFlow(activeRunId: string): Promise<void> {
   const { client } = useWorkbenchStore.getState()
   if (!client) return
+  let rootRunId = activeRunId
   try {
-    await client.getAgentRun(activeRunId)
+    const run = await client.getAgentRun(activeRunId)
+    rootRunId = run.rootRunId ?? run.runId
   } catch (error) {
     const code = typeof error === 'object' && error !== null && 'code' in error
       ? (error as { code?: string }).code
@@ -249,14 +251,26 @@ async function restoreRunFlow(activeRunId: string): Promise<void> {
     return
   }
 
+  // The run's questions live on the server; the screen was just cleared of the previous conversation's.
+  void useWorkbenchStore.getState().loadRunDecisions(rootRunId)
   try {
     const events = await client.getAgentRunEvents(activeRunId)
-    if (events.length === 0) return
-    useWorkbenchStore.setState((state) => ({
-      ...state,
-      ...applyRunEventsToState(state, events),
-      activeRunId,
-    }))
+    if (events.length > 0) {
+      useWorkbenchStore.setState((state) => ({
+        ...state,
+        ...applyRunEventsToState(state, events),
+        activeRunId,
+      }))
+    }
+    // Replaying the events leaves a run "running" from its start event on, and the saved status can be
+    // stale too. The run on disk says where it actually ended: a finished run must not reopen with a Stop button.
+    const current = useWorkbenchStore.getState()
+    if (current.activeRunId === activeRunId) {
+      const reconciled = await reconcileStaleFlowStatus(client, activeRunId, current.flowStatus)
+      if (reconciled !== current.flowStatus && useWorkbenchStore.getState().activeRunId === activeRunId) {
+        useWorkbenchStore.setState({ flowStatus: reconciled })
+      }
+    }
   } catch (error) {
     const code = typeof error === 'object' && error !== null && 'code' in error
       ? (error as { code?: string }).code
@@ -310,10 +324,19 @@ function applySessionToWorkbench(record: ChatSessionRecord): void {
     liveGraphPausedRunId: null,
     diffReady: false,
     diffReviewOnlyReason: null,
+    diffUnmetRequirements: [],
     generatedDiff: null,
     applyResult: null,
     verificationResult: null,
     refineLoading: false,
+    // The conversation's own intent card, if it was waiting for approval. The one of the conversation
+    // that was left must not come along: it would keep Send disabled here (the card shows only in
+    // Agent mode). Question cards belong to a run and are reloaded from it below.
+    pendingIntent: hydrated.pendingIntent,
+    runDecisions: [],
+    decisionRootRunId: null,
+    focusedDecisionId: null,
+    decisionResolvingIds: [],
   })
   // Restore run evidence into the store, but do not open the Agent Flow overlay.
   // Project open / session hydrate must land on Function Map (C4); overlays open

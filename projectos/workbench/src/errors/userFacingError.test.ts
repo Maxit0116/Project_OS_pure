@@ -62,4 +62,75 @@ describe('userFacingProviderText', () => {
   it('leaves text that is not a provider failure alone', () => {
     expect(userFacingProviderText('Disk is full', 'en')).toBeUndefined()
   })
+
+  it('tells a person which step to take when a debug fix has no target file', () => {
+    const error = Object.assign(new Error('No target file could be resolved for the debug fix'), { code: 'debug_target_unresolved' })
+    expect(userFacingErrorMessage(error, 'zh')).toMatch(/选中出问题的文件/u)
+    expect(userFacingErrorMessage(error, 'en')).toMatch(/Select the file/u)
+    expect(userFacingErrorMessage(error, 'en')).not.toMatch(/No target file could be resolved/u)
+  })
+
+  it('tells a person the model could not be reached instead of a bare fetch failure', () => {
+    // Observed live: offline, every call failed with `fetch failed` and nothing said why.
+    const dns = Object.assign(new Error('Model provider unreachable (dns): api.deepseek.com'), { code: 'model_unreachable' })
+    expect(userFacingErrorMessage(dns, 'en')).toMatch(/could not reach the model service \(api\.deepseek\.com\)/u)
+    expect(userFacingErrorMessage(dns, 'zh')).toMatch(/无法连接到模型服务（api\.deepseek\.com）/u)
+    const refused = new Error('Model provider unreachable (refused): 127.0.0.1:11434')
+    expect(userFacingErrorMessage(refused, 'en')).toMatch(/refused the connection.*local model/u)
+    expect(userFacingErrorMessage(refused, 'en')).not.toMatch(/unreachable \(refused\)/u)
+  })
+
+  it('says how long the model was given before it timed out', () => {
+    const timeout = Object.assign(new Error('Model request timed out after 120s'), { code: 'model_timeout' })
+    expect(userFacingErrorMessage(timeout, 'en')).toMatch(/did not answer within 120 seconds/u)
+    expect(userFacingErrorMessage(timeout, 'zh')).toMatch(/120 秒内没有响应/u)
+  })
+
+  it('says a file no feature owns cannot be changed yet and how to fix that', () => {
+    const error = Object.assign(new Error("File 'lib/validators.ts' is not owned or linked by any functional node"), { code: 'file_owner_not_found' })
+    expect(userFacingErrorMessage(error, 'en')).toMatch(/lib\/validators\.ts is not part of any feature.*add it to a feature/u)
+    expect(userFacingErrorMessage(error, 'zh')).toMatch(/lib\/validators\.ts 不属于任何功能.*加入某个功能/u)
+    expect(userFacingErrorMessage(error, 'en')).not.toMatch(/functional node/u)
+  })
+
+  it('says a change the review rejected was not applied, which requirement failed, and what to do', () => {
+    // Observed live: a requirement that could not be met as written ended the run with "rejected the
+    // whole-tree proposal batch" and nothing about what to change.
+    const text = 'Independent agent validation rejected the whole-tree proposal batch: app/profile/page.tsx: The count is not restricted inside the nested select.'
+    expect(userFacingErrorMessage(new Error(text), 'en')).toMatch(/not applied.*could not confirm a requirement \(app\/profile\/page\.tsx: The count is not restricted.*Nothing was written.*Reword the request/u)
+    expect(userFacingErrorMessage(new Error(text), 'zh')).toMatch(/改动未应用.*app\/profile\/page\.tsx.*没有写入任何文件/u)
+    const bare = 'Independent agent validation rejected the whole-tree proposal batch'
+    expect(userFacingErrorMessage(new Error(bare), 'en')).toMatch(/Nothing was written/u)
+  })
+
+  it('says a change that went stale cannot be applied and what to do, not the internal diff text', () => {
+    // Observed live: applying a debug fix after the probes were cleaned up showed this raw English line.
+    const error = Object.assign(new Error("Generated diff is stale for 'lib/team.ts'"), { code: 'diff_stale' })
+    expect(userFacingErrorMessage(error, 'zh')).toMatch(/无法再应用/u)
+    expect(userFacingErrorMessage(error, 'en')).toMatch(/can no longer be applied/u)
+    expect(userFacingErrorMessage(error, 'en')).not.toMatch(/Generated diff is stale/u)
+  })
+  it('says a held change was not applied because a requirement is unmet, and what the choices are', () => {
+    const error = Object.assign(
+      new Error('The independent review says this change does not meet: app/page.tsx: The heading must say Welcome'),
+      { code: 'review_unmet_requirements' },
+    )
+    expect(userFacingErrorMessage(error, 'en')).toMatch(/not applied.*does not meet a requirement \(app\/page\.tsx: The heading must say Welcome\).*Apply anyway.*reword/u)
+    expect(userFacingErrorMessage(error, 'zh')).toMatch(/改动未应用.*app\/page\.tsx.*仍然应用/u)
+    const bare = Object.assign(new Error('refused'), { code: 'review_unmet_requirements' })
+    expect(userFacingErrorMessage(bare, 'en')).toMatch(/does not meet a requirement\. Read the change/u)
+  })
+
+  it('says a file too large to change is too large, with its size and the limit, when a subtree failed for that', () => {
+    // Observed on a real repository: the main service file (12.7 KB) ended a run with only "One or more delegated subtrees failed".
+    const text = "One or more delegated subtrees failed; no files were applied: Selected file 'src/app/routes/article/article.service.ts' cannot be used for local context: selected_file_too_large (about 3182 tokens; the limit is 12000)"
+    expect(userFacingProviderText(text, 'en')).toMatch(/Agent cannot change src\/app\/routes\/article\/article\.service\.ts.*about 3182 tokens; the limit is 12000.*Nothing was written/u)
+    expect(userFacingProviderText(text, 'zh')).toMatch(/Agent 无法修改 src\/app\/routes\/article\/article\.service\.ts.*3182.*12000/u)
+  })
+
+  it('keeps the reason a failed subtree gave, and still says something when it gave none', () => {
+    expect(userFacingProviderText('One or more delegated subtrees failed; no files were applied: Model edit planning failed (malformed JSON)', 'en'))
+      .toBe('Part of the change could not be prepared, so nothing was written: Model edit planning failed (malformed JSON)')
+    expect(userFacingProviderText('One or more delegated subtrees failed; no files were applied', 'en')).toBeUndefined()
+  })
 })

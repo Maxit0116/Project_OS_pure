@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { DocumentSymbolItem } from '@contracts/index'
 import { isDesktopApp } from '../data/clientMode'
 import { lspClient } from '../lsp/lspClient'
+import { fallbackOutline, isServedByLanguageServer } from '../lsp/fallbackOutline'
 
 const DEMO_OUTLINE: Record<string, DocumentSymbolItem[]> = {
   'app/login/page.tsx': [
@@ -48,6 +49,22 @@ async function documentSymbolWithRetry(filePath: string): Promise<DocumentSymbol
   }
 }
 
+/** What the editor currently holds for a file; read lazily because the workbench store imports this one. */
+async function editorText(filePath: string): Promise<string> {
+  try {
+    const { useWorkbenchStore } = await import('./workbenchStore')
+    return useWorkbenchStore.getState().editorBuffers[filePath] ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** Symbols read from the text, for a language the language server does not serve. */
+async function symbolsWithoutServer(filePath: string): Promise<DocumentSymbolItem[]> {
+  if (isServedByLanguageServer(filePath)) return []
+  return fallbackOutline(filePath, await editorText(filePath))
+}
+
 async function loadOutlineSymbols(
   filePath: string,
   showLoading: boolean,
@@ -58,7 +75,7 @@ async function loadOutlineSymbols(
   ) => void,
 ): Promise<void> {
   if (!isDesktopApp() || !lspClient.isAvailable()) {
-    const demo = DEMO_OUTLINE[filePath] ?? []
+    const demo = DEMO_OUTLINE[filePath] ?? (isDesktopApp() ? await symbolsWithoutServer(filePath) : [])
     set((state) => ({
       symbolsByFile: { ...state.symbolsByFile, [filePath]: demo },
       loadingFiles: { ...state.loadingFiles, [filePath]: false },
@@ -75,17 +92,21 @@ async function loadOutlineSymbols(
   }
 
   try {
-    const symbols = await documentSymbolWithRetry(filePath)
+    let symbols = await documentSymbolWithRetry(filePath)
+    // The bundled server speaks TypeScript and JavaScript. For any other language it answers with
+    // nothing, and the panel said "no symbols" for every Python, Java, Go or Rust file.
+    if (symbols.length === 0) symbols = await symbolsWithoutServer(filePath)
     set((state) => ({
       symbolsByFile: { ...state.symbolsByFile, [filePath]: symbols },
       loadingFiles: { ...state.loadingFiles, [filePath]: false },
     }))
   } catch (error) {
     console.warn('[outlineStore] failed to fetch outline', error)
+    const fromText = await symbolsWithoutServer(filePath)
     set((state) => ({
-      symbolsByFile: { ...state.symbolsByFile, [filePath]: [] },
+      symbolsByFile: { ...state.symbolsByFile, [filePath]: fromText },
       loadingFiles: { ...state.loadingFiles, [filePath]: false },
-      unavailableReason: error instanceof Error ? error.message : 'Outline unavailable',
+      unavailableReason: fromText.length > 0 ? null : error instanceof Error ? error.message : 'Outline unavailable',
     }))
   }
 }

@@ -973,10 +973,16 @@ export function buildSpatialPinUserContent(
   options?: BuildSpatialPinUserContentOptions,
 ): string {
   const locationLine = formatSpatialPinLocationLine(pin);
+  const { prompt, stencilBrief, generationScope } = pin.composer;
+  const composer = {
+    prompt,
+    ...(stencilBrief !== undefined ? { stencilBrief } : {}),
+    ...(generationScope !== undefined ? { generationScope } : {}),
+  };
   const hubLines = pin.composer.hub
     ? formatPinComposerHubLines(pin.composer.hub)
     : [];
-  const base = buildSpatialPinUserContentWithStencils(pin.composer, {
+  const base = buildSpatialPinUserContentWithStencils(composer, {
     locationLine,
     ...(options?.placements ? { placements: options.placements } : {}),
     ...(options?.outOfScope ? { outOfScope: options.outOfScope } : {}),

@@ -451,6 +451,7 @@ import {
   UpdateMapWorkGroupPatchSchema,
 } from "../contracts/map-work-group.js";
 import { ProjectOSError } from "../errors.js";
+import { assignFileToNode } from "./file-owner-assignment.js";
 import { buildVerificationEvidence } from "./verification-evidence.js";
 import { suggestedTestsFromIndex } from "./code-intelligence/index.js";
 import { reconcileInterruptedAgentRuns } from "./harness/interrupted-runs.js";
@@ -472,6 +473,7 @@ import {
   AgentOrchestrator,
   type AgentRunEventPersistence,
   type OrchestratorRunState,
+  unmetRequirementsPayload,
 } from "./agent-orchestrator/index.js";
 import {
   pickRefinementBackend,
@@ -675,6 +677,7 @@ export interface LocalContextAssemblerDependency {
     selectedFilePath: string;
     responseLanguage: string;
     assembledAt: string;
+    windowLargeSelectedFile?: boolean | undefined;
   }): LocalContextBundle;
   assembleNode(input: {
     workspace: LoadedProjectOSWorkspace;
@@ -905,6 +908,33 @@ interface DependencyImpactScanResult {
   scannedFiles: string[];
 }
 
+
+/**
+ * Whether a leaf's independent-review evidence lets its change be committed with the rest. Every
+ * criterion must be satisfied; "uncertain" is accepted only when the batch was held for review and
+ * the person applied it anyway. "Unsatisfied" is never accepted.
+ */
+export function wholeTreeLeafEvidenceAccepted(
+  task: { status: "consistent" | "inconsistent" | "uncertain"; criteria: Array<{ criterion: string; status: "satisfied" | "unsatisfied" | "uncertain" }> },
+  expectedCriteria: readonly string[],
+  reviewAcknowledged: boolean,
+  /**
+   * The person chose "apply anyway" for a change the server held because the reviewer found some
+   * requirement unmet. Only then is "unsatisfied" taken, and the criteria must still be exactly the
+   * ones that were delegated, so a reply that dropped or reworded one is still refused.
+   */
+  unmetAccepted = false,
+): boolean {
+  const acknowledged = reviewAcknowledged || unmetAccepted;
+  const criterionOk = (status: string) =>
+    status === "satisfied" || (acknowledged && status === "uncertain") || (unmetAccepted && status === "unsatisfied");
+  const statusOk = task.status === "consistent" ||
+    (acknowledged && task.status === "uncertain") ||
+    (unmetAccepted && task.status === "inconsistent" && task.criteria.some((criterion) => criterion.status === "unsatisfied"));
+  return statusOk &&
+    task.criteria.length === expectedCriteria.length &&
+    task.criteria.every((criterion, index) => criterion.criterion === expectedCriteria[index] && criterionOk(criterion.status));
+}
 
 export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly sampleWorkspaceRoot: string | undefined;
@@ -1137,6 +1167,18 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       gateway: this.modelGateway,
       settingsService: this.settingsService,
       executors: this.executors,
+      decisions: {
+        open: (decision) => { this.recordRunDecision(decision); },
+        supersede: (decisionId) => {
+          // Best effort: a question that cannot be retired must not hide why the run ended.
+          try {
+            for (const workspace of this.workspacesByProjectId.values()) {
+              const store = this.durableRunStateFor(workspace);
+              if (store.loadDecision(decisionId)) { store.supersedeDecision(decisionId); return; }
+            }
+          } catch { /* the run's own outcome is what the person needs to see */ }
+        },
+      },
       validateGeneratedDiffScope: (runId, diff) =>
         this.validateGeneratedDiffScope(runId, diff),
       automaticLeafExecution: {
@@ -1670,6 +1712,22 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
   }
 
+
+  /**
+   * Give a file no node owns to one node, so Agent can change it. Written to the graph on disk with
+   * the semantic tree rebuilt from it; the previous graph is restored if anything after the write
+   * fails (the same safeguard regenerating the map uses).
+   */
+  async assignFileOwner(projectId: string, filePath: string, nodeId: string): Promise<ProjectGraph> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    if (!workspaceFileIsReadable(workspace.workspaceRoot, filePath)) {
+      throw new ProjectOSError("file_not_found", `'${filePath}' is not a file in this project`);
+    }
+    const next = assignFileToNode(workspace.graph, filePath, nodeId);
+    const reloaded = await this.persistScannedStructureGraph(workspace, next);
+    this.workspacesByProjectId.set(projectId, reloaded);
+    return cloneJson(reloaded.graph);
+  }
 
   async getProjectGraph(projectId: string): Promise<ProjectGraph> {
     return this.requireLoadedWorkspace(projectId).graph;
@@ -2730,6 +2788,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     );
     let resolvedScope: AgentConversationScope;
     let localContext: AgentContextBundle;
+    let largeFileNote: string | undefined;
     if (parsedRequest.scope.kind === "global") {
       resolvedScope = parsedRequest.scope;
       localContext = await this.createGlobalPlanningContext(
@@ -2754,7 +2813,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         nodeId: ownerScope.nodeId,
         selectedFilePath: ownerScope.selectedFilePath,
       };
-      localContext = this.assembleScopedLocalContext(
+      const fileContext = this.assembleReadOnlyFileContext(
         workspace,
         {
           kind: "file",
@@ -2763,6 +2822,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         },
         responseLanguage.tag,
       );
+      localContext = fileContext.localContext;
+      largeFileNote = fileContext.largeFileNote;
     }
     if (askAbort.signal.aborted) {
       throw new ProjectOSError(
@@ -2786,7 +2847,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ? exploreForAskQuestion(workspace, parsedRequest.question, {
             allowedReadPaths: localContext.allowedReadPaths,
             maxRounds: explorationMaxRounds,
-            maxReads: Math.max(3, explorationMaxRounds + 1),
+            maxReads: Math.max(5, explorationMaxRounds + 3),
           })
         : null;
     const retrieval = retrieveForUtterance(
@@ -2796,6 +2857,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       this.retrievalOptions(workspace),
     );
     const supplementalMarkdown = [
+      largeFileNote ?? "",
       augmented.supplementalMarkdown,
       sessionContext,
       exploration?.supplementalMarkdown ?? "",
@@ -3647,7 +3709,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const planExploration = exploreForAskQuestion(workspace, parsedRequest.objective, {
       allowedReadPaths: localContext.allowedReadPaths,
       maxRounds: 2,
-      maxReads: 3,
+      maxReads: 5,
     });
     const planRetrieval = retrieveForUtterance(
       workspace,
@@ -4010,7 +4072,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             {
               allowedReadPaths: localContext.allowedReadPaths,
               maxRounds: 2,
-              maxReads: 3,
+              maxReads: 4,
             },
           );
           const hypotheses = await this.debugHypothesisService.generateHypotheses({
@@ -4175,7 +4237,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const filePath = resolveDebugFixFilePath(stored.session, workspace);
       if (!filePath) {
         throw new ProjectOSError(
-          "debug_session_not_found",
+          "debug_target_unresolved",
           "No target file could be resolved for the debug fix",
         );
       }
@@ -5706,6 +5768,32 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   }
 
   async applyDiff(runId: string): Promise<ApplyResult> {
+    return this.applyDiffForRun(runId, { acceptUnmet: false });
+  }
+
+  /**
+   * The person's explicit "apply anyway": the change was held because the independent review said
+   * some requirement is not met. A separate method, not a flag on `applyDiff`, so the ordinary Apply
+   * can never cross this gate; it is recorded in the audit trail.
+   */
+  async applyDespiteUnmetRequirements(runId: string): Promise<ApplyResult> {
+    if (this.orchestrator.getUnmetRequirements(runId).length === 0) {
+      throw new ProjectOSError(
+        "proposal_validation_failed",
+        "This change was not held for unmet requirements, so there is nothing to apply anyway",
+      );
+    }
+    if (this.auditDirectory) {
+      recordAuditApproval(this.auditDirectory, {
+        runId,
+        tool: "apply_unmet_requirements",
+        decision: "allow",
+      });
+    }
+    return this.applyDiffForRun(runId, { acceptUnmet: true });
+  }
+
+  private async applyDiffForRun(runId: string, options: { acceptUnmet: boolean }): Promise<ApplyResult> {
     const alreadyApplied = this.orchestrator.idempotentApplyResult(runId);
     if (alreadyApplied) return alreadyApplied;
     if (!this.orchestrator.getRun(runId)) {
@@ -5753,7 +5841,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         throw error;
       }
       if (result.applied && result.outcome === "applied") {
-        const verification = await this.executeConfiguredVerification(runId, workspace);
+        const verification = await this.verifyAfterApply(runId, workspace);
         if (verification.results.length === 0) {
           this.orchestrator.recordVerificationResult(
             workspace,
@@ -5803,7 +5891,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         throw error;
       }
       if (result.applied && result.outcome === "applied") {
-        const verification = await this.executeConfiguredVerification(runId, workspace);
+        const verification = await this.verifyAfterApply(runId, workspace);
         for (const commandResult of verification.results) {
           this.orchestrator.recordVerificationResult(
             workspace,
@@ -5846,7 +5934,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           "Whole-tree change has not completed independent batch validation",
         );
       }
-      this.orchestrator.requireValidatedWholeTree(runId);
+      const unmet = this.orchestrator.getUnmetRequirements(runId);
+      if (unmet.length > 0 && !options.acceptUnmet) {
+        // Say what is unmet and what to do, so the person is not left with a raw validation error.
+        throw new ProjectOSError(
+          "review_unmet_requirements",
+          `The independent review says this change does not meet: ${unmet[0]!.path}: ${unmet[0]!.problems[0] ?? "a requirement"}`.slice(0, 600),
+          { details: { unmetRequirements: unmetRequirementsPayload(unmet) } },
+        );
+      }
+      this.orchestrator.requireValidatedWholeTree(runId, { acceptUnmet: options.acceptUnmet });
       const workspace = this.requireLoadedWorkspace(orchestratorRun.run.projectId);
       let result: ApplyResult;
       try {
@@ -5855,6 +5952,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           orchestratorRun.run,
           plan,
           validation,
+          options.acceptUnmet,
         );
       } catch (error) {
         this.orchestrator.recordWholeTreeApply(workspace, runId, {
@@ -6003,6 +6101,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async runVerification(runId: string): Promise<VerificationRunResult> {
     const run = await this.getAgentRun(runId);
     const workspace = this.requireLoadedWorkspace(run.projectId);
+    // Not verifyAfterApply: when a person presses "run verification", an unapproved command must
+    // come back as the approval error, because that is what opens the approval card.
     const verification = await this.executeConfiguredVerification(runId, workspace);
     if (verification.results.length === 0) {
       this.orchestrator.recordVerificationResult(
@@ -6054,6 +6154,31 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
     }
     return approved;
+  }
+
+  /**
+   * Verification that follows an apply. The files are already written, so a verification that could
+   * not run (it needs the person's approval, there is no runner, or policy denied it) must not turn
+   * the apply into an error: the run would never be finalized, the UI would show a failure and keep
+   * offering to apply what is already on disk. It is "not run", and the evidence already says why.
+   */
+  private async verifyAfterApply(
+    runId: string,
+    workspace: LoadedProjectOSWorkspace,
+  ): Promise<VerificationRunResult> {
+    try {
+      return await this.executeConfiguredVerification(runId, workspace);
+    } catch (error) {
+      if (
+        error instanceof ProjectOSError &&
+        (error.code === "verification_approval_required" ||
+          error.code === "verification_unavailable" ||
+          error.code === "tool_policy_denied")
+      ) {
+        return { runId, status: "not_run", results: [] };
+      }
+      throw error;
+    }
   }
 
   private async executeConfiguredVerification(
@@ -8187,6 +8312,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       workspace,
       { kind: "file", nodeId, selectedFilePath: filePath },
       responseLanguage.tag,
+      true,
     );
     const selectedFile = bundle.fileManifest.find(
       (file) => file.relationship === "selected",
@@ -11151,11 +11277,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
     return {
       resolvedScope,
-      localContext: this.assembleScopedLocalContext(
+      localContext: this.assembleReadOnlyFileContext(
         workspace,
         resolvedScope,
         responseLanguage.tag,
-      ),
+      ).localContext,
     };
   }
 
@@ -11206,10 +11332,46 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return stored;
   }
 
+  /**
+   * The context for a read-only conversation (Ask, Plan, Debug) about one file. A file too large to
+   * send whole used to fail the question ("Agent cannot modify ... split it"), though nothing was to
+   * be written. It now falls back to the feature's own context, and the question is answered from
+   * excerpts that exploration and retrieval find in the file, with a note saying so. Agent edits keep
+   * the strict rule: they need the whole file.
+   */
+  private assembleReadOnlyFileContext(
+    workspace: LoadedProjectOSWorkspace,
+    scope: Extract<AgentConversationScope, { kind: "file" }>,
+    responseLanguage: string,
+  ): { localContext: AgentContextBundle; largeFileNote?: string } {
+    try {
+      return { localContext: this.assembleScopedLocalContext(workspace, scope, responseLanguage) };
+    } catch (error) {
+      const tooLarge = error instanceof ProjectOSError &&
+        error.code === "local_context_unavailable" &&
+        error.message.includes("selected_file_too_large");
+      if (!tooLarge) throw error;
+      const tokens = /about (\d+) tokens/u.exec(error.message)?.[1];
+      return {
+        localContext: this.assembleNodeLocalContext(workspace, scope.nodeId, responseLanguage),
+        largeFileNote:
+          `The selected file \`${scope.selectedFilePath}\` is large${tokens ? ` (about ${tokens} tokens)` : ""} ` +
+          "and was not sent whole. Search results and excerpts around the matches follow; " +
+          "say so when the answer depends on a part of the file that was not shown.",
+      };
+    }
+  }
+
+  /**
+   * `forEdit` lets the selected file be larger than a prompt holds: the orchestrator shows such a file
+   * to the model as an outline and regions. Read-only conversations send the bundle as it is and keep
+   * the smaller limit (and assembleReadOnlyFileContext's fallback).
+   */
   private assembleScopedLocalContext(
     workspace: LoadedProjectOSWorkspace,
     scope: Extract<AgentConversationScope, { kind: "file" }>,
     responseLanguage: string,
+    forEdit = false,
   ): LocalContextBundle {
     if (!this.localContextAssembler) {
       throw new ProjectOSError(
@@ -11224,6 +11386,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         selectedFilePath: scope.selectedFilePath,
         responseLanguage,
         assembledAt: new Date().toISOString(),
+        windowLargeSelectedFile: forEdit,
       }),
     );
     if (
@@ -11377,6 +11540,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       workspace,
       { kind: "file", nodeId, selectedFilePath },
       stored.responseLanguage,
+      true,
     );
     const selectedFile = bundle.fileManifest.find(
       (file) => file.relationship === "selected",
@@ -13926,9 +14090,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     rootRun: AgentRun,
     plan: WholeTreeTransactionPlan,
     validation: BatchValidationResult,
+    acceptUnmet = false,
   ): Promise<ApplyResult> {
     const rootState = this.orchestrator.getRun(rootRun.runId);
-    this.orchestrator.requireValidatedWholeTree(rootRun.runId);
+    this.orchestrator.requireValidatedWholeTree(rootRun.runId, { acceptUnmet });
     if (
       rootRun.parentRunId ||
       rootRun.projectId !== workspace.project.projectId ||
@@ -13939,7 +14104,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       validation.parentRunId !== rootRun.runId ||
       validation.planId !== plan.transactionPlanId ||
       validation.contextBundleHash !== plan.rootContextHash ||
-      validation.verdict !== "valid" ||
+      (validation.verdict !== "valid" && !(acceptUnmet && (rootState.unmetRequirements?.length ?? 0) > 0)) ||
       validation.tasks.length !== plan.leaves.length
     ) {
       throw new ProjectOSError(
@@ -13959,6 +14124,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       );
     }
 
+    // The server held this batch for review because some criteria could not be confirmed by reading
+    // (it recorded that itself, never the model). The person's Apply is the acknowledgement; without it
+    // anything short of "satisfied" is refused here as before.
+    const reviewAcknowledged = Boolean(rootState.batchReviewReason);
     const combinedFiles: GeneratedDiff["files"] = [];
     const canonicalTargets = new Set<string>();
     const fileIdentities = new Set<string>();
@@ -13981,13 +14150,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         validationTask.taskId !== leaf.transactionTaskId ||
         validationTask.childRunId !== leaf.childRunId ||
         validationTask.path !== leaf.filePath ||
-        validationTask.status !== "consistent" ||
-        validationTask.criteria.length !== leaf.acceptanceCriteria.length ||
-        validationTask.criteria.some(
-          (criterion, criterionIndex) =>
-            criterion.criterion !== leaf.acceptanceCriteria[criterionIndex] ||
-            (criterion.status !== "satisfied" && criterion.status !== "uncertain"),
-        ) ||
+        !wholeTreeLeafEvidenceAccepted(validationTask, leaf.acceptanceCriteria, reviewAcknowledged, acceptUnmet) ||
         !leafState ||
         leafState.run.rootRunId !== rootRun.runId ||
         leafState.run.scope?.kind !== "leaf-file" ||
@@ -15212,7 +15375,8 @@ function sameStringArray(left: string[], right: string[]): boolean {
 }
 
 function formatExecCommandForDisplay(command: ExecCommand): string {
-  return [command.command, ...command.args.map((arg) => JSON.stringify(arg))].join(" ");
+  const line = [command.command, ...command.args.map((arg) => JSON.stringify(arg))].join(" ");
+  return command.cwd ? `${line} (in ${command.cwd}/)` : line;
 }
 
 function appendRecentChanges(

@@ -34,6 +34,7 @@ import { containsHighConfidenceSecret } from "../high-confidence-secret-patterns
 import { DefaultWorkspaceIgnorePolicy } from "../local-context-assembler.js";
 import type { ModelProfile } from "../../contracts/settings.js";
 import type { ResolvedResponseLanguage } from "../agent-language-policy.js";
+import { extractDeclaredSymbols } from "./extract-declarations.js";
 import { extractExportedSymbols } from "./extract-exports.js";
 import { buildCodeImpact } from "./impact.js";
 import {
@@ -123,11 +124,15 @@ export function syncCodeIntelligence(input: {
       continue;
     }
     if (unchanged && priorFile) {
-      files.push({ ...priorFile, size: disk.size, mtimeMs: disk.mtimeMs });
+      // The language is decided again: a file recorded as unsupported before Python and the other
+      // languages were read would otherwise stay unsupported until it changed.
+      const language = languageOf(disk.path);
+      const file = { ...priorFile, language, size: disk.size, mtimeMs: disk.mtimeMs };
+      files.push(file);
       const cached = previousSymbolFiles.get(disk.path);
-      if (priorFile.language === "unsupported") continue;
-      if (cached && cached.contentHash === priorFile.contentHash) symbolFiles.push(cached);
-      else symbolFiles.push(parseSymbolFile(input.workspaceRoot, priorFile));
+      if (language === "unsupported") continue;
+      if (cached && cached.contentHash === priorFile.contentHash && priorFile.language === language) symbolFiles.push(cached);
+      else symbolFiles.push(parseSymbolFile(input.workspaceRoot, file));
       continue;
     }
     if (unchanged && priorOmission) {
@@ -403,7 +408,9 @@ function parseSymbolFile(workspaceRoot: string, file: CodeInventoryFile): CodeSy
 
 function parseSymbolText(file: CodeInventoryFile, text: string): CodeSymbolFile {
   try {
-    const extracted = extractExportedSymbols(file.path, text, file.contentHash);
+    const extracted = file.language === "typescript" || file.language === "javascript"
+      ? extractExportedSymbols(file.path, text, file.contentHash)
+      : extractDeclaredSymbols(file.path, text, file.contentHash, file.language);
     return {
       path: file.path,
       contentHash: file.contentHash,
@@ -536,15 +543,15 @@ function writeJson(workspaceRoot: string, relativePath: string, value: unknown):
   writeFileSync(fullPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+const LANGUAGE_BY_EXTENSION: Record<string, CodeIntelligenceLanguage> = {
+  ".ts": "typescript", ".tsx": "typescript", ".mts": "typescript", ".cts": "typescript",
+  ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+  ".py": "python", ".go": "go", ".rs": "rust", ".java": "java", ".kt": "kotlin", ".kts": "kotlin",
+  ".scala": "scala", ".cs": "csharp", ".rb": "ruby", ".php": "php", ".swift": "swift",
+};
+
 function languageOf(path: string): CodeIntelligenceLanguage {
-  const extension = extname(path).toLowerCase();
-  if (extension === ".ts" || extension === ".tsx" || extension === ".mts" || extension === ".cts") {
-    return "typescript";
-  }
-  if (extension === ".js" || extension === ".jsx" || extension === ".mjs" || extension === ".cjs") {
-    return "javascript";
-  }
-  return "unsupported";
+  return LANGUAGE_BY_EXTENSION[extname(path).toLowerCase()] ?? "unsupported";
 }
 
 function isSensitiveExtension(path: string): boolean {

@@ -3,7 +3,8 @@ import type { ChatSessionHead } from '@contracts/index'
 import { groupChatHistorySessions } from './chatHistoryGrouping'
 
 function head(partial: Partial<ChatSessionHead> & Pick<ChatSessionHead, 'id'>): ChatSessionHead {
-  const now = new Date().toISOString()
+  // One fixed time: heads made a millisecond apart sorted newest first and swapped the expected order.
+  const now = '2026-08-02T11:00:00.000Z'
   return {
     id: partial.id,
     title: partial.title ?? partial.id,

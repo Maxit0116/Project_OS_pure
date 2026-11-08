@@ -71,6 +71,9 @@ export class AppQuitCoordinator {
 
   handleBeforeQuit(event: AppQuitEvent): void {
     if (this.state === "allow_quit" || this.state === "forced") return;
+    // Nothing to wait for: do not take the quit over. Cancelling it only to ask for it again made the
+    // first Cmd+Q close the window and leave the app running; a second one was needed to exit.
+    if (this.cleanup.deactivate === undefined) return;
     event.preventDefault();
     if (this.state === "cleaning") {
       this.forceExit(new Error("Application quit was requested again during cleanup"));

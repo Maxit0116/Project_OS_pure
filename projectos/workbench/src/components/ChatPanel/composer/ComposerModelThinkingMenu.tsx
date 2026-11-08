@@ -65,8 +65,8 @@ export default function ComposerModelThinkingMenu({
     (profile) => profile.id === selectedModelProfileId,
   )
   const hasModels = modelProfiles.length > 0
-  const hasRuntimes = runtimes.length > 0
-  const activeRuntime = runtimes.find((option) => option.executorId === selectedRuntimeId)
+  const activeRuntime = runtimes.find((runtime) => runtime.executorId === selectedRuntimeId)
+  const hasRuntimes = runtimes.length > 0 && Boolean(onSelectRuntime)
 
   const thinkingLabel = (depth: ThinkingDepth) => {
     switch (depth) {

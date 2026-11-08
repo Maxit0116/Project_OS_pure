@@ -699,7 +699,7 @@ function stepActionNode(
     return stepGithubAction(doc, next, spec, node, execution, payload);
   }
   if (arch.actionIntegration === "terminal") {
-    return stepTerminalAction(doc, next, spec, node, execution, payload, hasApproval);
+    return stepTerminalAction(doc, next, spec, node, execution, payload, Boolean(hasApproval));
   }
 
   next = pushArtifact(next, {

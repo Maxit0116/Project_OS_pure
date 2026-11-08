@@ -9,6 +9,7 @@ import type {
 import type { ModelToolCall, ModelToolDefinition } from "../../contracts/model-gateway.js";
 import { normalizeModelProfile } from "../../contracts/settings.js";
 import { ProjectOSError } from "../../errors.js";
+import { sanitizeErrorMessage } from "../../utils/sanitize-error-message.js";
 import type { SecretStore } from "../../persistence/secret-store.js";
 import type {
   OutboundBudgetGate,
@@ -120,14 +121,16 @@ const OpenAiResponseSchema = z.object({
       content: z.string().nullable().optional(),
       reasoning_content: z.string().nullable().optional(),
       reasoning: z.string().nullable().optional(),
+      // A provider adds fields of its own (DeepSeek sends `index` on every tool call). The ones read
+      // here are checked; the rest are ignored, or the whole reply was rejected as "invalid payload".
       tool_calls: z.array(z.object({
         id: z.string().min(1),
         type: z.literal("function"),
         function: z.object({
           name: z.string().min(1),
           arguments: z.string(),
-        }).strict(),
-      }).strict()).optional(),
+        }),
+      })).optional(),
     }),
     finish_reason: z.string().nullable().optional(),
   })).min(1),
@@ -161,8 +164,8 @@ const OllamaResponseSchema = z.object({
       function: z.object({
         name: z.string().min(1),
         arguments: z.union([z.string(), z.record(z.unknown())]),
-      }).strict(),
-    }).strict()).optional(),
+      }),
+    })).optional(),
   }),
   // Official /api/chat usage counters when the host reports them.
   prompt_eval_count: OptionalTokenCountSchema,
@@ -173,7 +176,7 @@ const OllamaModelsResponseSchema = z.object({
   models: z.array(z.object({ name: z.string().min(1) })),
 });
 
-async function readResponseText(response: Response): Promise<string> {
+export async function readResponseText(response: Response, signal?: AbortSignal): Promise<string> {
   if (!response.ok) {
     throw new ProjectOSError(
       "model_connection_failed",
@@ -193,9 +196,24 @@ async function readResponseText(response: Response): Promise<string> {
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
+  // An aborted read ends the stream early; the caller checks the signal and does not parse a part.
+  const stop = () => { void reader.cancel().catch(() => undefined); };
+  // The wait itself is raced against the deadline rather than trusting cancel() to release it. Against
+  // the real provider a "120 s" deadline was once reported after 17 minutes (a replay of the same
+  // request with a short deadline returned on time, so the cause was not established); a stream that
+  // does not honour cancel would otherwise keep the caller waiting for as long as the provider likes.
+  const aborted = new Promise<{ done: true; value: undefined }>((resolve) => {
+    if (signal?.aborted) resolve({ done: true, value: undefined });
+    else signal?.addEventListener("abort", () => resolve({ done: true, value: undefined }), { once: true });
+  });
+  if (signal?.aborted) stop();
+  else signal?.addEventListener("abort", stop, { once: true });
+  let pendingRead: Promise<unknown> | undefined;
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const read = reader.read();
+      pendingRead = read;
+      const { done, value } = await Promise.race([read, aborted]);
       if (done) break;
       totalBytes += value.byteLength;
       if (totalBytes > PROVIDER_MAX_RESPONSE_BYTES) {
@@ -204,7 +222,14 @@ async function readResponseText(response: Response): Promise<string> {
       chunks.push(value);
     }
   } finally {
-    reader.releaseLock();
+    signal?.removeEventListener("abort", stop);
+    // A read abandoned at the deadline settles later, once the stream is cancelled; it is not an error.
+    void pendingRead?.catch(() => undefined);
+    try {
+      reader.releaseLock();
+    } catch {
+      // Still has a read waiting on a cancelled stream; the stream is being discarded anyway.
+    }
   }
 
   const bytes = new Uint8Array(totalBytes);
@@ -231,9 +256,18 @@ function parseProviderJson<Schema extends z.ZodTypeAny>(
   try {
     decoded = JSON.parse(text);
   } catch {
+    // What the provider sent goes in the details, never in the message: "invalid JSON" alone cannot
+    // tell an empty body from an error page from a cut-off reply.
     throw new ProjectOSError(
       "model_connection_failed",
       "Model provider returned invalid JSON",
+      {
+        details: {
+          reason: text.trim() === "" ? "empty_body" : "invalid_json",
+          bodyBytes: text.length,
+          bodyStart: sanitizeErrorMessage(text.trim().slice(0, 200)),
+        },
+      },
     );
   }
   const parsed = schema.safeParse(decoded);
@@ -275,6 +309,90 @@ type FetchWithBudgetResult = {
   response: Response;
   reservationId?: string;
 };
+
+export type NetworkFailureKind = "dns" | "refused" | "unreachable" | "timeout" | "connection";
+
+/**
+ * What the network did, read from the error code the platform attached, so a person can be told
+ * "could not reach the model" instead of the bare `fetch failed` that undici throws for all of it.
+ * Undefined for anything that is not the network (a bad URL, a programming error).
+ */
+export function classifyNetworkFailure(error: unknown): NetworkFailureKind | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const cause = "cause" in error && error.cause instanceof Error ? error.cause : undefined;
+  const code = String((cause as { code?: unknown } | undefined)?.code ?? (error as { code?: unknown }).code ?? "");
+  const text = `${error.message} ${cause?.message ?? ""}`.toLowerCase();
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN" || text.includes("getaddrinfo")) return "dns";
+  if (code === "ECONNREFUSED") return "refused";
+  if (code === "ENETUNREACH" || code === "EHOSTUNREACH" || code === "ENETDOWN") return "unreachable";
+  if (code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT") return "timeout";
+  if (code === "ECONNRESET" || code.startsWith("UND_ERR") || text.includes("fetch failed") || text.includes("other side closed")) {
+    return "connection";
+  }
+  return undefined;
+}
+
+function unreachableError(url: string, error: unknown): Error {
+  const kind = classifyNetworkFailure(error);
+  if (!kind) return error instanceof Error ? error : new Error("Model request failed");
+  let host = "the model provider";
+  try { host = new URL(url).host; } catch { /* keep the generic name */ }
+  return new ProjectOSError(
+    "model_unreachable",
+    `Model provider unreachable (${kind}): ${host}`,
+    { cause: error, details: { kind, host } },
+  );
+}
+
+const PROVIDER_BODY_RETRIES = 1;
+
+function isUnreadableProviderBody(error: unknown): boolean {
+  if (!(error instanceof ProjectOSError)) return false;
+  const reason = (error.details as { reason?: unknown } | undefined)?.reason;
+  return reason === "invalid_json" || reason === "empty_body";
+}
+
+/**
+ * Read a reply's body within the same deadline as its headers, and ask again once when what came
+ * back is not JSON at all (empty, an error page, cut off): that is the provider or a proxy failing,
+ * not the model answering badly, and giving up there threw away a whole multi-call run. A reply that
+ * is JSON of the wrong shape is not asked for again.
+ */
+async function withBodyRetry<T>(
+  attempt: (readBody: (response: Response) => Promise<string>) => Promise<T>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<T> {
+  for (let tries = 0; ; tries += 1) {
+    const readBody = async (response: Response): Promise<string> => {
+      const bodyAbort = new AbortController();
+      const timer = setTimeout(() => bodyAbort.abort(), timeoutMs);
+      const onCallerAbort = () => bodyAbort.abort();
+      signal?.addEventListener("abort", onCallerAbort, { once: true });
+      try {
+        const text = await readResponseText(response, bodyAbort.signal);
+        if (bodyAbort.signal.aborted) {
+          if (signal?.aborted) throw new Error("Model request cancelled");
+          throw new ProjectOSError(
+            "model_timeout",
+            `Model request timed out after ${timeoutMs / 1000}s`,
+            { details: { seconds: timeoutMs / 1000 } },
+          );
+        }
+        return text;
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onCallerAbort);
+      }
+    };
+    try {
+      return await attempt(readBody);
+    } catch (error) {
+      if (tries < PROVIDER_BODY_RETRIES && isUnreadableProviderBody(error) && !signal?.aborted) continue;
+      throw error;
+    }
+  }
+}
 
 async function fetchWithTimeout(
   url: string,
@@ -324,7 +442,11 @@ async function fetchWithTimeout(
       }
       if (error instanceof Error && error.name === "AbortError") {
         if (signal?.aborted) throw new Error("Model request cancelled");
-        throw new Error(`Model request timed out after ${timeoutMs / 1000}s`);
+        throw new ProjectOSError(
+          "model_timeout",
+          `Model request timed out after ${timeoutMs / 1000}s`,
+          { details: { seconds: timeoutMs / 1000 } },
+        );
       }
       lastError = error;
       // Caller abort must never burn further retry slots as "transient".
@@ -335,7 +457,7 @@ async function fetchWithTimeout(
         !isTransientProviderFetchError(error) ||
         attempt === PROVIDER_FETCH_TRANSIENT_RETRIES
       ) {
-        throw error;
+        throw unreachableError(url, error);
       }
     } finally {
       clearTimeout(timeoutId);
@@ -474,7 +596,20 @@ export function buildOpenAiChatBody(
   ) {
     body.reasoning_effort = input.thinkingDepth;
   }
+  // DeepSeek reasons by default and "off" used to change nothing: the model still spent its whole
+  // output budget thinking (titles and digests were cut off at 64-400 tokens). It has an explicit switch.
+  if (input.thinkingDepth === "off" && isDeepSeekEndpoint(profile.baseUrl)) {
+    body.thinking = { type: "disabled" };
+  }
   return body;
+}
+
+export function isDeepSeekEndpoint(baseUrl: string | undefined): boolean {
+  try {
+    return new URL(baseUrl ?? "").hostname.toLowerCase().endsWith("deepseek.com");
+  } catch {
+    return false;
+  }
 }
 
 export function supportsOpenAiReasoningEffort(model: string): boolean {
@@ -632,7 +767,9 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
     apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
-    const { response, reservationId } = await fetchWithTimeout(openAiChatCompletionsUrl(profile.baseUrl), {
+    let reservationId: string | undefined;
+    const body = await withBodyRetry(async (readBody) => {
+      const fetched = await fetchWithTimeout(openAiChatCompletionsUrl(profile.baseUrl), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -640,11 +777,9 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
       },
       body: JSON.stringify(buildOpenAiChatBody(profile, input)),
     }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget, input.outboundBudgetMeta);
-
-    const body = parseProviderJson(
-      await readResponseText(response),
-      OpenAiResponseSchema,
-    );
+      reservationId = fetched.reservationId;
+      return parseProviderJson(await readBody(fetched.response), OpenAiResponseSchema);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
     const choice = body.choices[0]!;
     const message = extractOpenAiMessageParts(choice.message);
     const toolCalls = message.tool_calls?.map((toolCall) => ({
@@ -686,7 +821,9 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
     apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
-    const { response, reservationId } = await fetchWithTimeout(anthropicMessagesUrl(profile.baseUrl), {
+    let reservationId: string | undefined;
+    const body = await withBodyRetry(async (readBody) => {
+      const fetched = await fetchWithTimeout(anthropicMessagesUrl(profile.baseUrl), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -695,11 +832,9 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
       },
       body: JSON.stringify(buildAnthropicMessagesBody(profile, input)),
     }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget, input.outboundBudgetMeta);
-
-    const body = parseProviderJson(
-      await readResponseText(response),
-      AnthropicResponseSchema,
-    );
+      reservationId = fetched.reservationId;
+      return parseProviderJson(await readBody(fetched.response), AnthropicResponseSchema);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
     const output = body.content
       .filter((part): part is { type: "text"; text: string } => part.type === "text")
       .map((part) => part.text)
@@ -747,7 +882,9 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
     _apiKey: string | undefined,
     input: ProviderCompleteInput,
   ): Promise<ProviderCompleteResult> {
-    const { response, reservationId } = await fetchWithTimeout(ollamaChatUrl(profile.baseUrl), {
+    let reservationId: string | undefined;
+    const body = await withBodyRetry(async (readBody) => {
+      const fetched = await fetchWithTimeout(ollamaChatUrl(profile.baseUrl), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -780,11 +917,9 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
         ...(input.tools?.length ? { tools: input.tools } : {}),
       }),
     }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget, input.outboundBudgetMeta);
-
-    const body = parseProviderJson(
-      await readResponseText(response),
-      OllamaResponseSchema,
-    );
+      reservationId = fetched.reservationId;
+      return parseProviderJson(await readBody(fetched.response), OllamaResponseSchema);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal);
     const output = body.message.content ?? "";
     const hasUsage =
       body.prompt_eval_count !== undefined || body.eval_count !== undefined;
@@ -815,17 +950,16 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
     _apiKey: string | undefined,
     outboundBudget?: OutboundBudgetGate,
   ): Promise<Array<{ id: string; name: string }>> {
-    const { response } = await fetchWithTimeout(
-      `${normalizeBaseUrl(profile.baseUrl)}/api/tags`,
-      { method: "GET" },
-      PROVIDER_FETCH_TIMEOUT_MS,
-      undefined,
-      outboundBudget,
-    );
-    const body = parseProviderJson(
-      await readResponseText(response),
-      OllamaModelsResponseSchema,
-    );
+    const body = await withBodyRetry(async (readBody) => {
+      const { response } = await fetchWithTimeout(
+        `${normalizeBaseUrl(profile.baseUrl)}/api/tags`,
+        { method: "GET" },
+        PROVIDER_FETCH_TIMEOUT_MS,
+        undefined,
+        outboundBudget,
+      );
+      return parseProviderJson(await readBody(response), OllamaModelsResponseSchema);
+    }, PROVIDER_FETCH_TIMEOUT_MS, undefined);
     return body.models.map((model) => ({
       id: model.name,
       name: model.name,

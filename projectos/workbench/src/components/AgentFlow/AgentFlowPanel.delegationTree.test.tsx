@@ -333,6 +333,27 @@ describe('AgentFlowPanel delegated run tree after Stop', () => {
     expect(render(true, 'en')).toContain('data-child-outcome="running"')
   })
 
+  const renderEnded = (props: { live: boolean; interrupted: boolean }, events = startedOnly) => {
+    useWorkbenchStore.setState({ locale: 'zh' })
+    return renderToStaticMarkup(
+      <DelegatedRunTree events={events as never} tracesByRun={{}} {...props} />,
+    )
+  }
+
+  it('shows a task the app lost as interrupted, not stopped, when the whole run was interrupted', () => {
+    const html = renderEnded({ live: false, interrupted: true })
+    expect(html).toContain('data-child-outcome="interrupted"')
+    expect(html).toContain('已中断')
+  })
+
+  it('shows a task that was never reached as not started once nothing is running, instead of waiting forever', () => {
+    const neverStarted = startedOnly.filter((event) => event.type !== 'child_run_started')
+    expect(renderEnded({ live: false, interrupted: true }, neverStarted)).toContain('data-child-outcome="not_started"')
+    expect(renderEnded({ live: false, interrupted: true }, neverStarted)).toContain('未启动')
+    // While the run is live a task not yet reached still waits.
+    expect(renderEnded({ live: true, interrupted: false }, neverStarted)).toContain('data-child-outcome="pending"')
+  })
+
   it('shows it as stopped once the run is no longer live', () => {
     // Observed live: after Stop every task kept reading "executing" because the stream was closed
     // and nothing ever said otherwise. (Static rendering reads the store's initial locale, zh; the

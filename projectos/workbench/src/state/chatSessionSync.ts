@@ -88,10 +88,13 @@ export function deriveChatSessionSubtitle(state: ChatSessionSyncState): string |
 
 export function deriveChatSessionStatus(state: ChatSessionSyncState): ChatSessionStatus {
   if (state.flowStatus === 'awaiting_review') return 'awaiting_review'
+  if (state.pendingIntent?.status === 'draft') return 'awaiting_review'
   if (state.pendingRefinement && !state.refinementConfirmed) return 'awaiting_review'
   if (state.pendingPlan && !state.planConfirmed) return 'awaiting_review'
-  if (state.flowStatus === 'running' || state.refineLoading || state.activeRunId) return 'running'
-  if (state.flowStatus === 'error') return 'error'
+  // An active run id stays set after the run ends (the review and undo work from it), so it is not
+  // evidence that the run is going: a finished run was listed as running for good.
+  if (state.flowStatus === 'running' || state.refineLoading) return 'running'
+  if (state.flowStatus === 'error' || state.flowStatus === 'interrupted') return 'error'
   return 'idle'
 }
 
@@ -116,6 +119,8 @@ export function buildChatSessionSnapshot(state: ChatSessionSyncState): ChatSessi
     ...(state.latestContextAssembly
       ? { latestContextAssembly: state.latestContextAssembly }
       : {}),
+    // An intent card waiting for approval was dropped when the person left the conversation.
+    ...(state.pendingIntent?.status === 'draft' ? { pendingIntent: state.pendingIntent } : {}),
   }
 }
 
@@ -195,6 +200,7 @@ export interface HydratedChatSessionState {
   activeAgentDefinitionId: string | null
   conversationCheckpoints: WorkbenchState['conversationCheckpoints']
   latestContextAssembly: WorkbenchState['latestContextAssembly']
+  pendingIntent: WorkbenchState['pendingIntent']
 }
 
 /**
@@ -255,5 +261,6 @@ export function hydrateChatSessionState(record: ChatSessionRecord): HydratedChat
     activeAgentDefinitionId: snapshot?.activeAgentDefinitionId ?? null,
     conversationCheckpoints: snapshot?.conversationCheckpoints ?? [],
     latestContextAssembly: snapshot?.latestContextAssembly ?? null,
+    pendingIntent: snapshot?.pendingIntent?.status === 'draft' ? snapshot.pendingIntent : null,
   }
 }

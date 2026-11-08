@@ -7,6 +7,7 @@ import type {
 } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
+import type { UnmetRequirement } from '../../state/unmetRequirements'
 import type { MarkdownDiffViewMode } from '../Markdown/markdownPath'
 import Button from '../ui/Button'
 import { computeDiffFileStat } from '../PendingChangesDrawer/diffFileStats'
@@ -28,6 +29,8 @@ interface Props {
   undoLoading: boolean
   /** When set, the proposal can be reviewed but not applied; shown instead of Apply. */
   reviewOnlyReason?: string | null
+  /** Requirements the review says the change does not meet; Apply then reads "Apply anyway". */
+  unmetRequirements?: UnmetRequirement[]
   onApply: () => void
   onVerify: () => void
   onApproveVerification: () => void
@@ -42,6 +45,7 @@ export default function DiffReviewPanel({
   verificationLoading,
   undoLoading,
   reviewOnlyReason = null,
+  unmetRequirements = [],
   onApply,
   onVerify,
   onApproveVerification,
@@ -95,6 +99,20 @@ export default function DiffReviewPanel({
           {reviewOnlyReason && !applyResult?.applied ? (
             <p className={styles.summary} role="note">{reviewOnlyReason}</p>
           ) : null}
+          {unmetRequirements.length > 0 && !applyResult?.applied ? (
+            <div className={styles.summary} role="alert" data-testid="unmet-requirements">
+              <strong>{ts('diff.unmetTitle')}</strong>
+              <ul>
+                {unmetRequirements.flatMap((unmet) =>
+                  unmet.problems.map((problem, index) => (
+                    <li key={`${unmet.path}:${index}`}>
+                      {unmet.path ? <code>{unmet.path}</code> : null}{unmet.path ? ' — ' : ''}{problem}
+                    </li>
+                  )))}
+              </ul>
+              <span>{ts('diff.unmetHint')}</span>
+            </div>
+          ) : null}
         </div>
         <div className={styles.headerActions}>
           {!applyResult?.applied && (
@@ -107,7 +125,9 @@ export default function DiffReviewPanel({
                   {ts('diff.reviewOnly')}
                 </span>
               ) : (
-                <Button onClick={onApply}>{ts('common.apply')}</Button>
+                <Button onClick={onApply}>
+                  {unmetRequirements.length > 0 ? ts('diff.applyAnyway') : ts('common.apply')}
+                </Button>
               )}
             </>
           )}
