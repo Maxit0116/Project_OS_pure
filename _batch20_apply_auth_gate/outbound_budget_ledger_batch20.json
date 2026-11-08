@@ -484,6 +484,446 @@
       "usageStatus": "reported",
       "inputTokens": 253,
       "outputTokens": 372
+    },
+    {
+      "id": "obr_1794099749799_k9zeynel",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:02:29.799Z",
+      "settledAt": "2026-11-08T01:02:39.923Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794099750873_9jcg3b5z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:02:30.873Z",
+      "settledAt": "2026-11-08T01:02:41.444Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794099759924_hrbmilbf",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:02:39.924Z",
+      "settledAt": "2026-11-08T01:02:50.559Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794099761445_ldb01rh1",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:02:41.445Z",
+      "settledAt": "2026-11-08T01:02:52.046Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 263,
+      "outputTokens": 343
+    },
+    {
+      "id": "obr_1794099770560_40jwadok",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:02:50.560Z",
+      "settledAt": "2026-11-08T01:02:52.086Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 2717,
+      "outputTokens": 100
+    },
+    {
+      "id": "obr_1794099773335_e2v7tcr0",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:02:53.335Z",
+      "settledAt": "2026-11-08T01:02:53.418Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 6260,
+      "outputTokens": 802
+    },
+    {
+      "id": "obr_1794099780531_e9ff0foz",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:03:00.531Z",
+      "settledAt": "2026-11-08T01:03:00.620Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 263,
+      "outputTokens": 268
+    },
+    {
+      "id": "obr_1794099907054_fhjzvzhg",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:05:07.054Z",
+      "settledAt": "2026-11-08T01:05:16.357Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 2717,
+      "outputTokens": 161
+    },
+    {
+      "id": "obr_1794099908123_zu82wecy",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:05:08.123Z",
+      "settledAt": "2026-11-08T01:05:16.325Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 263,
+      "outputTokens": 490
+    },
+    {
+      "id": "obr_1794099917852_dxzraw3x",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:05:17.852Z",
+      "settledAt": "2026-11-08T01:05:17.943Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 2843,
+      "outputTokens": 44
+    },
+    {
+      "id": "obr_1794099918862_log9urql",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:05:18.862Z",
+      "settledAt": "2026-11-08T01:05:18.953Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 5916,
+      "outputTokens": 147
+    },
+    {
+      "id": "obr_1794099920812_d0dy7o4e",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:05:20.812Z",
+      "settledAt": "2026-11-08T01:05:20.949Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 9456,
+      "outputTokens": 1628
+    },
+    {
+      "id": "obr_1794099935577_9elssxwi",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:05:35.577Z",
+      "settledAt": "2026-11-08T01:05:35.648Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 263,
+      "outputTokens": 210
+    },
+    {
+      "id": "obr_1794100088549_huz4nsk2",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:08:08.549Z",
+      "settledAt": "2026-11-08T01:08:19.039Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100089610_xfo6z13t",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:08:09.610Z",
+      "settledAt": "2026-11-08T01:08:20.045Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100099040_wxq1gbpm",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:08:19.040Z",
+      "settledAt": "2026-11-08T01:08:29.584Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100100046_2l7ogweo",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:08:20.046Z",
+      "settledAt": "2026-11-08T01:08:30.589Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100109586_1fkwsbfh",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:08:29.586Z",
+      "settledAt": "2026-11-08T01:08:30.790Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 2768,
+      "outputTokens": 188
+    },
+    {
+      "id": "obr_1794100110591_5npx0r7x",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:08:30.591Z",
+      "settledAt": "2026-11-08T01:08:30.751Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 314,
+      "outputTokens": 492
+    },
+    {
+      "id": "obr_1794100113023_qiw8s13i",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:08:33.023Z",
+      "settledAt": "2026-11-08T01:08:33.126Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 5957,
+      "outputTokens": 200
+    },
+    {
+      "id": "obr_1794100115039_4qde6w7a",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:08:35.039Z",
+      "settledAt": "2026-11-08T01:08:35.211Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 6083,
+      "outputTokens": 47
+    },
+    {
+      "id": "obr_1794100266786_xby4r4pq",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:06.786Z",
+      "settledAt": "2026-11-08T01:11:16.905Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100267857_vn9fqbvn",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:07.857Z",
+      "settledAt": "2026-11-08T01:11:18.419Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100276906_7cgukble",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:16.906Z",
+      "settledAt": "2026-11-08T01:11:27.496Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100278421_mc6ecjzk",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:18.421Z",
+      "settledAt": "2026-11-08T01:11:29.029Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 314,
+      "outputTokens": 572
+    },
+    {
+      "id": "obr_1794100287498_kambew7s",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:27.498Z",
+      "settledAt": "2026-11-08T01:11:29.147Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 2768,
+      "outputTokens": 903
+    },
+    {
+      "id": "obr_1794100296986_zbwa41xz",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:36.986Z",
+      "settledAt": "2026-11-08T01:11:37.099Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 4791,
+      "outputTokens": 620
+    },
+    {
+      "id": "obr_1794100298505_cyx6r1t6",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:38.505Z",
+      "settledAt": "2026-11-08T01:11:38.599Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 314,
+      "outputTokens": 291
+    },
+    {
+      "id": "obr_1794100302667_pgzamlbl",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:42.667Z",
+      "settledAt": "2026-11-08T01:11:42.756Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 5351,
+      "outputTokens": 158
+    },
+    {
+      "id": "obr_1794100304211_2ygpwmgp",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:44.211Z",
+      "settledAt": "2026-11-08T01:11:44.362Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 314,
+      "outputTokens": 272
+    },
+    {
+      "id": "obr_1794100306008_27ogbeiv",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:46.008Z",
+      "settledAt": "2026-11-08T01:11:46.171Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 5384,
+      "outputTokens": 197
+    },
+    {
+      "id": "obr_1794100306542_80eo6c24",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:46.542Z",
+      "settledAt": "2026-11-08T01:11:46.638Z",
+      "status": "ok",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100308048_4w7gr9fi",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:11:48.048Z",
+      "settledAt": "2026-11-08T01:11:48.120Z",
+      "status": "ok",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100323395_y9kb77jo",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:12:03.395Z",
+      "settledAt": "2026-11-08T01:12:13.536Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100324471_gpjn0wzt",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:12:04.471Z",
+      "settledAt": "2026-11-08T01:12:15.058Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100333537_yfv3o5oa",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:12:13.537Z",
+      "settledAt": "2026-11-08T01:12:24.144Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
+    },
+    {
+      "id": "obr_1794100335059_fd1rle5z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:12:15.059Z",
+      "settledAt": "2026-11-08T01:12:25.624Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 314,
+      "outputTokens": 325
+    },
+    {
+      "id": "obr_1794100344146_avlgz1vy",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:12:24.146Z",
+      "settledAt": "2026-11-08T01:12:25.702Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 2768,
+      "outputTokens": 146
+    },
+    {
+      "id": "obr_1794100347374_8ocm2ehp",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:12:27.374Z",
+      "settledAt": "2026-11-08T01:12:27.465Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 5965,
+      "outputTokens": 59
+    },
+    {
+      "id": "obr_1794100348557_b2qb206r",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:12:28.557Z",
+      "settledAt": "2026-11-08T01:12:28.649Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 9491,
+      "outputTokens": 1118
+    },
+    {
+      "id": "obr_1794100358603_lreqlkcw",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:12:38.603Z",
+      "settledAt": "2026-11-08T01:12:38.690Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 4760,
+      "outputTokens": 730
+    },
+    {
+      "id": "obr_1794100360120_y78bwlf2",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:12:40.120Z",
+      "settledAt": "2026-11-08T01:12:40.228Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 314,
+      "outputTokens": 286
+    },
+    {
+      "id": "obr_1794100364850_hv2628uh",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:12:44.850Z",
+      "settledAt": "2026-11-08T01:12:44.971Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 5328,
+      "outputTokens": 183
+    },
+    {
+      "id": "obr_1794100366394_wsffsa51",
+      "state": "settled",
+      "reservedAt": "2026-11-08T01:12:46.394Z",
+      "settledAt": "2026-11-08T01:12:46.458Z",
+      "status": "ok",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0
     }
   ]
 }
