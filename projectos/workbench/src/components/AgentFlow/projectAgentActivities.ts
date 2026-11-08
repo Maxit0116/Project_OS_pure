@@ -52,6 +52,7 @@ export interface ActivityAskResult {
 export type ActivityAskTrace =
   | { status: 'running'; scope: AgentConversationScope }
   | { status: 'complete'; scope: AgentConversationScope; result: ActivityAskResult }
+  | { status: 'cancelled'; scope: AgentConversationScope }
   | { status: 'error'; scope: AgentConversationScope; message: string }
 
 export interface ActivityPlanResult {
@@ -493,6 +494,8 @@ export function projectAgentActivities(
       startedAt,
       detail: { kind: 'thinking', content: '', truncated: false },
     })
+  } else if (ask?.status === 'cancelled') {
+    // Stop already surfaces chat.agentStopped; do not project a failed ask activity.
   } else if (ask?.status === 'error') {
     activities.push({
       id: 'ask:thinking',

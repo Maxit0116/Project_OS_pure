@@ -7,6 +7,7 @@ import { ProjectOSError } from "../errors.js";
 import type { ModelGatewayRequest, ModelGatewayResponse } from "../contracts/model-gateway.js";
 import type { ModelProfile } from "../contracts/settings.js";
 import { createDefaultSettings } from "../contracts/settings.js";
+import { InMemorySecretStore } from "../persistence/secret-store.js";
 import { LocalContextAssembler } from "./local-context-assembler.js";
 import { ModelGateway } from "./model-gateway/index.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
@@ -29,18 +30,7 @@ class HangingAskGateway extends ModelGateway {
   lastSignal: AbortSignal | undefined;
 
   constructor() {
-    super({
-      secretStore: {
-        async get() {
-          return "test-key";
-        },
-        async set() {},
-        async delete() {},
-        async list() {
-          return [];
-        },
-      },
-    });
+    super({ secretStore: new InMemorySecretStore() });
   }
 
   override async complete(
