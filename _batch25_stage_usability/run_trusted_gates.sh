@@ -54,10 +54,20 @@ def last(name: str):
     return int(ms[-1]) if ms else None
 
 files = re.findall(r"Test Files\s+(\d+) failed \| (\d+) passed \((\d+)\)", log)
+if not files:
+    # All-green vitest omits the "failed |" segment.
+    files = [( "0", a, b) for a, b in re.findall(r"Test Files\s+(\d+) passed \((\d+)\)", log)]
 tests = re.findall(r"Tests\s+(\d+) failed \| (\d+) passed(?: \| (\d+) skipped)? \((\d+)\)", log)
 if not tests:
     tests = re.findall(r"Tests\s+(\d+) failed \| (\d+) passed \((\d+)\)", log)
     tests = [(a, b, "0", c) for a, b, c in tests]
+if not tests:
+    tests = [("0", a, "0", b) for a, b in re.findall(r"Tests\s+(\d+) passed \((\d+)\)", log)]
+if not tests:
+    tests = [
+        ("0", a, sk or "0", b)
+        for a, sk, b in re.findall(r"Tests\s+(\d+) passed(?: \| (\d+) skipped)? \((\d+)\)", log)
+    ]
 
 def archive_rel(path: Path) -> str:
     # Never embed absolute home/machine paths in tracked summaries.
@@ -85,7 +95,8 @@ out = {
     "fullgate_tests_line": None,
     "log": archive_rel(log_path),
     "console": archive_rel(console_path),
-    "known_ux_red_expected_fullgate_nonzero": True,
+    # UX blockers closed; fullgate must be zero to accept.
+    "known_ux_red_expected_fullgate_nonzero": False,
 }
 if files:
     f = files[-1]
@@ -112,6 +123,6 @@ bad = [k for k in required_zero if out["exits"].get(k) not in (0,)]
 fg = out["exits"].get("fullgate")
 if bad: sys.exit(1)
 if fg is None: sys.exit(2)
-if fg not in (0, 1): sys.exit(fg)
+if fg != 0: sys.exit(fg if isinstance(fg, int) and fg != 0 else 1)
 sys.exit(0)
 PY
