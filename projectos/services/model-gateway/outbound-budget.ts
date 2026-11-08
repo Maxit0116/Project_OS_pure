@@ -140,21 +140,34 @@ export function createFileOutboundBudget(
       let fd: number | undefined;
       try {
         fd = openSync(lockPath, "wx");
+        // Stamp before any other work so peers never see an empty lock as "stale".
+        writeSync(fd, `${process.pid}\n${Date.now()}\n`);
       } catch (error) {
         const code =
           error && typeof error === "object" && "code" in error
             ? String((error as { code?: unknown }).code)
             : "";
         if (code !== "EEXIST") {
+          if (fd !== undefined) {
+            try {
+              closeSync(fd);
+            } catch {
+              /* ignore */
+            }
+            try {
+              unlinkSync(lockPath);
+            } catch {
+              /* ignore */
+            }
+          }
           throw new ProjectOSError(
             "model_outbound_budget_unavailable",
             "Outbound budget lock failed",
             { cause: error },
           );
         }
-        // Stale lock reclaim: dead pid or aged lock file.
-        // Prefer lock-file payload timestamps (pid\\nepochMs) over Stats.mtimeMs —
-        // workbench's narrowed fs typings omit mtimeMs.
+        // Stale lock reclaim: dead holder, or aged stamp. Never treat an empty /
+        // partial stamp as instantly stale — that races the creator's first write.
         try {
           if (existsSync(lockPath)) {
             let pid = 0;
@@ -167,11 +180,11 @@ export function createFileOutboundBudget(
               pid = 0;
               stampedAt = 0;
             }
-            const age =
-              Number.isFinite(stampedAt) && stampedAt > 0
-                ? Date.now() - stampedAt
-                : LOCK_STALE_MS + 1;
-            if (age > LOCK_STALE_MS || (pid > 0 && !isPidAlive(pid))) {
+            const hasStamp = Number.isFinite(stampedAt) && stampedAt > 0;
+            const age = hasStamp ? Date.now() - stampedAt : 0;
+            const holderDead = pid > 0 && !isPidAlive(pid);
+            const stampExpired = hasStamp && age > LOCK_STALE_MS;
+            if (holderDead || stampExpired) {
               try {
                 unlinkSync(lockPath);
               } catch {
@@ -187,7 +200,6 @@ export function createFileOutboundBudget(
         continue;
       }
       try {
-        writeSync(fd, `${process.pid}\n${Date.now()}\n`);
         // Domain errors from fn (exhausted/corrupt) must propagate untouched.
         return fn();
       } finally {
