@@ -8,6 +8,14 @@
 - **Not done:** per-file descriptions are not rewritten by translate; the detail panel still shows technical terms in Simple view; the packaged app was not rebuilt this round; a first-open legend for non-coders.
 - Commits c08d2c4 to 3368e55 (nine), nothing pushed; `58a7752` and `607b727` from earlier today are also unpushed.
 
+## 2026-11-08 (S11) - connections that say what they are for, and an Agent request that failed on a code box
+
+- **Asked:** "agent 时间轴 流程图都没有", the code graph page's connections in both Chinese and English, and every level's connections saying what function they carry.
+- **Cause of the empty flow:** an Agent request with a code-level box selected failed before any run existed, with "Master discovery referenced unknown node 'code_file_…'" (the view-only id of a box, the same bug as the Ask one fixed in `607b727`, in the Agent path). The only sign was a red bar in the chat; the flow dialog said nothing. Found by reproducing it in the app (request sent, no intent card after 3 minutes, banner text read from the page).
+- **Done:** the Agent request names the box's component and file (`requestTargetFromSelection`); map notes, map images and "write the answer as a decision" use the component too (`serverNodeIdFor`). The empty flow says why when a request failed. Code-page connections read "Uses X" / "用到 X" from the target's functions, in the interface language, replacing "a.tsx → b.tsx" and the hard-coded "导入：" (`fileLinkLabel`). A new scan mode `connections` and a menu item "把连线改写成功能说明" rewrite the upper-level labels as function phrases; the scan prompt now asks for that for new maps. The Agent flow shows plain step names (19 kinds, both languages) and its flowchart runs left to right.
+- **Verified:** full suite 86 failing, the same 86 as before this work (2,588 passing; 38 new tests); root, workbench, desktop typechecks 0; mutation check on the Agent fix; live in the dev app: the same request on the same `admin.tsx` box now gets an intent card in 21 s and a +1/−1 change in 44 s (not applied), the timeline and flowchart fill in; code-page labels switched from Chinese to English with the interface; the connections rewrite changed all 22 labels on the FastAPI template.
+- **Not done:** upper-level labels have one language at a time (rewrite to switch; no stored second language); code boxes still show `[Code]` and member names in Simple view; the first reload after rebuilding left the old main process running (a rebuilt app needs a restart); packaged app not rebuilt; not pushed.
+
 ## 2026-11-08 (S10 follow-up) - an old "Ask 失败" headline under a Plan that worked
 
 - **Asked:** why "Ask 失败" was still on screen although the plan came out right.
