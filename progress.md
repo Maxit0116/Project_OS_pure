@@ -8,6 +8,16 @@
 - **Not done:** per-file descriptions are not rewritten by translate; the detail panel still shows technical terms in Simple view; the packaged app was not rebuilt this round; a first-open legend for non-coders.
 - Commits c08d2c4 to 3368e55 (nine), nothing pushed; `58a7752` and `607b727` from earlier today are also unpushed.
 
+## 2026-11-08 (S12) - merged origin/agent into graph; the merged tree is not green
+
+- **Asked:** "check the remote branch", then "origin/agent is new we can apply merge and then test".
+- **Remote state:** `origin/shipability` and `origin/graph` unchanged; new `origin/agent` (Maxit0116, 111 commits, last 11-08 18:20) branching from the same `c7f153f` as the 14 local commits. `origin/cursor/batch2-ai-backend-gates-ab2c` is the same work one commit behind.
+- **Done:** merge `873597a`. One conflict (`projectAgentActivities.ts`, two spots): kept agent's `cancelled` Ask/Plan row and graph's `flowSubject` gate on saved failures, both. Their commits contain no key prefix and no local paths.
+- **Verified:** full vitest on three trees: graph before the merge 86 failed / 2588 passed; origin/agent tip 24 / 2940; merged 24 / 2978 (3026 tests, 530 files). The merged and agent-tip failing sets are identical, so none come from combining with the 14 local commits, and every test those commits added passes. 75 of the old 86 now pass.
+- **Not green:** 24 failing = 12 environment (6 catalog-network `client.test.ts`, 5 prisma `sample-team-data-foundation`, 1 missing `next/dist/compiled/babel/core`; all fail before the merge too) + 13 new on agent's branch after it merged `shipability` (`index.test.ts` 3, `project-os-local-api.test.ts` 4, `project-os-local-api.questions.test.ts` 3, `chatSummaryMarkdown` 1, `handleRunEvent.interrupted` 2). At agent's last pre-merge commit `a029278` `index.test.ts` (86) and `project-os-local-api.test.ts` (107) pass; the other three files do not exist there. The `handleRunEvent.interrupted` pair is a design collision: shipability maps a stopped run to `error`/`idle`, agent maps it to `cancelled`. `tsc` is not clean on root, workbench and desktop web: duplicate `RunDecision` import and an unused import in `agent-orchestrator/index.ts`, `pendingIntent` missing from `ChatSessionSyncState`, `'interrupted'` missing from `ParentBatchAuthStatus` (4 sites), a `'complete'` vs `'cancelled'` comparison in `workbenchStore.ts`. All identical on agent's tip.
+- **State left:** `graph` is 126 commits ahead of `origin/shipability`, 15 ahead of `origin/agent`, 0 behind either. Nothing pushed. The merged desktop app was not run.
+- **Next:** decide the stopped-run meaning (cancelled vs error/idle), fix the 13 tests and the 6 type errors, re-run the full suite, then push `graph:shipability` (fast-forward) only on a go-ahead.
+
 ## 2026-11-08 (S11) - connections that say what they are for, and an Agent request that failed on a code box
 
 - **Asked:** "agent 时间轴 流程图都没有", the code graph page's connections in both Chinese and English, and every level's connections saying what function they carry.
