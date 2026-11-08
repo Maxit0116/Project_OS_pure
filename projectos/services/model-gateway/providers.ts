@@ -10,7 +10,10 @@ import type { ModelToolCall, ModelToolDefinition } from "../../contracts/model-g
 import { normalizeModelProfile } from "../../contracts/settings.js";
 import { ProjectOSError } from "../../errors.js";
 import type { SecretStore } from "../../persistence/secret-store.js";
-import type { OutboundBudgetGate } from "./outbound-budget.js";
+import type {
+  OutboundBudgetGate,
+  OutboundReservationAuditMeta,
+} from "./outbound-budget.js";
 
 export interface ProviderImagePart {
   mimeType: "image/png" | "image/jpeg";
@@ -28,6 +31,8 @@ export interface ProviderCompleteInput {
   images?: ProviderImagePart[];
   /** Opt-in: reserve one ledger slot before each HTTP attempt (incl. retries). */
   outboundBudget?: OutboundBudgetGate;
+  /** Safe audit fields stamped onto each reservation (no secrets/prompts). */
+  outboundBudgetMeta?: OutboundReservationAuditMeta;
 }
 
 export function buildOpenAiUserContent(
@@ -277,11 +282,17 @@ async function fetchWithTimeout(
   timeoutMs = PROVIDER_FETCH_TIMEOUT_MS,
   signal?: AbortSignal,
   budget?: OutboundBudgetGate,
+  budgetMeta?: OutboundReservationAuditMeta,
 ): Promise<FetchWithBudgetResult> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= PROVIDER_FETCH_TRANSIENT_RETRIES; attempt += 1) {
+    if (signal?.aborted) {
+      throw new Error("Model request cancelled");
+    }
     // One durable reservation per HTTP attempt (including transient retries).
-    const reservationId = budget ? budget.reserve().reservationId : undefined;
+    const reservationId = budget
+      ? budget.reserve(budgetMeta).reservationId
+      : undefined;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const abort = () => controller.abort();
@@ -316,6 +327,10 @@ async function fetchWithTimeout(
         throw new Error(`Model request timed out after ${timeoutMs / 1000}s`);
       }
       lastError = error;
+      // Caller abort must never burn further retry slots as "transient".
+      if (signal?.aborted) {
+        throw new Error("Model request cancelled");
+      }
       if (
         !isTransientProviderFetchError(error) ||
         attempt === PROVIDER_FETCH_TRANSIENT_RETRIES
@@ -624,7 +639,7 @@ export class OpenAiProviderAdapter implements ModelProviderAdapter {
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       },
       body: JSON.stringify(buildOpenAiChatBody(profile, input)),
-    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget, input.outboundBudgetMeta);
 
     const body = parseProviderJson(
       await readResponseText(response),
@@ -679,7 +694,7 @@ export class AnthropicProviderAdapter implements ModelProviderAdapter {
         ...(apiKey ? { "x-api-key": apiKey } : {}),
       },
       body: JSON.stringify(buildAnthropicMessagesBody(profile, input)),
-    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget, input.outboundBudgetMeta);
 
     const body = parseProviderJson(
       await readResponseText(response),
@@ -764,7 +779,7 @@ export class OllamaProviderAdapter implements ModelProviderAdapter {
         ],
         ...(input.tools?.length ? { tools: input.tools } : {}),
       }),
-    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget);
+    }, PROVIDER_FETCH_TIMEOUT_MS, input.signal, input.outboundBudget, input.outboundBudgetMeta);
 
     const body = parseProviderJson(
       await readResponseText(response),

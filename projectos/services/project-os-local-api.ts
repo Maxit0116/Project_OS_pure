@@ -980,6 +980,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly structureScanProgress = new StructureScanProgressTracker();
   private readonly structureScanInflight = new Map<string, Promise<void>>();
   private readonly structureScanAbortByProjectId = new Map<string, AbortController>();
+  /** In-flight Ask HTTP; Stop must abort here (IPC cannot pass AbortSignal). */
+  private readonly askAbortByProjectId = new Map<string, AbortController>();
   private readonly boundRunAuthorizations = new Map<
     string,
     BoundRunAuthorization
@@ -1392,6 +1394,37 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       controller.abort();
     }
     return true;
+  }
+
+  /**
+   * Abort an in-flight Ask or Agent intent-discovery model turn for the project.
+   * Renderer Stop cannot pass AbortSignal across IPC; this is the durable cancel path.
+   */
+  async cancelAsk(projectId: string): Promise<boolean> {
+    this.requireLoadedWorkspace(projectId);
+    const controller = this.askAbortByProjectId.get(projectId);
+    if (!controller || controller.signal.aborted) {
+      return false;
+    }
+    controller.abort();
+    return true;
+  }
+
+  /** Install a fresh AbortController for the project's in-flight model turn. */
+  private beginProjectModelTurnAbort(projectId: string): AbortController {
+    this.askAbortByProjectId.get(projectId)?.abort();
+    const controller = new AbortController();
+    this.askAbortByProjectId.set(projectId, controller);
+    return controller;
+  }
+
+  private endProjectModelTurnAbort(
+    projectId: string,
+    controller: AbortController,
+  ): void {
+    if (this.askAbortByProjectId.get(projectId) === controller) {
+      this.askAbortByProjectId.delete(projectId);
+    }
   }
 
   /**
@@ -2683,6 +2716,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         "A configured model profile is required for grounded answers",
       );
     }
+    const askAbort = this.beginProjectModelTurnAbort(parsedRequest.projectId);
     const responseLanguage = resolveResponseLanguage(
       parsedRequest.question,
       parsedRequest.language,
@@ -2800,22 +2834,28 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     });
     const instructionAppendix = assembled.instructions;
     const mcp = await this.buildAskMcpOptions(workspace);
-    const result = await this.groundedAnswerService.answer({
-      projectId: parsedRequest.projectId,
-      question: parsedRequest.question,
-      localContext: augmented.bundle,
-      profile,
-      thinkingDepth: modelExecution?.thinkingDepth,
-      responseLanguage,
-      supplementalMarkdown,
-      ...(instructionAppendix.trim()
-        ? { instructionAppendix }
-        : {}),
-      ...(parsedRequest.images?.length
-        ? { images: parsedRequest.images }
-        : {}),
-      ...(mcp ? { mcp } : {}),
-    });
+    let result;
+    try {
+      result = await this.groundedAnswerService.answer({
+        projectId: parsedRequest.projectId,
+        question: parsedRequest.question,
+        localContext: augmented.bundle,
+        profile,
+        thinkingDepth: modelExecution?.thinkingDepth,
+        responseLanguage,
+        supplementalMarkdown,
+        signal: askAbort.signal,
+        ...(instructionAppendix.trim()
+          ? { instructionAppendix }
+          : {}),
+        ...(parsedRequest.images?.length
+          ? { images: parsedRequest.images }
+          : {}),
+        ...(mcp ? { mcp } : {}),
+      });
+    } finally {
+      this.endProjectModelTurnAbort(parsedRequest.projectId, askAbort);
+    }
     const usedMcp = (result.mcpToolCalls?.length ?? 0) > 0;
     const contextSummary = summarizeLocalContext(augmented.bundle);
     const parsed = AgentAnswerResultSchema.parse({
@@ -2985,14 +3025,20 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       );
     }
     const globalContext = await this.createGlobalPlanningContext(workspace, "en");
-    const intent = await this.intentExtractionService.extract({
-      request: fileOwner ? { ...parsedRequest, nodeId: fileOwner.nodeId } : parsedRequest,
-      graph: workspace.graph,
-      globalContext,
-      execution,
-      inspectNode: async (nodeId) => this.assembleNodeLocalContext(workspace, nodeId, "en"),
-    });
-    return this.durableRunStateFor(workspace).saveIntent(intent);
+    const turnAbort = this.beginProjectModelTurnAbort(parsedRequest.projectId);
+    try {
+      const intent = await this.intentExtractionService.extract({
+        request: fileOwner ? { ...parsedRequest, nodeId: fileOwner.nodeId } : parsedRequest,
+        graph: workspace.graph,
+        globalContext,
+        execution,
+        signal: turnAbort.signal,
+        inspectNode: async (nodeId) => this.assembleNodeLocalContext(workspace, nodeId, "en"),
+      });
+      return this.durableRunStateFor(workspace).saveIntent(intent);
+    } finally {
+      this.endProjectModelTurnAbort(parsedRequest.projectId, turnAbort);
+    }
   }
 
   async approveRequestIntent(

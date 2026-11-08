@@ -131,7 +131,7 @@ export function withOutboundSessionCap(
   return {
     path: gate.path,
     limit: gate.limit,
-    reserve(): { reservationId: string } {
+    reserve(meta?: Parameters<OutboundBudgetGate["reserve"]>[0]): { reservationId: string } {
       if (sessionReserves >= sessionCap) {
         throw new ProjectOSError(
           "model_outbound_budget_exhausted",
@@ -147,7 +147,7 @@ export function withOutboundSessionCap(
           },
         );
       }
-      const reserved = gate.reserve();
+      const reserved = gate.reserve(meta);
       sessionReserves += 1;
       return reserved;
     },

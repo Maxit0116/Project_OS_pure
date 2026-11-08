@@ -106,6 +106,8 @@ export class RequestIntentExtractionService {
     globalContext: GlobalContextBundle;
     execution: ModelExecutionSnapshot;
     inspectNode?: (nodeId: string) => Promise<NodeContextBundle>;
+    /** When aborted (Stop during intent discovery), gateway settles cancelled. */
+    signal?: AbortSignal;
   }): Promise<RequestIntent> {
     const { request, graph, globalContext, execution } = input;
     const initialInput = {
@@ -117,22 +119,40 @@ export class RequestIntentExtractionService {
       executorSelection: request.executorSelection,
       outputSchema: DISCOVERY_OUTPUT_SCHEMA,
     };
-    const complete = (value: unknown, systemPrompt: string, maxOutputTokens: number) => this.gateway.complete(execution.profile, {
-      projectId: request.projectId,
-      requestKind: "request_intent",
-      modelPreference: execution.profile.id,
-      systemPrompt,
-      input: value,
-      thinkingDepth: execution.thinkingDepth,
-      redactionPolicy: "secrets_and_paths",
-      maxOutputTokens,
-    });
+    const complete = (value: unknown, systemPrompt: string, maxOutputTokens: number) => {
+      if (input.signal?.aborted) {
+        throw new ProjectOSError(
+          "operation_cancelled",
+          "Model request cancelled",
+        );
+      }
+      return this.gateway.complete(
+        execution.profile,
+        {
+          projectId: request.projectId,
+          requestKind: "request_intent",
+          modelPreference: execution.profile.id,
+          systemPrompt,
+          input: value,
+          thinkingDepth: execution.thinkingDepth,
+          redactionPolicy: "secrets_and_paths",
+          maxOutputTokens,
+        },
+        input.signal ? { signal: input.signal } : undefined,
+      );
+    };
     // Some providers occasionally answer a JSON-only request with something else (for example their
     // own tool-call markup). One corrective retry recovers that; a second miss is reported as such.
     const parseAction = async (value: unknown) => {
       let correction: { previousReply: string; problem: string } | undefined;
       let cutOff = false;
       for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (input.signal?.aborted) {
+          throw new ProjectOSError(
+            "operation_cancelled",
+            "Model request cancelled",
+          );
+        }
         const maxOutputTokens = attempt === 0 ? DISCOVERY_STEP_MAX_OUTPUT_TOKENS : DISCOVERY_STEP_RETRY_MAX_OUTPUT_TOKENS;
         const response = await complete(correction
           ? {
@@ -185,6 +205,12 @@ export class RequestIntentExtractionService {
     let actionCount = 0;
 
     while (!draft) {
+      if (input.signal?.aborted) {
+        throw new ProjectOSError(
+          "operation_cancelled",
+          "Model request cancelled",
+        );
+      }
       const exhausted = actionCount >= MAX_DISCOVERY_ACTIONS;
       const action = await parseAction({
         ...initialInput,

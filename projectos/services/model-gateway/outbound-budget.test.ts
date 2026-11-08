@@ -99,6 +99,90 @@ describe("FileOutboundBudget", () => {
     expect(row.status).toBe("failed");
   });
 
+  it("stamps optional requestKind/model/provider audit meta at reserve and keeps it through settle/abort/error", () => {
+    const path = tempLedger();
+    const budget = createFileOutboundBudget(path, 3);
+    const ok = budget.reserve({
+      requestKind: "question_answer",
+      model: "deepseek-chat",
+      provider: "deepseek",
+    });
+    const cancelled = budget.reserve({
+      requestKind: "request_intent",
+      model: "deepseek-chat",
+      provider: "deepseek",
+    });
+    const failed = budget.reserve({
+      requestKind: "question_answer",
+      model: "deepseek-chat",
+    });
+    budget.settle(ok.reservationId, {
+      status: "ok",
+      usageStatus: "reported",
+      inputTokens: 12,
+      outputTokens: 3,
+    });
+    budget.settle(cancelled.reservationId, {
+      status: "cancelled",
+      usageStatus: "missing",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    budget.settle(failed.reservationId, {
+      status: "failed",
+      usageStatus: "missing",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    const rows = budget.snapshot().reservations;
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({
+      requestKind: "question_answer",
+      model: "deepseek-chat",
+      provider: "deepseek",
+      status: "ok",
+      usageStatus: "reported",
+      inputTokens: 12,
+      outputTokens: 3,
+    });
+    expect(rows[1]).toMatchObject({
+      requestKind: "request_intent",
+      status: "cancelled",
+      usageStatus: "missing",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    expect(rows[2]).toMatchObject({
+      requestKind: "question_answer",
+      status: "failed",
+      usageStatus: "missing",
+    });
+    // Old ledgers without meta remain readable (backward compatible).
+    const legacyPath = tempLedger();
+    writeFileSync(
+      legacyPath,
+      `${JSON.stringify({
+        version: 1,
+        limit: 1,
+        reservations: [
+          {
+            id: "obr_legacy",
+            state: "settled",
+            reservedAt: new Date().toISOString(),
+            settledAt: new Date().toISOString(),
+            status: "ok",
+            usageStatus: "missing",
+            inputTokens: 0,
+            outputTokens: 0,
+          },
+        ],
+      }, null, 2)}\n`,
+    );
+    const legacy = createFileOutboundBudget(legacyPath, 1);
+    expect(legacy.snapshot().reservations[0]?.requestKind).toBeUndefined();
+    expect(() => legacy.reserve()).toThrow(/exhausted/i);
+  });
+
   it("annotates provider-reported usage onto the matching reservation id (not latest-wins)", () => {
     const path = tempLedger();
     const budget = createFileOutboundBudget(path, 3);

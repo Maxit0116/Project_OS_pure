@@ -38,6 +38,8 @@ export interface ModelGatewaySettledEvent {
   outputTokens: number;
   provider?: string;
   model?: string;
+  /** Safe kind label from the request (never prompts/secrets/paths). */
+  requestKind?: string;
   /** Present when an opt-in outbound budget reservation was consumed for this call. */
   reservationId?: string;
 }
@@ -159,7 +161,7 @@ export class ModelGateway {
     const input: ProviderCompleteInput = {
       ...this.buildProviderInput(request),
       ...(deadline.signal ? { signal: deadline.signal } : {}),
-      ...(this.outboundBudget ? { outboundBudget: this.outboundBudget } : {}),
+      ...this.outboundBudgetFields(profile, request),
     };
     let result;
     try {
@@ -174,6 +176,7 @@ export class ModelGateway {
         outputTokens: 0,
         provider: modelProfileLabel(profile),
         model: profile.model,
+        requestKind: request.requestKind,
       });
       if (cancelled) {
         throw new ProjectOSError(
@@ -203,6 +206,10 @@ export class ModelGateway {
       outputTokens,
       provider: modelProfileLabel(profile),
       model: profile.model,
+      requestKind: request.requestKind,
+      ...(result.outboundReservationId
+        ? { reservationId: result.outboundReservationId }
+        : {}),
     });
     if (
       usageReported &&
@@ -281,8 +288,8 @@ export class ModelGateway {
       }
       if (options.signal?.aborted) {
         throw new ProjectOSError(
-          "external_agent_failed",
-          "MCP tool loop was cancelled",
+          "operation_cancelled",
+          "Model request cancelled",
           { details: { requestId } },
         );
       }
@@ -294,7 +301,7 @@ export class ModelGateway {
           messages,
           tools: options.tools,
           ...(deadline.signal ? { signal: deadline.signal } : {}),
-          ...(this.outboundBudget ? { outboundBudget: this.outboundBudget } : {}),
+          ...this.outboundBudgetFields(profile, request),
         },
         this.outboundRequestBounds,
       );
@@ -311,11 +318,12 @@ export class ModelGateway {
           outputTokens: 0,
           provider: modelProfileLabel(profile),
           model: profile.model,
+          requestKind: request.requestKind,
         });
         if (cancelled) {
           throw new ProjectOSError(
-            "external_agent_failed",
-            "MCP tool loop was cancelled",
+            "operation_cancelled",
+            "Model request cancelled",
             { cause: error, details: { requestId } },
           );
         }
@@ -342,6 +350,10 @@ export class ModelGateway {
         outputTokens: roundOut,
         provider: modelProfileLabel(profile),
         model: profile.model,
+        requestKind: request.requestKind,
+        ...(result.outboundReservationId
+          ? { reservationId: result.outboundReservationId }
+          : {}),
       });
       if (
         roundReported &&
@@ -532,6 +544,21 @@ export class ModelGateway {
     };
     // Fail-closed input-size / max_tokens clamp before any provider HTTP.
     return applyOutboundRequestBounds(built, this.outboundRequestBounds);
+  }
+
+  private outboundBudgetFields(
+    profile: ModelProfile,
+    request: ModelGatewayRequest,
+  ): Pick<ProviderCompleteInput, "outboundBudget" | "outboundBudgetMeta"> {
+    if (!this.outboundBudget) return {};
+    return {
+      outboundBudget: this.outboundBudget,
+      outboundBudgetMeta: {
+        requestKind: request.requestKind,
+        model: profile.model,
+        provider: modelProfileLabel(profile),
+      },
+    };
   }
 }
 

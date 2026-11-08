@@ -115,6 +115,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.cancelStructureScan(projectId);
   }
 
+  cancelAsk(projectId: string): Promise<boolean> {
+    return this.transport.cancelAsk(projectId);
+  }
+
   getProjectGraph(projectId: string): Promise<ProjectGraph> {
     return this.transport.getProjectGraph(projectId);
   }

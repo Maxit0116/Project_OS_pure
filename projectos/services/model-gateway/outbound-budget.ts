@@ -37,7 +37,14 @@ const LOCK_MAX_ATTEMPTS = 100;
 
 export type OutboundReservationState = "reserved" | "settled";
 
-export interface OutboundReservationRecord {
+/** Optional audit fields stamped at reserve time (never secrets/prompts/paths). */
+export interface OutboundReservationAuditMeta {
+  requestKind?: string;
+  model?: string;
+  provider?: string;
+}
+
+export interface OutboundReservationRecord extends OutboundReservationAuditMeta {
   id: string;
   state: OutboundReservationState;
   reservedAt: string;
@@ -66,7 +73,7 @@ export interface OutboundBudgetGate {
   readonly path: string;
   readonly limit: number;
   /** Atomically consume one slot. Throws if exhausted or ledger unavailable. */
-  reserve(): { reservationId: string };
+  reserve(meta?: OutboundReservationAuditMeta): { reservationId: string };
   /** Record outcome; never frees the reserved slot. */
   settle(reservationId: string, outcome: OutboundBudgetSettleInput): void;
   /**
@@ -286,7 +293,7 @@ export function createFileOutboundBudget(
   return {
     path: absolute,
     limit,
-    reserve(): { reservationId: string } {
+    reserve(meta?: OutboundReservationAuditMeta): { reservationId: string } {
       return withLock(() => {
         const ledger = readLedgerUnlocked();
         if (ledger.reservations.length >= ledger.limit) {
@@ -303,10 +310,25 @@ export function createFileOutboundBudget(
           );
         }
         const reservationId = `obr_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const requestKind =
+          typeof meta?.requestKind === "string" && meta.requestKind.trim()
+            ? meta.requestKind.trim().slice(0, 64)
+            : undefined;
+        const model =
+          typeof meta?.model === "string" && meta.model.trim()
+            ? meta.model.trim().slice(0, 128)
+            : undefined;
+        const provider =
+          typeof meta?.provider === "string" && meta.provider.trim()
+            ? meta.provider.trim().slice(0, 64)
+            : undefined;
         ledger.reservations.push({
           id: reservationId,
           state: "reserved",
           reservedAt: new Date().toISOString(),
+          ...(requestKind ? { requestKind } : {}),
+          ...(model ? { model } : {}),
+          ...(provider ? { provider } : {}),
         });
         writeLedgerUnlocked(ledger);
         return { reservationId };

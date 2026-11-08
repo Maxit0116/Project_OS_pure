@@ -81,6 +81,10 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async cancelAsk(_projectId: string): Promise<boolean> {
+    return transportNotConnected();
+  }
+
   async getProjectGraph(_projectId: string): Promise<ProjectGraph> {
     return transportNotConnected();
   }

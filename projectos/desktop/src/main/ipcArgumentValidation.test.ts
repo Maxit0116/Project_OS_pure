@@ -36,6 +36,7 @@ describe('privileged IPC argument validation', () => {
     expect(PROJECTOS_IPC_METHODS).toContain('getAccountProfile')
     expect(PROJECTOS_IPC_METHODS).toContain('saveGitHubOAuthClientId')
     expect(PROJECTOS_IPC_METHODS).toContain('importGitHubAuthFromGhCli')
+    expect(PROJECTOS_IPC_METHODS).toContain('cancelAsk')
     expect(PROJECTOS_IPC_METHODS as readonly string[]).not.toContain(
       'restoreDeterministicDesignMutationBackup',
     )

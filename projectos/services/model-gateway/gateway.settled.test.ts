@@ -116,6 +116,82 @@ describe("ModelGateway onSettled", () => {
     expect(settled[0]?.usageStatus).toBe("missing");
   });
 
+  it("mid-flight AbortSignal settles cancelled on ledger with requestKind/model meta and does not retry", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pos-gw-budget-abort-"));
+    budgetDirs.push(dir);
+    const budget = createFileOutboundBudget(join(dir, "ledger.json"), 5);
+    const controller = new AbortController();
+    let fetchCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_url: string | URL | Request, init?: RequestInit) => {
+        fetchCalls += 1;
+        return new Promise<Response>((_resolve, reject) => {
+          const abort = () => {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          };
+          if (init?.signal?.aborted) {
+            abort();
+            return;
+          }
+          init?.signal?.addEventListener("abort", abort, { once: true });
+          // Hang until abort — simulates live Ask Stop while HTTP is in flight.
+          setTimeout(() => controller.abort(), 20);
+        });
+      }),
+    );
+    const secrets = new InMemorySecretStore();
+    await secrets.set("model-key", "secret");
+    const settled: ModelGatewaySettledEvent[] = [];
+    const gateway = new ModelGateway({
+      secretStore: secrets,
+      outboundBudget: budget,
+      onSettled: (event) => settled.push(event),
+    });
+    await expect(
+      gateway.complete(
+        {
+          id: "model-test",
+          name: "Test",
+          provider: "custom",
+          apiFormat: "openai_chat",
+          model: "test-model",
+          baseUrl: "http://127.0.0.1:4000/v1",
+          apiKeyRef: "model-key",
+        },
+        {
+          projectId: "project-test",
+          requestKind: "question_answer",
+          input: { question: "ping" },
+          modelPreference: "model-test",
+          redactionPolicy: "none",
+        },
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ code: "operation_cancelled" });
+    expect(fetchCalls).toBe(1);
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({
+      status: "cancelled",
+      usageStatus: "missing",
+      requestKind: "question_answer",
+      model: "test-model",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    const rows = budget.snapshot().reservations;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      state: "settled",
+      status: "cancelled",
+      usageStatus: "missing",
+      requestKind: "question_answer",
+      model: "test-model",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+  });
+
   it("does not reserve budget when already aborted before any provider outbound", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pos-gw-budget-"));
     budgetDirs.push(dir);

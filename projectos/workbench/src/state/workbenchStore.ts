@@ -291,6 +291,7 @@ export type AgentFlowSubject = 'ask' | 'run' | 'plan' | 'debug'
 export type LatestAskTrace =
   | { status: 'running'; scope: AgentConversationScope }
   | { status: 'complete'; scope: AgentConversationScope; result: AgentAnswerResult }
+  | { status: 'cancelled'; scope: AgentConversationScope }
   | { status: 'error'; scope: AgentConversationScope; message: string }
 export type LatestPlanTrace =
   | { status: 'running'; scope: AgentConversationScope }
@@ -1182,6 +1183,14 @@ function isStructureScanCancellation(error: unknown): boolean {
   if (code === 'operation_cancelled') return true
   const message = error instanceof Error ? error.message : ''
   return /structure map generation was cancelled|operation_cancelled/i.test(message)
+}
+
+function isOperationCancelled(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const code = 'code' in error ? String((error as { code?: unknown }).code ?? '') : ''
+  if (code === 'operation_cancelled') return true
+  const message = error instanceof Error ? error.message : String(error)
+  return /operation_cancelled|Model request cancelled/i.test(message)
 }
 
 function ensureBuffer(buffers: Record<string, string>, path: string): Record<string, string> {
@@ -2971,11 +2980,23 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
 
   stopAgentRun: async () => {
-    const { client, activeRunId, flowStatus, refineLoading, pushToast, locale, executionOverlay, graph } =
-      get()
+    const {
+      client,
+      project,
+      activeRunId,
+      flowStatus,
+      refineLoading,
+      latestAskTrace,
+      pushToast,
+      locale,
+      executionOverlay,
+      graph,
+    } = get()
     if (!activeRunId && flowStatus !== 'running' && !refineLoading) return
 
     const runId = activeRunId
+    const askWasRunning = refineLoading && latestAskTrace?.status === 'running'
+    const askScope = askWasRunning ? latestAskTrace.scope : null
     disposeActiveRunSubscriptions(get, set)
     const settledOverlay =
       runId && executionOverlay?.runId === runId
@@ -2995,6 +3016,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       refineLoading: false,
       activeRunId: null,
       executionOverlay: settledOverlay,
+      ...(askWasRunning && askScope
+        ? { latestAskTrace: { status: 'cancelled' as const, scope: askScope } }
+        : {}),
       ...(runId
         ? {
             revokedApplyRunIds: [
@@ -3013,6 +3037,14 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         await client.cancelAgentRun(runId)
       } catch (error) {
         console.error('[workbench] cancelAgentRun failed', error)
+      }
+    }
+    // Ask / intent-discovery cannot pass AbortSignal over IPC — abort on the main process.
+    if (client && project && refineLoading && typeof client.cancelAsk === 'function') {
+      try {
+        await client.cancelAsk(project.projectId)
+      } catch (error) {
+        console.error('[workbench] cancelAsk failed', error)
       }
     }
 
@@ -3563,6 +3595,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         }))
         notifyMemoryWrite(pushToast, get().locale, answer.memoryWrite)
       } catch (error) {
+        if (isOperationCancelled(error) || get().latestAskTrace?.status === 'cancelled') {
+          set({
+            refineLoading: false,
+            latestAskTrace: { status: 'cancelled', scope: askScope },
+          })
+          return
+        }
         set({
           refineLoading: false,
           latestAskTrace: {
@@ -3642,6 +3681,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
         })
+        if (get().latestAskTrace?.status === 'cancelled') {
+          set({ refineLoading: false })
+          return
+        }
         set((current) => ({
           refineLoading: false,
           latestAskTrace: {
@@ -3687,6 +3730,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         })
         notifyMemoryWrite(pushToast, get().locale, answer.memoryWrite)
       } catch (error) {
+        if (isOperationCancelled(error) || get().latestAskTrace?.status === 'cancelled') {
+          set({
+            refineLoading: false,
+            latestAskTrace: { status: 'cancelled', scope: askScope },
+          })
+          return
+        }
         const ownershipFailure = readFileOwnershipFailure(error)
         if (selectedFilePath && ownershipFailure?.code === 'ownership_ambiguous') {
           set({
