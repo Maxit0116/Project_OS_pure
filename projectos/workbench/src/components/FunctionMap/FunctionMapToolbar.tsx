@@ -58,6 +58,8 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
     architecture,
   } = useFunctionMap()
   const rescanStructureGraph = useWorkbenchStore((s) => s.rescanStructureGraph)
+  const mapDetail = useWorkbenchStore((s) => s.mapDetail)
+  const setMapDetail = useWorkbenchStore((s) => s.setMapDetail)
   const structureRescanLoading = useWorkbenchStore((s) => s.structureRescanLoading)
   const selectedNodeId = useWorkbenchStore((s) => s.selectedNodeId)
   const graph = useWorkbenchStore((s) => s.graph)
@@ -371,6 +373,27 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
               data-zone-interactive
               style={{ left: displayMenuPosition.x, top: displayMenuPosition.y }}
             >
+              <div className={contextMenuStyles.groupLabel} aria-hidden>
+                {ts('map.detail.label')}
+              </div>
+              {(['simple', 'technical'] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={mapDetail === value}
+                  className={contextMenuStyles.menuItem}
+                  title={ts('map.detail.help')}
+                  onClick={() => {
+                    setMapDetail(value)
+                    closeDisplayMenu()
+                  }}
+                >
+                  {mapDetail === value ? '✓ ' : ''}
+                  {ts(`map.detail.${value}`)}
+                </button>
+              ))}
+              <div className={contextMenuStyles.separator} aria-hidden />
               <div className={contextMenuStyles.groupLabel} aria-hidden>
                 {ts('map.displayMenuStructure')}
               </div>

@@ -4,6 +4,8 @@ import type { LiveNodeSummary } from '@contracts/index'
 import { OpenGraphButton } from '../OpenGraphButton'
 import LiveNodeBadge, { liveRingClass } from '../LiveNodeBadge'
 import type { C4ShapeKind } from './types'
+import { MAX_FILES_SHOWN } from './fileList'
+import { useI18n } from '../../../i18n'
 import { C4_SHAPE_COMPONENTS } from './shapes'
 import styles from '../FeatureNode.module.css'
 
@@ -14,6 +16,8 @@ export interface C4FlowNodeData {
   technology?: string
   stereotype?: string
   members?: string[]
+  /** File names listed under the box. */
+  files?: string[]
   selected?: boolean
   dimmed?: boolean
   /** Live Graph activity summary for this architecture node. */
@@ -31,6 +35,8 @@ export interface C4FlowNodeData {
  * Drill-in remains double-click on the canvas; optional button when canOpenGraph.
  */
 function C4FlowNode({ data }: NodeProps & { data: C4FlowNodeData }) {
+  const { ts } = useI18n()
+  const hiddenFiles = (data.files?.length ?? 0) - MAX_FILES_SHOWN
   const Shape = C4_SHAPE_COMPONENTS[data.shape] ?? C4_SHAPE_COMPONENTS.system
   const ring = liveRingClass(data.liveSummary)
   return (
@@ -53,6 +59,8 @@ function C4FlowNode({ data }: NodeProps & { data: C4FlowNodeData }) {
         technology={data.technology}
         stereotype={data.stereotype}
         members={data.members}
+        files={data.files}
+        moreFilesLabel={hiddenFiles > 0 ? ts('map.node.moreFiles', { count: hiddenFiles }) : undefined}
         selected={data.selected}
         dimmed={data.dimmed}
         className={data.canOpenGraph ? 'has-drill' : undefined}

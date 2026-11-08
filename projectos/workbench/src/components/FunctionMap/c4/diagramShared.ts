@@ -2,6 +2,8 @@ import type { FunctionalEdge, FunctionalNode } from '@contracts/index'
 import { nodeCardBlurb } from '../nodeCopy'
 import { C4_DEFAULT_NODE_SIZE } from './shapes'
 import { resolveC4ShapeKindFromNode } from './shapeKind'
+import { filesBlockHeight } from './fileList'
+import { nodeFileNames } from '../nodeCopy'
 import type { C4DiagramEdge, C4DiagramNode } from './types'
 
 export function emptyBounds() {
@@ -50,18 +52,21 @@ export function toC4Node(
 ): C4DiagramNode {
   const shape = resolveC4ShapeKindFromNode(node)
   const size = C4_DEFAULT_NODE_SIZE[shape]
+  // A feature lists the files it is made of under its name and what it is for.
+  const files = node.level === 'component' ? nodeFileNames(node) : []
   return {
     id: node.id,
     shape,
     label: node.name,
     description: nodeCardBlurb(node),
     technology: node.technology,
+    ...(files.length > 0 ? { files } : {}),
     elementType: node.elementType,
     level: node.level,
     sourceNodeId: node.id,
     position,
     width: size.width,
-    height: size.height,
+    height: size.height + filesBlockHeight(files.length),
   }
 }
 

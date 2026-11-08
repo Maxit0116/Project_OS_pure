@@ -2942,6 +2942,28 @@ const en = {
     impactCopied: 'Impact analysis copied ({views} views)',
     artifacts: 'Artifacts',
     artifactsHint: 'Show notes, plans, terminals, and work groups',
+    detail: {
+      label: 'Detail',
+      simple: 'Simple',
+      technical: 'Technical',
+      help: 'Simple uses plain words: what each part is for and which files it holds. Technical adds frameworks, protocols and architecture terms.',
+    },
+    levelsPlain: {
+      context: 'Big picture',
+      container: 'Parts',
+      component: 'Features',
+      code: 'Files',
+    },
+    levelDescriptionsPlain: {
+      context:
+        'The big picture: who uses the product and which outside services it relies on. Double-click the product to see its parts.',
+      container:
+        'The main parts of the product (for example the website and the server). Double-click a part to see its features.',
+      component:
+        'The features inside this part. Each box says what the feature is for and lists the files it uses. Double-click a feature to see its files.',
+      code:
+        'The files that make up this feature. A line means one file uses another.',
+    },
     levels: {
       context: 'Context',
       container: 'Containers',
@@ -2979,6 +3001,7 @@ const en = {
       openSystemMap: 'Open system composition',
       openModuleMap: 'Open feature modules',
       openGraph: 'Open internal file map',
+      moreFiles: '+{count} more files',
     },
     liveGraph: {
       unmappedTitle: 'Activity outside this graph',

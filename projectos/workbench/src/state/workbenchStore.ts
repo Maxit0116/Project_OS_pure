@@ -247,6 +247,7 @@ import {
 import { resolveFileOwnerSelection } from './fileOwnerSelection'
 import { unmetRequirementsFromMessage, type UnmetRequirement } from './unmetRequirements'
 import { isNodeAgentArchitectureLevel, resolveProjectedCodeNode } from '../components/FunctionMap/architectureView'
+import { loadMapDetail, saveMapDetail, type MapDetail } from './mapDetailPreference'
 import {
   closeEditorFileInLayout,
   initialEditorLayout,
@@ -535,6 +536,8 @@ export interface WorkbenchState {
 
   locale: Locale
   themePreference: ThemePreference
+  /** Plain words (default) or the architecture vocabulary on the map. */
+  mapDetail: MapDetail
   resolvedTheme: ResolvedTheme
   notifyOnDiffReady: boolean
   notifyOnPendingDecision: boolean
@@ -725,6 +728,7 @@ export interface WorkbenchState {
 
   setLocale: (locale: Locale) => void
   setThemePreference: (theme: ThemePreference) => void
+  setMapDetail: (value: MapDetail) => void
   setResolvedTheme: (theme: ResolvedTheme) => void
   setNotifyOnDiffReady: (enabled: boolean) => void
   setNotifyOnPendingDecision: (enabled: boolean) => void
@@ -1905,6 +1909,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   contextLoading: false,
   locale: loadLocale(),
   themePreference: loadThemePreference(),
+  mapDetail: loadMapDetail(),
   resolvedTheme: resolveTheme(loadThemePreference()),
   notifyOnDiffReady: loadNotifyOnDiffReadyPreference(),
   notifyOnPendingDecision: loadNotifyOnPendingDecisionPreference(),
@@ -1950,6 +1955,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   setLocale: (locale) => {
     saveLocale(locale)
     set({ locale })
+  },
+  setMapDetail: (mapDetail) => {
+    saveMapDetail(mapDetail)
+    set({ mapDetail })
   },
 
   setThemePreference: (themePreference) => {

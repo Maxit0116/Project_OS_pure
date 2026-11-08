@@ -49,6 +49,8 @@ export interface C4DiagramNode {
   stereotype?: string
   /** Code-level members (exports / methods / symbols) for class-like boxes. */
   members?: string[]
+  /** File names under a feature box (component level). */
+  files?: string[]
   /** Contract elementType when present. */
   elementType?: string
   level?: ArchitectureLevel
@@ -97,6 +99,9 @@ export interface C4ShapeProps {
   technology?: string
   stereotype?: string
   members?: string[]
+  /** File names listed under the box; `moreFilesLabel` says how many were left out. */
+  files?: string[]
+  moreFilesLabel?: string
   selected?: boolean
   dimmed?: boolean
   className?: string

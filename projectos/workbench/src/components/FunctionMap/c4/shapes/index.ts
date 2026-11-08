@@ -56,6 +56,6 @@ export const C4_DEFAULT_NODE_SIZE: Record<
   server: { width: 200, height: 110 },
   database: { width: 150, height: 130 },
   queue: { width: 210, height: 84 },
-  component: { width: 200, height: 100 },
+  component: { width: 200, height: 112 },
   code: { width: 220, height: 110 },
 }

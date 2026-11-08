@@ -1,6 +1,7 @@
 import { Fragment } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useI18n } from '../../i18n'
+import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useFunctionMap } from './FunctionMapContext'
 import styles from './FunctionMap.module.css'
 
@@ -21,6 +22,8 @@ export default function FunctionMapLevelNavigator({ showScopeLabel = false }: Pr
     drillOut,
   } = useFunctionMap()
   const { ts } = useI18n()
+  // Plain words (Big picture, Parts, Features, Files) unless the person asked for the technical view.
+  const levelNames = useWorkbenchStore((s) => s.mapDetail) === 'simple' ? 'Plain' : ''
 
   if (architectureLevels.length === 0) return null
 
@@ -67,9 +70,9 @@ export default function FunctionMapLevelNavigator({ showScopeLabel = false }: Pr
               onClick={() => {
                 if (level !== architectureLevel) setArchitectureLevel(level)
               }}
-              title={ts(`map.levelDescriptions.${level}`)}
+              title={ts(`map.levelDescriptions${levelNames}.${level}`)}
             >
-              {ts(`map.levels.${level}`)}
+              {ts(`map.levels${levelNames}.${level}`)}
             </button>
           </Fragment>
         ))}

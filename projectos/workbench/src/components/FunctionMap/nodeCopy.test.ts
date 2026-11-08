@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { nodeCardBlurb, nodeDetailCopy, nodePreviewBody } from './nodeCopy'
+import { nodeCardBlurb, nodeDetailCopy, nodePreviewBody, nodeFileNames } from './nodeCopy'
 
 describe('nodeCopy', () => {
   it('puts the short summary on the card and the longer description in the preview', () => {
@@ -41,5 +41,32 @@ describe('nodeCopy', () => {
     expect(nodePreviewBody(node)).toBe(
       '一段较长的说明，用来解释这个模块在系统里的位置。',
     )
+  })
+})
+
+describe('nodeFileNames', () => {
+  it('lists file names, not folders, with the files that carry the logic first and tests last', () => {
+    expect(
+      nodeFileNames({
+        linkedFiles: [
+          { path: 'tests/test_login.py', role: 'test' },
+          { path: 'backend/app/api/routes/login.py', role: 'primary' },
+          { path: 'backend/app/core/config.py', role: 'config' },
+          { path: 'backend/app/crud.py', role: 'supporting' },
+        ],
+      }),
+    ).toEqual(['login.py', 'crud.py', 'config.py', 'test_login.py'])
+  })
+
+  it('names a file once, keeps the order it was given within a role, and can be capped', () => {
+    const linkedFiles = [
+      { path: 'a/index.ts', role: 'primary' },
+      { path: 'b/index.ts', role: 'primary' },
+      { path: 'a/other.ts', role: 'primary' },
+    ]
+    expect(nodeFileNames({ linkedFiles })).toEqual(['index.ts', 'other.ts'])
+    expect(nodeFileNames({ linkedFiles }, 1)).toEqual(['index.ts'])
+    expect(nodeFileNames({})).toEqual([])
+    expect(nodeFileNames({ linkedFiles: null })).toEqual([])
   })
 })

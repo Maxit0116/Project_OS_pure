@@ -2900,6 +2900,28 @@ const zh = {
     impactCopied: '已复制影响分析（{views} 个视图）',
     artifacts: '资料卡',
     artifactsHint: '显示笔记、计划、终端与 WorkGroup',
+    detail: {
+      label: '详细程度',
+      simple: '简单',
+      technical: '技术',
+      help: '简单：用大白话说明每个部分是做什么的、包含哪些文件。技术：额外显示框架、协议和架构术语。',
+    },
+    levelsPlain: {
+      context: '全貌',
+      container: '模块',
+      component: '功能',
+      code: '文件',
+    },
+    levelDescriptionsPlain: {
+      context:
+        '全貌：谁在使用这个产品，它依赖哪些外部服务。双击产品可以看到它的各个模块。',
+      container:
+        '产品的主要部分（例如网站和服务器）。双击某个模块可以看到它的功能。',
+      component:
+        '这个模块里的各项功能。每个方框写明这项功能是做什么的，并列出用到的文件。双击某项功能可以看到它的文件。',
+      code:
+        '组成这项功能的文件。连线表示一个文件用到了另一个文件。',
+    },
     levels: {
       context: '系统上下文',
       container: '容器',
@@ -2937,6 +2959,7 @@ const zh = {
       openSystemMap: '查看系统组成',
       openModuleMap: '查看功能模块',
       openGraph: '查看内部文件图',
+      moreFiles: '另有 {count} 个文件',
     },
     liveGraph: {
       unmappedTitle: '未入图资源活动',

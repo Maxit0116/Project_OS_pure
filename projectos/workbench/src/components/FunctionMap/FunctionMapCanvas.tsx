@@ -1034,6 +1034,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
   const openGlobalAgentChat = useWorkbenchStore((s) => s.openGlobalAgentChat)
   const openFileAgentChat = useWorkbenchStore((s) => s.openFileAgentChat)
   const { ts, messages } = useI18n()
+  const simpleMap = useWorkbenchStore((s) => s.mapDetail) === 'simple'
   const [contextMenu, setContextMenu] = useState<FunctionMapContextMenuState | null>(null)
   const [headerContextMenu, setHeaderContextMenu] =
     useState<MapArtifactHeaderContextMenuState | null>(null)
@@ -1891,9 +1892,10 @@ function FunctionMapCanvasInner({ bleed }: Props) {
               shape: c4Node.shape,
               label: c4Node.label || n.name,
               description: c4Node.description ?? nodeCardBlurb(n),
-              technology: c4Node.technology ?? n.technology,
-              stereotype: c4Node.stereotype,
+              technology: simpleMap ? undefined : (c4Node.technology ?? n.technology),
+              stereotype: simpleMap ? undefined : c4Node.stereotype,
               members: c4Node.members,
+              files: c4Node.files,
               selected: n.id === selectedNodeId,
               dimmed: nodeDimmed,
               liveSummary: summarizeNodeLiveActivityWithDecisions(executionOverlay, n.id, runDecisions),
@@ -1993,6 +1995,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       layerLabelById,
       locale,
       messages,
+      simpleMap,
       canDrillIntoNode,
       drillIntoNode,
       teamSnapshot,
@@ -3047,12 +3050,13 @@ function FunctionMapCanvasInner({ bleed }: Props) {
             const relationI18n =
               messages.map.relations[e.relation as keyof typeof messages.map.relations]
             const denseC4 = displayEdges.length > 8
+            // Plain view: what the connection is for, never just its protocol.
             const compactLabel = formatC4EdgeLabel(
               e.label,
-              e.technology,
+              simpleMap ? undefined : e.technology,
               e.relation,
               relationI18n,
-              denseC4 ? 'tech' : 'full',
+              denseC4 && !simpleMap ? 'tech' : 'full',
             )
             const fit =
               compactLabel && source && target
@@ -3093,10 +3097,10 @@ function FunctionMapCanvasInner({ bleed }: Props) {
       const denseC4 = useC4Visuals && displayEdges.length > 8
       const compactLabel = formatC4EdgeLabel(
         e.label,
-        e.technology,
+        simpleMap ? undefined : e.technology,
         e.relation,
         relationI18n,
-        denseC4 ? 'tech' : 'full',
+        denseC4 && !simpleMap ? 'tech' : 'full',
       )
       const parallel = useC4Visuals
         ? parallelEdgeIndex(displayEdges, e.id, e.source, e.target)
@@ -3121,7 +3125,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
               : isLayeredArchitecture || displayEdges.length > 6
                 ? 'hover'
                 : 'always',
-          technology: e.technology,
+          technology: simpleMap ? undefined : e.technology,
           relationship: e.label,
           ...(useC4Visuals
             ? {
@@ -3286,6 +3290,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     liveGraphFocusTaskId,
     liveFocusNodeIds,
     durableGraph,
+    simpleMap,
   ])
 
   useEffect(() => {

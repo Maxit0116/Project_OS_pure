@@ -1,4 +1,5 @@
 import type { C4ShapeProps } from '../types'
+import { MAX_FILES_SHOWN } from '../fileList'
 import styles from './C4ShapeShell.module.css'
 
 export function shapeRootClass(
@@ -21,7 +22,9 @@ export function C4ShapeMeta({
   technology,
   description,
   stereotype,
-}: Pick<C4ShapeProps, 'label' | 'technology' | 'description' | 'stereotype'>) {
+  files,
+  moreFilesLabel,
+}: Pick<C4ShapeProps, 'label' | 'technology' | 'description' | 'stereotype' | 'files' | 'moreFilesLabel'>) {
   const techLine = stereotype ?? (technology ? `[${technology}]` : undefined)
   return (
     <div className={styles.meta}>
@@ -34,6 +37,18 @@ export function C4ShapeMeta({
       ) : null}
       {description ? (
         <span className={styles.description}>{description}</span>
+      ) : null}
+      {files && files.length > 0 ? (
+        <ul className={styles.files} aria-label="files">
+          {files.slice(0, MAX_FILES_SHOWN).map((name) => (
+            <li key={name} className={styles.fileName} title={name}>
+              {name}
+            </li>
+          ))}
+          {files.length > MAX_FILES_SHOWN && moreFilesLabel ? (
+            <li className={styles.fileMore}>{moreFilesLabel}</li>
+          ) : null}
+        </ul>
       ) : null}
     </div>
   )
