@@ -186,9 +186,13 @@ export class PlanService {
         lastTruncationFailure = false;
         break;
       } catch (error) {
-        const mayRetry =
-          attempt === 0
-          && shouldRetryImplementationPlanForTruncation(response, maxOutputTokens);
+        const truncSignal = shouldRetryImplementationPlanForTruncation(
+          response,
+          maxOutputTokens,
+        );
+        const cutJson = isPlanParseFailureLikelyTruncation(error);
+        // Budget retry only for likely cut JSON + trunc signal — never for complete schema-invalid.
+        const mayRetry = attempt === 0 && truncSignal && cutJson;
         if (mayRetry) {
           firstFailure = "response_truncated";
           lastTruncationFailure = true;
@@ -201,17 +205,32 @@ export class PlanService {
           }
           continue;
         }
-        // Explicit stop / structural invalid / non-saturated miss — fail closed, no budget retry.
+        // Two-round truncation exhaustion: readable truncation error (not the inner parse wording).
+        if (attempt > 0 && lastTruncationFailure && cutJson) {
+          throw new ProjectOSError(
+            "plan_generation_failed",
+            "The model truncated the implementation plan JSON before it was complete",
+            { details: { planParseFailure: "malformed_json", exhaustedTruncationRetries: true } },
+          );
+        }
+        // Schema / non-truncation failures keep their original message.
         throw error;
       }
     }
 
     if (!parsed) {
+      // Safety net if the loop exits without parse or throw (should be unreachable).
       throw new ProjectOSError(
         "plan_generation_failed",
         lastTruncationFailure
           ? "The model truncated the implementation plan JSON before it was complete"
           : "The model returned malformed implementation plan JSON",
+        {
+          details: {
+            planParseFailure: "malformed_json",
+            ...(lastTruncationFailure ? { exhaustedTruncationRetries: true } : {}),
+          },
+        },
       );
     }
 
@@ -353,6 +372,17 @@ export function sanitizePlanPayload(decoded: unknown): unknown {
   };
 }
 
+export type PlanParseFailureKind = "malformed_json" | "invalid_schema";
+
+/** True only for cut/undecodable JSON — not for complete objects that fail the plan schema. */
+export function isPlanParseFailureLikelyTruncation(error: unknown): boolean {
+  return (
+    error instanceof ProjectOSError
+    && error.code === "plan_generation_failed"
+    && error.details?.planParseFailure === "malformed_json"
+  );
+}
+
 /** Exported for fixture regression: truncated/malformed plan bodies must fail closed. */
 export function parsePlanJson(
   output: string,
@@ -376,11 +406,15 @@ export function parsePlanJson(
     }
   }
 
+  const planParseFailure: PlanParseFailureKind = sawDecodedJson
+    ? "invalid_schema"
+    : "malformed_json";
   throw new ProjectOSError(
     "plan_generation_failed",
-    sawDecodedJson
+    planParseFailure === "invalid_schema"
       ? "The model returned an invalid implementation plan"
       : "The model returned malformed implementation plan JSON",
+    { details: { planParseFailure } },
   );
 }
 

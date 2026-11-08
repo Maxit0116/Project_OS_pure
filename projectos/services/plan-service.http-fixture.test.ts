@@ -191,6 +191,64 @@ describe("PlanService HTTP fixture (live truncation class)", () => {
     expect(seenMaxTokens).toEqual([8192]);
   });
 
+  it("HTTP missing finishReason + saturated tokens + complete schema-invalid does not second-call", async () => {
+    const secrets = new InMemorySecretStore();
+    await secrets.set("fixture-key", "sk-fixture-not-real");
+    let hits = 0;
+    const invalidComplete = JSON.stringify({
+      objective: "Add idempotent event dedupe for sync",
+      steps: "not-an-array",
+      todos: [],
+      ambiguities: [],
+      rationale: "complete but schema-invalid",
+    });
+    await withFixtureServer((_req, res) => {
+      hits += 1;
+      res.setHeader("content-type", "application/json");
+      // Omit finish_reason to mirror live completes log (no finishReason field).
+      res.end(JSON.stringify({
+        id: "chatcmpl_fixture_schema_cap",
+        object: "chat.completion",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: invalidComplete },
+          },
+        ],
+        usage: {
+          prompt_tokens: 3900,
+          completion_tokens: 4096,
+          total_tokens: 7996,
+        },
+      }));
+    }, async (baseUrl) => {
+      const profile = {
+        id: "fixture_flash",
+        name: "fixture",
+        provider: "custom",
+        apiFormat: "openai_chat",
+        model: "fixture-model",
+        baseUrl,
+        apiKeyRef: "fixture-key",
+      } as ModelProfile;
+      const gateway = new ModelGateway({ secretStore: secrets, outboundRequestBounds: null });
+      await expect(
+        new PlanService(gateway).createPlan({
+          projectId: "proj_fixture",
+          scope: { kind: "global" },
+          objective: "Add idempotent event dedupe for sync",
+          localContext,
+          profile,
+          thinkingDepth: "off",
+        }),
+      ).rejects.toMatchObject({
+        code: "plan_generation_failed",
+        message: "The model returned an invalid implementation plan",
+      });
+    });
+    expect(hits).toBe(1);
+  });
+
   it("HTTP stop + complete JSON at the cap is accepted with a single request", async () => {
     const secrets = new InMemorySecretStore();
     await secrets.set("fixture-key", "sk-fixture-not-real");

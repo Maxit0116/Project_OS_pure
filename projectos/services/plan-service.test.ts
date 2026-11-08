@@ -9,6 +9,7 @@ import { ChatSessionModeSchema } from "../contracts/chat-session.js";
 import {
   PlanService,
   buildPromptFromPlan,
+  isPlanParseFailureLikelyTruncation,
   mergeClarifyingQuestions,
   normalizeClarifyingQuestions,
   parsePlanJson,
@@ -287,8 +288,60 @@ describe("implementation plan truncation regression (live acceptance shape)", ()
         profile,
         thinkingDepth: "medium",
       }),
-    ).rejects.toBeInstanceOf(ProjectOSError);
+    ).rejects.toMatchObject({
+      code: "plan_generation_failed",
+      message: "The model truncated the implementation plan JSON before it was complete",
+      details: { exhaustedTruncationRetries: true },
+    });
     expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry complete schema-invalid JSON when finishReason is missing and tokens saturate", async () => {
+    const invalidComplete = JSON.stringify({
+      objective: "Add idempotent event dedupe for sync",
+      steps: "not-an-array",
+      todos: [],
+      ambiguities: [],
+      rationale: "complete object but schema-invalid",
+    });
+    expect(() => parsePlanJson(invalidComplete)).toThrow(/invalid implementation plan/i);
+    expect(
+      isPlanParseFailureLikelyTruncation(
+        (() => {
+          try {
+            parsePlanJson(invalidComplete);
+          } catch (error) {
+            return error;
+          }
+          return null;
+        })(),
+      ),
+    ).toBe(false);
+    const complete = vi.fn(async () => ({
+      requestId: "plan_schema_near_cap",
+      provider: "fixture",
+      model: "fixture-model",
+      latencyMs: 1,
+      // Live settles omit finishReason; saturation alone must NOT budget-retry schema errors.
+      usage: { inputTokens: 3900, outputTokens: 4096 },
+      output: invalidComplete,
+    }));
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    await expect(
+      service.createPlan({
+        projectId: "proj_1",
+        scope: { kind: "global" },
+        objective: "Add idempotent event dedupe for sync",
+        localContext,
+        profile,
+        thinkingDepth: "medium",
+      }),
+    ).rejects.toMatchObject({
+      code: "plan_generation_failed",
+      message: "The model returned an invalid implementation plan",
+      details: { planParseFailure: "invalid_schema" },
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a complete finishReason=stop plan that sits on the token cap (no second HTTP)", async () => {

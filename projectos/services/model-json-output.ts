@@ -86,13 +86,12 @@ export function resolveImplementationPlanMaxOutputTokens(
 }
 
 /**
- * Plan-only truncation retry gate. A complete, schema-valid plan must be kept even
- * when outputTokens sits near the cap with finishReason=stop (or missing).
- * Budget retry is allowed only for:
+ * Plan-only truncation *signal* from the model response (not a commit to retry).
+ * Combined with `isPlanParseFailureLikelyTruncation` in PlanService: complete JSON that
+ * fails schema must not budget-retry even when finishReason is missing and tokens saturate.
+ * Signal is true only for:
  * - explicit finishReason "length", or
- * - missing/unknown finishReason with saturated token usage (live gateway settles omit finishReason)
- * after parse already failed. Explicit non-length finish reasons never burn a second HTTP call
- * for shape/schema errors.
+ * - missing finishReason with saturated token usage (live gateway settles omit finishReason).
  */
 export function shouldRetryImplementationPlanForTruncation(
   response: { finishReason?: string | undefined; usage: { outputTokens: number } },
