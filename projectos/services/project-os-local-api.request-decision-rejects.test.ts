@@ -208,7 +208,11 @@ describe("ProjectOSLocalApi requestDecision rejection boundaries", () => {
       runId: "run_decision_timeout",
       pipelineBudget: { maxWallClockMs: 40 },
     });
-    await expect(started).rejects.toThrow(/timed out within the run budget|pipeline_budget|no files were written/i);
+    // Decision-wait and executor wall-clock deadlines race; either phrasing is a budget timeout.
+    // Keep the security asserts below — no staged write / superseded wait — regardless of which wins.
+    await expect(started).rejects.toThrow(
+      /timed out within the run budget|did not finish within the run's time budget|pipeline_budget|no files were written/i,
+    );
     expect(state.diff).toBeUndefined();
     expect(store.loadDecision(pending.id)?.status).toBe("superseded");
     expect(orchestrator.hasActiveDecisionWait(pending.id)).toBe(false);
