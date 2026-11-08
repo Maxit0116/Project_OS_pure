@@ -64,4 +64,14 @@ describe("provider capability matrix (supported surface)", () => {
     expect(createProviderAdapter("ollama_chat").complete).toEqual(expect.any(Function));
     expect(createProviderAdapter("openai_chat").testConnection).toEqual(expect.any(Function));
   });
+
+  it("does not claim native SSE streaming as a product capability", () => {
+    // Adapters use non-streaming HTTP complete(); UI token streaming is a separate layer.
+    // Do not advertise provider SSE parity across vendors.
+    const adapters = ModelApiFormatSchema.options.map((format) => createProviderAdapter(format));
+    for (const adapter of adapters) {
+      expect(adapter).not.toHaveProperty("streamComplete");
+      expect(adapter).not.toHaveProperty("stream");
+    }
+  });
 });
