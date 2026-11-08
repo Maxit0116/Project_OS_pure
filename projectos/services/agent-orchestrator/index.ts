@@ -10799,17 +10799,6 @@ export function alignProposalReview(
   });
 }
 
-function isEvidenceValidBatchValidation(
-  parsed: z.infer<typeof ModelBatchValidationSchema>,
-): boolean {
-  // Trust per-criterion evidence over task/cross-file/top-level status labels.
-  // Models often mark every criterion satisfied while emitting inconsistent/invalid
-  // (e.g. complaining the bug is already absent / fix is a no-op).
-  return parsed.tasks.every((task) =>
-    task.criteria.every((criterion) => criterion.status === "satisfied"),
-  );
-}
-
 function safeBatchValidationFailureLabel(
   category: BatchValidationFailureCategory,
 ): string {
