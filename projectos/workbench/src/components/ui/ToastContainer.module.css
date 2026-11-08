@@ -1,6 +1,7 @@
 .container {
   position: fixed;
-  bottom: 48px;
+  /* Right side, ~1/5 from top — clears title/top chrome and chat composer */
+  top: max(20vh, calc(var(--titlebar-height) + var(--topbar-height) + var(--space-lg)));
   right: var(--space-lg);
   z-index: 1000;
   display: flex;

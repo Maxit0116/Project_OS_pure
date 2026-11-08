@@ -144,11 +144,20 @@ export function buildChatSessionRecord(
     ...(existingHead?.titleGeneratedAt ? { titleGeneratedAt: existingHead.titleGeneratedAt } : {}),
     ...(existingHead?.parentSessionId ? { parentSessionId: existingHead.parentSessionId } : {}),
     ...(existingHead?.forkMessageId ? { forkMessageId: existingHead.forkMessageId } : {}),
+    ...(existingHead?.forkLayout ? { forkLayout: existingHead.forkLayout } : {}),
+    ...(typeof existingHead?.forkAnchorOffsetY === 'number'
+      ? { forkAnchorOffsetY: existingHead.forkAnchorOffsetY }
+      : {}),
+    ...(existingHead?.graphId ? { graphId: existingHead.graphId } : {}),
     ...(existingHead?.classification ? { classification: existingHead.classification } : {}),
     ...(existingHead?.classificationSource
       ? { classificationSource: existingHead.classificationSource }
       : {}),
     ...(existingHead?.responsibility ? { responsibility: existingHead.responsibility } : {}),
+    ...(existingHead?.previewStrip ? { previewStrip: existingHead.previewStrip } : {}),
+    ...(typeof existingHead?.messageCount === 'number'
+      ? { messageCount: existingHead.messageCount }
+      : {}),
   }
   return {
     version: '0.2.0',

@@ -46,3 +46,11 @@ export function selectPendingChangesDrawerUndoMode(state: {
   }
   return 'dismiss'
 }
+
+/** Stage-rail Code/Diff live dot: only when there is a reviewable diff payload. */
+export function selectDiffReviewAttention(state: {
+  diffReady: boolean
+  generatedDiff: { files: unknown[] } | null
+}): boolean {
+  return state.diffReady && (state.generatedDiff?.files.length ?? 0) > 0
+}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { GitBranch } from 'lucide-react'
+import { GitBranch, History } from 'lucide-react'
 import { CustomModeIcon } from './customModeIcons'
 import { canSubmitAgentPrompt, useWorkbenchStore } from '../../state/workbenchStore'
 import { useChatSessionStore } from '../../state/chatSessionStore'
@@ -51,14 +51,22 @@ import { useWireframePackStore } from '../../state/wireframePackStore'
 import AgentDraftCard from '../AgentWorkforce/AgentDraftCard'
 import { shouldSuggestPlanMode } from './suggestPlanMode'
 import { isDebugFixPending } from '../../state/debugFixPending'
+import Button from '../ui/Button'
 import ConversationNavRail from './ConversationNavRail'
-import { collectUserTurns, scrollTurnIntoView } from './conversationNavTurns'
+import {
+  collectUserTurns,
+  flashTurnHighlight,
+  findTurnElement,
+  scrollTurnIntoView,
+  sweepScrollTurnIntoView,
+} from './conversationNavTurns'
 import FirstPrinciplesConflictCard from './FirstPrinciples/FirstPrinciplesConflictCard'
 import FirstPrinciplesLayerCard from './FirstPrinciples/FirstPrinciplesLayerCard'
-import FirstPrinciplesSuggestChip from './FirstPrinciples/FirstPrinciplesSuggestChip'
 import ThesisHandoffBar from './FirstPrinciples/ThesisHandoffBar'
 import ThesisReviewCard from './FirstPrinciples/ThesisReviewCard'
-import { looksLikeVisionPrompt } from '@contracts/index'
+import SessionRoutePreview from './SessionRoutePreview'
+import { useSessionRouteStore } from '../../state/sessionRouteStore'
+import { resolveSessionForkPlacementFromMessages } from '../SessionGraph/sessionForkLayout'
 import styles from './ChatPanel.module.css'
 
 export default function ChatPanel() {
@@ -66,8 +74,14 @@ export default function ChatPanel() {
   const inheritedDigest = useChatSessionStore((s) => s.inheritedDigest)
   const activeSessionId = useChatSessionStore((s) => s.activeSessionId)
   const pendingRevealMessageId = useChatSessionStore((s) => s.pendingRevealMessageId)
+  const pendingRevealNonce = useChatSessionStore((s) => s.pendingRevealNonce)
+  const pendingRevealMotion = useChatSessionStore((s) => s.pendingRevealMotion)
   const clearPendingRevealMessage = useChatSessionStore((s) => s.clearPendingRevealMessage)
   const forkSession = useChatSessionStore((s) => s.forkSession)
+  const routeEnabled = useSessionRouteStore((s) => s.preferences.enabled)
+  const routeMatching = useSessionRouteStore((s) => s.matching)
+  const routePreview = useSessionRouteStore((s) => s.preview)
+  const routeFromPrompt = useSessionRouteStore((s) => s.routeFromPrompt)
   const composerDraft = useWorkbenchStore((s) => s.composerDraft)
   const setComposerDraft = useWorkbenchStore((s) => s.setComposerDraft)
   const setChatInput = useWorkbenchStore((s) => s.setChatInput)
@@ -152,12 +166,6 @@ export default function ChatPanel() {
   const askSubMode = useWorkbenchStore((s) => s.askSubMode)
   const pendingFirstPrinciples = useWorkbenchStore((s) => s.pendingFirstPrinciples)
   const firstPrinciplesBusy = useWorkbenchStore((s) => s.firstPrinciplesBusy)
-  const firstPrinciplesSuggestDismissed = useWorkbenchStore(
-    (s) => s.firstPrinciplesSuggestDismissed,
-  )
-  const setAskSubMode = useWorkbenchStore((s) => s.setAskSubMode)
-  const dismissFirstPrinciplesSuggest = useWorkbenchStore((s) => s.dismissFirstPrinciplesSuggest)
-  const beginFirstPrinciplesFromVision = useWorkbenchStore((s) => s.beginFirstPrinciplesFromVision)
   const answerFirstPrinciplesQuestion = useWorkbenchStore((s) => s.answerFirstPrinciplesQuestion)
   const confirmFirstPrinciplesThesis = useWorkbenchStore((s) => s.confirmFirstPrinciplesThesis)
   const resolveFirstPrinciplesConflict = useWorkbenchStore((s) => s.resolveFirstPrinciplesConflict)
@@ -220,6 +228,10 @@ export default function ChatPanel() {
   const messagesRef = useRef<HTMLDivElement>(null)
   const baseInputRef = useRef('')
   const voiceUpdatingRef = useRef(false)
+  /** Avoid auto-scroll-to-bottom undoing a just-completed message reveal. */
+  const pendingRevealRef = useRef<string | null>(pendingRevealMessageId)
+  pendingRevealRef.current = pendingRevealMessageId
+  const suppressBottomScrollUntilRef = useRef(0)
   const voiceBackend = useChatVoiceBackend(locale)
   const navTurns = useMemo(
     () => collectUserTurns(messages, agentActivities),
@@ -310,24 +322,80 @@ export default function ChatPanel() {
   useEffect(() => {
     const el = messagesRef.current
     if (!el) return
-    if (pendingRevealMessageId) return
+    // Read pending via ref so clearing a successful reveal does not re-trigger
+    // this effect and jump to the latest reply.
+    if (pendingRevealRef.current) return
+    if (performance.now() < suppressBottomScrollUntilRef.current) return
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-  }, [messages, pendingRefinement, pendingIntent, pendingPlan, debugSession, refineLoading, pendingRevealMessageId])
+  }, [messages, pendingRefinement, pendingIntent, pendingPlan, debugSession, refineLoading])
 
   useEffect(() => {
     if (!pendingRevealMessageId) return
     const el = messagesRef.current
     if (!el) return
     const messageId = pendingRevealMessageId
-    const frame = window.requestAnimationFrame(() => {
-      const found = scrollTurnIntoView(el, messageId)
-      clearPendingRevealMessage()
-      if (!found) {
-        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    const motion = pendingRevealMotion
+    let cancelled = false
+    let settled = false
+    let frame = 0
+    const startedAt = performance.now()
+    // Session Graph → Chat can wait on switchSession + overlay close layout.
+    const deadlineMs = 4000
+
+    const finish = (found: boolean) => {
+      if (cancelled || settled) return
+      settled = true
+      if (found) {
+        // Cover smooth travel (and sweep origin) so auto-scroll-to-bottom cannot win.
+        suppressBottomScrollUntilRef.current =
+          performance.now() + (motion === 'sweep' ? 2000 : 1200)
+        flashTurnHighlight(el, messageId, styles.navFlash)
       }
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [pendingRevealMessageId, messages, clearPendingRevealMessage, activeSessionId])
+      clearPendingRevealMessage()
+    }
+
+    const tick = () => {
+      if (cancelled) return
+      if (!findTurnElement(el, messageId)) {
+        if (performance.now() - startedAt > deadlineMs) {
+          finish(false)
+          return
+        }
+        frame = window.requestAnimationFrame(tick)
+        return
+      }
+      // Same session: from current position (Conversation Nav style).
+      // Cross session: nearer end → smooth travel to the turn.
+      const scrolled =
+        motion === 'sweep'
+          ? sweepScrollTurnIntoView(el, messageId)
+          : scrollTurnIntoView(el, messageId)
+      if (scrolled) {
+        finish(true)
+        return
+      }
+      if (performance.now() - startedAt > deadlineMs) {
+        finish(false)
+        return
+      }
+      frame = window.requestAnimationFrame(tick)
+    }
+
+    frame = window.requestAnimationFrame(tick)
+    const timeout = window.setTimeout(() => finish(false), deadlineMs)
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frame)
+      window.clearTimeout(timeout)
+    }
+  }, [
+    pendingRevealMessageId,
+    pendingRevealNonce,
+    pendingRevealMotion,
+    messages,
+    clearPendingRevealMessage,
+    activeSessionId,
+  ])
 
   useEffect(() => {
     if (!isRecording && !isTranscribing) return
@@ -465,13 +533,16 @@ export default function ChatPanel() {
                 {(showCopy || showBranch || msg.checkpointId) && (
                   <div className={styles.messageActions}>
                     {msg.checkpointId ? (
-                      <button
-                        type="button"
-                        className={styles.copyButton}
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className={styles.restoreCheckpointButton}
+                        title={ts('chat.restoreCheckpoint')}
                         onClick={() => void restoreConversationCheckpoint(msg.checkpointId!)}
                       >
-                        {ts('chat.restoreCheckpoint')}
-                      </button>
+                        <History size={14} strokeWidth={1.75} aria-hidden />
+                        <span>{ts('chat.restoreCheckpoint')}</span>
+                      </Button>
                     ) : null}
                     {showBranch ? (
                       <button
@@ -479,7 +550,13 @@ export default function ChatPanel() {
                         className={styles.copyButton}
                         aria-label={ts('chat.sessionGraph.branchFromHere')}
                         title={ts('chat.sessionGraph.branchFromHere')}
-                        onClick={() => void forkSession(activeSessionId!, msg.id)}
+                        onClick={() => {
+                          const placement = resolveSessionForkPlacementFromMessages(
+                            messages,
+                            msg.id,
+                          )
+                          void forkSession(activeSessionId!, msg.id, placement)
+                        }}
                       >
                         <GitBranch size={14} aria-hidden />
                       </button>
@@ -820,22 +897,6 @@ export default function ChatPanel() {
               </div>
             </div>
           ) : null}
-          {chatMode === 'ask' &&
-          askSubMode === 'chat' &&
-          !firstPrinciplesSuggestDismissed &&
-          looksLikeVisionPrompt(composerDraft.text) ? (
-            <FirstPrinciplesSuggestChip
-              onAccept={() => {
-                const vision = composerDraft.text.trim()
-                if (!vision) {
-                  setAskSubMode('first_principles')
-                  return
-                }
-                void beginFirstPrinciplesFromVision(vision)
-              }}
-              onDismiss={() => dismissFirstPrinciplesSuggest()}
-            />
-          ) : null}
           <VoiceInputErrorBanner
             errorKey={voiceState.error}
             onDismiss={dismissError}
@@ -856,6 +917,7 @@ export default function ChatPanel() {
               }}
             />
           ) : null}
+          {routePreview ? <SessionRoutePreview suggestion={routePreview} /> : null}
           <PromptComposer
             draft={composerDraft}
             onDraftChange={setComposerDraft}
@@ -874,6 +936,16 @@ export default function ChatPanel() {
             }
             stopVisible={agentStopVisible}
             onStop={() => void stopAgentRun()}
+            routeVisible={routeEnabled}
+            routeDisabled={
+              !composerDraft.text.trim() ||
+              refineLoading ||
+              createAgentComposerActive
+            }
+            routeBusy={routeMatching}
+            onRoute={() => {
+              void routeFromPrompt(composerDraft.text)
+            }}
             voice={{
               isRecording,
               isTranscribing,

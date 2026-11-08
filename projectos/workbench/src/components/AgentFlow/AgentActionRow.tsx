@@ -1,3 +1,5 @@
+import { useId, useState } from 'react'
+import { ChevronRight } from 'lucide-react'
 import type { AgentActionEvent } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import styles from './AgentActionRow.module.css'
@@ -267,39 +269,84 @@ function localizedAgentActionMetadata(
 export default function AgentActionRow({ event }: { event: AgentActionEvent }) {
   const { ts } = useI18n()
   const title = ts(`agentFlow.actions.${event.type}` as 'agentFlow.actions.context_assembled')
+  const lines = localizedAgentActionMetadata(event, ts)
+  const detailId = useId()
+  const [expanded, setExpanded] = useState(false)
+  const hasBody =
+    lines.length > 0 ||
+    event.type === 'context_assembled' ||
+    event.type === 'context_attached'
 
   return (
-    <div className={styles.card} data-action={event.type}>
+    <div className={styles.row} data-action={event.type} data-expanded={expanded ? 'true' : undefined}>
       <div className={styles.heading}>
-        <span>{title}</span>
-        <time>{new Date(event.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>
+        {hasBody ? (
+          <button
+            type="button"
+            className={styles.chevronBtn}
+            aria-expanded={expanded}
+            aria-controls={detailId}
+            aria-label={expanded ? ts('agentFlow.collapseDetails') : ts('agentFlow.expandDetails')}
+            onClick={() => setExpanded((open) => !open)}
+          >
+            <ChevronRight
+              size={14}
+              className={`${styles.chevron} ${expanded ? styles.chevronOpen : ''}`}
+              aria-hidden
+            />
+          </button>
+        ) : (
+          <span className={styles.chevronSpacer} aria-hidden />
+        )}
+        <button
+          type="button"
+          className={styles.titleBtn}
+          onClick={() => hasBody && setExpanded((open) => !open)}
+        >
+          <span>{title}</span>
+          <time>
+            {new Date(event.timestamp).toLocaleTimeString(undefined, {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            })}
+          </time>
+        </button>
       </div>
-      {event.type === 'context_assembled' && (
-        <div className={styles.meta}>
-          {ts('agentFlow.actionBundle', {
-            count: event.payload.files.length,
-            synopsis: event.payload.synopsisPresent
-              ? ts('agentFlow.synopsisIncluded')
-              : ts('agentFlow.synopsisMissing'),
-          })}
-          <code>{event.payload.bundleHash}</code>
+      {expanded ? (
+        <div id={detailId} className={styles.detail}>
+          {event.type === 'context_assembled' && (
+            <div className={styles.meta}>
+              {ts('agentFlow.actionBundle', {
+                count: event.payload.files.length,
+                synopsis: event.payload.synopsisPresent
+                  ? ts('agentFlow.synopsisIncluded')
+                  : ts('agentFlow.synopsisMissing'),
+              })}
+              <code>{event.payload.bundleHash}</code>
+            </div>
+          )}
+          {event.type === 'context_attached' && (
+            <div className={styles.meta}>
+              {ts('agentFlow.actionBundle', {
+                count: event.payload.autoFiles.length,
+                synopsis: ts('agentFlow.synopsisIncluded'),
+              })}
+              {event.payload.explicitAttachments.length > 0
+                ? ` · ${event.payload.explicitAttachments.length} explicit`
+                : ''}
+              <code>{event.payload.bundleHash}</code>
+            </div>
+          )}
+          {lines.length > 0 ? (
+            <ul>
+              {lines.map((line, index) => (
+                <li key={`${line}-${index}`}>{line}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
-      )}
-      {event.type === 'context_attached' && (
-        <div className={styles.meta}>
-          {ts('agentFlow.actionBundle', {
-            count: event.payload.autoFiles.length,
-            synopsis: ts('agentFlow.synopsisIncluded'),
-          })}
-          {event.payload.explicitAttachments.length > 0
-            ? ` · ${event.payload.explicitAttachments.length} explicit`
-            : ''}
-          <code>{event.payload.bundleHash}</code>
-        </div>
-      )}
-      <ul>
-        {localizedAgentActionMetadata(event, ts).map((line, index) => <li key={`${line}-${index}`}>{line}</li>)}
-      </ul>
+      ) : null}
     </div>
   )
 }

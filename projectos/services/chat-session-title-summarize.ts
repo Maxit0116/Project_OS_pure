@@ -22,8 +22,12 @@ export async function summarizeChatSessionContextForRecord(
   record: ChatSessionRecord,
   deps: SummarizeChatSessionTitleDeps,
 ): Promise<ChatSessionContextUpdate | null> {
+  const isForkChild = Boolean(record.head.parentSessionId);
   const userMessages = record.messages.filter((message) => message.role === "user");
   if (userMessages.length === 0) {
+    // Fresh fork / empty shell: do not demote. Fork children must stay on the
+    // Session Graph until the user explicitly removes them.
+    if (isForkChild) return null;
     return {
       classification: "misc",
       title: null,
@@ -34,6 +38,16 @@ export async function summarizeChatSessionContextForRecord(
   const substantive = isSubstantiveChat(record.messages);
   const fallbackTitle = deriveChatSessionTitle(record.messages, "");
   if (!substantive) {
+    if (isForkChild) {
+      return {
+        classification: "topic",
+        title: fallbackTitle || null,
+        digest: deriveSessionContextDigest(record.messages),
+        ...(record.head.responsibility
+          ? { responsibility: record.head.responsibility }
+          : {}),
+      };
+    }
     return {
       classification: "misc",
       title: fallbackTitle || null,
@@ -53,6 +67,16 @@ export async function summarizeChatSessionContextForRecord(
         responseLanguage,
       });
       if (!summarized.substantive || !summarized.digest) {
+        if (isForkChild) {
+          return {
+            classification: "topic",
+            title: summarized.title || fallbackTitle || null,
+            digest: deriveSessionContextDigest(record.messages),
+            ...(record.head.responsibility
+              ? { responsibility: record.head.responsibility }
+              : {}),
+          };
+        }
         return {
           classification: "misc",
           title: summarized.title || fallbackTitle || null,

@@ -27,10 +27,13 @@ export type ReminderFilter =
 
 export type ReminderComposerSheet = 'none' | 'activity' | 'context'
 
+export type ReminderGraphPage = 'timeline' | 'notifications'
+
 interface ReminderGraphStore {
   document: ReminderTimelineDocument | null
   selectedId: string | null
   filter: ReminderFilter
+  page: ReminderGraphPage
   composerDraft: string
   composerSheet: ReminderComposerSheet
   askReply: string | null
@@ -43,6 +46,7 @@ interface ReminderGraphStore {
 
   setComposerDraft: (value: string) => void
   setFilter: (filter: ReminderFilter) => void
+  setPage: (page: ReminderGraphPage) => void
   selectItem: (id: string | null) => void
   toggleComposerSheet: (sheet: Exclude<ReminderComposerSheet, 'none'>) => void
   clearError: () => void
@@ -69,6 +73,7 @@ export const useReminderGraphStore = create<ReminderGraphStore>((set, get) => ({
   document: null,
   selectedId: null,
   filter: 'all',
+  page: 'timeline',
   composerDraft: '',
   composerSheet: 'none',
   askReply: null,
@@ -80,6 +85,7 @@ export const useReminderGraphStore = create<ReminderGraphStore>((set, get) => ({
 
   setComposerDraft: (value) => set({ composerDraft: value }),
   setFilter: (filter) => set({ filter }),
+  setPage: (page) => set({ page }),
   selectItem: (id) =>
     set({
       selectedId: id,

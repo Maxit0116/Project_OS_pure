@@ -100,6 +100,43 @@ describe("chat session context", () => {
     expect(promoted.head.title).toBe("Login redirect");
   });
 
+  it("does not auto-demote a fork child off the session graph", () => {
+    const child = head({
+      id: "chat_child",
+      parentSessionId: "chat_parent",
+      classification: "topic",
+      classificationSource: "auto",
+      graphId: "g1",
+      responsibility: "Continue login fix",
+    });
+    const updated = applyChatSessionContextUpdate(
+      record({
+        head: child,
+        messages: [message("m1", "user", "ok")],
+        inheritedDigest: {
+          responsibility: "Continue login fix",
+          decisions: [],
+          openQuestions: [],
+          refs: [],
+          updatedAt: now,
+          throughMessageId: "m0",
+        },
+      }),
+      {
+        classification: "misc",
+        title: null,
+        digest: null,
+        now,
+      },
+    );
+    expect(updated.head.classification).toBe("topic");
+    expect(updated.head.graphId).toBe("g1");
+    expect(updated.head.parentSessionId).toBe("chat_parent");
+    expect(buildSessionGraph([head({ id: "chat_parent", classification: "topic", graphId: "g1" }), updated.head]).nodes.map((n) => n.id).sort()).toEqual(
+      ["chat_child", "chat_parent"].sort(),
+    );
+  });
+
   it("keeps a manual title and a manual misc classification", () => {
     const updated = applyChatSessionContextUpdate(
       record({
@@ -376,6 +413,7 @@ describe("chat session context", () => {
           role: "user",
           content: "Fix the login redirect after callback",
           timestamp: "2026-08-02T01:00:00.000Z",
+          chatMode: "plan",
         },
         {
           id: "m3",
@@ -395,22 +433,29 @@ describe("chat session context", () => {
     });
     const strip = buildSessionGraphStrip(session);
     expect(strip.length).toBeGreaterThanOrEqual(3);
-    expect(strip.length).toBeLessThanOrEqual(5);
+    expect(strip.length).toBeLessThanOrEqual(10);
     expect(strip.map((item) => item.kind)).toContain("decision");
     expect(strip.map((item) => item.kind)).toContain("intent");
     expect(strip.every((item) => item.title.length <= 80)).toBe(true);
     for (let i = 1; i < strip.length; i += 1) {
       expect(strip[i - 1]!.ts >= strip[i]!.ts).toBe(true);
     }
+    const intent = strip.find((item) => item.kind === "intent");
+    expect(intent?.messageId).toBe("m2");
+    expect(intent?.chatMode).toBe("plan");
+    const decision = strip.find((item) => item.kind === "decision");
+    expect(decision?.messageId).toBe("m2");
+    expect(decision?.chatMode).toBe("plan");
     const projected = withSessionGraphHeadProjection(session);
     expect(projected.head.previewStrip).toEqual(strip);
     expect(projected.head.messageCount).toBe(3);
   });
 
-  it("seeds a forked child strip from inherited digest", () => {
+  it("seeds a forked child strip with a parent-title citation", () => {
     const parent = record({
       head: head({
         id: "parent",
+        title: "Login redirect topic",
         classification: "topic",
         responsibility: "Fix the login redirect",
       }),
@@ -425,8 +470,13 @@ describe("chat session context", () => {
       },
     });
     const child = buildForkedChatSession(parent, parent.contextDigest ?? null, "m1", now);
-    expect(child.head.previewStrip?.some((item) => item.kind === "note")).toBe(true);
-    expect(child.head.previewStrip?.some((item) => item.kind === "decision")).toBe(true);
+    expect(child.head.previewStrip).toEqual([
+      expect.objectContaining({
+        id: `note:parent-cite:${child.head.id}`,
+        kind: "note",
+        title: "Login redirect topic",
+      }),
+    ]);
     expect(child.head.messageCount).toBe(0);
   });
 });

@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GeneratedDiffFile } from '@contracts/index'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useI18n } from '../../i18n'
@@ -44,6 +44,7 @@ export default function DiffFileView({
   const { ts } = useI18n()
   const resolvedTheme = useWorkbenchStore((s) => s.resolvedTheme)
   const syntaxTheme = editorThemeName(resolvedTheme)
+  const rootRef = useRef<HTMLDivElement>(null)
   const beforeRef = useRef<HTMLDivElement>(null)
   const afterRef = useRef<HTMLDivElement>(null)
   const scrollSynchronizerRef = useRef<ReturnType<
@@ -82,6 +83,37 @@ export default function DiffFileView({
   const canGoNext = showMonacoDiff && changeSites.length > 0 &&
     activeChangeIndex < changeSites.length - 1
 
+  const goPrevChange = useCallback(() => {
+    setActiveChangeIndex((index) => Math.max(0, index - 1))
+  }, [])
+
+  const goNextChange = useCallback(() => {
+    setActiveChangeIndex((index) => Math.min(changeSites.length - 1, index + 1))
+  }, [changeSites.length])
+
+  useEffect(() => {
+    if (!showMonacoDiff || changeSites.length === 0) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey || event.metaKey || event.ctrlKey) return
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+
+      const root = rootRef.current
+      if (!root) return
+      const active = document.activeElement
+      const within =
+        active === root || (active instanceof Node && root.contains(active))
+      if (!within) return
+
+      event.preventDefault()
+      if (event.key === 'ArrowUp') goPrevChange()
+      else goNextChange()
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [changeSites.length, goNextChange, goPrevChange, showMonacoDiff])
+
   const mirrorScroll = (source: 'before' | 'after', scrollTop: number) => {
     const target = source === 'before' ? afterRef.current : beforeRef.current
     scrollSynchronizerRef.current?.sync(source, scrollTop, target)
@@ -93,7 +125,12 @@ export default function DiffFileView({
   const emptyLabel = ts('diff.emptySide')
 
   return (
-    <div className={styles.file}>
+    <div
+      ref={rootRef}
+      className={styles.file}
+      tabIndex={showMonacoDiff && changeSites.length > 0 ? 0 : undefined}
+      data-testid="diff-file-view"
+    >
       <div className={styles.fileHeader}>
         <div className={styles.fileHeaderMeta}>
           <span className={styles.path}>{file.path}</span>
@@ -101,14 +138,14 @@ export default function DiffFileView({
         </div>
         <div className={styles.fileHeaderActions}>
           {showMonacoDiff && changeSites.length > 0 ? (
-            <div className={styles.changeNav}>
+            <div className={styles.changeNav} role="group" aria-label={ts('diff.changeNav')}>
               <Button
                 variant="ghost"
                 size="sm"
                 disabled={!canGoPrev}
                 aria-label={ts('diff.prevChange')}
-                title={ts('diff.prevChange')}
-                onClick={() => setActiveChangeIndex((index) => Math.max(0, index - 1))}
+                title={`${ts('diff.prevChange')} (Alt+↑)`}
+                onClick={goPrevChange}
               >
                 <ChevronUp size={14} aria-hidden />
               </Button>
@@ -123,9 +160,8 @@ export default function DiffFileView({
                 size="sm"
                 disabled={!canGoNext}
                 aria-label={ts('diff.nextChange')}
-                title={ts('diff.nextChange')}
-                onClick={() => setActiveChangeIndex((index) =>
-                  Math.min(changeSites.length - 1, index + 1))}
+                title={`${ts('diff.nextChange')} (Alt+↓)`}
+                onClick={goNextChange}
               >
                 <ChevronDown size={14} aria-hidden />
               </Button>

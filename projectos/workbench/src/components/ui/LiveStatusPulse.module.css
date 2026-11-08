@@ -1,0 +1,59 @@
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.dotLive {
+  animation: liveBreath 1.4s var(--ease-out, ease-in-out) infinite;
+}
+
+.label {
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: baseline;
+}
+
+/* Cursor-style status copy: opacity breath (light ↔ dim), not a gradient sweep.
+   background-clip shimmer is unreliable in Electron/button contexts and reads as "only the dot moves". */
+.labelLive {
+  animation: liveLabelBreath 1.5s var(--ease-out, ease-in-out) infinite;
+  will-change: opacity;
+}
+
+@keyframes liveBreath {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes liveLabelBreath {
+  0%,
+  100% {
+    opacity: 0.48;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dotLive {
+    animation: none;
+    opacity: 0.85;
+  }
+
+  .labelLive {
+    animation: none;
+    opacity: 0.9;
+    will-change: auto;
+  }
+}

@@ -24,16 +24,18 @@ function FlowInner({ steps, onSelectStep }: Props) {
         id: step.id,
         position: { x: i * H_SPACING, y: 40 },
         data: { label: step.label, status: step.status },
+        className: `${styles.node} ${
+          step.status === 'running'
+            ? styles.nodeRunning
+            : step.status === 'complete'
+              ? styles.nodeComplete
+              : step.status === 'error'
+                ? styles.nodeError
+                : styles.nodePending
+        }`,
         style: {
           padding: '10px 14px',
-          borderRadius: 8,
-          border: `2px solid ${
-            step.status === 'running' ? '#d29922' :
-            step.status === 'complete' ? '#3fb950' :
-            step.status === 'error' ? '#f85149' : '#30363d'
-          }`,
-          background: '#161b22',
-          color: '#e6edf3',
+          borderRadius: 6,
           fontSize: 12,
           minWidth: 120,
           cursor: 'pointer',
@@ -49,7 +51,7 @@ function FlowInner({ steps, onSelectStep }: Props) {
         source: step.id,
         target: steps[i + 1].id,
         animated: steps[i + 1].status === 'running',
-        style: { stroke: '#58a6ff' },
+        className: styles.edge,
       })),
     [steps],
   )
@@ -66,7 +68,7 @@ function FlowInner({ steps, onSelectStep }: Props) {
         nodesConnectable={false}
         elementsSelectable
       >
-        <Background color="#21262d" gap={16} />
+        <Background color="var(--tech-border, #21262d)" gap={16} />
       </ReactFlow>
     </div>
   )

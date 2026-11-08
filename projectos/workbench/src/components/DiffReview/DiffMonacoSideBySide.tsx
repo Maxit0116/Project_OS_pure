@@ -23,32 +23,64 @@ interface Props {
 
 type MonacoEditorInstance = ReturnType<Monaco['editor']['create']>
 
+function collectChangeLineNumbers(
+  site: DiffChangeSite | undefined,
+  rows: SideBySideRow[],
+): { before: number[]; after: number[] } {
+  if (!site) return { before: [], after: [] }
+
+  const before = new Set<number>()
+  const after = new Set<number>()
+
+  for (let rowIndex = site.rowIndex; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex]
+    if (!row) break
+    const isChange =
+      row.before === null ||
+      row.after === null ||
+      row.before.lineKind !== 'equal' ||
+      row.after.lineKind !== 'equal'
+    if (!isChange) break
+    if (row.before?.lineNumber != null) before.add(row.before.lineNumber)
+    if (row.after?.lineNumber != null) after.add(row.after.lineNumber)
+  }
+
+  return {
+    before: [...before],
+    after: [...after],
+  }
+}
+
 function buildBeforeDecorations(
   rows: SideBySideRow[],
   monaco: Monaco,
+  activeLines: number[],
 ): editor.IModelDeltaDecoration[] {
   const decorations: editor.IModelDeltaDecoration[] = []
+  const activeSet = new Set(activeLines)
 
   for (const row of rows) {
     const line = row.before
     if (!line?.lineNumber) continue
-    if (line.lineKind === 'removed') {
-      decorations.push({
-        range: new monaco.Range(line.lineNumber, 1, line.lineNumber, 1),
-        options: {
-          isWholeLine: true,
-          className: 'projectos-diff-line-removed',
+
+    const isRemoved = line.lineKind === 'removed' || line.lineKind === 'changed'
+    if (!isRemoved) continue
+
+    const isActive = activeSet.has(line.lineNumber)
+    decorations.push({
+      range: new monaco.Range(line.lineNumber, 1, line.lineNumber, 1),
+      options: {
+        isWholeLine: true,
+        className: isActive
+          ? 'projectos-diff-line-removed projectos-diff-line-active'
+          : 'projectos-diff-line-removed',
+        linesDecorationsClassName: 'projectos-diff-gutter-removed',
+        overviewRuler: {
+          color: '#c94f47',
+          position: monaco.editor.OverviewRulerLane.Full,
         },
-      })
-    } else if (line.lineKind === 'changed') {
-      decorations.push({
-        range: new monaco.Range(line.lineNumber, 1, line.lineNumber, 1),
-        options: {
-          isWholeLine: true,
-          className: 'projectos-diff-line-changed',
-        },
-      })
-    }
+      },
+    })
   }
 
   return decorations
@@ -57,29 +89,33 @@ function buildBeforeDecorations(
 function buildAfterDecorations(
   rows: SideBySideRow[],
   monaco: Monaco,
+  activeLines: number[],
 ): editor.IModelDeltaDecoration[] {
   const decorations: editor.IModelDeltaDecoration[] = []
+  const activeSet = new Set(activeLines)
 
   for (const row of rows) {
     const line = row.after
     if (!line?.lineNumber) continue
-    if (line.lineKind === 'added') {
-      decorations.push({
-        range: new monaco.Range(line.lineNumber, 1, line.lineNumber, 1),
-        options: {
-          isWholeLine: true,
-          className: 'projectos-diff-line-added',
+
+    const isAdded = line.lineKind === 'added' || line.lineKind === 'changed'
+    if (!isAdded) continue
+
+    const isActive = activeSet.has(line.lineNumber)
+    decorations.push({
+      range: new monaco.Range(line.lineNumber, 1, line.lineNumber, 1),
+      options: {
+        isWholeLine: true,
+        className: isActive
+          ? 'projectos-diff-line-added projectos-diff-line-active'
+          : 'projectos-diff-line-added',
+        linesDecorationsClassName: 'projectos-diff-gutter-added',
+        overviewRuler: {
+          color: '#3a9a58',
+          position: monaco.editor.OverviewRulerLane.Full,
         },
-      })
-    } else if (line.lineKind === 'changed') {
-      decorations.push({
-        range: new monaco.Range(line.lineNumber, 1, line.lineNumber, 1),
-        options: {
-          isWholeLine: true,
-          className: 'projectos-diff-line-changed',
-        },
-      })
-    }
+      },
+    })
   }
 
   return decorations
@@ -103,7 +139,8 @@ const editorOptions = {
   ...codeEditorOptions,
   readOnly: true,
   renderValidationDecorations: 'off' as const,
-  overviewRulerLanes: 0,
+  overviewRulerLanes: 2,
+  renderLineHighlight: 'none' as const,
 }
 
 export default function DiffMonacoSideBySide({
@@ -125,6 +162,13 @@ export default function DiffMonacoSideBySide({
   const afterDecorationsRef = useRef<string[]>([])
   const syncingScroll = useRef(false)
   const editorsReadyRef = useRef({ before: false, after: false })
+  const rowsRef = useRef(rows)
+  rowsRef.current = rows
+
+  const activeLines = useMemo(
+    () => collectChangeLineNumbers(changeSites[activeChangeIndex], rows),
+    [activeChangeIndex, changeSites, rows],
+  )
 
   const mirrorScroll = (source: 'before' | 'after') => {
     if (syncingScroll.current) return
@@ -136,42 +180,7 @@ export default function DiffMonacoSideBySide({
     syncingScroll.current = false
   }
 
-  const revealActiveChange = useCallback(() => {
-    if (changeSites.length === 0) return
-    const site = changeSites[activeChangeIndex]
-    revealChangeSite(site, beforeEditorRef.current, afterEditorRef.current)
-  }, [activeChangeIndex, changeSites])
-
-  const markEditorReady = (side: 'before' | 'after') => {
-    editorsReadyRef.current[side] = true
-    if (editorsReadyRef.current.before && editorsReadyRef.current.after) {
-      revealActiveChange()
-    }
-  }
-
-  const mountBefore = (editor: MonacoEditorInstance, monaco: Monaco) => {
-    beforeEditorRef.current = editor
-    monacoRef.current = monaco
-    beforeDecorationsRef.current = editor.deltaDecorations(
-      beforeDecorationsRef.current,
-      buildBeforeDecorations(rows, monaco),
-    )
-    editor.onDidScrollChange(() => mirrorScroll('before'))
-    markEditorReady('before')
-  }
-
-  const mountAfter = (editor: MonacoEditorInstance, monaco: Monaco) => {
-    afterEditorRef.current = editor
-    monacoRef.current = monaco
-    afterDecorationsRef.current = editor.deltaDecorations(
-      afterDecorationsRef.current,
-      buildAfterDecorations(rows, monaco),
-    )
-    editor.onDidScrollChange(() => mirrorScroll('after'))
-    markEditorReady('after')
-  }
-
-  useEffect(() => {
+  const applyDecorations = useCallback((active: { before: number[]; after: number[] }) => {
     const monaco = monacoRef.current
     const beforeEditor = beforeEditorRef.current
     const afterEditor = afterEditorRef.current
@@ -179,13 +188,52 @@ export default function DiffMonacoSideBySide({
 
     beforeDecorationsRef.current = beforeEditor.deltaDecorations(
       beforeDecorationsRef.current,
-      buildBeforeDecorations(rows, monaco),
+      buildBeforeDecorations(rowsRef.current, monaco, active.before),
     )
     afterDecorationsRef.current = afterEditor.deltaDecorations(
       afterDecorationsRef.current,
-      buildAfterDecorations(rows, monaco),
+      buildAfterDecorations(rowsRef.current, monaco, active.after),
     )
-  }, [rows])
+  }, [])
+
+  const revealActiveChange = useCallback(() => {
+    if (changeSites.length === 0) return
+    const site = changeSites[activeChangeIndex]
+    const scheduleReveal = () => {
+      revealChangeSite(site, beforeEditorRef.current, afterEditorRef.current)
+    }
+    requestAnimationFrame(() => {
+      scheduleReveal()
+      requestAnimationFrame(scheduleReveal)
+    })
+  }, [activeChangeIndex, changeSites])
+
+  const markEditorReady = (side: 'before' | 'after') => {
+    editorsReadyRef.current[side] = true
+    if (editorsReadyRef.current.before && editorsReadyRef.current.after) {
+      applyDecorations(activeLines)
+      revealActiveChange()
+    }
+  }
+
+  const mountBefore = (editor: MonacoEditorInstance, monaco: Monaco) => {
+    beforeEditorRef.current = editor
+    monacoRef.current = monaco
+    editor.onDidScrollChange(() => mirrorScroll('before'))
+    markEditorReady('before')
+  }
+
+  const mountAfter = (editor: MonacoEditorInstance, monaco: Monaco) => {
+    afterEditorRef.current = editor
+    monacoRef.current = monaco
+    editor.onDidScrollChange(() => mirrorScroll('after'))
+    markEditorReady('after')
+  }
+
+  useEffect(() => {
+    if (!editorsReadyRef.current.before || !editorsReadyRef.current.after) return
+    applyDecorations(activeLines)
+  }, [activeLines, applyDecorations, rows])
 
   useEffect(() => {
     if (!editorsReadyRef.current.before || !editorsReadyRef.current.after) return

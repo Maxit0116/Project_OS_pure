@@ -1,10 +1,9 @@
 .wrapper {
-  margin: 4px 0 4px 20px;
-  padding: var(--space-sm) var(--space-md);
-  border-left: 2px solid var(--color-warning);
-  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  animation: glassEnter var(--duration-normal) var(--ease-out) both;
+  margin: 4px 0 4px 28px;
+  padding: 4px 0 4px 8px;
+  border-left: 1px solid color-mix(in srgb, var(--color-warning) 55%, transparent);
+  background: transparent;
+  border-radius: 0;
 }
 
 .marker {
@@ -14,8 +13,6 @@
   color: var(--color-warning);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .badge {
@@ -23,14 +20,8 @@
 }
 
 .message {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   line-height: 1.4;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .wrapper {
-    animation: none;
-  }
 }

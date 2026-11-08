@@ -2715,15 +2715,40 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     );
     const {
       buildForkedChatSession,
+      deriveSessionContextDigest,
       messagesThroughFork,
     } = await import("../contracts/chat-session-context.js");
     const parent = getChatSession(workspace.workspaceRoot, parentSessionId);
     if (!parent) return null;
     const forkId = forkMessageId.trim() || undefined;
-    let inherited = parent.contextDigest ?? null;
-    if (forkId) {
-      const slice = messagesThroughFork(parent.messages, forkId);
-      if (!slice) return null;
+    // Title / latest branch: full parent transcript. Mid-strip branch: through fork point.
+    const slice = messagesThroughFork(parent.messages, forkId);
+    if (!slice) return null;
+    // Return the child immediately so the renderer can activate it before any
+    // LLM summarize. Waiting on summarize left activeSessionId on the parent
+    // and post-branch chat kept writing to the father node.
+    const inherited =
+      deriveSessionContextDigest(slice) ?? parent.contextDigest ?? null;
+    const child = buildForkedChatSession(parent, inherited, forkId);
+    const saved = upsertChatSession(workspace.workspaceRoot, child);
+    if (slice.length > 0) {
+      void this.upgradeForkInheritedDigest(projectId, saved.head.id, parent, slice);
+    }
+    return saved;
+  }
+
+  private async upgradeForkInheritedDigest(
+    projectId: string,
+    childSessionId: string,
+    parent: import("../contracts/chat-session.js").ChatSessionRecord,
+    slice: import("../contracts/chat-session.js").ChatMessage[],
+  ): Promise<void> {
+    try {
+      const workspace = this.requireLoadedWorkspace(projectId);
+      const { getChatSession, upsertChatSession } = await import("./chat-session-service.js");
+      const { summarizeChatSessionContextForRecord } = await import(
+        "./chat-session-title-summarize.js"
+      );
       const update = await summarizeChatSessionContextForRecord(
         projectId,
         { ...parent, messages: slice },
@@ -2733,10 +2758,23 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           settings: workspace.settings,
         },
       );
-      inherited = update?.digest ?? null;
+      if (!update?.digest) return;
+      const current = getChatSession(workspace.workspaceRoot, childSessionId);
+      if (!current) return;
+      await upsertChatSession(workspace.workspaceRoot, {
+        ...current,
+        inheritedDigest: update.digest,
+        head: {
+          ...current.head,
+          ...(update.responsibility?.trim()
+            ? { responsibility: update.responsibility.trim() }
+            : {}),
+          lastUpdatedAt: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error("[projectos] fork inherited digest upgrade failed", error);
     }
-    const child = buildForkedChatSession(parent, inherited, forkId);
-    return upsertChatSession(workspace.workspaceRoot, child);
   }
 
   async setChatSessionClassification(

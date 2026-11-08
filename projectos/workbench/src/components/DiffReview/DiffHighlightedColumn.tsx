@@ -26,7 +26,9 @@ function lineClassName(line: RenderLine | null): string {
 
   const classes = [styles.line]
   if (line.lineKind === 'equal') classes.push(styles.lineEqual)
-  if (line.lineKind === 'changed') classes.push(styles.lineChanged)
+  if (line.lineKind === 'changed') {
+    classes.push(side === 'before' ? styles.lineRemoved : styles.lineAdded)
+  }
   if (line.lineKind === 'added') classes.push(styles.lineAdded)
   if (line.lineKind === 'removed') classes.push(styles.lineRemoved)
   return classes.join(' ')

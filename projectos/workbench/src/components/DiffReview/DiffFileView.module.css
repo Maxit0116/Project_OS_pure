@@ -3,6 +3,11 @@
   border-radius: var(--radius-sm);
   overflow: hidden;
   background: var(--color-bg-elevated);
+  outline: none;
+}
+
+.file:focus-visible {
+  box-shadow: var(--tech-shadow-focus);
 }
 
 .fileHeader {
@@ -134,16 +139,38 @@
   font-size: var(--font-size-sm);
 }
 
+:global(.monaco-editor .projectos-diff-line-added),
 :global(.projectos-diff-line-added) {
-  background-color: var(--color-success-subtle);
+  background-color: var(--color-diff-line-added) !important;
 }
 
+:global(.monaco-editor .projectos-diff-line-removed),
 :global(.projectos-diff-line-removed) {
-  background-color: var(--color-error-subtle);
+  background-color: var(--color-diff-line-removed) !important;
 }
 
+:global(.monaco-editor .projectos-diff-line-changed),
 :global(.projectos-diff-line-changed) {
-  background-color: var(--color-diff-line-changed);
+  background-color: var(--color-diff-line-changed) !important;
+}
+
+:global(.monaco-editor .projectos-diff-line-active),
+:global(.projectos-diff-line-active) {
+  box-shadow: inset 0 0 0 1px var(--color-diff-line-active);
+}
+
+:global(.monaco-editor .projectos-diff-gutter-added),
+:global(.projectos-diff-gutter-added) {
+  background: var(--color-diff-gutter-added);
+  width: 3px !important;
+  margin-left: 3px;
+}
+
+:global(.monaco-editor .projectos-diff-gutter-removed),
+:global(.projectos-diff-gutter-removed) {
+  background: var(--color-diff-gutter-removed);
+  width: 3px !important;
+  margin-left: 3px;
 }
 
 .columns {
@@ -229,11 +256,11 @@
 }
 
 .lineAdded {
-  background: var(--color-success-subtle);
+  background: var(--color-diff-line-added);
 }
 
 .lineRemoved {
-  background: var(--color-error-subtle);
+  background: var(--color-diff-line-removed);
 }
 
 .linePlaceholder {

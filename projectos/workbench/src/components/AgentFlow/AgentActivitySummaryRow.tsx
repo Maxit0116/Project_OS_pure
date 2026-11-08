@@ -1,3 +1,4 @@
+import LiveStatusPulse from '../ui/LiveStatusPulse'
 import styles from './AgentActivitySummaryRow.module.css'
 
 interface Props {
@@ -8,15 +9,24 @@ interface Props {
 }
 
 export default function AgentActivitySummaryRow({ id, status, summary, onOpen }: Props) {
+  const live = status === 'running'
+
   return (
     <button
       type="button"
       className={`${styles.row} ${styles[status]}`}
       data-agent-activity={id}
+      data-live={live ? 'true' : undefined}
       onClick={onOpen}
     >
-      <span className={styles.mark} aria-hidden />
-      <span className={styles.summary}>{summary}</span>
+      {live ? (
+        <LiveStatusPulse active className={styles.markLive} />
+      ) : (
+        <span className={styles.mark} aria-hidden />
+      )}
+      <LiveStatusPulse active={live} variant="label" className={styles.summary}>
+        {summary}
+      </LiveStatusPulse>
     </button>
   )
 }

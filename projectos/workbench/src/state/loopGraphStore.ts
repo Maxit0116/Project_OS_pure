@@ -86,6 +86,7 @@ interface LoopGraphStore {
   setPhase: (phase: LoopPhase) => void
   selectLoop: (loopId: string) => Promise<void>
   createLoop: (title?: string) => Promise<string | null>
+  deleteLoop: (loopId: string) => Promise<boolean>
   updateDraft: (draft: IntentGraph, title?: string) => void
   schedulePersist: () => void
   persistNow: () => Promise<void>
@@ -531,6 +532,43 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         error: error instanceof Error ? error.message : 'Failed to create loop',
       })
       return null
+    }
+  },
+
+  deleteLoop: async (loopId) => {
+    const { client, project } = useWorkbenchStore.getState()
+    if (!client || !project) return false
+    try {
+      const ok = await client.deleteLoopGraph(project.projectId, loopId)
+      if (!ok) return false
+      const nextHeads = get().heads.filter((head) => head.id !== loopId)
+      const wasActive = get().activeLoopId === loopId
+      const nextActiveId = wasActive ? (nextHeads[0]?.id ?? null) : get().activeLoopId
+      set({
+        heads: nextHeads,
+        ...(wasActive
+          ? {
+              activeLoopId: nextActiveId,
+              document: null,
+              compileResult: null,
+              connectingFromId: null,
+              pendingDelete: null,
+              composerDraft: '',
+              composerSheet: 'none' as const,
+              authoringBusy: false,
+            }
+          : {}),
+        error: null,
+      })
+      if (wasActive && nextActiveId) {
+        await get().selectLoop(nextActiveId)
+      }
+      return true
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : 'Failed to delete loop',
+      })
+      return false
     }
   },
 

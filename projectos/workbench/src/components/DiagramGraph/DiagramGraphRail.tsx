@@ -29,7 +29,7 @@ import {
   type DiagramGraphRailFolderEntry,
   type DiagramGraphRailLayout,
 } from './diagramGraphRailLayout'
-import styles from './DiagramGraphRail.module.css'
+import styles from '../GraphOverlay/graphOverlayRail.module.css'
 
 const EXPAND_DELAY_MS = 350
 const COLLAPSE_DELAY_MS = 180
@@ -64,12 +64,12 @@ interface Props {
   onCreateFolder: () => void
   onRenameFolder: (folderId: string, title: string) => void
   onCancelRenameFolder: () => void
+  onRemoveDiagram: (diagramId: string) => void
   onRemoveFolder: (folderId: string) => void
   onMoveIntoFolder: (diagramId: string, folderId: string) => void
   onMoveFolderIntoFolder: (folderId: string, targetFolderId: string) => void
   onMoveToRail: (diagramId: string) => void
   onMoveFolderToRail: (folderId: string) => void
-  onDeleteDiagram?: (diagramId: string) => void
 }
 
 export default function DiagramGraphRail({
@@ -82,12 +82,12 @@ export default function DiagramGraphRail({
   onCreateFolder,
   onRenameFolder,
   onCancelRenameFolder,
+  onRemoveDiagram,
   onRemoveFolder,
   onMoveIntoFolder,
   onMoveFolderIntoFolder,
   onMoveToRail,
   onMoveFolderToRail,
-  onDeleteDiagram,
 }: Props) {
   const { ts } = useI18n()
   const [expanded, setExpanded] = useState(false)
@@ -208,7 +208,8 @@ export default function DiagramGraphRail({
   ) => {
     const item = byId.get(diagramId)
     if (!item) return null
-    const TypeIcon = iconForVisualType(item.visualType)
+    const visualTypeKey = item.visualType.trim().toLowerCase() || 'auto'
+    const TypeIcon = iconForVisualType(visualTypeKey)
     const active = item.id === activeDiagramId
     return (
       <div
@@ -222,6 +223,10 @@ export default function DiagramGraphRail({
         data-rail-nested={options.nested ? 'true' : undefined}
         draggable
         onDragStart={(event) => {
+          if ((event.target as Element | null)?.closest?.('[data-rail-drag-ignore]')) {
+            event.preventDefault()
+            return
+          }
           event.stopPropagation()
           event.dataTransfer.setData('text/diagram-id', diagramId)
           event.dataTransfer.effectAllowed = 'move'
@@ -237,7 +242,7 @@ export default function DiagramGraphRail({
           className={`${styles.item} ${options.nested ? styles.folderChild : ''} ${
             active ? styles.itemActive : ''
           }`}
-          data-visual-type={item.visualType}
+          data-visual-type={visualTypeKey}
           aria-current={active ? 'true' : undefined}
           aria-label={item.title}
           title={item.title}
@@ -250,22 +255,28 @@ export default function DiagramGraphRail({
             <span className={styles.label}>
               <span className={styles.labelTitle}>{item.title}</span>
               {!options.nested ? (
-                <span className={styles.labelMeta}>{item.visualType}</span>
+                <span className={styles.labelMeta}>
+                  <span className={styles.statusDot} aria-hidden />
+                  {item.visualType}
+                </span>
               ) : null}
             </span>
           ) : null}
         </button>
-        {onDeleteDiagram && isExpanded ? (
-          <button
-            type="button"
-            className={styles.deleteButton}
-            aria-label={ts('chat.diagramGraph.removeDiagram')}
-            title={ts('chat.diagramGraph.removeDiagram')}
-            onClick={() => onDeleteDiagram(diagramId)}
-          >
-            <X size={12} strokeWidth={2.25} aria-hidden />
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className={styles.deleteButton}
+          data-rail-drag-ignore=""
+          aria-label={ts('chat.diagramGraph.removeDiagram')}
+          title={ts('chat.diagramGraph.removeDiagram')}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            onRemoveDiagram(diagramId)
+          }}
+        >
+          <X size={12} strokeWidth={2.25} aria-hidden />
+        </button>
       </div>
     )
   }
@@ -296,6 +307,10 @@ export default function DiagramGraphRail({
         onPointerEnter={() => scheduleReveal(entry.id)}
         onPointerLeave={() => scheduleRevealCollapse(entry.id)}
         onDragStart={(event) => {
+          if ((event.target as Element | null)?.closest?.('[data-rail-drag-ignore]')) {
+            event.preventDefault()
+            return
+          }
           event.stopPropagation()
           event.dataTransfer.setData('text/folder-id', entry.id)
           event.dataTransfer.effectAllowed = 'move'
@@ -343,7 +358,8 @@ export default function DiagramGraphRail({
         }}
       >
         <div className={styles.itemWrap}>
-          <div
+          <button
+            type="button"
             className={`${styles.item} ${styles.folderHeader} ${
               options.nested ? styles.folderChild : ''
             } ${containsActive ? styles.itemActive : ''}`}
@@ -386,13 +402,18 @@ export default function DiagramGraphRail({
                 {itemCount}
               </span>
             ) : null}
-          </div>
+          </button>
           <button
             type="button"
             className={styles.deleteButton}
+            data-rail-drag-ignore=""
             aria-label={ts('chat.diagramGraph.removeFolder')}
             title={ts('chat.diagramGraph.removeFolder')}
-            onClick={() => onRemoveFolder(entry.id)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              onRemoveFolder(entry.id)
+            }}
           >
             <X size={12} strokeWidth={2.25} aria-hidden />
           </button>

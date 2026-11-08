@@ -679,14 +679,18 @@ export function projectAgentPoolTrace(
       const attempt = attemptMatch ? Number(attemptMatch[1]) + 1 : 1
       const timing = stepTiming(step.id, events, poolOriginMs, live, nowMs)
       const status = mapStepStatus(step.status)
+      // After Stop, open steps stay "running" in memory until settled; never keep
+      // them live once the parent run is no longer streaming.
+      const settledStatus =
+        status === 'running' && !live ? ('skipped' as const) : status
       return {
         actionId: step.id,
         agentRunId,
         name: step.label,
         kind: step.kind,
-        status: live && status === 'running' ? 'running' : status,
+        status: settledStatus,
         startMs: timing.startMs,
-        endMs: status === 'running' && live ? undefined : timing.endMs,
+        endMs: settledStatus === 'running' ? undefined : timing.endMs,
         timingQuality: timing.timingQuality,
         stepId: step.id,
         attempt: attempt > 1 ? attempt : undefined,

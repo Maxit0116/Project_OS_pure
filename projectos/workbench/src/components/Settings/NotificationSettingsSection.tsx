@@ -1,6 +1,7 @@
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import PresentationModeToggle from './PresentationModeToggle'
+import SessionSweepSettingsSection from './SessionSweepSettingsSection'
 import SettingsGroup from './SettingsGroup'
 import styles from './SettingsPanel.module.css'
 
@@ -27,6 +28,7 @@ export default function NotificationSettingsSection() {
           onChange={setNotifyOnPendingDecision}
         />
       </SettingsGroup>
+      <SessionSweepSettingsSection />
     </section>
   )
 }

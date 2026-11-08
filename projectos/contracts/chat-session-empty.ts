@@ -30,6 +30,33 @@ export function composerDraftHasContent(
   );
 }
 
+/**
+ * Fork child that is still identical to a fresh branch: no continued user prompt
+ * and no draft in the composer. Explicit remove should hard-delete these instead
+ * of demoting them into Misc.
+ */
+export function isUnusedForkChildSession(input: {
+  head: Pick<ChatSessionHead, "parentSessionId" | "status">;
+  messages: ReadonlyArray<Pick<ChatMessage, "role" | "content">>;
+  draft?: ComposerDraft | string | null | undefined;
+}): boolean {
+  if (!input.head.parentSessionId) return false;
+  if (input.head.status === "running" || input.head.status === "awaiting_review") {
+    return false;
+  }
+  if (chatSessionHasUserMessage(input.messages)) return false;
+  if (composerDraftHasContent(input.draft ?? null)) return false;
+  return true;
+}
+
+export function isUnusedForkChildSessionRecord(record: ChatSessionRecord): boolean {
+  return isUnusedForkChildSession({
+    head: record.head,
+    messages: record.messages,
+    draft: record.draftComposer ?? record.draftInput ?? null,
+  });
+}
+
 /** Fork child, pinned, or manually placed on the session graph. */
 export function isDeferredEmptySessionShell(
   head: Pick<

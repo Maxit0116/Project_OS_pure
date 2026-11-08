@@ -259,28 +259,41 @@ function mapFlowStatus(status: string): AgentPoolTaskStatus {
     case 'awaiting_review':
       return 'awaiting_user_done'
     case 'complete':
+    case 'cancelled':
+    case 'idle':
       return 'complete'
     case 'error':
+    case 'interrupted':
       return 'error'
     default:
-      return 'running'
+      // Unknown terminal/idle statuses must not look live after Stop.
+      return 'complete'
   }
 }
 
 function mapDelegatedStatus(
   events: AgentDelegationEvent[],
   childRunId: string,
+  parentLive: boolean,
 ): AgentPoolTaskStatus {
   const completed = events.find(
     (event) =>
       event.type === 'child_run_completed' && event.payload.childRunId === childRunId,
   )
   if (completed && completed.type === 'child_run_completed') {
+    if (
+      completed.payload.failureCategory === 'cancelled' ||
+      completed.payload.failureCategory === 'operation_cancelled'
+    ) {
+      return 'complete'
+    }
     if (completed.payload.status === 'error') return 'error'
     if (completed.payload.status === 'awaiting_review') return 'awaiting_user_done'
     return 'complete'
   }
-  return 'running'
+  // Stop closes the stream before child_run_completed — without a live parent,
+  // an unfinished child is stopped, not still working.
+  return parentLive ? 'running' : 'complete'
 }
 
 function toFlowSteps(steps: AgentFlowStep[]): AgentPoolFlowStep[] {
@@ -561,8 +574,17 @@ function buildDelegationTasks(
     const childActions = childEvents.filter(isActionEvent)
     const childSteps = collectRunSteps(childEvents)
     const acceptanceCriteria = extractAcceptanceCriteria(childActions)
-    const status = mapDelegatedStatus(input.flowDelegationEvents, childRunId)
-    const currentAction = latestActionLabel(childActions, childSteps, 'Delegated')
+    const parentLive = input.flowStatus === 'running'
+    const status = mapDelegatedStatus(
+      input.flowDelegationEvents,
+      childRunId,
+      parentLive,
+    )
+    const currentAction = latestActionLabel(
+      childActions,
+      childSteps,
+      parentLive ? 'Delegated' : 'Stopped',
+    )
     const { spans, originMs, trace } = projectAgentPoolSpans({
       title,
       status,

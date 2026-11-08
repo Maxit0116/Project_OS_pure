@@ -48,9 +48,25 @@ describe('cancel / Stop product DOM + state regressions (unpaid)', () => {
       timestamp: '2026-11-08T00:00:00.000Z',
       type: 'run_cancelled',
     })
-    const after = reduceRunEventState(baseState(), cancelled)
+    const after = reduceRunEventState(
+      {
+        ...baseState(),
+        flowSteps: [
+          {
+            id: 'step_1',
+            label: 'Inspect',
+            kind: 'inspect_files',
+            status: 'running',
+            relatedNodeIds: [],
+            relatedFiles: [],
+          },
+        ],
+      },
+      cancelled,
+    )
     expect(after.flowStatus).toBe('cancelled')
     expect(after.revokedApplyRunIds).toContain('run_root')
+    expect(after.flowSteps[0]?.status).toBe('skipped')
   })
 
   it('operation_cancelled surfaces Stop copy, not orchestration-failed', () => {

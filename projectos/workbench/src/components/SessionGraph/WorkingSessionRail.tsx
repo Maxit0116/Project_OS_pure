@@ -38,7 +38,7 @@ import {
   type SessionGraphRailLayout,
 } from './sessionGraphRailLayout'
 import { previewRailReorder } from './useSessionGraphDrag'
-import styles from './WorkingSessionRail.module.css'
+import styles from '../GraphOverlay/graphOverlayRail.module.css'
 
 const EXPAND_DELAY_MS = 350
 const COLLAPSE_DELAY_MS = 180

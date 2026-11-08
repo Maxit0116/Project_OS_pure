@@ -25,16 +25,20 @@
   border-radius: 4px;
 }
 
-.mark {
+.mark,
+.markLive {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--tech-text-secondary);
   flex: none;
+  color: var(--tech-accent, var(--color-accent));
 }
 
-.running .mark {
-  background: var(--tech-accent);
+.running .mark,
+.running .markLive {
+  background: var(--tech-accent, var(--color-accent));
+  color: var(--tech-accent, var(--color-accent));
 }
 
 .error .mark {

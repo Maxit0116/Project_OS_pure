@@ -53,6 +53,7 @@ import {
   moveLoopFolderIntoFolder,
   moveLoopIntoFolder,
   removeLoopFolderFromLayout,
+  removeLoopFromLayout,
   renameLoopRailFolder,
   saveLoopGraphRailLayout,
   syncRailLayoutWithLoops,
@@ -95,6 +96,7 @@ export default function LoopGraphOverlay() {
   const setPhase = useLoopGraphStore((s) => s.setPhase)
   const selectLoop = useLoopGraphStore((s) => s.selectLoop)
   const createLoop = useLoopGraphStore((s) => s.createLoop)
+  const deleteLoop = useLoopGraphStore((s) => s.deleteLoop)
   const updateDraft = useLoopGraphStore((s) => s.updateDraft)
   const setConnectingFrom = useLoopGraphStore((s) => s.setConnectingFrom)
   const setPendingDelete = useLoopGraphStore((s) => s.setPendingDelete)
@@ -491,6 +493,13 @@ export default function LoopGraphOverlay() {
             }
           }
           setRenamingFolderId(null)
+        }}
+        onRemoveLoop={(loopId) => {
+          void deleteLoop(loopId).then((ok) => {
+            if (ok) {
+              persistRail(removeLoopFromLayout(railLayoutRef.current, loopId))
+            }
+          })
         }}
         onRemoveFolder={(folderId) => {
           if (renamingFolderId === folderId) setRenamingFolderId(null)

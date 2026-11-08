@@ -1,0 +1,322 @@
+.host {
+  position: fixed;
+  top: 52px;
+  right: var(--space-lg);
+  z-index: 1100;
+  width: min(320px, calc(100vw - var(--space-lg) * 2));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.host > * {
+  pointer-events: auto;
+}
+
+.typeStack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.typeHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.typeTitle {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tech-text-muted);
+  letter-spacing: 0.01em;
+}
+
+.typeCount {
+  font-size: 11px;
+  color: var(--tech-text-muted);
+  opacity: 0.8;
+}
+
+.stack {
+  position: relative;
+}
+
+.cardShell {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+  isolation: isolate;
+}
+
+.stackedCard {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.mutedCard .card {
+  background: var(--tech-bg-chrome);
+  box-shadow: none;
+}
+
+/* Mac NC Clear rail — sits under the card on the right; left-swipe reveals it. */
+.clearRail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 72px;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.clearOpen .clearRail {
+  pointer-events: auto;
+}
+
+.clearButton {
+  flex: 1;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0 6px 6px 0;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  cursor: pointer;
+  transition:
+    background 150ms var(--ease-out),
+    color 150ms var(--ease-out);
+}
+
+.clearButton:hover {
+  background: color-mix(in srgb, var(--tech-error) 18%, var(--tech-bg-muted));
+  color: var(--tech-text-primary);
+}
+
+.clearButton:focus-visible {
+  outline: none;
+  box-shadow: inset var(--tech-shadow-focus);
+}
+
+.clearLabel {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--tech-border);
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-sm);
+  transition:
+    transform 180ms var(--ease-out),
+    opacity 180ms var(--ease-out),
+    border-color 150ms var(--ease-out),
+    background 150ms var(--ease-out);
+  transform-origin: top center;
+  /* Allow horizontal trackpad/pointer swipes while keeping vertical page scroll. */
+  touch-action: pan-y;
+  cursor: grab;
+  user-select: none;
+}
+
+.card:active {
+  cursor: grabbing;
+}
+
+.card:hover {
+  border-color: var(--tech-border-strong);
+}
+
+.archiving {
+  opacity: 0 !important;
+  transform: translateX(120%) !important;
+}
+
+.deleting {
+  opacity: 0 !important;
+  transform: translateX(-72px) !important;
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  min-width: 0;
+}
+
+.content:focus-visible {
+  outline: none;
+  box-shadow: inset var(--tech-shadow-focus);
+}
+
+.icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--tech-text-muted);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--tech-text-primary);
+}
+
+.body {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--tech-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.action {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tech-text-secondary);
+}
+
+.suggestBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 11px 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.suggestCopy {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.suggestActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.suggestPrimary,
+.suggestSecondary {
+  appearance: none;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+.suggestPrimary {
+  border: 1px solid var(--tech-border-strong);
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+}
+
+.suggestPrimary:hover {
+  border-color: var(--tech-text-muted);
+}
+
+.suggestPrimary:focus-visible,
+.suggestSecondary:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.suggestSecondary {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--tech-text-secondary);
+}
+
+.suggestSecondary:hover {
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
+}
+
+.collapseBtn {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--tech-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.collapseBtn:hover {
+  color: var(--tech-text-primary);
+}
+
+.expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.expandedList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: auto;
+  max-height: inherit;
+  padding-bottom: 2px;
+}
+
+.archivedDivider {
+  margin: 4px 2px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--tech-border-subtle);
+  font-size: 11px;
+  color: var(--tech-text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .archiving,
+  .deleting,
+  .clearButton {
+    transition: none;
+  }
+}

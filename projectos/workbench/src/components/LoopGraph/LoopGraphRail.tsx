@@ -30,7 +30,7 @@ import {
   type LoopGraphRailFolderEntry,
   type LoopGraphRailLayout,
 } from './loopGraphRailLayout'
-import styles from './LoopGraphRail.module.css'
+import styles from '../GraphOverlay/graphOverlayRail.module.css'
 
 const EXPAND_DELAY_MS = 350
 const COLLAPSE_DELAY_MS = 180
@@ -71,6 +71,7 @@ interface Props {
   onCreateFolder: () => void
   onRenameFolder: (folderId: string, title: string) => void
   onCancelRenameFolder: () => void
+  onRemoveLoop: (loopId: string) => void
   onRemoveFolder: (folderId: string) => void
   onMoveIntoFolder: (loopId: string, folderId: string) => void
   onMoveFolderIntoFolder: (folderId: string, targetFolderId: string) => void
@@ -88,6 +89,7 @@ export default function LoopGraphRail({
   onCreateFolder,
   onRenameFolder,
   onCancelRenameFolder,
+  onRemoveLoop,
   onRemoveFolder,
   onMoveIntoFolder,
   onMoveFolderIntoFolder,
@@ -227,6 +229,10 @@ export default function LoopGraphRail({
         data-rail-nested={options.nested ? 'true' : undefined}
         draggable
         onDragStart={(event) => {
+          if ((event.target as Element | null)?.closest?.('[data-rail-drag-ignore]')) {
+            event.preventDefault()
+            return
+          }
           event.stopPropagation()
           event.dataTransfer.setData('text/loop-id', loopId)
           event.dataTransfer.effectAllowed = 'move'
@@ -266,6 +272,20 @@ export default function LoopGraphRail({
             </span>
           ) : null}
         </button>
+        <button
+          type="button"
+          className={styles.deleteButton}
+          data-rail-drag-ignore=""
+          aria-label={ts('chat.loopGraph.removeLoop')}
+          title={ts('chat.loopGraph.removeLoop')}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            onRemoveLoop(loopId)
+          }}
+        >
+          <X size={12} strokeWidth={2.25} aria-hidden />
+        </button>
       </div>
     )
   }
@@ -296,6 +316,10 @@ export default function LoopGraphRail({
         onPointerEnter={() => scheduleReveal(entry.id)}
         onPointerLeave={() => scheduleRevealCollapse(entry.id)}
         onDragStart={(event) => {
+          if ((event.target as Element | null)?.closest?.('[data-rail-drag-ignore]')) {
+            event.preventDefault()
+            return
+          }
           event.stopPropagation()
           event.dataTransfer.setData('text/folder-id', entry.id)
           event.dataTransfer.effectAllowed = 'move'
@@ -343,7 +367,8 @@ export default function LoopGraphRail({
         }}
       >
         <div className={styles.itemWrap}>
-          <div
+          <button
+            type="button"
             className={`${styles.item} ${styles.folderHeader} ${
               options.nested ? styles.folderChild : ''
             } ${containsActive ? styles.itemActive : ''}`}
@@ -386,13 +411,18 @@ export default function LoopGraphRail({
                 {itemCount}
               </span>
             ) : null}
-          </div>
+          </button>
           <button
             type="button"
             className={styles.deleteButton}
+            data-rail-drag-ignore=""
             aria-label={ts('chat.loopGraph.removeFolder')}
             title={ts('chat.loopGraph.removeFolder')}
-            onClick={() => onRemoveFolder(entry.id)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              onRemoveFolder(entry.id)
+            }}
           >
             <X size={12} strokeWidth={2.25} aria-hidden />
           </button>

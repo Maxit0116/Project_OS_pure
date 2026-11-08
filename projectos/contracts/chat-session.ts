@@ -68,7 +68,8 @@ export const SessionGraphStripKindSchema = z.enum([
 ]);
 
 export const SESSION_GRAPH_STRIP_TITLE_MAX = 80;
-export const SESSION_GRAPH_STRIP_MAX_ITEMS = 5;
+/** Visible rows before the node-card strip scrolls; also caps persisted previewStrip. */
+export const SESSION_GRAPH_STRIP_MAX_ITEMS = 10;
 
 export const SessionGraphStripItemSchema = z
   .object({
@@ -76,7 +77,10 @@ export const SessionGraphStripItemSchema = z
     kind: SessionGraphStripKindSchema,
     title: z.string().trim().min(1).max(SESSION_GRAPH_STRIP_TITLE_MAX),
     ts: z.string().min(1),
+    /** Prefer the user prompt id so ChatPanel / conversation nav can reveal the same turn. */
     messageId: z.string().min(1).optional(),
+    /** Chat mode of the linked user turn — matches Conversation Nav stack-bar color. */
+    chatMode: ChatSessionModeSchema.optional(),
   })
   .strict();
 
@@ -123,6 +127,14 @@ export const ChatSessionHeadSchema = z
     titleGeneratedAt: z.string().min(1).optional(),
     parentSessionId: z.string().min(1).optional(),
     forkMessageId: z.string().min(1).optional(),
+    /**
+     * How the parent→child edge is drawn on Session Graph.
+     * `below` = full-context / title / latest-turn fork under the parent.
+     * `aside` = mid-turn fork attached to a strip row on the parent's right.
+     */
+    forkLayout: z.enum(["below", "aside"]).optional(),
+    /** Y offset (px) from parent card top for aside-edge attachment. */
+    forkAnchorOffsetY: z.number().finite().optional(),
     /** Shared canvas group for topic sessions. Multi-root forests share one graphId. */
     graphId: z.string().min(1).optional(),
     classification: ChatSessionClassificationSchema.optional(),

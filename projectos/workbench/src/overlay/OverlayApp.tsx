@@ -106,6 +106,7 @@ import {
   composeAttachScreenPoint,
   estimateComposePanelHeight,
   layoutComposeForArrow,
+  layoutComposeNearTarget,
   type ComposeLayoutResult,
 } from './composeLayout'
 import { resolveArrowEdgeConnection } from './composeConnection'
@@ -1330,27 +1331,28 @@ export function OverlayApp() {
       region: baseRegion,
       arrowId,
     })
-    const localCenter = {
-      x:
-        (placement.rect.x + placement.rect.width / 2) /
-        Math.max(1, baseRegion.captureRect.width),
-      y:
-        (placement.rect.y + placement.rect.height / 2) /
-        Math.max(1, baseRegion.captureRect.height),
+    const stencilStage = {
+      x: baseRegion.captureRect.x + placement.rect.x,
+      y: baseRegion.captureRect.y + placement.rect.y,
+      width: placement.rect.width,
+      height: placement.rect.height,
     }
-    const head = {
-      x: Math.min(0.98, Math.max(0.02, localCenter.x)),
-      y: Math.min(0.98, Math.max(0.02, localCenter.y)),
-    }
-    const tail = { x: head.x + 0.35, y: head.y }
-    const layout = layoutComposeForArrow({
-      region: baseRegion.captureRect,
-      headScreen: relativeToClient(baseRegion.captureRect, head),
-      preferredTailScreen: relativeToClient(baseRegion.captureRect, tail),
+    const layout = layoutComposeNearTarget({
+      target: stencilStage,
       panelWidth: 360,
       panelHeight: estimateComposePanelHeight(false),
       viewport: { width: window.innerWidth, height: window.innerHeight },
     })
+    const head = clientToRelative(
+      baseRegion.captureRect,
+      stencilStage.x + stencilStage.width / 2,
+      stencilStage.y + stencilStage.height / 2,
+    )
+    const tail = clientToRelative(
+      baseRegion.captureRect,
+      layout.attachScreen.x,
+      layout.attachScreen.y,
+    )
     const draftArrow: OverlayArrow = {
       id: arrowId,
       index,

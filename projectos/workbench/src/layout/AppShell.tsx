@@ -1,6 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { useWorkbenchStore } from '../state/workbenchStore'
-import { useI18n } from '../i18n'
 import { usePanelPresence } from '../hooks/usePanelPresence'
 import ThreeZoneLayout from './ThreeZoneLayout'
 import WorkbenchTopBar from './WorkbenchTopBar'
@@ -8,6 +7,8 @@ import WorkbenchStageRail from './WorkbenchStageRail'
 import DesktopTitleBar from './DesktopTitleBar'
 import WelcomeScreen from '../components/WelcomeScreen'
 import ToastContainer from '../components/ui/ToastContainer'
+import WorkbenchErrorDialog from '../components/ui/WorkbenchErrorDialog'
+import NotificationStack from '../components/NotificationStack/NotificationStack'
 import CommandPalette from '../components/CommandPalette/CommandPalette'
 import AppMenuBridge from '../appMenu/AppMenuBridge'
 import SettingsPanel from '../components/Settings/SettingsPanel'
@@ -61,7 +62,6 @@ export default function AppShell() {
   const terminalHeight = useWorkbenchStore((s) => s.terminalHeight)
   const panelResizing = useWorkbenchStore((s) => s.panelResizing)
   const reclampPanelLayout = useWorkbenchStore((s) => s.reclampPanelLayout)
-  const { ts } = useI18n()
 
   const leftPresence = usePanelPresence(leftPanelOpen, PANEL_EXIT_MS)
   const rightPresence = usePanelPresence(rightPanelOpen, PANEL_EXIT_MS)
@@ -155,14 +155,7 @@ export default function AppShell() {
         <WorkbenchTopBar onOpenSettings={() => setSettingsOpen(true)} />
         <WorkbenchStageRail />
 
-        {error && (
-          <div className={styles.errorBar} role="alert">
-            <span>{error}</span>
-            <button type="button" className={styles.dismissBtn} onClick={dismissError} aria-label={ts('common.dismiss')}>
-              ×
-            </button>
-          </div>
-        )}
+        {error ? <WorkbenchErrorDialog message={error} onDismiss={dismissError} /> : null}
 
         <div className={workbenchBodyClassName} style={workbenchBodyStyle}>
           <CaptureFolderDnDProvider>
@@ -201,6 +194,7 @@ export default function AppShell() {
           </CaptureFolderDnDProvider>
         </div>
 
+        <NotificationStack />
         <ToastContainer />
         <CommandPalette />
         <AppMenuBridge />

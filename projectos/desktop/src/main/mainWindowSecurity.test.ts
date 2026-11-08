@@ -27,6 +27,16 @@ describe('main-window navigation and capability policy', () => {
       .toContain('https://huggingface.co')
     expect(mainWindowContentSecurityPolicy(true))
       .toContain('https://hf-mirror.com')
+    expect(mainWindowContentSecurityPolicy(true))
+      .toContain('https://avatars.githubusercontent.com')
+    expect(mainWindowContentSecurityPolicy(true))
+      .toContain('https://*.githubusercontent.com')
+    expect(mainWindowContentSecurityPolicy(true))
+      .toContain('https://github.com')
+    expect(imgSrcDirective(mainWindowContentSecurityPolicy(true)))
+      .toBe(
+        "img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.githubusercontent.com https://github.com",
+      )
     expect(installedMainFramePolicy(false))
       .toBe(mainWindowContentSecurityPolicy(false))
     expect(installedMainFramePolicy(true))
@@ -124,6 +134,12 @@ describe('main-window navigation and capability policy', () => {
     expect(mainWindowContentSecurityPolicy(true)).toContain("object-src 'none'")
   })
 })
+
+function imgSrcDirective(policy: string): string | undefined {
+  return policy
+    .split('; ')
+    .find((directive) => directive.startsWith('img-src '))
+}
 
 function installedMainFramePolicy(packaged: boolean): string | undefined {
   let headersReceived: ((

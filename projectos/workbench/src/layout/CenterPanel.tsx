@@ -9,7 +9,6 @@ import CodeEditorWorkspace from '../components/CodeEditor/CodeEditorWorkspace'
 import { hasOpenEditorFiles } from '../components/CodeEditor/editorPaneHelpers'
 import BrowserPanel from '../components/Browser/BrowserPanel'
 import SpatialCapturesPanel from '../components/SpatialCaptures/SpatialCapturesPanel'
-import DiffReadyBanner from '../components/DiffReadyBanner/DiffReadyBanner'
 import TabBar from '../components/ui/TabBar'
 import EmptyState from '../components/ui/EmptyState'
 import { Code2 } from 'lucide-react'
@@ -44,9 +43,6 @@ export default function CenterPanel({ mapBleed }: Props) {
     (s) => s.approveAndRunCurrentVerification,
   )
   const undoCurrentApply = useWorkbenchStore((s) => s.undoCurrentApply)
-  const diffReadyBanner = useWorkbenchStore((s) => s.diffReadyBanner)
-  const dismissDiffReadyBanner = useWorkbenchStore((s) => s.dismissDiffReadyBanner)
-  const navigateFromAgentNotification = useWorkbenchStore((s) => s.navigateFromAgentNotification)
   const selectedFilePath = useWorkbenchStore((s) => s.selectedFilePath)
   const editorPanes = useWorkbenchStore((s) => s.editorPanes)
   const { ts } = useI18n()
@@ -72,20 +68,6 @@ export default function CenterPanel({ mapBleed }: Props) {
     }
   }, [showBrowser])
 
-  const showMapBanner = diffReadyBanner?.channel === 'map_banner'
-  const showCenterBanner = diffReadyBanner?.channel === 'center_banner'
-
-  const diffReadyBannerEl =
-    diffReadyBanner?.visible ? (
-      <DiffReadyBanner
-        title={diffReadyBanner.title}
-        body={diffReadyBanner.body}
-        destination={diffReadyBanner.destination}
-        onReview={() => void navigateFromAgentNotification(diffReadyBanner.destination)}
-        onDismiss={dismissDiffReadyBanner}
-      />
-    ) : null
-
   return (
     <section className={`${styles.panel} ${mapBleedActive ? styles.mapBleed : ''}`}>
       {keepBrowserAlive && (
@@ -96,7 +78,6 @@ export default function CenterPanel({ mapBleed }: Props) {
           aria-hidden={!showBrowser}
         >
           <div className={`${styles.codePanel} ${styles.browserPanel}`}>
-            {showCenterBanner ? diffReadyBannerEl : null}
             <BrowserPanel />
           </div>
         </div>
@@ -106,7 +87,6 @@ export default function CenterPanel({ mapBleed }: Props) {
         <div className={`${styles.body} tab-content-fade`} key={centerTab}>
           {centerTab === 'function-map' && graph && (
             <div className={styles.tabPane} data-tour="function-map">
-              {showMapBanner ? diffReadyBannerEl : null}
               {mapBleedActive ? (
                 <MapChromeAnchor />
               ) : (
@@ -134,7 +114,6 @@ export default function CenterPanel({ mapBleed }: Props) {
                 centerTab === 'code' ? styles.tabPane : styles.codePanelHidden
               }`}
             >
-              {showCenterBanner ? diffReadyBannerEl : null}
               {generatedDiff && (
                 <TabBar
                   tabs={codeSubTabs}
@@ -171,7 +150,6 @@ export default function CenterPanel({ mapBleed }: Props) {
           )}
           {centerTab === 'spatial-captures' && (
             <div className={styles.tabPane} data-tour="spatial-captures">
-              {showCenterBanner ? diffReadyBannerEl : null}
               <SpatialCapturesPanel />
             </div>
           )}

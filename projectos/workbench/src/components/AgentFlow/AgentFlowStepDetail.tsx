@@ -1,8 +1,13 @@
-import { useState } from 'react'
+import { useRef, useState, type KeyboardEvent } from 'react'
 import type { AgentFlowStep } from '@contracts/index'
 import type { FlowCorrection } from '../../state/workbenchStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useI18n } from '../../i18n'
+import { useComposePromptVoice } from '../ChatPanel/composer/useComposePromptVoice'
+import {
+  VoiceInputDock,
+  VoiceInputErrorBanner,
+} from '../ChatPanel/VoiceInputControls'
 import Chip from '../ui/Chip'
 import Button from '../ui/Button'
 import styles from './AgentFlowStepDetail.module.css'
@@ -16,13 +21,46 @@ interface Props {
 export default function AgentFlowStepDetail({ step, corrections, onClose }: Props) {
   const selectFile = useWorkbenchStore((s) => s.selectFile)
   const injectFlowCorrection = useWorkbenchStore((s) => s.injectFlowCorrection)
-  const { ts } = useI18n()
+  const { ts, locale } = useI18n()
   const [correction, setCorrection] = useState('')
+  const correctionRef = useRef(correction)
+  correctionRef.current = correction
+  const stepIdRef = useRef(step.id)
+  stepIdRef.current = step.id
+
+  const composeVoice = useComposePromptVoice({
+    locale,
+    getText: () => correctionRef.current,
+    setText: setCorrection,
+    onSubmit: (text) => {
+      if (!text.trim()) return
+      void injectFlowCorrection(stepIdRef.current, text.trim())
+      setCorrection('')
+    },
+  })
 
   const handleSubmitCorrection = () => {
     if (!correction.trim()) return
+    if (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing) {
+      composeVoice.stopVoice()
+    }
     void injectFlowCorrection(step.id, correction.trim())
     setCorrection('')
+  }
+
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      event.key === 'Escape' &&
+      (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing)
+    ) {
+      event.preventDefault()
+      composeVoice.cancelVoice()
+      return
+    }
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === 'Space') {
+      event.preventDefault()
+      composeVoice.dockProps.onMicToggle()
+    }
   }
 
   return (
@@ -54,13 +92,28 @@ export default function AgentFlowStepDetail({ step, corrections, onClose }: Prop
         )}
         <div className={styles.correction}>
           <label className={styles.correctionLabel}>{ts('agentFlow.correction')}</label>
-          <textarea
-            className={styles.correctionInput}
-            value={correction}
-            onChange={(e) => setCorrection(e.target.value)}
-            placeholder={ts('agentFlow.correctionPlaceholder')}
-            rows={2}
-          />
+          {composeVoice.voice.state.error ? (
+            <VoiceInputErrorBanner
+              errorKey={composeVoice.voice.state.error}
+              onDismiss={composeVoice.voice.dismissError}
+              labels={composeVoice.voiceLabels}
+            />
+          ) : null}
+          <div className={styles.correctionWrap}>
+            <textarea
+              className={styles.correctionInput}
+              value={correction}
+              onChange={(e) => {
+                const value = e.target.value
+                setCorrection(value)
+                composeVoice.syncBaseFromExternalText(value)
+              }}
+              onKeyDown={onKeyDown}
+              placeholder={ts('agentFlow.correctionPlaceholder')}
+              rows={2}
+            />
+            <VoiceInputDock {...composeVoice.dockProps} />
+          </div>
           <Button size="sm" onClick={handleSubmitCorrection}>
             {ts('agentFlow.submitCorrection')}
           </Button>

@@ -280,6 +280,13 @@
 
 /* Live activity / diff rows */
 
+.activityFeed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
 .actionList {
   margin: 0;
   padding: 0;
@@ -359,6 +366,16 @@
   min-width: 0;
 }
 
+.diffRow .activityMeta {
+  flex: 1;
+  min-width: 0;
+}
+
+.diffRow > :last-child {
+  flex-shrink: 0;
+  align-self: center;
+}
+
 .diffPath {
   flex: 1;
   min-width: 0;
@@ -406,6 +423,10 @@
   gap: 6px;
 }
 
+.instructionWrap {
+  position: relative;
+}
+
 .instructionInput {
   appearance: none;
   -webkit-appearance: none;
@@ -418,7 +439,7 @@
   overflow-y: auto;
   min-height: 52px;
   max-height: 120px;
-  padding: 8px 10px;
+  padding: 8px 40px 8px 10px;
   border: 1px solid var(--tech-border);
   border-radius: 6px;
   background-color: var(--tech-bg-muted);

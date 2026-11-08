@@ -210,39 +210,6 @@
   box-shadow: var(--tech-shadow-md);
 }
 
-.errorBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-md);
-  padding: var(--space-sm) var(--space-lg);
-  font-size: var(--font-size-sm);
-  color: var(--color-error);
-  background: var(--color-error-subtle);
-  border-bottom: 1px solid var(--color-error-border);
-  flex-shrink: 0;
-}
-
-.dismissBtn {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  font-size: 18px;
-  line-height: 1;
-  color: inherit;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  opacity: 0.8;
-  cursor: pointer;
-}
-
-.dismissBtn:hover {
-  opacity: 1;
-  background: var(--color-hover-overlay);
-}
-
 .main {
   flex: 1;
   min-height: 0;

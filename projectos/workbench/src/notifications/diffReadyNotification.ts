@@ -1,6 +1,10 @@
 import type { Locale } from '../i18n/types'
 import { getStoreMessage } from '../i18n/storeMessages'
 import type { CenterTab, CodeSubTab, RightPanelTab } from '../state/workbenchStore'
+import {
+  NOTIFICATION_MIN_LINGER_MS,
+  NOTIFICATION_SWIPE_DISMISS_THRESHOLD_PX,
+} from './notificationCenterTypes'
 
 export type AgentCompletionKind = 'ask' | 'diff'
 
@@ -41,8 +45,11 @@ export function captureDiffReadyNotificationContext(state: {
     agentFlowOpen: state.agentFlowOpen,
   }
 }
-export const DIFF_READY_BANNER_AUTO_DISMISS_MS = 8000
-export const DIFF_READY_SWIPE_DISMISS_THRESHOLD_PX = 80
+
+/** @deprecated Auto-dismiss removed; linger gate is NOTIFICATION_MIN_LINGER_MS */
+export const DIFF_READY_BANNER_AUTO_DISMISS_MS = NOTIFICATION_MIN_LINGER_MS
+/** @deprecated Prefer NOTIFICATION_SWIPE_DISMISS_THRESHOLD_PX */
+export const DIFF_READY_SWIPE_DISMISS_THRESHOLD_PX = NOTIFICATION_SWIPE_DISMISS_THRESHOLD_PX
 
 export function shouldSuppressDiffReadyNotification(state: {
   enabled: boolean

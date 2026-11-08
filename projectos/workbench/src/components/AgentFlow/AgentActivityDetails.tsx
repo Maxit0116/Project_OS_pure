@@ -1,16 +1,24 @@
-import { useEffect } from 'react'
+import { useEffect, useId, useState } from 'react'
+import { ChevronRight } from 'lucide-react'
 import type { AgentActivity } from '@contracts/index'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useI18n } from '../../i18n'
 import RestrictedMarkdown from '../ChatPanel/RestrictedMarkdown'
+import LiveStatusPulse from '../ui/LiveStatusPulse'
 import styles from './AgentActivityDetails.module.css'
 
 interface Props {
   activities: AgentActivity[]
   selectedId: string | null
+  /** Inspector: keep the selected activity expanded by default. */
+  preferExpandSelected?: boolean
 }
 
-export default function AgentActivityDetails({ activities, selectedId }: Props) {
+export default function AgentActivityDetails({
+  activities,
+  selectedId,
+  preferExpandSelected = false,
+}: Props) {
   const { ts } = useI18n()
   const openDiff = useWorkbenchStore((s) => s.navigateToDiffReviewFile)
 
@@ -25,16 +33,83 @@ export default function AgentActivityDetails({ activities, selectedId }: Props) 
   return (
     <div className={styles.list}>
       {activities.map((activity) => (
-        <article
+        <ActivityRow
           key={activity.id}
-          className={`${styles.card} ${activity.id === selectedId ? styles.selected : ''}`}
-          data-activity-detail={activity.id}
-        >
-          <h3>{activity.summary}</h3>
-          <DetailBody activity={activity} ts={ts} onOpenDiff={openDiff} />
-        </article>
+          activity={activity}
+          selected={activity.id === selectedId}
+          defaultExpanded={
+            preferExpandSelected
+              ? activity.id === selectedId || activity.status === 'running'
+              : activity.status === 'running'
+          }
+          ts={ts}
+          onOpenDiff={openDiff}
+        />
       ))}
     </div>
+  )
+}
+
+function ActivityRow({
+  activity,
+  selected,
+  defaultExpanded,
+  ts,
+  onOpenDiff,
+}: {
+  activity: AgentActivity
+  selected: boolean
+  defaultExpanded: boolean
+  ts: (path: string, params?: Record<string, string | number>) => string
+  onOpenDiff: (path?: string) => void
+}) {
+  const detailId = useId()
+  const [expanded, setExpanded] = useState(defaultExpanded)
+  const live = activity.status === 'running'
+
+  useEffect(() => {
+    if (defaultExpanded) setExpanded(true)
+  }, [defaultExpanded, activity.id])
+
+  return (
+    <article
+      className={`${styles.card} ${selected ? styles.selected : ''}`}
+      data-activity-detail={activity.id}
+      data-expanded={expanded ? 'true' : undefined}
+      data-live={live ? 'true' : undefined}
+    >
+      <div className={styles.heading}>
+        <button
+          type="button"
+          className={styles.chevronBtn}
+          aria-expanded={expanded}
+          aria-controls={detailId}
+          aria-label={expanded ? ts('agentFlow.collapseDetails') : ts('agentFlow.expandDetails')}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          <ChevronRight
+            size={14}
+            className={`${styles.chevron} ${expanded ? styles.chevronOpen : ''}`}
+            aria-hidden
+          />
+        </button>
+        <button
+          type="button"
+          className={styles.titleBtn}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          {live ? <LiveStatusPulse active className={styles.liveDot} /> : null}
+          <LiveStatusPulse active={live} variant="label" className={styles.title}>
+            {activity.summary}
+          </LiveStatusPulse>
+        </button>
+      </div>
+      {expanded ? (
+        <div id={detailId} className={styles.detail}>
+          <DetailBody activity={activity} ts={ts} onOpenDiff={onOpenDiff} />
+        </div>
+      ) : null}
+    </article>
   )
 }
 
@@ -51,7 +126,14 @@ function DetailBody({
   switch (detail.kind) {
     case 'thinking':
       if (!detail.content) {
-        return <p className={styles.meta}>{ts('agentFlow.activity.thinkingPending')}</p>
+        return (
+          <p className={styles.pendingRow}>
+            <LiveStatusPulse active className={styles.pendingDot} />
+            <LiveStatusPulse active variant="label">
+              {ts('agentFlow.activity.thinkingPending')}
+            </LiveStatusPulse>
+          </p>
+        )
       }
       return (
         <>

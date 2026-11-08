@@ -17,11 +17,28 @@ import {
   NAV_SCRUB_VELOCITY_PX_PER_MS,
   navRailViewportLeft,
   navRailViewportRightEdge,
+  chooseSweepOrigin,
   previewSourceForUserContent,
   resolveTurnStatus,
   shouldShowConversationNav,
   truncateNavPreview,
 } from './conversationNavTurns'
+
+describe('chooseSweepOrigin', () => {
+  it('picks top when the target is in the upper half', () => {
+    expect(chooseSweepOrigin(100, 1000)).toBe('top')
+    expect(chooseSweepOrigin(500, 1000)).toBe('top')
+  })
+
+  it('picks bottom when the target is in the lower half', () => {
+    expect(chooseSweepOrigin(501, 1000)).toBe('bottom')
+    expect(chooseSweepOrigin(900, 1000)).toBe('bottom')
+  })
+
+  it('defaults to top when there is no overflow', () => {
+    expect(chooseSweepOrigin(0, 0)).toBe('top')
+  })
+})
 
 describe('truncateNavPreview', () => {
   it('collapses whitespace and truncates long text', () => {

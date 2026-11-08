@@ -67,7 +67,7 @@ describe('Live Graph Phase 3 interaction', () => {
     expect(pauseAgentRun).toHaveBeenCalledWith('run_pause')
     expect(useWorkbenchStore.getState().activeRunId).toBeNull()
     expect(useWorkbenchStore.getState().liveGraphPausedRunId).toBe('run_pause')
-    expect(useWorkbenchStore.getState().flowStatus).toBe('idle')
+    expect(useWorkbenchStore.getState().flowStatus).toBe('interrupted')
   })
 
   it('rejectFromGraph clears verification approval without approving', () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  selectDiffReviewAttention,
   selectPendingChangesDrawerUndoMode,
   selectPendingChangesDrawerVisible,
 } from './pendingChangesDrawer'
@@ -54,5 +55,26 @@ describe('pendingChangesDrawer selectors', () => {
       applyResult: { applied: true, backupId: 'backup_1' },
       settings: { execution: { changeExecutionPolicy: 'automatic' } },
     })).toBe('restore')
+  })
+})
+
+describe('selectDiffReviewAttention', () => {
+  it('requires both diffReady and a non-empty generated diff', () => {
+    expect(selectDiffReviewAttention({
+      diffReady: true,
+      generatedDiff: { files: [{ path: 'a.ts' }] },
+    })).toBe(true)
+    expect(selectDiffReviewAttention({
+      diffReady: true,
+      generatedDiff: null,
+    })).toBe(false)
+    expect(selectDiffReviewAttention({
+      diffReady: true,
+      generatedDiff: { files: [] },
+    })).toBe(false)
+    expect(selectDiffReviewAttention({
+      diffReady: false,
+      generatedDiff: { files: [{ path: 'a.ts' }] },
+    })).toBe(false)
   })
 })

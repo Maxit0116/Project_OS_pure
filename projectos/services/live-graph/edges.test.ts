@@ -5,6 +5,7 @@ import {
   agentFlowActivityIdsForLive,
   deriveExecutionEdges,
   focusNodeIdSet,
+  listNodeChangeEntries,
   resolveCurrentTaskId,
 } from "./edges.js";
 import { rebuildExecutionOverlay } from "./overlay.js";
@@ -124,6 +125,55 @@ describe("agentFlowActivityIdsForLive", () => {
     });
     expect(ids).toContain("evt_diff");
     expect(ids).toContain("evt_diff:app/login/page.tsx");
+  });
+});
+
+describe("listNodeChangeEntries", () => {
+  it("aggregates path rows and prefers a running edit over older completes", () => {
+    const overlay = rebuildExecutionOverlay(
+      [
+        event({
+          type: "diff_proposed",
+          eventId: "d1",
+          phaseId: "phase_gen",
+          timestamp: "2026-10-20T01:00:01.000Z",
+          payload: {
+            files: [{ path: "app/login/page.tsx", operation: "modify" }],
+          },
+        }),
+        event({
+          type: "diff_proposed",
+          eventId: "d2",
+          phaseId: "phase_gen",
+          timestamp: "2026-10-20T01:00:05.000Z",
+          payload: {
+            files: [{ path: "lib/auth.ts", operation: "modify" }],
+          },
+        }),
+        event({
+          type: "apply_result",
+          eventId: "a1",
+          phaseId: "phase_gen",
+          timestamp: "2026-10-20T01:00:06.000Z",
+          payload: {
+            filesWritten: ["lib/auth.ts"],
+            outcome: "applied",
+          },
+        }),
+      ],
+      FILE_INDEX,
+    )!;
+
+    const loginChanges = listNodeChangeEntries(overlay, "code_login");
+    const authChanges = listNodeChangeEntries(overlay, "code_auth");
+
+    expect(loginChanges).toHaveLength(1);
+    expect(loginChanges[0]?.path).toBe("app/login/page.tsx");
+    expect(loginChanges[0]?.status).toBe("running");
+
+    expect(authChanges).toHaveLength(1);
+    expect(authChanges[0]?.path).toBe("lib/auth.ts");
+    expect(authChanges[0]?.status).toBe("complete");
   });
 });
 

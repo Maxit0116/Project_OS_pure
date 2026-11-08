@@ -1,0 +1,140 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.count {
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--tech-text-muted);
+}
+
+.toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-secondary);
+  cursor: pointer;
+  transition:
+    color 160ms var(--ease-out, ease),
+    background 160ms var(--ease-out, ease),
+    border-color 160ms var(--ease-out, ease);
+}
+
+.toggle:hover {
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
+  border-color: var(--tech-border-strong);
+}
+
+.toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.deckButton {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.deckButton:focus-visible {
+  outline: none;
+}
+
+.deckButton:focus-visible .deckFaceFront {
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.deck {
+  position: relative;
+  display: block;
+  min-height: 40px;
+  padding-top: 6px;
+}
+
+.deckLayer {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 6px;
+  height: 34px;
+  border-radius: 6px;
+  border: 1px solid var(--tech-border-subtle);
+  background: var(--tech-bg-elevated);
+  pointer-events: none;
+  transition:
+    transform 180ms var(--ease-out, ease),
+    opacity 180ms var(--ease-out, ease);
+}
+
+.deckFace {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--tech-border-subtle);
+  background: var(--tech-bg-muted);
+}
+
+.deckFaceFront {
+  transition:
+    border-color 160ms var(--ease-out, ease),
+    background 160ms var(--ease-out, ease);
+}
+
+.deckButton:hover .deckFaceFront {
+  border-color: var(--tech-border-strong);
+  background: var(--tech-bg-elevated);
+}
+
+.deckFaceText {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--tech-text-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toggle,
+  .deckLayer,
+  .deckFaceFront {
+    transition: none;
+  }
+}

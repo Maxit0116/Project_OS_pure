@@ -135,6 +135,7 @@ import type {
 } from "../contracts/spatial-pin.js";
 import {
   buildForkedChatSession,
+  deriveSessionContextDigest,
   messagesThroughFork,
 } from "../contracts/chat-session-context.js";
 import { summarizeChatSessionContextForRecord } from "../services/chat-session-title-summarize.js";
@@ -658,11 +659,14 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     const workspace = this.requireLoadedWorkspace(projectId);
     if (!workspace) return null;
     const forkId = forkMessageId.trim() || undefined;
-    let inherited = parent.contextDigest ?? null;
-    if (forkId) {
-      const slice = messagesThroughFork(parent.messages, forkId);
-      if (!slice) return null;
-      const update = await summarizeChatSessionContextForRecord(
+    const slice = messagesThroughFork(parent.messages, forkId);
+    if (!slice) return null;
+    const inherited =
+      deriveSessionContextDigest(slice) ?? parent.contextDigest ?? null;
+    const child = buildForkedChatSession(parent, inherited, forkId);
+    const saved = mockUpsertChatSession(projectId, child);
+    if (slice.length > 0) {
+      void summarizeChatSessionContextForRecord(
         projectId,
         { ...parent, messages: slice },
         {
@@ -670,11 +674,23 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
           settingsService: this.settingsService,
           settings: workspace.settings,
         },
-      );
-      inherited = update?.digest ?? null;
+      ).then((update) => {
+        if (!update?.digest) return;
+        const current = mockGetChatSession(projectId, saved.head.id);
+        if (!current) return;
+        mockUpsertChatSession(projectId, {
+          ...current,
+          inheritedDigest: update.digest,
+          head: {
+            ...current.head,
+            ...(update.responsibility?.trim()
+              ? { responsibility: update.responsibility.trim() }
+              : {}),
+          },
+        });
+      });
     }
-    const child = buildForkedChatSession(parent, inherited, forkId);
-    return mockUpsertChatSession(projectId, child);
+    return saved;
   }
 
   override setChatSessionClassification(

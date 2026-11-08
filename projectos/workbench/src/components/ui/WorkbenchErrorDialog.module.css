@@ -1,0 +1,110 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  pointer-events: none;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--scrim);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.dialog {
+  position: relative;
+  z-index: 1;
+  width: min(440px, 100%);
+  max-height: min(70vh, 480px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--tech-bg-elevated);
+  border: 1px solid var(--tech-border);
+  border-left: 3px solid var(--tech-error);
+  box-shadow: var(--tech-shadow-lg);
+  pointer-events: auto;
+}
+
+.dialog:focus {
+  outline: none;
+}
+
+.dialog:focus-visible {
+  box-shadow: var(--tech-shadow-lg), var(--tech-shadow-focus);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.icon {
+  flex-shrink: 0;
+  color: var(--tech-error);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.closeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tech-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.closeButton:hover {
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+}
+
+.closeButton:focus-visible {
+  box-shadow: var(--tech-shadow-focus);
+  outline: none;
+}
+
+.message {
+  margin: 0;
+  padding: 10px 16px 16px;
+  overflow: auto;
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  color: var(--tech-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

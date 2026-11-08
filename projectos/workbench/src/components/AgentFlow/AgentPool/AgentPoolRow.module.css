@@ -172,9 +172,9 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 0 6px;
-  border-radius: 999px;
-  border: 1px solid var(--tech-border, var(--color-border));
+  padding: 0;
+  border-radius: 0;
+  border: 0;
   font-size: 10px;
   font-weight: 600;
   color: var(--tech-text-secondary, var(--color-text-secondary));
@@ -185,23 +185,30 @@
 .statusBadge[data-status='running'],
 .statusBadge[data-status='continuing'] {
   color: var(--color-success, #3fb950);
-  border-color: color-mix(in srgb, var(--color-success, #3fb950) 40%, transparent);
 }
 
 .statusBadge[data-status='awaiting_user_done'],
 .statusBadge[data-status='reviewing'] {
   color: var(--tech-accent, var(--color-accent));
-  border-color: var(--tech-border-strong, rgba(255, 255, 255, 0.16));
 }
 
 .statusBadge[data-status='error'] {
   color: var(--color-error, #f85149);
-  border-color: color-mix(in srgb, var(--color-error, #f85149) 45%, transparent);
 }
 
 .statusBadge[data-pulse='true'] {
-  /* Soft presence only — liveness is conveyed by growing bars + playhead. */
-  opacity: 0.92;
+  /* Light label breath; waterfall bars remain the primary liveness cue. */
+  animation: poolStatusBreath 1.5s var(--ease-out, ease-in-out) infinite;
+}
+
+@keyframes poolStatusBreath {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .acceptanceTag {
@@ -694,7 +701,8 @@
   .expandShell,
   .expand,
   .kpiValue,
-  .historyPill {
+  .historyPill,
+  .statusBadge[data-pulse='true'] {
     animation: none !important;
     transition: none;
   }

@@ -35,26 +35,6 @@
   cursor: not-allowed;
 }
 
-.suggestChip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 0 0 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--tech-border-strong);
-  background: var(--tech-bg-elevated);
-  color: var(--tech-text-primary, var(--color-text-primary));
-  font-size: var(--font-size-sm);
-}
-
-.suggestActions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
 .progress {
   display: flex;
   align-items: center;

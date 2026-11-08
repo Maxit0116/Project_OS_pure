@@ -1,4 +1,4 @@
-import type { SessionGraphModel } from '@contracts/index'
+import { SESSION_GRAPH_STRIP_MAX_ITEMS, type SessionGraphModel } from '@contracts/index'
 import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js'
 
 export const SESSION_NODE_WIDTH = 252
@@ -16,8 +16,15 @@ export const SESSION_NODE_MIN_STRIP_ROWS = 1
 /** Compact card when there is no strip content yet. */
 export const SESSION_NODE_HEIGHT = estimateSessionNodeHeight(0)
 
+/**
+ * Card height grows with strip rows up to SESSION_GRAPH_STRIP_MAX_ITEMS.
+ * Beyond that the strip scrolls inside a fixed viewport of that many rows.
+ */
 export function estimateSessionNodeHeight(stripCount: number): number {
-  const rows = Math.max(SESSION_NODE_MIN_STRIP_ROWS, stripCount)
+  const rows = Math.min(
+    Math.max(SESSION_NODE_MIN_STRIP_ROWS, stripCount),
+    SESSION_GRAPH_STRIP_MAX_ITEMS,
+  )
   return (
     SESSION_NODE_HEAD_HEIGHT +
     SESSION_NODE_STRIP_PAD +

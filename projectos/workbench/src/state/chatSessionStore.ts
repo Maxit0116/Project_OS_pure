@@ -11,7 +11,9 @@ import {
   mergeSessionGraphs,
   orderSessionIdsForDeletion,
   placeChatSessionOnGraph,
+  preserveChatSessionContext,
   shouldDisposeEmptySessionRecord,
+  withSessionGraphHeadProjection,
 } from '@contracts/index'
 import { create } from 'zustand'
 import { resolveClientMode } from '../data/clientMode'
@@ -70,7 +72,11 @@ function clearPersistedCanvasOverlay(): void {
 clearPersistedCanvasOverlay()
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null
+/** Session id captured when the debounced persist was scheduled. */
+let scheduledPersistSessionId: string | null = null
 let titleSummarizeTimer: ReturnType<typeof setTimeout> | null = null
+/** Prevent concurrent forkSession races (slow summarize + switchSession). */
+let forkSessionInFlight = false
 
 /** Silent GC for empty shells — no toast; caller must ensure session is not active. */
 async function tryDeleteDisposableEmptySession(
@@ -151,6 +157,22 @@ interface ChatSessionStore {
   loading: boolean
   /** One-shot: after switchSession, ChatPanel scrolls to this message id. */
   pendingRevealMessageId: string | null
+  /** Bumped on every openSessionAtMessage so same-id reveals still retrigger. */
+  pendingRevealNonce: number
+  /**
+   * `direct` = same-session smooth travel from current scroll (nav-rail style).
+   * `sweep` = cross-session: snap to nearer end, then smooth to the turn.
+   */
+  pendingRevealMotion: 'direct' | 'sweep'
+  /**
+   * One-shot: Session Graph places a freshly forked child relative to its parent
+   * (below vs aside) once layout is ready.
+   */
+  pendingSessionForkPlacement: {
+    parentSessionId: string
+    childSessionId: string
+    placement: { forkLayout: 'below' | 'aside'; forkAnchorOffsetY?: number }
+  } | null
 
   loadForWorkspace: () => Promise<void>
   clear: () => void
@@ -189,6 +211,7 @@ interface ChatSessionStore {
   /** Open a session and optionally scroll to a message after load. */
   openSessionAtMessage: (sessionId: string, messageId?: string | null) => Promise<void>
   clearPendingRevealMessage: () => void
+  clearPendingSessionForkPlacement: () => void
   switchSession: (sessionId: string) => Promise<void>
   createSession: (options?: {
     seedWelcome?: boolean
@@ -200,13 +223,22 @@ interface ChatSessionStore {
   }) => Promise<string>
   persistActiveSession: () => Promise<void>
   schedulePersist: () => void
+  /**
+   * Immediately project workbench messages/status onto the active head so
+   * Session Graph strip + running state update before debounced persist lands.
+   */
+  syncActiveHeadFromWorkbench: () => void
   scheduleTitleSummarize: (sessionId?: string) => void
   summarizeSessionTitle: (sessionId: string) => Promise<void>
   setPinned: (sessionId: string, pinned: boolean) => Promise<void>
   setArchived: (sessionId: string, archived: boolean) => Promise<void>
   renameSession: (sessionId: string, title: string) => Promise<void>
   deleteSession: (sessionId: string) => Promise<boolean>
-  forkSession: (parentSessionId: string, forkMessageId?: string) => Promise<string | null>
+  forkSession: (
+    parentSessionId: string,
+    forkMessageId?: string,
+    layout?: { forkLayout?: 'below' | 'aside'; forkAnchorOffsetY?: number },
+  ) => Promise<string | null>
   setSessionClassification: (
     sessionId: string,
     classification: 'topic' | 'misc',
@@ -396,12 +428,16 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   inheritedDigest: null,
   loading: false,
   pendingRevealMessageId: null,
+  pendingRevealNonce: 0,
+  pendingRevealMotion: 'direct' as const,
+  pendingSessionForkPlacement: null,
 
   clear: () => {
     if (persistTimer) {
       clearTimeout(persistTimer)
       persistTimer = null
     }
+    scheduledPersistSessionId = null
     if (titleSummarizeTimer) {
       clearTimeout(titleSummarizeTimer)
       titleSummarizeTimer = null
@@ -415,17 +451,40 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       inheritedDigest: null,
       loading: false,
       pendingRevealMessageId: null,
+      pendingRevealNonce: 0,
+      pendingRevealMotion: 'direct',
+      pendingSessionForkPlacement: null,
     })
   },
 
-  clearPendingRevealMessage: () => set({ pendingRevealMessageId: null }),
+  clearPendingRevealMessage: () =>
+    set({ pendingRevealMessageId: null, pendingRevealMotion: 'direct' }),
+
+  clearPendingSessionForkPlacement: () => set({ pendingSessionForkPlacement: null }),
 
   openSessionAtMessage: async (sessionId, messageId) => {
-    set({
-      pendingRevealMessageId: messageId?.trim() ? messageId.trim() : null,
-    })
+    const trimmed = messageId?.trim() ? messageId.trim() : null
+    const sameSession = get().activeSessionId === sessionId
+    // Same session: travel from current scroll like Conversation Nav.
+    // Cross session: after load, sweep from the nearer transcript end.
+    const motion = trimmed && !sameSession ? 'sweep' : 'direct'
+    // Set before switch so ChatPanel suppresses auto-scroll-to-bottom while loading.
+    set((state) => ({
+      pendingRevealMessageId: trimmed,
+      pendingRevealNonce: state.pendingRevealNonce + 1,
+      pendingRevealMotion: motion,
+    }))
     useWorkbenchStore.setState({ rightPanelTab: 'chat', rightPanelOpen: true })
     await get().switchSession(sessionId)
+    // Bump again after the target transcript is applied so ChatPanel re-runs
+    // reveal against the loaded messages (cross-session jumps).
+    if (trimmed) {
+      set((state) => ({
+        pendingRevealMessageId: trimmed,
+        pendingRevealNonce: state.pendingRevealNonce + 1,
+        pendingRevealMotion: motion,
+      }))
+    }
   },
 
   setHistoryOpen: (open) => set({ historyOpen: open }),
@@ -682,24 +741,66 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     const { activeSessionId, heads } = get()
     if (!client || !project || !activeSessionId) return
 
+    // Capture id + workbench snapshot synchronously. After the first await the
+    // user may have forked/switched; never write activeSessionId back from a
+    // stale persist (that sent post-fork chat to the parent node).
+    const sessionId = activeSessionId
     const workbench = useWorkbenchStore.getState()
-    const existingHead = heads.find((head) => head.id === activeSessionId)
-    const record = buildChatSessionRecord(workbench, activeSessionId, existingHead)
+    const existingHead = heads.find((head) => head.id === sessionId)
+    const record = buildChatSessionRecord(workbench, sessionId, existingHead)
     await client.upsertChatSession(project.projectId, record)
-    await client.setLastActiveChatSession(project.projectId, activeSessionId)
+
+    if (get().activeSessionId === sessionId) {
+      await client.setLastActiveChatSession(project.projectId, sessionId)
+    }
 
     const index = await client.getChatSessionIndex(project.projectId)
     set({
       heads: index.heads,
       pinnedIds: index.pinnedIds,
-      activeSessionId,
+    })
+  },
+
+  syncActiveHeadFromWorkbench: () => {
+    const { activeSessionId, heads, inheritedDigest } = get()
+    if (!activeSessionId) return
+    const existingHead = heads.find((head) => head.id === activeSessionId)
+    if (!existingHead) return
+    const workbench = useWorkbenchStore.getState()
+    const draft = buildChatSessionRecord(workbench, activeSessionId, existingHead)
+    const existingRecord: ChatSessionRecord = {
+      version: '0.2.0',
+      head: existingHead,
+      messages: [],
+      ...(inheritedDigest ? { inheritedDigest } : {}),
+    }
+    const merged = preserveChatSessionContext(existingRecord, {
+      ...draft,
+      ...(inheritedDigest ? { inheritedDigest } : {}),
+    })
+    const projected = withSessionGraphHeadProjection(merged)
+    set({
+      heads: heads.map((head) =>
+        head.id === activeSessionId ? projected.head : head,
+      ),
     })
   },
 
   schedulePersist: () => {
+    const sessionId = get().activeSessionId
+    if (!sessionId) return
+    // Optimistic Session Graph update before the debounced disk write.
+    get().syncActiveHeadFromWorkbench()
     if (persistTimer) clearTimeout(persistTimer)
+    scheduledPersistSessionId = sessionId
     persistTimer = setTimeout(() => {
       persistTimer = null
+      const targetId = scheduledPersistSessionId
+      scheduledPersistSessionId = null
+      // If the user forked/switched before the debounce fired, the leave path
+      // already flushed the old session — do not write this workbench under a
+      // different active id (that was sending child chat onto the parent card).
+      if (!targetId || get().activeSessionId !== targetId) return
       void get().persistActiveSession()
     }, PERSIST_DEBOUNCE_MS)
   },
@@ -720,6 +821,15 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     if (!client || !project) return
 
     try {
+      // Skip until a user turn exists — summarizing an empty fork was demoting
+      // it to misc and removing the new node from the Session Graph.
+      const existing = await client.getChatSession(project.projectId, sessionId)
+      if (!existing) return
+      const hasUser = existing.messages.some(
+        (message) => message.role === 'user' && message.content.trim().length > 0,
+      )
+      if (!hasUser) return
+
       const updatedHead = await client.summarizeChatSessionTitle(project.projectId, sessionId)
       if (!updatedHead) return
 
@@ -739,6 +849,14 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       return
     }
 
+    // Drop queued debounced persist so it cannot run mid-switch against a
+    // mixed activeSessionId / workbench pairing.
+    if (persistTimer) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+    }
+    scheduledPersistSessionId = null
+
     const leavingId = get().activeSessionId
     await get().persistActiveSession()
 
@@ -748,15 +866,16 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     const record = await client.getChatSession(project.projectId, sessionId)
     if (!record) return
 
+    // Flip active id before hydrating workbench so concurrent
+    // schedulePersist / sendPrompt never target the parent with child state.
+    set({ activeSessionId: sessionId, historyOpen: false })
     applySessionToWorkbench(record)
     await client.setLastActiveChatSession(project.projectId, sessionId)
 
     let index = await client.getChatSessionIndex(project.projectId)
     set({
-      activeSessionId: sessionId,
       heads: index.heads,
       pinnedIds: index.pinnedIds,
-      historyOpen: false,
     })
 
     if (leavingId && leavingId !== sessionId) {
@@ -780,6 +899,13 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       activate = true,
       title = '',
     } = options
+
+    if (persistTimer) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+    }
+    scheduledPersistSessionId = null
+
     const leavingId = get().activeSessionId
     await get().persistActiveSession()
 
@@ -808,14 +934,14 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     await client.upsertChatSession(project.projectId, record)
 
     let index = await client.getChatSessionIndex(project.projectId)
-    set({
-      heads: index.heads,
-      pinnedIds: index.pinnedIds,
-      activeSessionId: activate ? sessionId : get().activeSessionId,
-      historyOpen: false,
-    })
-
     if (activate) {
+      // Activate before hydrate — same race window as switchSession.
+      set({
+        heads: index.heads,
+        pinnedIds: index.pinnedIds,
+        activeSessionId: sessionId,
+        historyOpen: false,
+      })
       applySessionToWorkbench(record)
       await client.setLastActiveChatSession(project.projectId, sessionId)
 
@@ -830,6 +956,12 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
           set({ heads: index.heads, pinnedIds: index.pinnedIds })
         }
       }
+    } else {
+      set({
+        heads: index.heads,
+        pinnedIds: index.pinnedIds,
+        historyOpen: false,
+      })
     }
 
     return sessionId
@@ -899,22 +1031,78 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     return true
   },
 
-  forkSession: async (parentSessionId, forkMessageId) => {
-    const { client, project } = useWorkbenchStore.getState()
-    if (!client || !project) return null
-    await get().persistActiveSession()
-    const child = await client.forkChatSession(
-      project.projectId,
-      parentSessionId,
-      forkMessageId ?? '',
-    )
-    if (!child) return null
-    // Refresh heads immediately so Session Graph can draw the parent→child edge
-    // before switchSession finishes its persist/load round-trip.
-    const index = await client.getChatSessionIndex(project.projectId)
-    set({ heads: index.heads, pinnedIds: index.pinnedIds })
-    await get().switchSession(child.head.id)
-    return child.head.id
+  forkSession: async (parentSessionId, forkMessageId, layout) => {
+    // Concurrent forks race on switchSession + canvas placement; keep one at a time.
+    if (forkSessionInFlight) return null
+    forkSessionInFlight = true
+    try {
+      const { client, project } = useWorkbenchStore.getState()
+      if (!client || !project) return null
+      if (persistTimer) {
+        clearTimeout(persistTimer)
+        persistTimer = null
+      }
+      scheduledPersistSessionId = null
+      if (titleSummarizeTimer) {
+        clearTimeout(titleSummarizeTimer)
+        titleSummarizeTimer = null
+      }
+      // Flush the parent, then fork. API returns the child immediately (LLM
+      // digest upgrade is background) so we can activate before any new chat.
+      await get().persistActiveSession()
+      let child = await client.forkChatSession(
+        project.projectId,
+        parentSessionId,
+        forkMessageId ?? '',
+      )
+      if (!child) return null
+      const forkLayout = layout?.forkLayout ?? 'below'
+      const nextHead = {
+        ...child.head,
+        forkLayout,
+        ...(forkLayout === 'aside' && typeof layout?.forkAnchorOffsetY === 'number'
+          ? { forkAnchorOffsetY: layout.forkAnchorOffsetY }
+          : {}),
+      }
+      if (forkLayout !== 'aside') {
+        delete nextHead.forkAnchorOffsetY
+      }
+      // Always persist layout so Session Graph edges/positions see aside vs below
+      // even when the API seeded the child with the default `below`.
+      if (
+        nextHead.forkLayout !== child.head.forkLayout ||
+        nextHead.forkAnchorOffsetY !== child.head.forkAnchorOffsetY
+      ) {
+        const withLayout = { ...child, head: nextHead }
+        const saved = await client.upsertChatSession(project.projectId, withLayout)
+        child = saved ?? withLayout
+      }
+      const index = await client.getChatSessionIndex(project.projectId)
+      // Activate the child in the same tick the card appears. Previously we only
+      // pushed heads then awaited switchSession — users could click/send while
+      // activeSessionId was still the parent, so new chat landed on the father.
+      set({
+        heads: index.heads,
+        pinnedIds: index.pinnedIds,
+        activeSessionId: child.head.id,
+        historyOpen: false,
+        pendingSessionForkPlacement: {
+          parentSessionId,
+          childSessionId: child.head.id,
+          placement: {
+            forkLayout,
+            ...(forkLayout === 'aside' && typeof layout?.forkAnchorOffsetY === 'number'
+              ? { forkAnchorOffsetY: layout.forkAnchorOffsetY }
+              : {}),
+          },
+        },
+      })
+      applySessionToWorkbench(child)
+      await client.setLastActiveChatSession(project.projectId, child.head.id)
+      return child.head.id
+    } finally {
+      forkSessionInFlight = false
+    }
   },
 
   setSessionClassification: async (sessionId, classification) => {

@@ -1,3 +1,4 @@
+import { useRef, type KeyboardEvent } from 'react'
 import {
   isConfigNode,
   withArchitectureDefaults,
@@ -9,6 +10,11 @@ import { resolveAgentWiring } from '../../../../services/loop-agent-wiring'
 import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
+import { useComposePromptVoice } from '../ChatPanel/composer/useComposePromptVoice'
+import {
+  VoiceInputDock,
+  VoiceInputErrorBanner,
+} from '../ChatPanel/VoiceInputControls'
 import { isCommunityMcpServer } from './LoopConfigAssetPicker'
 import styles from './LoopNodeInspector.module.css'
 
@@ -30,7 +36,7 @@ export default function LoopNodeInspector({
   readOnly = false,
   embedded = false,
 }: Props) {
-  const { ts } = useI18n()
+  const { ts, locale } = useI18n()
   const document = useLoopGraphStore((s) => s.document)
   const setAgentWiringOverride = useLoopGraphStore((s) => s.setAgentWiringOverride)
   const applyWiringToAgentDefinition = useLoopGraphStore(
@@ -39,6 +45,27 @@ export default function LoopNodeInspector({
   const saveWiringAsNewAgent = useLoopGraphStore((s) => s.saveWiringAsNewAgent)
   const settings = useWorkbenchStore((s) => s.settings)
   const shellClass = embedded ? styles.embedded : styles.inspector
+  const nodeRef = useRef(node)
+  nodeRef.current = node
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  const readOnlyRef = useRef(readOnly)
+  readOnlyRef.current = readOnly
+
+  const composeVoice = useComposePromptVoice({
+    locale,
+    disabled: readOnly || !node || isConfigNode(node),
+    getText: () => {
+      const current = nodeRef.current
+      return current && !isConfigNode(current) ? current.prompt : ''
+    },
+    setText: (text) => {
+      const current = nodeRef.current
+      if (!current || isConfigNode(current) || readOnlyRef.current) return
+      onChangeRef.current({ prompt: text })
+    },
+  })
+
   if (!node) {
     return (
       <aside className={shellClass} aria-label={ts('chat.loopGraph.inspector')}>
@@ -97,12 +124,44 @@ export default function LoopNodeInspector({
         </label>
         <label className={styles.field}>
           <span>{ts('chat.loopGraph.inspectorPrompt')}</span>
-          <textarea
-            value={node.prompt}
-            disabled={readOnly}
-            rows={4}
-            onChange={(event) => onChange({ prompt: event.target.value })}
-          />
+          {composeVoice.voice.state.error ? (
+            <VoiceInputErrorBanner
+              errorKey={composeVoice.voice.state.error}
+              onDismiss={composeVoice.voice.dismissError}
+              labels={composeVoice.voiceLabels}
+            />
+          ) : null}
+          <div className={styles.promptWrap}>
+            <textarea
+              value={node.prompt}
+              disabled={readOnly}
+              rows={4}
+              onChange={(event) => {
+                const value = event.target.value
+                onChange({ prompt: value })
+                composeVoice.syncBaseFromExternalText(value)
+              }}
+              onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                if (
+                  event.key === 'Escape' &&
+                  (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing)
+                ) {
+                  event.preventDefault()
+                  composeVoice.cancelVoice()
+                  return
+                }
+                if (
+                  (event.metaKey || event.ctrlKey) &&
+                  event.shiftKey &&
+                  event.code === 'Space'
+                ) {
+                  event.preventDefault()
+                  composeVoice.dockProps.onMicToggle()
+                }
+              }}
+            />
+            <VoiceInputDock {...composeVoice.dockProps} />
+          </div>
         </label>
         <div className={styles.metaRow}>
           <span className={styles.chip}>{arch.type}</span>

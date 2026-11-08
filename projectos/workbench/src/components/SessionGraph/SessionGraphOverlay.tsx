@@ -5,28 +5,41 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type WheelEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
 import type {
+  ChatMessage,
   ChatSessionHead,
+  ChatSessionMode,
   SessionGraphModel,
   SessionGraphStripItem,
 } from '@contracts/index'
 import {
   buildSessionGraph,
+  isUnusedForkChildSessionRecord,
   pickGraphRepresentative,
   resolveSessionGraphId,
   sessionsInGraph,
   sessionGraphShieldCssInsets,
+  SESSION_GRAPH_STRIP_MAX_ITEMS,
   type SessionGraphCssInsets,
 } from '@contracts/index'
+import { collectUserTurns } from '../ChatPanel/conversationNavTurns'
+import {
+  placeForkChildPosition,
+  resolveSessionForkPlacementForPreview,
+  SESSION_FORK_ASIDE_GAP,
+  type SessionForkPlacement,
+} from './sessionForkLayout'
 import {
   Archive,
   Box,
   Bug,
+  ChevronDown,
   GitBranch,
   GitPullRequest,
   LayoutTemplate,
@@ -43,9 +56,12 @@ import { GraphOverlayFrame } from '../GraphOverlay/GraphOverlayFrame'
 import {
   SESSION_NODE_HEIGHT,
   SESSION_NODE_WIDTH,
+  estimateSessionNodeHeight,
   layoutSessionGraph,
   type SessionGraphLayout,
 } from './layoutSessionGraph'
+import { toneClassForChatMode } from '../ChatPanel/composer/chatModeVisuals'
+import SessionStripWorkingTitle from './SessionStripWorkingTitle'
 import { classifySessionTask } from './sessionTaskKind'
 import {
   createRailFolder,
@@ -90,6 +106,11 @@ import {
   SESSION_NODE_PREVIEW_WIDTH,
   resolveSessionNodePreviewPosition,
 } from './sessionNodePreview'
+import {
+  resolveSessionNodeStripPromptPreview,
+  resolveStripChatMode,
+  resolveStripRevealMessageId,
+} from './sessionNodeStripPreview'
 import { computeMiscFitCount } from './miscFitCount'
 import {
   formatSessionGraphRelativeTime,
@@ -97,6 +118,14 @@ import {
   sessionMatchesGraphQuery,
 } from './sessionGraphCardMeta'
 import WorkingSessionRail from './WorkingSessionRail'
+import SessionNodeContextMenu, {
+  type SessionNodeContextMenuState,
+} from './SessionNodeContextMenu'
+import SessionPromptHistorySheet from './SessionPromptHistorySheet'
+import SessionSweepReviewSheet from './SessionSweepReviewSheet'
+import SessionTidyReviewSheet from './SessionTidyReviewSheet'
+import { useSessionSweepStore } from '../../state/sessionSweepStore'
+import sheetStyles from './SessionGraphCenterSheet.module.css'
 import styles from './SessionGraphOverlay.module.css'
 
 const TASK_ICON = {
@@ -144,16 +173,31 @@ export default function SessionGraphOverlay() {
   const openSessionAtMessage = useChatSessionStore((s) => s.openSessionAtMessage)
   const createSession = useChatSessionStore((s) => s.createSession)
   const forkSession = useChatSessionStore((s) => s.forkSession)
+  const pendingSessionForkPlacement = useChatSessionStore((s) => s.pendingSessionForkPlacement)
+  const clearPendingSessionForkPlacement = useChatSessionStore(
+    (s) => s.clearPendingSessionForkPlacement,
+  )
+  const deleteSession = useChatSessionStore((s) => s.deleteSession)
   const placeSessionOnGraph = useChatSessionStore((s) => s.placeSessionOnGraph)
   const extractSubtreeToGraph = useChatSessionStore((s) => s.extractSubtreeToGraph)
   const mergeGraphs = useChatSessionStore((s) => s.mergeGraphs)
+  const client = useWorkbenchStore((s) => s.client)
   const projectId = useWorkbenchStore((s) => s.project?.projectId ?? null)
   const leftPanelOpen = useWorkbenchStore((s) => s.leftPanelOpen)
   const rightPanelOpen = useWorkbenchStore((s) => s.rightPanelOpen)
   const setRightPanelOpen = useWorkbenchStore((s) => s.setRightPanelOpen)
   const panelResizing = useWorkbenchStore((s) => s.panelResizing)
   const terminalOpen = useBottomDockStore((s) => s.open)
+  const pendingSweepPlan = useSessionSweepStore((s) => s.pendingPlan)
+  const pendingTidyPlan = useSessionSweepStore((s) => s.pendingTidyPlan)
+  const centerSheet = useSessionSweepStore((s) => s.centerSheet)
+  const openSweepReview = useSessionSweepStore((s) => s.openSweepReview)
+  const openTidyReview = useSessionSweepStore((s) => s.openTidyReview)
+  const openPromptHistory = useSessionSweepStore((s) => s.openPromptHistory)
   const { ts } = useI18n()
+  const [nodeContextMenu, setNodeContextMenu] = useState<SessionNodeContextMenuState | null>(
+    null,
+  )
 
   const [railLayout, setRailLayout] = useState<SessionGraphRailLayout>(() =>
     emptySessionGraphRailLayout(),
@@ -196,6 +240,7 @@ export default function SessionGraphOverlay() {
     railDropIndex: number | null
   } | null>(null)
   const suppressNodeClickRef = useRef(false)
+  const suppressMiscClickRef = useRef(false)
   const nodeDragCleanupRef = useRef<(() => void) | null>(null)
   const railLayoutRef = useRef(railLayout)
   railLayoutRef.current = railLayout
@@ -203,6 +248,8 @@ export default function SessionGraphOverlay() {
   canvasLayoutRef.current = canvasLayout
   const viewportRef = useRef(viewport)
   viewportRef.current = viewport
+  const headsRef = useRef(heads)
+  headsRef.current = heads
 
   const activeGraphId = useMemo(
     () => resolveActiveGraphId(heads, activeSessionId, preferredGraphId),
@@ -227,6 +274,8 @@ export default function SessionGraphOverlay() {
         : null,
     [baseLayout, graphCanvasPositions],
   )
+  const layoutRef = useRef(layout)
+  layoutRef.current = layout
 
   useEffect(() => {
     if (!projectId) {
@@ -256,6 +305,66 @@ export default function SessionGraphOverlay() {
     [projectId],
   )
 
+  const placeForkedChildOnCanvas = useCallback(
+    (
+      parentSessionId: string,
+      childSessionId: string,
+      placement: SessionForkPlacement,
+    ): boolean => {
+      const parentHead = headsRef.current.find((head) => head.id === parentSessionId)
+      const graphId =
+        (parentHead ? resolveSessionGraphId(parentHead) : null) ?? activeGraphId
+      const currentLayout = layoutRef.current
+      if (!graphId || !currentLayout) return false
+      const parentPos = currentLayout.positions[parentSessionId]
+      if (!parentPos) return false
+      const parentHeight = currentLayout.heights[parentSessionId] ?? SESSION_NODE_HEIGHT
+      const point = placeForkChildPosition(
+        { x: parentPos.x, y: parentPos.y, height: parentHeight },
+        placement,
+        1,
+      )
+      persistCanvas(
+        setSessionCanvasPosition(canvasLayoutRef.current, graphId, childSessionId, point),
+      )
+      return true
+    },
+    [activeGraphId, persistCanvas],
+  )
+
+  const forkFromNode = useCallback(
+    async (
+      parentSessionId: string,
+      forkMessageId: string | undefined,
+      placement: SessionForkPlacement,
+    ): Promise<string | null> => {
+      const childId = await forkSession(parentSessionId, forkMessageId, placement)
+      if (!childId) return null
+      // Match the store's eager child activation so the new card reads as selected.
+      setFocusedSessionId(childId)
+      // Place immediately so aside forks appear to the right without waiting for
+      // the next ELK pass / pending effect tick.
+      if (placeForkedChildOnCanvas(parentSessionId, childId, placement)) {
+        clearPendingSessionForkPlacement()
+      }
+      return childId
+    },
+    [clearPendingSessionForkPlacement, forkSession, placeForkedChildOnCanvas],
+  )
+
+  useEffect(() => {
+    if (!pendingSessionForkPlacement || !layout) return
+    const { parentSessionId, childSessionId, placement } = pendingSessionForkPlacement
+    if (!layout.positions[parentSessionId]) return
+    if (!placeForkedChildOnCanvas(parentSessionId, childSessionId, placement)) return
+    clearPendingSessionForkPlacement()
+  }, [
+    clearPendingSessionForkPlacement,
+    layout,
+    pendingSessionForkPlacement,
+    placeForkedChildOnCanvas,
+  ])
+
   const openGraph = useCallback(
     async (graphId: string) => {
       setPreferredGraphId(graphId)
@@ -272,6 +381,28 @@ export default function SessionGraphOverlay() {
     async (sessionId: string) => {
       const head = heads.find((item) => item.id === sessionId)
       const graphId = head ? resolveSessionGraphId(head) : null
+
+      // Unused fork children (no continued prompt) are discarded instead of Misc.
+      if (client && projectId && head?.parentSessionId) {
+        const record = await client.getChatSession(projectId, sessionId)
+        if (record && isUnusedForkChildSessionRecord(record)) {
+          const deleted = await deleteSession(sessionId)
+          if (deleted) {
+            if (graphId) {
+              const remaining = sessionsInGraph(
+                useChatSessionStore.getState().heads,
+                graphId,
+              )
+              if (remaining.length === 0) {
+                persistRail(removeGraphFromLayout(railLayoutRef.current, graphId))
+                if (preferredGraphId === graphId) setPreferredGraphId(null)
+              }
+            }
+            return
+          }
+        }
+      }
+
       await placeSessionOnGraph(sessionId, { mode: 'misc' })
       if (graphId) {
         const remaining = sessionsInGraph(
@@ -284,7 +415,15 @@ export default function SessionGraphOverlay() {
         }
       }
     },
-    [heads, placeSessionOnGraph, persistRail, preferredGraphId],
+    [
+      client,
+      deleteSession,
+      heads,
+      placeSessionOnGraph,
+      persistRail,
+      preferredGraphId,
+      projectId,
+    ],
   )
 
   const handleDrop = useCallback(
@@ -439,7 +578,10 @@ export default function SessionGraphOverlay() {
     onPointerMove: onSessionPointerMove,
     onPointerUp: onSessionPointerUp,
   } = useSessionGraphDrag({
-    onDragStart: () => setForceRailExpanded(true),
+    onDragStart: (state) => {
+      if (state.source === 'misc') suppressMiscClickRef.current = true
+      setForceRailExpanded(true)
+    },
     onDragEnd: () => setForceRailExpanded(false),
     onDrop: (state, target) => {
       void handleDrop(state, target)
@@ -520,7 +662,12 @@ export default function SessionGraphOverlay() {
       },
     ) => {
       if (event.button !== 0) return
-      if ((event.target as HTMLElement).closest('[data-session-drag-ignore]')) return
+      // Title / strip / branch controls opt out of canvas drag. Clear any sticky
+      // suppress from a prior drag so their click can still open the session.
+      if ((event.target as HTMLElement).closest('[data-session-drag-ignore]')) {
+        suppressNodeClickRef.current = false
+        return
+      }
       if (sessionDrag || nodeDragRef.current) return
       event.stopPropagation()
       suppressNodeClickRef.current = false
@@ -565,8 +712,16 @@ export default function SessionGraphOverlay() {
 
         if (drag.mode === 'pending') {
           endNodeCanvasDrag()
+          suppressNodeClickRef.current = false
           return
         }
+
+        // Swallow only the click that ends this drag; do not leave suppress sticky
+        // (that blocked opening a forked child card after any prior node move).
+        suppressNodeClickRef.current = true
+        window.setTimeout(() => {
+          suppressNodeClickRef.current = false
+        }, 0)
 
         if (drag.mode === 'semantic') {
           const el = document.elementFromPoint(clientX, clientY)
@@ -876,6 +1031,28 @@ export default function SessionGraphOverlay() {
               onChange={(event) => setFilterQuery(event.target.value)}
               onPointerDown={(event) => event.stopPropagation()}
             />
+            {pendingTidyPlan && pendingTidyPlan.clusters.length > 0 ? (
+              <button
+                type="button"
+                className={sheetStyles.pendingBadge}
+                onClick={() => openTidyReview()}
+              >
+                {ts('chat.sessionGraph.tidy.pendingBadge', {
+                  count: pendingTidyPlan.clusters.length,
+                })}
+              </button>
+            ) : null}
+            {pendingSweepPlan && pendingSweepPlan.candidates.length > 0 ? (
+              <button
+                type="button"
+                className={sheetStyles.pendingBadge}
+                onClick={() => openSweepReview()}
+              >
+                {ts('chat.sessionGraph.sweep.pendingBadge', {
+                  count: pendingSweepPlan.candidates.length,
+                })}
+              </button>
+            ) : null}
           </div>
           <button
             type="button"
@@ -942,20 +1119,38 @@ export default function SessionGraphOverlay() {
                   const target = layout.positions[edge.target]
                   if (!source || !target) return null
                   const sourceHeight = layout.heights[edge.source] ?? SESSION_NODE_HEIGHT
-                  const x1 = source.x + SESSION_NODE_WIDTH / 2
-                  const y1 = source.y + sourceHeight
-                  const x2 = target.x + SESSION_NODE_WIDTH / 2
-                  const y2 = target.y
-                  const mid = (y1 + y2) / 2
-                  const labelX = (x1 + x2) / 2
-                  const labelY = mid
+                  const targetHeight = layout.heights[edge.target] ?? SESSION_NODE_HEIGHT
                   const child = model.nodes.find((node) => node.id === edge.target)
+                  const aside = child?.forkLayout === 'aside'
+                  let path: string
+                  let labelX: number
+                  let labelY: number
+                  if (aside) {
+                    const anchorY =
+                      typeof child?.forkAnchorOffsetY === 'number'
+                        ? child.forkAnchorOffsetY
+                        : sourceHeight / 2
+                    const x1 = source.x + SESSION_NODE_WIDTH
+                    const y1 = source.y + anchorY
+                    const x2 = target.x
+                    const y2 = target.y + targetHeight / 2
+                    const bend = Math.max(28, SESSION_FORK_ASIDE_GAP * 0.55)
+                    path = `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`
+                    labelX = (x1 + x2) / 2
+                    labelY = (y1 + y2) / 2
+                  } else {
+                    const x1 = source.x + SESSION_NODE_WIDTH / 2
+                    const y1 = source.y + sourceHeight
+                    const x2 = target.x + SESSION_NODE_WIDTH / 2
+                    const y2 = target.y
+                    const mid = (y1 + y2) / 2
+                    path = `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`
+                    labelX = (x1 + x2) / 2
+                    labelY = mid
+                  }
                   return (
                     <g key={`${edge.source}-${edge.target}`}>
-                      <path
-                        className={`${styles.edge} ${styles.edgeFork}`}
-                        d={`M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`}
-                      />
+                      <path className={`${styles.edge} ${styles.edgeFork}`} d={path} />
                       <text
                         className={styles.edgeLabel}
                         x={labelX}
@@ -995,6 +1190,7 @@ export default function SessionGraphOverlay() {
                   <SessionNode
                     key={node.id}
                     head={head}
+                    sessionId={node.id}
                     title={title}
                     responsibility={node.responsibility}
                     status={node.status}
@@ -1002,6 +1198,13 @@ export default function SessionGraphOverlay() {
                     messageCount={node.messageCount}
                     lastUpdatedAt={node.lastUpdatedAt}
                     forked={Boolean(node.parentId)}
+                    parentTitle={
+                      node.parentId
+                        ? heads.find((item) => item.id === node.parentId)?.title ||
+                          ts('chat.history.untitled')
+                        : undefined
+                    }
+                    parentSessionId={node.parentId}
                     active={node.id === activeSessionId}
                     focused={focusedSessionId === node.id}
                     dimmed={dimmed}
@@ -1016,12 +1219,32 @@ export default function SessionGraphOverlay() {
                       )
                       void openSessionAtMessage(node.id)
                     }}
-                    onStripItem={(item) => {
+                    onStripItem={(_item, revealMessageId) => {
                       setFocusedSessionId(node.id)
-                      void openSessionAtMessage(node.id, item.messageId)
+                      // Keep Session Graph open; ChatPanel still reveals the turn behind it.
+                      void openSessionAtMessage(node.id, revealMessageId)
                     }}
-                    onBranch={() => void forkSession(node.id)}
+                    onOpenParent={(parentId) => {
+                      setFocusedSessionId(parentId)
+                      void openSessionAtMessage(parentId)
+                    }}
+                    onBranch={() =>
+                      forkFromNode(node.id, undefined, { forkLayout: 'below' })
+                    }
+                    onBranchFromMessage={(messageId, placement) =>
+                      forkFromNode(node.id, messageId, placement)
+                    }
                     onMisc={() => void demoteToMisc(node.id)}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setNodeContextMenu({
+                        x: event.clientX,
+                        y: event.clientY,
+                        sessionId: node.id,
+                        restoreFocusTo: event.currentTarget,
+                      })
+                    }}
                     shouldSuppressClick={() => suppressNodeClickRef.current}
                     onPointerDown={(event) =>
                       onNodeCanvasPointerDown(event, {
@@ -1044,20 +1267,18 @@ export default function SessionGraphOverlay() {
           dropActive={activeDropTarget?.kind === 'misc'}
           dragActive={Boolean(sessionDrag) || nodeCanvasDrag?.mode === 'semantic'}
           dragFromMisc={sessionDrag?.source === 'misc'}
-          onOpen={(sessionId) => void switchSession(sessionId)}
-          onPromote={(sessionId) => {
-            void placeSessionOnGraph(
-              sessionId,
-              activeGraphId
-                ? { mode: 'current-graph', graphId: activeGraphId }
-                : { mode: 'new-graph' },
-            ).then((head) => {
-              if (!head?.graphId) return
-              persistRail(insertGraphOnRail(railLayoutRef.current, head.graphId))
-              setPreferredGraphId(head.graphId)
-            })
+          onOpen={(sessionId) => {
+            if (suppressMiscClickRef.current) {
+              suppressMiscClickRef.current = false
+              return
+            }
+            openPromptHistory(sessionId)
+          }}
+          onDelete={(sessionId) => {
+            void deleteSession(sessionId)
           }}
           onPointerDown={(event, sessionId, title) => {
+            suppressMiscClickRef.current = false
             onSessionPointerDown(event, {
               sessionId,
               title,
@@ -1079,12 +1300,47 @@ export default function SessionGraphOverlay() {
           <span>{ghostTitle}</span>
         </div>
       ) : null}
+      <SessionNodeContextMenu
+        menu={nodeContextMenu}
+        onClose={() => setNodeContextMenu(null)}
+        onViewHistory={(sessionId) => openPromptHistory(sessionId)}
+        onBranch={(sessionId) =>
+          void forkFromNode(sessionId, undefined, { forkLayout: 'below' })
+        }
+        onOpen={(sessionId) => void openSessionAtMessage(sessionId)}
+      />
+      {centerSheet?.type === 'tidy' && pendingTidyPlan ? (
+        <SessionTidyReviewSheet
+          plan={pendingTidyPlan}
+          onLocate={(sessionId) => {
+            setFocusedSessionId(sessionId)
+            setFilterQuery('')
+          }}
+        />
+      ) : null}
+      {centerSheet?.type === 'sweep' && pendingSweepPlan ? (
+        <SessionSweepReviewSheet
+          plan={pendingSweepPlan}
+          onLocate={(sessionId) => {
+            setFocusedSessionId(sessionId)
+            setFilterQuery('')
+          }}
+        />
+      ) : null}
+      {centerSheet?.type === 'history' ? (
+        <SessionPromptHistorySheet sessionId={centerSheet.sessionId} />
+      ) : null}
     </SessionGraphFrame>
   )
 }
 
+type SessionNodePreviewTarget =
+  | { kind: 'title' }
+  | { kind: 'strip'; item: SessionGraphStripItem }
+
 function SessionNode({
   head,
+  sessionId,
   title,
   responsibility,
   status,
@@ -1092,6 +1348,8 @@ function SessionNode({
   messageCount,
   lastUpdatedAt,
   forked,
+  parentTitle,
+  parentSessionId,
   active,
   focused,
   dimmed,
@@ -1099,15 +1357,19 @@ function SessionNode({
   dragging = false,
   x,
   y,
-  height,
+  height: _layoutHeight,
   onOpen,
   onStripItem,
+  onOpenParent,
   onBranch,
+  onBranchFromMessage,
   onMisc,
+  onContextMenu,
   shouldSuppressClick,
   onPointerDown,
 }: {
   head: ChatSessionHead | undefined
+  sessionId: string
   title: string
   responsibility?: string
   status: SessionGraphModel['nodes'][number]['status']
@@ -1115,6 +1377,8 @@ function SessionNode({
   messageCount: number
   lastUpdatedAt: string
   forked: boolean
+  parentTitle?: string
+  parentSessionId?: string | null
   active: boolean
   focused: boolean
   dimmed: boolean
@@ -1124,36 +1388,124 @@ function SessionNode({
   y: number
   height: number
   onOpen: () => void
-  onStripItem: (item: SessionGraphStripItem) => void
-  onBranch: () => void
+  onStripItem: (
+    item: SessionGraphStripItem,
+    revealMessageId: string | null,
+  ) => void
+  onOpenParent: (parentSessionId: string) => void
+  onBranch: () => void | Promise<unknown>
+  onBranchFromMessage: (
+    messageId: string,
+    placement: SessionForkPlacement,
+  ) => void | Promise<unknown>
   onMisc: () => void
+  onContextMenu: (event: ReactMouseEvent<HTMLDivElement>) => void
   shouldSuppressClick: () => boolean
   onPointerDown: (event: ReactPointerEvent) => void
 }) {
   const { ts } = useI18n()
+  const client = useWorkbenchStore((s) => s.client)
+  const projectId = useWorkbenchStore((s) => s.project?.projectId ?? null)
+  const liveMessages = useWorkbenchStore((s) => (active ? s.messages : null))
+  const liveRefineLoading = useWorkbenchStore((s) =>
+    active ? s.refineLoading : false,
+  )
+  const liveFlowStatus = useWorkbenchStore((s) =>
+    active ? s.flowStatus : 'idle',
+  )
   const task = classifySessionTask(title, responsibility)
   const TaskIcon = TASK_ICON[task]
   const taskLabel = ts(`chat.sessionGraph.task.${task}`)
   const description = responsibility?.trim() ?? ''
-  const stripHasDecisions = previewStrip.some((item) => item.kind === 'decision')
-  const previewExtra = [
-    !stripHasDecisions && description ? description : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
+  const titlePreviewBody = description || ts('chat.sessionGraph.descriptionEmpty')
   const nodeRef = useRef<HTMLDivElement | null>(null)
   const openTimerRef = useRef<number | null>(null)
   const hideTimerRef = useRef<number | null>(null)
+  const messagesCacheRef = useRef<ChatMessage[] | null>(null)
+  const messagesRequestRef = useRef<Promise<ChatMessage[]> | null>(null)
+  const previewRequestIdRef = useRef(0)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewPos, setPreviewPos] = useState({ x: 0, y: 0 })
+  const [previewTarget, setPreviewTarget] = useState<SessionNodePreviewTarget | null>(
+    null,
+  )
+  const [stripPromptBody, setStripPromptBody] = useState<string | null>(null)
+  const [stripReplyBody, setStripReplyBody] = useState<string | null>(null)
+  const [stripReplyExpanded, setStripReplyExpanded] = useState(false)
+  const [stripForkMessageId, setStripForkMessageId] = useState<string | null>(null)
+  const [stripPromptLoading, setStripPromptLoading] = useState(false)
+  /** Resolved chatMode per strip row — matches Conversation Nav stack-bar colors. */
+  const [stripModeById, setStripModeById] = useState<Record<string, string>>({})
+  /**
+   * Prefer live user turns (same ids/colors as Conversation Nav stack bars)
+   * over curated digest rows that often share one throughMessageId.
+   */
+  const [turnStrip, setTurnStrip] = useState<SessionGraphStripItem[] | null>(null)
+  const [branching, setBranching] = useState(false)
+  // Oldest at top, newest at bottom (matches chat transcript order).
+  // Forked cards lead with a parent-title citation instead of replaying parent chats.
+  // Own turns prefer live turnStrip; fall back to head.previewStrip so a forked
+  // child still shows new intents after persist even when it is not the active card.
+  // Keep every turn in the list — card height caps at MAX and the strip scrolls.
+  const displayStrip = useMemo(() => {
+    const fromPreview = [...previewStrip]
+      .filter((item) => !item.id.startsWith('note:parent-cite:'))
+      .sort((a, b) => a.ts.localeCompare(b.ts))
+    const ownTurns =
+      turnStrip && turnStrip.length > 0 ? turnStrip : fromPreview
+    if (!forked || !parentTitle?.trim()) return ownTurns
+    const cite: SessionGraphStripItem = {
+      id: `note:parent-cite:${sessionId}`,
+      kind: 'note',
+      title: parentTitle.trim(),
+      ts: head?.createdAt ?? lastUpdatedAt,
+    }
+    return [cite, ...ownTurns]
+  }, [
+    forked,
+    head?.createdAt,
+    lastUpdatedAt,
+    parentTitle,
+    previewStrip,
+    sessionId,
+    turnStrip,
+  ])
+  const stripScrollable = displayStrip.length > SESSION_GRAPH_STRIP_MAX_ITEMS
+  const cardHeight = estimateSessionNodeHeight(displayStrip.length)
+  const agentWorking =
+    status === 'running' ||
+    (active && (liveRefineLoading || liveFlowStatus === 'running'))
   const quiet = isSessionGraphQuiet(lastUpdatedAt, status)
   const relative = formatSessionGraphRelativeTime(lastUpdatedAt)
   const liveLabel =
-    status === 'running'
+    agentWorking
       ? ts('chat.sessionGraph.liveWorking')
       : status === 'awaiting_review'
         ? ts('chat.sessionGraph.liveNeedsYou')
         : null
+
+  const applyTurnsToStrip = useCallback((messages: ChatMessage[]) => {
+    const turns = collectUserTurns(messages)
+    if (turns.length === 0) {
+      setTurnStrip(null)
+      return
+    }
+    // Keep the full turn list; the card viewport scrolls past MAX visible rows.
+    const nextStrip: SessionGraphStripItem[] = turns.map((turn) => ({
+      id: `intent:${turn.id}`,
+      kind: 'intent' as const,
+      title: turn.preview || turn.id,
+      ts: turn.timestamp,
+      messageId: turn.id,
+      ...(turn.chatMode ? { chatMode: turn.chatMode as ChatSessionMode } : {}),
+    }))
+    const modes: Record<string, string> = {}
+    for (const item of nextStrip) {
+      if (item.chatMode) modes[item.id] = item.chatMode
+    }
+    setTurnStrip(nextStrip)
+    setStripModeById(modes)
+  }, [])
 
   const clearOpenTimer = useCallback(() => {
     if (openTimerRef.current != null) {
@@ -1169,50 +1521,192 @@ function SessionNode({
     }
   }, [])
 
-  const closePreview = useCallback(() => {
-    clearOpenTimer()
-    clearHideTimer()
-    setPreviewOpen(false)
-  }, [clearHideTimer, clearOpenTimer])
-
-  const openPreview = useCallback(() => {
-    if (!previewExtra || lifted) return
-    const nodeEl = nodeRef.current
-    if (!nodeEl) return
+  const placePreview = useCallback((anchor?: DOMRectReadOnly | HTMLElement | null) => {
+    const fallback = nodeRef.current
+    const rect =
+      anchor && 'getBoundingClientRect' in anchor
+        ? anchor.getBoundingClientRect()
+        : (anchor ?? fallback?.getBoundingClientRect())
+    if (!rect) return
     setPreviewPos(
       resolveSessionNodePreviewPosition(
-        nodeEl.getBoundingClientRect(),
+        rect,
         SESSION_NODE_PREVIEW_WIDTH,
         SESSION_NODE_PREVIEW_MAX_HEIGHT,
       ),
     )
-    setPreviewOpen(true)
-  }, [lifted, previewExtra])
+  }, [])
 
-  const schedulePreviewOpen = useCallback(() => {
-    if (!previewExtra || lifted) return
-    clearHideTimer()
+  const closePreview = useCallback(() => {
     clearOpenTimer()
-    openTimerRef.current = window.setTimeout(() => {
-      openTimerRef.current = null
-      openPreview()
-    }, SESSION_NODE_PREVIEW_DELAY_MS)
-  }, [clearHideTimer, clearOpenTimer, lifted, openPreview, previewExtra])
+    clearHideTimer()
+    previewRequestIdRef.current += 1
+    setPreviewOpen(false)
+    setPreviewTarget(null)
+    setStripPromptBody(null)
+    setStripReplyBody(null)
+    setStripReplyExpanded(false)
+    setStripForkMessageId(null)
+    setStripPromptLoading(false)
+    // Leave `branching` alone; the in-flight fork clears it when finished.
+  }, [clearHideTimer, clearOpenTimer])
+
+  const loadSessionMessages = useCallback(async (): Promise<ChatMessage[]> => {
+    if (messagesCacheRef.current) return messagesCacheRef.current
+    if (messagesRequestRef.current) return messagesRequestRef.current
+    if (!client || !projectId) return []
+    const request = client
+      .getChatSession(projectId, sessionId)
+      .then((record) => {
+        const messages = record?.messages ?? []
+        messagesCacheRef.current = messages
+        return messages
+      })
+      .catch(() => [] as ChatMessage[])
+      .finally(() => {
+        messagesRequestRef.current = null
+      })
+    messagesRequestRef.current = request
+    return request
+  }, [client, projectId, sessionId])
+
+  // Active session: mirror live workbench turns immediately on send.
+  useEffect(() => {
+    if (!active || !liveMessages) return
+    messagesCacheRef.current = liveMessages
+    applyTurnsToStrip(liveMessages)
+  }, [active, applyTurnsToStrip, liveMessages])
+
+  useEffect(() => {
+    if (active) return
+    messagesCacheRef.current = null
+    messagesRequestRef.current = null
+    setTurnStrip(null)
+    const seeded: Record<string, string> = {}
+    for (const item of previewStrip) {
+      if (item.chatMode) seeded[item.id] = item.chatMode
+    }
+    setStripModeById(seeded)
+    let cancelled = false
+    void (async () => {
+      const messages = await loadSessionMessages()
+      if (cancelled) return
+      const turns = collectUserTurns(messages)
+      if (turns.length > 0) {
+        applyTurnsToStrip(messages)
+        return
+      }
+      if (messages.length === 0) return
+      const next: Record<string, string> = { ...seeded }
+      for (const item of previewStrip) {
+        const mode = resolveStripChatMode(item, messages)
+        if (mode) next[item.id] = mode
+      }
+      if (!cancelled) setStripModeById(next)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [active, applyTurnsToStrip, loadSessionMessages, previewStrip, sessionId])
+
+  const hydrateStripPreview = useCallback(
+    async (item: SessionGraphStripItem, requestId: number) => {
+      setStripPromptLoading(true)
+      setStripPromptBody(item.title)
+      setStripReplyBody(null)
+      setStripReplyExpanded(false)
+      setStripForkMessageId(item.messageId ?? null)
+      const messages = await loadSessionMessages()
+      if (previewRequestIdRef.current !== requestId) return
+      const resolved = resolveSessionNodeStripPromptPreview(item, messages)
+      setStripPromptBody(resolved.body)
+      setStripReplyBody(resolved.reply)
+      setStripForkMessageId(resolved.forkMessageId)
+      setStripPromptLoading(false)
+    },
+    [loadSessionMessages],
+  )
+
+  const revealPreview = useCallback(
+    (
+      target: SessionNodePreviewTarget,
+      anchor?: DOMRectReadOnly | HTMLElement | null,
+    ) => {
+      if (lifted) return
+      const requestId = previewRequestIdRef.current + 1
+      previewRequestIdRef.current = requestId
+      setPreviewTarget(target)
+      placePreview(anchor)
+      setPreviewOpen(true)
+      if (target.kind === 'title') {
+        setStripPromptBody(null)
+        setStripReplyBody(null)
+        setStripReplyExpanded(false)
+        setStripForkMessageId(null)
+        setStripPromptLoading(false)
+        return
+      }
+      void hydrateStripPreview(target.item, requestId)
+    },
+    [hydrateStripPreview, lifted, placePreview],
+  )
+
+  const schedulePreviewOpen = useCallback(
+    (
+      target: SessionNodePreviewTarget,
+      anchor?: DOMRectReadOnly | HTMLElement | null,
+    ) => {
+      if (lifted) return
+      clearHideTimer()
+      clearOpenTimer()
+      // Switching targets while open should update immediately.
+      if (previewOpen) {
+        revealPreview(target, anchor)
+        return
+      }
+      openTimerRef.current = window.setTimeout(() => {
+        openTimerRef.current = null
+        revealPreview(target, anchor)
+      }, SESSION_NODE_PREVIEW_DELAY_MS)
+    },
+    [clearHideTimer, clearOpenTimer, lifted, previewOpen, revealPreview],
+  )
 
   const schedulePreviewClose = useCallback(() => {
     clearOpenTimer()
     clearHideTimer()
     hideTimerRef.current = window.setTimeout(() => {
       hideTimerRef.current = null
-      setPreviewOpen(false)
+      closePreview()
     }, SESSION_NODE_PREVIEW_HIDE_MS)
-  }, [clearHideTimer, clearOpenTimer])
+  }, [clearHideTimer, clearOpenTimer, closePreview])
 
   useEffect(() => () => closePreview(), [closePreview])
 
   useEffect(() => {
     if (lifted || dragging) closePreview()
   }, [closePreview, dragging, lifted])
+
+  useEffect(() => {
+    messagesCacheRef.current = null
+    messagesRequestRef.current = null
+  }, [sessionId, lastUpdatedAt, messageCount])
+
+  const stripPreviewItem =
+    previewTarget?.kind === 'strip' ? previewTarget.item : null
+  const stripPromptTitle = stripPreviewItem
+    ? stripPromptBody ?? stripPreviewItem.title
+    : null
+  const previewLabel = ts('chat.sessionGraph.description')
+  const previewAria = stripPreviewItem
+    ? stripPromptTitle ?? stripPreviewItem.title
+    : `${previewLabel}: ${title}`
+  const canBranchFromPreview =
+    Boolean(stripPreviewItem) && Boolean(stripForkMessageId) && !stripPromptLoading
+  const canExpandReply =
+    Boolean(stripPreviewItem) &&
+    !stripPromptLoading &&
+    Boolean(stripReplyBody?.trim())
 
   return (
     <>
@@ -1223,14 +1717,21 @@ function SessionNode({
         } ${dimmed ? styles.nodeDim : ''} ${lifted ? styles.nodeLifted : ''} ${
           dragging ? styles.nodeDragging : ''
         }`}
-        style={{ left: x, top: y, width: SESSION_NODE_WIDTH, height }}
+        style={{
+          left: x,
+          top: y,
+          width: SESSION_NODE_WIDTH,
+          // Live strip length drives height (grows/shrinks with rows, capped at MAX).
+          height: cardHeight,
+        }}
         data-session-node={head?.id}
         data-task={task}
+        data-strip-scrollable={stripScrollable ? 'true' : undefined}
         onPointerDown={(event) => {
           closePreview()
           onPointerDown(event)
         }}
-        onMouseEnter={schedulePreviewOpen}
+        onContextMenu={onContextMenu}
         onMouseLeave={schedulePreviewClose}
       >
         <div className={styles.nodeTop}>
@@ -1241,6 +1742,10 @@ function SessionNode({
           <button
             type="button"
             className={styles.nodeTitle}
+            data-session-drag-ignore=""
+            onMouseEnter={(event) =>
+              schedulePreviewOpen({ kind: 'title' }, event.currentTarget)
+            }
             onClick={() => {
               if (shouldSuppressClick()) return
               onOpen()
@@ -1252,7 +1757,7 @@ function SessionNode({
           {liveLabel ? (
             <span
               className={`${styles.liveChip} ${
-                status === 'running' ? styles.liveChipWorking : styles.liveChipNeedsYou
+                agentWorking ? styles.liveChipWorking : styles.liveChipNeedsYou
               }`}
             >
               {liveLabel}
@@ -1269,7 +1774,9 @@ function SessionNode({
               data-session-drag-ignore=""
               aria-label={ts('chat.sessionGraph.branch')}
               title={ts('chat.sessionGraph.branch')}
-              onClick={onBranch}
+              onClick={() => {
+                void onBranch()
+              }}
             >
               <GitBranch size={14} aria-hidden />
             </button>
@@ -1285,30 +1792,82 @@ function SessionNode({
             </button>
           </span>
         </div>
-        <ol className={styles.strip}>
-          {previewStrip.length === 0 ? (
+        <ol
+          className={`${styles.strip} ${stripScrollable ? styles.stripScrollable : ''}`}
+          data-session-drag-ignore=""
+          onWheel={(event) => {
+            // Keep wheel on a scrollable strip from zooming the graph canvas.
+            if (stripScrollable) event.stopPropagation()
+          }}
+        >
+          {displayStrip.length === 0 ? (
             <li className={styles.stripEmpty}>{ts('chat.sessionGraph.stripEmpty')}</li>
           ) : (
-            previewStrip.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className={styles.stripItem}
-                  data-kind={item.kind}
-                  title={ts(`chat.sessionGraph.stripKind.${item.kind}`)}
-                  onClick={() => {
-                    if (shouldSuppressClick()) return
-                    onStripItem(item)
-                  }}
-                >
-                  <span className={styles.stripGlyph} aria-hidden />
-                  <span className={styles.stripTitle}>{item.title}</span>
-                  <time className={styles.stripTime} dateTime={item.ts}>
-                    {formatSessionGraphRelativeTime(item.ts)}
-                  </time>
-                </button>
-              </li>
-            ))
+            displayStrip.map((item, index) => {
+              const mode = stripModeById[item.id] ?? item.chatMode
+              const tone = toneClassForChatMode(mode)
+              const toneClass = tone ? styles[tone] : ''
+              const isParentCite = item.id.startsWith('note:parent-cite:')
+              const isLatestOwnTurn =
+                !isParentCite &&
+                item.kind === 'intent' &&
+                index === displayStrip.length - 1
+              const showWorking = agentWorking && isLatestOwnTurn
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className={`${styles.stripItem} ${toneClass}`}
+                    data-kind={item.kind}
+                    data-parent-cite={isParentCite ? 'true' : undefined}
+                    data-working={showWorking ? 'true' : undefined}
+                    data-chat-mode={mode ?? undefined}
+                    data-session-drag-ignore=""
+                    title={
+                      isParentCite
+                        ? ts('chat.sessionGraph.openParent')
+                        : showWorking
+                          ? ts('chat.sessionGraph.liveWorking')
+                          : ts(`chat.sessionGraph.stripKind.${item.kind}`)
+                    }
+                    onMouseEnter={(event) => {
+                      if (isParentCite) return
+                      schedulePreviewOpen(
+                        { kind: 'strip', item },
+                        event.currentTarget,
+                      )
+                    }}
+                    onClick={() => {
+                      if (shouldSuppressClick()) return
+                      if (isParentCite && parentSessionId) {
+                        onOpenParent(parentSessionId)
+                        return
+                      }
+                      void (async () => {
+                        const sessionMessages = await loadSessionMessages()
+                        const revealMessageId = resolveStripRevealMessageId(
+                          item,
+                          sessionMessages,
+                        )
+                        onStripItem(item, revealMessageId)
+                      })()
+                    }}
+                  >
+                    <span className={styles.stripGlyph} aria-hidden />
+                    <span className={styles.stripTitle}>
+                      {showWorking ? (
+                        <SessionStripWorkingTitle title={item.title} />
+                      ) : (
+                        item.title
+                      )}
+                    </span>
+                    <time className={styles.stripTime} dateTime={item.ts}>
+                      {formatSessionGraphRelativeTime(item.ts)}
+                    </time>
+                  </button>
+                </li>
+              )
+            })
           )}
         </ol>
         <div className={styles.nodeFoot}>
@@ -1330,7 +1889,7 @@ function SessionNode({
           </span>
         </div>
       </div>
-      {previewOpen && previewExtra
+      {previewOpen && previewTarget
         ? createPortal(
             <aside
               className={styles.nodePreview}
@@ -1340,15 +1899,95 @@ function SessionNode({
                 width: SESSION_NODE_PREVIEW_WIDTH,
                 maxHeight: SESSION_NODE_PREVIEW_MAX_HEIGHT,
               }}
-              aria-label={`${ts('chat.sessionGraph.description')}: ${title}`}
+              aria-label={previewAria}
               aria-live="polite"
+              data-session-drag-ignore=""
               onMouseEnter={clearHideTimer}
               onMouseLeave={schedulePreviewClose}
+              onPointerDown={(event) => {
+                // Keep card drag / node pointerdown from stealing preview clicks.
+                event.stopPropagation()
+              }}
               onWheel={(event) => event.stopPropagation()}
             >
-              <div className={styles.nodePreviewTitle}>{title}</div>
-              <div className={styles.nodePreviewLabel}>{ts('chat.sessionGraph.description')}</div>
-              <div className={styles.nodePreviewBody}>{previewExtra}</div>
+              {stripPreviewItem ? (
+                <>
+                  <div
+                    className={`${styles.nodePreviewTitle} ${styles.nodePreviewTitlePrompt} ${
+                      stripPromptLoading ? styles.nodePreviewBodyLoading : ''
+                    }`}
+                  >
+                    {stripPromptTitle}
+                  </div>
+                  {canExpandReply || stripPromptLoading ? (
+                    <button
+                      type="button"
+                      className={`${styles.nodePreviewExpand} ${
+                        stripReplyExpanded ? styles.nodePreviewExpandOpen : ''
+                      }`}
+                      aria-expanded={stripReplyExpanded}
+                      aria-label={
+                        stripReplyExpanded
+                          ? ts('chat.sessionGraph.collapseReply')
+                          : ts('chat.sessionGraph.expandReply')
+                      }
+                      disabled={stripPromptLoading || !canExpandReply}
+                      onClick={() => setStripReplyExpanded((open) => !open)}
+                    >
+                      <ChevronDown size={14} aria-hidden />
+                    </button>
+                  ) : null}
+                  {stripReplyExpanded && stripReplyBody ? (
+                    <div className={styles.nodePreviewBody}>{stripReplyBody}</div>
+                  ) : null}
+                  {stripForkMessageId || stripPromptLoading ? (
+                    <div className={styles.nodePreviewActions}>
+                      <button
+                        type="button"
+                        className={styles.nodePreviewBranch}
+                        data-session-drag-ignore=""
+                        disabled={!canBranchFromPreview || branching}
+                        onPointerDown={(event) => {
+                          // Prefer pointerdown over click: preview remounts / mid-press
+                          // disable can drop the click before fork starts.
+                          if (event.button !== 0) return
+                          if (!stripForkMessageId || !canBranchFromPreview || branching) return
+                          event.preventDefault()
+                          event.stopPropagation()
+                          const forkMessageId = stripForkMessageId
+                          const stripItemId = stripPreviewItem?.id ?? null
+                          clearHideTimer()
+                          setBranching(true)
+                          void (async () => {
+                            try {
+                              const messages = await loadSessionMessages()
+                              const placement = resolveSessionForkPlacementForPreview(
+                                displayStrip,
+                                messages,
+                                forkMessageId,
+                                stripItemId,
+                              )
+                              await onBranchFromMessage(forkMessageId, placement)
+                            } finally {
+                              closePreview()
+                              setBranching(false)
+                            }
+                          })()
+                        }}
+                      >
+                        <GitBranch size={12} aria-hidden />
+                        {ts('chat.sessionGraph.branchFromHere')}
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <div className={styles.nodePreviewTitle}>{title}</div>
+                  <div className={styles.nodePreviewLabel}>{previewLabel}</div>
+                  <div className={styles.nodePreviewBody}>{titlePreviewBody}</div>
+                </>
+              )}
             </aside>,
             document.body,
           )
@@ -1373,7 +2012,7 @@ function MiscTray({
   dragActive,
   dragFromMisc,
   onOpen,
-  onPromote,
+  onDelete,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -1384,7 +2023,7 @@ function MiscTray({
   dragActive: boolean
   dragFromMisc: boolean
   onOpen: (sessionId: string) => void
-  onPromote: (sessionId: string) => void
+  onDelete: (sessionId: string) => void
   onPointerDown: (
     event: ReactPointerEvent,
     sessionId: string,
@@ -1593,20 +2232,27 @@ function MiscTray({
                     className={`${styles.miscChip} ${
                       item.id === activeSessionId ? styles.miscChipActive : ''
                     } ${overflow ? styles.miscChipOverflow : ''}`}
+                    role="button"
+                    tabIndex={overflow ? -1 : 0}
+                    aria-label={ts('chat.sessionGraph.contextMenu.viewHistory')}
                     onPointerDown={(event) => onPointerDown(event, item.id, title)}
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerUp}
                     onPointerCancel={onPointerUp}
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest('[data-session-drag-ignore]')) {
+                        return
+                      }
+                      onOpen(item.id)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return
+                      event.preventDefault()
+                      onOpen(item.id)
+                    }}
                   >
                     <div className={styles.miscChipBody}>
-                      <button
-                        type="button"
-                        className={styles.miscTitle}
-                        onClick={() => onOpen(item.id)}
-                        tabIndex={overflow ? -1 : undefined}
-                      >
-                        {title}
-                      </button>
+                      <span className={styles.miscTitle}>{title}</span>
                       {subtitle ? (
                         <span className={styles.miscSubtitle} title={subtitle}>
                           {subtitle}
@@ -1617,12 +2263,12 @@ function MiscTray({
                       type="button"
                       className={styles.miscButton}
                       data-session-drag-ignore=""
-                      aria-label={ts('chat.sessionGraph.moveToGraph')}
-                      title={ts('chat.sessionGraph.moveToGraph')}
+                      aria-label={ts('chat.sessionGraph.miscDelete')}
+                      title={ts('chat.sessionGraph.miscDelete')}
                       tabIndex={overflow ? -1 : undefined}
-                      onClick={() => onPromote(item.id)}
+                      onClick={() => onDelete(item.id)}
                     >
-                      +
+                      <X size={12} strokeWidth={2} aria-hidden />
                     </button>
                   </div>
                 )
@@ -1646,7 +2292,9 @@ function MiscTray({
               return (
                 <div key={item.id} className={styles.miscChip} data-misc-measure-chip="">
                   <span className={styles.miscTitle}>{title}</span>
-                  <span className={styles.miscButton}>+</span>
+                  <span className={styles.miscButton}>
+                    <X size={12} strokeWidth={2} aria-hidden />
+                  </span>
                 </div>
               )
             })}

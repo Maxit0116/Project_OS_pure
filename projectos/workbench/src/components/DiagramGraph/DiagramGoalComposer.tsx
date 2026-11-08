@@ -4,6 +4,11 @@ import { ArrowUp, ChevronUp, Layers } from 'lucide-react'
 import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea'
 import { useI18n } from '../../i18n'
 import { useDiagramGraphStore } from '../../state/diagramGraphStore'
+import { useComposePromptVoice } from '../ChatPanel/composer/useComposePromptVoice'
+import {
+  VoiceInputDock,
+  VoiceInputErrorBanner,
+} from '../ChatPanel/VoiceInputControls'
 import AgentActivityIndicator from '../ui/AgentActivityIndicator'
 import Button from '../ui/Button'
 import Chip from '../ui/Chip'
@@ -20,7 +25,7 @@ const TYPE_HINTS: DiagramVisualTypeHint[] = [
 ]
 
 export default function DiagramGoalComposer() {
-  const { ts } = useI18n()
+  const { ts, locale } = useI18n()
   const composerDraft = useDiagramGraphStore((s) => s.composerDraft)
   const typeHint = useDiagramGraphStore((s) => s.typeHint)
   const surfaceMode = useDiagramGraphStore((s) => s.surfaceMode)
@@ -48,6 +53,21 @@ export default function DiagramGoalComposer() {
   const styleGate = wireframeMode ? true : styleChosen
   const disabled = working || !styleGate || !composerDraft.trim()
 
+  const composeVoice = useComposePromptVoice({
+    locale,
+    disabled: working || !styleGate,
+    getText: () => useDiagramGraphStore.getState().composerDraft,
+    setText: setComposerDraft,
+    onSubmit: () => {
+      const state = useDiagramGraphStore.getState()
+      const nextWireframe =
+        state.surfaceMode === 'wireframe' || state.typeHint === 'ui-wireframe'
+      const nextStyleGate = nextWireframe ? true : state.styleChosen
+      if (state.busy || state.ensuring || !nextStyleGate || !state.composerDraft.trim()) return
+      void state.generate('overlay')
+    },
+  })
+
   useEffect(() => {
     if (!typeMenuOpen) return
     const onPointerDown = (event: MouseEvent) => {
@@ -61,10 +81,26 @@ export default function DiagramGoalComposer() {
 
   const onSend = () => {
     if (disabled) return
+    if (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing) {
+      composeVoice.stopVoice()
+    }
     void generate('overlay')
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      event.key === 'Escape' &&
+      (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing)
+    ) {
+      event.preventDefault()
+      composeVoice.cancelVoice()
+      return
+    }
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === 'Space') {
+      event.preventDefault()
+      composeVoice.dockProps.onMicToggle()
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       onSend()
@@ -159,6 +195,13 @@ export default function DiagramGoalComposer() {
       </div>
 
       <div className={styles.promptDock}>
+        {composeVoice.voice.state.error ? (
+          <VoiceInputErrorBanner
+            errorKey={composeVoice.voice.state.error}
+            onDismiss={composeVoice.voice.dismissError}
+            labels={composeVoice.voiceLabels}
+          />
+        ) : null}
         <div className={styles.inputComposer}>
           <div className={styles.composerBody}>
             <textarea
@@ -176,7 +219,11 @@ export default function DiagramGoalComposer() {
                   ? ts('chat.wireframePack.composerInput')
                   : ts('chat.diagramGraph.composerInput')
               }
-              onChange={(event) => setComposerDraft(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value
+                setComposerDraft(value)
+                composeVoice.syncBaseFromExternalText(value)
+              }}
               onKeyDown={onKeyDown}
               rows={3}
             />
@@ -222,6 +269,7 @@ export default function DiagramGoalComposer() {
               </div>
             </div>
             <div className={styles.rightCluster}>
+              <VoiceInputDock {...composeVoice.dockProps} inline />
               <Button
                 type="button"
                 variant="primary"

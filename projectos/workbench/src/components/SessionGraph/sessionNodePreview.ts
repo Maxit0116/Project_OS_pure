@@ -14,9 +14,13 @@ export interface ViewportRect {
   bottom: number
 }
 
-/** Place the preview beside the node (prefer right, then left, then below), clamped to the viewport. */
+/**
+ * Place the preview beside an anchor (node card, title, or strip row).
+ * Prefer right, then left, then below — clamped to the viewport.
+ * Vertical origin tracks the anchor top so strip-row previews sit beside that row.
+ */
 export function resolveSessionNodePreviewPosition(
-  nodeRect: DOMRectReadOnly,
+  anchorRect: DOMRectReadOnly,
   previewWidth = SESSION_NODE_PREVIEW_WIDTH,
   previewHeight = SESSION_NODE_PREVIEW_MAX_HEIGHT,
   viewport: ViewportRect = {
@@ -28,29 +32,29 @@ export function resolveSessionNodePreviewPosition(
   gap = SESSION_NODE_PREVIEW_GAP,
   margin = SESSION_NODE_PREVIEW_MARGIN,
 ): { x: number; y: number } {
-  const spaceRight = viewport.right - margin - (nodeRect.right + gap)
-  const spaceLeft = nodeRect.left - gap - (viewport.left + margin)
+  const spaceRight = viewport.right - margin - (anchorRect.right + gap)
+  const spaceLeft = anchorRect.left - gap - (viewport.left + margin)
 
   let x: number
   if (spaceRight >= previewWidth || spaceRight >= spaceLeft) {
-    x = nodeRect.right + gap
+    x = anchorRect.right + gap
   } else {
-    x = nodeRect.left - gap - previewWidth
+    x = anchorRect.left - gap - previewWidth
   }
 
-  let y = nodeRect.top
+  let y = anchorRect.top
   const maxX = viewport.right - margin - previewWidth
   const maxY = viewport.bottom - margin - previewHeight
   x = Math.max(viewport.left + margin, Math.min(x, maxX))
   y = Math.max(viewport.top + margin, Math.min(y, maxY))
 
-  // If horizontal placement still collides with the node, drop below.
-  const overlapsNodeHorizontally =
-    x < nodeRect.right + gap && x + previewWidth > nodeRect.left - gap
-  const overlapsNodeVertically =
-    y < nodeRect.bottom + gap && y + previewHeight > nodeRect.top - gap
-  if (overlapsNodeHorizontally && overlapsNodeVertically) {
-    y = Math.min(nodeRect.bottom + gap, maxY)
+  // If horizontal placement still collides with the anchor, drop below.
+  const overlapsHorizontally =
+    x < anchorRect.right + gap && x + previewWidth > anchorRect.left - gap
+  const overlapsVertically =
+    y < anchorRect.bottom + gap && y + previewHeight > anchorRect.top - gap
+  if (overlapsHorizontally && overlapsVertically) {
+    y = Math.min(anchorRect.bottom + gap, maxY)
     y = Math.max(viewport.top + margin, y)
   }
 

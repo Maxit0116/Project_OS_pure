@@ -1,29 +1,109 @@
 .list {
   display: grid;
-  gap: 8px;
+  gap: 2px;
   width: min(100%, 720px);
 }
 
 .card {
-  padding: 10px 12px;
-  border: 1px solid var(--tech-border);
-  border-radius: 6px;
-  background: var(--tech-bg-elevated);
+  padding: 2px 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--tech-text-primary);
   font-size: var(--font-size-sm);
 }
 
-.card h3 {
-  margin: 0 0 6px;
-  font-size: var(--font-size-sm);
-  font-weight: 600;
+.selected {
+  box-shadow: inset 2px 0 0 var(--tech-accent, var(--color-accent));
+  padding-left: 8px;
 }
 
-.selected {
-  border-color: var(--tech-accent);
+.heading {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chevronBtn,
+.titleBtn {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.chevronBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 22px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  border-radius: 4px;
+}
+
+.chevronBtn:hover {
+  color: var(--color-text-primary);
+}
+
+.chevronBtn:focus-visible,
+.titleBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.chevron {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.titleBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+  padding: 2px 0;
+}
+
+.title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.liveDot,
+.pendingDot {
+  color: var(--tech-accent, var(--color-accent));
+  background: currentColor;
+}
+
+.detail {
+  margin: 2px 0 8px 20px;
+  padding-left: 8px;
+  border-left: 1px solid var(--tech-border, var(--color-border));
 }
 
 .meta {
+  margin: 4px 0;
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+  font-size: var(--font-size-xs);
+}
+
+.pendingRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 4px 0;
   color: var(--tech-text-secondary, var(--color-text-secondary));
   font-size: var(--font-size-xs);
@@ -37,13 +117,13 @@
 }
 
 .hits,
-.card ul,
-.card ol {
+.detail ul,
+.detail ol {
   margin: 4px 0 0;
   padding-left: 16px;
 }
 
-.card pre {
+.detail pre {
   margin: 4px 0 0;
   white-space: pre-wrap;
   font-size: var(--font-size-xs);
@@ -63,4 +143,10 @@
 .link:focus-visible {
   outline: none;
   box-shadow: var(--tech-shadow-focus);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
 }

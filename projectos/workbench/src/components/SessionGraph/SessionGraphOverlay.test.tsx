@@ -31,9 +31,11 @@ describe('SessionGraphOverlay', () => {
     expect(renderToStaticMarkup(<SessionGraphOverlay />)).toBe('')
   })
 
-  it('estimates taller cards when the preview strip has rows', () => {
+  it('estimates taller cards when the preview strip has rows, capped at the visible max', () => {
     expect(estimateSessionNodeHeight(0)).toBeLessThan(estimateSessionNodeHeight(5))
-    expect(estimateSessionNodeHeight(5)).toBeGreaterThan(150)
+    expect(estimateSessionNodeHeight(5)).toBeLessThan(estimateSessionNodeHeight(10))
+    expect(estimateSessionNodeHeight(10)).toBe(estimateSessionNodeHeight(20))
+    expect(estimateSessionNodeHeight(3)).toBeGreaterThan(estimateSessionNodeHeight(1))
   })
 
   it('projects previewStrip onto session graph nodes for card rendering', () => {
