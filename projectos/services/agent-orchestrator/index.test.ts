@@ -2812,7 +2812,9 @@ describe("AgentOrchestrator runtime executor dispatch", () => {
     expect(modelOrchestrator.notifyDecisionAnswer(declined)).toBe(true);
     await expect(started).rejects.toMatchObject({ code: "operation_cancelled" });
     expect(state.diff).toBeUndefined();
-    expect(state.run.status).toMatch(/error|cancelled|failed/);
+    expect(state.run.status).toBe("cancelled");
+    expect(state.events.some((event) => event.type === "run_cancelled")).toBe(true);
+    expect(state.events.some((event) => event.type === "step_failed")).toBe(false);
   });
 
   it("requestDecision cancel supersedes the wait and does not stage a proposal", async () => {

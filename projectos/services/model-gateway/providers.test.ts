@@ -556,9 +556,17 @@ describe("provider HTTP contract matrix (openai_chat + anthropic_messages)", () 
         id: "msg_1",
         type: "message",
         role: "assistant",
-        content: [{ type: "text", text: "OK" }],
+        content: [
+          { type: "text", text: "OK" },
+          {
+            type: "tool_use",
+            id: "toolu_1",
+            name: "ping",
+            input: { x: 1 },
+          },
+        ],
         model: "claude-3-5-haiku-latest",
-        stop_reason: "end_turn",
+        stop_reason: "tool_use",
         usage: { input_tokens: 9, output_tokens: 2 },
       },
     },
@@ -572,6 +580,14 @@ describe("provider HTTP contract matrix (openai_chat + anthropic_messages)", () 
       },
     },
   ];
+
+  const ollama = normalizeModelProfile({
+    id: "contract-ollama",
+    name: "Ollama",
+    provider: "ollama",
+    model: "llama3.2",
+    apiKeyRef: "",
+  });
 
   for (const entry of formats) {
     describe(entry.label, () => {
@@ -645,13 +661,88 @@ describe("provider HTTP contract matrix (openai_chat + anthropic_messages)", () 
         expect(result.usageReported).toBe(true);
         expect(result.inputTokens).toBeGreaterThan(0);
         expect(result.outputTokens).toBeGreaterThan(0);
-        if (entry.format === "openai_chat" && entry.label === "openai_chat") {
+        if (entry.label === "openai_chat" || entry.label === "anthropic_messages") {
           expect(result.toolCalls?.length).toBe(1);
           expect(result.toolCalls?.[0]?.name).toBe("ping");
         }
       });
+
     });
   }
+
+  it("maps internal fetch timeout to a timed-out Error without leaking the API key", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn((_url: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        }, { once: true });
+      }),
+    ));
+    const pending = createProviderAdapter("openai_chat").complete(
+      openAi,
+      "secret-token-should-not-leak",
+      { userPrompt: "hi" },
+    );
+    // Transient retries mean several timeout windows; advance until settled.
+    const failurePromise = pending.catch((error: unknown) => error);
+    for (let i = 0; i < 8; i += 1) {
+      await vi.advanceTimersByTimeAsync(120_000);
+      if (await Promise.race([
+        failurePromise.then(() => true),
+        Promise.resolve(false),
+      ])) break;
+    }
+    const failure = await failurePromise;
+    expect(failure).toBeInstanceOf(Error);
+    expect(String((failure as Error).message)).toMatch(/timed out/i);
+    expect(String((failure as Error).message)).not.toContain("secret-token-should-not-leak");
+    vi.useRealTimers();
+  });
+
+  describe("ollama_chat contract", () => {
+    it("maps HTTP 401 without leaking body", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("ollama-auth-body", { status: 401 })));
+      const failure = await createProviderAdapter("ollama_chat")
+        .complete(ollama, "", { userPrompt: "hi" })
+        .catch((error: unknown) => error);
+      expect(failure).toMatchObject({
+        code: "model_connection_failed",
+        message: "Model provider request failed (HTTP 401)",
+      });
+      expect((failure as Error).message).not.toContain("ollama-auth-body");
+    });
+
+    it("rejects malformed JSON success", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("{broken", { status: 200 })));
+      await expect(createProviderAdapter("ollama_chat").complete(
+        ollama,
+        "",
+        { userPrompt: "hi" },
+      )).rejects.toMatchObject({
+        code: "model_connection_failed",
+        message: "Model provider returned invalid JSON",
+      });
+    });
+
+    it("parses official-shaped chat response", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(
+        JSON.stringify({
+          message: { role: "assistant", content: "OK" },
+          done: true,
+          prompt_eval_count: 4,
+          eval_count: 2,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )));
+      const result = await createProviderAdapter("ollama_chat").complete(
+        ollama,
+        "",
+        { userPrompt: "hi" },
+      );
+      expect(result.output).toContain("OK");
+    });
+  });
 
   it("documents supported apiFormat surface (not every vendor brand)", () => {
     expect(createProviderAdapter("openai_chat").constructor.name).toMatch(/OpenAi/);

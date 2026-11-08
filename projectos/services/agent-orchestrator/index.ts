@@ -1711,6 +1711,16 @@ export class AgentOrchestrator {
     if (!state.events.some((event) => event.type === "run_started")) {
       this.emit(workspace, state, createEvent(runId, "run_started"));
     }
+    // Stop/decline is cancelled, not a failed orchestration step.
+    if (error instanceof ProjectOSError && error.code === "operation_cancelled") {
+      state.status = "error";
+      state.run.status = "cancelled";
+      state.run.completedAt ??= new Date().toISOString();
+      if (!state.events.some((event) => event.type === "run_cancelled")) {
+        this.emit(workspace, state, createEvent(runId, "run_cancelled"));
+      }
+      return;
+    }
     state.status = "error";
     state.run.status = "error";
     state.run.completedAt ??= new Date().toISOString();
@@ -3162,7 +3172,8 @@ export class AgentOrchestrator {
             event.type === "child_run_completed" &&
             (event.payload as { childRunId?: string; failureCategory?: string } | undefined)
               ?.childRunId === childRunId &&
-            (event.payload as { failureCategory?: string }).failureCategory === "cancelled",
+            ((event.payload as { failureCategory?: string }).failureCategory === "cancelled" ||
+              (event.payload as { failureCategory?: string }).failureCategory === "operation_cancelled"),
         );
       };
       // Stop/decline: every failed child is cancel-classified. Mixed real failures stay errors.
@@ -3524,6 +3535,15 @@ export class AgentOrchestrator {
         return { ...child, ok: true as const };
       } catch (error) {
         if (error instanceof AgentRunCancelledError) throw error;
+        const category = childRunFailureCategory(
+          error,
+          this.runs.get(child.runId)?.events,
+        );
+        // Normalize Stop/decline to the same cancelled category used by leaf siblings.
+        const failureCategory =
+          error instanceof ProjectOSError && error.code === "operation_cancelled"
+            ? "cancelled"
+            : category;
         this.emit(
           workspace,
           state,
@@ -3532,19 +3552,40 @@ export class AgentOrchestrator {
             taskId: child.taskId,
             childRunId: child.runId,
             status: "error",
-            failureCategory: childRunFailureCategory(
-              error,
-              this.runs.get(child.runId)?.events,
-            ),
+            failureCategory,
           }),
         );
-        return { ...child, ok: false as const };
+        return {
+          ...child,
+          ok: false as const,
+          cancelled: failureCategory === "cancelled",
+        };
       }
     };
     const childrenByTaskId = new Map(children.map((child) => [child.taskId, child]));
     const pendingTaskIds = new Set(children.map((child) => child.taskId));
-    const resultsByTaskId = new Map<string, Awaited<ReturnType<typeof runHierarchyChild>>>();
+    const resultsByTaskId = new Map<string, Awaited<ReturnType<typeof runHierarchyChild>> & { cancelled?: boolean }>();
+    let hierarchyCancelled = false;
     while (pendingTaskIds.size > 0) {
+      if (hierarchyCancelled) {
+        for (const taskId of [...pendingTaskIds]) {
+          pendingTaskIds.delete(taskId);
+          const child = childrenByTaskId.get(taskId)!;
+          this.emit(
+            workspace,
+            state,
+            createDelegationEvent(state.run.runId, "child_run_completed", {
+              planId: plan.planId,
+              taskId,
+              childRunId: child.runId,
+              status: "error",
+              failureCategory: "cancelled",
+            }),
+          );
+          resultsByTaskId.set(taskId, { ...child, ok: false as const, cancelled: true });
+        }
+        break;
+      }
       const blockedTaskIds = [...pendingTaskIds].filter((taskId) => {
         const task = plan.tasks.find((candidate) => candidate.taskId === taskId)!;
         return (task.dependencyTaskIds ?? []).some((dependencyId) => resultsByTaskId.get(dependencyId)?.ok === false);
@@ -3552,6 +3593,8 @@ export class AgentOrchestrator {
       for (const taskId of blockedTaskIds) {
         pendingTaskIds.delete(taskId);
         const child = childrenByTaskId.get(taskId)!;
+        const dependencyCancel = (plan.tasks.find((candidate) => candidate.taskId === taskId)?.dependencyTaskIds ?? [])
+          .some((dependencyId) => resultsByTaskId.get(dependencyId)?.cancelled === true);
         this.emit(
           workspace,
           state,
@@ -3559,11 +3602,15 @@ export class AgentOrchestrator {
             planId: plan.planId,
             taskId,
             childRunId: child.runId,
-            status: "blocked",
-            failureCategory: "dependency_failed",
+            status: dependencyCancel ? "error" : "blocked",
+            failureCategory: dependencyCancel ? "cancelled" : "dependency_failed",
           }),
         );
-        resultsByTaskId.set(taskId, { ...child, ok: false as const });
+        resultsByTaskId.set(taskId, {
+          ...child,
+          ok: false as const,
+          cancelled: dependencyCancel,
+        });
       }
       if (pendingTaskIds.size === 0) break;
 
@@ -3581,6 +3628,7 @@ export class AgentOrchestrator {
       for (const { taskId, result } of batch) {
         pendingTaskIds.delete(taskId);
         resultsByTaskId.set(taskId, result);
+        if ("cancelled" in result && result.cancelled) hierarchyCancelled = true;
       }
     }
     const results = children.map((child) => resultsByTaskId.get(child.taskId) ?? { ...child, ok: false as const });
@@ -3596,6 +3644,47 @@ export class AgentOrchestrator {
           reason: "child_failure",
         }),
       );
+      const rootForDecisions = state.run.rootRunId ?? state.run.runId;
+      const decisions = this.createDecisionStore?.(workspace)?.listDecisions(rootForDecisions) ?? [];
+      const childFailedAsCancel = (childRunId: string): boolean => {
+        const childState = this.runs.get(childRunId);
+        if (childState?.run.status === "cancelled") return true;
+        if (
+          decisions.some(
+            (decision) =>
+              decision.runId === childRunId &&
+              decision.kind === "clarification" &&
+              decision.status === "declined",
+          )
+        ) {
+          return true;
+        }
+        return state.events.some(
+          (event) =>
+            event.type === "child_run_completed" &&
+            (event.payload as { childRunId?: string; failureCategory?: string } | undefined)
+              ?.childRunId === childRunId &&
+            ((event.payload as { failureCategory?: string }).failureCategory === "cancelled" ||
+              (event.payload as { failureCategory?: string }).failureCategory === "operation_cancelled"),
+        );
+      };
+      const stopOrDecline =
+        failed.length > 0 && failed.every((result) => childFailedAsCancel(result.runId));
+      if (stopOrDecline) {
+        const error = new ProjectOSError(
+          "operation_cancelled",
+          `Delegated subtree stopped after clarification was declined or Stop (${failed.length}/${results.length}); no files were applied`,
+          {
+            details: {
+              failedChildRunIds: failed.map((result) => result.runId),
+              failedTaskIds: failed.map((result) => result.taskId),
+              reason: "clarification_declined_or_stop",
+            },
+          },
+        );
+        this.emitFailedStep(workspace, state, delegateStep, error);
+        throw error;
+      }
       const failedDetails = failed.map((result) => {
         const childState = this.runs.get(result.runId);
         const childError = childState?.events
@@ -7699,6 +7788,25 @@ export class AgentOrchestrator {
     runningStep: AgentFlowStep,
     error: unknown,
   ): void {
+    if (error instanceof ProjectOSError && error.code === "operation_cancelled") {
+      state.status = "error";
+      state.run.status = "cancelled";
+      state.run.completedAt ??= new Date().toISOString();
+      // Close the open step as skipped — not step_failed (real error) and not complete.
+      this.emit(
+        workspace,
+        state,
+        createEvent(state.run.runId, "step_completed", {
+          ...runningStep,
+          status: "skipped",
+          outputSummary: sanitizeErrorMessage(error),
+        }),
+      );
+      if (!state.events.some((event) => event.type === "run_cancelled")) {
+        this.emit(workspace, state, createEvent(state.run.runId, "run_cancelled"));
+      }
+      return;
+    }
     const message = sanitizeErrorMessage(error);
     state.status = "error";
     state.run.status = "error";

@@ -14303,12 +14303,20 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       if (!this.orchestrator.getRun(runId)) {
         return;
       }
-      const message = sanitizeErrorMessage(error);
-      this.orchestrator.failRun(workspace, runId, error);
-      this.fallbackNotices.set(
-        workspace.project.projectId,
-        `Agent orchestration failed: ${message}`,
-      );
+      const cancelled =
+        error instanceof ProjectOSError && error.code === "operation_cancelled";
+      if (cancelled) {
+        // Ensure durable cancelled + run_cancelled without the failure notice path.
+        this.orchestrator.failRun(workspace, runId, error);
+        this.orchestrator.recordCancellation(workspace, runId);
+      } else {
+        const message = sanitizeErrorMessage(error);
+        this.orchestrator.failRun(workspace, runId, error);
+        this.fallbackNotices.set(
+          workspace.project.projectId,
+          `Agent orchestration failed: ${message}`,
+        );
+      }
     } finally {
       const state = this.orchestrator.getRun(runId);
       const planId = state?.refinement.sourcePlanId;

@@ -342,4 +342,29 @@ describe('AgentFlowPanel delegated run tree after Stop', () => {
     expect(html).toContain('已停止')
     expect(html).not.toContain('执行中')
   })
+
+  it('maps child_run_completed error + failureCategory cancelled to stopped, not error', () => {
+    const cancelledComplete: AgentRunEvent[] = [
+      ...startedOnly,
+      {
+        eventId: 'evt_complete',
+        runId: 'run_root',
+        timestamp: '2026-07-20T00:00:04.000Z',
+        type: 'child_run_completed',
+        payload: {
+          planId: 'plan_root',
+          taskId: 'task_1',
+          childRunId: 'run_leaf',
+          status: 'error',
+          failureCategory: 'cancelled',
+        },
+      } as AgentRunEvent,
+    ]
+    useWorkbenchStore.setState({ locale: 'en' })
+    const html = renderToStaticMarkup(
+      <DelegatedRunTree events={cancelledComplete as never} tracesByRun={{}} live={false} />,
+    )
+    expect(html).toContain('data-child-outcome="stopped"')
+    expect(html).not.toContain('data-child-outcome="error"')
+  })
 })

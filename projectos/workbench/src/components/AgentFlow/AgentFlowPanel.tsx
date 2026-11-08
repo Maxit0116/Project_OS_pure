@@ -598,7 +598,12 @@ function resolveDelegatedRunStatus(
     (candidate) => candidate.type === 'child_run_completed' &&
       candidate.payload.childRunId === childRunId,
   )
-  if (completed?.type === 'child_run_completed') return completed.payload.status
+  if (completed?.type === 'child_run_completed') {
+    const category = completed.payload.failureCategory
+    // Stop/decline skip reports status "error" + failureCategory cancelled — show stopped, not error.
+    if (category === 'cancelled' || category === 'operation_cancelled') return 'stopped'
+    return completed.payload.status
+  }
   const started = parentEvents.some(
     (candidate) => candidate.type === 'child_run_started' &&
       candidate.payload.childRunId === childRunId,
