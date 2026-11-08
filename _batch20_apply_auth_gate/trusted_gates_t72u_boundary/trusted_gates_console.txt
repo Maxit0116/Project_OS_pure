@@ -1,0 +1,9 @@
+HEAD_AT_END=40609c8bdbedbc9840f1dde6251b970b98240213
+EXITS core_tsc=0 fixtures=0 fullgate=0
+files=495 passed (495)
+tests=2669 passed (2669)
+FULLGATE_START=2026-11-08T09:17:11Z
+FULLGATE_END=2026-11-08T09:26:59Z
+log=_batch20_apply_auth_gate/trusted_gates_t72u_boundary/fullgate.log
+http_fixture=plan-service.http-fixture.test.ts (4 cases; loopback; not real DeepSeek)
+window=pid 61389 preserved (no restart this turn)

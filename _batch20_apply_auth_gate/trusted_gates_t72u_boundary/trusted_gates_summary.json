@@ -1,0 +1,19 @@
+{
+  "head_at_start": "6b76a3893f2fde1ae2c80b72d361e1f962440540",
+  "head_at_end": "40609c8bdbedbc9840f1dde6251b970b98240213",
+  "productFixCommit": "40609c8bdbedbc9840f1dde6251b970b98240213",
+  "note": "fullgate ran on working tree containing the boundary fix; HEAD_AT_END is the committed tip after push during the run",
+  "exits": {
+    "core_tsc": 0,
+    "fixtures": 0,
+    "fullgate": 0
+  },
+  "fullgate_files_line": "495 passed (495)",
+  "fullgate_tests_line": "2669 passed (2669)",
+  "fullgate_start_utc": "2026-11-08T09:17:11Z",
+  "fullgate_end_utc": "2026-11-08T09:26:59Z",
+  "plan_http_fixture_file": "projectos/services/plan-service.http-fixture.test.ts",
+  "plan_http_fixture_cases": 4,
+  "not_real_deepseek": true,
+  "window_pid_61389_preserved": true
+}

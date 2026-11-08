@@ -43,5 +43,15 @@
     ],
     "notRealDeepSeek": true
   },
-  "scopeUnchanged": "graph scope / approve / writeguard / explicit Plan Build only"
+  "scopeUnchanged": "graph scope / approve / writeguard / explicit Plan Build only",
+  "finalShaGates": {
+    "productFixHead": "40609c8bdbedbc9840f1dde6251b970b98240213",
+    "core_tsc": 0,
+    "fixtures": 0,
+    "fullgate": 0,
+    "fullgate_files": "495 passed (495)",
+    "fullgate_tests": "2669 passed (2669)",
+    "fullgate_log": "_batch20_apply_auth_gate/trusted_gates_t72u_boundary/fullgate.log",
+    "priorTipFullgateIfAuditMissedEnd": "6b76a38/7eff20c also FULLGATE_EXIT=0 with 494/2656"
+  }
 }
