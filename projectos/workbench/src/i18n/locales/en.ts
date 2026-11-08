@@ -2942,6 +2942,8 @@ const en = {
     impactCopied: 'Impact analysis copied ({views} views)',
     artifacts: 'Artifacts',
     artifactsHint: 'Show notes, plans, terminals, and work groups',
+    translateStructure: 'Rewrite this map in {language}',
+    translatingStructure: 'Rewriting the map in your language…',
     detail: {
       label: 'Detail',
       simple: 'Simple',

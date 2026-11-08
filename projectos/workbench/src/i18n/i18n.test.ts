@@ -72,3 +72,15 @@ describe('i18n messages', () => {
       .toBe('3 of 3')
   })
 })
+
+describe('the language a first-time visitor gets', () => {
+  it('follows the system: Chinese for zh-*, English for any other language', async () => {
+    const { systemLocale } = await import('./storeMessages')
+    expect(systemLocale(['zh-CN', 'en'])).toBe('zh')
+    expect(systemLocale(['zh-TW'])).toBe('zh')
+    expect(systemLocale(['en-US', 'zh-CN'])).toBe('en')
+    expect(systemLocale(['fr-FR'])).toBe('en')
+    // No signal at all keeps the earlier default.
+    expect(systemLocale([])).toBe('zh')
+  })
+})

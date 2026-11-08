@@ -344,6 +344,20 @@ export interface ChatMessage {
 }
 
 /** No node/file selection ⇒ whole-project (global) agent scope. */
+/**
+ * Keeps the project's `interfaceLanguage` equal to the language the person reads the app in, so that the
+ * map generated next is written in it. Quiet: no toast, and nothing when they already agree.
+ */
+async function syncInterfaceLanguage(get: () => WorkbenchState): Promise<void> {
+  const { project, settings, locale } = get()
+  if (!project || !settings || settings.interfaceLanguage === locale) return
+  try {
+    await get().updateSettings({ interfaceLanguage: locale }, { silent: true })
+  } catch {
+    // The setting is a convenience; a failure must not disturb switching the interface.
+  }
+}
+
 export function isGlobalAgentScope(state: {
   selectedNodeId: string | null
   selectedFilePath: string | null
@@ -1955,6 +1969,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   setLocale: (locale) => {
     saveLocale(locale)
     set({ locale })
+    // The map's own text is written in this language: tell the open project.
+    void syncInterfaceLanguage(get)
   },
   setMapDetail: (mapDetail) => {
     saveMapDetail(mapDetail)
@@ -2480,6 +2496,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const mode = options?.mode ?? 'regenerate'
     set({ structureRescanLoading: true })
     attachStructureScanSubscription(project.projectId, client, locale, get, set)
+    // The rewrite is written in the project's interface language: make sure it is the current one.
+    if (mode === 'translate') await syncInterfaceLanguage(get)
     const loadingKey =
       mode === 'refine' || mode === 'acceptRefine'
         ? 'map.refiningStructure'
@@ -2487,7 +2505,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ? 'map.deepeningStructure'
           : mode === 'prepareRefine'
             ? 'map.refiningStructure'
-            : 'map.regeneratingStructure'
+            : mode === 'translate'
+              ? 'map.translatingStructure'
+              : 'map.regeneratingStructure'
     pushToast({
       type: 'info',
       message: getStoreMessage(locale, loadingKey),
@@ -5743,6 +5763,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           null,
         error: null,
       })
+      void syncInterfaceLanguage(get)
     } catch (error) {
       if (get().project?.projectId === projectId) {
         reportSettingsMutationFailure(error, 'Failed to load settings')

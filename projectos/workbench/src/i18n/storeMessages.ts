@@ -12,7 +12,22 @@ export function loadLocale(): Locale {
   } catch {
     /* ignore */
   }
-  return 'zh'
+  return systemLocale()
+}
+
+/** The language of the person's system: Chinese for zh-*, English for anything else. */
+export function systemLocale(languages?: readonly string[]): Locale {
+  let list = languages
+  if (!list) {
+    try {
+      list = [...(navigator.languages ?? []), navigator.language]
+    } catch {
+      return 'zh'
+    }
+  }
+  const first = list.find((language) => typeof language === 'string' && language.length > 0)
+  if (!first) return 'zh'
+  return /^zh/iu.test(first) ? 'zh' : 'en'
 }
 
 export function saveLocale(locale: Locale) {

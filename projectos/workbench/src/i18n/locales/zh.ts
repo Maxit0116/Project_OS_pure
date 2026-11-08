@@ -2900,6 +2900,8 @@ const zh = {
     impactCopied: '已复制影响分析（{views} 个视图）',
     artifacts: '资料卡',
     artifactsHint: '显示笔记、计划、终端与 WorkGroup',
+    translateStructure: '用{language}重写这张地图',
+    translatingStructure: '正在用你的语言重写地图…',
     detail: {
       label: '详细程度',
       simple: '简单',

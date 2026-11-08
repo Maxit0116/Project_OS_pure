@@ -36,6 +36,8 @@ export default function WelcomeScreen({
   const { ts } = useI18n()
   const themePreference = useWorkbenchStore((s) => s.themePreference)
   const setThemePreference = useWorkbenchStore((s) => s.setThemePreference)
+  const locale = useWorkbenchStore((s) => s.locale)
+  const setLocale = useWorkbenchStore((s) => s.setLocale)
   const [dialogMode, setDialogMode] = useState<'path' | 'clone' | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [workspacePath, setWorkspacePath] = useState('')
@@ -114,6 +116,14 @@ export default function WelcomeScreen({
 
   return (
     <div className={styles.screen}>
+      <button
+        type="button"
+        className={`${styles.themeBtn} ${styles.langBtn}`}
+        onClick={() => setLocale(locale === 'zh' ? 'en' : 'zh')}
+        aria-label={ts('topBar.language')}
+      >
+        {locale === 'zh' ? 'English' : '中文'}
+      </button>
       <button
         type="button"
         className={styles.themeBtn}

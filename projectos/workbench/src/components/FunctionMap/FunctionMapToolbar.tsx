@@ -1,3 +1,4 @@
+import { mapTextLanguage } from './mapTextLanguage'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, RotateCcw, SlidersHorizontal, StickyNote } from 'lucide-react'
@@ -59,6 +60,8 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
   } = useFunctionMap()
   const rescanStructureGraph = useWorkbenchStore((s) => s.rescanStructureGraph)
   const mapDetail = useWorkbenchStore((s) => s.mapDetail)
+  const interfaceLocale = useWorkbenchStore((s) => s.locale)
+  const textLanguage = mapTextLanguage(graphNodes)
   const setMapDetail = useWorkbenchStore((s) => s.setMapDetail)
   const structureRescanLoading = useWorkbenchStore((s) => s.structureRescanLoading)
   const selectedNodeId = useWorkbenchStore((s) => s.selectedNodeId)
@@ -393,6 +396,19 @@ export default function FunctionMapToolbar({ variant = 'panel' }: Props) {
                   {ts(`map.detail.${value}`)}
                 </button>
               ))}
+              {textLanguage && textLanguage !== interfaceLocale ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={contextMenuStyles.menuItem}
+                  onClick={() => {
+                    closeDisplayMenu()
+                    void rescanStructureGraph({ mode: 'translate' })
+                  }}
+                >
+                  {ts('map.translateStructure', { language: interfaceLocale === 'zh' ? '中文' : 'English' })}
+                </button>
+              ) : null}
               <div className={contextMenuStyles.separator} aria-hidden />
               <div className={contextMenuStyles.groupLabel} aria-hidden>
                 {ts('map.displayMenuStructure')}
