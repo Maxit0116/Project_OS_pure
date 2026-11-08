@@ -1,12 +1,11 @@
 {
-  "note": "Code-source file content hashes — NOT Couple settings/graph/semantic/CV four-hashes.",
   "label": "ISOLATE",
-  "root": "<ISOLATE>",
-  "files": {
-    "projectos/services/agent-orchestrator/index.ts": "7d302e009448d0061ad322a3440b9b6e9b89636df204243cd48daedac4a7ddbc",
-    "projectos/services/project-os-local-api.ts": "2d7997132d99bdf16c3a518c0d680c518732eabffc26a0dcc70334e796df0337",
-    "projectos/workbench/src/state/workbenchStore.ts": "8e94b80748553c12e57b789e2e32fdb30c1eef8b1fe9c599912c814ce3d46c85",
-    "projectos/services/model-gateway/deterministic-login-change-gateway.ts": "ebfe7ff31c56eb162a26d1ea5ce8a7724cfede09677662487da5785ebe5be53a"
-  },
-  "path_redacted": true
+  "root_basename": "Couple_Recording_isolate_20261106-200509",
+  "settings": "672457f01926a75c",
+  "graph": "a05a885a888c4d54",
+  "semantic_tree_file": "b36f354651971f89",
+  "cv_ContentView_swift": "ed8eeeada6000ba7",
+  "at": "2026-11-08T00:40:28.273610+00:00",
+  "ok": true,
+  "missing": []
 }

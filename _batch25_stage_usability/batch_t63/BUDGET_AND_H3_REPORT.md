@@ -38,3 +38,17 @@
 - child-fail chat/toast desensitize real DOM
 - Live DeepSeek H3 clarify under ledger reserves
 - Post-final-test Couple SOURCE/ISOLATE settings/graph/semantic/CV four-hashes + secrets RO meta (no substitute with code-file hashes or prior dump)
+
+
+## Tip fullgates (final this turn)
+
+- `c96e1b4`: TSC/build/fixtures 0; fullgate exit 1; 3 files/4 tests (UX reds + review-only heal — fixed later).
+- First `855761e` fullgate **invalid** (probe env pollution). Clean re-run at docs tip `f3b3e39` (= product `855761e` + docs): TSC/build/fixtures 0; fullgate exit 1; **2 files / 3 tests** = locked UX reds only; `syntheticDiffApplyUndo` green.
+- Couple four-hashes (this dump): settings SOURCE `f4614b36…` ≠ ISOLATE `672457…`; graph/semantic/CV equal. Secrets RO meta recorded (basename/size/mtime/sha16 only). Ledger still **47/100**, Δ0.
+
+## Still open (not 交验)
+
+- Greenfield Electron DOM Apply/backup/Undo
+- Cancel user-visible copy real DOM (timeout path DOM shows as 验证失败 per schema)
+- Child-fail chat/toast desensitize real DOM
+- Live DeepSeek H3 clarify→card→same-root+Stop under executable reserves
