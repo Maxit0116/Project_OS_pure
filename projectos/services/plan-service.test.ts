@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ImplementationPlanSchema,
@@ -6,13 +6,26 @@ import {
 } from "../contracts/implementation-plan.js";
 import { DebugSessionSchema } from "../contracts/debug-session.js";
 import { ChatSessionModeSchema } from "../contracts/chat-session.js";
-import { buildPromptFromPlan, mergeClarifyingQuestions, normalizeClarifyingQuestions, sanitizePlanPayload } from "./plan-service.js";
+import {
+  PlanService,
+  buildPromptFromPlan,
+  mergeClarifyingQuestions,
+  normalizeClarifyingQuestions,
+  parsePlanJson,
+  sanitizePlanPayload,
+} from "./plan-service.js";
 import { buildInstrumentationSnippet } from "./debug-instrumentation-service.js";
 import { chooseRootCause, createInitialDebugSession, findHarnessRecordForSession, prepareManualDebugSession, resolveDebugFixFilePath } from "./debug-session-service.js";
 import graphFixture from "../client/sample-projectos-fixtures/graph.json" with { type: "json" };
 import authHarnessFixture from "../client/sample-projectos-fixtures/harness/err_auth_provider_callback.json" with { type: "json" };
+import truncatedPlanFixture from "./fixtures/implementation-plan-truncated-4096.json" with { type: "json" };
 import { HarnessRecordSchema } from "../contracts/harness.js";
 import { ProjectGraphSchema } from "../contracts/graph.js";
+import type { ModelGateway } from "./model-gateway/index.js";
+import type { AgentContextBundle } from "../contracts/local-context.js";
+import type { ModelProfile } from "../contracts/settings.js";
+import { ProjectOSError } from "../errors.js";
+import { isTruncatedModelOutput } from "./model-json-output.js";
 
 describe("implementation plan contracts", () => {
   it("accepts plan and debug chat modes", () => {
@@ -138,6 +151,143 @@ describe("plan-service helpers", () => {
     );
     expect(prompt).toContain("Objective: Fix callback");
     expect(prompt).toContain("Normalize callback");
+  });
+});
+
+describe("implementation plan truncation regression (live acceptance shape)", () => {
+  const profile = {
+    id: "model_flash",
+    name: "flash",
+    provider: "custom",
+    apiFormat: "openai_chat",
+    model: "deepseek-v4-flash",
+    baseUrl: "http://127.0.0.1:9",
+    apiKeyRef: "ref",
+  } as ModelProfile;
+
+  const localContext = {
+    version: "0.1.0",
+    kind: "global",
+    projectId: "proj_1",
+    topLevelNodes: [],
+    bundleHash: "sha256:test",
+  } as unknown as AgentContextBundle;
+
+  it("old single-shot 4096 path: truncated fixture is detected and fails parse", () => {
+    const truncated = truncatedPlanFixture.truncatedOutput;
+    expect(
+      isTruncatedModelOutput(
+        {
+          finishReason: truncatedPlanFixture.liveEvidence.finishReason,
+          usage: {
+            outputTokens: truncatedPlanFixture.liveEvidence.observedOutputTokens,
+          },
+        },
+        truncatedPlanFixture.liveEvidence.maxOutputTokens,
+      ),
+    ).toBe(true);
+    expect(() => parsePlanJson(truncated)).toThrow(/malformed implementation plan JSON/i);
+  });
+
+  it("new path: saturating 4096 retries at 8192 and returns a ready plan", async () => {
+    const caps: number[] = [];
+    const complete = vi.fn(async (_profile: unknown, request: { maxOutputTokens?: number }) => {
+      const max = request.maxOutputTokens ?? 0;
+      caps.push(max);
+      if (max <= 4096) {
+        return {
+          requestId: "plan_trunc",
+          provider: "DeepSeek",
+          model: "deepseek-v4-flash",
+          latencyMs: 1,
+          finishReason: "length",
+          usage: { inputTokens: 3986, outputTokens: 4096 },
+          output: truncatedPlanFixture.truncatedOutput,
+        };
+      }
+      return {
+        requestId: "plan_ok",
+        provider: "DeepSeek",
+        model: "deepseek-v4-flash",
+        latencyMs: 1,
+        finishReason: "stop",
+        usage: { inputTokens: 3986, outputTokens: 1800 },
+        output: JSON.stringify(truncatedPlanFixture.completeOutput),
+      };
+    });
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    const plan = await service.createPlan({
+      projectId: "proj_1",
+      scope: { kind: "global" },
+      objective: "Add idempotent event dedupe for sync",
+      localContext,
+      profile,
+      thinkingDepth: "medium",
+    });
+    expect(caps).toEqual([4096, 8192]);
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(plan.status).toBe("ready");
+    expect(plan.steps).toHaveLength(3);
+  });
+
+  it("clarification follow-up starts at 8192 so the live 4096 saturation class is skipped", async () => {
+    const caps: number[] = [];
+    const complete = vi.fn(async (_profile: unknown, request: { maxOutputTokens?: number }) => {
+      caps.push(request.maxOutputTokens ?? 0);
+      return {
+        requestId: "plan_ready",
+        provider: "DeepSeek",
+        model: "deepseek-v4-flash",
+        latencyMs: 1,
+        finishReason: "stop",
+        usage: { inputTokens: 6630, outputTokens: 5200 },
+        output: JSON.stringify(truncatedPlanFixture.completeOutput),
+      };
+    });
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    const plan = await service.createPlan({
+      projectId: "proj_1",
+      scope: { kind: "global" },
+      objective: "Add idempotent event dedupe for sync",
+      localContext,
+      profile,
+      thinkingDepth: "medium",
+      existingPlanId: "plan_existing",
+      clarifyingAnswers: [
+        { questionId: "q_1", answer: "Shared contract first", selectedOptionId: "q_1_opt_a" },
+      ],
+      existingQuestions: [{ id: "q_1", question: "Where first?" }],
+    });
+    expect(caps).toEqual([8192]);
+    expect(plan.status).toBe("ready");
+    expect(plan.id).toBe("plan_existing");
+  });
+
+  it("still fails closed when the raised budget is also truncated", async () => {
+    const complete = vi.fn(async (_profile: unknown, request: { maxOutputTokens?: number }) => ({
+      requestId: "plan_still_trunc",
+      provider: "DeepSeek",
+      model: "deepseek-v4-flash",
+      latencyMs: 1,
+      finishReason: "length",
+      usage: {
+        inputTokens: 6630,
+        outputTokens: request.maxOutputTokens ?? 4096,
+      },
+      output: truncatedPlanFixture.truncatedOutput,
+    }));
+    const service = new PlanService({ complete } as unknown as ModelGateway);
+    await expect(
+      service.createPlan({
+        projectId: "proj_1",
+        scope: { kind: "global" },
+        objective: "Add idempotent event dedupe for sync",
+        localContext,
+        profile,
+        thinkingDepth: "medium",
+      }),
+    ).rejects.toBeInstanceOf(ProjectOSError);
+    expect(complete).toHaveBeenCalledTimes(2);
   });
 });
 

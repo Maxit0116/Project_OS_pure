@@ -7,6 +7,7 @@ import {
   resolveDelegatedBatchValidationMaxOutputTokens,
   resolveFileEditPlanMaxOutputTokens,
   resolveGenerateDiffMaxOutputTokens,
+  resolveImplementationPlanMaxOutputTokens,
   resolveModelStructuredOutput,
   resolveProposalValidationMaxOutputTokens,
 } from "./model-json-output.js";
@@ -51,6 +52,26 @@ describe("resolveFileEditPlanMaxOutputTokens", () => {
     expect(resolveFileEditPlanMaxOutputTokens(false)).toBe(4096);
     expect(resolveFileEditPlanMaxOutputTokens(true, "response_truncated")).toBe(8192);
     expect(resolveFileEditPlanMaxOutputTokens(true)).toBe(6144);
+  });
+});
+
+describe("resolveImplementationPlanMaxOutputTokens", () => {
+  it("keeps 4096 for first draft and raises after truncation", () => {
+    expect(resolveImplementationPlanMaxOutputTokens(false)).toBe(4096);
+    expect(resolveImplementationPlanMaxOutputTokens(true, "response_truncated")).toBe(8192);
+  });
+
+  it("starts higher once clarifying answers are present", () => {
+    expect(
+      resolveImplementationPlanMaxOutputTokens(false, undefined, {
+        hasClarifyingAnswers: true,
+      }),
+    ).toBe(8192);
+    expect(
+      resolveImplementationPlanMaxOutputTokens(true, "response_truncated", {
+        hasClarifyingAnswers: true,
+      }),
+    ).toBe(16_384);
   });
 });
 

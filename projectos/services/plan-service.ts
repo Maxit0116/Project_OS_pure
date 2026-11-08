@@ -14,7 +14,11 @@ import type { AgentConversationScope } from "../contracts/agent-conversation.js"
 import type { ModelProfile, ThinkingDepth } from "../contracts/settings.js";
 import { ProjectOSError } from "../errors.js";
 import { ModelGateway } from "./model-gateway/index.js";
-import { orderedModelOutputSources } from "./model-json-output.js";
+import {
+  isTruncatedModelOutput,
+  orderedModelOutputSources,
+  resolveImplementationPlanMaxOutputTokens,
+} from "./model-json-output.js";
 import { separateLeadingThinkBlock } from "./model-gateway/providers.js";
 
 const PLAN_SYSTEM_PROMPT = `You create implementation plans for a graph-driven IDE.
@@ -124,38 +128,84 @@ export class PlanService {
         "Model request cancelled",
       );
     }
-    const response = await this.gateway.complete(
-      input.profile,
-      {
-        projectId: input.projectId,
-        requestKind: "implementation_plan",
-        modelPreference: input.profile.id,
-        systemPrompt: [
-          PLAN_SYSTEM_PROMPT,
-          ...(input.supplementalMarkdown?.trim()
-            ? [
-                "The user explicitly attached additional context. Treat it as authoritative supplemental material.",
-                input.supplementalMarkdown,
-              ]
-            : []),
-        ].join("\n"),
-        input: {
-          mode: "plan",
-          writeCapability: false,
-          objective: input.objective,
-          clarifyingAnswers: input.clarifyingAnswers ?? [],
-          existingQuestions: input.existingQuestions ?? [],
-          localContext: input.localContext,
-        },
-        redactionPolicy: "secrets_and_paths",
-        maxOutputTokens: 4096,
-        thinkingDepth: input.thinkingDepth,
-        ...(input.images?.length ? { images: input.images } : {}),
-      },
-      input.signal ? { signal: input.signal } : undefined,
-    );
 
-    const parsed = parsePlanJson(response.output, response.reasoning);
+    const hasClarifyingAnswers = (input.clarifyingAnswers?.length ?? 0) > 0;
+    const systemPrompt = [
+      PLAN_SYSTEM_PROMPT,
+      ...(input.supplementalMarkdown?.trim()
+        ? [
+            "The user explicitly attached additional context. Treat it as authoritative supplemental material.",
+            input.supplementalMarkdown,
+          ]
+        : []),
+    ].join("\n");
+    const requestInput = {
+      mode: "plan" as const,
+      writeCapability: false,
+      objective: input.objective,
+      clarifyingAnswers: input.clarifyingAnswers ?? [],
+      existingQuestions: input.existingQuestions ?? [],
+      localContext: input.localContext,
+    };
+
+    let firstFailure: "response_truncated" | undefined;
+    let parsed: z.infer<typeof ModelPlanPayloadSchema> | undefined;
+    // Two attempts: initial budget, then one truncation-driven raise (mirrors other JSON gates).
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (input.signal?.aborted) {
+        throw new ProjectOSError(
+          "operation_cancelled",
+          "Model request cancelled",
+        );
+      }
+      const maxOutputTokens = resolveImplementationPlanMaxOutputTokens(
+        attempt > 0,
+        firstFailure,
+        { hasClarifyingAnswers },
+      );
+      const response = await this.gateway.complete(
+        input.profile,
+        {
+          projectId: input.projectId,
+          requestKind: "implementation_plan",
+          modelPreference: input.profile.id,
+          systemPrompt,
+          input: requestInput,
+          redactionPolicy: "secrets_and_paths",
+          maxOutputTokens,
+          thinkingDepth: input.thinkingDepth,
+          ...(input.images?.length ? { images: input.images } : {}),
+        },
+        input.signal ? { signal: input.signal } : undefined,
+      );
+
+      if (isTruncatedModelOutput(response, maxOutputTokens)) {
+        firstFailure = "response_truncated";
+        if (attempt === 0) {
+          continue;
+        }
+        throw new ProjectOSError(
+          "plan_generation_failed",
+          "The model truncated the implementation plan JSON before it was complete",
+        );
+      }
+
+      try {
+        parsed = parsePlanJson(response.output, response.reasoning);
+        break;
+      } catch (error) {
+        // Non-truncation parse failures are not recovered by a larger budget alone.
+        throw error;
+      }
+    }
+
+    if (!parsed) {
+      throw new ProjectOSError(
+        "plan_generation_failed",
+        "The model returned malformed implementation plan JSON",
+      );
+    }
+
     const now = new Date().toISOString();
     const mergedQuestions = mergeClarifyingQuestions(
       normalizeClarifyingQuestions(parsed.clarifyingQuestions ?? []),
@@ -294,7 +344,8 @@ export function sanitizePlanPayload(decoded: unknown): unknown {
   };
 }
 
-function parsePlanJson(
+/** Exported for fixture regression: truncated/malformed plan bodies must fail closed. */
+export function parsePlanJson(
   output: string,
   reasoning?: string,
 ): z.infer<typeof ModelPlanPayloadSchema> {

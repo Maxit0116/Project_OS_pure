@@ -64,6 +64,26 @@ export function resolveFileEditPlanMaxOutputTokens(
   return 6144;
 }
 
+/**
+ * Implementation-plan JSON often grows after clarifying answers are filled in.
+ * Live acceptance (2026-11-08) saturated a fixed 4096 cap twice on that path;
+ * raise the base when answers are present and grow further after truncation.
+ */
+export function resolveImplementationPlanMaxOutputTokens(
+  retrying: boolean,
+  firstFailure?: "response_truncated",
+  options?: { hasClarifyingAnswers?: boolean },
+): number {
+  const base = options?.hasClarifyingAnswers ? 8192 : 4096;
+  if (!retrying) {
+    return base;
+  }
+  if (firstFailure === "response_truncated") {
+    return Math.min(16_384, base * 2);
+  }
+  return Math.min(12_288, base + 4096);
+}
+
 export function resolveGenerateDiffMaxOutputTokens(
   retrying: boolean,
   firstFailure?: "response_truncated" | "invalid_edit_shape" | "malformed_json" | "search_absent" | "search_ambiguous" | "overlapping_edits" | "no_effect" | "output_too_large",

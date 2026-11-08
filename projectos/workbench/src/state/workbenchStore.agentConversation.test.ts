@@ -999,6 +999,133 @@ describe('agent conversation routing', () => {
     expect(useWorkbenchStore.getState().agentFlowSubject).toBe('plan')
   })
 
+  it('Plan clarification: createPlan failure surfaces an error and keeps the pending plan (live acceptance class)', async () => {
+    const createPlan = vi.fn(async () => {
+      throw new ProjectOSError(
+        'plan_generation_failed',
+        'The model returned malformed implementation plan JSON',
+      )
+    })
+    setReadyScope({ createPlan } as unknown as ProjectOSApi, 'plan')
+    useWorkbenchStore.setState({
+      pendingPlan: {
+        version: '0.1.0',
+        id: 'plan_clarify',
+        projectId: 'sample-graph-saas',
+        scope: { kind: 'global' },
+        objective: 'Add idempotent sync dedupe',
+        steps: [],
+        todos: [],
+        ambiguities: ['scope'],
+        clarifyingQuestions: [
+          {
+            id: 'q_1',
+            question: 'Where first?',
+            options: [
+              { id: 'q_1_opt_a', label: 'Shared contract' },
+              { id: 'q_1_opt_b', label: 'Client only' },
+            ],
+          },
+        ],
+        rationale: 'Need a decision',
+        status: 'needs_clarification',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      error: null,
+    })
+
+    await useWorkbenchStore.getState().submitPlanClarification([
+      { questionId: 'q_1', answer: 'Shared contract', selectedOptionId: 'q_1_opt_a' },
+    ])
+
+    expect(createPlan).toHaveBeenCalledOnce()
+    expect(createPlan).toHaveBeenCalledWith(expect.objectContaining({
+      existingPlanId: 'plan_clarify',
+      clarifyingAnswers: [
+        { questionId: 'q_1', answer: 'Shared contract', selectedOptionId: 'q_1_opt_a' },
+      ],
+    }))
+    expect(useWorkbenchStore.getState().pendingPlan?.status).toBe('needs_clarification')
+    expect(useWorkbenchStore.getState().error).toMatch(/Failed to submit plan clarification|plan/i)
+    expect(useWorkbenchStore.getState().refineLoading).toBe(false)
+  })
+
+  it('Plan clarification: successful createPlan marks the plan ready without applying changes', async () => {
+    const createPlan = vi.fn(async () => ({
+      version: '0.1.0' as const,
+      id: 'plan_clarify',
+      projectId: 'sample-graph-saas',
+      scope: { kind: 'global' as const },
+      objective: 'Add idempotent sync dedupe',
+      steps: [
+        {
+          id: 'step_1',
+          description: 'Define dedupe key',
+          affectedFiles: ['shared/events.ts'],
+          acceptanceCriteria: ['Documented'],
+        },
+      ],
+      todos: [{ id: 'todo_1', content: 'Write migration', status: 'pending' as const }],
+      ambiguities: [],
+      clarifyingQuestions: [
+        {
+          id: 'q_1',
+          question: 'Where first?',
+          answer: 'Shared contract',
+          selectedOptionId: 'q_1_opt_a',
+          options: [
+            { id: 'q_1_opt_a', label: 'Shared contract' },
+            { id: 'q_1_opt_b', label: 'Client only' },
+          ],
+        },
+      ],
+      rationale: 'Answers chose the shared path',
+      status: 'ready' as const,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:01.000Z',
+    }))
+    setReadyScope({ createPlan } as unknown as ProjectOSApi, 'plan')
+    useWorkbenchStore.setState({
+      pendingPlan: {
+        version: '0.1.0',
+        id: 'plan_clarify',
+        projectId: 'sample-graph-saas',
+        scope: { kind: 'global' },
+        objective: 'Add idempotent sync dedupe',
+        steps: [],
+        todos: [],
+        ambiguities: ['scope'],
+        clarifyingQuestions: [
+          {
+            id: 'q_1',
+            question: 'Where first?',
+            options: [
+              { id: 'q_1_opt_a', label: 'Shared contract' },
+              { id: 'q_1_opt_b', label: 'Client only' },
+            ],
+          },
+        ],
+        rationale: 'Need a decision',
+        status: 'needs_clarification',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      planConfirmed: false,
+      error: null,
+    })
+
+    await useWorkbenchStore.getState().submitPlanClarification([
+      { questionId: 'q_1', answer: 'Shared contract', selectedOptionId: 'q_1_opt_a' },
+    ])
+
+    expect(useWorkbenchStore.getState().pendingPlan?.status).toBe('ready')
+    expect(useWorkbenchStore.getState().planConfirmed).toBe(false)
+    expect(useWorkbenchStore.getState().activeRunId).toBeNull()
+    expect(useWorkbenchStore.getState().error).toBeNull()
+    expect(useWorkbenchStore.getState().latestPlanTrace).toMatchObject({ status: 'complete' })
+  })
+
   it('builds a plan into the Change refinement path', async () => {
     const buildPlan = vi.fn(async () => ({
       id: 'ref-plan',
