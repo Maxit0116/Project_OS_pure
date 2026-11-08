@@ -8,14 +8,15 @@
   },
   "budget": {
     "ledgerLimit": 1000,
-    "reserved": 302,
-    "remaining": 698,
-    "sessionCap": 25,
-    "estCnyReportedOnlySinceRaise193": 0.4238,
-    "missingUnknownRowsSinceRaise193": 26,
+    "uniqueReservationIds": 302,
+    "reported": 218,
+    "missing": 74,
+    "reservedUnknown": 10,
+    "unknownRows": 84,
+    "estCnyReportedOnly_offPeakMiss": 1.3045,
     "authorizedRmbCap": 10,
+    "cannotProveTotalIncludingUnknownLeq10": true,
     "recharge": false,
-    "note": "count LIMIT 1000 replaces 240 ask-stop; fee band still ~¥10; unknowns≠0",
     "legacyGapSlots": 27,
     "continuityClaim": "continuity_slots_not_original_id_restore"
   },
@@ -42,5 +43,7 @@
     "fullgate": "reusable e81e87d 494/2648 — not re-run",
     "merge": false,
     "newModelCalls": false
-  }
+  },
+  "t70u_fee_reconcile": "_batch20_apply_auth_gate/FEE_RECONCILE_READONLY_t70u.json",
+  "freezeStatus": "lifted_by_t70u_continue_remaining_work"
 }
