@@ -334,6 +334,11 @@ export function separateNodesForLabels(diagram: C4Diagram): C4Diagram {
     if (!passChanged) break
   }
 
+  // Moving a box to make room for a connection label knows nothing about the boxes it moves toward: on
+  // the FastAPI template it slid one feature 280px down into the next, and with taller boxes (files
+  // listed under each feature) every such move collides. Clear any overlap it caused.
+  if (resolveNodeOverlaps(positions, sizeById, NODE_CLEARANCE)) changed = true
+
   if (!changed) return diagram
 
   const nodes = diagram.nodes.map((node) => {
@@ -370,6 +375,48 @@ export function separateNodesForLabels(diagram: C4Diagram): C4Diagram {
     boundaries,
     bounds: frame.length > 0 ? computeBounds(frame) : emptyBounds(),
   }
+}
+
+/** The least space kept between two boxes once the layout has moved one of them. */
+const NODE_CLEARANCE = 40
+
+/**
+ * Pushes boxes that overlap (or sit closer than `clearance`) apart: of two colliding boxes the lower one
+ * moves down, top to bottom, until nothing collides. Returns whether anything moved.
+ */
+export function resolveNodeOverlaps(
+  positions: Map<string, { x: number; y: number }>,
+  sizes: Map<string, { width: number; height: number }>,
+  clearance: number,
+): boolean {
+  const ids = [...positions.keys()].filter((id) => sizes.has(id))
+  let moved = false
+  for (let pass = 0; pass < ids.length * 2; pass += 1) {
+    let changed = false
+    const order = [...ids].sort(
+      (a, b) => positions.get(a)!.y - positions.get(b)!.y || positions.get(a)!.x - positions.get(b)!.x,
+    )
+    for (let i = 0; i < order.length; i += 1) {
+      for (let j = i + 1; j < order.length; j += 1) {
+        const a = order[i]!
+        const b = order[j]!
+        const pa = positions.get(a)!
+        const pb = positions.get(b)!
+        const sa = sizes.get(a)!
+        const sb = sizes.get(b)!
+        const sideBySide = pa.x + sa.width + clearance <= pb.x || pb.x + sb.width + clearance <= pa.x
+        if (sideBySide) continue
+        const clearY = pa.y + sa.height + clearance
+        if (pb.y < clearY) {
+          pb.y = clearY
+          changed = true
+          moved = true
+        }
+      }
+    }
+    if (!changed) break
+  }
+  return moved
 }
 
 function isUnrelatedCodeListing(diagram: C4Diagram): boolean {
