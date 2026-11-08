@@ -246,7 +246,7 @@ import {
 } from './modelProfileMutations'
 import { resolveFileOwnerSelection } from './fileOwnerSelection'
 import { unmetRequirementsFromMessage, type UnmetRequirement } from './unmetRequirements'
-import { isNodeAgentArchitectureLevel } from '../components/FunctionMap/architectureView'
+import { isNodeAgentArchitectureLevel, resolveProjectedCodeNode } from '../components/FunctionMap/architectureView'
 import {
   closeEditorFileInLayout,
   initialEditorLayout,
@@ -352,6 +352,31 @@ export function isGlobalAgentScope(state: {
   if (state.pendingFileOwnerChoice || state.fileScopeError) return false
   if (state.selectedNodeId || state.selectedFilePath) return false
   return true
+}
+
+/**
+ * The scope of an Ask, Plan or Debug conversation from the current selection. A code-level box on the
+ * map has a view-only id the server does not know ("Selected node 'code_file_…' was not found"); it is
+ * sent as the file it stands for, in the component that owns it, and as the whole project if the graph
+ * cannot say which.
+ */
+export function conversationScopeFromSelection(state: {
+  selectedNodeId: string | null
+  selectedFilePath: string | null
+  pendingFileOwnerChoice: PendingFileOwnerChoice | null
+  fileScopeError: 'not_mapped' | null
+  graph: { fileIndex: ReadonlyArray<{ path: string; nodeIds: string[] }> } | null
+}): AgentConversationScope {
+  if (isGlobalAgentScope(state)) return { kind: 'global' }
+  const { selectedNodeId, selectedFilePath } = state
+  if (selectedNodeId?.startsWith('code_file_')) {
+    const projected = resolveProjectedCodeNode(state.graph?.fileIndex, selectedNodeId)
+    if (!projected) return { kind: 'global' }
+    return { kind: 'file', nodeId: projected.nodeId, selectedFilePath: selectedFilePath ?? projected.filePath }
+  }
+  return selectedFilePath
+    ? { kind: 'file', nodeId: selectedNodeId!, selectedFilePath }
+    : { kind: 'node', nodeId: selectedNodeId! }
 }
 
 /**
@@ -3547,7 +3572,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         })
         return
       }
-      const askScope: AgentConversationScope = { kind: 'node', nodeId: anchor.id }
+      const askScope: AgentConversationScope = {
+        kind: 'node',
+        nodeId: resolveProjectedCodeNode(get().graph?.fileIndex, anchor.id)?.nodeId ?? anchor.id,
+      }
       const userMsg = buildUserMessage()
       set((current) => ({
         messages: [...current.messages, userMsg],
@@ -3632,18 +3660,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
 
     if (chatMode === 'ask') {
-      const askScope: AgentConversationScope = isGlobalAgentScope(state)
-        ? { kind: 'global' }
-        : selectedFilePath
-        ? {
-            kind: 'file',
-            nodeId: selectedNodeId!,
-            selectedFilePath,
-          }
-        : {
-            kind: 'node',
-            nodeId: selectedNodeId!,
-          }
+      const askScope: AgentConversationScope = conversationScopeFromSelection(state)
       const userMsg = buildUserMessage()
       useChatSessionStore.getState().presentAgentFlow()
       set((current) => ({
@@ -3759,18 +3776,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
 
     if (chatMode === 'plan') {
-      const planScope: AgentConversationScope = isGlobalAgentScope(state)
-        ? { kind: 'global' }
-        : selectedFilePath
-        ? {
-            kind: 'file',
-            nodeId: selectedNodeId!,
-            selectedFilePath,
-          }
-        : {
-            kind: 'node',
-            nodeId: selectedNodeId!,
-          }
+      const planScope: AgentConversationScope = conversationScopeFromSelection(state)
       const userMsg = buildUserMessage()
       useChatSessionStore.getState().presentAgentFlow()
       set((current) => ({
@@ -3857,18 +3863,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
 
     if (chatMode === 'debug') {
-      const debugScope: AgentConversationScope = isGlobalAgentScope(state)
-        ? { kind: 'global' }
-        : selectedFilePath
-        ? {
-            kind: 'file',
-            nodeId: selectedNodeId!,
-            selectedFilePath,
-          }
-        : {
-            kind: 'node',
-            nodeId: selectedNodeId!,
-          }
+      const debugScope: AgentConversationScope = conversationScopeFromSelection(state)
       const userMsg = buildUserMessage()
       useChatSessionStore.getState().presentAgentFlow()
       set((current) => ({

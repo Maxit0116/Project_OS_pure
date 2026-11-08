@@ -7,6 +7,7 @@ import {
   computeOneHopLinkedIds,
   defaultArchitectureScopeId,
   projectArchitectureView,
+  resolveProjectedCodeNode,
 } from './architectureView'
 
 function node(
@@ -611,3 +612,28 @@ function relation(
     evidence: `${sourcePath} -> ${targetPath}`,
   }
 }
+
+/**
+ * A code-level box on the map has a view-only id. Asking a question with one selected failed with
+ * "Selected node 'code_file_comp_e2e_tests_frontend_tests_config_ts_12bms7p' was not found in project".
+ */
+describe('resolveProjectedCodeNode', () => {
+  const fileIndex = [
+    { path: 'frontend/tests/config.ts', nodeIds: ['comp_e2e_tests'] },
+    { path: 'backend/app/crud.py', nodeIds: ['comp_items_api', 'comp_users_api'] },
+  ]
+
+  it('finds the component and file a code-level id stands for', () => {
+    const id = architectureFileNodeId('comp_e2e_tests', 'frontend/tests/config.ts')
+    expect(resolveProjectedCodeNode(fileIndex, id)).toEqual({ nodeId: 'comp_e2e_tests', filePath: 'frontend/tests/config.ts' })
+    // A file mounted by two components is a different box in each.
+    const second = architectureFileNodeId('comp_users_api', 'backend/app/crud.py')
+    expect(resolveProjectedCodeNode(fileIndex, second)).toEqual({ nodeId: 'comp_users_api', filePath: 'backend/app/crud.py' })
+  })
+
+  it('says nothing about ids that are not code-level boxes, or that the graph does not hold', () => {
+    expect(resolveProjectedCodeNode(fileIndex, 'comp_e2e_tests')).toBeNull()
+    expect(resolveProjectedCodeNode(fileIndex, 'code_file_comp_x_missing_py_1abc')).toBeNull()
+    expect(resolveProjectedCodeNode(null, architectureFileNodeId('comp_e2e_tests', 'frontend/tests/config.ts'))).toBeNull()
+  })
+})

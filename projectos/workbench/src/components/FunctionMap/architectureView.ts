@@ -105,6 +105,25 @@ export function architectureFileNodeId(componentId: string, path: string): strin
   return `code_file_${componentId}_${safePath}_${(hash >>> 0).toString(36)}`
 }
 
+/**
+ * The component and file a code-level box on the map stands for. These boxes have view-only ids
+ * (`code_file_…`, made by architectureFileNodeId) that the project graph does not contain, so a question
+ * asked with one selected failed with "Selected node ... was not found in project". The graph's file
+ * index says which component owns the file.
+ */
+export function resolveProjectedCodeNode(
+  fileIndex: ReadonlyArray<Pick<FileEntry, 'path' | 'nodeIds'>> | null | undefined,
+  nodeId: string,
+): { nodeId: string; filePath: string } | null {
+  if (!nodeId.startsWith('code_file_') || !fileIndex) return null
+  for (const entry of fileIndex) {
+    for (const owner of entry.nodeIds) {
+      if (architectureFileNodeId(owner, entry.path) === nodeId) return { nodeId: owner, filePath: entry.path }
+    }
+  }
+  return null
+}
+
 function fileLayer(file: FileEntry | undefined): string {
   const path = file?.path ?? ''
   if (file?.type === 'page' || path.startsWith('lib/hooks/')) return 'experience'
