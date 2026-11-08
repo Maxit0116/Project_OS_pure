@@ -19,6 +19,8 @@ export function loadLocale(): Locale {
 export function systemLocale(languages?: readonly string[]): Locale {
   let list = languages
   if (!list) {
+    // Only a real window speaks for a person: Node (tests, tooling) has a navigator of its own.
+    if (typeof window === 'undefined') return 'zh'
     try {
       list = [...(navigator.languages ?? []), navigator.language]
     } catch {
