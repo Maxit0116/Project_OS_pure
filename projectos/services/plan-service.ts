@@ -15,9 +15,9 @@ import type { ModelProfile, ThinkingDepth } from "../contracts/settings.js";
 import { ProjectOSError } from "../errors.js";
 import { ModelGateway } from "./model-gateway/index.js";
 import {
-  isTruncatedModelOutput,
   orderedModelOutputSources,
   resolveImplementationPlanMaxOutputTokens,
+  shouldRetryImplementationPlanForTruncation,
 } from "./model-json-output.js";
 import { separateLeadingThinkBlock } from "./model-gateway/providers.js";
 
@@ -150,7 +150,9 @@ export class PlanService {
 
     let firstFailure: "response_truncated" | undefined;
     let parsed: z.infer<typeof ModelPlanPayloadSchema> | undefined;
-    // Two attempts: initial budget, then one truncation-driven raise (mirrors other JSON gates).
+    let lastTruncationFailure = false;
+    // Two attempts: initial budget, then one truncation-driven raise only.
+    // Parse succeeds first — near-cap stop/missing-reason complete JSON is never discarded.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (input.signal?.aborted) {
         throw new ProjectOSError(
@@ -179,22 +181,27 @@ export class PlanService {
         input.signal ? { signal: input.signal } : undefined,
       );
 
-      if (isTruncatedModelOutput(response, maxOutputTokens)) {
-        firstFailure = "response_truncated";
-        if (attempt === 0) {
-          continue;
-        }
-        throw new ProjectOSError(
-          "plan_generation_failed",
-          "The model truncated the implementation plan JSON before it was complete",
-        );
-      }
-
       try {
         parsed = parsePlanJson(response.output, response.reasoning);
+        lastTruncationFailure = false;
         break;
       } catch (error) {
-        // Non-truncation parse failures are not recovered by a larger budget alone.
+        const mayRetry =
+          attempt === 0
+          && shouldRetryImplementationPlanForTruncation(response, maxOutputTokens);
+        if (mayRetry) {
+          firstFailure = "response_truncated";
+          lastTruncationFailure = true;
+          // Abort after the failed attempt must not open a second HTTP call.
+          if (input.signal?.aborted) {
+            throw new ProjectOSError(
+              "operation_cancelled",
+              "Model request cancelled",
+            );
+          }
+          continue;
+        }
+        // Explicit stop / structural invalid / non-saturated miss — fail closed, no budget retry.
         throw error;
       }
     }
@@ -202,7 +209,9 @@ export class PlanService {
     if (!parsed) {
       throw new ProjectOSError(
         "plan_generation_failed",
-        "The model returned malformed implementation plan JSON",
+        lastTruncationFailure
+          ? "The model truncated the implementation plan JSON before it was complete"
+          : "The model returned malformed implementation plan JSON",
       );
     }
 

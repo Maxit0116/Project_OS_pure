@@ -1,0 +1,47 @@
+{
+  "turn": "t72u-boundary",
+  "independentAuditNote": "Dump stopped ~17:03 Shanghai before fullgate end text; prior tip 6b76a38/7eff20c fullgate did finish: 494 files / 2656 tests FULLGATE_EXIT=0 (trusted_gates_7eff20c_t72u_plan + 98f2908_t72u_plan/fullgate.log).",
+  "window": {
+    "pid": 61389,
+    "action": "read-only verify only; no restart/reversion this turn",
+    "launcherExpectedMatchedHeadAtStart": "6b76a3893f2fde1ae2c80b72d361e1f962440540"
+  },
+  "ledger": {
+    "limit": 1000,
+    "reservations": 302,
+    "usageStatus": { "reported": 218, "missing": 74, "null": 10 },
+    "unknown84": "missing(74)+null(10)=84",
+    "skipWorktree": true,
+    "paidCallsThisTurn": 0
+  },
+  "liveGatewayFinishReason": {
+    "observedInCompletesLog": false,
+    "keys": ["requestId", "status", "usageStatus", "inputTokens", "outputTokens", "provider", "model", "requestKind", "at"],
+    "priorSummaryCorrection": "Do not cite finish_reason=length as a direct live observation; live signal was outputTokens===4096 + parse failure. Fixture/protocol may set length only for HTTP simulation."
+  },
+  "boundaryBug": "PlanService retried whenever isTruncatedModelOutput (OR tokens>=cap-4), discarding complete finishReason=stop JSON near the cap and opening a second paid call.",
+  "boundaryFix": {
+    "parseFirst": true,
+    "retryOnlyIf": "parse failed AND (finishReason===length OR (missing finishReason AND tokens saturate))",
+    "noRetryOn": "finishReason=stop/other + structural invalid",
+    "abortBetweenAttempts": "operation_cancelled; no second HTTP"
+  },
+  "regressionsUnpaid": {
+    "unitNearCapStopKeep": true,
+    "unitMissingReasonCompleteKeep": true,
+    "unitMissingReasonCutRetry": true,
+    "unitExplicitLengthRetry": true,
+    "unitTwoRoundTruncationFail": true,
+    "unitStopInvalidNoRetry": true,
+    "unitAbortNoSecondHttp": true,
+    "httpFixtureCount": 4,
+    "httpFixtureItems": [
+      "truncated body parse fail",
+      "length-cut then raise (loopback fixture, not real DeepSeek)",
+      "clarification starts 8192",
+      "stop+complete at cap single request"
+    ],
+    "notRealDeepSeek": true
+  },
+  "scopeUnchanged": "graph scope / approve / writeguard / explicit Plan Build only"
+}

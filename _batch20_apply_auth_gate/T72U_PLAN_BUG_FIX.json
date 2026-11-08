@@ -39,12 +39,13 @@
     ],
     "uiSurface": "submitPlanClarification catch sets workbench error banner; plan not applied"
   },
-  "rootCause": "PlanService.createPlan used a fixed maxOutputTokens=4096 with no truncation detect/retry. Clarification follow-ups enlarge the ready-plan JSON; DeepSeek returned finish_reason=length at exactly 4096. Gateway logged ok; parsePlanJson then threw plan_generation_failed.",
+  "rootCause": "PlanService.createPlan used a fixed maxOutputTokens=4096 with no truncation detect/retry. Clarification follow-ups enlarge the ready-plan JSON; live gateway completes showed status=ok and outputTokens exactly 4096 (log has no finishReason field — length was not directly observed). parsePlanJson then threw plan_generation_failed.",
   "notRootCause": "cancelAsk / Stop path; first draft plan at 3682 tokens succeeded",
   "fix": {
     "resolveImplementationPlanMaxOutputTokens": "4096 base; 8192 when clarifyingAnswers present; truncation retry up to 16384",
-    "PlanService": "detect isTruncatedModelOutput and retry once with raised budget",
-    "scopePreserved": "graph scope / approve / writeguard unchanged; Plan still requires explicit Build; no auto-apply"
+    "PlanService": "parse-first; budget retry only on length or (missing finishReason + saturated tokens) after parse failure — never discard complete stop/near-cap JSON",
+    "scopePreserved": "graph scope / approve / writeguard unchanged; Plan still requires explicit Build; no auto-apply",
+    "boundaryCloseout": "see T72U_PLAN_BOUNDARY_CLOSEOUT.json"
   },
   "regression": {
     "fixture": "projectos/services/fixtures/implementation-plan-truncated-4096.json",

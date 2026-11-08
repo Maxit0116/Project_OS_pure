@@ -10,6 +10,7 @@ import {
   resolveImplementationPlanMaxOutputTokens,
   resolveModelStructuredOutput,
   resolveProposalValidationMaxOutputTokens,
+  shouldRetryImplementationPlanForTruncation,
 } from "./model-json-output.js";
 
 describe("resolveModelStructuredOutput", () => {
@@ -72,6 +73,44 @@ describe("resolveImplementationPlanMaxOutputTokens", () => {
         hasClarifyingAnswers: true,
       }),
     ).toBe(16_384);
+  });
+});
+
+describe("shouldRetryImplementationPlanForTruncation", () => {
+  it("retries on explicit length even below the soft saturation band", () => {
+    expect(
+      shouldRetryImplementationPlanForTruncation(
+        { finishReason: "length", usage: { outputTokens: 100 } },
+        4096,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not retry on finishReason=stop even when tokens sit on the cap", () => {
+    expect(
+      shouldRetryImplementationPlanForTruncation(
+        { finishReason: "stop", usage: { outputTokens: 4096 } },
+        4096,
+      ),
+    ).toBe(false);
+  });
+
+  it("retries when finishReason is missing and tokens saturate (live gateway settles shape)", () => {
+    expect(
+      shouldRetryImplementationPlanForTruncation(
+        { usage: { outputTokens: 4096 } },
+        4096,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not retry when finishReason is missing but tokens are well under the cap", () => {
+    expect(
+      shouldRetryImplementationPlanForTruncation(
+        { usage: { outputTokens: 1800 } },
+        4096,
+      ),
+    ).toBe(false);
   });
 });
 

@@ -66,8 +66,9 @@ export function resolveFileEditPlanMaxOutputTokens(
 
 /**
  * Implementation-plan JSON often grows after clarifying answers are filled in.
- * Live acceptance (2026-11-08) saturated a fixed 4096 cap twice on that path;
- * raise the base when answers are present and grow further after truncation.
+ * Live acceptance (2026-11-08) hit exact outputTokens=4096 twice on that path
+ * (gateway completes log has no finishReason field — length was not directly observed).
+ * Raise the base when answers are present and grow further after confirmed truncation.
  */
 export function resolveImplementationPlanMaxOutputTokens(
   retrying: boolean,
@@ -82,6 +83,30 @@ export function resolveImplementationPlanMaxOutputTokens(
     return Math.min(16_384, base * 2);
   }
   return Math.min(12_288, base + 4096);
+}
+
+/**
+ * Plan-only truncation retry gate. A complete, schema-valid plan must be kept even
+ * when outputTokens sits near the cap with finishReason=stop (or missing).
+ * Budget retry is allowed only for:
+ * - explicit finishReason "length", or
+ * - missing/unknown finishReason with saturated token usage (live gateway settles omit finishReason)
+ * after parse already failed. Explicit non-length finish reasons never burn a second HTTP call
+ * for shape/schema errors.
+ */
+export function shouldRetryImplementationPlanForTruncation(
+  response: { finishReason?: string | undefined; usage: { outputTokens: number } },
+  maxOutputTokens: number,
+): boolean {
+  const reason = response.finishReason?.trim().toLowerCase();
+  if (reason === "length") {
+    return true;
+  }
+  if (reason) {
+    // stop / end_turn / tool_calls / content_filter / etc. — not a length cut.
+    return false;
+  }
+  return response.usage.outputTokens >= Math.max(1, maxOutputTokens - 4);
 }
 
 export function resolveGenerateDiffMaxOutputTokens(

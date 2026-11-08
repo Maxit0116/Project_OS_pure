@@ -1,6 +1,7 @@
 /**
- * Local HTTP fixture reproducing the live Plan clarification truncation class
- * (gateway HTTP 200 / finish_reason=length / outputTokens=4096 / cut JSON).
+ * Local HTTP fixture (NOT real DeepSeek) for the Plan truncation / near-cap class.
+ * Live gateway completes rows showed status=ok + outputTokens=4096; they do not
+ * include finishReason. Fixture may set finish_reason only to exercise protocol.
  * Uses production PlanService + ModelGateway against a loopback OpenAI-chat server.
  * No real provider keys; no ledger writes.
  */
@@ -188,5 +189,56 @@ describe("PlanService HTTP fixture (live truncation class)", () => {
     });
 
     expect(seenMaxTokens).toEqual([8192]);
+  });
+
+  it("HTTP stop + complete JSON at the cap is accepted with a single request", async () => {
+    const secrets = new InMemorySecretStore();
+    await secrets.set("fixture-key", "sk-fixture-not-real");
+    let hits = 0;
+    const { seenMaxTokens } = await withFixtureServer((_req, res) => {
+      hits += 1;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        id: "chatcmpl_fixture_stop_cap",
+        object: "chat.completion",
+        choices: [
+          {
+            index: 0,
+            finish_reason: "stop",
+            message: {
+              role: "assistant",
+              content: JSON.stringify(truncatedPlanFixture.completeOutput),
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 3900,
+          completion_tokens: 4096,
+          total_tokens: 7996,
+        },
+      }));
+    }, async (baseUrl) => {
+      const profile = {
+        id: "fixture_flash",
+        name: "fixture",
+        provider: "custom",
+        apiFormat: "openai_chat",
+        model: "fixture-model",
+        baseUrl,
+        apiKeyRef: "fixture-key",
+      } as ModelProfile;
+      const gateway = new ModelGateway({ secretStore: secrets, outboundRequestBounds: null });
+      const plan = await new PlanService(gateway).createPlan({
+        projectId: "proj_fixture",
+        scope: { kind: "global" },
+        objective: "Add idempotent event dedupe for sync",
+        localContext,
+        profile,
+        thinkingDepth: "off",
+      });
+      expect(plan.status).toBe("ready");
+    });
+    expect(hits).toBe(1);
+    expect(seenMaxTokens).toEqual([4096]);
   });
 });
