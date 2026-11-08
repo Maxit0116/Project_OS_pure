@@ -14,9 +14,11 @@ import {
   resolveArchitecture,
   elementTypeFromId,
   isRetryableGateFailure,
+  repairUnknownParents,
   runStructureGraphAiScan,
 } from "./structure-graph-ai-scan.js";
 import { buildHeuristicProjectGraph } from "./workspace-bootstrap.js";
+import type { FunctionalNode } from "../contracts/graph.js";
 import type { ModelGateway } from "./model-gateway/index.js";
 
 function makeTempRepo(options?: {
@@ -457,6 +459,48 @@ describe("structure-graph-ai-scan", () => {
     expect(elementTypeFromId("person_developer")).toBe("person");
     expect(elementTypeFromId("container_tests")).toBe("container");
     expect(elementTypeFromId("auth_service")).toBeUndefined();
+  });
+
+  it("attaches a component whose parent container does not exist instead of refusing the whole map", async () => {
+    // FastAPI template, live: "Unknown parent node 'container_packages_react_email'" threw the map away.
+    const { root, projectId } = makeTempRepo();
+    const heuristic = buildHeuristicProjectGraph({ projectId, projectName: "demo", projectType: "node", workspaceRoot: root });
+    const b = JSON.parse(roundBJson()) as { components: Array<Record<string, unknown>> };
+    b.components[0] = { ...b.components[0], parentId: "container_packages_react_email" };
+    b.components[1] = { ...b.components[1], parentId: "container_node_runtime" };
+    const complete = vi.fn(async (_profile, request) => {
+      const task = (request.input as { task?: string }).task;
+      return gatewayResponse(task === "structure_graph_round_a" ? roundAJson() : JSON.stringify(b));
+    });
+    const scanned = await runStructureGraphAiScan({
+      workspaceRoot: root, projectId, displayName: "demo", graph: heuristic, profile: mockProfile(),
+      gateway: { complete } as unknown as ModelGateway,
+    });
+    expect(scanned.analysisStatus).toBe("complete");
+    expect(scanned.nodes.find((node) => node.id === "component_auth")?.parentId).toBe("container_app");
+    // The missing parent shares the word "node" with the "Node runtime" container: it is chosen by name.
+    expect(scanned.nodes.find((node) => node.id === "component_billing")?.parentId).toBe("container_app");
+  });
+
+  it("repairs a dangling parent by the words it shares with a container, a container to the system", () => {
+    const node = (id: string, level: string, parentId?: string, name = id) =>
+      ({ id, name, level, ...(parentId ? { parentId } : {}) }) as unknown as FunctionalNode;
+    const repaired = repairUnknownParents([
+      node("sys", "context"),
+      node("container_web", "container", "sys", "Web frontend"),
+      node("container_api", "container", "sys", "Backend API"),
+      node("c1", "component", "container_web_dashboard"),
+      node("c2", "component", "container_backend_services"),
+      node("c3", "component", "container_unrelated_thing"),
+      node("c4", "container", "gone"),
+      node("p1", "context", "gone"),
+    ], "sys", "container_web");
+    const by = (id: string) => repaired.find((candidate) => candidate.id === id);
+    expect(by("c1")?.parentId).toBe("container_web");
+    expect(by("c2")?.parentId).toBe("container_api");
+    expect(by("c3")?.parentId).toBe("container_web");
+    expect(by("c4")?.parentId).toBe("sys");
+    expect(by("p1")).not.toHaveProperty("parentId");
   });
 
   it("asks only once more, and not at all for a failure another round cannot fix", () => {

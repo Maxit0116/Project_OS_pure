@@ -1165,6 +1165,46 @@ export function resolveArchitecture(
   };
 }
 
+const PARENT_TOKEN = /[a-z0-9]+/gu;
+
+function idTokens(value: string): Set<string> {
+  const generic = new Set(["container", "component", "system", "software", "node", "the", "and"]);
+  return new Set((value.toLowerCase().match(PARENT_TOKEN) ?? []).filter((token) => token.length > 2 && !generic.has(token)));
+}
+
+/**
+ * A node whose parent does not exist is attached somewhere sensible instead of failing the map. On the
+ * FastAPI template the second round named a component's parent container_packages_react_email, which
+ * the first round never created, and "Assembled graph failed validation" threw away the whole map. A
+ * component goes to the container whose id or name shares the most words with the missing parent, else
+ * the first container; a container goes to the system; anything else loses the dangling parent.
+ */
+export function repairUnknownParents(
+  nodes: FunctionalNode[],
+  systemId: string | undefined,
+  firstContainerId: string | undefined,
+): FunctionalNode[] {
+  const ids = new Set(nodes.map((node) => node.id));
+  const containers = nodes.filter((node) => node.level === "container");
+  return nodes.map((node) => {
+    if (!node.parentId || ids.has(node.parentId)) return node;
+    if (node.level === "component") {
+      const wanted = idTokens(node.parentId);
+      let best: { id: string; score: number } | undefined;
+      for (const container of containers) {
+        const have = new Set([...idTokens(container.id), ...idTokens(container.name)]);
+        const score = [...wanted].filter((token) => have.has(token)).length;
+        if (score > 0 && (!best || score > best.score)) best = { id: container.id, score };
+      }
+      const parentId = best?.id ?? firstContainerId;
+      if (parentId) return { ...node, parentId };
+    }
+    if (node.level === "container" && systemId) return { ...node, parentId: systemId };
+    const { parentId: _dangling, ...rest } = node;
+    return rest as FunctionalNode;
+  });
+}
+
 function assembleFromRounds(input: {
   projectId: string;
   projectName: string;
@@ -1207,6 +1247,7 @@ function assembleFromRounds(input: {
     }
     return node;
   });
+  nodes = repairUnknownParents(nodes, systemId, firstContainerId);
   nodes = rebuildHierarchy(nodes);
 
   const hints = componentsRaw.map((raw) => ({
