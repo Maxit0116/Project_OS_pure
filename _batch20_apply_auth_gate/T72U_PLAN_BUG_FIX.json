@@ -58,6 +58,21 @@
     "ledgerReservations": 302,
     "skipWorktreeProtected": true
   },
+  "gates": {
+    "core_tsc": 0,
+    "wb_tsc": 0,
+    "wb_test_tsc": 0,
+    "desktop_tsc": 0,
+    "desktop_build": 0,
+    "fixtures": 0,
+    "fullgate": 0,
+    "fullgate_files": "494 passed (494)",
+    "fullgate_tests": "2656 passed (2656)"
+  },
+  "launcherLock": {
+    "expectedHead": "7eff20cc22961acc62208f7dff0755259ccb68a6",
+    "match": true
+  },
   "acceptanceRestartRequired": true,
   "restartNote": "pid 51417 still runs pre-fix binary; coordinate Terran before restarting that window. Prefer separate verify isolate for patch proof."
 }
