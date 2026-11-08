@@ -1814,7 +1814,8 @@ function FunctionMapCanvasInner({ bleed }: Props) {
         },
         data: {
           label: boundary.label,
-          description: boundary.description,
+          // The plain view drops the bracketed technology tag ("[React]") the frame carries.
+          description: simpleMap && /^\[.*\]$/u.test(boundary.description?.trim() ?? '') ? undefined : boundary.description,
           collapsed,
           onToggleCollapsed: () => toggleBoundaryCollapsed(boundary.id),
         },
@@ -1822,6 +1823,7 @@ function FunctionMapCanvasInner({ bleed }: Props) {
     })
   }, [
     useC4Visuals,
+    simpleMap,
     c4Diagram,
     boundaryMembership,
     c4NodeById,
