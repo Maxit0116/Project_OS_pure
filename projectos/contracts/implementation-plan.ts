@@ -129,6 +129,12 @@ export const LatestPlanTraceSchema = z.discriminatedUnion("status", [
     .strict(),
   z
     .object({
+      status: z.literal("cancelled"),
+      scope: AgentConversationScopeSchema,
+    })
+    .strict(),
+  z
+    .object({
       status: z.literal("error"),
       scope: AgentConversationScopeSchema,
       message: z.string(),

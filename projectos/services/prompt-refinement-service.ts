@@ -107,38 +107,50 @@ export interface ModelRefinementInput {
   responseLanguage: ResolvedResponseLanguage;
   supplementalMarkdown?: string;
   knownNodeIds: ReadonlySet<string>;
+  /** When aborted (Stop during refine), gateway settles cancelled — no fixture fallback. */
+  signal?: AbortSignal;
 }
 
 export class PromptRefinementService {
   constructor(private readonly gateway: ModelGateway) {}
 
   async refineWithModel(input: ModelRefinementInput): Promise<PromptRefinement> {
-    const response = await this.gateway.complete(input.profile, {
-      projectId: input.request.projectId,
-      requestKind: "prompt_refinement",
-      modelPreference: input.profile.id,
-      systemPrompt: [
-        REFINEMENT_SYSTEM_PROMPT,
-        responseLanguageInstruction(input.responseLanguage),
-        ...(input.supplementalMarkdown?.trim()
-          ? [
-              "The user explicitly attached additional context. Treat it as authoritative supplemental material.",
-              input.supplementalMarkdown,
-            ]
-          : []),
-      ].join("\n"),
-      input: {
-        rawPrompt: input.request.rawPrompt,
-        nodeId: input.request.nodeId,
-        filePath: input.request.filePath,
-        context: input.context,
+    if (input.signal?.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
+    const response = await this.gateway.complete(
+      input.profile,
+      {
+        projectId: input.request.projectId,
+        requestKind: "prompt_refinement",
+        modelPreference: input.profile.id,
+        systemPrompt: [
+          REFINEMENT_SYSTEM_PROMPT,
+          responseLanguageInstruction(input.responseLanguage),
+          ...(input.supplementalMarkdown?.trim()
+            ? [
+                "The user explicitly attached additional context. Treat it as authoritative supplemental material.",
+                input.supplementalMarkdown,
+              ]
+            : []),
+        ].join("\n"),
+        input: {
+          rawPrompt: input.request.rawPrompt,
+          nodeId: input.request.nodeId,
+          filePath: input.request.filePath,
+          context: input.context,
+        },
+        redactionPolicy: "secrets_and_paths",
+        ...(input.thinkingDepth ? { thinkingDepth: input.thinkingDepth } : {}),
+        ...(input.request.images?.length
+          ? { images: input.request.images }
+          : {}),
       },
-      redactionPolicy: "secrets_and_paths",
-      ...(input.thinkingDepth ? { thinkingDepth: input.thinkingDepth } : {}),
-      ...(input.request.images?.length
-        ? { images: input.request.images }
-        : {}),
-    });
+      input.signal ? { signal: input.signal } : undefined,
+    );
 
     const parsed = parseRefinementJson(
       redactText(response.output, "secrets_and_paths"),

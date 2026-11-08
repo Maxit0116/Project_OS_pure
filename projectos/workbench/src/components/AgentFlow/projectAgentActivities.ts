@@ -65,6 +65,7 @@ export interface ActivityPlanResult {
 export type ActivityPlanTrace =
   | { status: 'running' }
   | { status: 'complete' | 'needs_clarification'; result: ActivityPlanResult }
+  | { status: 'cancelled' }
   | { status: 'error'; message: string }
 
 export interface ActivityProjectionInput {
@@ -596,6 +597,8 @@ export function projectAgentActivities(
       startedAt,
       detail: { kind: 'planning', objective: '', anchors: [], acceptanceCriteria: [] },
     })
+  } else if (plan?.status === 'cancelled') {
+    // Stop already surfaces chat.agentStopped; do not project a failed plan activity.
   } else if (plan?.status === 'error') {
     activities.push({
       id: 'plan:planning',

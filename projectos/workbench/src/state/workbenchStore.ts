@@ -297,6 +297,7 @@ export type LatestPlanTrace =
   | { status: 'running'; scope: AgentConversationScope }
   | { status: 'complete'; scope: AgentConversationScope; result: import('@contracts/index').ImplementationPlan }
   | { status: 'needs_clarification'; scope: AgentConversationScope; result: import('@contracts/index').ImplementationPlan }
+  | { status: 'cancelled'; scope: AgentConversationScope }
   | { status: 'error'; scope: AgentConversationScope; message: string }
 export type { FlowCorrection } from './handleRunEvent'
 
@@ -2987,6 +2988,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       flowStatus,
       refineLoading,
       latestAskTrace,
+      latestPlanTrace,
       pushToast,
       locale,
       executionOverlay,
@@ -2997,6 +2999,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const runId = activeRunId
     const askWasRunning = refineLoading && latestAskTrace?.status === 'running'
     const askScope = askWasRunning ? latestAskTrace.scope : null
+    const planWasRunning = refineLoading && latestPlanTrace?.status === 'running'
+    const planScope = planWasRunning ? latestPlanTrace.scope : null
     disposeActiveRunSubscriptions(get, set)
     const settledOverlay =
       runId && executionOverlay?.runId === runId
@@ -3018,6 +3022,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       executionOverlay: settledOverlay,
       ...(askWasRunning && askScope
         ? { latestAskTrace: { status: 'cancelled' as const, scope: askScope } }
+        : {}),
+      ...(planWasRunning && planScope
+        ? { latestPlanTrace: { status: 'cancelled' as const, scope: planScope } }
         : {}),
       ...(runId
         ? {
@@ -3573,6 +3580,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
         })
+        if (get().latestAskTrace?.status === 'cancelled') {
+          set({ refineLoading: false })
+          return
+        }
         set((current) => ({
           refineLoading: false,
           lastAnchoredAnswer: { answer: answer.answer, recorded: false },
@@ -3822,6 +3833,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ...chatSessionRequestFields(),
           ...composerFieldsWithMode,
         }))
+        if (
+          get().latestPlanTrace?.status === 'cancelled' ||
+          !get().refineLoading
+        ) {
+          set({ refineLoading: false })
+          return
+        }
         if (plan.status === 'needs_clarification') {
           const questions = plan.clarifyingQuestions ?? []
           const questionText = questions.length
@@ -3860,6 +3878,17 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           })
         }
       } catch (error) {
+        if (
+          isOperationCancelled(error) ||
+          get().latestPlanTrace?.status === 'cancelled' ||
+          !get().refineLoading
+        ) {
+          set({
+            refineLoading: false,
+            latestPlanTrace: { status: 'cancelled', scope: planScope },
+          })
+          return
+        }
         set((current) => ({
           refineLoading: false,
           latestPlanTrace: {
@@ -3968,12 +3997,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ...composerFieldsWithMode,
           executorSelection,
         })
+        // Drop late intent if Stop already cleared the in-flight turn.
+        if (!get().refineLoading) {
+          return
+        }
         set({
           pendingIntent: intent,
           rightPanelTab: 'chat',
           refineLoading: false,
         })
       } catch (error) {
+        if (isOperationCancelled(error) || !get().refineLoading) {
+          set({ refineLoading: false })
+          return
+        }
         set({
           refineLoading: false,
           error: errorMessage(error, 'Failed to prepare request intent'),
@@ -4023,6 +4060,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         ...chatSessionRequestFields(),
         ...composerFieldsWithMode,
       })
+      // Drop late refine if Stop already cleared the in-flight turn.
+      if (!get().refineLoading) {
+        return
+      }
       set((state) => ({
         pendingRefinement: refinement,
         rightPanelTab: 'chat',
@@ -4050,6 +4091,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         set({ pendingRefinement: null })
       }
     } catch (err) {
+      if (isOperationCancelled(err) || !get().refineLoading) {
+        set({ refineLoading: false })
+        return
+      }
       set({
         refineLoading: false,
         error: errorMessage(err, 'Failed to refine prompt'),

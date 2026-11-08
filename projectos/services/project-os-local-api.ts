@@ -2717,6 +2717,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       );
     }
     const askAbort = this.beginProjectModelTurnAbort(parsedRequest.projectId);
+    try {
+    if (askAbort.signal.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
     const responseLanguage = resolveResponseLanguage(
       parsedRequest.question,
       parsedRequest.language,
@@ -2755,6 +2762,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           selectedFilePath: ownerScope.selectedFilePath,
         },
         responseLanguage.tag,
+      );
+    }
+    if (askAbort.signal.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
       );
     }
     const augmented = await this.augmentComposerContext(
@@ -2834,9 +2847,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     });
     const instructionAppendix = assembled.instructions;
     const mcp = await this.buildAskMcpOptions(workspace);
-    let result;
-    try {
-      result = await this.groundedAnswerService.answer({
+    if (askAbort.signal.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
+    const result = await this.groundedAnswerService.answer({
         projectId: parsedRequest.projectId,
         question: parsedRequest.question,
         localContext: augmented.bundle,
@@ -2853,9 +2870,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           : {}),
         ...(mcp ? { mcp } : {}),
       });
-    } finally {
-      this.endProjectModelTurnAbort(parsedRequest.projectId, askAbort);
-    }
     const usedMcp = (result.mcpToolCalls?.length ?? 0) > 0;
     const contextSummary = summarizeLocalContext(augmented.bundle);
     const parsed = AgentAnswerResultSchema.parse({
@@ -2911,6 +2925,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       });
     }
     return parsed;
+    } finally {
+      this.endProjectModelTurnAbort(parsedRequest.projectId, askAbort);
+    }
   }
 
   private async buildAskMcpOptions(
@@ -3609,6 +3626,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         "A configured model profile is required to create a plan",
       );
     }
+    const planAbort = this.beginProjectModelTurnAbort(parsedRequest.projectId);
+    try {
+    if (planAbort.signal.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
     const { resolvedScope, localContext } = await this.resolveConversationContext(
       parsedRequest.projectId,
       parsedRequest.scope,
@@ -3671,6 +3696,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ...this.attachmentOmissions(augmented.attachmentSummary.explicitAttachments),
       ],
     });
+    if (planAbort.signal.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
     const created = await this.planService.createPlan({
       projectId: parsedRequest.projectId,
       scope: resolvedScope,
@@ -3679,6 +3710,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       profile,
       thinkingDepth: modelExecution?.thinkingDepth,
       clarifyingAnswers: parsedRequest.clarifyingAnswers,
+      signal: planAbort.signal,
       ...(parsedRequest.existingQuestions !== undefined
         ? { existingQuestions: parsedRequest.existingQuestions }
         : {}),
@@ -3718,6 +3750,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       planAssembly.assembly,
     );
     return plan;
+    } finally {
+      this.endProjectModelTurnAbort(parsedRequest.projectId, planAbort);
+    }
   }
 
   async updatePlan(request: UpdatePlanRequest): Promise<ImplementationPlan> {
@@ -4354,7 +4389,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     if (!route.forceFixture && route.backend === "model") {
       const profile = selectedExecution?.profile;
       if (profile) {
+        const refineAbort = this.beginProjectModelTurnAbort(request.projectId);
         try {
+          if (refineAbort.signal.aborted) {
+            throw new ProjectOSError(
+              "operation_cancelled",
+              "Model request cancelled",
+            );
+          }
           const context = request.nodeId
             ? await this.getNodeContext(request.projectId, request.nodeId)
             : request.filePath
@@ -4374,6 +4416,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             responseLanguage,
             supplementalMarkdown,
             knownNodeIds: new Set(workspace.graph.nodes.map((node) => node.id)),
+            signal: refineAbort.signal,
           });
           const refinement: PromptRefinement = ensureAlignmentOnRefinement(
             {
@@ -4392,6 +4435,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           );
           return refinement;
         } catch (error) {
+          if (
+            error instanceof ProjectOSError &&
+            error.code === "operation_cancelled"
+          ) {
+            throw error;
+          }
           console.error("[projectos] model refinement failed", error);
           this.fallbackNotices.set(
             request.projectId,
@@ -4404,6 +4453,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             message: "Model refinement failed; using deterministic fallback.",
             providerMessage: sanitizeErrorMessage(error),
           };
+        } finally {
+          this.endProjectModelTurnAbort(request.projectId, refineAbort);
         }
       }
     }

@@ -110,38 +110,50 @@ export interface PlanServiceInput {
   existingCreatedAt?: string;
   supplementalMarkdown?: string;
   images?: Array<{ mimeType: "image/png" | "image/jpeg"; base64: string }>;
+  /** When aborted (Stop during plan), gateway settles cancelled. */
+  signal?: AbortSignal;
 }
 
 export class PlanService {
   constructor(private readonly gateway: ModelGateway) {}
 
   async createPlan(input: PlanServiceInput): Promise<ImplementationPlan> {
-    const response = await this.gateway.complete(input.profile, {
-      projectId: input.projectId,
-      requestKind: "implementation_plan",
-      modelPreference: input.profile.id,
-      systemPrompt: [
-        PLAN_SYSTEM_PROMPT,
-        ...(input.supplementalMarkdown?.trim()
-          ? [
-              "The user explicitly attached additional context. Treat it as authoritative supplemental material.",
-              input.supplementalMarkdown,
-            ]
-          : []),
-      ].join("\n"),
-      input: {
-        mode: "plan",
-        writeCapability: false,
-        objective: input.objective,
-        clarifyingAnswers: input.clarifyingAnswers ?? [],
-        existingQuestions: input.existingQuestions ?? [],
-        localContext: input.localContext,
+    if (input.signal?.aborted) {
+      throw new ProjectOSError(
+        "operation_cancelled",
+        "Model request cancelled",
+      );
+    }
+    const response = await this.gateway.complete(
+      input.profile,
+      {
+        projectId: input.projectId,
+        requestKind: "implementation_plan",
+        modelPreference: input.profile.id,
+        systemPrompt: [
+          PLAN_SYSTEM_PROMPT,
+          ...(input.supplementalMarkdown?.trim()
+            ? [
+                "The user explicitly attached additional context. Treat it as authoritative supplemental material.",
+                input.supplementalMarkdown,
+              ]
+            : []),
+        ].join("\n"),
+        input: {
+          mode: "plan",
+          writeCapability: false,
+          objective: input.objective,
+          clarifyingAnswers: input.clarifyingAnswers ?? [],
+          existingQuestions: input.existingQuestions ?? [],
+          localContext: input.localContext,
+        },
+        redactionPolicy: "secrets_and_paths",
+        maxOutputTokens: 4096,
+        thinkingDepth: input.thinkingDepth,
+        ...(input.images?.length ? { images: input.images } : {}),
       },
-      redactionPolicy: "secrets_and_paths",
-      maxOutputTokens: 4096,
-      thinkingDepth: input.thinkingDepth,
-      ...(input.images?.length ? { images: input.images } : {}),
-    });
+      input.signal ? { signal: input.signal } : undefined,
+    );
 
     const parsed = parsePlanJson(response.output, response.reasoning);
     const now = new Date().toISOString();

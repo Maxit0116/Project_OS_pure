@@ -118,4 +118,36 @@ describe("ProjectOSLocalApi cancelAsk", () => {
     await expect(askPromise).rejects.toMatchObject({ code: "operation_cancelled" });
     expect(await api.cancelAsk(project.projectId)).toBe(false);
   });
+
+  it("cancelAsk aborts in-flight extractRequestIntent discovery", async () => {
+    const workspaceRoot = copyWorkspace();
+    const gateway = new HangingAskGateway();
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: workspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: gateway,
+      runEventPersistence: "memory",
+    });
+    const project = await api.openSampleWorkspace();
+    const nodeId = (await api.getProjectGraph(project.projectId)).nodes[0]?.id;
+    expect(nodeId).toBeTruthy();
+
+    const intentPromise = api.extractRequestIntent({
+      projectId: project.projectId,
+      rawRequest: "Tweak the selected feature copy in one line",
+      nodeId,
+      executorSelection: { kind: "model", modelProfileId: "fixture-model" },
+    });
+
+    for (let i = 0; i < 80 && gateway.completeCalls === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(gateway.completeCalls).toBeGreaterThanOrEqual(1);
+    expect(gateway.lastSignal?.aborted).toBe(false);
+
+    expect(await api.cancelAsk(project.projectId)).toBe(true);
+    expect(gateway.lastSignal?.aborted).toBe(true);
+    await expect(intentPromise).rejects.toMatchObject({ code: "operation_cancelled" });
+    expect(await api.cancelAsk(project.projectId)).toBe(false);
+  });
 });
