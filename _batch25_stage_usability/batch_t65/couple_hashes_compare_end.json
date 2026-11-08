@@ -1,0 +1,47 @@
+{
+  "SOURCE": {
+    "settings": {
+      "start": "f4614b36efdfbe91",
+      "end": "f4614b36efdfbe91",
+      "unchanged": true
+    },
+    "graph": {
+      "start": "a05a885a888c4d54",
+      "end": "a05a885a888c4d54",
+      "unchanged": true
+    },
+    "semantic_tree_file": {
+      "start": "b36f354651971f89",
+      "end": "b36f354651971f89",
+      "unchanged": true
+    },
+    "cv_ContentView_swift": {
+      "start": "ed8eeeada6000ba7",
+      "end": "ed8eeeada6000ba7",
+      "unchanged": true
+    }
+  },
+  "ISOLATE": {
+    "settings": {
+      "start": "672457f01926a75c",
+      "end": "672457f01926a75c",
+      "unchanged": true
+    },
+    "graph": {
+      "start": "a05a885a888c4d54",
+      "end": "a05a885a888c4d54",
+      "unchanged": true
+    },
+    "semantic_tree_file": {
+      "start": "b36f354651971f89",
+      "end": "b36f354651971f89",
+      "unchanged": true
+    },
+    "cv_ContentView_swift": {
+      "start": "ed8eeeada6000ba7",
+      "end": "ed8eeeada6000ba7",
+      "unchanged": true
+    }
+  },
+  "exit0": true
+}

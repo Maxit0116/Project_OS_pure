@@ -1,0 +1,37 @@
+{
+  "for_independent_review": true,
+  "premature_acceptance": false,
+  "tip": "9c374cd",
+  "artifacts": [
+    "BATCH_T65_REPORT.md",
+    "PUBLIC_SUMMARY_T65_LIVE_H3_ANSWER.json",
+    "PUBLIC_SUMMARY_T65_LIVE_H3_STOP.json",
+    "PUBLIC_SUMMARY_T64_CHILDFAIL_SANITIZE.json",
+    "PUBLIC_SUMMARY_T65_FULLGATE_9C374CD.json",
+    "COST_LEDGER_SNAPSHOT.json",
+    "couple_hashes_compare_end.json",
+    "couple_hashes_end_SOURCE.json",
+    "couple_hashes_end_ISOLATE.json",
+    "SECRETS_META_END.json",
+    "trusted_gates_summary.json"
+  ],
+  "h3_answer": {
+    "apiStatus": "awaiting_review",
+    "scope": "node-plan/feat_login",
+    "proposalFiles": [
+      "app/login/page.tsx",
+      "components/LoginForm.tsx"
+    ],
+    "forcedNamedOptions": false,
+    "reviewFirstDiskUnchanged": true
+  },
+  "h3_stop": {
+    "afterStopStatus": "error",
+    "noNewDispatchAfterStop": true,
+    "siblingSkippedWithoutStart": true
+  },
+  "childfail_excerpt": "Delegated file task failed; [path] api_key=[redacted] Bearer [redacted]",
+  "couple_four_hashes_unchanged": true,
+  "secrets_sha256_16": "08e354c69d666b40",
+  "writtenAt": "2026-11-08T02:12:51.101902Z"
+}
