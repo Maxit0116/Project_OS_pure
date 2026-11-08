@@ -15,7 +15,9 @@
     "missingUnknownRowsSinceRaise193": 26,
     "authorizedRmbCap": 10,
     "recharge": false,
-    "note": "count LIMIT 1000 replaces 240 ask-stop; fee band still ~¥10; unknowns≠0"
+    "note": "count LIMIT 1000 replaces 240 ask-stop; fee band still ~¥10; unknowns≠0",
+    "legacyGapSlots": 27,
+    "continuityClaim": "continuity_slots_not_original_id_restore"
   },
   "productChange": null,
   "fullgate": "not required — tip locked, no product fix",
@@ -28,5 +30,17 @@
     "legacyGapSlots": 27,
     "audit": "_batch20_apply_auth_gate/LEDGER_CONTINUITY_RESTORE_T69U_AUDIT.json",
     "at": "2026-11-08T08:04:58.270812+00:00"
+  },
+  "finalFreeze": {
+    "at": "2026-11-08T08:17:38.949312+00:00",
+    "launcherHead": "57167245b02dddddd70944f844a3b7b13658ff45",
+    "productTreeEquivalent": "e81e87d17bee5947b9c1e333caddbcde835f56ba",
+    "entryNomodelVerifyOk": true,
+    "ledgerUniqueIds": 302,
+    "limit": 1000,
+    "continuityClaim": "continuity_slots_not_original_id_restore",
+    "fullgate": "reusable e81e87d 494/2648 — not re-run",
+    "merge": false,
+    "newModelCalls": false
   }
 }
