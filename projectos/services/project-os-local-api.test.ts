@@ -4758,6 +4758,58 @@ describe("ProjectOSLocalApi graph, tree, and context methods", { timeout: 60_000
     }
   });
 
+  it("whole-tree apply still emits apply_result when post-apply verification throws", async () => {
+    const tempWorkspaceRoot = copySampleWorkspace();
+    const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];
+    const api = new ProjectOSLocalApi({
+      sampleWorkspaceRoot: tempWorkspaceRoot,
+      localContextAssembler: new LocalContextAssembler(),
+      modelGateway: new RecursiveHierarchyGateway({ uncertainCriteriaOnWholeTree: true }),
+      runEventPersistence: "memory",
+      verificationRunner: {
+        async run() {
+          throw new ProjectOSError(
+            "verification_approval_required",
+            "SYNTHETIC: post-apply verification blocked for Undo honesty",
+          );
+        },
+      },
+    });
+    const project = await api.openSampleWorkspace();
+    await enableModelExecution(api, project.projectId, "automatic");
+    await api.updateSettings(project.projectId, {
+      verification: {
+        commands: [{ command: "node", args: ["-e", "process.exit(0)"], timeoutMs: 10_000 }],
+      },
+    });
+    await approveConfiguredVerification(api, project.projectId);
+    const { run: root } = await approveAndConfirmModelExecution(api, {
+      projectId: project.projectId,
+      rawRequest: "Update login consistently across the product.",
+      deferOrchestratorStart: false,
+      forceGlobalPlanner: true,
+    });
+    expect((await waitForRunStatus(api, root.runId, "awaiting_review")).status)
+      .toBe("awaiting_review");
+    const applied = await api.applyDiff(root.runId);
+    expect(applied.applied).toBe(true);
+    expect(applied.backupId).toBeTruthy();
+    expect(applied.verificationStatus).toBe("not_run");
+    const events = await api.getAgentRunEvents(root.runId);
+    expect(events.some((event) =>
+      event.type === "apply_result" &&
+      (event.payload as { outcome?: string; backupId?: string } | undefined)?.outcome === "applied" &&
+      Boolean((event.payload as { backupId?: string } | undefined)?.backupId),
+    )).toBe(true);
+    const restored = await api.restoreApplyBackup(project.projectId, applied.backupId!);
+    expect(restored.restored).toBe(true);
+    for (const filePath of delegatedPaths) {
+      expect(readFileSync(join(tempWorkspaceRoot, filePath), "utf8")).toContain(
+        filePath.endsWith("page.tsx") ? "Demo access" : "Enter demo workspace",
+      );
+    }
+  });
+
   it("keeps a failed whole-tree verification applied and undoable while erroring every run", async () => {
     const tempWorkspaceRoot = copySampleWorkspace();
     const delegatedPaths = ["app/login/page.tsx", "components/LoginForm.tsx"];

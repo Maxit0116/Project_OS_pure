@@ -5268,8 +5268,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         generatedDiff: { ...generatedDiff, files: enrichedFiles },
         diffFileStats,
         error: null,
-        // Heal sticky review-only if parent batch already unlocked Apply.
-        ...(parentAllowsApply && current.diffReviewOnlyReason
+        // Heal sticky review-only only for delegated parents whose batch already
+        // unlocked Apply (late child diff_ready race). Never clear leaf/non-delegated
+        // validatingProposal — loadDiff runs on diff_proposed before validation finishes.
+        ...(hasDelegatedChildren &&
+        parentAllowsApply &&
+        current.diffReviewOnlyReason
           ? { diffReviewOnlyReason: null }
           : {}),
         ...(targetRunId !== pendingChangesDrawerDismissedRunId
@@ -5352,10 +5356,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       set({ diffReviewOnlyReason: message })
       return
     }
-    // Parent batch already authorizes Apply — clear sticky review-only left by a
-    // late/replayed child diff_ready that raced past batch_validation_result.
     if (diffReviewOnlyReason) {
-      set({ diffReviewOnlyReason: null })
+      // Delegated parent already batch-authorized: clear sticky review-only left by a
+      // late/replayed child diff_ready. Leaf/non-delegated validatingProposal must block.
+      if (hasDelegatedChildren) {
+        set({ diffReviewOnlyReason: null })
+      } else {
+        pushToast({ type: 'warning', message: diffReviewOnlyReason })
+        return
+      }
     }
     try {
       const applyResult = await client.applyDiff(activeRunId)
@@ -5446,6 +5455,36 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       }
       scheduleChatSessionPersist()
     } catch (err) {
+      // Disk+backup may already be committed when post-apply verification throws.
+      // Recover parent applyResult from persisted apply_result so DOM Undo stays linked.
+      try {
+        if (get().project?.projectId === project.projectId) {
+          const events = await client.getAgentRunEvents(activeRunId)
+          const applyEvt = [...events].reverse().find((event) => event.type === 'apply_result')
+          const payload = applyEvt && applyEvt.type === 'apply_result' ? applyEvt.payload : null
+          if (
+            payload &&
+            payload.outcome === 'applied' &&
+            typeof payload.backupId === 'string' &&
+            payload.backupId.length > 0
+          ) {
+            set({
+              applyResult: {
+                runId: activeRunId,
+                applied: true,
+                filesChanged: Array.isArray(payload.filesWritten) ? payload.filesWritten : [],
+                verificationStatus: 'not_run',
+                outcome: 'applied',
+                backupId: payload.backupId,
+              },
+              error: errorMessage(err, 'Failed to apply diff'),
+            })
+            return
+          }
+        }
+      } catch {
+        /* fall through to surface the original apply error */
+      }
       set({ error: errorMessage(err, 'Failed to apply diff') })
     }
   },

@@ -5770,29 +5770,37 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         });
         throw error;
       }
+      // Record apply_result BEFORE post-apply verification. Verification may throw
+      // (approval_required / runner missing); disk+backup already exist and Undo
+      // must remain reachable via apply_result + applyResult in the UI.
+      this.orchestrator.recordWholeTreeApply(workspace, runId, result);
       if (result.applied && result.outcome === "applied") {
-        const verification = await this.executeConfiguredVerification(runId, workspace);
-        if (verification.results.length === 0) {
-          this.orchestrator.recordVerificationResult(
-            workspace,
-            runId,
-            undefined,
-            verification.status,
-          );
-        } else {
-          for (const commandResult of verification.results) {
+        try {
+          const verification = await this.executeConfiguredVerification(runId, workspace);
+          if (verification.results.length === 0) {
             this.orchestrator.recordVerificationResult(
               workspace,
               runId,
-              formatExecCommandForDisplay(commandResult.command),
-              commandResult.status,
+              undefined,
+              verification.status,
             );
+          } else {
+            for (const commandResult of verification.results) {
+              this.orchestrator.recordVerificationResult(
+                workspace,
+                runId,
+                formatExecCommandForDisplay(commandResult.command),
+                commandResult.status,
+              );
+            }
           }
+          result = { ...result, verificationStatus: verification.status };
+          this.orchestrator.recordWholeTreeApply(workspace, runId, result);
+        } catch {
+          // Keep applied outcome; Diff can still request verification / Undo.
+          result = { ...result, verificationStatus: "not_run" };
+          this.orchestrator.recordWholeTreeApply(workspace, runId, result);
         }
-        result = { ...result, verificationStatus: verification.status };
-      }
-      this.orchestrator.recordWholeTreeApply(workspace, runId, result);
-      if (result.applied && result.outcome === "applied") {
         this.orchestrator.finalizeWholeTreeRun(
           workspace,
           runId,
@@ -5832,28 +5840,35 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         });
         throw error;
       }
+      // Same honesty as whole-tree: apply_result before verification can throw.
+      this.orchestrator.recordDelegatedGroupApply(workspace, runId, result);
       if (result.applied && result.outcome === "applied") {
-        const verification = await this.executeConfiguredVerification(runId, workspace);
-        if (verification.results.length === 0) {
-          this.orchestrator.recordVerificationResult(
-            workspace,
-            runId,
-            undefined,
-            verification.status,
-          );
-        } else {
-          for (const commandResult of verification.results) {
+        try {
+          const verification = await this.executeConfiguredVerification(runId, workspace);
+          if (verification.results.length === 0) {
             this.orchestrator.recordVerificationResult(
               workspace,
               runId,
-              formatExecCommandForDisplay(commandResult.command),
-              commandResult.status,
+              undefined,
+              verification.status,
             );
+          } else {
+            for (const commandResult of verification.results) {
+              this.orchestrator.recordVerificationResult(
+                workspace,
+                runId,
+                formatExecCommandForDisplay(commandResult.command),
+                commandResult.status,
+              );
+            }
           }
+          result = { ...result, verificationStatus: verification.status };
+          this.orchestrator.recordDelegatedGroupApply(workspace, runId, result);
+        } catch {
+          result = { ...result, verificationStatus: "not_run" };
+          this.orchestrator.recordDelegatedGroupApply(workspace, runId, result);
         }
-        result = { ...result, verificationStatus: verification.status };
       }
-      this.orchestrator.recordDelegatedGroupApply(workspace, runId, result);
       return result;
     }
     if (orchestratorRun?.run.parentRunId) {
