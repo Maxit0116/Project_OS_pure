@@ -34,7 +34,13 @@ export interface FlowCorrection {
   timestamp: string
 }
 
-export type FlowStatus = 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error'
+export type FlowStatus =
+  | 'idle'
+  | 'running'
+  | 'complete'
+  | 'awaiting_review'
+  | 'error'
+  | 'cancelled'
 
 export interface RunEventStoreSlice {
   client: ProjectOSApi
@@ -158,7 +164,8 @@ export function reduceRunEventState(
   }
 
   if (event.type === 'run_interrupted' || event.type === 'run_cancelled') {
-    patch.flowStatus = 'error'
+    // Stop/cancel is not an unexpected failure — keep Apply blocked, use cancelled status.
+    patch.flowStatus = event.type === 'run_cancelled' ? 'cancelled' : 'error'
     const revoked = new Set(state.revokedApplyRunIds ?? [])
     revoked.add(event.runId)
     patch.revokedApplyRunIds = [...revoked]

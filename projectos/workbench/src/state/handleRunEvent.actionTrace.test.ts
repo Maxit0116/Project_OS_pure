@@ -244,7 +244,7 @@ describe('Agent Flow action trace state', () => {
       type: 'run_cancelled',
     })
     const afterCancel = reduceRunEventState(baseState(), cancelled)
-    expect(afterCancel.flowStatus).toBe('error')
+    expect(afterCancel.flowStatus).toBe('cancelled')
     expect(afterCancel.revokedApplyRunIds).toContain('run_parent')
     expect(afterCancel.diffReviewOnlyReason).toMatch(/cancel/i)
 

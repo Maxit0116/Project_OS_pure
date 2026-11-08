@@ -1118,6 +1118,7 @@ const en = {
   errors: {
     modelNotConfigured: 'No model is set up yet. Open Settings → Models, add a model profile with your API key, then try again.',
     modelOutputInvalid: 'The model replied in a form Project OS could not use, even after one retry. Nothing was changed. Try again, or pick another model in Settings → Models.',
+    operationCancelled: 'Stopped — nothing was written. You can send a new request when ready.',
     providerRejectedKey: 'The model provider rejected the API key (HTTP {status}). Check the key in Settings → Models.',
     providerPaymentRequired: 'The model provider says the account has insufficient balance (HTTP {status}). Top up the account or use another key.',
     providerNotFound: 'The model provider could not find that model or endpoint (HTTP {status}). Check the model name and Base URL in Settings → Models.',

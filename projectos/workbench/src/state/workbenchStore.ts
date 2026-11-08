@@ -593,7 +593,7 @@ export interface WorkbenchState {
   delegatedRunTraces: Record<string, DelegatedRunTrace>
   flowTransientTraces: AgentTransientTrace[]
   flowCorrections: FlowCorrection[]
-  flowStatus: 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error'
+  flowStatus: 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error' | 'cancelled'
   /** Live Graph overlay driven by run events (see Live-Graph Dev Plan Phase 1). */
   executionOverlay: import('@contracts/index').ExecutionOverlay | null
   /** Phase 2: focus a task/phase so only its nodes and execution edges stay emphasized. */
@@ -1149,6 +1149,7 @@ async function reconcileStaleFlowStatus(
     const run = await client.getAgentRun(activeRunId)
     if (run.status === 'running' || run.status === 'queued') return 'running'
     if (run.status === 'awaiting_review') return 'awaiting_review'
+    if (run.status === 'cancelled') return 'cancelled'
     if (run.status === 'error') return 'error'
     return 'complete'
   } catch {

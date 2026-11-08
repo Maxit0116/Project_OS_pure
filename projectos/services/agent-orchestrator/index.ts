@@ -1503,6 +1503,40 @@ export class AgentOrchestrator {
     return runIds;
   }
 
+  /**
+   * Map a thrown pipeline error onto durable run status. Stop/decline
+   * (`operation_cancelled`) and abort (`AgentRunCancelledError`) must not look
+   * like unexpected failures; real failures stay `error`.
+   */
+  private applyRunTerminalFromCaughtError(
+    state: OrchestratorRunState,
+    error: unknown,
+  ): void {
+    if (error instanceof AgentRunCancelledError) {
+      return;
+    }
+    if (
+      error instanceof ProjectOSError &&
+      error.code === "operation_cancelled"
+    ) {
+      if (
+        state.run.status === "running" ||
+        state.run.status === "queued" ||
+        state.run.status === "error"
+      ) {
+        state.status = "error";
+        state.run.status = "cancelled";
+        state.run.completedAt ??= new Date().toISOString();
+      }
+      return;
+    }
+    if (state.run.status === "running" || state.run.status === "queued") {
+      state.status = "error";
+      state.run.status = "error";
+      state.run.completedAt ??= new Date().toISOString();
+    }
+  }
+
   private abortInFlightRun(
     runId: string,
     terminal: "cancelled" | "interrupted",
@@ -1915,11 +1949,9 @@ export class AgentOrchestrator {
       try {
         await this.runRuntimeExecutorTask(workspace, state, state.runtimeExecutor);
       } catch (error) {
-        // A cancelled or interrupted run keeps the status that cancellation set.
-        if (!(error instanceof AgentRunCancelledError) && state.run.status === "running") {
-          state.status = "error";
-          state.run.status = "error";
-        }
+        // Cancelled / interrupted keep the status cancel set; Stop/decline use
+        // operation_cancelled → run.status cancelled (not a generic error).
+        this.applyRunTerminalFromCaughtError(state, error);
         throw error;
       }
       return;
@@ -1939,8 +1971,7 @@ export class AgentOrchestrator {
           await this.runLiveModelChangePipeline(workspace, state);
         }
       } catch (error) {
-        state.status = "error";
-        state.run.status = "error";
+        this.applyRunTerminalFromCaughtError(state, error);
         throw error;
       }
       return;
@@ -3111,6 +3142,33 @@ export class AgentOrchestrator {
     const completed = results.filter((result) => result.ok);
     const failed = results.filter((result) => !result.ok);
     if (failed.length > 0) {
+      const rootForDecisions = state.run.rootRunId ?? state.run.runId;
+      const decisions = this.createDecisionStore?.(workspace)?.listDecisions(rootForDecisions) ?? [];
+      const childFailedAsCancel = (childRunId: string): boolean => {
+        const childState = this.runs.get(childRunId);
+        if (childState?.run.status === "cancelled") return true;
+        if (
+          decisions.some(
+            (decision) =>
+              decision.runId === childRunId &&
+              decision.kind === "clarification" &&
+              decision.status === "declined",
+          )
+        ) {
+          return true;
+        }
+        return state.events.some(
+          (event) =>
+            event.type === "child_run_completed" &&
+            (event.payload as { childRunId?: string; failureCategory?: string } | undefined)
+              ?.childRunId === childRunId &&
+            (event.payload as { failureCategory?: string }).failureCategory === "cancelled",
+        );
+      };
+      // Stop/decline: every failed child is cancel-classified. Mixed real failures stay errors.
+      const stopOrDecline =
+        failed.length > 0 && failed.every((result) => childFailedAsCancel(result.runId));
+
       this.emit(
         workspace,
         state,
@@ -3121,6 +3179,21 @@ export class AgentOrchestrator {
           reason: "child_failure",
         }),
       );
+      if (stopOrDecline) {
+        const error = new ProjectOSError(
+          "operation_cancelled",
+          `Delegated file task stopped after clarification was declined or Stop (${failed.length}/${results.length}); no files were written`,
+          {
+            details: {
+              failedChildRunIds: failed.map((result) => result.runId),
+              failedTaskIds: failed.map((result) => result.taskId),
+              reason: "clarification_declined_or_stop",
+            },
+          },
+        );
+        this.emitFailedStep(workspace, state, delegateStep, error);
+        throw error;
+      }
       const failedDetails = failed.map((result) => {
         const childState = this.runs.get(result.runId);
         const childError = childState?.events

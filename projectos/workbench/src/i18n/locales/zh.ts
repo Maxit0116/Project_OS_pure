@@ -1109,6 +1109,7 @@ const zh = {
   errors: {
     modelNotConfigured: '尚未配置模型。请打开“设置 → 模型”，添加带 API Key 的模型配置后再试。',
     modelOutputInvalid: '模型两次返回的内容都无法被 Project OS 解析，未做任何改动。请重试，或在“设置 → 模型”里换一个模型。',
+    operationCancelled: '已停止 — 未写入任何文件。需要时可重新发送请求。',
     providerRejectedKey: '模型服务商拒绝了该 API Key（HTTP {status}）。请到“设置 → 模型”检查密钥。',
     providerPaymentRequired: '模型服务商提示账户余额不足（HTTP {status}）。请充值或更换密钥。',
     providerNotFound: '模型服务商找不到该模型或接口（HTTP {status}）。请到“设置 → 模型”检查模型名称和 Base URL。',

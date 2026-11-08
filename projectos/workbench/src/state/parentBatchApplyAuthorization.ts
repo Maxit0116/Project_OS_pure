@@ -10,7 +10,13 @@ export type ParentBatchAuthEvent = {
   payload?: { verdict?: unknown } | Record<string, unknown> | null
 }
 
-export type ParentBatchAuthStatus = 'idle' | 'running' | 'complete' | 'awaiting_review' | 'error'
+export type ParentBatchAuthStatus =
+  | 'idle'
+  | 'running'
+  | 'complete'
+  | 'awaiting_review'
+  | 'error'
+  | 'cancelled'
 
 export function hasAuthorizingParentBatchValid(input: {
   activeRunId: string
@@ -30,8 +36,8 @@ export function isApplyAuthorizationRevoked(input: {
   flowStatus: ParentBatchAuthStatus
 }): boolean {
   if (input.revokedApplyRunIds?.includes(input.activeRunId)) return true
-  // Cancel / interrupt mark the flow as error; Apply must stay closed for that run.
-  if (input.flowStatus === 'error') return true
+  // Cancel / interrupt / Stop: Apply must stay closed for that run.
+  if (input.flowStatus === 'error' || input.flowStatus === 'cancelled') return true
   return false
 }
 
@@ -74,6 +80,6 @@ export function shouldUnlockApplyOnParentBatchValid(input: {
   flowStatus: ParentBatchAuthStatus
 }): boolean {
   if (input.revokedApplyRunIds?.includes(input.runId)) return false
-  if (input.flowStatus === 'error') return false
+  if (input.flowStatus === 'error' || input.flowStatus === 'cancelled') return false
   return true
 }

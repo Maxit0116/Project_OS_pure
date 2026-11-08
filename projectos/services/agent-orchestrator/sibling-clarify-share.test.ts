@@ -576,12 +576,15 @@ describe("AgentOrchestrator sibling clarify share (node-plan)", () => {
       "declined",
     );
     expect(orchestrator.notifyDecisionAnswer(declined)).toBe(true);
-    await expect(started).rejects.toMatchObject({ code: "agent_orchestration_failed" });
+    await expect(started).rejects.toMatchObject({ code: "operation_cancelled" });
+    expect(parent.run.status).toBe("cancelled");
 
     expect(startedChildRunIds).toHaveLength(1);
     expect(startedChildRunIds[0]).toMatch(/^run_sibling_child_\d+_1$/);
     expect(childMeta).toHaveLength(2);
+    const firstId = childMeta[0]!.runId;
     const secondId = childMeta[1]!.runId;
+    expect(orchestrator.getRun(firstId)?.run.status).toBe("cancelled");
     const second = orchestrator.getRun(secondId);
     expect(second?.diff).toBeUndefined();
     expect(second?.run.status).not.toBe("awaiting_review");
@@ -635,7 +638,8 @@ describe("AgentOrchestrator sibling clarify share (node-plan)", () => {
       "declined",
     );
     expect(second.orchestrator.notifyDecisionAnswer(declined)).toBe(true);
-    await expect(started2).rejects.toMatchObject({ code: "agent_orchestration_failed" });
+    await expect(started2).rejects.toMatchObject({ code: "operation_cancelled" });
+    expect(second.parent.run.status).toBe("cancelled");
   }, 45_000);
 });
 
