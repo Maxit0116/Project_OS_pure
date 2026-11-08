@@ -8,8 +8,8 @@
   },
   "budget": {
     "ledgerLimit": 1000,
-    "reserved": 275,
-    "remaining": 725,
+    "reserved": 302,
+    "remaining": 698,
     "sessionCap": 25,
     "estCnyReportedOnlySinceRaise193": 0.4238,
     "missingUnknownRowsSinceRaise193": 26,
@@ -20,5 +20,13 @@
   "productChange": null,
   "fullgate": "not required — tip locked, no product fix",
   "merge": false,
-  "privateRaw": "not published"
+  "privateRaw": "not published",
+  "ledgerContinuityRepair": {
+    "uniqueReservationIds": 302,
+    "limit": 1000,
+    "claim": "continuity_slots_not_original_id_restore",
+    "legacyGapSlots": 27,
+    "audit": "_batch20_apply_auth_gate/LEDGER_CONTINUITY_RESTORE_T69U_AUDIT.json",
+    "at": "2026-11-08T08:04:58.270812+00:00"
+  }
 }

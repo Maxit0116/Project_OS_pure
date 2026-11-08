@@ -1946,6 +1946,519 @@
       "outputTokens": 487
     },
     {
+      "id": "legacy_t67_gap:193:obr_17941135@2026-11-08T04:51:43.033Z",
+      "state": "reserved",
+      "reservedAt": "2026-11-08T04:51:43.033Z",
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 193,
+        "idPrefix": "obr_17941135",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "LEDGER_193_200_READONLY_AUDIT.json",
+        "fieldsPresentInAudit": [
+          "id",
+          "reservedAt",
+          "state"
+        ],
+        "usageVerdict": "unknown_unsettled_reserved",
+        "note": "Full original id not in any backup; slot restored for continuity accounting only — not a forged obr_ id"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:194:obr_17941135@2026-11-08T04:51:44.547Z",
+      "state": "reserved",
+      "reservedAt": "2026-11-08T04:51:44.547Z",
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 194,
+        "idPrefix": "obr_17941135",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "LEDGER_193_200_READONLY_AUDIT.json",
+        "fieldsPresentInAudit": [
+          "id",
+          "reservedAt",
+          "state"
+        ],
+        "usageVerdict": "unknown_unsettled_reserved",
+        "note": "Full original id not in any backup; slot restored for continuity accounting only — not a forged obr_ id"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:195:obr_17941135@2026-11-08T04:51:45.123Z",
+      "state": "reserved",
+      "reservedAt": "2026-11-08T04:51:45.123Z",
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 195,
+        "idPrefix": "obr_17941135",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "LEDGER_193_200_READONLY_AUDIT.json",
+        "fieldsPresentInAudit": [
+          "id",
+          "reservedAt",
+          "state"
+        ],
+        "usageVerdict": "unknown_unsettled_reserved",
+        "note": "Full original id not in any backup; slot restored for continuity accounting only — not a forged obr_ id"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:196:obr_17941135@2026-11-08T04:51:47.030Z",
+      "state": "reserved",
+      "reservedAt": "2026-11-08T04:51:47.030Z",
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 196,
+        "idPrefix": "obr_17941135",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "LEDGER_193_200_READONLY_AUDIT.json",
+        "fieldsPresentInAudit": [
+          "id",
+          "reservedAt",
+          "state"
+        ],
+        "usageVerdict": "unknown_unsettled_reserved",
+        "note": "Full original id not in any backup; slot restored for continuity accounting only — not a forged obr_ id"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:197:obr_17941136@2026-11-08T04:54:40.849Z",
+      "state": "reserved",
+      "reservedAt": "2026-11-08T04:54:40.849Z",
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 197,
+        "idPrefix": "obr_17941136",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "LEDGER_193_200_READONLY_AUDIT.json",
+        "fieldsPresentInAudit": [
+          "id",
+          "reservedAt",
+          "state"
+        ],
+        "usageVerdict": "unknown_unsettled_reserved",
+        "note": "Full original id not in any backup; slot restored for continuity accounting only — not a forged obr_ id"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:198:obr_17941136@2026-11-08T04:54:42.701Z",
+      "state": "reserved",
+      "reservedAt": "2026-11-08T04:54:42.701Z",
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 198,
+        "idPrefix": "obr_17941136",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "LEDGER_193_200_READONLY_AUDIT.json",
+        "fieldsPresentInAudit": [
+          "id",
+          "reservedAt",
+          "state"
+        ],
+        "usageVerdict": "unknown_unsettled_reserved",
+        "note": "Full original id not in any backup; slot restored for continuity accounting only — not a forged obr_ id"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:199:obr_17941136@2026-11-08T04:54:44.558Z",
+      "state": "reserved",
+      "reservedAt": "2026-11-08T04:54:44.558Z",
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 199,
+        "idPrefix": "obr_17941136",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "LEDGER_193_200_READONLY_AUDIT.json",
+        "fieldsPresentInAudit": [
+          "id",
+          "reservedAt",
+          "state"
+        ],
+        "usageVerdict": "unknown_unsettled_reserved",
+        "note": "Full original id not in any backup; slot restored for continuity accounting only — not a forged obr_ id"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:200:obr_1794115654@2026-11-08T05:27:34.820Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:27:34.820Z",
+      "settledAt": "2026-11-08T05:27:45.202Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 200,
+        "idPrefix": "obr_1794115654",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "missing_unknown_cost",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:201:obr_1794115656@2026-11-08T05:27:36.330Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:27:36.330Z",
+      "settledAt": "2026-11-08T05:27:46.704Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 201,
+        "idPrefix": "obr_1794115656",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "missing_unknown_cost",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:202:obr_1794115658@2026-11-08T05:27:38.173Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:27:38.173Z",
+      "settledAt": "2026-11-08T05:27:48.211Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 202,
+        "idPrefix": "obr_1794115658",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "missing_unknown_cost",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:203:obr_1794115659@2026-11-08T05:27:39.102Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:27:39.102Z",
+      "settledAt": "2026-11-08T05:27:49.216Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 203,
+        "idPrefix": "obr_1794115659",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "missing_unknown_cost",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:204:obr_1794115665@2026-11-08T05:27:45.204Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:27:45.204Z",
+      "settledAt": "2026-11-08T05:27:55.736Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 204,
+        "idPrefix": "obr_1794115665",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "missing_unknown_cost",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:205:obr_1794115666@2026-11-08T05:27:46.705Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:27:46.705Z",
+      "settledAt": "2026-11-08T05:27:57.246Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 205,
+        "idPrefix": "obr_1794115666",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "missing_unknown_cost",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:206:obr_1794115668@2026-11-08T05:27:48.213Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:27:48.213Z",
+      "settledAt": "2026-11-08T05:27:57.445Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 6253,
+      "outputTokens": 1020,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 206,
+        "idPrefix": "obr_1794115668",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "reported",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:207:obr_1794115669@2026-11-08T05:27:49.223Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:27:49.223Z",
+      "settledAt": "2026-11-08T05:27:57.460Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 296,
+      "outputTokens": 288,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 207,
+        "idPrefix": "obr_1794115669",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "reported",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:208:obr_1794115675@2026-11-08T05:27:55.738Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:27:55.738Z",
+      "settledAt": "2026-11-08T05:27:57.409Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 6566,
+      "outputTokens": 318,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 208,
+        "idPrefix": "obr_1794115675",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "reported",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:209:obr_1794115677@2026-11-08T05:27:57.249Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:27:57.249Z",
+      "settledAt": "2026-11-08T05:27:57.412Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 252,
+      "outputTokens": 259,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 209,
+        "idPrefix": "obr_1794115677",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "reported",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:210:obr_1794115681@2026-11-08T05:28:01.897Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:28:01.897Z",
+      "settledAt": "2026-11-08T05:28:01.976Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 378,
+      "outputTokens": 201,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 210,
+        "idPrefix": "obr_1794115681",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "reported",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:211:obr_1794115685@2026-11-08T05:28:05.785Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:28:05.785Z",
+      "settledAt": "2026-11-08T05:28:05.983Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 780,
+      "outputTokens": 475,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 211,
+        "idPrefix": "obr_1794115685",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "reported",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:212:obr_1794115843@2026-11-08T05:30:43.299Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:30:43.299Z",
+      "settledAt": "2026-11-08T05:30:53.351Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 212,
+        "idPrefix": "obr_1794115843",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "missing_unknown_cost",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:213:obr_1794115844@2026-11-08T05:30:44.788Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:30:44.788Z",
+      "settledAt": "2026-11-08T05:30:54.861Z",
+      "status": "failed",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 213,
+        "idPrefix": "obr_1794115844",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "missing_unknown_cost",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:214:obr_1794115853@2026-11-08T05:30:53.352Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:30:53.352Z",
+      "settledAt": "2026-11-08T05:31:03.105Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 3423,
+      "outputTokens": 390,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 214,
+        "idPrefix": "obr_1794115853",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "reported",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:215:obr_1794115854@2026-11-08T05:30:54.863Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:30:54.863Z",
+      "settledAt": "2026-11-08T05:31:03.057Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 296,
+      "outputTokens": 258,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 215,
+        "idPrefix": "obr_1794115854",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "reported",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:216:obr_1794115865@2026-11-08T05:31:05.729Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:31:05.729Z",
+      "settledAt": "2026-11-08T05:31:05.870Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 3547,
+      "outputTokens": 67,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 216,
+        "idPrefix": "obr_1794115865",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "reported",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:217:obr_1794115866@2026-11-08T05:31:06.681Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:31:06.681Z",
+      "settledAt": "2026-11-08T05:31:06.824Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 4574,
+      "outputTokens": 390,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 217,
+        "idPrefix": "obr_1794115866",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "reported",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:218:obr_1794115869@2026-11-08T05:31:09.928Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:31:09.928Z",
+      "settledAt": "2026-11-08T05:31:10.031Z",
+      "status": "ok",
+      "usageStatus": "reported",
+      "inputTokens": 8417,
+      "outputTokens": 333,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 218,
+        "idPrefix": "obr_1794115869",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "reported",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
+      "id": "legacy_t67_gap:219:obr_1794115872@2026-11-08T05:31:12.240Z",
+      "state": "settled",
+      "reservedAt": "2026-11-08T05:31:12.240Z",
+      "settledAt": "2026-11-08T05:31:12.351Z",
+      "status": "ok",
+      "usageStatus": "missing",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "continuity": {
+        "kind": "legacy_historical_missing_slot",
+        "originalIndex": 219,
+        "idPrefix": "obr_1794115872",
+        "originalFullIdRecoverable": false,
+        "fieldsRestoredFrom": "electron_t67_paid_ask_agent_result.json + LEDGER_POST_RAISE_200_220_AUDIT.json",
+        "usageVerdict": "missing_unknown_cost",
+        "note": "Full original id not in any backup; known audit fields restored; requestKind absent in original ledger"
+      }
+    },
+    {
       "id": "obr_1794123130986_daxaidcl",
       "state": "settled",
       "reservedAt": "2026-11-08T07:32:10.986Z",
@@ -2996,5 +3509,99 @@
       "inputTokens": 338,
       "outputTokens": 327
     }
-  ]
+  ],
+  "legacyHistoricalMissing": {
+    "version": 1,
+    "restoredAsContinuitySlots": true,
+    "originalFullIdRowRestore": false,
+    "slotCount": 27,
+    "meta": {
+      "at": "2026-11-08T08:04:46.809932+00:00",
+      "action": "legacy_historical_missing_slot_insert",
+      "claim": "NOT_original_id_row_restore",
+      "reason": "No full-id backup of t67 220-state ledger found; only idPrefix + reservedAt/status/usage in private audits",
+      "rootCause": {
+        "summary": "Before t69u LIMIT→1000 raise, working-tree ledger had been restored to git HEAD state limit=200/reserved=193, wiping uncommitted t67 rows 193-219 (27). Raise file recorded t67_220_durable_rows_missing_from_file=true and did not invent rows from idPrefix at that time.",
+        "evidence": [
+          "_batch25_stage_usability/batch_t67/BUDGET_CAP_RAISE_t69u_to_1000.json#integrity",
+          "git-tracked ledger at raise moment matched HEAD 200/193",
+          "backup pre_t69u_1000 is also 193-state (post-wipe)"
+        ],
+        "likelyMechanism": "git checkout/restore (or equivalent) of outbound_budget_ledger_batch20.json against an earlier commit while 220-state existed only in the working tree / private audits",
+        "prevention": "Do not git checkout/restore this active ledger path; use adjacent .pre_* backups; see LEDGER_ACTIVE_GUARD.md"
+      },
+      "sourcesChecked": [
+        "outbound_budget_ledger_batch20.json.pre_t69u_1000 (193 only)",
+        "LEDGER_193_200_READONLY_AUDIT.json (idPrefix+reservedAt for 193-199)",
+        "LEDGER_POST_RAISE_200_220_AUDIT.json / electron_t67_paid_ask_agent_result.json (idPrefix+fields for 200-219)",
+        "COST_LEDGER_SNAPSHOT.json (aggregates only)"
+      ],
+      "slotsInserted": 27,
+      "slotIdScheme": "legacy_t67_gap:{originalIndex}:{idPrefix}@{reservedAt}",
+      "originalFullIdsRecoverable": false,
+      "merge": {
+        "keptBase0to192": 193,
+        "insertedGap193to219": 27,
+        "keptPostWipeNewRows": 82,
+        "totalUniqueIds": 302,
+        "expected275plus27": 302,
+        "limitUnchanged": 1000
+      },
+      "usage": {
+        "gapReported": {
+          "count": 11,
+          "inputTokens": 34782,
+          "outputTokens": 3999
+        },
+        "gapMissingSettled": 9,
+        "gapReservedUnknown": 7,
+        "newRowsAfterWipeReported": 56,
+        "newRowsAfterWipeMissingOrReservedUnknown": 26,
+        "note": "Do not collapse old gap unknowns into new-session unknown counts"
+      },
+      "aggregates": {
+        "base0to192": {
+          "count": 193,
+          "reported": 151,
+          "missing_settled": 42,
+          "reserved_unknown": 0,
+          "other": 0,
+          "reportedInputTokens": 543048,
+          "reportedOutputTokens": 71706,
+          "estCnyReportedOnly": 0.8299
+        },
+        "legacyGap27": {
+          "count": 27,
+          "reported": 11,
+          "missing_settled": 9,
+          "reserved_unknown": 7,
+          "other": 0,
+          "reportedInputTokens": 34782,
+          "reportedOutputTokens": 3999,
+          "estCnyReportedOnly": 0.0508
+        },
+        "postWipeNew82": {
+          "count": 82,
+          "reported": 56,
+          "missing_settled": 23,
+          "reserved_unknown": 3,
+          "other": 0,
+          "reportedInputTokens": 289704,
+          "reportedOutputTokens": 33528,
+          "estCnyReportedOnly": 0.4238
+        },
+        "all302": {
+          "count": 302,
+          "reported": 218,
+          "missing_settled": 74,
+          "reserved_unknown": 10,
+          "other": 0,
+          "reportedInputTokens": 867534,
+          "reportedOutputTokens": 109233,
+          "estCnyReportedOnly": 1.3045
+        }
+      },
+      "backupBeforeThisRepair": "outbound_budget_ledger_batch20.json.pre_continuity_restore_20261108T080446Z"
+    }
+  }
 }

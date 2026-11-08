@@ -1,0 +1,42 @@
+{
+  "at": "2026-11-08T08:04:46.809932+00:00",
+  "ledgerPath": "_batch20_apply_auth_gate/outbound_budget_ledger_batch20.json",
+  "limit": 1000,
+  "uniqueReservationIds": 302,
+  "breakdown": {
+    "base0to192": 193,
+    "legacyGapSlots193to219": 27,
+    "postWipeNewRows": 82
+  },
+  "claim": "continuity_slots_not_original_id_restore",
+  "originalFullIdsRecoverable": false,
+  "legacyGapUsage": {
+    "gapReported": {
+      "count": 11,
+      "inputTokens": 34782,
+      "outputTokens": 3999
+    },
+    "gapMissingSettled": 9,
+    "gapReservedUnknown": 7,
+    "newRowsAfterWipeReported": 56,
+    "newRowsAfterWipeMissingOrReservedUnknown": 26,
+    "note": "Do not collapse old gap unknowns into new-session unknown counts"
+  },
+  "aggregatesReportedOnlyCny": {
+    "base0to192": 0.8299,
+    "legacyGap27": 0.0508,
+    "postWipeNew82": 0.4238,
+    "all302": 1.3045,
+    "rateAssumption": "DeepSeek Flash weekend idle prior: in 1 CNY/MTok, out 4 CNY/MTok — not live price verify"
+  },
+  "unknownsSeparate": {
+    "base0to192_missing_settled": 42,
+    "legacyGap_reserved_unknown": 7,
+    "legacyGap_missing_settled": 9,
+    "postWipeNew_missing_or_reserved": 26,
+    "note": "new-session unknowns do not erase legacy gap unknowns"
+  },
+  "rootCause": "Before t69u LIMIT→1000 raise, working-tree ledger had been restored to git HEAD state limit=200/reserved=193, wiping uncommitted t67 rows 193-219 (27). Raise file recorded t67_220_durable_rows_missing_from_file=true and did not invent rows from idPrefix at that time.",
+  "prevention": "Do not git checkout/restore this active ledger path; use adjacent .pre_* backups; see LEDGER_ACTIVE_GUARD.md",
+  "productTipEquivalent": "e81e87d17bee5947b9c1e333caddbcde835f56ba"
+}
