@@ -1,41 +1,28 @@
 {
   "ok": true,
-  "at": "2026-11-08T08:17:02.297087+00:00",
+  "at": "2026-11-08T08:17:40.599756+00:00",
   "entry": "human_acceptance_84d8afb/launch_human_acceptance.sh",
   "tipLock": {
-    "head": "57167245b02dddddd70944f844a3b7b13658ff45",
-    "expected": "57167245b02dddddd70944f844a3b7b13658ff45",
+    "head": "6a3a3499b1c2b8ef000a9ac6735b3e1f3266811b",
+    "expected": "6a3a3499b1c2b8ef000a9ac6735b3e1f3266811b",
     "ok": true,
     "mismatchRejectProbe": true
   },
   "productTreeEquivalentTo": "e81e87d17bee5947b9c1e333caddbcde835f56ba",
-  "diffVsE81e87d_batch20Only": [
-    "_batch20_apply_auth_gate/LEDGER_ACTIVE_GUARD.md",
-    "_batch20_apply_auth_gate/LEDGER_CONTINUITY_RESTORE_T69U_AUDIT.json",
-    "_batch20_apply_auth_gate/PUBLIC_LIVE_VERIFY_T69U.json",
-    "_batch20_apply_auth_gate/outbound_budget_ledger_batch20.json"
-  ],
-  "nonLedgerDocDiffs": [],
   "marker": {
     "refreshed": true,
-    "beforeAt": "2026-11-08T08:06:26.605Z",
-    "afterAt": "2026-11-08T08:17:00.155Z",
-    "afterPid": 49354,
-    "launcherPid": 49354,
+    "afterAt": "2026-11-08T08:17:39.673Z",
+    "afterPid": 49457,
+    "launcherPid": 49457,
     "pidMatchesMarker": true,
-    "effectivePath": "/Users/terran/Projects/_projectos_isolates/human_acceptance_84d8afb/electron_userdata_human_acceptance",
-    "sha16_before": "0449ad057d8a4779",
-    "sha16_after": "0ab8c8300f554523"
+    "sha16_after": "790df4fbdac61986"
   },
   "windowHint": {
-    "electronUserdataProcessSeen": true,
-    "relatedProcessLines": 4,
-    "aliveDuringWait": true
+    "electronUserdataProcessSeen": true
   },
   "dailySecrets": {
     "unchanged": true,
-    "sha16": "08e354c69d666b40",
-    "bytes": 348
+    "sha16": "08e354c69d666b40"
   },
   "ledger": {
     "limit": 1000,
@@ -45,5 +32,6 @@
     "legacyGapSlots": 27
   },
   "cdpArgsEmptyArrayFix": true,
-  "noModelCalls": true
+  "noModelCalls": true,
+  "relockPass": true
 }
