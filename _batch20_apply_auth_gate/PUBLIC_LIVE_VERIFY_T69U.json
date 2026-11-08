@@ -1,0 +1,24 @@
+{
+  "batch": "t69u",
+  "tip": "e81e87d17bee5947b9c1e333caddbcde835f56ba",
+  "verdict": "PASS",
+  "proofs": {
+    "ask": "mode=Ask confirmed → mid-run Stop → cancelAsk cancelled settle (same-tip reuse after prior live pass)",
+    "agent": "mode=Agent confirmed → discovery → real Approve-and-start → ≥2 task_delegated + first child_run_started → Stop → durable: no later child_run_started + no disk write"
+  },
+  "budget": {
+    "ledgerLimit": 1000,
+    "reserved": 275,
+    "remaining": 725,
+    "sessionCap": 25,
+    "estCnyReportedOnlySinceRaise193": 0.4238,
+    "missingUnknownRowsSinceRaise193": 26,
+    "authorizedRmbCap": 10,
+    "recharge": false,
+    "note": "count LIMIT 1000 replaces 240 ask-stop; fee band still ~¥10; unknowns≠0"
+  },
+  "productChange": null,
+  "fullgate": "not required — tip locked, no product fix",
+  "merge": false,
+  "privateRaw": "not published"
+}
