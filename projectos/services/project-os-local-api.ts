@@ -1526,6 +1526,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         force: options.force,
         userInitiated: options.userInitiated,
         scanMode: options.scanMode,
+        // The map's text is written in the language the person reads the app in.
+        ...(workspace.settings.interfaceLanguage
+          ? { language: workspace.settings.interfaceLanguage === "zh" ? ("zh-CN" as const) : ("en" as const) }
+          : {}),
         ...(options.nodeIds !== undefined ? { nodeIds: options.nodeIds } : {}),
         ...(options.changedFiles !== undefined ? { changedFiles: options.changedFiles } : {}),
         refinedGraph: options.refinedGraph,

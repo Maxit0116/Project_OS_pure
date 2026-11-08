@@ -503,6 +503,63 @@ describe("structure-graph-ai-scan", () => {
     expect(by("p1")).not.toHaveProperty("parentId");
   });
 
+  it("writes the map in the interface language, not the README's, and asks for plain words", async () => {
+    // An English repository's map used to be English for a person reading the app in Chinese.
+    const { root, projectId } = makeTempRepo();
+    const heuristic = buildHeuristicProjectGraph({ projectId, projectName: "demo", projectType: "node", workspaceRoot: root });
+    const prompts: string[] = [];
+    const complete = vi.fn(async (_profile, request) => {
+      const task = (request.input as { task?: string }).task;
+      prompts.push(String(request.systemPrompt ?? ""));
+      return gatewayResponse(task === "structure_graph_round_a" ? roundAJson() : roundBJson());
+    });
+    // The mocked answers are English, which the quality gate rightly refuses for a Chinese map; only
+    // what was asked matters here.
+    await runStructureGraphAiScan({
+      workspaceRoot: root, projectId, displayName: "demo", graph: heuristic, profile: mockProfile(),
+      gateway: { complete } as unknown as ModelGateway, language: "zh-CN",
+    }).catch(() => undefined);
+    expect(prompts).toHaveLength(2);
+    for (const prompt of prompts) {
+      expect(prompt).toContain("Language for names: Chinese");
+      expect(prompt).toContain("Write for a reader who does not code");
+      expect(prompt).toContain("never just a protocol");
+    }
+    expect(prompts[0]).toContain("the language the person reads the app in");
+  });
+
+  it("rewrites the map's text in another language and keeps ids, structure and untranslated text", async () => {
+    const { root, projectId } = makeTempRepo();
+    const heuristic = buildHeuristicProjectGraph({ projectId, projectName: "demo", projectType: "node", workspaceRoot: root });
+    const english = await runStructureGraphAiScan({
+      workspaceRoot: root, projectId, displayName: "demo", graph: heuristic, profile: mockProfile(),
+      gateway: { complete: vi.fn(async (_p, request) => gatewayResponse((request.input as { task?: string }).task === "structure_graph_round_a" ? roundAJson() : roundBJson())) } as unknown as ModelGateway,
+    });
+    const sent: Array<Record<string, Record<string, string>>> = [];
+    const complete = vi.fn(async (_profile, request) => {
+      const items = (request.input as { items: Record<string, Record<string, string>> }).items;
+      sent.push(items);
+      // Translate every text to "<field> zh" and leave out one node entirely, as a model may.
+      const answer = Object.fromEntries(
+        Object.entries(items)
+          .filter(([key]) => key !== "n:component_billing")
+          .map(([key, fields]) => [key, Object.fromEntries(Object.entries(fields).map(([field, text]) => [field, `${text} (中文)`]))]),
+      );
+      return gatewayResponse(JSON.stringify({ items: answer }));
+    });
+    const rewritten = await runStructureGraphAiScan({
+      workspaceRoot: root, projectId, displayName: "demo", graph: english, profile: mockProfile(),
+      gateway: { complete } as unknown as ModelGateway, language: "zh-CN", scanMode: "translate",
+    });
+    expect(complete).toHaveBeenCalledTimes(Math.ceil(sent.flatMap((batch) => Object.keys(batch)).length / 20));
+    expect(rewritten.nodes.map((node) => node.id)).toEqual(english.nodes.map((node) => node.id));
+    expect(rewritten.edges.map((edge) => edge.id)).toEqual(english.edges.map((edge) => edge.id));
+    expect(rewritten.fileIndex).toEqual(english.fileIndex);
+    expect(rewritten.nodes.find((node) => node.id === "component_auth")?.name).toBe("Identity access (中文)");
+    // The one the model left out keeps its text.
+    expect(rewritten.nodes.find((node) => node.id === "component_billing")?.name).toBe("Billing checkout");
+  });
+
   it("asks only once more, and not at all for a failure another round cannot fix", () => {
     expect(isRetryableGateFailure(["components_without_code:3"])).toBe(true);
     expect(isRetryableGateFailure(["thin_file_mounts:1<4"])).toBe(true);

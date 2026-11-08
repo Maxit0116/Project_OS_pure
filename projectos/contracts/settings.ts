@@ -162,6 +162,8 @@ export const ProjectOSSettingsSchema = z
     projectId: z.string(),
     updatedAt: z.string().optional(),
     presentationMode: z.boolean(),
+    /** The language the person reads the app in; the map's own text (names, summaries, connections) is written in it. */
+    interfaceLanguage: z.enum(["en", "zh"]).optional(),
     execution: z
       .object({
         mode: ExecutionModeSchema,

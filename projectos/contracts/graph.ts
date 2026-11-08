@@ -629,6 +629,8 @@ export const StructureScanModeSchema = z.enum([
   "prepareRefine",
   /** Accept a refined model payload and merge into the graph. */
   "acceptRefine",
+  /** Rewrite the map's text (names, summaries, connection labels) in the interface language; structure unchanged. */
+  "translate",
 ]);
 
 export const StructureScanOptionsSchema = z

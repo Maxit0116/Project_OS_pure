@@ -624,6 +624,12 @@ export interface RunStructureGraphAiScanInput {
    */
   userInitiated?: boolean;
   scanMode?: StructureScanMode;
+  /**
+   * The language the map's text is written in: the person's interface language. Without it the
+   * README's language is used, which left an English repository's map English for a person reading
+   * the app in Chinese.
+   */
+  language?: ScanLanguage;
   nodeIds?: string[];
   /** Bias refine toward these changed paths (Arch4 changed-files). */
   changedFiles?: string[];
@@ -1045,6 +1051,103 @@ export function elementTypeFromId(id: string): string | undefined {
   return ELEMENT_TYPE_ID_PREFIXES.find(([pattern]) => pattern.test(id))?.[1];
 }
 
+const TRANSLATE_BATCH_SIZE = 20;
+const TRANSLATED_TEXT_MAX = 2_000;
+
+type TextItem = { key: string; fields: Record<string, string> };
+
+/** The text of a map that a person reads: names, summaries, descriptions and connection labels. */
+export function mapTextItems(graph: ProjectGraph): TextItem[] {
+  const items: TextItem[] = [];
+  for (const node of graph.nodes) {
+    const fields: Record<string, string> = {};
+    for (const field of ["name", "summary", "description", "responsibility"] as const) {
+      const value = node[field];
+      if (typeof value === "string" && value.trim()) fields[field] = value;
+    }
+    if (Object.keys(fields).length > 0) items.push({ key: `n:${node.id}`, fields });
+  }
+  for (const edge of graph.edges ?? []) {
+    if (typeof edge.label === "string" && edge.label.trim()) items.push({ key: `e:${edge.id}`, fields: { label: edge.label } });
+  }
+  return items;
+}
+
+/** The graph with the translated text in place; ids, links, files and layout are untouched. */
+export function applyMapText(graph: ProjectGraph, translated: ReadonlyMap<string, Record<string, string>>): ProjectGraph {
+  const pick = (current: string | undefined, next: string | undefined): string | undefined =>
+    typeof next === "string" && next.trim() ? next.trim().slice(0, TRANSLATED_TEXT_MAX) : current;
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => {
+      const text = translated.get(`n:${node.id}`);
+      if (!text) return node;
+      return {
+        ...node,
+        name: pick(node.name, text.name) ?? node.name,
+        ...(pick(node.summary, text.summary) !== undefined ? { summary: pick(node.summary, text.summary)! } : {}),
+        ...(pick(node.description, text.description) !== undefined ? { description: pick(node.description, text.description)! } : {}),
+        ...(pick(node.responsibility, text.responsibility) !== undefined ? { responsibility: pick(node.responsibility, text.responsibility)! } : {}),
+      };
+    }),
+    ...(graph.edges
+      ? {
+          edges: graph.edges.map((edge) => {
+            const label = translated.get(`e:${edge.id}`)?.label;
+            const next = pick(edge.label, label);
+            return next !== undefined && next !== edge.label ? { ...edge, label: next } : edge;
+          }),
+        }
+      : {}),
+  };
+}
+
+/**
+ * Rewrites the map's text in the interface language in a few batches, keeping every id: a person who
+ * switches the app from Chinese to English should not have to read an old map in Chinese, and a new scan
+ * would give new ids to what their conversations point at.
+ */
+async function translateGraphText(input: RunStructureGraphAiScanInput): Promise<ProjectGraph> {
+  const language = input.language ?? "en";
+  const target = language === "zh-CN" ? "Chinese (Simplified)" : "English";
+  const items = mapTextItems(input.graph);
+  const translated = new Map<string, Record<string, string>>();
+  for (let start = 0; start < items.length; start += TRANSLATE_BATCH_SIZE) {
+    const batch = items.slice(start, start + TRANSLATE_BATCH_SIZE);
+    const answer = await completeJsonRound(
+      input,
+      [
+        `Translate the texts of a software map into ${target}.`,
+        "Return one JSON object: { items: { \"<key>\": { \"<field>\": \"<translated text>\" } } } with every key and field you were given.",
+        "Keep file names, code identifiers and product names as they are. Write for a reader who does not code: plain, short sentences, no framework or protocol jargon that was not in the original.",
+        "Do not add, merge or drop anything.",
+      ].join("\n"),
+      "structure_graph_translate",
+      { items: Object.fromEntries(batch.map((item) => [item.key, item.fields])) },
+    );
+    const returned = (answer.items ?? answer) as Record<string, unknown>;
+    for (const item of batch) {
+      const value = returned[item.key];
+      if (value && typeof value === "object") {
+        const fields: Record<string, string> = {};
+        for (const [field, text] of Object.entries(value as Record<string, unknown>)) {
+          if (typeof text === "string") fields[field] = text;
+        }
+        translated.set(item.key, fields);
+      }
+    }
+  }
+  return applyMapText(input.graph, translated);
+}
+
+/**
+ * Who reads the map: often someone who builds with AI and does not code. Names say what a part is for,
+ * summaries what it does for the user, connections what is asked for or sent; technology goes in its
+ * own field, where the technical view shows it.
+ */
+const PLAIN_LANGUAGE_NOTE =
+  "Write for a reader who does not code. A name says what the part is FOR in everyday words (\"Sign in and sign up\", \"Order history\"), not the technology (not \"AuthService\" or \"React router module\"). The summary is one plain sentence about what it does for the user. Do not put framework, library or protocol names in names, summaries or edge labels; put them only in the technology field. An edge label says in a few plain words what is asked for or sent (\"Checks the password\", \"Sends the order\"), never just a protocol.";
+
 /** Gate failures a second round B can fix: components without code, too few files, directory shells. */
 export function isRetryableGateFailure(reasons: readonly string[]): boolean {
   return reasons.some((reason) =>
@@ -1394,6 +1497,16 @@ export async function runStructureGraphAiScan(
     return input.graph;
   }
 
+  if (scanMode === "translate") {
+    emitStep("step_started", "map_components");
+    const translated = await translateGraphText(input);
+    emitStep("step_completed", "map_components", `${translated.nodes.length} nodes`);
+    for (const stepId of ["map_context", "link_code", "validate_save"] as const) {
+      emitStep("step_skipped", stepId);
+    }
+    return translated;
+  }
+
   if (scanMode === "acceptRefine") {
     if (input.refinedGraph === undefined || input.refinedGraph === null) {
       throw new ProjectOSError(
@@ -1414,7 +1527,7 @@ export async function runStructureGraphAiScan(
   let activeStep: Parameters<typeof stepEvent>[1]["stepId"] = "index_repo";
   try {
     emitStep("step_started", "index_repo");
-    const language = detectReadmeLanguage(input.workspaceRoot);
+    const language = input.language ?? detectReadmeLanguage(input.workspaceRoot);
     const inventory = listRepoFiles(input.workspaceRoot);
     const sourceFileCount = countSourceFiles(inventory);
     const files = sampleRepoFiles(inventory, 400);
@@ -1486,7 +1599,8 @@ export async function runStructureGraphAiScan(
           bundle,
           "",
           "ROUND A: emit ONLY context + container nodes (no components, no fileIndex, no fileRelations).",
-          `Language for names: ${language === "zh-CN" ? "Chinese" : "English"} (follow README).`,
+          `Language for names: ${language === "zh-CN" ? "Chinese" : "English"}${input.language ? " (the language the person reads the app in)" : " (follow README)"}.`,
+          PLAIN_LANGUAGE_NOTE,
           "Include 0–4 person actors, 1 software_system, 0–4 external_system (SaaS/cloud/third-party), 2–6 containers.",
           "Use elementType data_store (level=container) for databases/caches; short technology strings for C4 shapes:",
           "Next.js, React, Vue, React Native, Flutter, Node.js / Express, NestJS, PostgreSQL, MySQL, MongoDB, SQLite, Redis, Kafka, RabbitMQ, SQS.",
@@ -1532,6 +1646,7 @@ export async function runStructureGraphAiScan(
           "",
           "ROUND B: emit ONLY components with pathHints. No fileIndex, no fileRelations.",
           `Language for names: ${language === "zh-CN" ? "Chinese" : "English"}.`,
+          PLAIN_LANGUAGE_NOTE,
           `Each container needs 2–6 components; ${budget.min}–${budget.max} in total for this repository (${sourceFileCount} source files). Never more components than half the number of source files, and every component must own at least one real file through its pathHints. Product capability names, not directory shells.`,
           "Each component: { id, name, parentId, description, summary, responsibility, layer, pathHints: string[], technology?, notes?, openQuestions?, owners? }.",
           "pathHints must be real path prefixes from the file list or the directory overview (e.g. android/app/src, src/auth). The file list is only a sample; the directory overview shows where all the files are.",
