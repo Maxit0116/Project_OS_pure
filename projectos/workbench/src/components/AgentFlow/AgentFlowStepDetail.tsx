@@ -5,6 +5,7 @@ import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useI18n } from '../../i18n'
 import Chip from '../ui/Chip'
 import Button from '../ui/Button'
+import { agentFlowStepLabel } from './stepLabel'
 import styles from './AgentFlowStepDetail.module.css'
 
 interface Props {
@@ -16,7 +17,7 @@ interface Props {
 export default function AgentFlowStepDetail({ step, corrections, onClose }: Props) {
   const selectFile = useWorkbenchStore((s) => s.selectFile)
   const injectFlowCorrection = useWorkbenchStore((s) => s.injectFlowCorrection)
-  const { ts } = useI18n()
+  const { ts, messages } = useI18n()
   const [correction, setCorrection] = useState('')
 
   const handleSubmitCorrection = () => {
@@ -32,7 +33,7 @@ export default function AgentFlowStepDetail({ step, corrections, onClose }: Prop
         <button type="button" className={styles.close} onClick={onClose}>×</button>
       </div>
       <div className={styles.body}>
-        <p className={styles.label}>{step.label}</p>
+        <p className={styles.label}>{agentFlowStepLabel(step, messages.agentFlow.stepKind)}</p>
         <p className={styles.kind}>{step.kind.replace(/_/g, ' ')}</p>
         {step.outputSummary && <p className={styles.summary}>{step.outputSummary}</p>}
         {step.relatedFiles.length > 0 && (

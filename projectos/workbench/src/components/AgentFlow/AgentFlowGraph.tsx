@@ -2,11 +2,14 @@ import { useMemo } from 'react'
 import {
   ReactFlow,
   Background,
+  Position,
   ReactFlowProvider,
   type Node,
   type Edge,
 } from '@xyflow/react'
 import type { AgentFlowStep } from '@contracts/index'
+import { useI18n } from '../../i18n'
+import { agentFlowStepLabel } from './stepLabel'
 import styles from './AgentFlowGraph.module.css'
 
 interface Props {
@@ -18,12 +21,16 @@ interface Props {
 const H_SPACING = 220
 
 function FlowInner({ steps, onSelectStep }: Props) {
+  const { messages } = useI18n()
   const flowNodes: Node[] = useMemo(
     () =>
       steps.map((step, i) => ({
         id: step.id,
         position: { x: i * H_SPACING, y: 40 },
-        data: { label: step.label, status: step.status },
+        // Steps run left to right, so the arrows leave on the right and arrive on the left.
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+        data: { label: agentFlowStepLabel(step, messages.agentFlow.stepKind), status: step.status },
         style: {
           padding: '10px 14px',
           borderRadius: 8,
@@ -39,7 +46,7 @@ function FlowInner({ steps, onSelectStep }: Props) {
           cursor: 'pointer',
         },
       })),
-    [steps],
+    [steps, messages],
   )
 
   const flowEdges: Edge[] = useMemo(

@@ -39,6 +39,19 @@ interface Props {
   onReviewDiff: () => void
 }
 
+/**
+ * What the flow says before any run exists. When the request failed before a run could start (the usual
+ * reason for an empty flow after a person sent one), it says so and why, not just how the flow begins.
+ */
+export function emptyFlowCopy(
+  startError: string | null,
+  ts: (path: string) => string,
+): { title: string; description: string } {
+  return startError
+    ? { title: ts('agentFlow.errorTitle'), description: startError }
+    : { title: ts('agentFlow.emptyTitle'), description: ts('agentFlow.emptyDesc') }
+}
+
 export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff }: Props) {
   const agentFlowViewMode = useWorkbenchStore((s) => s.agentFlowViewMode)
   const setAgentFlowViewMode = useWorkbenchStore((s) => s.setAgentFlowViewMode)
@@ -55,6 +68,7 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
   const undoCurrentApply = useWorkbenchStore((s) => s.undoCurrentApply)
   const applyCurrentDiff = useWorkbenchStore((s) => s.applyCurrentDiff)
   const agentFlowSubject = useWorkbenchStore((s) => s.agentFlowSubject)
+  const startError = useWorkbenchStore((s) => s.error)
   const latestAskTrace = useWorkbenchStore((s) => s.latestAskTrace)
   const latestPlanTrace = useWorkbenchStore((s) => s.latestPlanTrace)
   const messages = useWorkbenchStore((s) => s.messages)
@@ -182,12 +196,13 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
   }
 
   if (steps.length === 0 && status === 'idle' && activities.length === 0) {
+    const empty = emptyFlowCopy(startError, ts)
     return renderShell(
       ts('agentFlow.status.idle'),
       <EmptyState
         icon={<Workflow size={16} />}
-        title={ts('agentFlow.emptyTitle')}
-        description={ts('agentFlow.emptyDesc')}
+        title={empty.title}
+        description={empty.description}
       />,
     )
   }

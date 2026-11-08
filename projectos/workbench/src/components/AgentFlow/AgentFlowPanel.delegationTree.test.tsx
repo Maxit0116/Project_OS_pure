@@ -124,7 +124,8 @@ describe('AgentFlowPanel delegated run tree', () => {
 
     expect(html).toContain('Update the login experience')
     expect(html).toContain('app/login/page.tsx')
-    expect(html).toContain('Locate Plan')
+    // The step is named for what it does, in the interface language (Chinese in a static render), not by the run's label.
+    expect(html).toContain('找到要改的地方')
     expect(html).toContain('data-action="edit_plan_created"')
     expect(html).toContain('Provider-supplied child trace')
     expect(html).toContain('data-child-outcome="applied"')

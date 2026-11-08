@@ -1,6 +1,7 @@
 import { Check, AlertCircle, Circle } from 'lucide-react'
 import type { AgentFlowStep } from '@contracts/index'
 import { useI18n } from '../../i18n'
+import { agentFlowStepLabel } from './stepLabel'
 import styles from './AgentFlowStepRow.module.css'
 
 const STATUS_CLASS: Record<string, string> = {
@@ -30,7 +31,7 @@ function StatusIcon({ status }: { status: string }) {
 
 export default function AgentFlowStepRow({ step, isLast, index, onSelect, selected, hasCorrection }: Props) {
   const statusClass = STATUS_CLASS[step.status] ?? styles.pending
-  const { ts } = useI18n()
+  const { ts, messages } = useI18n()
 
   return (
     <div className={styles.wrapper} data-step style={{ animationDelay: `${index * 50}ms` }}>
@@ -45,7 +46,7 @@ export default function AgentFlowStepRow({ step, isLast, index, onSelect, select
           </span>
           <div className={styles.content}>
             <div className={styles.label}>
-              {step.label}
+              {agentFlowStepLabel(step, messages.agentFlow.stepKind)}
               {hasCorrection && (
                 <span className={styles.correctionBadge}>{ts('agentFlow.correctionMarker')}</span>
               )}
