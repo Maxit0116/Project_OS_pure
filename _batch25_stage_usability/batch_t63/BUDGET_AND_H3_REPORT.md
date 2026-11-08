@@ -1,44 +1,40 @@
-# t63u — budget cap raise + H3 mid-run clarify + uncertain whole-tree DOM
+# t64u — privacy redact + whole-tree DOM Undo + tip gates
+
+## Privacy (ordinary commit, history kept)
+
+- `1d35ce2` redacted absolute home roots in three t63 **code-source file hash** JSONs under `batch_t63/` (`root` → `<ISOLATE>` / `<SOURCE>`, `path_redacted: true`, hashes unchanged).
+- Those files are **not** Couple settings/graph/semantic/CV four-hashes — do not conflate.
+- Tracked PR text re-scanned for home absolute-path prefixes and secret-style; only the three JSONs were this-round leaks. Historical archive paths elsewhere left as-is.
 
 ## Budget gate (same ledger PATH, no reset)
 
 - PATH: `_batch20_apply_auth_gate/outbound_budget_ledger_batch20.json`
-- Cap: **50 → 100** (meta: `_batch20_apply_auth_gate/BUDGET_CAP_RAISE_t63u.json`)
-- Reservations preserved: **47** (ok 40 / failed 7 / usage_missing 8 / inflight 0)
-- Fee budget: ~10 CNY; assumed Flash weekend idle **1 / 4 CNY/MTok**
-- Known reported tokens: input 114062, output 15470 → **~0.176 CNY**
-- Unknown rows: 8 → worst reserve **~0.079 CNY**
-- Conservative spent est: **~0.255 CNY**
-- New slots 53 × p95×1.5 → **~0.78 CNY**; total if all used **~1.04 CNY** (under 10)
-- This turn synthetic probes: **ledger Δ = 0** (deterministic gateway; no DeepSeek)
+- Cap: **100** (raised t63u); reservations preserved: **47** (Δ this turn synthetic = 0)
+- Fee budget: ~10 CNY
+- Official DeepSeek Flash (weekend/idle, docs 2026-11): input miss **¥1/MTok**, output **¥4/MTok** (cache hit input ¥0.02/MTok). Peak would double — not used today (Sunday).
+- Known reported tokens → **~0.176 CNY** (prior). Missing×8 **~0.079 CNY** is a **statistical estimate only**, not a hard worst bound; keep a separate unknown margin.
+- Executable reserve before live calls (Flash idle, conservative per-attempt ceiling assuming product caps ≈32k in + 8k out, cache-miss): **~0.064 CNY/attempt**. Plan ≤15 attempts → **~0.96 CNY** reserved from remaining ~9.7 CNY headroom; do not treat p95×1.5 / 1.04 as absolute guarantee.
 
-## H3 product path (closed for synthetic)
+## H3 clarify tier honesty
 
-Wiring: model `{"action":"clarify",...}` → `ModelClarificationNeededError` → existing `requestRunDecision` → same-root resume with clarification in `stepOutputs`. Stop/decline appended on card.
+- **Production wiring**: model schema/prompt `action:"clarify"` → `requestRunDecision` → same-root resume; Stop declines. Scope/cancel/restart constraints retained; no fixed Continue card on the normal approve path.
+- **Synthetic gateway tier (proven)**: `PROJECTOS_DETERMINISTIC_MIDRUN_CLARIFICATION=1` Electron answer + Stop. This is **not** DeepSeek and must not be billed as product-usable live clarification.
+- **Live DeepSeek mid-run Q→card→same-root+Stop**: still required for H3/H4 business cross-component proof under the reserve above; not closed this note.
 
-Evidence:
-- Unit: built-in clarify→resume; clarify→Stop declines (`agent-orchestrator/index.test.ts`)
-- Electron synthetic (`PROJECTOS_DETERMINISTIC_MIDRUN_CLARIFICATION=1`):
-  - `_private_r5_evidence/electron_t63_midrun_clarify_answer_result.json` — material options, no Continue, same-root awaiting_review
-  - `_private_r5_evidence/electron_t63_midrun_clarify_stop_result.json` — Stop declines, no disk write
-- Not claimed: live DeepSeek mid-run Q (budget reserved; prefer synthetic for UI)
+## Whole-tree Apply / Undo
 
-## Uncertain whole-tree DOM
+- Product tip `855761e`: record parent `apply_result` before post-apply verification can throw; recover `applyResult` from events on Apply IPC error; leaf `validatingProposal` still blocks Apply (delegated sticky heal only).
+- Electron (private): uncertain whole-tree → DOM Apply → parent `apply_result`+backup → **DOM Undo** bytes restored (`undoVia: dom_undo`). IPC `restoreApplyBackup` is **not** acceptance.
 
-- API: already green (LocalApi whole-tree + greenfield uncertain apply/undo)
-- Electron: `PROJECTOS_DETERMINISTIC_FORCE_GLOBAL_PLANNER=1` + uncertain → `whole_tree_validated_uncertain_awaiting_review` → DOM Apply → disk+backup → undo via `restoreApplyBackup` IPC fallback
-- Product fixes shipped this turn:
-  - Late child `diff_ready` must not re-block Apply after parent `batch_validation_result` valid
-  - `applyCurrentDiff` keeps `applyResult` if `activeRunId` races mid-await
-  - PendingChanges 「全部撤销」 restores whenever backup exists (not only automatic)
-- Known gap: after whole-tree DOM Apply, parent events sometimes lack `apply_result` while disk+backup exist — Undo UI thin; IPC restore works. Greenfield Electron DOM still API-only.
+## Tip fullgates
 
-## Timeout / cancel / child-fail
+- `c96e1b4` collected: TSC/build/fixtures 0; fullgate exit 1; 3 files / 4 tests failed (2 layout UX reds + ChatContextHeader UX red + syntheticDiffApplyUndo from over-broad review-only heal). Summary path-redacted; raw private.
+- `855761e` tip fullgate started after product push (sole concurrent gate).
 
-- requestDecision wall-clock timeout + cancel supersede: unit green
-- Diff verify fail badge + toast: prior t62 private evidence
-- child-fail chat/toast sanitize: `handleRunEvent.childFailSanitize.test.ts`
+## Still open (not 交验)
 
-## Acceptance
-
-**Not 交验.** Remaining: greenfield Electron DOM; whole-tree apply_result/Undo chrome honesty; live DeepSeek H3 if budget allows; tip fullgate + couple hashes after push.
+- Greenfield Electron DOM Apply/backup/Undo
+- timeout/cancel user-visible copy real DOM
+- child-fail chat/toast desensitize real DOM
+- Live DeepSeek H3 clarify under ledger reserves
+- Post-final-test Couple SOURCE/ISOLATE settings/graph/semantic/CV four-hashes + secrets RO meta (no substitute with code-file hashes or prior dump)
