@@ -8,6 +8,14 @@
 - **Not done:** per-file descriptions are not rewritten by translate; the detail panel still shows technical terms in Simple view; the packaged app was not rebuilt this round; a first-open legend for non-coders.
 - Commits c08d2c4 to 3368e55 (nine), nothing pushed; `58a7752` and `607b727` from earlier today are also unpushed.
 
+## 2026-11-08 (S10 follow-up) - an old "Ask 失败" headline under a Plan that worked
+
+- **Asked:** why "Ask 失败" was still on screen although the plan came out right.
+- **Cause:** not a new failure. The Ask that failed at 10:06 (the `code_file_…` id bug fixed in `607b727`) was saved in the chat session's snapshot as `latestAskTrace: error`. Nothing replaces it until another Ask runs, and the activity list that feeds the timeline and the chat panel drew it whatever the latest run was (the Agent Flow header was already gated on the run kind; the list was not). A failed Plan was also labelled "Ask failed".
+- **Done:** `projectAgentActivities` takes the latest run kind (`flowSubject`, the store's `agentFlowSubject`) and shows an Ask failure only when Ask is the latest run and a Plan failure only when Plan is; a failed Plan reads "Plan failed" / "规划失败". Both callers (`AgentFlowPanel`, `ChatPanel`) pass it. The old failure messages stay in the transcript as history.
+- **Verified:** 3 new tests (two failed before the change); AgentFlow, ChatPanel and i18n suites: only the standing `chat.marketplace.gitUrlAgentsUnsupported` failure, which fails without this change too; workbench typecheck 0; live: the same saved session reopened in the rebuilt dev app no longer shows the headline in the chat or in the timeline.
+- **Not done:** a failed Ask is still kept in the saved session (only hidden); anchored-mode Ask has no timeline row of its own.
+
 ## 2026-11-07 (S9) - merging origin/graph, Keychain storage, Developer ID build prepared
 
 - **Asked:** "1,3, yes. 2 after merging": run external repositories' own tests (1), merge `origin/graph` (3), then signing, Keychain and a second Mac (2). Details are in `build_plan.md` §0 ("S9").

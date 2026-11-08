@@ -20,6 +20,7 @@ export interface ActivityLabels {
   context: (count: number) => string
   mcp: (tool: string, status: string) => string
   askFailed: () => string
+  planFailed: () => string
 }
 
 export interface ActivityMessageSource {
@@ -74,6 +75,13 @@ export interface ActivityProjectionInput {
   flowActions: AgentActionEvent[]
   flowTransientTraces: AgentTransientTrace[]
   chatMode: 'ask' | 'change' | 'plan' | 'debug' | 'anchored'
+  /**
+   * Which kind of run is the latest (the store's `agentFlowSubject`). A failed Ask or Plan is kept in
+   * the store, and in the saved chat, until the next run of the same kind replaces it, so without this
+   * an Ask that failed hours ago would stay on the timeline under a Plan that worked. Left out, every
+   * failure is shown.
+   */
+  flowSubject?: 'ask' | 'run' | 'plan' | 'debug'
   debugExploration?: AskExplorationTrace | null
 }
 
@@ -493,7 +501,7 @@ export function projectAgentActivities(
       startedAt,
       detail: { kind: 'thinking', content: '', truncated: false },
     })
-  } else if (ask?.status === 'error') {
+  } else if (ask?.status === 'error' && (input.flowSubject === undefined || input.flowSubject === 'ask')) {
     activities.push({
       id: 'ask:thinking',
       runId: 'ask',
@@ -593,14 +601,14 @@ export function projectAgentActivities(
       startedAt,
       detail: { kind: 'planning', objective: '', anchors: [], acceptanceCriteria: [] },
     })
-  } else if (plan?.status === 'error') {
+  } else if (plan?.status === 'error' && (input.flowSubject === undefined || input.flowSubject === 'plan')) {
     activities.push({
       id: 'plan:planning',
       runId: 'plan',
       mode: 'plan',
       kind: 'planning',
       status: 'error',
-      summary: labels.askFailed(),
+      summary: labels.planFailed(),
       startedAt,
       detail: {
         kind: 'planning',
@@ -672,6 +680,7 @@ export function buildActivityLabels(
     context: (count) => ts('agentFlow.activity.context', { count }),
     mcp: (tool, status) => ts('agentFlow.activity.mcp', { tool, status }),
     askFailed: () => ts('agentFlow.activity.askFailed'),
+    planFailed: () => ts('agentFlow.activity.planFailed'),
   }
 }
 

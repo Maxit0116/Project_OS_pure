@@ -2449,6 +2449,7 @@ const zh = {
       context: 'Context · {count} 个文件',
       mcp: '{tool} · {status}',
       askFailed: 'Ask 失败',
+      planFailed: '规划失败',
       openDiff: '在 Diff 中打开',
       outputTruncated: '输出已截断。',
       hunkStats: '+{additions} −{deletions}',

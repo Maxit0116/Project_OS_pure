@@ -147,6 +147,7 @@ export default function ChatPanel() {
   const flowTransientTraces = useWorkbenchStore((s) => s.flowTransientTraces)
   const activeRunId = useWorkbenchStore((s) => s.activeRunId)
   const latestAskTrace = useWorkbenchStore((s) => s.latestAskTrace)
+  const agentFlowSubject = useWorkbenchStore((s) => s.agentFlowSubject)
   const latestPlanTrace = useWorkbenchStore((s) => s.latestPlanTrace)
   const chatMode = useWorkbenchStore((s) => s.chatMode)
   const askSubMode = useWorkbenchStore((s) => s.askSubMode)
@@ -194,11 +195,13 @@ export default function ChatPanel() {
     flowActions,
       flowTransientTraces,
       chatMode,
+      flowSubject: agentFlowSubject,
       debugExploration: debugSession?.explorationTrace ?? null,
     }, buildActivityLabels(ts)), [
     messages,
     latestAskTrace,
     latestPlanTrace,
+    agentFlowSubject,
     activeRunId,
     flowActions,
     flowTransientTraces,

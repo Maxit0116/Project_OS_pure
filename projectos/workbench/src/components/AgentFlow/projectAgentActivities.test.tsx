@@ -21,6 +21,7 @@ const labels: ActivityLabels = {
   context: (count) => `Context · ${count} files`,
   mcp: (tool, status) => `${tool} · ${status}`,
   askFailed: () => 'Ask failed',
+  planFailed: () => 'Plan failed',
 }
 
 const emptyInput = {
@@ -244,6 +245,34 @@ describe('projectAgentActivities', () => {
       serverId: 'docs',
       toolName: 'lookup',
       error: 'tool_policy_deny: blocked',
+    })
+  })
+
+  describe('a failed run that a later run has replaced', () => {
+    const failedAsk = {
+      status: 'error' as const,
+      scope: { kind: 'node' as const, nodeId: 'code_file_x' },
+      message: "Selected node 'code_file_x' was not found",
+    }
+    const failedPlan = { status: 'error' as const, message: 'The model did not answer' }
+    const summaries = (input: Parameters<typeof projectAgentActivities>[0]) =>
+      projectAgentActivities(input, labels).map((activity) => activity.summary)
+
+    it('does not show an old Ask failure once a Plan is the latest run', () => {
+      expect(summaries({ ...emptyInput, latestAskTrace: failedAsk, flowSubject: 'plan' })).not.toContain('Ask failed')
+      expect(summaries({ ...emptyInput, latestAskTrace: failedAsk, flowSubject: 'run' })).not.toContain('Ask failed')
+      expect(summaries({ ...emptyInput, latestAskTrace: failedAsk, flowSubject: 'debug' })).not.toContain('Ask failed')
+    })
+
+    it('still shows an Ask failure while Ask is the latest run', () => {
+      expect(summaries({ ...emptyInput, latestAskTrace: failedAsk, flowSubject: 'ask' })).toContain('Ask failed')
+      // Callers that do not say which run is latest keep the old behavior.
+      expect(summaries({ ...emptyInput, latestAskTrace: failedAsk })).toContain('Ask failed')
+    })
+
+    it('does not show an old Plan failure once Ask is the latest run, and names a Plan failure as one', () => {
+      expect(summaries({ ...emptyInput, latestPlanTrace: failedPlan, flowSubject: 'ask' })).toEqual([])
+      expect(summaries({ ...emptyInput, latestPlanTrace: failedPlan, flowSubject: 'plan' })).toEqual(['Plan failed'])
     })
   })
 })

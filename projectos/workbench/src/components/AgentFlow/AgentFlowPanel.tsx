@@ -73,11 +73,13 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
     flowActions,
       flowTransientTraces,
       chatMode,
+      flowSubject: agentFlowSubject,
       debugExploration: debugSession?.explorationTrace ?? null,
     }, buildActivityLabels(ts)), [
     messages,
     latestAskTrace,
     latestPlanTrace,
+    agentFlowSubject,
     activeRunId,
     flowActions,
     flowTransientTraces,

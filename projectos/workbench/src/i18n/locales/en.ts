@@ -2490,6 +2490,7 @@ const en = {
       context: 'Context · {count} files',
       mcp: '{tool} · {status}',
       askFailed: 'Ask failed',
+      planFailed: 'Plan failed',
       openDiff: 'Open in Diff',
       outputTruncated: 'Output truncated.',
       hunkStats: '+{additions} −{deletions}',
