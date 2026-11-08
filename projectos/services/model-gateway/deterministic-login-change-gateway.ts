@@ -295,7 +295,8 @@ export class DeterministicLoginChangeGateway extends ModelGateway {
         this.childFailTriggered = true;
         throw new ProjectOSError(
           "agent_orchestration_failed",
-          "Delegated file task failed; /Users/terran/secret/proj/components/LoginForm.tsx api_key=sk-abcdefghijklmnop Bearer tok_live_123",
+          // Generic fake-user path — not a real home directory; still exercises sanitize.
+          "Delegated file task failed; /Users/fake-user/secret/proj/components/LoginForm.tsx api_key=sk-abcdefghijklmnop Bearer tok_live_123",
         );
       }
       output = JSON.stringify({

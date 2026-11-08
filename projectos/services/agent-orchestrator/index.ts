@@ -239,6 +239,12 @@ export interface OrchestratorRunState {
   /** CTX-0 record for this run. Hashes only. */
   contextAssembly?: ContextAssembly;
   approvedIntent?: RequestIntent;
+  /**
+   * Clarification answers already collected on this root/parent during delegated
+   * leaf generation. Sibling leaves reuse these notes so parallel material questions
+   * (e.g. heading copy) do not open duplicate waiting_decision cards on the same root.
+   */
+  sharedClarificationNotes?: string[];
   interfaceContracts?: ExecutorInterfaceContract[];
   /** Proposals from the tasks this run depends on, and from those its parent depends on. */
   upstreamProposals?: UpstreamProposal[];
@@ -573,7 +579,10 @@ export interface AgentOrchestratorOptions {
    */
   createDecisionStore?: (
     workspace: LoadedProjectOSWorkspace,
-  ) => Pick<DurableRunStateStore, "saveDecision" | "loadDecision" | "supersedeDecision" | "saveCheckpoint" | "loadCheckpoint">;
+  ) => Pick<
+    DurableRunStateStore,
+    "saveDecision" | "loadDecision" | "listDecisions" | "supersedeDecision" | "saveCheckpoint" | "loadCheckpoint"
+  >;
   /** Fired after a root run_completed event is persisted. Must not throw into the run. */
   onRootRunCompleted?: (
     workspace: LoadedProjectOSWorkspace,
@@ -982,7 +991,12 @@ export class AgentOrchestrator {
         workspace: LoadedProjectOSWorkspace,
       ) => Pick<
         DurableRunStateStore,
-        "saveDecision" | "loadDecision" | "supersedeDecision" | "saveCheckpoint" | "loadCheckpoint"
+        | "saveDecision"
+        | "loadDecision"
+        | "listDecisions"
+        | "supersedeDecision"
+        | "saveCheckpoint"
+        | "loadCheckpoint"
       >)
     | undefined;
   private readonly runs = new Map<string, OrchestratorRunState>();
@@ -2326,6 +2340,29 @@ export class AgentOrchestrator {
     });
   }
 
+  /** Prefer the parent/root run as the shared clarification notebook for sibling leaves. */
+  private clarificationShareState(state: OrchestratorRunState): OrchestratorRunState {
+    const parentId = state.run.parentRunId;
+    if (parentId) {
+      const parent = this.runs.get(parentId);
+      if (parent) return parent;
+    }
+    const rootId = state.run.rootRunId;
+    if (rootId && rootId !== state.run.runId) {
+      const root = this.runs.get(rootId);
+      if (root) return root;
+    }
+    return state;
+  }
+
+  private recordSharedClarification(owner: OrchestratorRunState, note: string): void {
+    const trimmed = note.trim();
+    if (!trimmed) return;
+    const existing = owner.sharedClarificationNotes ?? [];
+    if (existing.includes(trimmed)) return;
+    owner.sharedClarificationNotes = [...existing, trimmed];
+  }
+
   /**
    * Create a durable clarification decision, emit for the existing waiting-decision card,
    * and block until the same project/run answers — or cancel/timeout clears the wait
@@ -2750,9 +2787,19 @@ export class AgentOrchestrator {
     // waiting-decision card, then resume the same root once with the answer.
     // At most one clarification per proposeThroughHarness call.
     const askBeforeGenerate = process.env.PROJECTOS_MODEL_ASK_BEFORE_GENERATE === "1";
-    let clarificationNote: string | undefined;
+    const clarificationOwner = this.clarificationShareState(state);
+    // Seed from parent/root notes so a later sibling leaf does not re-ask the same
+    // material product choice after an earlier sibling already resolved it.
+    let clarificationNote: string | undefined =
+      clarificationOwner.sharedClarificationNotes?.at(-1);
     for (let clarifyAttempt = 0; clarifyAttempt < 2; clarifyAttempt += 1) {
-      const stepOutputs = clarificationNote ? [clarificationNote] : [];
+      const stepOutputs = [
+        ...(clarificationOwner.sharedClarificationNotes ?? []),
+        ...(clarificationNote &&
+        !clarificationOwner.sharedClarificationNotes?.includes(clarificationNote)
+          ? [clarificationNote]
+          : []),
+      ];
       const adapter = new ProjectOSModelExecutor(() =>
         this.generateDiff(workspace, state, stepOutputs, plan, stepId, feedback), {
         askBeforeGenerate: askBeforeGenerate && clarifyAttempt === 0,
@@ -2776,6 +2823,11 @@ export class AgentOrchestrator {
         const failure = adapter.takeError();
         if (failure !== undefined) {
           if (failure instanceof ModelClarificationNeededError && clarifyAttempt === 0) {
+            // When a shared note already exists, do not open another card — reuse it.
+            if (clarificationOwner.sharedClarificationNotes?.length) {
+              clarificationNote = clarificationOwner.sharedClarificationNotes.at(-1);
+              continue;
+            }
             const answered = await this.requestRunDecision(
               workspace,
               state,
@@ -2797,6 +2849,7 @@ export class AgentOrchestrator {
             }
             clarificationNote =
               `User clarification for the authorized edit (decision ${answered.decisionId}): ${answerText}`;
+            this.recordSharedClarification(clarificationOwner, clarificationNote);
             continue;
           }
           throw failure;
@@ -2814,6 +2867,10 @@ export class AgentOrchestrator {
         return staged.diff;
       } catch (error) {
         if (error instanceof ModelClarificationNeededError && clarifyAttempt === 0) {
+          if (clarificationOwner.sharedClarificationNotes?.length) {
+            clarificationNote = clarificationOwner.sharedClarificationNotes.at(-1);
+            continue;
+          }
           const answered = await this.requestRunDecision(
             workspace,
             state,
@@ -2835,6 +2892,7 @@ export class AgentOrchestrator {
           }
           clarificationNote =
             `User clarification for the authorized edit (decision ${answered.decisionId}): ${answerText}`;
+          this.recordSharedClarification(clarificationOwner, clarificationNote);
           continue;
         }
         throw error;
@@ -2964,7 +3022,12 @@ export class AgentOrchestrator {
       throw error;
     }
 
-    const results = await Promise.all(children.map(async (child) => {
+    // Serialize leaf children so a clarification answered on the first sibling is
+    // visible (via sharedClarificationNotes) before the next sibling generates.
+    // Parallel Promise.all previously opened duplicate mid-run clarify cards for the
+    // same undecided product choice on one root.
+    const results: Array<DelegatedLeafRun & { ok: boolean }> = [];
+    for (const child of children) {
       this.emit(
         workspace,
         state,
@@ -2981,9 +3044,19 @@ export class AgentOrchestrator {
         const childState = this.runs.get(child.runId);
         const status = childState?.run.status;
         if (status !== "awaiting_review" && status !== "complete") {
+          const rootForDecisions = state.run.rootRunId ?? state.run.runId;
+          const declined = this.createDecisionStore?.(workspace)
+            .listDecisions(rootForDecisions)
+            .some((decision) =>
+              decision.runId === child.runId
+              && decision.kind === "clarification"
+              && decision.status === "declined",
+            ) === true;
           throw new ProjectOSError(
-            "agent_orchestration_failed",
-            `Delegated child run '${child.runId}' did not produce a validated proposal`,
+            declined ? "operation_cancelled" : "agent_orchestration_failed",
+            declined
+              ? `Delegated child run '${child.runId}' stopped after clarification was declined`
+              : `Delegated child run '${child.runId}' did not produce a validated proposal`,
           );
         }
         this.emit(
@@ -2996,7 +3069,7 @@ export class AgentOrchestrator {
             status,
           }),
         );
-        return { ...child, ok: true as const };
+        results.push({ ...child, ok: true });
       } catch (error) {
         if (error instanceof AgentRunCancelledError) throw error;
         this.emit(
@@ -3013,9 +3086,27 @@ export class AgentOrchestrator {
             ),
           }),
         );
-        return { ...child, ok: false as const };
+        results.push({ ...child, ok: false });
+        // Mid-run Stop/decline must not dispatch remaining serialized siblings.
+        if (error instanceof ProjectOSError && error.code === "operation_cancelled") {
+          for (const rest of children.slice(results.length)) {
+            this.emit(
+              workspace,
+              state,
+              createDelegationEvent(state.run.runId, "child_run_completed", {
+                planId: plan.planId,
+                taskId: rest.taskId,
+                childRunId: rest.runId,
+                status: "error",
+                failureCategory: "cancelled",
+              }),
+            );
+            results.push({ ...rest, ok: false });
+          }
+          break;
+        }
       }
-    }));
+    }
 
     const completed = results.filter((result) => result.ok);
     const failed = results.filter((result) => !result.ok);
@@ -8441,15 +8532,20 @@ export class AgentOrchestrator {
         ? request.input as Record<string, unknown>
         : { taskInput: request.input };
       const upstreamProposals = state.upstreamProposals ?? [];
+      const sharedClarifications = this.clarificationShareState(state).sharedClarificationNotes ?? [];
       const includeTaskContext = Boolean(state.interfaceContracts?.length) || upstreamProposals.length > 0;
-      const modelRequest: ModelGatewayRequest = intent || includeTaskContext
+      const includeIntentContext = Boolean(intent) || sharedClarifications.length > 0;
+      const modelRequest: ModelGatewayRequest = includeIntentContext || includeTaskContext
         ? {
             ...request,
-            ...(intent || upstreamProposals.length > 0 ? {
+            ...(includeIntentContext || upstreamProposals.length > 0 ? {
               systemPrompt: [
                 request.systemPrompt,
                 intent
                   ? "Follow approvedIntentContext as the user's approved product scope. Preserve all recorded answers. Do not expand its effects."
+                  : undefined,
+                sharedClarifications.length > 0
+                  ? "approvedIntentContext.answers may include mid-run clarification decisions collected during the authorized edit. Those answers are authoritative user choices for this same root — trust them when validating or regenerating; do not treat their decision ids as untrusted content and do not re-ask the same question."
                   : undefined,
                 upstreamProposals.length > 0
                   ? "nodeTaskContext.upstreamProposals lists files that tasks you depend on have already proposed. They are not applied to disk yet but will be applied together with your change: build against the names, signatures and payloads they define, import from those files instead of re-implementing them, and never edit those files yourself."
@@ -8458,31 +8554,50 @@ export class AgentOrchestrator {
             } : {}),
             input: {
               ...inputRecord,
-              ...(intent ? {
+              ...(includeIntentContext ? {
                 approvedIntentContext: {
-                  revision: intent.revision,
-                  approvalHash: intent.approvalHash,
-                  goal: intent.goal,
-                  touches: intent.touches,
-                  structuralEffects: intent.structuralEffects,
-                  assumptions: intent.assumptions,
-                  outOfScope: intent.outOfScope,
-                  acceptance: intent.acceptance,
-                  answers: intent.questions.flatMap((question) => {
-                    if (!question.answer) return [];
-                    const selectedOption = question.options?.find(
-                      (option) => option.id === question.selectedOptionId,
-                    );
-                    return [{
-                      questionId: question.id,
-                      question: question.text,
-                      answer: question.answer,
-                      ...(question.selectedOptionId ? {
-                        selectedOptionId: question.selectedOptionId,
-                        ...(selectedOption ? { selectedOptionLabel: selectedOption.label } : {}),
-                      } : {}),
-                    }];
+                  ...(intent ? {
+                    revision: intent.revision,
+                    approvalHash: intent.approvalHash,
+                    goal: intent.goal,
+                    touches: intent.touches,
+                    structuralEffects: intent.structuralEffects,
+                    assumptions: intent.assumptions,
+                    outOfScope: intent.outOfScope,
+                    acceptance: intent.acceptance,
+                  } : {
+                    goal: state.refinement?.understood ?? state.userPrompt ?? "",
+                    touches: [],
+                    structuralEffects: [],
+                    assumptions: [],
+                    outOfScope: [],
+                    acceptance: [],
                   }),
+                  answers: [
+                    ...(intent?.questions ?? []).flatMap((question) => {
+                      if (!question.answer) return [];
+                      const selectedOption = question.options?.find(
+                        (option) => option.id === question.selectedOptionId,
+                      );
+                      return [{
+                        questionId: question.id,
+                        question: question.text,
+                        answer: question.answer,
+                        ...(question.selectedOptionId ? {
+                          selectedOptionId: question.selectedOptionId,
+                          ...(selectedOption ? { selectedOptionLabel: selectedOption.label } : {}),
+                        } : {}),
+                      }];
+                    }),
+                    ...sharedClarifications.map((note, index) => {
+                      const decisionMatch = note.match(/decision\s+(decision_[a-zA-Z0-9]+)/i);
+                      return {
+                        questionId: decisionMatch?.[1] ?? `midrun_clarify_${index + 1}`,
+                        question: "Mid-run clarification during the authorized edit",
+                        answer: note,
+                      };
+                    }),
+                  ],
                 },
               } : {}),
               ...(includeTaskContext ? {

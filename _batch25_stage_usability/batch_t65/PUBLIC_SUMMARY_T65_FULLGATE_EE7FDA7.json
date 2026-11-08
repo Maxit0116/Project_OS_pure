@@ -1,0 +1,16 @@
+{
+  "head": "ee7fda7299ebd67d24280d2aa695440918c3e2ec",
+  "FINISHED_AT": "2026-11-08T01:35:01Z",
+  "WRAPPER_EXIT": 0,
+  "FULLGATE_EXIT": 1,
+  "known_ux_red_expected_fullgate_nonzero": true,
+  "fullgate_files_line": "2 failed | 486 passed (488)",
+  "fullgate_tests_line": "3 failed | 2538 passed (2541)",
+  "failed_expected_ux_reds": [
+    "ChatContextHeader.test.tsx > does not render context usage in the header anymore",
+    "layeredArchitectureLayout.test.ts > clears edge blockers in saas-starter component architecture view",
+    "layeredArchitectureLayout.test.ts > clears edge blockers on wide viewports for saas-starter web components"
+  ],
+  "sole_dir": "trusted_gates_ee7fda7",
+  "note": "Tip fullgate collected; UX 3-red locked expected nonzero fullgate."
+}

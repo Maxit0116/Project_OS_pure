@@ -1,0 +1,29 @@
+{
+  "note": "Reuse of prior live H3 root without re-billing. Partial chain only — NOT acceptance.",
+  "rootRunId": "run_45468f0a-194a-4ce4-a705-e20dd5298953",
+  "decisionId": "decision_34d04e2305e64e77d46b9986",
+  "proven": {
+    "real_http": true,
+    "midrun_clarification_card": true,
+    "decision_kind": "clarification",
+    "answer_optionId": "welcome-back",
+    "same_root_resume_generate": true,
+    "diff_proposed_after_answer": true,
+    "proposal_files": ["app/login/page.tsx"],
+    "disk_unchanged_review_first": true
+  },
+  "not_proven_for_acceptance": {
+    "api_status_awaiting_review": false,
+    "api_status_at_probe_end": "running",
+    "stuck_at": "validate_proposal step_started (Electron killed before settle)",
+    "proposal_files_ge_2": false,
+    "scope": "leaf-file app/login/page.tsx (forced by probe file pick + prompt naming Welcome Back/Sign in)",
+    "awaitingUi_diff_regex": "invalid — matched Diff text while status still running"
+  },
+  "workspace_paths_private": [
+    "_private_r5_evidence/workspace_live_h3_answer/.projectos/agent-runs/run_45468f0a-194a-4ce4-a705-e20dd5298953.run.json",
+    "_private_r5_evidence/workspace_live_h3_answer/.projectos/agent-runs/run_45468f0a-194a-4ce4-a705-e20dd5298953.jsonl",
+    "_private_r5_evidence/workspace_live_h3_answer/.projectos/run-decisions/decision_34d04e2305e64e77d46b9986.json",
+    "_private_r5_evidence/workspace_live_h3_answer/.projectos/proposed-snapshots/babfcbc7-50f8-4096-8d94-104473dab6b6/"
+  ]
+}

@@ -1,0 +1,20 @@
+# Batch T65 — H3 chain closeout (not premature 交验)
+
+## Product fixes (this tip)
+1. **Intent discovery**: prefer `questions: []` for pure customer-facing copy; leave those to mid-run `action:"clarify"`.
+2. **Sibling clarify share**: serialize node→file leaf delegation; record/share clarification notes on parent so siblings do not open duplicate cards.
+3. **Validator trust**: inject shared mid-run clarification answers into `approvedIntentContext.answers` as authoritative.
+4. **Stop no sibling dispatch**: declined clarification (`operation_cancelled`) skips remaining serialized siblings.
+5. **Childfail bait**: new fixture path uses `/Users/fake-user/...` (historical tests unchanged).
+
+## Evidence (strict)
+- **Answer**: root `awaiting_review`, scope `node-plan`/`feat_login`, proposal files `app/login/page.tsx` + `components/LoginForm.tsx`, mid-run clarify without forced Welcome Back/Sign in, review_first disk unchanged. See `PUBLIC_SUMMARY_T65_LIVE_H3_ANSWER.json`.
+- **Stop**: afterStop status `error`, child list printed, no new dispatch after decline (second sibling cancelled without start). See `PUBLIC_SUMMARY_T65_LIVE_H3_STOP.json`.
+- **Childfail sanitize excerpt**: `Delegated file task failed; [path] api_key=[redacted] Bearer [redacted]` in `PUBLIC_SUMMARY_T64_CHILDFAIL_SANITIZE.json`.
+- **Reuse note**: prior root `run_45468f0a…` was partial only (leaf-file + stuck running); new chain required. See `H3_T64_REUSE_PARTIAL_EVIDENCE.json`.
+- **Fullgate**: sole `trusted_gates_ee7fda7` collected (UX 3-red expected nonzero); re-run after this tip commit.
+
+## Bounds
+Ledger raised in place (no reset); missing≠0. Session cap 24; max_out 2048; max_in_chars 48000.
+
+Independent main-agent review should verify the JSON summaries + product diffs; do not treat this note as 可验收 by itself.
