@@ -7,7 +7,9 @@
  * delegated multi-file automatic apply (sample-graph-saas).
  */
 import type { ModelGatewayRequest, ModelGatewayResponse } from "../../contracts/model-gateway.js";
+import { ProjectOSError } from "../../errors.js";
 import { InMemorySecretStore } from "../../persistence/secret-store.js";
+import { createDeterministicGreenfieldGatewayFromEnv } from "./deterministic-greenfield-gateway.js";
 import { ModelGateway } from "./gateway.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -44,21 +46,34 @@ export class DeterministicLoginChangeGateway extends ModelGateway {
   readonly synthetic = true as const;
   private readonly uncertainCriteria: boolean;
   private readonly midRunClarification: boolean;
+  /** Opt-in: fail one delegated leaf with a dirty diagnostic for sanitize DOM proof. */
+  private readonly forceChildFail: boolean;
   private midRunClarificationAsked = false;
+  private childFailTriggered = false;
 
   constructor(options: {
     uncertainCriteria?: boolean;
     midRunClarification?: boolean;
+    forceChildFail?: boolean;
   } = {}) {
     super({ secretStore: new InMemorySecretStore() });
     this.uncertainCriteria = options.uncertainCriteria === true;
     this.midRunClarification = options.midRunClarification === true;
+    this.forceChildFail = options.forceChildFail === true;
   }
 
   override async complete(
     _profile: Parameters<ModelGateway["complete"]>[0],
     request: ModelGatewayRequest,
   ): Promise<ModelGatewayResponse> {
+    // Opt-in hold so Electron Stop probes can click while flowStatus===running.
+    const slowMsRaw = process.env.PROJECTOS_DETERMINISTIC_SLOW_MS?.trim();
+    if (slowMsRaw && /^\d+$/u.test(slowMsRaw)) {
+      const slowMs = Number(slowMsRaw);
+      if (slowMs > 0 && slowMs <= 30_000) {
+        await new Promise((resolve) => setTimeout(resolve, slowMs));
+      }
+    }
     const input = isRecord(request.input) ? request.input : {};
     const mode = typeof input.mode === "string" ? input.mode : undefined;
     const localContext = isRecord(input.localContext) ? input.localContext : undefined;
@@ -274,6 +289,15 @@ export class DeterministicLoginChangeGateway extends ModelGateway {
         edits: [{ search: "<h1>Demo access</h1>", replace: `<h1>${heading}</h1>` }],
       });
     } else if (selectedPath === "components/LoginForm.tsx") {
+      // Opt-in dirty child failure: throw unsanitized diagnostics so the real
+      // orchestrator → renderer sanitize chain can be proven in Electron DOM.
+      if (this.forceChildFail && !this.childFailTriggered) {
+        this.childFailTriggered = true;
+        throw new ProjectOSError(
+          "agent_orchestration_failed",
+          "Delegated file task failed; /Users/terran/secret/proj/components/LoginForm.tsx api_key=sk-abcdefghijklmnop Bearer tok_live_123",
+        );
+      }
       output = JSON.stringify({
         summary: "Update the delegated demo-entry label",
         path: selectedPath,
@@ -305,11 +329,17 @@ export function createDeterministicAgentGatewayFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): ModelGateway | undefined {
   if (env.PROJECTOS_DETERMINISTIC_AGENT_GATEWAY !== "1") return undefined;
+  // Empty-graph greenfield takes precedence when explicitly opted in.
+  if (env.PROJECTOS_DETERMINISTIC_GREENFIELD === "1") {
+    return createDeterministicGreenfieldGatewayFromEnv(env);
+  }
   return new DeterministicLoginChangeGateway({
     // Opt-in only: synthetic Electron/desktop proof of automatic→awaiting_review
     // when criteria are uncertain. Does not invent mid-run Continue cards.
     uncertainCriteria: env.PROJECTOS_DETERMINISTIC_UNCERTAIN_CRITERIA === "1",
     // Opt-in only: one substantive missing-intent clarify → waiting-decision → same-root resume.
     midRunClarification: env.PROJECTOS_DETERMINISTIC_MIDRUN_CLARIFICATION === "1",
+    // Opt-in only: dirty child-fail diagnostic for chat/toast sanitize DOM proof.
+    forceChildFail: env.PROJECTOS_DETERMINISTIC_FORCE_CHILD_FAIL === "1",
   });
 }

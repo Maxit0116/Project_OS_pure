@@ -10,6 +10,7 @@ import { LocalContextAssembler } from '../../../services/local-context-assembler
 import { ModelGateway } from '../../../services/model-gateway/gateway.js'
 import { createDeterministicAgentGatewayFromEnv } from '../../../services/model-gateway/deterministic-login-change-gateway.js'
 import { resolveOutboundBudgetFromEnv } from '../../../services/model-gateway/outbound-budget.js'
+import { resolveOutboundRequestBoundsFromEnv } from '../../../services/model-gateway/outbound-request-bounds.js'
 import { VerificationRunner } from '../../../services/verification-runner.js'
 import * as writeTransactionModule from '../../../services/recoverable-write-transaction.js'
 import { WorkspaceTransactionCoordinator } from '../../../services/workspace-transaction-coordinator.js'
@@ -36,13 +37,15 @@ export function getProjectOsService(): ProjectOSLocalApi {
     const logsDir = join(userDataPath, 'logs')
     mkdirSync(logsDir, { recursive: true })
     const completesLog = join(logsDir, 'model-gateway-completes.jsonl')
-    // Opt-in only: unset env ⇒ daily desktop has no test outbound budget.
+    // Opt-in only: unset env ⇒ daily desktop has no test outbound budget / request bounds.
     const outboundBudget = resolveOutboundBudgetFromEnv(process.env)
+    const outboundRequestBounds = resolveOutboundRequestBoundsFromEnv(process.env)
     // Opt-in SYNTHETIC gateway for isolate Electron probes (0 HTTP). Default desktop unchanged.
     const deterministicGateway = createDeterministicAgentGatewayFromEnv(process.env)
     const modelGateway = deterministicGateway ?? new ModelGateway({
       secretStore,
       ...(outboundBudget ? { outboundBudget } : {}),
+      ...(outboundRequestBounds ? { outboundRequestBounds } : {}),
       onSettled: (event) => {
         // Metadata only — never secret values. Isolate Chromium userData only.
         appendFileSync(

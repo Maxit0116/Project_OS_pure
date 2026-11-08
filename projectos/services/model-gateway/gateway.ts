@@ -21,6 +21,12 @@ import {
   type ProviderMessage,
 } from "./providers.js";
 import type { OutboundBudgetGate } from "./outbound-budget.js";
+import {
+  applyOutboundRequestBounds,
+  resolveOutboundRequestBoundsFromEnv,
+  withOutboundSessionCap,
+  type OutboundRequestBounds,
+} from "./outbound-request-bounds.js";
 
 /** One settled provider-facing gateway call (success, failure, or cancel). */
 export interface ModelGatewaySettledEvent {
@@ -48,6 +54,12 @@ export interface ModelGatewayOptions {
    * tool-loop rounds) reserves before fetch. Daily runs leave this unset.
    */
   outboundBudget?: OutboundBudgetGate;
+  /**
+   * Opt-in hard request bounds (max output tokens / input chars / session cap).
+   * When omitted, resolved from PROJECTOS_MODEL_OUTBOUND_MAX_* env (unset ⇒ none).
+   * Pass `null` to force no bounds even if env is set.
+   */
+  outboundRequestBounds?: OutboundRequestBounds | null;
 }
 
 export interface ModelToolExecutionResult {
@@ -90,11 +102,21 @@ export class ModelGateway {
   private readonly secretStore: SecretStore;
   private readonly onSettled: ((event: ModelGatewaySettledEvent) => void) | undefined;
   private readonly outboundBudget: OutboundBudgetGate | undefined;
+  private readonly outboundRequestBounds: OutboundRequestBounds | null;
 
   constructor(options: ModelGatewayOptions) {
     this.secretStore = options.secretStore;
     this.onSettled = options.onSettled;
-    this.outboundBudget = options.outboundBudget;
+    const bounds =
+      options.outboundRequestBounds !== undefined
+        ? options.outboundRequestBounds
+        : resolveOutboundRequestBoundsFromEnv();
+    this.outboundRequestBounds = bounds;
+    const baseBudget = options.outboundBudget;
+    this.outboundBudget =
+      baseBudget && bounds?.sessionCap !== undefined
+        ? withOutboundSessionCap(baseBudget, bounds.sessionCap)
+        : baseBudget;
   }
 
   private settle(event: ModelGatewaySettledEvent): void {
@@ -265,13 +287,17 @@ export class ModelGateway {
         );
       }
       const deadline = budgetAbortSignal(options.signal, maxTotalDurationMs, started);
-      const providerInput: ProviderCompleteInput = {
-        ...baseInput,
-        messages,
-        tools: options.tools,
-        ...(deadline.signal ? { signal: deadline.signal } : {}),
-        ...(this.outboundBudget ? { outboundBudget: this.outboundBudget } : {}),
-      };
+      // Re-apply bounds each tool-loop round so growing messages hit maxInputChars fail-closed.
+      const providerInput: ProviderCompleteInput = applyOutboundRequestBounds(
+        {
+          ...baseInput,
+          messages,
+          tools: options.tools,
+          ...(deadline.signal ? { signal: deadline.signal } : {}),
+          ...(this.outboundBudget ? { outboundBudget: this.outboundBudget } : {}),
+        },
+        this.outboundRequestBounds,
+      );
       let result;
       try {
         result = await adapter.complete(resolved, apiKey, providerInput);
@@ -489,7 +515,7 @@ export class ModelGateway {
         ? request.input
         : JSON.stringify(request.input, null, 2);
     const userPrompt = redactText(serialized, request.redactionPolicy);
-    return {
+    const built: ProviderCompleteInput = {
       userPrompt,
       ...(request.systemPrompt
         ? {
@@ -504,6 +530,8 @@ export class ModelGateway {
         : {}),
       ...(request.images?.length ? { images: request.images } : {}),
     };
+    // Fail-closed input-size / max_tokens clamp before any provider HTTP.
+    return applyOutboundRequestBounds(built, this.outboundRequestBounds);
   }
 }
 
