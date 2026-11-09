@@ -162,6 +162,27 @@ export function resolveStripRevealMessageId(
   return resolved.forkMessageId ?? item.messageId ?? null
 }
 
+/**
+ * Latest transcript position for title / footer open: prefer the last user turn
+ * (Conversation Nav "jump to latest"), else the last non-empty message.
+ */
+export function resolveLatestRevealMessageId(
+  messages: readonly ChatMessage[],
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i]
+    if (!message || message.role !== 'user') continue
+    if (!message.content.trim()) continue
+    return message.id
+  }
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i]
+    if (!message?.content.trim()) continue
+    return message.id
+  }
+  return null
+}
+
 /** Mode used to tint the strip marker like a Conversation Nav stack bar. */
 export function resolveStripChatMode(
   item: SessionGraphStripItem,

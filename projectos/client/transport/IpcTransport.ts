@@ -637,6 +637,20 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("summarizeChatSessionTitle", projectId, sessionId);
   }
 
+  judgeSessionAffinityHygiene(
+    projectId: string,
+    request: import("../../contracts/session-affinity-llm.js").SessionAffinityHygieneJudgeRequest,
+  ): Promise<import("../../contracts/session-affinity-llm.js").SessionAffinityHygieneJudgeResponse> {
+    return this.invoke("judgeSessionAffinityHygiene", projectId, request);
+  }
+
+  judgeSessionAffinityRoute(
+    projectId: string,
+    request: import("../../contracts/session-affinity-llm.js").SessionAffinityRouteJudgeRequest,
+  ): Promise<import("../../contracts/session-affinity-llm.js").SessionAffinityRouteJudgeResponse> {
+    return this.invoke("judgeSessionAffinityRoute", projectId, request);
+  }
+
   forkChatSession(
     projectId: string,
     parentSessionId: string,

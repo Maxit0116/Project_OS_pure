@@ -71,6 +71,8 @@ const PROJECTOS_IPC_SIGNATURES = {
   setChatSessionPinned: ['string', 'string', 'boolean'],
   renameChatSession: ['string', 'string', 'string'],
   summarizeChatSessionTitle: ['string', 'string'],
+  judgeSessionAffinityHygiene: ['string', 'record'],
+  judgeSessionAffinityRoute: ['string', 'record'],
   forkChatSession: ['string', 'string', 'string'],
   setChatSessionClassification: ['string', 'string', 'string'],
   deleteChatSession: ['string', 'string'],

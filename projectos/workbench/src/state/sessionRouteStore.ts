@@ -1,5 +1,8 @@
 import type { ChatSessionRecord, SessionRouteAction, SessionRouteSuggestion } from '@contracts/index'
-import { buildSessionRouteSuggestion } from '@contracts/index'
+import {
+  buildSessionRouteSuggestion,
+  refineRouteSuggestionWithJudgment,
+} from '@contracts/index'
 import { create } from 'zustand'
 import { getStoreMessage } from '../i18n/storeMessages'
 import {
@@ -8,6 +11,13 @@ import {
   saveSessionRoutePreferences,
   type SessionRoutePreferences,
 } from '../preferences/sessionRoute'
+import {
+  bumpAffinityLlmCalls,
+  loadSessionSweepPreferences,
+  loadSessionSweepRuntime,
+  saveSessionSweepRuntime,
+  syncAffinityLlmBudgetDay,
+} from '../preferences/sessionSweep'
 import { useChatSessionStore } from './chatSessionStore'
 import { useWorkbenchStore } from './workbenchStore'
 
@@ -82,10 +92,36 @@ export const useSessionRouteStore = create<SessionRouteStore>((set, get) => ({
     try {
       const chat = useChatSessionStore.getState()
       const records = await loadRecords()
-      const suggestion = buildSessionRouteSuggestion(trimmed, records, {
+      let suggestion = buildSessionRouteSuggestion(trimmed, records, {
         activeSessionId: chat.activeSessionId,
         autoApplyHighConfidence: preferences.autoApplyHighConfidence,
       })
+
+      const affinityMode = loadSessionSweepPreferences().affinityMode
+      const { client, project } = useWorkbenchStore.getState()
+      if (affinityMode !== 'off' && client && project) {
+        try {
+          let runtime = syncAffinityLlmBudgetDay(loadSessionSweepRuntime())
+          const judged = await client.judgeSessionAffinityRoute(project.projectId, {
+            mode: affinityMode,
+            callsUsedToday: runtime.affinityLlmCallsToday,
+            prompt: trimmed,
+            suggestion,
+          })
+          if (judged.calls > 0) {
+            runtime = bumpAffinityLlmCalls(runtime, judged.calls)
+            saveSessionSweepRuntime(runtime)
+          }
+          suggestion = refineRouteSuggestionWithJudgment(
+            suggestion,
+            judged.judgment,
+            affinityMode,
+            { autoApplyHighConfidence: preferences.autoApplyHighConfidence },
+          )
+        } catch (error) {
+          console.error('[sessionRouteStore] affinity route judge failed', error)
+        }
+      }
 
       if (suggestion.autoApply) {
         const ok = await get().applySuggestion(suggestion)

@@ -456,6 +456,20 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.summarizeChatSessionTitle(projectId, sessionId);
   }
 
+  judgeSessionAffinityHygiene(
+    projectId: string,
+    request: import("../contracts/session-affinity-llm.js").SessionAffinityHygieneJudgeRequest,
+  ): Promise<import("../contracts/session-affinity-llm.js").SessionAffinityHygieneJudgeResponse> {
+    return this.transport.judgeSessionAffinityHygiene(projectId, request);
+  }
+
+  judgeSessionAffinityRoute(
+    projectId: string,
+    request: import("../contracts/session-affinity-llm.js").SessionAffinityRouteJudgeRequest,
+  ): Promise<import("../contracts/session-affinity-llm.js").SessionAffinityRouteJudgeResponse> {
+    return this.transport.judgeSessionAffinityRoute(projectId, request);
+  }
+
   forkChatSession(
     projectId: string,
     parentSessionId: string,

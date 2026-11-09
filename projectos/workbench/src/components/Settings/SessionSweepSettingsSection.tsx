@@ -1,15 +1,21 @@
+import type { AffinityMode } from '@contracts/index'
+import { AFFINITY_LLM_DAILY_BUDGET } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useSessionRouteStore } from '../../state/sessionRouteStore'
 import { useSessionSweepStore } from '../../state/sessionSweepStore'
+import { localDateKey, syncAffinityLlmBudgetDay } from '../../preferences/sessionSweep'
 import Button from '../ui/Button'
 import PresentationModeToggle from './PresentationModeToggle'
 import SettingsGroup from './SettingsGroup'
 import SettingsRow from './SettingsRow'
 import styles from './SettingsPanel.module.css'
 
+const AFFINITY_MODES: AffinityMode[] = ['off', 'balanced', 'accurate']
+
 export default function SessionSweepSettingsSection() {
   const { ts } = useI18n()
   const preferences = useSessionSweepStore((s) => s.preferences)
+  const runtime = useSessionSweepStore((s) => s.runtime)
   const setPreferences = useSessionSweepStore((s) => s.setPreferences)
   const runHygieneCheck = useSessionSweepStore((s) => s.runHygieneCheck)
   const openSweepReview = useSessionSweepStore((s) => s.openSweepReview)
@@ -19,8 +25,47 @@ export default function SessionSweepSettingsSection() {
   const routePreferences = useSessionRouteStore((s) => s.preferences)
   const setRoutePreferences = useSessionRouteStore((s) => s.setPreferences)
 
+  const synced = syncAffinityLlmBudgetDay(runtime, localDateKey())
+  const budget = AFFINITY_LLM_DAILY_BUDGET[preferences.affinityMode]
+
   return (
     <>
+      <SettingsGroup label={ts('settings.sessionAffinity.group')}>
+        <SettingsRow
+          title={ts('settings.sessionAffinity.mode')}
+          description={ts(`settings.sessionAffinity.modeDesc.${preferences.affinityMode}`)}
+        >
+          <div
+            className={styles.affinityModeRow}
+            role="tablist"
+            aria-label={ts('settings.sessionAffinity.mode')}
+          >
+            {AFFINITY_MODES.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={preferences.affinityMode === mode}
+                className={`${styles.affinityModeChip} ${
+                  preferences.affinityMode === mode ? styles.affinityModeChipActive : ''
+                }`}
+                onClick={() => setPreferences({ affinityMode: mode })}
+              >
+                {ts(`settings.sessionAffinity.modes.${mode}`)}
+              </button>
+            ))}
+          </div>
+        </SettingsRow>
+        {preferences.affinityMode !== 'off' ? (
+          <p className={styles.affinityBudget}>
+            {ts('settings.sessionAffinity.callsToday', {
+              used: synced.affinityLlmCallsToday,
+              budget,
+            })}
+          </p>
+        ) : null}
+      </SettingsGroup>
+
       <SettingsGroup label={ts('settings.sessionRoute.group')}>
         <PresentationModeToggle
           checked={routePreferences.enabled}

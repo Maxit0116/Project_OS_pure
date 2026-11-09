@@ -3,6 +3,7 @@ import type { ChatMessage, SessionGraphStripItem } from '@contracts/index'
 import {
   resolveSessionNodeStripPromptPreview,
   resolveStripChatMode,
+  resolveLatestRevealMessageId,
   resolveStripRevealMessageId,
 } from './sessionNodeStripPreview'
 
@@ -120,6 +121,22 @@ describe('resolveSessionNodeStripPromptPreview', () => {
         messages,
       ),
     ).toBe('u1')
+  })
+
+  it('resolveLatestRevealMessageId prefers the last user turn', () => {
+    const messages = [
+      msg({ id: 'u1', role: 'user', content: 'First prompt.' }),
+      msg({ id: 'a1', role: 'assistant', content: 'First reply.' }),
+      msg({ id: 'u2', role: 'user', content: 'Latest prompt.' }),
+      msg({ id: 'a2', role: 'assistant', content: 'Latest reply.' }),
+    ]
+    expect(resolveLatestRevealMessageId(messages)).toBe('u2')
+    expect(resolveLatestRevealMessageId([])).toBeNull()
+    expect(
+      resolveLatestRevealMessageId([
+        msg({ id: 'a1', role: 'assistant', content: 'Only assistant.' }),
+      ]),
+    ).toBe('a1')
   })
 
   it('surfaces chatMode from the linked user turn for stack-bar coloring', () => {

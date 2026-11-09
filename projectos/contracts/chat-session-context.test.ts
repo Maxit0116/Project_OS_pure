@@ -20,6 +20,7 @@ import {
   collectSessionSubtreeIds,
   summarizeSessionGraphTitle,
   sessionGraphCardInsets,
+  preserveChatSessionContext,
 } from "./chat-session-context.js";
 
 const now = "2026-08-02T00:00:00.000Z";
@@ -137,6 +138,49 @@ describe("chat session context", () => {
     );
   });
 
+  it("keeps a stale misc fork child on the graph instead of Misc", () => {
+    // Couple_Recording-style residue: short child prompts were auto-marked misc
+    // while parentSessionId + graphId remained — chat must stay on the child card.
+    const parent = head({
+      id: "chat_parent",
+      classification: "topic",
+      classificationSource: "manual",
+      graphId: "g1",
+    });
+    const staleChild = head({
+      id: "chat_child",
+      title: "111",
+      parentSessionId: "chat_parent",
+      classification: "misc",
+      classificationSource: "auto",
+      graphId: "g1",
+      forkMessageId: "m1",
+      forkLayout: "aside",
+    });
+    const graph = buildSessionGraph([parent, staleChild]);
+    expect(graph.nodes.map((node) => node.id).sort()).toEqual(
+      ["chat_child", "chat_parent"].sort(),
+    );
+    expect(graph.edges).toEqual([{ source: "chat_parent", target: "chat_child" }]);
+    expect(graph.misc.map((item) => item.id)).toEqual([]);
+
+    const healed = applyChatSessionContextUpdate(
+      record({
+        head: staleChild,
+        messages: [message("m1", "user", "111")],
+      }),
+      {
+        classification: "misc",
+        title: "111",
+        digest: null,
+        now,
+      },
+    );
+    expect(healed.head.classification).toBe("topic");
+    expect(healed.head.graphId).toBe("g1");
+    expect(healed.head.parentSessionId).toBe("chat_parent");
+  });
+
   it("keeps a manual title and a manual misc classification", () => {
     const updated = applyChatSessionContextUpdate(
       record({
@@ -216,9 +260,69 @@ describe("chat session context", () => {
     expect(joined.graphId).toBe("g_existing");
     expect(joined.parentSessionId).toBeUndefined();
 
-    const demoted = demoteChatSessionToMisc(asNew);
+    const demoted = demoteChatSessionToMisc({
+      ...asNew,
+      parentSessionId: "chat_parent",
+      forkMessageId: "m1",
+      forkLayout: "aside",
+    });
     expect(demoted.classification).toBe("misc");
     expect(demoted.graphId).toBeUndefined();
+    expect(demoted.parentSessionId).toBeUndefined();
+    expect(demoted.forkMessageId).toBeUndefined();
+    expect(demoted.forkLayout).toBeUndefined();
+  });
+
+  it("does not reattach lineage when upserting a manual misc demotion", () => {
+    const existing = record({
+      head: head({
+        id: "chat_child",
+        classification: "topic",
+        classificationSource: "auto",
+        parentSessionId: "chat_parent",
+        graphId: "g1",
+        forkMessageId: "m1",
+        forkLayout: "aside",
+      }),
+      messages: [message("m1", "user", "Keep this chat in Misc")],
+    });
+    const demotedHead = demoteChatSessionToMisc(existing.head);
+    const merged = preserveChatSessionContext(existing, {
+      ...existing,
+      head: demotedHead,
+    });
+    expect(merged.head.classification).toBe("misc");
+    expect(merged.head.classificationSource).toBe("manual");
+    expect(merged.head.parentSessionId).toBeUndefined();
+    expect(merged.head.graphId).toBeUndefined();
+    expect(merged.head.forkMessageId).toBeUndefined();
+    expect(buildSessionGraph([
+      head({ id: "chat_parent", classification: "topic", graphId: "g1" }),
+      merged.head,
+    ]).misc.map((item) => item.id)).toEqual(["chat_child"]);
+  });
+
+  it("does not restore parent when manually placing a fork child as a graph root", () => {
+    const existing = record({
+      head: head({
+        id: "chat_child",
+        classification: "topic",
+        parentSessionId: "chat_parent",
+        graphId: "g1",
+        forkMessageId: "m1",
+      }),
+    });
+    const placed = placeChatSessionOnGraph(existing.head, {
+      mode: "join-graph",
+      graphId: "g2",
+    });
+    const merged = preserveChatSessionContext(existing, {
+      ...existing,
+      head: placed,
+    });
+    expect(merged.head.parentSessionId).toBeUndefined();
+    expect(merged.head.graphId).toBe("g2");
+    expect(merged.head.forkMessageId).toBeUndefined();
   });
 
   it("extracts a node and its whole subtree onto a new graph", () => {

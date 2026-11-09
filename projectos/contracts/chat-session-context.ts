@@ -61,7 +61,7 @@ export function createSessionGraphId(): string {
 }
 
 export function resolveSessionGraphId(
-  head: Pick<ChatSessionHead, "graphId" | "classification">,
+  head: Pick<ChatSessionHead, "graphId" | "classification" | "parentSessionId">,
 ): string | null {
   if (resolveChatSessionClassification(head) === "misc") return null;
   return head.graphId?.trim() || DEFAULT_SESSION_GRAPH_ID;
@@ -95,8 +95,14 @@ export function demoteChatSessionToMisc(head: ChatSessionHead): ChatSessionHead 
     classificationSource: "manual",
     lastUpdatedAt: new Date().toISOString(),
   };
+  // Misc is a root-only shelf. Detach from any Session Graph parent so child
+  // chats never continue to surface under both a node card and Misc.
   delete next.graphId;
   delete next.responsibility;
+  delete next.parentSessionId;
+  delete next.forkMessageId;
+  delete next.forkLayout;
+  delete next.forkAnchorOffsetY;
   return next;
 }
 
@@ -270,8 +276,14 @@ export interface SessionGraphCssInsets {
 }
 
 export function resolveChatSessionClassification(
-  head: Pick<ChatSessionHead, "classification">,
+  head: Pick<ChatSessionHead, "classification" | "parentSessionId" | "graphId">,
 ): ChatSessionClassification {
+  // Graph-attached forks belong on the Session Graph card, never in Misc.
+  // Older auto-summaries marked short child prompts as misc while leaving
+  // parentSessionId + graphId intact — heal that so the graph stays clean.
+  if (head.parentSessionId && head.graphId?.trim()) {
+    return "topic";
+  }
   return head.classification ?? "topic";
 }
 
@@ -717,26 +729,46 @@ export function chatSessionIdsToPrune(
   return toRemove;
 }
 
+/**
+ * Whether the incoming head intentionally cleared graph lineage.
+ * Message upserts omit fields by accident — those should be restored.
+ * Manual misc demote / re-root must keep parent/graph/fork cleared.
+ */
+export function isIntentionalGraphDetach(
+  existing: Pick<ChatSessionHead, "parentSessionId">,
+  incoming: Pick<ChatSessionHead, "classification" | "classificationSource" | "parentSessionId">,
+): boolean {
+  if (incoming.classification === "misc") return true;
+  return (
+    incoming.classificationSource === "manual" &&
+    !incoming.parentSessionId &&
+    Boolean(existing.parentSessionId)
+  );
+}
+
 export function preserveChatSessionContext(
   existing: ChatSessionRecord | null,
   incoming: ChatSessionRecord,
 ): ChatSessionRecord {
   if (!existing || existing.head.id !== incoming.head.id) return incoming;
   const head: ChatSessionHead = { ...incoming.head };
-  if (!head.parentSessionId && existing.head.parentSessionId) {
-    head.parentSessionId = existing.head.parentSessionId;
-  }
-  if (!head.forkMessageId && existing.head.forkMessageId) {
-    head.forkMessageId = existing.head.forkMessageId;
-  }
-  if (!head.forkLayout && existing.head.forkLayout) {
-    head.forkLayout = existing.head.forkLayout;
-  }
-  if (
-    typeof head.forkAnchorOffsetY !== "number" &&
-    typeof existing.head.forkAnchorOffsetY === "number"
-  ) {
-    head.forkAnchorOffsetY = existing.head.forkAnchorOffsetY;
+  const detach = isIntentionalGraphDetach(existing.head, incoming.head);
+  if (!detach) {
+    if (!head.parentSessionId && existing.head.parentSessionId) {
+      head.parentSessionId = existing.head.parentSessionId;
+    }
+    if (!head.forkMessageId && existing.head.forkMessageId) {
+      head.forkMessageId = existing.head.forkMessageId;
+    }
+    if (!head.forkLayout && existing.head.forkLayout) {
+      head.forkLayout = existing.head.forkLayout;
+    }
+    if (
+      typeof head.forkAnchorOffsetY !== "number" &&
+      typeof existing.head.forkAnchorOffsetY === "number"
+    ) {
+      head.forkAnchorOffsetY = existing.head.forkAnchorOffsetY;
+    }
   }
   if (!head.classification && existing.head.classification) {
     head.classification = existing.head.classification;
@@ -744,7 +776,8 @@ export function preserveChatSessionContext(
   if (!head.classificationSource && existing.head.classificationSource) {
     head.classificationSource = existing.head.classificationSource;
   }
-  if (!head.graphId && existing.head.graphId) {
+  // Misc is a root-only shelf — never reattach a cleared graphId.
+  if (head.classification !== "misc" && !head.graphId && existing.head.graphId) {
     head.graphId = existing.head.graphId;
   }
   if (
@@ -793,12 +826,14 @@ export function applyChatSessionContextUpdate(
   const previous = resolveChatSessionClassification(record.head);
   let classification = locked ? previous : update.classification;
   // Auto title/context summarize must not yank fork children off the Session
-  // Graph (empty or short prompts were being classified misc → node vanished).
+  // Graph (empty or short prompts were being classified misc → node vanished,
+  // and the same chat then cluttered Misc). Any parent-linked session that is
+  // already on a graph — or was previously a topic — stays a topic.
   if (
     !locked &&
     classification === "misc" &&
     record.head.parentSessionId &&
-    previous === "topic"
+    (previous === "topic" || Boolean(record.head.graphId?.trim()))
   ) {
     classification = "topic";
   }

@@ -491,6 +491,20 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async judgeSessionAffinityHygiene(
+    _projectId: string,
+    _request: import("../../contracts/session-affinity-llm.js").SessionAffinityHygieneJudgeRequest,
+  ): Promise<import("../../contracts/session-affinity-llm.js").SessionAffinityHygieneJudgeResponse> {
+    return transportNotConnected();
+  }
+
+  async judgeSessionAffinityRoute(
+    _projectId: string,
+    _request: import("../../contracts/session-affinity-llm.js").SessionAffinityRouteJudgeRequest,
+  ): Promise<import("../../contracts/session-affinity-llm.js").SessionAffinityRouteJudgeResponse> {
+    return transportNotConnected();
+  }
+
   async forkChatSession(
     _projectId: string,
     _parentSessionId: string,

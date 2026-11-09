@@ -20,20 +20,25 @@ import type {
 } from '@contracts/index'
 import {
   buildSessionGraph,
-  isUnusedForkChildSessionRecord,
+  chatSessionHasUserMessage,
+  composerDraftHasContent,
   pickGraphRepresentative,
+  resolveChatSessionClassification,
   resolveSessionGraphId,
   sessionsInGraph,
   sessionGraphShieldCssInsets,
+  shouldHardDeleteInsteadOfMisc,
   SESSION_GRAPH_STRIP_MAX_ITEMS,
   type SessionGraphCssInsets,
 } from '@contracts/index'
 import { collectUserTurns } from '../ChatPanel/conversationNavTurns'
 import {
-  placeForkChildPosition,
+  placeForkChildPositionClearOfObstacles,
   resolveSessionForkPlacementForPreview,
-  SESSION_FORK_ASIDE_GAP,
+  buildSessionForkEdgePath,
+  resolveSessionGraphOverlaps,
   type SessionForkPlacement,
+  type SessionNodeBounds,
 } from './sessionForkLayout'
 import {
   Archive,
@@ -89,16 +94,24 @@ import {
   pruneGraphCanvasPositions,
   saveSessionGraphCanvasLayout,
   setSessionCanvasPosition,
+  setSessionCanvasPositions,
   type SessionGraphCanvasLayout,
 } from './sessionGraphCanvasLayout'
 import {
-  SESSION_DRAG_MOVE_PX,
   readRailDropIndex,
   readSessionGraphDropTarget,
   useSessionGraphDrag,
   type SessionDragState,
   type SessionDropTarget,
 } from './useSessionGraphDrag'
+
+/**
+ * Screen-px movement before a canvas node drag leaves pending (title/footer).
+ * Keep above typical click jitter so title/footer can still fire click → open.
+ */
+const SESSION_NODE_DRAG_MOVE_PX = 6
+/** Same tolerance: blank-canvas click vs pan. */
+const SESSION_CANVAS_PAN_MOVE_PX = 6
 import {
   SESSION_NODE_PREVIEW_DELAY_MS,
   SESSION_NODE_PREVIEW_HIDE_MS,
@@ -107,6 +120,7 @@ import {
   resolveSessionNodePreviewPosition,
 } from './sessionNodePreview'
 import {
+  resolveLatestRevealMessageId,
   resolveSessionNodeStripPromptPreview,
   resolveStripChatMode,
   resolveStripRevealMessageId,
@@ -171,6 +185,7 @@ export default function SessionGraphOverlay() {
   const setSessionGraphOpen = useChatSessionStore((s) => s.setSessionGraphOpen)
   const switchSession = useChatSessionStore((s) => s.switchSession)
   const openSessionAtMessage = useChatSessionStore((s) => s.openSessionAtMessage)
+  const clearPendingRevealMessage = useChatSessionStore((s) => s.clearPendingRevealMessage)
   const createSession = useChatSessionStore((s) => s.createSession)
   const forkSession = useChatSessionStore((s) => s.forkSession)
   const pendingSessionForkPlacement = useChatSessionStore((s) => s.pendingSessionForkPlacement)
@@ -213,6 +228,9 @@ export default function SessionGraphOverlay() {
   const [dragging, setDragging] = useState(false)
   const [filterQuery, setFilterQuery] = useState('')
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null)
+  /** Bumps when a card reports a new rendered height (live strip growth). */
+  const [liveHeightsVersion, setLiveHeightsVersion] = useState(0)
+  const liveNodeHeightsRef = useRef<Record<string, number>>({})
   const [nodeCanvasDrag, setNodeCanvasDrag] = useState<{
     sessionId: string
     graphId: string
@@ -224,6 +242,8 @@ export default function SessionGraphOverlay() {
     railDropIndex: number | null
   } | null>(null)
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
+  const canvasPannedRef = useRef(false)
+  const blankSessionInFlightRef = useRef(false)
   const nodeDragRef = useRef<{
     sessionId: string
     graphId: string
@@ -238,6 +258,8 @@ export default function SessionGraphOverlay() {
     lastCanvasY: number
     target: SessionDropTarget | null
     railDropIndex: number | null
+    /** Capture only after drag starts so title/footer still receive click. */
+    captureEl: HTMLElement | null
   } | null>(null)
   const suppressNodeClickRef = useRef(false)
   const suppressMiscClickRef = useRef(false)
@@ -270,10 +292,52 @@ export default function SessionGraphOverlay() {
   const layout = useMemo(
     () =>
       baseLayout
-        ? applyCanvasPositionOverrides(baseLayout, graphCanvasPositions)
+        ? applyCanvasPositionOverrides(baseLayout, graphCanvasPositions, {
+            liveIds: model.nodes.map((node) => node.id),
+            fallbackHeights: Object.fromEntries(
+              model.nodes.map((node) => [
+                node.id,
+                estimateSessionNodeHeight(
+                  node.stripCount + (node.parentId ? 1 : 0),
+                ),
+              ]),
+            ),
+          })
         : null,
-    [baseLayout, graphCanvasPositions],
+    [baseLayout, graphCanvasPositions, model.nodes],
   )
+
+  /** Rendered card heights — edges must track these, not the stale ELK estimate. */
+  const liveNodeHeights = useMemo(() => {
+    void liveHeightsVersion
+    const next: Record<string, number> = { ...(layout?.heights ?? {}) }
+    for (const node of model.nodes) {
+      const live = liveNodeHeightsRef.current[node.id]
+      if (typeof live === 'number' && live > 0) {
+        next[node.id] = live
+      } else if (!(node.id in next)) {
+        next[node.id] = estimateSessionNodeHeight(
+          node.stripCount + (node.parentId ? 1 : 0),
+        )
+      }
+    }
+    return next
+  }, [layout?.heights, liveHeightsVersion, model.nodes])
+
+  /** Grow the pannable world when live cards outgrow the ELK estimate. */
+  const worldSize = useMemo(() => {
+    if (!layout) return null
+    let width = layout.width
+    let height = layout.height
+    for (const node of model.nodes) {
+      const position = layout.positions[node.id]
+      if (!position) continue
+      const nodeHeight = liveNodeHeights[node.id] ?? SESSION_NODE_HEIGHT
+      width = Math.max(width, position.x + SESSION_NODE_WIDTH + 40)
+      height = Math.max(height, position.y + nodeHeight + 40)
+    }
+    return { width, height }
+  }, [layout, liveNodeHeights, model.nodes])
   const layoutRef = useRef(layout)
   layoutRef.current = layout
 
@@ -318,10 +382,27 @@ export default function SessionGraphOverlay() {
       if (!graphId || !currentLayout) return false
       const parentPos = currentLayout.positions[parentSessionId]
       if (!parentPos) return false
-      const parentHeight = currentLayout.heights[parentSessionId] ?? SESSION_NODE_HEIGHT
-      const point = placeForkChildPosition(
+      const parentHeight =
+        liveNodeHeightsRef.current[parentSessionId] ??
+        currentLayout.heights[parentSessionId] ??
+        SESSION_NODE_HEIGHT
+      const obstacles: SessionNodeBounds[] = Object.entries(currentLayout.positions)
+        .filter(([id]) => id !== childSessionId)
+        .map(([id, pos]) => ({
+          id,
+          x: pos.x,
+          y: pos.y,
+          width: SESSION_NODE_WIDTH,
+          height:
+            liveNodeHeightsRef.current[id] ??
+            currentLayout.heights[id] ??
+            SESSION_NODE_HEIGHT,
+        }))
+      // Ideal fork slot, then nudge clear of any overlapping cards.
+      const point = placeForkChildPositionClearOfObstacles(
         { x: parentPos.x, y: parentPos.y, height: parentHeight },
         placement,
+        obstacles,
         1,
       )
       persistCanvas(
@@ -382,10 +463,11 @@ export default function SessionGraphOverlay() {
       const head = heads.find((item) => item.id === sessionId)
       const graphId = head ? resolveSessionGraphId(head) : null
 
-      // Unused fork children (no continued prompt) are discarded instead of Misc.
-      if (client && projectId && head?.parentSessionId) {
+      // Manual remove: low-value / unused fork → hard delete; otherwise Misc.
+      // Auto-classify still keeps graph-attached forks on the canvas (not Misc).
+      if (client && projectId) {
         const record = await client.getChatSession(projectId, sessionId)
-        if (record && isUnusedForkChildSessionRecord(record)) {
+        if (record && shouldHardDeleteInsteadOfMisc(record)) {
           const deleted = await deleteSession(sessionId)
           if (deleted) {
             if (graphId) {
@@ -400,6 +482,7 @@ export default function SessionGraphOverlay() {
             }
             return
           }
+          // Delete blocked (e.g. retained children) — fall through to Misc.
         }
       }
 
@@ -629,6 +712,15 @@ export default function SessionGraphOverlay() {
   useEffect(() => {
     if (!activeGraphId) return
     const liveIds = model.nodes.map((node) => node.id)
+    const liveIdSet = new Set(liveIds)
+    const heightIds = Object.keys(liveNodeHeightsRef.current)
+    let heightsChanged = false
+    for (const id of heightIds) {
+      if (liveIdSet.has(id)) continue
+      delete liveNodeHeightsRef.current[id]
+      heightsChanged = true
+    }
+    if (heightsChanged) setLiveHeightsVersion((value) => value + 1)
     const pruned = pruneGraphCanvasPositions(
       canvasLayoutRef.current,
       activeGraphId,
@@ -636,6 +728,60 @@ export default function SessionGraphOverlay() {
     )
     if (pruned !== canvasLayoutRef.current) persistCanvas(pruned)
   }, [activeGraphId, model.nodes, persistCanvas])
+
+  const onNodeCardHeightChange = useCallback((sessionId: string, height: number) => {
+    const prev = liveNodeHeightsRef.current[sessionId]
+    if (prev === height) return
+    liveNodeHeightsRef.current[sessionId] = height
+    setLiveHeightsVersion((value) => value + 1)
+  }, [])
+
+  // When strip growth makes a card taller, push neighbors clear of overlaps.
+  useEffect(() => {
+    if (!open || !layout || !activeGraphId) return
+    if (nodeCanvasDrag) return
+    const bounds: SessionNodeBounds[] = []
+    for (const node of model.nodes) {
+      const position = layout.positions[node.id]
+      if (!position) continue
+      const liveHeight = liveNodeHeightsRef.current[node.id]
+      bounds.push({
+        id: node.id,
+        x: position.x,
+        y: position.y,
+        width: SESSION_NODE_WIDTH,
+        height:
+          typeof liveHeight === 'number' && liveHeight > 0
+            ? liveHeight
+            : estimateSessionNodeHeight(
+                node.stripCount + (node.parentId ? 1 : 0),
+              ),
+      })
+    }
+    const resolved = resolveSessionGraphOverlaps(bounds)
+    if (!resolved.changed) return
+
+    const updates: Record<string, { x: number; y: number }> = {}
+    for (const node of model.nodes) {
+      const next = resolved.positions[node.id]
+      const current = layout.positions[node.id]
+      if (!next || !current) continue
+      if (next.x === current.x && next.y === current.y) continue
+      updates[node.id] = next
+    }
+    if (Object.keys(updates).length === 0) return
+    persistCanvas(
+      setSessionCanvasPositions(canvasLayoutRef.current, activeGraphId, updates),
+    )
+  }, [
+    activeGraphId,
+    layout,
+    liveHeightsVersion,
+    model.nodes,
+    nodeCanvasDrag,
+    open,
+    persistCanvas,
+  ])
 
   const handleDropRef = useRef(handleDrop)
   handleDropRef.current = handleDrop
@@ -662,8 +808,8 @@ export default function SessionGraphOverlay() {
       },
     ) => {
       if (event.button !== 0) return
-      // Title / strip / branch controls opt out of canvas drag. Clear any sticky
-      // suppress from a prior drag so their click can still open the session.
+      // Strip items / branch / archive opt out of canvas drag. Title + footer
+      // stay draggable; clear sticky suppress so their click can still open.
       if ((event.target as HTMLElement).closest('[data-session-drag-ignore]')) {
         suppressNodeClickRef.current = false
         return
@@ -676,6 +822,7 @@ export default function SessionGraphOverlay() {
       if (!graphId) return
 
       const pointerId = event.pointerId
+      const captureEl = event.currentTarget as HTMLElement
       nodeDragRef.current = {
         sessionId: payload.sessionId,
         graphId,
@@ -690,12 +837,7 @@ export default function SessionGraphOverlay() {
         lastCanvasY: payload.y,
         target: null,
         railDropIndex: null,
-      }
-
-      try {
-        ;(event.currentTarget as HTMLElement).setPointerCapture(pointerId)
-      } catch {
-        /* ignore */
+        captureEl,
       }
 
       const detach = () => {
@@ -703,6 +845,13 @@ export default function SessionGraphOverlay() {
         window.removeEventListener('pointerup', onUp)
         window.removeEventListener('pointercancel', onUp)
         if (nodeDragCleanupRef.current === detach) nodeDragCleanupRef.current = null
+        try {
+          if (captureEl.hasPointerCapture(pointerId)) {
+            captureEl.releasePointerCapture(pointerId)
+          }
+        } catch {
+          /* ignore */
+        }
       }
 
       const finish = (clientX: number, clientY: number) => {
@@ -776,13 +925,20 @@ export default function SessionGraphOverlay() {
         const dxScreen = moveEvent.clientX - drag.px
         const dyScreen = moveEvent.clientY - drag.py
         if (drag.mode === 'pending') {
-          if (
-            dxScreen * dxScreen + dyScreen * dyScreen <
-            SESSION_DRAG_MOVE_PX * SESSION_DRAG_MOVE_PX
-          ) {
+          // Allow small click jitter on title/footer before treating as a drag.
+          const startPx = SESSION_NODE_DRAG_MOVE_PX
+          if (dxScreen * dxScreen + dyScreen * dyScreen < startPx * startPx) {
             return
           }
           suppressNodeClickRef.current = true
+          // Capture only once dragging — early capture stole title/footer clicks.
+          if (drag.captureEl) {
+            try {
+              drag.captureEl.setPointerCapture(pointerId)
+            } catch {
+              /* ignore */
+            }
+          }
         }
         moveEvent.preventDefault()
 
@@ -873,6 +1029,44 @@ export default function SessionGraphOverlay() {
     },
     [activeGraphId, endNodeCanvasDrag, sessionDrag],
   )
+
+  /**
+   * Blank-canvas click: clear graph selection and land on an unassociated empty
+   * misc session (no parent / graph). Smart routing / tidy may attach it later.
+   * Must stay above the `if (!open)` return so hook order is stable.
+   */
+  const activateBlankCanvasSession = useCallback(async () => {
+    setFocusedSessionId(null)
+    clearPendingRevealMessage()
+
+    const activeId = useChatSessionStore.getState().activeSessionId
+    const activeHead = useChatSessionStore
+      .getState()
+      .heads.find((head) => head.id === activeId)
+    const { messages, composerDraft } = useWorkbenchStore.getState()
+    const alreadyScratch =
+      Boolean(activeHead) &&
+      resolveChatSessionClassification(activeHead!) === 'misc' &&
+      !activeHead!.parentSessionId &&
+      !activeHead!.graphId?.trim() &&
+      activeHead!.status !== 'running' &&
+      activeHead!.status !== 'awaiting_review' &&
+      !chatSessionHasUserMessage(messages) &&
+      !composerDraftHasContent(composerDraft)
+
+    if (alreadyScratch) {
+      setRightPanelOpen(true)
+      return
+    }
+    if (blankSessionInFlightRef.current) return
+    blankSessionInFlightRef.current = true
+    try {
+      await createSession({ seedWelcome: false })
+      setRightPanelOpen(true)
+    } finally {
+      blankSessionInFlightRef.current = false
+    }
+  }, [clearPendingRevealMessage, createSession, setRightPanelOpen])
 
   if (!open) return null
 
@@ -1070,8 +1264,10 @@ export default function SessionGraphOverlay() {
           data-session-graph-drop="canvas"
           onWheel={onWheel}
           onPointerDown={(event) => {
+            if (event.button !== 0) return
             if (sessionDrag || nodeDragRef.current) return
             if ((event.target as HTMLElement).closest('[data-session-node]')) return
+            canvasPannedRef.current = false
             dragRef.current = {
               x: viewport.x,
               y: viewport.y,
@@ -1085,20 +1281,33 @@ export default function SessionGraphOverlay() {
             if (nodeDragRef.current) return
             const drag = dragRef.current
             if (!drag) return
+            const dx = event.clientX - drag.px
+            const dy = event.clientY - drag.py
+            if (
+              dx * dx + dy * dy >=
+              SESSION_CANVAS_PAN_MOVE_PX * SESSION_CANVAS_PAN_MOVE_PX
+            ) {
+              canvasPannedRef.current = true
+            }
+            if (!canvasPannedRef.current) return
             setViewport((current) => ({
               ...current,
-              x: drag.x + event.clientX - drag.px,
-              y: drag.y + event.clientY - drag.py,
+              x: drag.x + dx,
+              y: drag.y + dy,
             }))
           }}
           onPointerUp={() => {
             if (nodeDragRef.current) return
+            const wasPan = canvasPannedRef.current
             dragRef.current = null
+            canvasPannedRef.current = false
             setDragging(false)
+            if (!wasPan) void activateBlankCanvasSession()
           }}
           onPointerCancel={() => {
             if (nodeDragRef.current) return
             dragRef.current = null
+            canvasPannedRef.current = false
             setDragging(false)
           }}
         >
@@ -1108,46 +1317,40 @@ export default function SessionGraphOverlay() {
             <div
               className={styles.world}
               style={{
-                width: layout.width,
-                height: layout.height,
+                width: worldSize?.width ?? layout.width,
+                height: worldSize?.height ?? layout.height,
                 transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
               }}
             >
-              <svg className={styles.edges} width={layout.width} height={layout.height} aria-hidden>
+              <svg
+                className={styles.edges}
+                width={worldSize?.width ?? layout.width}
+                height={worldSize?.height ?? layout.height}
+                aria-hidden
+              >
                 {model.edges.map((edge) => {
                   const source = layout.positions[edge.source]
                   const target = layout.positions[edge.target]
                   if (!source || !target) return null
-                  const sourceHeight = layout.heights[edge.source] ?? SESSION_NODE_HEIGHT
-                  const targetHeight = layout.heights[edge.target] ?? SESSION_NODE_HEIGHT
+                  const sourceHeight =
+                    liveNodeHeights[edge.source] ?? SESSION_NODE_HEIGHT
+                  const targetHeight =
+                    liveNodeHeights[edge.target] ?? SESSION_NODE_HEIGHT
                   const child = model.nodes.find((node) => node.id === edge.target)
-                  const aside = child?.forkLayout === 'aside'
-                  let path: string
-                  let labelX: number
-                  let labelY: number
-                  if (aside) {
-                    const anchorY =
-                      typeof child?.forkAnchorOffsetY === 'number'
-                        ? child.forkAnchorOffsetY
-                        : sourceHeight / 2
-                    const x1 = source.x + SESSION_NODE_WIDTH
-                    const y1 = source.y + anchorY
-                    const x2 = target.x
-                    const y2 = target.y + targetHeight / 2
-                    const bend = Math.max(28, SESSION_FORK_ASIDE_GAP * 0.55)
-                    path = `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`
-                    labelX = (x1 + x2) / 2
-                    labelY = (y1 + y2) / 2
-                  } else {
-                    const x1 = source.x + SESSION_NODE_WIDTH / 2
-                    const y1 = source.y + sourceHeight
-                    const x2 = target.x + SESSION_NODE_WIDTH / 2
-                    const y2 = target.y
-                    const mid = (y1 + y2) / 2
-                    path = `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`
-                    labelX = (x1 + x2) / 2
-                    labelY = mid
-                  }
+                  const { path, labelX, labelY } = buildSessionForkEdgePath(
+                    source,
+                    target,
+                    sourceHeight,
+                    targetHeight,
+                    child
+                      ? {
+                          forkLayout: child.forkLayout === 'aside' ? 'aside' : 'below',
+                          ...(typeof child.forkAnchorOffsetY === 'number'
+                            ? { forkAnchorOffsetY: child.forkAnchorOffsetY }
+                            : {}),
+                        }
+                      : null,
+                  )
                   return (
                     <g key={`${edge.source}-${edge.target}`}>
                       <path className={`${styles.edge} ${styles.edgeFork}`} d={path} />
@@ -1182,10 +1385,13 @@ export default function SessionGraphOverlay() {
                   responsibility: node.responsibility,
                   previewStrip: node.previewStrip,
                 })
-                const dimmed =
-                  (!matches && filterQuery.trim().length > 0) ||
-                  (focusedSessionId != null && focusedSessionId !== node.id)
-                const height = layout.heights[node.id] ?? SESSION_NODE_HEIGHT
+                // Selection uses the focused border only — never dim other cards.
+                // Dim remains for filter mismatch so search stays scannable.
+                const dimmed = !matches && filterQuery.trim().length > 0
+                const height =
+                  liveNodeHeights[node.id] ??
+                  layout.heights[node.id] ??
+                  SESSION_NODE_HEIGHT
                 return (
                   <SessionNode
                     key={node.id}
@@ -1213,11 +1419,10 @@ export default function SessionGraphOverlay() {
                     x={position.x}
                     y={position.y}
                     height={height}
-                    onOpen={() => {
-                      setFocusedSessionId((current) =>
-                        current === node.id ? null : node.id,
-                      )
-                      void openSessionAtMessage(node.id)
+                    onOpen={(revealMessageId) => {
+                      // Title / footer: select card and jump to latest (or resolved) turn.
+                      setFocusedSessionId(node.id)
+                      void openSessionAtMessage(node.id, revealMessageId)
                     }}
                     onStripItem={(_item, revealMessageId) => {
                       setFocusedSessionId(node.id)
@@ -1246,6 +1451,7 @@ export default function SessionGraphOverlay() {
                       })
                     }}
                     shouldSuppressClick={() => suppressNodeClickRef.current}
+                    onCardHeightChange={onNodeCardHeightChange}
                     onPointerDown={(event) =>
                       onNodeCanvasPointerDown(event, {
                         sessionId: node.id,
@@ -1338,6 +1544,41 @@ type SessionNodePreviewTarget =
   | { kind: 'title' }
   | { kind: 'strip'; item: SessionGraphStripItem }
 
+function sessionGraphStripsEqual(
+  left: SessionGraphStripItem[] | null,
+  right: SessionGraphStripItem[],
+): boolean {
+  if (!left || left.length !== right.length) return false
+  for (let i = 0; i < left.length; i += 1) {
+    const a = left[i]!
+    const b = right[i]!
+    if (
+      a.id !== b.id ||
+      a.kind !== b.kind ||
+      a.title !== b.title ||
+      a.ts !== b.ts ||
+      a.messageId !== b.messageId ||
+      a.chatMode !== b.chatMode
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function sessionGraphModeMapsEqual(
+  left: Record<string, string>,
+  right: Record<string, string>,
+): boolean {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  if (leftKeys.length !== rightKeys.length) return false
+  for (const key of leftKeys) {
+    if (left[key] !== right[key]) return false
+  }
+  return true
+}
+
 function SessionNode({
   head,
   sessionId,
@@ -1366,6 +1607,7 @@ function SessionNode({
   onMisc,
   onContextMenu,
   shouldSuppressClick,
+  onCardHeightChange,
   onPointerDown,
 }: {
   head: ChatSessionHead | undefined
@@ -1387,7 +1629,7 @@ function SessionNode({
   x: number
   y: number
   height: number
-  onOpen: () => void
+  onOpen: (revealMessageId?: string | null) => void
   onStripItem: (
     item: SessionGraphStripItem,
     revealMessageId: string | null,
@@ -1401,6 +1643,7 @@ function SessionNode({
   onMisc: () => void
   onContextMenu: (event: ReactMouseEvent<HTMLDivElement>) => void
   shouldSuppressClick: () => boolean
+  onCardHeightChange: (sessionId: string, height: number) => void
   onPointerDown: (event: ReactPointerEvent) => void
 }) {
   const { ts } = useI18n()
@@ -1472,6 +1715,11 @@ function SessionNode({
   ])
   const stripScrollable = displayStrip.length > SESSION_GRAPH_STRIP_MAX_ITEMS
   const cardHeight = estimateSessionNodeHeight(displayStrip.length)
+
+  useEffect(() => {
+    onCardHeightChange(sessionId, cardHeight)
+  }, [cardHeight, onCardHeightChange, sessionId])
+
   const agentWorking =
     status === 'running' ||
     (active && (liveRefineLoading || liveFlowStatus === 'running'))
@@ -1484,28 +1732,37 @@ function SessionNode({
         ? ts('chat.sessionGraph.liveNeedsYou')
         : null
 
-  const applyTurnsToStrip = useCallback((messages: ChatMessage[]) => {
-    const turns = collectUserTurns(messages)
-    if (turns.length === 0) {
-      setTurnStrip(null)
-      return
-    }
-    // Keep the full turn list; the card viewport scrolls past MAX visible rows.
-    const nextStrip: SessionGraphStripItem[] = turns.map((turn) => ({
-      id: `intent:${turn.id}`,
-      kind: 'intent' as const,
-      title: turn.preview || turn.id,
-      ts: turn.timestamp,
-      messageId: turn.id,
-      ...(turn.chatMode ? { chatMode: turn.chatMode as ChatSessionMode } : {}),
-    }))
-    const modes: Record<string, string> = {}
-    for (const item of nextStrip) {
-      if (item.chatMode) modes[item.id] = item.chatMode
-    }
-    setTurnStrip(nextStrip)
-    setStripModeById(modes)
-  }, [])
+  const previewStripRef = useRef(previewStrip)
+  previewStripRef.current = previewStrip
+
+  const applyTurnsToStrip = useCallback(
+    (messages: ChatMessage[], options?: { allowEmpty?: boolean }) => {
+      const turns = collectUserTurns(messages)
+      if (turns.length === 0) {
+        // Keep the last stable strip during selection switches / mid-load empties.
+        if (options?.allowEmpty) {
+          setTurnStrip(null)
+        }
+        return
+      }
+      // Keep the full turn list; the card viewport scrolls past MAX visible rows.
+      const nextStrip: SessionGraphStripItem[] = turns.map((turn) => ({
+        id: `intent:${turn.id}`,
+        kind: 'intent' as const,
+        title: turn.preview || turn.id,
+        ts: turn.timestamp,
+        messageId: turn.id,
+        ...(turn.chatMode ? { chatMode: turn.chatMode as ChatSessionMode } : {}),
+      }))
+      const modes: Record<string, string> = {}
+      for (const item of nextStrip) {
+        if (item.chatMode) modes[item.id] = item.chatMode
+      }
+      setTurnStrip((prev) => (sessionGraphStripsEqual(prev, nextStrip) ? prev : nextStrip))
+      setStripModeById((prev) => (sessionGraphModeMapsEqual(prev, modes) ? prev : modes))
+    },
+    [],
+  )
 
   const clearOpenTimer = useCallback(() => {
     if (openTimerRef.current != null) {
@@ -1570,23 +1827,25 @@ function SessionNode({
     return request
   }, [client, projectId, sessionId])
 
+  // Invalidate before hydrate/sync so revision bumps actually refetch.
+  useEffect(() => {
+    messagesCacheRef.current = null
+    messagesRequestRef.current = null
+  }, [sessionId, lastUpdatedAt, messageCount])
+
   // Active session: mirror live workbench turns immediately on send.
   useEffect(() => {
     if (!active || !liveMessages) return
     messagesCacheRef.current = liveMessages
-    applyTurnsToStrip(liveMessages)
-  }, [active, applyTurnsToStrip, liveMessages])
+    // Empty live transcript on a non-empty head is usually a mid-switch race
+    // between activeSessionId and applySessionToWorkbench — keep the strip.
+    applyTurnsToStrip(liveMessages, { allowEmpty: messageCount === 0 })
+  }, [active, applyTurnsToStrip, liveMessages, messageCount])
 
+  // Inactive / background hydrate: refresh quietly without wiping the strip.
+  // Do not depend on previewStrip identity — heads rebuilds would flash every card.
   useEffect(() => {
     if (active) return
-    messagesCacheRef.current = null
-    messagesRequestRef.current = null
-    setTurnStrip(null)
-    const seeded: Record<string, string> = {}
-    for (const item of previewStrip) {
-      if (item.chatMode) seeded[item.id] = item.chatMode
-    }
-    setStripModeById(seeded)
     let cancelled = false
     void (async () => {
       const messages = await loadSessionMessages()
@@ -1596,18 +1855,32 @@ function SessionNode({
         applyTurnsToStrip(messages)
         return
       }
-      if (messages.length === 0) return
-      const next: Record<string, string> = { ...seeded }
-      for (const item of previewStrip) {
+      if (messages.length === 0) {
+        applyTurnsToStrip(messages, { allowEmpty: true })
+        return
+      }
+      const strip = previewStripRef.current
+      const next: Record<string, string> = {}
+      for (const item of strip) {
+        if (item.chatMode) next[item.id] = item.chatMode
         const mode = resolveStripChatMode(item, messages)
         if (mode) next[item.id] = mode
       }
-      if (!cancelled) setStripModeById(next)
+      if (!cancelled) {
+        setStripModeById((prev) => (sessionGraphModeMapsEqual(prev, next) ? prev : next))
+      }
     })()
     return () => {
       cancelled = true
     }
-  }, [active, applyTurnsToStrip, loadSessionMessages, previewStrip, sessionId])
+  }, [
+    active,
+    applyTurnsToStrip,
+    lastUpdatedAt,
+    loadSessionMessages,
+    messageCount,
+    sessionId,
+  ])
 
   const hydrateStripPreview = useCallback(
     async (item: SessionGraphStripItem, requestId: number) => {
@@ -1687,11 +1960,6 @@ function SessionNode({
     if (lifted || dragging) closePreview()
   }, [closePreview, dragging, lifted])
 
-  useEffect(() => {
-    messagesCacheRef.current = null
-    messagesRequestRef.current = null
-  }, [sessionId, lastUpdatedAt, messageCount])
-
   const stripPreviewItem =
     previewTarget?.kind === 'strip' ? previewTarget.item : null
   const stripPromptTitle = stripPreviewItem
@@ -1707,6 +1975,49 @@ function SessionNode({
     Boolean(stripPreviewItem) &&
     !stripPromptLoading &&
     Boolean(stripReplyBody?.trim())
+
+  const chromePressRef = useRef<{ pointerId: number; x: number; y: number } | null>(
+    null,
+  )
+  const openLatestInFlightRef = useRef(false)
+
+  const openAtLatest = useCallback(() => {
+    if (openLatestInFlightRef.current) return
+    openLatestInFlightRef.current = true
+    window.setTimeout(() => {
+      openLatestInFlightRef.current = false
+    }, 400)
+    void (async () => {
+      const sessionMessages = await loadSessionMessages()
+      onOpen(resolveLatestRevealMessageId(sessionMessages))
+    })()
+  }, [loadSessionMessages, onOpen])
+
+  const onChromePointerDown = useCallback((event: ReactPointerEvent) => {
+    if (event.button !== 0) return
+    chromePressRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    }
+  }, [])
+
+  const onChromePointerUp = useCallback(
+    (event: ReactPointerEvent) => {
+      const press = chromePressRef.current
+      chromePressRef.current = null
+      if (!press || press.pointerId !== event.pointerId) return
+      // Parent may have started a real drag — don't open after a move.
+      if (shouldSuppressClick()) return
+      const dx = event.clientX - press.x
+      const dy = event.clientY - press.y
+      if (dx * dx + dy * dy >= SESSION_NODE_DRAG_MOVE_PX * SESSION_NODE_DRAG_MOVE_PX) {
+        return
+      }
+      openAtLatest()
+    },
+    [openAtLatest, shouldSuppressClick],
+  )
 
   return (
     <>
@@ -1742,13 +2053,17 @@ function SessionNode({
           <button
             type="button"
             className={styles.nodeTitle}
-            data-session-drag-ignore=""
             onMouseEnter={(event) =>
               schedulePreviewOpen({ kind: 'title' }, event.currentTarget)
             }
-            onClick={() => {
-              if (shouldSuppressClick()) return
-              onOpen()
+            onPointerDown={onChromePointerDown}
+            onPointerUp={onChromePointerUp}
+            onPointerCancel={() => {
+              chromePressRef.current = null
+            }}
+            // pointerup is the primary open path (drag capture used to steal click).
+            onClick={(event) => {
+              event.preventDefault()
             }}
             aria-current={active ? 'true' : undefined}
           >
@@ -1870,7 +2185,22 @@ function SessionNode({
             })
           )}
         </ol>
-        <div className={styles.nodeFoot}>
+        <div
+          className={styles.nodeFoot}
+          data-session-drag-handle=""
+          role="button"
+          tabIndex={0}
+          onPointerDown={onChromePointerDown}
+          onPointerUp={onChromePointerUp}
+          onPointerCancel={() => {
+            chromePressRef.current = null
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            openAtLatest()
+          }}
+        >
           <span className={styles.nodeFootMeta}>
             <span>
               {ts('chat.sessionGraph.messagesCount', { count: messageCount })}
@@ -1912,31 +2242,33 @@ function SessionNode({
             >
               {stripPreviewItem ? (
                 <>
-                  <div
-                    className={`${styles.nodePreviewTitle} ${styles.nodePreviewTitlePrompt} ${
-                      stripPromptLoading ? styles.nodePreviewBodyLoading : ''
-                    }`}
-                  >
-                    {stripPromptTitle}
-                  </div>
-                  {canExpandReply || stripPromptLoading ? (
-                    <button
-                      type="button"
-                      className={`${styles.nodePreviewExpand} ${
-                        stripReplyExpanded ? styles.nodePreviewExpandOpen : ''
+                  <div className={styles.nodePreviewHeader}>
+                    <div
+                      className={`${styles.nodePreviewTitle} ${styles.nodePreviewTitlePrompt} ${
+                        stripPromptLoading ? styles.nodePreviewBodyLoading : ''
                       }`}
-                      aria-expanded={stripReplyExpanded}
-                      aria-label={
-                        stripReplyExpanded
-                          ? ts('chat.sessionGraph.collapseReply')
-                          : ts('chat.sessionGraph.expandReply')
-                      }
-                      disabled={stripPromptLoading || !canExpandReply}
-                      onClick={() => setStripReplyExpanded((open) => !open)}
                     >
-                      <ChevronDown size={14} aria-hidden />
-                    </button>
-                  ) : null}
+                      {stripPromptTitle}
+                    </div>
+                    {canExpandReply || stripPromptLoading ? (
+                      <button
+                        type="button"
+                        className={`${styles.nodePreviewExpand} ${
+                          stripReplyExpanded ? styles.nodePreviewExpandOpen : ''
+                        }`}
+                        aria-expanded={stripReplyExpanded}
+                        aria-label={
+                          stripReplyExpanded
+                            ? ts('chat.sessionGraph.collapseReply')
+                            : ts('chat.sessionGraph.expandReply')
+                        }
+                        disabled={stripPromptLoading || !canExpandReply}
+                        onClick={() => setStripReplyExpanded((open) => !open)}
+                      >
+                        <ChevronDown size={14} aria-hidden />
+                      </button>
+                    ) : null}
+                  </div>
                   {stripReplyExpanded && stripReplyBody ? (
                     <div className={styles.nodePreviewBody}>{stripReplyBody}</div>
                   ) : null}

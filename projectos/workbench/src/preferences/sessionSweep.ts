@@ -1,3 +1,5 @@
+import { normalizeAffinityMode, type AffinityMode } from '@contracts/index'
+
 export interface SessionSweepPreferences {
   enabled: boolean
   /** Continuity tidy (same-feature merge/attach) — runs before sweep. */
@@ -10,6 +12,11 @@ export interface SessionSweepPreferences {
   tidyNotifyEnabled: boolean
   /** Allow absorb (merge transcript into anchor) suggestions. */
   allowAbsorb: boolean
+  /**
+   * Shared L1 intelligence for route + tidy + sweep.
+   * `off` | `balanced` | `accurate`
+   */
+  affinityMode: AffinityMode
 }
 
 export interface SessionSweepRuntimeState {
@@ -23,6 +30,10 @@ export interface SessionSweepRuntimeState {
   snoozedUntil: Record<string, string>
   /** clusterId or sessionId → ISO snooze expiry (tidy skip). */
   tidySnoozedUntil: Record<string, string>
+  /** YYYY-MM-DD of the affinity LLM call counter. */
+  affinityLlmDate: string | null
+  /** LLM judge calls consumed today (route + tidy + sweep). */
+  affinityLlmCallsToday: number
 }
 
 const PREFS_KEY = 'projectos_session_sweep_prefs'
@@ -36,6 +47,7 @@ export const DEFAULT_SESSION_SWEEP_PREFERENCES: SessionSweepPreferences = {
   notifyEnabled: true,
   tidyNotifyEnabled: true,
   allowAbsorb: true,
+  affinityMode: 'balanced',
 }
 
 function parseDailyTime(value: string): string | null {
@@ -66,6 +78,9 @@ export function normalizeSessionSweepPreferences(
     tidyNotifyEnabled:
       input?.tidyNotifyEnabled ?? DEFAULT_SESSION_SWEEP_PREFERENCES.tidyNotifyEnabled,
     allowAbsorb: input?.allowAbsorb ?? DEFAULT_SESSION_SWEEP_PREFERENCES.allowAbsorb,
+    affinityMode: normalizeAffinityMode(
+      input?.affinityMode ?? DEFAULT_SESSION_SWEEP_PREFERENCES.affinityMode,
+    ),
   }
 }
 
@@ -96,19 +111,28 @@ function readSnoozeMap(value: unknown): Record<string, string> {
   )
 }
 
+function emptyRuntime(): SessionSweepRuntimeState {
+  return {
+    lastRunDate: null,
+    pendingReviewJson: null,
+    pendingTidyJson: null,
+    snoozedUntil: {},
+    tidySnoozedUntil: {},
+    affinityLlmDate: null,
+    affinityLlmCallsToday: 0,
+  }
+}
+
 export function loadSessionSweepRuntime(): SessionSweepRuntimeState {
   try {
     const raw = localStorage.getItem(RUNTIME_KEY)
-    if (!raw) {
-      return {
-        lastRunDate: null,
-        pendingReviewJson: null,
-        pendingTidyJson: null,
-        snoozedUntil: {},
-        tidySnoozedUntil: {},
-      }
-    }
+    if (!raw) return emptyRuntime()
     const parsed = JSON.parse(raw) as Partial<SessionSweepRuntimeState>
+    const calls =
+      typeof parsed.affinityLlmCallsToday === 'number' &&
+      Number.isFinite(parsed.affinityLlmCallsToday)
+        ? Math.max(0, Math.round(parsed.affinityLlmCallsToday))
+        : 0
     return {
       lastRunDate: typeof parsed.lastRunDate === 'string' ? parsed.lastRunDate : null,
       pendingReviewJson:
@@ -116,15 +140,38 @@ export function loadSessionSweepRuntime(): SessionSweepRuntimeState {
       pendingTidyJson: typeof parsed.pendingTidyJson === 'string' ? parsed.pendingTidyJson : null,
       snoozedUntil: readSnoozeMap(parsed.snoozedUntil),
       tidySnoozedUntil: readSnoozeMap(parsed.tidySnoozedUntil),
+      affinityLlmDate:
+        typeof parsed.affinityLlmDate === 'string' ? parsed.affinityLlmDate : null,
+      affinityLlmCallsToday: calls,
     }
   } catch {
-    return {
-      lastRunDate: null,
-      pendingReviewJson: null,
-      pendingTidyJson: null,
-      snoozedUntil: {},
-      tidySnoozedUntil: {},
-    }
+    return emptyRuntime()
+  }
+}
+
+/** Reset the daily counter when the calendar day rolls. */
+export function syncAffinityLlmBudgetDay(
+  runtime: SessionSweepRuntimeState,
+  today = localDateKey(),
+): SessionSweepRuntimeState {
+  if (runtime.affinityLlmDate === today) return runtime
+  return {
+    ...runtime,
+    affinityLlmDate: today,
+    affinityLlmCallsToday: 0,
+  }
+}
+
+export function bumpAffinityLlmCalls(
+  runtime: SessionSweepRuntimeState,
+  count: number,
+  today = localDateKey(),
+): SessionSweepRuntimeState {
+  const synced = syncAffinityLlmBudgetDay(runtime, today)
+  if (count <= 0) return synced
+  return {
+    ...synced,
+    affinityLlmCallsToday: synced.affinityLlmCallsToday + count,
   }
 }
 

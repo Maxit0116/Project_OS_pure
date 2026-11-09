@@ -14,14 +14,20 @@ import {
   buildSessionTidyPlan,
   chatSessionHasChildren,
   orderSessionIdsForDeletion,
+  refineSweepPlanWithJudgments,
+  refineTidyPlanWithJudgments,
   resolveSessionSweepExecution,
   sessionIdsInTidyPlan,
   stripLowValueTurns,
   withSessionGraphHeadProjection,
+  type AffinityJudgeResult,
+  type SessionSweepPlanWithLlm,
+  type SessionTidyPlanWithLlm,
 } from '@contracts/index'
 import { create } from 'zustand'
 import { getStoreMessage } from '../i18n/storeMessages'
 import {
+  bumpAffinityLlmCalls,
   loadSessionSweepPreferences,
   loadSessionSweepRuntime,
   localDateKey,
@@ -31,6 +37,7 @@ import {
   saveSessionSweepRuntime,
   shouldRunSessionSweepNow,
   snoozeExpiryIso,
+  syncAffinityLlmBudgetDay,
   type SessionSweepPreferences,
   type SessionSweepRuntimeState,
 } from '../preferences/sessionSweep'
@@ -53,8 +60,8 @@ export interface SessionTidyConfirmCluster {
 interface SessionSweepStore {
   preferences: SessionSweepPreferences
   runtime: SessionSweepRuntimeState
-  pendingPlan: SessionSweepPlan | null
-  pendingTidyPlan: SessionTidyPlan | null
+  pendingPlan: SessionSweepPlanWithLlm | null
+  pendingTidyPlan: SessionTidyPlanWithLlm | null
   centerSheet: SessionGraphCenterSheet
   sweepRunning: boolean
   setPreferences: (patch: Partial<SessionSweepPreferences>) => void
@@ -67,11 +74,14 @@ interface SessionSweepStore {
    * `force` ignores the daily gate.
    */
   runHygieneCheck: (options?: { force?: boolean; notify?: boolean }) => Promise<{
-    tidy: SessionTidyPlan | null
-    sweep: SessionSweepPlan | null
+    tidy: SessionTidyPlanWithLlm | null
+    sweep: SessionSweepPlanWithLlm | null
   }>
   /** @deprecated Prefer runHygieneCheck — kept for settings "scan cleanup only". */
-  runSweepCheck: (options?: { force?: boolean; notify?: boolean }) => Promise<SessionSweepPlan | null>
+  runSweepCheck: (options?: {
+    force?: boolean
+    notify?: boolean
+  }) => Promise<SessionSweepPlanWithLlm | null>
   confirmSweep: (checkedSessionIds: string[]) => Promise<{ deleted: number; reorganized: number }>
   dismissSweepKeepingAll: () => void
   confirmTidy: (
@@ -103,25 +113,28 @@ function inheritDigestFromParent(
   return parent?.contextDigest ?? parent?.inheritedDigest
 }
 
-function parsePendingSweep(json: string | null): SessionSweepPlan | null {
+function parsePendingSweep(json: string | null): SessionSweepPlanWithLlm | null {
   if (!json) return null
   try {
-    return JSON.parse(json) as SessionSweepPlan
+    return JSON.parse(json) as SessionSweepPlanWithLlm
   } catch {
     return null
   }
 }
 
-function parsePendingTidy(json: string | null): SessionTidyPlan | null {
+function parsePendingTidy(json: string | null): SessionTidyPlanWithLlm | null {
   if (!json) return null
   try {
-    return JSON.parse(json) as SessionTidyPlan
+    return JSON.parse(json) as SessionTidyPlanWithLlm
   } catch {
     return null
   }
 }
 
-function filterAbsorbIfDisabled(plan: SessionTidyPlan, allowAbsorb: boolean): SessionTidyPlan {
+function filterAbsorbIfDisabled(
+  plan: SessionTidyPlanWithLlm,
+  allowAbsorb: boolean,
+): SessionTidyPlanWithLlm {
   if (allowAbsorb) return plan
   return {
     ...plan,
@@ -135,6 +148,12 @@ function filterAbsorbIfDisabled(plan: SessionTidyPlan, allowAbsorb: boolean): Se
       })),
     })),
   }
+}
+
+function toJudgmentMap(
+  record: Record<string, AffinityJudgeResult> | undefined,
+): Map<string, AffinityJudgeResult> {
+  return new Map(Object.entries(record ?? {}))
 }
 
 function notifySeparate(
@@ -219,35 +238,73 @@ export const useSessionSweepStore = create<SessionSweepStore>((set, get) => ({
       const snoozedUntil = pruneExpiredSnoozes(runtime.snoozedUntil)
       const tidySnoozedUntil = pruneExpiredSnoozes(runtime.tidySnoozedUntil)
       const shouldNotify = options.notify !== false
-      const { locale } = useWorkbenchStore.getState()
+      const { locale, client, project } = useWorkbenchStore.getState()
+      const affinityMode = preferences.affinityMode
+      let budgetRuntime = syncAffinityLlmBudgetDay(runtime)
 
-      // 1) Continuity tidy first
-      let tidyPlan: SessionTidyPlan | null = null
+      // 1) Continuity tidy (L0 → optional L1)
+      let tidyPlan: SessionTidyPlanWithLlm | null = null
       if (preferences.tidyEnabled) {
-        tidyPlan = filterAbsorbIfDisabled(
-          buildSessionTidyPlan(records, chat.pinnedIds, {
-            activeSessionId: chat.activeSessionId,
-            snoozedUntil: tidySnoozedUntil,
-          }),
-          preferences.allowAbsorb,
-        )
-        if (tidyPlan.clusters.length === 0) tidyPlan = null
+        const l0Tidy = buildSessionTidyPlan(records, chat.pinnedIds, {
+          activeSessionId: chat.activeSessionId,
+          snoozedUntil: tidySnoozedUntil,
+        })
+        if (l0Tidy.clusters.length > 0) {
+          let tidyJudgments = new Map<string, AffinityJudgeResult>()
+          if (affinityMode !== 'off' && client && project) {
+            try {
+              const judged = await client.judgeSessionAffinityHygiene(project.projectId, {
+                mode: affinityMode,
+                callsUsedToday: budgetRuntime.affinityLlmCallsToday,
+                tidyPlan: l0Tidy,
+                sweepPlan: null,
+              })
+              tidyJudgments = toJudgmentMap(judged.tidyJudgments)
+              budgetRuntime = bumpAffinityLlmCalls(budgetRuntime, judged.calls)
+            } catch (error) {
+              console.error('[sessionSweepStore] affinity tidy judge failed', error)
+            }
+          }
+          tidyPlan = filterAbsorbIfDisabled(
+            refineTidyPlanWithJudgments(l0Tidy, tidyJudgments, affinityMode),
+            preferences.allowAbsorb,
+          )
+          if (tidyPlan.clusters.length === 0) tidyPlan = null
+        }
       }
 
-      // 2) Sweep second — exclude tidy cluster members so tidy wins
-      let sweepPlan: SessionSweepPlan | null = null
+      // 2) Sweep after tidy (L0 → optional L1); tidy members stay excluded
+      let sweepPlan: SessionSweepPlanWithLlm | null = null
       if (preferences.enabled) {
-        sweepPlan = buildSessionSweepPlan(records, chat.pinnedIds, {
+        const l0Sweep = buildSessionSweepPlan(records, chat.pinnedIds, {
           activeSessionId: chat.activeSessionId,
           snoozedUntil,
           excludeSessionIds: sessionIdsInTidyPlan(tidyPlan),
         })
-        if (sweepPlan.candidates.length === 0) sweepPlan = null
+        if (l0Sweep.candidates.length > 0) {
+          let sweepJudgments = new Map<string, AffinityJudgeResult>()
+          if (affinityMode !== 'off' && client && project) {
+            try {
+              const judged = await client.judgeSessionAffinityHygiene(project.projectId, {
+                mode: affinityMode,
+                callsUsedToday: budgetRuntime.affinityLlmCallsToday,
+                tidyPlan: null,
+                sweepPlan: l0Sweep,
+              })
+              sweepJudgments = toJudgmentMap(judged.sweepJudgments)
+              budgetRuntime = bumpAffinityLlmCalls(budgetRuntime, judged.calls)
+            } catch (error) {
+              console.error('[sessionSweepStore] affinity sweep judge failed', error)
+            }
+          }
+          sweepPlan = refineSweepPlanWithJudgments(l0Sweep, sweepJudgments, affinityMode)
+          if (sweepPlan.candidates.length === 0) sweepPlan = null
+        }
       }
 
       const today = localDateKey()
       const nextRuntime: SessionSweepRuntimeState = {
-        ...runtime,
+        ...budgetRuntime,
         lastRunDate: today,
         snoozedUntil,
         tidySnoozedUntil,

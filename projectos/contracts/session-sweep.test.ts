@@ -5,6 +5,7 @@ import {
   buildSessionSweepPlan,
   classifyLowValueSession,
   resolveSessionSweepExecution,
+  shouldHardDeleteInsteadOfMisc,
 } from "./session-sweep.js";
 
 function record(
@@ -32,6 +33,86 @@ function record(
     messages,
   };
 }
+
+describe("shouldHardDeleteInsteadOfMisc", () => {
+  it("hard-deletes unused fork children and low-value sessions", () => {
+    expect(
+      shouldHardDeleteInsteadOfMisc(
+        record({ id: "empty", classification: "topic", parentSessionId: "p", graphId: "g1" }),
+      ),
+    ).toBe(true);
+    expect(
+      shouldHardDeleteInsteadOfMisc(
+        record(
+          { id: "hi", classification: "topic", parentSessionId: "p", graphId: "g1" },
+          [{ id: "m1", role: "user", content: "hi", timestamp: "2026-11-08T12:00:00.000Z" }],
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps substantive sessions for Misc demotion", () => {
+    expect(
+      shouldHardDeleteInsteadOfMisc(
+        {
+          ...record(
+            {
+              id: "rich",
+              classification: "topic",
+              parentSessionId: "p",
+              graphId: "g1",
+              responsibility: "Auth callback hardening",
+              previewStrip: [
+                {
+                  id: "d1",
+                  kind: "decision",
+                  title: "Keep the callback",
+                  ts: "2026-11-08T12:00:00.000Z",
+                },
+              ],
+            },
+            [
+              {
+                id: "u1",
+                role: "user",
+                content: "Implement OAuth callback retry and cover the failure path in auth.ts",
+                timestamp: "2026-11-08T12:00:00.000Z",
+              },
+              {
+                id: "u2",
+                role: "user",
+                content: "Also add integration coverage for the refresh token rotation",
+                timestamp: "2026-11-08T13:00:00.000Z",
+              },
+              {
+                id: "u3",
+                role: "user",
+                content: "Document the edge case in README for the team",
+                timestamp: "2026-11-08T14:00:00.000Z",
+              },
+            ],
+          ),
+          contextDigest: {
+            responsibility: "Auth callback hardening",
+            decisions: ["Keep the callback"],
+            openQuestions: [],
+            refs: ["auth.ts"],
+            updatedAt: "2026-11-08T14:00:00.000Z",
+            throughMessageId: "u3",
+          },
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it("does not hard-delete running sessions", () => {
+    expect(
+      shouldHardDeleteInsteadOfMisc(
+        record({ id: "run", classification: "topic", status: "running", parentSessionId: "p" }),
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("classifyLowValueSession", () => {
   it("flags misc greetings", () => {

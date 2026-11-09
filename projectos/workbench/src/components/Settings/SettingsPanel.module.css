@@ -501,6 +501,47 @@
   max-width: 240px;
 }
 
+.affinityModeRow {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 360px;
+}
+
+.affinityModeChip {
+  appearance: none;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  font-size: var(--font-size-xs);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.affinityModeChip:hover {
+  border-color: var(--tech-border-strong);
+  color: var(--tech-text-primary);
+}
+
+.affinityModeChipActive {
+  border-color: var(--tech-border-strong);
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-primary);
+}
+
+.affinityModeChip:focus-visible {
+  box-shadow: var(--tech-shadow-focus);
+  outline: none;
+}
+
+.affinityBudget {
+  margin: 0 0 8px;
+  padding: 0 2px;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-muted);
+}
+
 .select:focus-visible,
 .textarea:focus-visible,
 .inlineSelect:focus-visible {

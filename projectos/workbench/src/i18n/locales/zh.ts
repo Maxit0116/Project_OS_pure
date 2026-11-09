@@ -1721,6 +1721,9 @@ const zh = {
           title_overlap: '标题相近',
         },
       },
+      affinity: {
+        llmConfirmed: 'LLM 已复核',
+      },
     },
     sessionRoute: {
       button: '智能归位',
@@ -3643,11 +3646,28 @@ const zh = {
     notifyOnPendingDecisionDesc: '运行暂停并等待你输入时提醒你。打开通知只会显示已记录的决定，不会自动批准。',
     notificationsSummary: 'Agent、Reminder 与决定提醒',
     notificationsOff: '已关闭',
+    sessionAffinity: {
+      group: '会话匹配智能',
+      mode: 'LLM 复核档位',
+      modes: {
+        off: '无 LLM',
+        balanced: '性价比',
+        accurate: '准确优先',
+      },
+      modeDesc: {
+        off: '仅用启发式匹配智能归位、整理与清理，不调用模型。',
+        balanced:
+          '先启发式缩小候选，再用低成本 LLM 复核边界案例。归位 / 整理 / 清理共用此档位。',
+        accurate:
+          '先启发式，再用更强 LLM 复核更多候选，可改写整理锚点，并对自动归位做双重高置信确认。日预算更高。',
+      },
+      callsToday: '今日 LLM 复核：{used} / {budget}',
+    },
     sessionSweep: {
       group: '会话清理',
       enabled: '每日低价值会话审阅',
       enabledDesc:
-        '在共享审阅时间，于同功能整理之后扫描低价值会话。确认前不会删除任何内容。',
+        '在共享审阅时间，于同功能整理之后扫描低价值会话。确认前不会删除任何内容。强度受上方「会话匹配智能」档位影响。',
       notify: '清理清单就绪时通知',
       notifyDesc: '与整理通知分开；发现低价值会话时显示 Toast。',
       dailyTime: '审阅时间',
@@ -3660,7 +3680,7 @@ const zh = {
       group: '同功能会话整理',
       enabled: '每日同功能会话整理',
       enabledDesc:
-        '在共享审阅时间找出同一功能的散开会话，建议挂接 / 归图 / 吸收。会在清理之前运行。',
+        '在共享审阅时间找出同一功能的散开会话，建议挂接 / 归图 / 吸收。会在清理之前运行。强度受上方「会话匹配智能」档位影响。',
       notify: '整理清单就绪时通知',
       notifyDesc: '与清理通知分开；发现延续簇时显示 Toast。',
       allowAbsorb: '允许「吸收」建议',
@@ -3674,7 +3694,7 @@ const zh = {
       group: '智能会话归位',
       enabled: '启用「智能归位」（默认开启）',
       enabledDesc:
-        '在聊天功能卡片栏常驻显示「智能归位」。关闭后隐藏该按钮。根据草稿 Prompt 匹配已有会话（切换或分叉）；发送仍由你手动完成。',
+        '在聊天功能卡片栏常驻显示「智能归位」。关闭后隐藏该按钮。根据草稿 Prompt 匹配已有会话（切换或分叉）；发送仍由你手动完成。强度受上方「会话匹配智能」档位影响。',
       autoApply: '高置信时自动应用归位',
       autoApplyDesc:
         '置信度高时直接 stay/switch/branch，不再弹出预览卡；你仍需自己点发送。',

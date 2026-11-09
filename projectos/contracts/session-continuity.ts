@@ -9,6 +9,7 @@ import {
   resolveSessionGraphId,
   withSessionGraphHeadProjection,
 } from "./chat-session-context.js";
+import { scoreSessionPair } from "./session-affinity.js";
 import { applyReparentToHead } from "./session-sweep.js";
 
 export const SESSION_TIDY_REASONS = [
@@ -50,34 +51,8 @@ export interface SessionTidySnoozeMap {
   [clusterOrSessionId: string]: string;
 }
 
-const TOKEN_RE = /[a-zA-Z0-9_\u4e00-\u9fff./-]{2,}/gu;
-const TIME_ADJACENT_MS = 72 * 60 * 60 * 1000;
 const ABSORB_MAX_USER_TURNS = 2;
 const MIN_PAIR_SCORE = 0.42;
-
-function tokenize(text: string): Set<string> {
-  const out = new Set<string>();
-  const lower = text.toLowerCase();
-  for (const match of lower.matchAll(TOKEN_RE)) {
-    const token = match[0]?.replace(/^\/+|\/+$/gu, "") ?? "";
-    if (token.length >= 2) out.add(token);
-  }
-  return out;
-}
-
-function jaccard(a: Set<string>, b: Set<string>): number {
-  if (a.size === 0 || b.size === 0) return 0;
-  let inter = 0;
-  for (const token of a) if (b.has(token)) inter += 1;
-  const union = a.size + b.size - inter;
-  return union === 0 ? 0 : inter / union;
-}
-
-function intersectionSize(a: Set<string>, b: Set<string>): number {
-  let n = 0;
-  for (const token of a) if (b.has(token)) n += 1;
-  return n;
-}
 
 function userTurnCount(messages: readonly ChatMessage[]): number {
   return messages.filter((m) => m.role === "user" && m.content.trim()).length;
@@ -89,35 +64,6 @@ function hasDecisionSignal(
 ): boolean {
   if ((digest?.decisions?.length ?? 0) > 0) return true;
   return (head.previewStrip ?? []).some((item) => item.kind === "decision");
-}
-
-function sessionTextBlob(record: ChatSessionRecord): string {
-  const parts = [
-    record.head.title,
-    record.head.responsibility ?? "",
-    record.contextDigest?.responsibility ?? "",
-    ...(record.contextDigest?.decisions ?? []),
-    ...(record.contextDigest?.refs ?? []),
-    ...(record.head.previewStrip ?? []).map((item) => item.title),
-  ];
-  const firstUsers = record.messages
-    .filter((m) => m.role === "user")
-    .slice(0, 3)
-    .map((m) => m.content);
-  return [...parts, ...firstUsers].join("\n");
-}
-
-function sessionRefSet(record: ChatSessionRecord): Set<string> {
-  const refs = new Set<string>();
-  for (const ref of record.contextDigest?.refs ?? []) {
-    for (const token of tokenize(ref)) refs.add(token);
-  }
-  const pathLike =
-    /\b[\w./-]+\.(?:ts|tsx|js|jsx|py|go|rs|css|json|md)\b/gu;
-  for (const match of sessionTextBlob(record).matchAll(pathLike)) {
-    refs.add(match[0]!.toLowerCase());
-  }
-  return refs;
 }
 
 function isHardExcluded(
@@ -158,62 +104,15 @@ function alreadyRelated(
   return false;
 }
 
-interface PairScore {
+function scorePair(a: ChatSessionRecord, b: ChatSessionRecord): {
   score: number;
   reasons: SessionTidyReason[];
-}
-
-function scorePair(a: ChatSessionRecord, b: ChatSessionRecord): PairScore {
-  const reasons: SessionTidyReason[] = [];
-  let score = 0;
-
-  const respA = (a.head.responsibility ?? a.contextDigest?.responsibility ?? "").trim();
-  const respB = (b.head.responsibility ?? b.contextDigest?.responsibility ?? "").trim();
-  if (respA && respB) {
-    const sim = jaccard(tokenize(respA), tokenize(respB));
-    if (sim >= 0.35) {
-      score += 0.35 * sim;
-      reasons.push("same_responsibility");
-    }
-  }
-
-  const refsA = sessionRefSet(a);
-  const refsB = sessionRefSet(b);
-  const sharedRefs = intersectionSize(refsA, refsB);
-  if (sharedRefs > 0) {
-    score += Math.min(0.35, 0.12 * sharedRefs);
-    reasons.push("shared_refs");
-  }
-
-  const intentA = tokenize(
-    [a.head.title, ...(a.head.previewStrip ?? []).map((i) => i.title)].join(" "),
-  );
-  const intentB = tokenize(
-    [b.head.title, ...(b.head.previewStrip ?? []).map((i) => i.title)].join(" "),
-  );
-  const intentSim = jaccard(intentA, intentB);
-  if (intentSim >= 0.3) {
-    score += 0.25 * intentSim;
-    reasons.push("similar_intent");
-  }
-
-  const titleSim = jaccard(tokenize(a.head.title), tokenize(b.head.title));
-  if (titleSim >= 0.4) {
-    score += 0.2 * titleSim;
-    reasons.push("title_overlap");
-  }
-
-  const ta = Date.parse(a.head.lastUpdatedAt);
-  const tb = Date.parse(b.head.lastUpdatedAt);
-  if (Number.isFinite(ta) && Number.isFinite(tb) && Math.abs(ta - tb) <= TIME_ADJACENT_MS) {
-    score += 0.12;
-    reasons.push("time_adjacent");
-  }
-
-  // Overall bag-of-words soft boost.
-  score += 0.15 * jaccard(tokenize(sessionTextBlob(a)), tokenize(sessionTextBlob(b)));
-
-  return { score, reasons: [...new Set(reasons)] };
+} {
+  const scored = scoreSessionPair(a, b);
+  return {
+    score: scored.score,
+    reasons: scored.reasons as SessionTidyReason[],
+  };
 }
 
 function pickAnchor(records: ChatSessionRecord[]): ChatSessionRecord {

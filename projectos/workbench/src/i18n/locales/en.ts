@@ -1753,6 +1753,9 @@ const en = {
           title_overlap: 'Title overlap',
         },
       },
+      affinity: {
+        llmConfirmed: 'LLM reviewed',
+      },
     },
     sessionRoute: {
       button: 'Route',
@@ -3691,11 +3694,28 @@ const en = {
       'Alert when a run pauses for your input. Opening the alert shows the recorded decision; it never approves it.',
     notificationsSummary: 'Agent, Reminder, and decision alerts',
     notificationsOff: 'Off',
+    sessionAffinity: {
+      group: 'Session matching intelligence',
+      mode: 'LLM review mode',
+      modes: {
+        off: 'No LLM',
+        balanced: 'Cost-aware',
+        accurate: 'Accuracy-first',
+      },
+      modeDesc: {
+        off: 'Heuristic matching only for Route, tidy, and cleanup. No model calls.',
+        balanced:
+          'Heuristics first; a cheap LLM only reviews borderline tidy/cleanup/route cases. Shared by Route, tidy, and cleanup.',
+        accurate:
+          'Heuristics first; a stronger LLM reviews more candidates, may rewrite tidy anchors, and dual-confirms auto-route. Higher daily budget.',
+      },
+      callsToday: 'Today: {used} / {budget} LLM reviews',
+    },
     sessionSweep: {
       group: 'Session cleanup',
       enabled: 'Daily low-value session review',
       enabledDesc:
-        'At the shared review time, nominate low-value sessions after continuity tidy. Nothing is deleted until you confirm.',
+        'At the shared review time, nominate low-value sessions after continuity tidy. Nothing is deleted until you confirm. Strength follows Session matching intelligence above.',
       notify: 'Notify when a cleanup list is ready',
       notifyDesc: 'Separate toast (and system alert when away) when low-value sessions are found.',
       dailyTime: 'Review time',
@@ -3709,7 +3729,7 @@ const en = {
       group: 'Session continuity tidy',
       enabled: 'Daily same-feature session tidy',
       enabledDesc:
-        'At the shared review time, find scattered sessions about the same feature and suggest attach / rehome / absorb. Runs before cleanup.',
+        'At the shared review time, find scattered sessions about the same feature and suggest attach / rehome / absorb. Runs before cleanup. Strength follows Session matching intelligence above.',
       notify: 'Notify when a tidy list is ready',
       notifyDesc: 'Separate toast from cleanup when continuity clusters are found.',
       allowAbsorb: 'Allow absorb suggestions',
@@ -3724,7 +3744,7 @@ const en = {
       group: 'Smart session route',
       enabled: 'Enable Route (on by default)',
       enabledDesc:
-        'Keep the Route chip in the composer function bar. Turn off to hide it. Matches the draft prompt to an existing session (switch or branch); Send stays manual.',
+        'Keep the Route chip in the composer function bar. Turn off to hide it. Matches the draft prompt to an existing session (switch or branch); Send stays manual. Strength follows Session matching intelligence above.',
       autoApply: 'Auto-apply high-confidence routes',
       autoApplyDesc:
         'When confidence is high, apply stay/switch/branch immediately without a preview card. You still press Send yourself.',

@@ -2703,6 +2703,99 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return saveChatSessionContext(workspace.workspaceRoot, sessionId, update);
   }
 
+  async judgeSessionAffinityHygiene(
+    projectId: string,
+    request: import("../contracts/session-affinity-llm.js").SessionAffinityHygieneJudgeRequest,
+  ): Promise<import("../contracts/session-affinity-llm.js").SessionAffinityHygieneJudgeResponse> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const mode = request.mode ?? "off";
+    if (mode === "off") {
+      return { tidyJudgments: {}, sweepJudgments: {}, calls: 0 };
+    }
+    const { getChatSession, listChatSessionHeads } = await import(
+      "./chat-session-service.js"
+    );
+    const {
+      judgeTidyClusters,
+      judgeSweepCandidates,
+    } = await import("./session-affinity/session-affinity-judge.js");
+    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    const heads = listChatSessionHeads(workspace.workspaceRoot);
+    const recordsById = new Map<
+      string,
+      import("../contracts/chat-session.js").ChatSessionRecord
+    >();
+    for (const head of heads) {
+      const record = getChatSession(workspace.workspaceRoot, head.id);
+      if (record) recordsById.set(head.id, record);
+    }
+    const deps = {
+      gateway: this.modelGateway,
+      profile,
+      projectId,
+      mode,
+      callsUsedToday: Math.max(0, request.callsUsedToday ?? 0),
+    };
+    let calls = 0;
+    const tidyJudgments: Record<
+      string,
+      import("../contracts/session-affinity-llm.js").AffinityJudgeResult
+    > = {};
+    const sweepJudgments: Record<
+      string,
+      import("../contracts/session-affinity-llm.js").AffinityJudgeResult
+    > = {};
+    if (request.tidyPlan) {
+      const tidy = await judgeTidyClusters(request.tidyPlan, recordsById, {
+        ...deps,
+        callsUsedToday: deps.callsUsedToday + calls,
+      });
+      calls += tidy.calls;
+      for (const [id, judgment] of tidy.judgments) tidyJudgments[id] = judgment;
+    }
+    if (request.sweepPlan) {
+      const sweep = await judgeSweepCandidates(request.sweepPlan, recordsById, {
+        ...deps,
+        callsUsedToday: deps.callsUsedToday + calls,
+      });
+      calls += sweep.calls;
+      for (const [id, judgment] of sweep.judgments) sweepJudgments[id] = judgment;
+    }
+    return { tidyJudgments, sweepJudgments, calls };
+  }
+
+  async judgeSessionAffinityRoute(
+    projectId: string,
+    request: import("../contracts/session-affinity-llm.js").SessionAffinityRouteJudgeRequest,
+  ): Promise<import("../contracts/session-affinity-llm.js").SessionAffinityRouteJudgeResponse> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const mode = request.mode ?? "off";
+    if (mode === "off") return { judgment: null, calls: 0 };
+    const { getChatSession, listChatSessionHeads } = await import(
+      "./chat-session-service.js"
+    );
+    const { judgeRouteSuggestion } = await import(
+      "./session-affinity/session-affinity-judge.js"
+    );
+    const profile = this.settingsService.resolveModelProfile(workspace.settings);
+    const heads = listChatSessionHeads(workspace.workspaceRoot);
+    const recordsById = new Map<
+      string,
+      import("../contracts/chat-session.js").ChatSessionRecord
+    >();
+    for (const head of heads) {
+      const record = getChatSession(workspace.workspaceRoot, head.id);
+      if (record) recordsById.set(head.id, record);
+    }
+    return judgeRouteSuggestion(request.prompt, request.suggestion, recordsById, {
+      gateway: this.modelGateway,
+      profile,
+      projectId,
+      mode,
+      callsUsedToday: Math.max(0, request.callsUsedToday ?? 0),
+    });
+  }
+
   async forkChatSession(
     projectId: string,
     parentSessionId: string,

@@ -95,6 +95,34 @@ export function setSessionCanvasPosition(
   }
 }
 
+/** Batch-write canvas positions for overlap repair / tidy passes. */
+export function setSessionCanvasPositions(
+  layout: SessionGraphCanvasLayout,
+  graphId: string,
+  positions: Record<string, SessionGraphPoint>,
+): SessionGraphCanvasLayout {
+  const entries = Object.entries(positions)
+  if (entries.length === 0) return layout
+  const current = layout.graphs[graphId] ?? {}
+  const next: SessionGraphCanvasPositions = { ...current }
+  let changed = false
+  for (const [sessionId, point] of entries) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue
+    const prev = next[sessionId]
+    if (prev && prev.x === point.x && prev.y === point.y) continue
+    next[sessionId] = { x: Math.max(0, point.x), y: Math.max(0, point.y) }
+    changed = true
+  }
+  if (!changed) return layout
+  return {
+    version: 1,
+    graphs: {
+      ...layout.graphs,
+      [graphId]: next,
+    },
+  }
+}
+
 /** Drop overrides for sessions that no longer belong to the graph. */
 export function pruneGraphCanvasPositions(
   layout: SessionGraphCanvasLayout,
@@ -131,26 +159,46 @@ export function pruneGraphCanvasPositions(
 /**
  * Overlay manual positions onto an ELK layout and expand the world so
  * dragged nodes remain inside the pannable bounds.
+ *
+ * When `liveIds` is provided, overrides for those ids are applied even if ELK
+ * has not emitted them yet — so a freshly forked child can bind to its fork
+ * slot before the next layout pass. Without `liveIds`, only ids already in
+ * the ELK layout are overridden (legacy behavior).
  */
 export function applyCanvasPositionOverrides(
   layout: SessionGraphLayout,
   overrides: SessionGraphCanvasPositions,
+  options?: {
+    liveIds?: Iterable<string>
+    fallbackHeights?: Record<string, number>
+  },
 ): SessionGraphLayout {
   if (Object.keys(overrides).length === 0) return layout
 
+  const live = options?.liveIds ? new Set(options.liveIds) : null
   const positions = { ...layout.positions }
+  const heights = { ...layout.heights }
   let width = layout.width
   let height = layout.height
+  let changed = false
 
   for (const [id, point] of Object.entries(overrides)) {
-    if (!(id in positions)) continue
+    const allowed = live ? live.has(id) : id in positions
+    if (!allowed) continue
     const x = Math.max(0, point.x)
     const y = Math.max(0, point.y)
     positions[id] = { x, y }
-    const nodeHeight = layout.heights[id] ?? SESSION_NODE_HEIGHT
+    if (!(id in heights)) {
+      heights[id] =
+        options?.fallbackHeights?.[id] ?? SESSION_NODE_HEIGHT
+    }
+    const nodeHeight =
+      options?.fallbackHeights?.[id] ?? heights[id] ?? SESSION_NODE_HEIGHT
     width = Math.max(width, x + SESSION_NODE_WIDTH + WORLD_PAD)
     height = Math.max(height, y + nodeHeight + WORLD_PAD)
+    changed = true
   }
 
-  return { ...layout, positions, width, height }
+  if (!changed) return layout
+  return { ...layout, positions, heights, width, height }
 }

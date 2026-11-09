@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
-import type { SessionSweepPlan } from '@contracts/index'
+import type { SessionSweepPlanWithLlm } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useSessionSweepStore } from '../../state/sessionSweepStore'
 import SessionTranscriptAccordion from './SessionTranscriptAccordion'
 import styles from './SessionGraphCenterSheet.module.css'
 
 interface Props {
-  plan: SessionSweepPlan
+  plan: SessionSweepPlanWithLlm
   onLocate: (sessionId: string) => void
 }
 
@@ -22,7 +22,9 @@ export default function SessionSweepReviewSheet({ plan, onLocate }: Props) {
 
   useEffect(() => {
     const next: Record<string, boolean> = {}
-    for (const candidate of plan.candidates) next[candidate.sessionId] = true
+    for (const candidate of plan.candidates) {
+      next[candidate.sessionId] = candidate.defaultChecked !== false
+    }
     setChecked(next)
     setExpandedSessionId(null)
   }, [plan])
@@ -140,11 +142,21 @@ export default function SessionSweepReviewSheet({ plan, onLocate }: Props) {
                           <span className={`${styles.chip} ${styles.chipAction}`}>
                             {ts(`chat.sessionGraph.sweep.action.${candidate.action}`)}
                           </span>
+                          {candidate.llmSource === 'llm' ? (
+                            <span className={styles.chip}>
+                              {ts('chat.sessionGraph.affinity.llmConfirmed')}
+                            </span>
+                          ) : null}
                           {candidate.reasons.map((reason) => (
                             <span key={reason} className={styles.chip}>
                               {ts(`chat.sessionGraph.sweep.reason.${reason}`)}
                             </span>
                           ))}
+                          {candidate.llmRationale ? (
+                            <span className={styles.chip} title={candidate.llmRationale}>
+                              {candidate.llmRationale}
+                            </span>
+                          ) : null}
                         </>
                       }
                       aside={

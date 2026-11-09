@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
-import type { SessionTidyActionKind, SessionTidyPlan } from '@contracts/index'
+import type { SessionTidyActionKind, SessionTidyPlanWithLlm } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useSessionSweepStore } from '../../state/sessionSweepStore'
 import SessionTranscriptAccordion from './SessionTranscriptAccordion'
 import styles from './SessionGraphCenterSheet.module.css'
 
 interface Props {
-  plan: SessionTidyPlan
+  plan: SessionTidyPlanWithLlm
   onLocate: (sessionId: string) => void
 }
 
@@ -37,7 +37,10 @@ export default function SessionTidyReviewSheet({ plan, onLocate }: Props) {
             ? 'attach'
             : member.suggestedAction
       }
-      next[cluster.id] = { accepted: true, actions }
+      next[cluster.id] = {
+        accepted: cluster.defaultChecked !== false,
+        actions,
+      }
     }
     setDrafts(next)
     setExpandedSessionId(null)
@@ -130,6 +133,16 @@ export default function SessionTidyReviewSheet({ plan, onLocate }: Props) {
                   />
                   <div className={styles.rowBody}>
                     <div className={styles.rowTitle}>{cluster.label}</div>
+                    {cluster.llmRationale || cluster.llmSource === 'llm' ? (
+                      <p className={styles.rowHint}>
+                        {cluster.llmSource === 'llm'
+                          ? ts('chat.sessionGraph.affinity.llmConfirmed')
+                          : null}
+                        {cluster.llmRationale
+                          ? ` ${cluster.llmRationale}`
+                          : null}
+                      </p>
+                    ) : null}
                     {anchor ? (
                       <SessionTranscriptAccordion
                         sessionId={anchor.sessionId}

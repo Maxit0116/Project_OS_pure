@@ -9,7 +9,10 @@ import {
   isSubstantiveChat,
   resolveChatSessionClassification,
 } from "./chat-session-context.js";
-import { orderSessionIdsForDeletion } from "./chat-session-empty.js";
+import {
+  isUnusedForkChildSessionRecord,
+  orderSessionIdsForDeletion,
+} from "./chat-session-empty.js";
 
 export const SESSION_SWEEP_REASON = [
   "misc",
@@ -108,6 +111,25 @@ export function isSessionSweepHardExcluded(
  * Heuristic: low-value / one-shot sessions that are safe to nominate for daily cleanup.
  * All low-value sessions are in scope (not limited to "opened today").
  */
+/**
+ * Manual Session Graph remove (archive / delete control):
+ * - low-value or unused fork child → hard delete
+ * - otherwise → demote to Misc (caller handles placeSessionOnGraph)
+ *
+ * Running / awaiting sessions stay on the graph (return false) so the agent
+ * work is not discarded from the remove control.
+ */
+export function shouldHardDeleteInsteadOfMisc(
+  record: ChatSessionRecord,
+  options: { nowMs?: number } = {},
+): boolean {
+  if (record.head.status === "running" || record.head.status === "awaiting_review") {
+    return false;
+  }
+  if (isUnusedForkChildSessionRecord(record)) return true;
+  return classifyLowValueSession(record, options).length > 0;
+}
+
 export function classifyLowValueSession(
   record: ChatSessionRecord,
   options: { nowMs?: number } = {},
