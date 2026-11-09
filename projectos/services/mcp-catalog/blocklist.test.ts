@@ -32,9 +32,10 @@ const document: McpCatalogDocument = {
 };
 
 describe("mcp catalog blocklist", () => {
-  it("filters disabled listings", () => {
+  it("keeps disabled listings visible", () => {
     const prefs = withDisabledListing(undefined, "a");
     expect(filterInstallableListings(document, prefs).map((l) => l.id)).toEqual([
+      "a",
       "b",
     ]);
   });

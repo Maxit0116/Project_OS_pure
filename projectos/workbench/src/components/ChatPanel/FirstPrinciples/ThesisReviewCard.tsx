@@ -6,6 +6,8 @@ import type {
 } from '@contracts/index'
 import { useI18n } from '../../../i18n'
 import Button from '../../ui/Button'
+import TextArea from '../../ui/TextArea'
+import TextInput from '../../ui/TextInput'
 import refinementStyles from '../PromptRefinementCard.module.css'
 import styles from './FirstPrinciples.module.css'
 
@@ -78,46 +80,48 @@ export default function ThesisReviewCard({
           ['mvp', 'firstPrinciples.thesis.fieldMvp'],
           ['successSignal', 'firstPrinciples.thesis.fieldSuccess'],
         ] as const
-      ).map(([key, labelKey]) => (
-        <div key={key} className={styles.thesisField}>
-          <label htmlFor={`fp-thesis-${key}`}>{ts(labelKey)}</label>
-          {key === 'thesis' || key === 'mvp' || key === 'whyNow' ? (
-            <textarea
-              id={`fp-thesis-${key}`}
-              rows={2}
-              value={thesis[key]}
-              disabled={concluded || submitting}
-              onChange={(event) => patch(key, event.target.value)}
-            />
-          ) : (
-            <input
-              id={`fp-thesis-${key}`}
-              value={thesis[key]}
-              disabled={concluded || submitting}
-              onChange={(event) => patch(key, event.target.value)}
-            />
-          )}
-        </div>
-      ))}
+      ).map(([key, labelKey]) =>
+        key === 'thesis' || key === 'mvp' || key === 'whyNow' ? (
+          <TextArea
+            key={key}
+            fieldClassName={styles.thesisField}
+            id={`fp-thesis-${key}`}
+            label={ts(labelKey)}
+            rows={2}
+            value={thesis[key]}
+            disabled={concluded || submitting}
+            onChange={(event) => patch(key, event.target.value)}
+          />
+        ) : (
+          <TextInput
+            key={key}
+            fieldClassName={styles.thesisField}
+            id={`fp-thesis-${key}`}
+            label={ts(labelKey)}
+            value={thesis[key]}
+            disabled={concluded || submitting}
+            onChange={(event) => patch(key, event.target.value)}
+          />
+        ),
+      )}
 
-      <div className={styles.thesisField}>
-        <label htmlFor="fp-thesis-nongoals">{ts('firstPrinciples.thesis.fieldNonGoals')}</label>
-        <textarea
-          id="fp-thesis-nongoals"
-          rows={2}
-          value={thesis.nonGoals.join('\n')}
-          disabled={concluded || submitting}
-          onChange={(event) =>
-            patch(
-              'nonGoals',
-              event.target.value
-                .split('\n')
-                .map((line) => line.trim())
-                .filter(Boolean),
-            )
-          }
-        />
-      </div>
+      <TextArea
+        fieldClassName={styles.thesisField}
+        id="fp-thesis-nongoals"
+        label={ts('firstPrinciples.thesis.fieldNonGoals')}
+        rows={2}
+        value={thesis.nonGoals.join('\n')}
+        disabled={concluded || submitting}
+        onChange={(event) =>
+          patch(
+            'nonGoals',
+            event.target.value
+              .split('\n')
+              .map((line) => line.trim())
+              .filter(Boolean),
+          )
+        }
+      />
 
       <div className={styles.thesisField}>
         <label htmlFor="fp-thesis-verdict">{ts('firstPrinciples.thesis.fieldVerdict')}</label>

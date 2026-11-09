@@ -40,49 +40,6 @@
   gap: 6px;
 }
 
-.label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--tech-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
-
-.input {
-  appearance: none;
-  -webkit-appearance: none;
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid var(--tech-border);
-  background-color: var(--tech-bg-muted);
-  background-image: none;
-  color: var(--tech-text-primary);
-  caret-color: var(--tech-text-primary);
-  border-radius: 6px;
-  padding: 8px 10px;
-  font: inherit;
-  font-size: 13px;
-  outline: none;
-  box-shadow: none;
-}
-
-.input::placeholder {
-  color: var(--tech-text-muted);
-  opacity: 1;
-}
-
-.input:hover:not(:disabled) {
-  border-color: var(--tech-border-strong);
-}
-
-.input:focus,
-.input:focus-visible {
-  outline: none;
-  border-color: var(--tech-border-strong);
-  box-shadow: var(--tech-shadow-focus);
-}
-
 .presets {
   display: flex;
   flex-wrap: wrap;

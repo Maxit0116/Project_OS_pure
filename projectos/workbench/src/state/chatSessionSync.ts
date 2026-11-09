@@ -128,14 +128,19 @@ export function buildChatSessionRecord(
   state: ChatSessionSyncState,
   sessionId: string,
   existingHead: ChatSessionHead | undefined,
+  options?: { touchActivity?: boolean },
 ): ChatSessionRecord {
   const now = new Date().toISOString()
+  const touchActivity = options?.touchActivity ?? true
+  // Leave-flush without new activity must not float the session above peers.
+  const lastUpdatedAt =
+    touchActivity || !existingHead?.lastUpdatedAt ? now : existingHead.lastUpdatedAt
   const title = resolvePersistedChatSessionTitle(existingHead)
   const head: ChatSessionHead = {
     id: sessionId,
     title,
     createdAt: existingHead?.createdAt ?? now,
-    lastUpdatedAt: now,
+    lastUpdatedAt,
     chatMode: state.chatMode,
     isArchived: existingHead?.isArchived ?? false,
     status: deriveChatSessionStatus(state),

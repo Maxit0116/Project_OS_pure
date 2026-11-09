@@ -5,6 +5,7 @@ import { useSessionRouteStore } from '../../state/sessionRouteStore'
 import { useSessionSweepStore } from '../../state/sessionSweepStore'
 import { localDateKey, syncAffinityLlmBudgetDay } from '../../preferences/sessionSweep'
 import Button from '../ui/Button'
+import TextInput from '../ui/TextInput'
 import PresentationModeToggle from './PresentationModeToggle'
 import SettingsGroup from './SettingsGroup'
 import SettingsRow from './SettingsRow'
@@ -112,9 +113,9 @@ export default function SessionSweepSettingsSection() {
           title={ts('settings.sessionSweep.snoozeDays')}
           description={ts('settings.sessionSweep.snoozeDaysDesc')}
         >
-          <input
-            className={styles.select}
+          <TextInput
             type="number"
+            size="sm"
             min={1}
             max={90}
             value={preferences.snoozeDays}

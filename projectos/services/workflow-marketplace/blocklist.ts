@@ -13,10 +13,11 @@ export function disabledWorkflowListingIdSet(
 
 export function filterInstallableWorkflowListings(
   document: WorkflowCatalogDocument,
-  prefs: WorkflowMarketplacePrefs | undefined,
+  _prefs: WorkflowMarketplacePrefs | undefined,
 ): WorkflowCatalogListing[] {
-  const disabled = disabledWorkflowListingIdSet(prefs);
-  return document.listings.filter((listing) => !disabled.has(listing.id));
+  // Hide/disable is retired — catalog listings stay visible.
+  void _prefs;
+  return document.listings;
 }
 
 export function withDisabledWorkflowListing(

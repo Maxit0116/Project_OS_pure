@@ -11,6 +11,7 @@ import {
   resolveRepoSyncButtons,
 } from './repoQuickOps'
 import { useComposerRepoOps } from './useComposerRepoOps'
+import TextInput from '../ui/TextInput'
 import styles from './ComposerRepoQuickOps.module.css'
 
 interface Props {
@@ -190,8 +191,9 @@ export default function ComposerRepoQuickOps({
           }}
         >
           <div className={styles.formRow}>
-            <input
-              className={styles.input}
+            <TextInput
+              fieldClassName={styles.fieldGrow}
+              size="sm"
               value={ops.branchDraft}
               placeholder={strings.repoNewBranchPlaceholder}
               aria-label={strings.repoNewBranch}
@@ -231,8 +233,9 @@ export default function ComposerRepoQuickOps({
           }}
         >
           <div className={styles.formRow}>
-            <input
-              className={styles.input}
+            <TextInput
+              fieldClassName={styles.fieldGrow}
+              size="sm"
               value={ops.prTitleDraft}
               placeholder={strings.repoPrTitlePlaceholder}
               aria-label={strings.repoCreatePr}

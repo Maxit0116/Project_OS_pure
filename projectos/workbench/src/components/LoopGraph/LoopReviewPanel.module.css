@@ -1,0 +1,253 @@
+.panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #fbbf24 45%, var(--tech-border));
+  border-radius: 6px;
+  background: color-mix(in srgb, #fbbf24 10%, var(--tech-bg-elevated));
+  color: var(--tech-text-primary);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.staleAction {
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 4px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.staleAction:hover {
+  border-color: var(--tech-accent);
+}
+
+.strip {
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  padding: 10px 12px;
+}
+
+.stripHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stripGoal {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+  line-height: 1.35;
+}
+
+.stripMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.chipMuted {
+  color: var(--tech-text-muted);
+}
+
+.toggle {
+  border: 0;
+  background: transparent;
+  color: var(--tech-text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  color: var(--tech-text-primary);
+}
+
+.stripBody {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  line-height: 1.45;
+}
+
+.stripSection strong {
+  color: var(--tech-text-primary);
+  font-weight: 600;
+}
+
+.stripHint {
+  margin: 6px 0 0;
+  font-size: 10px;
+  color: var(--tech-text-muted);
+}
+
+.split {
+  flex: 1;
+  min-height: 220px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.9fr);
+  gap: 10px;
+}
+
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mapCol,
+.gateCol {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gateCol {
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  padding: 10px;
+  overflow: auto;
+}
+
+.sectionTitle {
+  margin: 0 0 6px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.policyRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.gateList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.gateRow {
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.gateRow:hover,
+.gateRowActive {
+  background: var(--tech-bg-muted);
+}
+
+.empty {
+  margin: 0 0 10px;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-muted);
+}
+
+.detail {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--tech-border);
+}
+
+.detailTitle {
+  margin: 0 0 4px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.detailMeta {
+  margin: 0 0 6px;
+  font-size: 10px;
+  color: var(--tech-text-muted);
+}
+
+.detailBody {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  line-height: 1.45;
+}
+
+.detailList {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+}
+
+.neighbors {
+  margin: 8px 0 0;
+  font-size: 10px;
+  color: var(--tech-text-muted);
+}
+
+.hitlActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.actionButton {
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 4px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+  font-size: var(--font-size-xs);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.actionButtonPrimary {
+  background: var(--tech-accent);
+  color: var(--tech-bg-canvas);
+  border-color: transparent;
+}

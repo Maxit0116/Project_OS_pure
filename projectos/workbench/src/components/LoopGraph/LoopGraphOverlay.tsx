@@ -20,8 +20,8 @@ import { useLoopGraphStore, type LoopPhase } from '../../state/loopGraphStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import AgentPicker from '../AgentWorkforce/AgentPicker'
 import { GraphOverlayFrame } from '../GraphOverlay/GraphOverlayFrame'
-import Checkbox from '../ui/Checkbox'
 import LoopGoalComposer from './LoopGoalComposer'
+import LoopReviewPanel, { reviewApproveEnabled } from './LoopReviewPanel'
 import LoopGraphContextMenu, {
   type LoopGraphContextMenuState,
 } from './LoopGraphContextMenu'
@@ -32,11 +32,13 @@ import LoopConfigAssetPicker, {
 import LoopGraphPalette from './LoopGraphPalette'
 import LoopNodeDutyCard from './LoopNodeDutyCard'
 import LoopGraphRail from './LoopGraphRail'
+import LoopRunSidePanel from './LoopRunSidePanel'
 import {
   decodePaletteDragPayload,
   LOOP_PALETTE_MIME,
   visualForIntentNode,
 } from './loopNodeVisuals'
+import { toneFromNodeRecordStatus } from './loopRunVisuals'
 import {
   AGENT_WIRING_PORTS,
   expectedConfigPort,
@@ -64,8 +66,8 @@ import {
   LOOP_NODE_W,
   nearestPort,
   portPoint,
+  formatEdgeLabel,
   routeLoopEdge,
-  truncateEdgeLabel,
 } from './loopEdgeRouting'
 import styles from './LoopGraphOverlay.module.css'
 
@@ -123,6 +125,8 @@ export default function LoopGraphOverlay() {
   const resumeRun = useLoopGraphStore((s) => s.resumeRun)
   const advanceRun = useLoopGraphStore((s) => s.advanceRun)
   const resolveHitl = useLoopGraphStore((s) => s.resolveHitl)
+  const runHistory = useLoopGraphStore((s) => s.runHistory)
+  const refreshRunHistory = useLoopGraphStore((s) => s.refreshRunHistory)
   const linkActiveSession = useLoopGraphStore((s) => s.linkActiveSession)
 
   const [viewport, setViewport] = useState({ x: 32, y: 32, scale: 1 })
@@ -173,6 +177,11 @@ export default function LoopGraphOverlay() {
     if (!open || !project) return
     void loadForWorkspace()
   }, [open, project, loadForWorkspace])
+
+  useEffect(() => {
+    setAcceptedAssumptions({})
+    setConfirmedCycles({})
+  }, [compileResult?.specDraft.version])
 
   useEffect(() => {
     if (!project?.projectId) {
@@ -234,6 +243,11 @@ export default function LoopGraphOverlay() {
       setDutyCardNodeId(null)
     }
   }, [document, dutyCardNodeId])
+
+  useEffect(() => {
+    if (phase !== 'run') return
+    void refreshRunHistory()
+  }, [phase, document?.id, refreshRunHistory])
 
   const activeInstance = useMemo(() => {
     const instances = document?.instances ?? []
@@ -578,7 +592,14 @@ export default function LoopGraphOverlay() {
                 type="button"
                 className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
                 onClick={() => void approve()}
-                disabled={!compileResult}
+                disabled={
+                  !reviewApproveEnabled({
+                    compileResult,
+                    draftRevision: document?.draft.revision ?? -1,
+                    acceptedAssumptions,
+                    confirmedCycles,
+                  })
+                }
               >
                 {ts('chat.loopGraph.approve')}
               </button>
@@ -669,90 +690,20 @@ export default function LoopGraphOverlay() {
         <div className={styles.body}>
           <div className={styles.stage}>
             {phase === 'review' && compileResult ? (
-              <div className={styles.review}>
-                <div className={styles.reviewCard}>
-                  <h3>{ts('chat.loopGraph.goalUnderstanding')}</h3>
-                  <p>{compileResult.specDraft.goal}</p>
-                </div>
-                <div className={styles.reviewCard}>
-                  <h3>{ts('chat.loopGraph.executionPlan')}</h3>
-                  <ol>
-                    {compileResult.specDraft.nodes.map((node) => (
-                      <li key={node.id}>
-                        <strong>{node.role}</strong> — {node.goal}
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-                <div className={styles.reviewCard}>
-                  <h3>{ts('chat.loopGraph.assumptions')}</h3>
-                  {compileResult.assumptions.length === 0 ? (
-                    <p>{ts('chat.loopGraph.noAssumptions')}</p>
-                  ) : (
-                    compileResult.assumptions.map((item) => (
-                      <Checkbox
-                        key={item.id}
-                        className={styles.assumptionRow}
-                        checked={acceptedAssumptions[item.id] ?? false}
-                        onCheckedChange={(next) =>
-                          setAcceptedAssumptions((current) => ({
-                            ...current,
-                            [item.id]: next,
-                          }))
-                        }
-                        label={item.text}
-                      />
-                    ))
-                  )}
-                </div>
-                <div className={styles.reviewCard}>
-                  <h3>{ts('chat.loopGraph.cycleGates')}</h3>
-                  {compileResult.cycleGates.length === 0 ? (
-                    <p>{ts('chat.loopGraph.noCycles')}</p>
-                  ) : (
-                    compileResult.cycleGates.map((gate) => (
-                      <Checkbox
-                        key={gate.edgeId}
-                        className={styles.cycleRow}
-                        checked={confirmedCycles[gate.edgeId] ?? false}
-                        onCheckedChange={(next) =>
-                          setConfirmedCycles((current) => ({
-                            ...current,
-                            [gate.edgeId]: next,
-                          }))
-                        }
-                        label={`${gate.triggerWhen} · max ${gate.maxRounds}`}
-                      />
-                    ))
-                  )}
-                </div>
-                {activeInstance?.status === 'awaiting_hitl' ? (
-                  <div className={styles.reviewCard}>
-                    <h3>{ts('chat.loopGraph.hitl')}</h3>
-                    <p>{ts('chat.loopGraph.hitlHint')}</p>
-                    <div className={styles.headerActions}>
-                      <button
-                        type="button"
-                        className={styles.actionButton}
-                        onClick={() =>
-                          void resolveHitl([{ questionId: 'stop', answer: 'stop' }])
-                        }
-                      >
-                        {ts('chat.loopGraph.hitlStop')}
-                      </button>
-                      <button
-                        type="button"
-                        className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
-                        onClick={() =>
-                          void resolveHitl([{ questionId: 'continue', answer: 'continue' }])
-                        }
-                      >
-                        {ts('chat.loopGraph.hitlContinue')}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
+              <LoopReviewPanel
+                compileResult={compileResult}
+                draftRevision={document?.draft.revision ?? 0}
+                goalContext={
+                  document?.confirmedGoalContext ?? document?.draftGoalContext ?? null
+                }
+                activeInstance={activeInstance}
+                acceptedAssumptions={acceptedAssumptions}
+                confirmedCycles={confirmedCycles}
+                onAcceptedAssumptionsChange={setAcceptedAssumptions}
+                onConfirmedCyclesChange={setConfirmedCycles}
+                onBackToDraw={() => setPhase('draw')}
+                onResolveHitl={(answers) => void resolveHitl(answers)}
+              />
             ) : (
               <div
                 ref={canvasRef}
@@ -927,11 +878,12 @@ export default function LoopGraphOverlay() {
                           !provides && (!edge.prompt?.trim() || !edge.kind)
                         const feedback = edge.kind === 'feedback'
                         const conditional = edge.kind === 'conditional'
+                        const fallback = edge.kind === 'fallback'
                         const label = provides
                           ? edge.configPort ??
                             expectedConfigPort(source) ??
                             ts('chat.loopGraph.wiringProvides')
-                          : truncateEdgeLabel(
+                          : formatEdgeLabel(
                               edge.branchKey
                                 ? `${edge.branchKey}: ${edge.prompt ?? ''}`
                                 : (edge.prompt ?? ''),
@@ -958,34 +910,32 @@ export default function LoopGraphOverlay() {
                               className={`${styles.edge} ${
                                 feedback ? styles.edgeFeedback : ''
                               } ${conditional ? styles.edgeConditional : ''} ${
+                                fallback ? styles.edgeFallback : ''
+                              } ${
                                 provides ? styles.edgeProvides : ''
                               } ${incomplete ? styles.edgeIncomplete : ''}`}
                               d={routed.d}
                               pointerEvents="none"
                             />
                             {!provides ? (
-                              <>
-                                <rect
-                                  className={styles.edgeLabelBg}
-                                  x={routed.mid.x - 48}
-                                  y={routed.mid.y - 9}
-                                  width={96}
-                                  height={18}
-                                  rx={4}
-                                  pointerEvents="none"
-                                />
-                                <text
-                                  className={`${styles.edgeLabel} ${
-                                    incomplete ? styles.edgeLabelPending : ''
+                              <foreignObject
+                                className={styles.edgeLabelForeign}
+                                x={routed.mid.x}
+                                y={routed.mid.y}
+                                width={1}
+                                height={1}
+                                pointerEvents="none"
+                              >
+                                <div
+                                  xmlns="http://www.w3.org/1999/xhtml"
+                                  className={`${styles.edgeLabelChip} ${
+                                    incomplete ? styles.edgeLabelChipPending : ''
                                   }`}
-                                  x={routed.mid.x}
-                                  y={routed.mid.y + 4}
-                                  textAnchor="middle"
-                                  pointerEvents="none"
+                                  title={label}
                                 >
                                   {label}
-                                </text>
-                              </>
+                                </div>
+                              </foreignObject>
                             ) : (
                               <text
                                 className={styles.edgeProvidesLabel}
@@ -1012,6 +962,17 @@ export default function LoopGraphOverlay() {
                       const isCursor = activeInstance?.cursorNodeId === node.id
                       const isHitl =
                         activeInstance?.status === 'awaiting_hitl' && isCursor
+                      const recordStatus = activeInstance?.nodeRecords?.find(
+                        (item) => item.nodeId === node.id,
+                      )?.status
+                      const runTone =
+                        phase === 'run'
+                          ? toneFromNodeRecordStatus(recordStatus, {
+                              isCursor,
+                              instanceAwaitingHitl:
+                                activeInstance?.status === 'awaiting_hitl',
+                            })
+                          : null
                       const configSatellite = isConfigNode(node)
                       const isAgentDuty =
                         !configSatellite && (node.type ?? 'agent') === 'agent'
@@ -1054,6 +1015,14 @@ export default function LoopGraphOverlay() {
                             incomplete ? styles.nodeIncomplete : ''
                           } ${isCursor && phase === 'run' ? styles.nodeRunning : ''} ${
                             isHitl ? styles.nodeHitl : ''
+                          } ${
+                            runTone === 'succeeded'
+                              ? styles.nodeSucceeded
+                              : runTone === 'failed' || runTone === 'blocked'
+                                ? styles.nodeFailed
+                                : runTone === 'waiting' || runTone === 'waiting_approval'
+                                  ? styles.nodeHitl
+                                  : ''
                           }`}
                           style={{
                             left: node.position.x,
@@ -1062,6 +1031,7 @@ export default function LoopGraphOverlay() {
                             minHeight: size.height,
                           }}
                           data-loop-node={node.id}
+                          data-loop-node-status={runTone ?? undefined}
                           aria-label={`${visual.shortLabel}: ${node.title || ts('chat.loopGraph.untitledNode')}`}
                           onDoubleClick={(event) => {
                             event.stopPropagation()
@@ -1191,6 +1161,13 @@ export default function LoopGraphOverlay() {
                               )
                             })}
                           <div className={styles.nodeTop}>
+                            {runTone ? (
+                              <span
+                                className={`${styles.statusDot} ${styles[`status_${runTone}`] ?? ''}`}
+                                title={runTone}
+                                aria-label={runTone}
+                              />
+                            ) : null}
                             <span
                               className={`${styles.nodeIcon} ${categoryClass}`}
                               title={visual.shortLabel}
@@ -1386,10 +1363,6 @@ export default function LoopGraphOverlay() {
 
             {phase === 'run' && activeInstance ? (
               <div className={styles.runPanel}>
-                <div>
-                  {ts('chat.loopGraph.instanceStatus')}: {activeInstance.status} · round{' '}
-                  {activeInstance.round}
-                </div>
                 {activeInstance.status === 'awaiting_hitl' ? (
                   <div className={styles.hitlActions}>
                     {(activeInstance.hitlQuestionIds ?? ['continue']).map((questionId) => {
@@ -1477,12 +1450,10 @@ export default function LoopGraphOverlay() {
                     })}
                   </div>
                 ) : null}
-                {activeInstance.events.slice(-8).map((event) => (
-                  <div key={event.id} className={styles.runEvent}>
-                    {event.at.slice(11, 19)} · {event.type}
-                    {event.message ? ` — ${event.message}` : ''}
-                  </div>
-                ))}
+                <LoopRunSidePanel
+                  instance={activeInstance}
+                  history={runHistory}
+                />
               </div>
             ) : null}
           </div>

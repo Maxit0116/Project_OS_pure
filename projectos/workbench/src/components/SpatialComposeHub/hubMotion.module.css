@@ -491,46 +491,9 @@
   flex-shrink: 0;
 }
 
-.refUrlInput {
-  appearance: none;
-  -webkit-appearance: none;
+.refUrlFieldGrow {
   flex: 1;
   min-width: 0;
-  height: 26px;
-  margin: 0;
-  padding: 0 8px;
-  border-radius: 5px;
-  border: 1px solid var(--tech-border);
-  /* background-color beats Electron/WebKit UA white on <input> */
-  background-color: var(--tech-bg-muted);
-  background-image: none;
-  color: var(--tech-text-primary);
-  caret-color: var(--tech-text-primary);
-  font: inherit;
-  font-size: 11px;
-  line-height: 1.2;
-  outline: none;
-  box-shadow: none;
-}
-
-.refUrlInput::placeholder {
-  color: var(--tech-text-muted);
-  opacity: 1;
-}
-
-.refUrlInput:focus {
-  border-color: color-mix(in srgb, var(--sat-accent) 55%, var(--tech-border));
-  background-color: var(--tech-bg-muted);
-  background-image: none;
-}
-
-.refUrlInput:-webkit-autofill,
-.refUrlInput:-webkit-autofill:hover,
-.refUrlInput:-webkit-autofill:focus {
-  -webkit-text-fill-color: var(--tech-text-primary);
-  caret-color: var(--tech-text-primary);
-  box-shadow: 0 0 0 1000px var(--tech-bg-muted) inset;
-  transition: background-color 99999s ease-out;
 }
 
 .refAddBtn {
@@ -1070,6 +1033,11 @@
 .field:focus-visible {
   outline: none;
   box-shadow: var(--tech-shadow-focus);
+}
+
+.subagentField {
+  display: block;
+  width: 100%;
 }
 
 .fieldName {

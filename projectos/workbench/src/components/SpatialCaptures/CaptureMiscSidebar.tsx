@@ -9,6 +9,7 @@ import { useSpatialCaptureStore } from '../../state/spatialCaptureStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useCaptureFolderDnD } from './CaptureFolderDnDContext'
 import dndStyles from './CaptureFolderDnD.module.css'
+import TextInput from '../ui/TextInput'
 import styles from './CaptureMiscSidebar.module.css'
 
 export default function CaptureMiscSidebar() {
@@ -221,11 +222,12 @@ export default function CaptureMiscSidebar() {
                   </div>
                   {mergeFromId === head.id ? (
                     <div className={styles.mergeBox} data-capture-drag-ignore="">
-                      <input
+                      <TextInput
                         className={styles.mergeInput}
                         value={mergeFolderName}
                         onChange={(event) => setMergeFolderName(event.target.value)}
                         placeholder={ts('spatialCaptures.folderNamePlaceholder')}
+                        aria-label={ts('spatialCaptures.folderNamePlaceholder')}
                       />
                       <p className={styles.mergeHint}>
                         {ts('spatialCaptures.mergePickHint')}

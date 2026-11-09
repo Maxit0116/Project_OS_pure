@@ -11,6 +11,7 @@ import { useI18n } from '../../i18n'
 import RestrictedMarkdown from '../ChatPanel/RestrictedMarkdown'
 import Chip from '../ui/Chip'
 import Button from '../ui/Button'
+import TextArea from '../ui/TextArea'
 import AgentActionRow from './AgentActionRow'
 import AgentActivityDetails from './AgentActivityDetails'
 import styles from './AgentFlowInspector.module.css'
@@ -197,9 +198,10 @@ export default function AgentFlowInspector({
                 </div>
               ) : null}
               <div className={styles.correction}>
-                <label className={styles.correctionLabel}>{ts('agentFlow.correction')}</label>
-                <textarea
+                <TextArea
+                  label={ts('agentFlow.correction')}
                   className={styles.correctionInput}
+                  resize="vertical"
                   value={correction}
                   onChange={(event) => setCorrection(event.target.value)}
                   placeholder={ts('agentFlow.correctionPlaceholder')}

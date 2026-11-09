@@ -13,10 +13,11 @@ export function disabledStencilListingIdSet(
 
 export function filterInstallableStencilListings(
   document: StencilCatalogDocument,
-  prefs: StencilMarketplacePrefs | undefined,
+  _prefs: StencilMarketplacePrefs | undefined,
 ): StencilCatalogListing[] {
-  const disabled = disabledStencilListingIdSet(prefs);
-  return document.listings.filter((listing) => !disabled.has(listing.id));
+  // Hide/disable is retired — catalog listings stay visible.
+  void _prefs;
+  return document.listings;
 }
 
 export function withDisabledStencilListing(

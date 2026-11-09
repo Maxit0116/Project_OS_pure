@@ -55,6 +55,11 @@
   position: relative;
 }
 
+.promptField {
+  display: block;
+  width: 100%;
+}
+
 .field input,
 .field textarea {
   appearance: none;

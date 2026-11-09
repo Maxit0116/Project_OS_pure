@@ -103,15 +103,14 @@
   margin-bottom: 10px;
 }
 
-.thesisField label {
+.thesisField > span,
+.thesisField > label {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-secondary);
 }
 
-.thesisField input,
-.thesisField textarea,
 .thesisField select {
   width: 100%;
   box-sizing: border-box;

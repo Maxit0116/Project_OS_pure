@@ -3,6 +3,7 @@ import type { PromptRefinement } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import Button from '../ui/Button'
 import Checkbox from '../ui/Checkbox'
+import TextArea from '../ui/TextArea'
 import toneStyles from './composer/chatModeTone.module.css'
 import PlanClarificationQuestionItem from './PlanClarificationQuestionItem'
 import {
@@ -116,8 +117,9 @@ export default function PromptRefinementCard({
                     {ts('alignment.addComment')}
                   </button>
                   {itemDraft?.commentOpen ? (
-                    <textarea
+                    <TextArea
                       className={styles.commentInput}
+                      resize="vertical"
                       value={itemDraft.comment}
                       disabled={confirmed || confirming}
                       placeholder={ts('alignment.commentPlaceholder')}
@@ -159,8 +161,9 @@ export default function PromptRefinementCard({
                     {ts('alignment.addComment')}
                   </button>
                   {itemDraft?.commentOpen ? (
-                    <textarea
+                    <TextArea
                       className={styles.commentInput}
+                      resize="vertical"
                       value={itemDraft.comment}
                       disabled={confirmed || confirming}
                       placeholder={ts('alignment.commentPlaceholder')}

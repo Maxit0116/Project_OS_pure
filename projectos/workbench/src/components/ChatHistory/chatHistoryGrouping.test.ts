@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatSessionHead } from '@contracts/index'
-import { groupChatHistorySessions } from './chatHistoryGrouping'
+import {
+  chatHistoryStatusLabelKey,
+  groupChatHistorySessions,
+} from './chatHistoryGrouping'
 
 function head(partial: Partial<ChatSessionHead> & Pick<ChatSessionHead, 'id'>): ChatSessionHead {
   // One fixed time: heads made a millisecond apart sorted newest first and swapped the expected order.
@@ -20,12 +23,13 @@ function head(partial: Partial<ChatSessionHead> & Pick<ChatSessionHead, 'id'>): 
 describe('groupChatHistorySessions', () => {
   const now = new Date('2026-08-02T12:00:00.000Z').getTime()
 
-  it('orders pinned and status groups before date buckets', () => {
+  it('keeps pinned first, then a recent working set by activity, then date buckets', () => {
     const groups = groupChatHistorySessions({
       now,
       pinnedIds: ['pinned'],
-      activeSessionId: 'today',
+      activeSessionId: 'active',
       searchQuery: '',
+      workingSetSize: 3,
       heads: [
         head({ id: 'pinned', title: 'Pinned', lastUpdatedAt: '2026-08-01T12:00:00.000Z' }),
         head({
@@ -40,7 +44,16 @@ describe('groupChatHistorySessions', () => {
           status: 'running',
           lastUpdatedAt: '2026-08-02T10:00:00.000Z',
         }),
-        head({ id: 'today', title: 'Today', lastUpdatedAt: '2026-08-02T09:00:00.000Z' }),
+        head({
+          id: 'active',
+          title: 'Active',
+          lastUpdatedAt: '2026-08-02T09:00:00.000Z',
+        }),
+        head({
+          id: 'older-today',
+          title: 'Older today',
+          lastUpdatedAt: '2026-08-02T08:00:00.000Z',
+        }),
         head({
           id: 'archived',
           title: 'Archived',
@@ -52,10 +65,68 @@ describe('groupChatHistorySessions', () => {
 
     expect(groups.map((group) => group.key)).toEqual([
       'pinned',
-      'awaitingReview',
-      'inProgress',
+      'recent',
       'today',
       'archived',
+    ])
+    expect(groups.find((group) => group.key === 'pinned')?.sessionIds).toEqual(['pinned'])
+    // Status does not split the working set — newest activity wins.
+    expect(groups.find((group) => group.key === 'recent')?.sessionIds).toEqual([
+      'review',
+      'running',
+      'active',
+    ])
+    expect(groups.find((group) => group.key === 'today')?.sessionIds).toEqual(['older-today'])
+  })
+
+  it('floats the most recently updated session to the top of recent', () => {
+    const groups = groupChatHistorySessions({
+      now,
+      pinnedIds: [],
+      activeSessionId: 'a',
+      searchQuery: '',
+      workingSetSize: 8,
+      heads: [
+        head({ id: 'a', lastUpdatedAt: '2026-08-02T09:00:00.000Z' }),
+        head({ id: 'b', lastUpdatedAt: '2026-08-02T11:30:00.000Z' }),
+        head({ id: 'c', lastUpdatedAt: '2026-08-02T10:00:00.000Z' }),
+      ],
+    })
+
+    expect(groups).toEqual([
+      {
+        key: 'recent',
+        labelKey: 'chat.history.recent',
+        sessionIds: ['b', 'c', 'a'],
+      },
+    ])
+  })
+
+  it('keeps the active session in the working set even when quieter than overflow peers', () => {
+    const groups = groupChatHistorySessions({
+      now,
+      pinnedIds: [],
+      activeSessionId: 'quiet-active',
+      searchQuery: '',
+      workingSetSize: 2,
+      heads: [
+        head({ id: 'hot-1', lastUpdatedAt: '2026-08-02T11:00:00.000Z' }),
+        head({ id: 'hot-2', lastUpdatedAt: '2026-08-02T10:30:00.000Z' }),
+        head({ id: 'hot-3', lastUpdatedAt: '2026-08-02T10:00:00.000Z' }),
+        head({
+          id: 'quiet-active',
+          lastUpdatedAt: '2026-08-01T08:00:00.000Z',
+        }),
+      ],
+    })
+
+    expect(groups.find((group) => group.key === 'recent')?.sessionIds).toEqual([
+      'quiet-active',
+      'hot-1',
+    ])
+    expect(groups.find((group) => group.key === 'today')?.sessionIds).toEqual([
+      'hot-2',
+      'hot-3',
     ])
   })
 
@@ -73,6 +144,15 @@ describe('groupChatHistorySessions', () => {
     })
 
     const ids = groups.flatMap((group) => group.sessionIds)
-    expect(ids).toEqual(['a', 'b'])
+    expect(ids.sort()).toEqual(['a', 'b'])
+  })
+})
+
+describe('chatHistoryStatusLabelKey', () => {
+  it('maps actionable statuses to history badge keys', () => {
+    expect(chatHistoryStatusLabelKey('running')).toBe('chat.history.inProgress')
+    expect(chatHistoryStatusLabelKey('awaiting_review')).toBe('chat.history.awaitingReview')
+    expect(chatHistoryStatusLabelKey('error')).toBe('chat.history.error')
+    expect(chatHistoryStatusLabelKey('idle')).toBeNull()
   })
 })

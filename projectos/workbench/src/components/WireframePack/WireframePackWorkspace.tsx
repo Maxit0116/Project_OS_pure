@@ -3,6 +3,7 @@ import { useI18n } from '../../i18n'
 import { useWireframePackStore } from '../../state/wireframePackStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
+import TextInput from '../ui/TextInput'
 import styles from './WireframePackWorkspace.module.css'
 
 /**
@@ -407,8 +408,9 @@ export default function WireframePackWorkspace() {
             <h3>{ts('chat.wireframePack.gaps')}</h3>
             <p className={styles.hint}>{ts('chat.wireframePack.gapsHint')}</p>
             <div className={styles.composer} style={{ padding: '8px 0', border: 0 }}>
-              <input
-                className={styles.composerInput}
+              <TextInput
+                fieldClassName={styles.composerFieldGrow}
+                size="sm"
                 value={gapDraft}
                 onChange={(event) => setGapDraft(event.target.value)}
                 placeholder={ts('chat.wireframePack.gapPlaceholder')}

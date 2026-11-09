@@ -119,21 +119,9 @@
   align-items: center;
 }
 
-.input {
+.fieldGrow {
   flex: 1;
   min-width: 0;
-  padding: 4px 8px;
-  border: 1px solid var(--tech-border);
-  border-radius: 6px;
-  background: var(--tech-bg-elevated);
-  color: var(--tech-text-primary);
-  font: inherit;
-  font-size: 11px;
-}
-
-.input:focus-visible {
-  outline: none;
-  box-shadow: var(--tech-shadow-focus);
 }
 
 .footer {

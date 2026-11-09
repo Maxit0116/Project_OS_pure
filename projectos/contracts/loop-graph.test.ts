@@ -274,14 +274,131 @@ describe("loop-graph contracts", () => {
     expect(kind).toBe("feedback");
   });
 
-  it("rejects branching depends edges and multiple feedback edges", () => {
+  it("allows depends fan-out into Merge (Parallel join)", () => {
     const branched = sampleSpec({
+      nodes: [
+        {
+          id: "n_start",
+          role: "implement",
+          type: "agent",
+          agentRole: "planner",
+          goal: "Plan",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_a",
+          role: "implement",
+          type: "agent",
+          agentRole: "researcher",
+          goal: "Research",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_b",
+          role: "implement",
+          type: "agent",
+          agentRole: "architect",
+          goal: "Design",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_merge",
+          role: "unknown",
+          type: "logic",
+          logicKind: "merge",
+          goal: "Join",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n_start", to: "n_a", kind: "depends" },
+        { id: "e2", from: "n_start", to: "n_b", kind: "depends" },
+        { id: "e3", from: "n_a", to: "n_merge", kind: "depends" },
+        { id: "e4", from: "n_b", to: "n_merge", kind: "depends" },
+      ],
+    });
+    expect(validateLoopSpecTopology(branched)).toEqual([]);
+  });
+
+  it("allows multiple feedback edges from valid sources", () => {
+    const multi = sampleSpec({
+      nodes: [
+        {
+          id: "n_coder",
+          role: "implement",
+          type: "agent",
+          agentRole: "coder",
+          goal: "Code",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_test",
+          role: "verify",
+          type: "action",
+          actionIntegration: "test",
+          goal: "Test",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_human",
+          role: "decide",
+          type: "human",
+          humanMode: "review",
+          goal: "Review",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n_coder", to: "n_test", kind: "depends" },
+        { id: "e2", from: "n_test", to: "n_human", kind: "depends" },
+        {
+          id: "e_fb1",
+          from: "n_test",
+          to: "n_coder",
+          kind: "feedback",
+          when: "tests failed",
+        },
+        {
+          id: "e_fb2",
+          from: "n_human",
+          to: "n_coder",
+          kind: "feedback",
+          when: "changes requested",
+        },
+      ],
+    });
+    expect(validateLoopSpecTopology(multi)).toEqual([]);
+  });
+
+  it("rejects depends fan-in onto non-Merge nodes", () => {
+    const diamond = sampleSpec({
       nodes: [
         ...sampleSpec().nodes,
         {
           id: "n3",
           role: "implement",
-          goal: "Extra",
+          goal: "Side",
           constraints: [],
           inputs: [],
           outputs: [],
@@ -291,15 +408,27 @@ describe("loop-graph contracts", () => {
       edges: [
         { id: "e1", from: "n1", to: "n2", kind: "depends" },
         { id: "e3", from: "n1", to: "n3", kind: "depends" },
-        { id: "e2", from: "n2", to: "n1", kind: "feedback" },
-        { id: "e4", from: "n3", to: "n1", kind: "feedback" },
+        { id: "e4", from: "n2", to: "n3", kind: "depends" },
       ],
     });
-    const issues = validateLoopSpecTopology(branched);
-    expect(issues.some((issue) => issue.message.includes("outdegree"))).toBe(true);
-    expect(issues.some((issue) => issue.message.includes("At most one feedback"))).toBe(
-      true,
-    );
+    const issues = validateLoopSpecTopology(diamond);
+    expect(issues.some((issue) => issue.message.includes("Merge"))).toBe(true);
+  });
+
+  it("accepts fallback edges from agent/action nodes", () => {
+    const withFallback = sampleSpec({
+      edges: [
+        { id: "e1", from: "n1", to: "n2", kind: "depends" },
+        {
+          id: "e_fb",
+          from: "n1",
+          to: "n2",
+          kind: "fallback",
+          when: "implement failed",
+        },
+      ],
+    });
+    expect(validateLoopSpecTopology(withFallback)).toEqual([]);
   });
 
   it("maps legacy roles to architecture fields on normalize", () => {
@@ -461,6 +590,16 @@ describe("loop-graph contracts", () => {
         humanMode: "review",
       }).role,
     ).toBe("decide");
+  });
+
+  it("ships a Parallel Research preset that validates as fork-join", () => {
+    const preset = getLoopGraphPreset("parallel_research");
+    expect(preset).toBeTruthy();
+    const fanOut = preset!.draft.edges.filter(
+      (edge) => edge.source === "n_planner" && edge.kind === "depends",
+    );
+    expect(fanOut).toHaveLength(2);
+    expect(preset!.draft.nodes.some((node) => node.logicKind === "merge")).toBe(true);
   });
 
   it("keeps the started event when trimming the instance log", () => {

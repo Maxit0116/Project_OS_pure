@@ -4,6 +4,8 @@ import type {
   WorkforceAgentDraft,
 } from '@contracts/index'
 import { useI18n } from '../../i18n'
+import TextArea from '../ui/TextArea'
+import TextInput from '../ui/TextInput'
 import styles from './AgentAssemblyCard.module.css'
 
 export interface AgentAssemblyCardProps {
@@ -95,40 +97,31 @@ export default function AgentAssemblyCard({
         ))}
       </header>
 
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('workforce.draftName')}</span>
-        <input
-          className={styles.input}
-          value={draft.displayName}
-          disabled={busy}
-          onChange={(e) => patchDraft({ displayName: e.target.value })}
-        />
-      </label>
+      <TextInput
+        label={ts('workforce.draftName')}
+        value={draft.displayName}
+        disabled={busy}
+        onChange={(e) => patchDraft({ displayName: e.target.value })}
+      />
 
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('workforce.draftRole')}</span>
-        <input
-          className={styles.input}
-          value={draft.roleLabel ?? ''}
-          disabled={busy}
-          onChange={(e) =>
-            patchDraft({
-              roleLabel: e.target.value.trim() ? e.target.value : undefined,
-            })
-          }
-        />
-      </label>
+      <TextInput
+        label={ts('workforce.draftRole')}
+        value={draft.roleLabel ?? ''}
+        disabled={busy}
+        onChange={(e) =>
+          patchDraft({
+            roleLabel: e.target.value.trim() ? e.target.value : undefined,
+          })
+        }
+      />
 
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('workforce.draftInstructions')}</span>
-        <textarea
-          className={styles.textarea}
-          rows={4}
-          value={draft.instructions}
-          disabled={busy}
-          onChange={(e) => patchDraft({ instructions: e.target.value })}
-        />
-      </label>
+      <TextArea
+        label={ts('workforce.draftInstructions')}
+        rows={4}
+        value={draft.instructions}
+        disabled={busy}
+        onChange={(e) => patchDraft({ instructions: e.target.value })}
+      />
 
       {hasCommunityRisk ? (
         <div className={styles.riskBanner}>{ts('workforce.assemblyCommunityRisk')}</div>

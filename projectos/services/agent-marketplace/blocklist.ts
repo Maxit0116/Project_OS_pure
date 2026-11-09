@@ -13,10 +13,11 @@ export function disabledAgentListingIdSet(
 
 export function filterInstallableAgentListings(
   document: AgentCatalogDocument,
-  prefs: AgentMarketplacePrefs | undefined,
+  _prefs: AgentMarketplacePrefs | undefined,
 ): AgentCatalogListing[] {
-  const disabled = disabledAgentListingIdSet(prefs);
-  return document.listings.filter((listing) => !disabled.has(listing.id));
+  // Hide/disable is retired — catalog listings stay visible.
+  void _prefs;
+  return document.listings;
 }
 
 export function withDisabledAgentListing(

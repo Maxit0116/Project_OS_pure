@@ -172,6 +172,7 @@ import {
   resolveLoopLeafWriteScope,
   type LoopExecutionHooks,
 } from "./loop-execution.js";
+import { getLoopGraph } from "./loop-graph-service.js";
 import {
   evaluateTerminalPolicyDecision,
   isHighRiskTerminalCommand,
@@ -8580,8 +8581,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         continue;
       }
 
-      const hooks = this.loopExecutionHooks(workspace, instance.featureNodeId);
-      if (!instance.activeRunId) {
+      const hooks = this.loopHooksFor(workspace, loopId, instance.id);
+      const inFlightRunIds = [
+        ...new Set([
+          ...(instance.activeRunId ? [instance.activeRunId] : []),
+          ...(instance.activeRunIds ?? []),
+        ]),
+      ];
+      if (inFlightRunIds.length === 0) {
         if (instance.status === "awaiting_review") return current;
         const stepped = advanceLoopInstance(
           workspace.workspaceRoot,
@@ -8595,32 +8602,32 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         current = stepped;
         continue;
       }
-      const state = this.orchestrator.getRun(instance.activeRunId);
-      if (!state) return current;
-      if (state.run.status === "queued") {
-        try {
-          await this.orchestrator.startRun(workspace, instance.activeRunId);
-        } catch {
-          // executeRun already records the run error for the next poll.
+      let progressed = false;
+      for (const runId of inFlightRunIds) {
+        const state = this.orchestrator.getRun(runId);
+        if (!state) continue;
+        if (state.run.status === "queued") {
+          try {
+            await this.orchestrator.startRun(workspace, runId);
+          } catch {
+            // executeRun already records the run error for the next poll.
+          }
+          const after = this.orchestrator.getRun(runId);
+          if (after && after.run.status !== "queued") progressed = true;
+          continue;
         }
-        const after = this.orchestrator.getRun(instance.activeRunId);
-        if (!after || after.run.status === "queued") return current;
-        current = advanceLoopInstance(
-          workspace.workspaceRoot,
-          loopId,
-          instance.id,
-          hooks,
-        );
-        continue;
+        if (
+          instance.status === "running" &&
+          (state.run.status === "awaiting_review" ||
+            state.run.status === "complete" ||
+            state.run.status === "error" ||
+            state.run.status === "cancelled" ||
+            state.run.status === "interrupted")
+        ) {
+          progressed = true;
+        }
       }
-      if (
-        instance.status === "running" &&
-        (state.run.status === "awaiting_review" ||
-          state.run.status === "complete" ||
-          state.run.status === "error" ||
-          state.run.status === "cancelled" ||
-          state.run.status === "interrupted")
-      ) {
+      if (progressed) {
         current = advanceLoopInstance(
           workspace.workspaceRoot,
           loopId,
@@ -8634,10 +8641,36 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return current;
   }
 
+  private loopHooksFor(
+    workspace: LoadedProjectOSWorkspace,
+    loopId: string,
+    instanceId?: string,
+  ): LoopExecutionHooks {
+    const doc = getLoopGraph(workspace.workspaceRoot, loopId);
+    const instance = instanceId
+      ? doc?.instances.find((item) => item.id === instanceId)
+      : doc?.instances.find((item) =>
+          item.status === "queued" ||
+          item.status === "running" ||
+          item.status === "paused" ||
+          item.status === "awaiting_hitl" ||
+          item.status === "awaiting_review" ||
+          item.status === "blocked",
+        );
+    const spec = instance
+      ? doc?.approvedSpecs.find((item) => item.version === instance.specVersion)
+      : doc?.approvedSpecs[doc.approvedSpecs.length - 1];
+    return this.loopExecutionHooks(workspace, instance?.featureNodeId, {
+      allowConcurrentLoopRuns: spec?.parallelMode === "multi_run",
+    });
+  }
+
   private loopExecutionHooks(
     workspace: LoadedProjectOSWorkspace,
     featureNodeId?: string,
+    options?: { allowConcurrentLoopRuns?: boolean },
   ): LoopExecutionHooks {
+    const allowConcurrentLoopRuns = Boolean(options?.allowConcurrentLoopRuns);
     const leaf = resolveLoopLeafWriteScope(
       workspace.graph.nodes.map((node) => ({
         id: node.id,
@@ -8791,8 +8824,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           status: evidence.status,
         };
       },
+      allowConcurrentLoopRuns,
       startAgentRun: (input) => {
-        if (this.orchestrator.hasInFlightWork(workspace.project.projectId)) {
+        if (
+          !allowConcurrentLoopRuns &&
+          this.orchestrator.hasInFlightWork(workspace.project.projectId)
+        ) {
           throw new ProjectOSError(
             "agent_orchestration_failed",
             "A loop instance cannot start a second agent run while one is in flight",
@@ -8896,6 +8933,21 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           applySucceeded: false,
         };
       },
+      pauseAgentRun: (runId) => {
+        void this.pauseAgentRun(runId).catch((error) => {
+          console.error("[projectos] loop pauseAgentRun failed", error);
+        });
+      },
+      cancelAgentRun: (runId) => {
+        void this.cancelAgentRun(runId).catch((error) => {
+          console.error("[projectos] loop cancelAgentRun failed", error);
+        });
+      },
+      continueAgentRun: (runId) => {
+        void this.continueAgentRun(runId).catch((error) => {
+          console.error("[projectos] loop continueAgentRun failed", error);
+        });
+      },
     };
   }
 
@@ -8909,18 +8961,131 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const { startLoopInstance } = await import("./loop-runtime-service.js");
     const version = specVersion?.trim() || undefined;
     const selectedFeatureNodeId = featureNodeId?.trim() || undefined;
+    const doc = getLoopGraph(workspace.workspaceRoot, loopId);
+    const spec = version
+      ? doc?.approvedSpecs.find((item) => item.version === version)
+      : doc?.approvedSpecs[doc.approvedSpecs.length - 1];
     try {
-      const started = startLoopInstance(
-        workspace.workspaceRoot,
-        loopId,
-        version,
-        this.loopExecutionHooks(workspace, selectedFeatureNodeId),
-      );
+      const started = startLoopInstance(workspace.workspaceRoot, loopId, {
+        ...(version ? { specVersion: version } : {}),
+        execution: this.loopExecutionHooks(workspace, selectedFeatureNodeId, {
+          allowConcurrentLoopRuns: spec?.parallelMode === "multi_run",
+        }),
+        launch: { kind: "manual" },
+      });
       return await this.settleLoopRuns(workspace, loopId, started);
     } catch (error) {
       throw new ProjectOSError(
         "loop_graph_invalid",
         error instanceof Error ? error.message : "Failed to start loop instance",
+      );
+    }
+  }
+
+  async startLoopInstanceWithParams(
+    projectId: string,
+    loopId: string,
+    params: Record<string, unknown>,
+    options?: { specVersion?: string; idempotencyKey?: string },
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { startLoopInstanceWithParams } = await import("./loop-runtime-service.js");
+    const version = options?.specVersion?.trim() || undefined;
+    try {
+      const started = startLoopInstanceWithParams(
+        workspace.workspaceRoot,
+        loopId,
+        params,
+        {
+          ...(version ? { specVersion: version } : {}),
+          ...(options?.idempotencyKey
+            ? { idempotencyKey: options.idempotencyKey }
+            : {}),
+          execution: this.loopHooksFor(workspace, loopId),
+        },
+      );
+      return await this.settleLoopRuns(workspace, loopId, started);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to start loop with params",
+      );
+    }
+  }
+
+  async startLoopInstanceFromEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { startLoopInstanceFromEvent } = await import("./loop-runtime-service.js");
+    try {
+      const started = startLoopInstanceFromEvent(
+        workspace.workspaceRoot,
+        loopId,
+        event,
+        { execution: this.loopHooksFor(workspace, loopId) },
+      );
+      return await this.settleLoopRuns(workspace, loopId, started);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to start loop from event",
+      );
+    }
+  }
+
+  async restoreLoopInstanceFromCheckpoint(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { restoreLoopInstanceFromCheckpoint } = await import(
+      "./loop-runtime-service.js"
+    );
+    const restored = restoreLoopInstanceFromCheckpoint(
+      workspace.workspaceRoot,
+      loopId,
+      instanceId,
+      this.loopHooksFor(workspace, loopId, instanceId),
+    );
+    return this.settleLoopRuns(workspace, loopId, restored);
+  }
+
+  async listLoopRunHistory(
+    projectId: string,
+    loopId: string,
+  ): Promise<
+    Array<{
+      id: string;
+      status: string;
+      specVersion: string;
+      startedAt: string;
+      completedAt?: string;
+      round: number;
+      errorMessage?: string;
+    }>
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { listLoopRunHistory } = await import("./loop-runtime-service.js");
+    return listLoopRunHistory(workspace.workspaceRoot, loopId);
+  }
+
+  async deriveDraftFromLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { deriveDraftFromInstance } = await import("./loop-runtime-service.js");
+    try {
+      return deriveDraftFromInstance(workspace.workspaceRoot, loopId, instanceId);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to derive draft from instance",
       );
     }
   }
@@ -8932,7 +9097,27 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { pauseLoopInstance } = await import("./loop-runtime-service.js");
-    return pauseLoopInstance(workspace.workspaceRoot, loopId, instanceId);
+    return pauseLoopInstance(
+      workspace.workspaceRoot,
+      loopId,
+      instanceId,
+      this.loopHooksFor(workspace, loopId, instanceId),
+    );
+  }
+
+  async cancelLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { cancelLoopInstance } = await import("./loop-runtime-service.js");
+    return cancelLoopInstance(
+      workspace.workspaceRoot,
+      loopId,
+      instanceId,
+      this.loopHooksFor(workspace, loopId, instanceId),
+    );
   }
 
   async resumeLoopInstance(
@@ -8941,15 +9126,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     instanceId: string,
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
-    const { getLoopGraph } = await import("./loop-graph-service.js");
     const { resumeLoopInstance } = await import("./loop-runtime-service.js");
-    const featureNodeId = getLoopGraph(workspace.workspaceRoot, loopId)
-      ?.instances.find((item) => item.id === instanceId)?.featureNodeId;
     const resumed = resumeLoopInstance(
       workspace.workspaceRoot,
       loopId,
       instanceId,
-      this.loopExecutionHooks(workspace, featureNodeId),
+      this.loopHooksFor(workspace, loopId, instanceId),
     );
     return this.settleLoopRuns(workspace, loopId, resumed);
   }
@@ -8961,16 +9143,13 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     answers: import("../contracts/loop-graph.js").LoopHitlAnswer[],
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
-    const { getLoopGraph } = await import("./loop-graph-service.js");
     const { resolveLoopHitl } = await import("./loop-runtime-service.js");
-    const featureNodeId = getLoopGraph(workspace.workspaceRoot, loopId)
-      ?.instances.find((item) => item.id === instanceId)?.featureNodeId;
     const resolved = resolveLoopHitl(
       workspace.workspaceRoot,
       loopId,
       instanceId,
       answers,
-      this.loopExecutionHooks(workspace, featureNodeId),
+      this.loopHooksFor(workspace, loopId, instanceId),
     );
     return this.settleLoopRuns(workspace, loopId, resolved);
   }
@@ -8991,15 +9170,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     instanceId: string,
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
-    const { getLoopGraph } = await import("./loop-graph-service.js");
     const { advanceLoopInstance } = await import("./loop-runtime-service.js");
-    const featureNodeId = getLoopGraph(workspace.workspaceRoot, loopId)
-      ?.instances.find((item) => item.id === instanceId)?.featureNodeId;
     const advanced = advanceLoopInstance(
       workspace.workspaceRoot,
       loopId,
       instanceId,
-      this.loopExecutionHooks(workspace, featureNodeId),
+      this.loopHooksFor(workspace, loopId, instanceId),
     );
     return this.settleLoopRuns(workspace, loopId, advanced);
   }

@@ -13,10 +13,11 @@ export function disabledSkillListingIdSet(
 
 export function filterInstallableSkillListings(
   document: SkillCatalogDocument,
-  prefs: SkillMarketplacePrefs | undefined,
+  _prefs: SkillMarketplacePrefs | undefined,
 ): SkillCatalogListing[] {
-  const disabled = disabledSkillListingIdSet(prefs);
-  return document.listings.filter((listing) => !disabled.has(listing.id));
+  // Hide/disable is retired — catalog listings stay visible.
+  void _prefs;
+  return document.listings;
 }
 
 export function withDisabledSkillListing(

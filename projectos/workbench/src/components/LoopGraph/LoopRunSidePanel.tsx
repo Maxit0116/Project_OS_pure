@@ -1,0 +1,192 @@
+import type { LoopInstance, LoopInstanceArtifact } from '@contracts/index'
+import { useI18n } from '../../i18n'
+import { useLoopGraphStore } from '../../state/loopGraphStore'
+import styles from './LoopRunSidePanel.module.css'
+
+type HistoryRow = {
+  id: string
+  status: string
+  specVersion: string
+  startedAt: string
+  completedAt?: string
+  round: number
+  errorMessage?: string
+}
+
+type Props = {
+  instance: LoopInstance
+  history?: HistoryRow[]
+}
+
+function decisionSummary(artifact: LoopInstanceArtifact): string {
+  const data = artifact.data as {
+    choice?: string
+    summary?: string
+    mode?: string
+    answers?: Array<{ answer: string }>
+  }
+  if (typeof data.choice === 'string' && data.choice.trim()) return data.choice
+  if (typeof data.summary === 'string' && data.summary.trim()) return data.summary
+  const first = data.answers?.[0]?.answer
+  if (first) return first
+  return data.mode ?? artifact.kind
+}
+
+export default function LoopRunSidePanel({ instance, history = [] }: Props) {
+  const { ts } = useI18n()
+  const restoreFromCheckpoint = useLoopGraphStore((s) => s.restoreFromCheckpoint)
+  const deriveDraftFromRun = useLoopGraphStore((s) => s.deriveDraftFromRun)
+  const artifacts = instance.artifacts ?? []
+  const decisions = artifacts.filter((item) => item.kind === 'human_decision')
+  const evidenceLike = artifacts.filter((item) => item.kind !== 'human_decision')
+  const records = instance.nodeRecords ?? []
+  const freshness = instance.freshness?.status ?? 'unknown'
+  const budget = instance.budgetUsage
+  const hasCheckpoint = Boolean(instance.checkpoint)
+
+  return (
+    <div className={styles.panel} data-loop-run-side-panel="">
+      <div className={styles.meta}>
+        {ts('chat.loopGraph.instanceStatus')}: {instance.status} · round {instance.round}
+        {instance.launch?.kind ? ` · ${instance.launch.kind}` : ''}
+      </div>
+
+      <section className={styles.section}>
+        <h4 className={styles.heading}>{ts('chat.loopGraph.runReliability')}</h4>
+        <ul className={styles.list}>
+          <li className={styles.row}>
+            <span
+              className={`${styles.dot} ${
+                freshness === 'stale'
+                  ? styles.tone_blocked
+                  : freshness === 'fresh'
+                    ? styles.tone_succeeded
+                    : ''
+              }`}
+              aria-hidden
+            />
+            <span className={styles.rowId}>{ts('chat.loopGraph.runFreshness')}</span>
+            <span className={styles.rowStatus}>{freshness}</span>
+          </li>
+          <li className={styles.row}>
+            <span className={styles.dot} aria-hidden />
+            <span className={styles.rowId}>{ts('chat.loopGraph.runBudget')}</span>
+            <span className={styles.rowStatus}>
+              {budget?.wallClockMs != null ? `${Math.round(budget.wallClockMs / 1000)}s` : '—'}
+              {budget?.retries != null ? ` · r${budget.retries}` : ''}
+            </span>
+          </li>
+        </ul>
+        {hasCheckpoint ? (
+          <button
+            type="button"
+            className={styles.action}
+            onClick={() => void restoreFromCheckpoint(instance.id)}
+          >
+            {ts('chat.loopGraph.restoreCheckpoint')}
+          </button>
+        ) : null}
+      </section>
+
+      <section className={styles.section}>
+        <h4 className={styles.heading}>{ts('chat.loopGraph.runNodeStates')}</h4>
+        {records.length === 0 ? (
+          <p className={styles.empty}>{ts('chat.loopGraph.runNodeStatesEmpty')}</p>
+        ) : (
+          <ul className={styles.list}>
+            {records.map((record) => (
+              <li key={record.nodeId} className={styles.row}>
+                <span
+                  className={`${styles.dot} ${styles[`tone_${record.status}`] ?? ''}`}
+                  aria-hidden
+                />
+                <span className={styles.rowId}>{record.nodeId}</span>
+                <span className={styles.rowStatus}>{record.status}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className={styles.section}>
+        <h4 className={styles.heading}>{ts('chat.loopGraph.runDecisions')}</h4>
+        {decisions.length === 0 ? (
+          <p className={styles.empty}>{ts('chat.loopGraph.runDecisionsEmpty')}</p>
+        ) : (
+          <ul className={styles.list}>
+            {decisions
+              .slice()
+              .reverse()
+              .map((item) => (
+                <li key={item.id} className={styles.row}>
+                  <span className={styles.rowId}>{item.nodeId}</span>
+                  <span className={styles.rowStatus}>{decisionSummary(item)}</span>
+                </li>
+              ))}
+          </ul>
+        )}
+      </section>
+
+      <section className={styles.section}>
+        <h4 className={styles.heading}>{ts('chat.loopGraph.runArtifacts')}</h4>
+        {evidenceLike.length === 0 ? (
+          <p className={styles.empty}>{ts('chat.loopGraph.runArtifactsEmpty')}</p>
+        ) : (
+          <ul className={styles.list}>
+            {evidenceLike
+              .slice()
+              .reverse()
+              .slice(0, 12)
+              .map((item) => (
+                <li key={item.id} className={styles.row}>
+                  <span className={styles.rowId}>{item.nodeId}</span>
+                  <span className={styles.rowStatus}>{item.kind}</span>
+                </li>
+              ))}
+          </ul>
+        )}
+      </section>
+
+      <section className={styles.section}>
+        <h4 className={styles.heading}>{ts('chat.loopGraph.runHistory')}</h4>
+        {history.length === 0 ? (
+          <p className={styles.empty}>{ts('chat.loopGraph.runHistoryEmpty')}</p>
+        ) : (
+          <ul className={styles.list}>
+            {history.slice(0, 8).map((row) => (
+              <li key={row.id} className={styles.historyRow}>
+                <div className={styles.row}>
+                  <span className={styles.dot} aria-hidden />
+                  <span className={styles.rowId}>{row.id.slice(0, 12)}</span>
+                  <span className={styles.rowStatus}>{row.status}</span>
+                </div>
+                <button
+                  type="button"
+                  className={styles.action}
+                  onClick={() => void deriveDraftFromRun(row.id)}
+                >
+                  {ts('chat.loopGraph.deriveDraft')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className={styles.section}>
+        <h4 className={styles.heading}>{ts('chat.loopGraph.runEvents')}</h4>
+        <ul className={styles.list}>
+          {instance.events
+            .slice(-10)
+            .reverse()
+            .map((event) => (
+              <li key={event.id} className={styles.event}>
+                {event.at.slice(11, 19)} · {event.type}
+                {event.message ? ` — ${event.message}` : ''}
+              </li>
+            ))}
+        </ul>
+      </section>
+    </div>
+  )
+}

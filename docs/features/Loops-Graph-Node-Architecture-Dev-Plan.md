@@ -8,6 +8,7 @@
 | 文档 | 关系 |
 |------|------|
 | [`Loops-Graph-Workflow-Studio-Dev-Plan.md`](./Loops-Graph-Workflow-Studio-Dev-Plan.md) | **并行权威**：画布 Studio、真 pause/cancel、Fresh·Stale、重规划提案、参数化/事件触发仍归该文档。本计划**接管并取代**其中「MVP 节点语义映射」对 Condition 永久延期、以及 `implement\|verify\|fix\|decide` 作为唯一产品分类的表述。 |
+| [`Loops-Graph-Gaps-Closure-Dev-Plan.md`](./Loops-Graph-Gaps-Closure-Dev-Plan.md) | **缺口补全总控（2026-11-09）**：**解锁**本文件原「Parallel 调度延后」为受控 Parallel MVP（先串行排空就绪集）；并补 `logic.retry`/`wait`、多 feedback、Run 可观测性。控制流运行时验收以 GC-\* 为准。 |
 | [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | **展示层**：图标识读、右侧 Palette、DnD、浮动 Duty/Inspector 卡；不改本计划 Node Contract / Runtime。 |
 | [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | **Agent 配置可视化**：主卡底端口 + `provides` 虚线挂 Model / Memory / Capabilities；不改四类职责与 NA-D7（Action 不得收成 Agent Tool 卫星）。 |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | **已落地底座**：Spec/Instance 分离、implement→AgentRun、verify→证据、decide→HITL。本计划在其上扩展 Node 类型系统，不重做 P-0–P-3 不变量。 |
@@ -65,7 +66,7 @@ C4 / Function Map → 代码结构与写授权叶子如何变化
 |--------|------|
 | 通用 HTTP/DB/SaaS 集成市场与 credentials 商店 | 不是 n8n 竞品 |
 | 任意 Code Node / 任意表达式语言引擎 | 先可视化条件 + 有限表达式子集 |
-| Parallel Agent 自动调度 + 自动 worktree 隔离 | 数据模型预留多入/多出；调度延后 |
+| Parallel Agent 自动调度 + 自动 worktree 隔离 | **受控 Parallel 已改由** [`Loops-Graph-Gaps-Closure-Dev-Plan.md`](./Loops-Graph-Gaps-Closure-Dev-Plan.md) GC-D3 承接（P0 串行排空；P1 多 Run）。自动 worktree 隔离仍延期 |
 | 多人审批链、超时升级通知 | HITL 先单人 |
 | 插件市场 / 社区 Node 包 | 先内置工程 Node |
 | 多层子画布 / Sub-workflow 完整产品 | 契约可预留 `subflowRef`；实现延后 |

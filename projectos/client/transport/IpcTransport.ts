@@ -1793,12 +1793,81 @@ export class IpcTransport implements ApiTransport {
     );
   }
 
+  startLoopInstanceWithParams(
+    projectId: string,
+    loopId: string,
+    params: Record<string, unknown>,
+    options?: { specVersion?: string; idempotencyKey?: string },
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke(
+      "startLoopInstanceWithParams",
+      projectId,
+      loopId,
+      params,
+      options ?? {},
+    );
+  }
+
+  startLoopInstanceFromEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("startLoopInstanceFromEvent", projectId, loopId, event);
+  }
+
+  restoreLoopInstanceFromCheckpoint(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke(
+      "restoreLoopInstanceFromCheckpoint",
+      projectId,
+      loopId,
+      instanceId,
+    );
+  }
+
+  listLoopRunHistory(
+    projectId: string,
+    loopId: string,
+  ): Promise<
+    Array<{
+      id: string;
+      status: string;
+      specVersion: string;
+      startedAt: string;
+      completedAt?: string;
+      round: number;
+      errorMessage?: string;
+    }>
+  > {
+    return this.invoke("listLoopRunHistory", projectId, loopId);
+  }
+
+  deriveDraftFromLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("deriveDraftFromLoopInstance", projectId, loopId, instanceId);
+  }
+
   pauseLoopInstance(
     projectId: string,
     loopId: string,
     instanceId: string,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return this.invoke("pauseLoopInstance", projectId, loopId, instanceId);
+  }
+
+  cancelLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("cancelLoopInstance", projectId, loopId, instanceId);
   }
 
   resumeLoopInstance(

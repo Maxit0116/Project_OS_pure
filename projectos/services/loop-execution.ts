@@ -115,4 +115,13 @@ export interface LoopExecutionHooks {
   executeTerminalCommand?: (
     input: LoopTerminalCommandRequest,
   ) => LoopTerminalCommandResult;
+  /** GC-2.2: pause/cancel must reach Agent Runtime when present. */
+  pauseAgentRun?: (runId: string) => void;
+  cancelAgentRun?: (runId: string) => void;
+  continueAgentRun?: (runId: string) => void;
+  /**
+   * GC-7: when true, Loop may start another AgentRun while one is in flight
+   * (shared worktree; conflicts still surface as blocked/HITL).
+   */
+  allowConcurrentLoopRuns?: boolean;
 }

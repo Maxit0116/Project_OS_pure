@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import { useI18n } from '../../i18n'
 import Checkbox from '../ui/Checkbox'
+import TextInput from '../ui/TextInput'
 import styles from './CaptureFolderNameDialog.module.css'
 
 export type CaptureNamePromptKind = 'merge_misc' | 'new_folder' | 'merge_folders'
@@ -72,26 +73,24 @@ export default function CaptureFolderNameDialog({
           {title}
         </h3>
         <p className={styles.hint}>{hint}</p>
-        <label className={styles.field}>
-          <span className={styles.label}>{ts('spatialCaptures.folderNamePlaceholder')}</span>
-          <input
-            className={styles.input}
-            value={name}
-            autoFocus
-            onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                const trimmed = name.trim()
-                if (!trimmed) {
-                  setError(ts('spatialCaptures.folderNameRequired'))
-                  return
-                }
-                onConfirm({ name: trimmed, keepTitles })
+        <TextInput
+          fieldClassName={styles.field}
+          label={ts('spatialCaptures.folderNamePlaceholder')}
+          value={name}
+          autoFocus
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              const trimmed = name.trim()
+              if (!trimmed) {
+                setError(ts('spatialCaptures.folderNameRequired'))
+                return
               }
-            }}
-          />
-        </label>
+              onConfirm({ name: trimmed, keepTitles })
+            }
+          }}
+        />
         {prompt.kind === 'merge_folders' &&
         (prompt.sourceName || prompt.targetName) ? (
           <div className={styles.presets}>

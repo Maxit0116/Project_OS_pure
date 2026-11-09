@@ -10,6 +10,8 @@ import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
 import Checkbox from '../ui/Checkbox'
+import TextArea from '../ui/TextArea'
+import TextInput from '../ui/TextInput'
 import SettingsGroup from './SettingsGroup'
 import styles from './SettingsPanel.module.css'
 
@@ -323,18 +325,16 @@ export default function HarnessSettingsSection() {
                   ))}
                 </select>
               </label>
-              <label className={styles.field}>
-                <span className={styles.label}>{ts('settings.harness.match')}</span>
-                <input
-                  className={styles.select}
-                  value={rule.match ?? ''}
-                  placeholder="npm *"
-                  onChange={(event) => {
-                    const match = event.target.value.trim()
-                    updateRule(index, match ? { match } : { match: undefined })
-                  }}
-                />
-              </label>
+              <TextInput
+                label={ts('settings.harness.match')}
+                mono
+                value={rule.match ?? ''}
+                placeholder="npm *"
+                onChange={(event) => {
+                  const match = event.target.value.trim()
+                  updateRule(index, match ? { match } : { match: undefined })
+                }}
+              />
             </div>
             <Button
               variant="ghost"
@@ -399,35 +399,30 @@ export default function HarnessSettingsSection() {
         {config.modelHarness.variants.map((variant, index) => (
           <div className={styles.row} key={`variant-${index}`}>
             <div className={styles.formGrid} style={{ flex: 1 }}>
-              <label className={styles.field}>
-                <span className={styles.label}>{ts('settings.harness.modelMatch')}</span>
-                <input
-                  className={styles.select}
-                  value={variant.match.model ?? ''}
-                  placeholder="claude-*"
-                  onChange={(event) => {
-                    const model = event.target.value.trim()
-                    const next = [...config.modelHarness.variants]
-                    next[index] = {
-                      ...variant,
-                      match: { ...variant.match, ...(model ? { model } : { model: undefined }) },
-                    }
-                    setConfig({ ...config, modelHarness: { ...config.modelHarness, variants: next } })
-                  }}
-                />
-              </label>
-              <label className={styles.textareaField}>
-                <span className={styles.label}>{ts('settings.harness.systemDelta')}</span>
-                <textarea
-                  className={styles.textarea}
-                  value={variant.systemDelta ?? ''}
-                  onChange={(event) => {
-                    const next = [...config.modelHarness.variants]
-                    next[index] = { ...variant, systemDelta: event.target.value }
-                    setConfig({ ...config, modelHarness: { ...config.modelHarness, variants: next } })
-                  }}
-                />
-              </label>
+              <TextInput
+                label={ts('settings.harness.modelMatch')}
+                mono
+                value={variant.match.model ?? ''}
+                placeholder="claude-*"
+                onChange={(event) => {
+                  const model = event.target.value.trim()
+                  const next = [...config.modelHarness.variants]
+                  next[index] = {
+                    ...variant,
+                    match: { ...variant.match, ...(model ? { model } : { model: undefined }) },
+                  }
+                  setConfig({ ...config, modelHarness: { ...config.modelHarness, variants: next } })
+                }}
+              />
+              <TextArea
+                label={ts('settings.harness.systemDelta')}
+                value={variant.systemDelta ?? ''}
+                onChange={(event) => {
+                  const next = [...config.modelHarness.variants]
+                  next[index] = { ...variant, systemDelta: event.target.value }
+                  setConfig({ ...config, modelHarness: { ...config.modelHarness, variants: next } })
+                }}
+              />
             </div>
             <Button
               variant="ghost"

@@ -20,11 +20,14 @@ import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { GraphOverlayFrame } from '../GraphOverlay/GraphOverlayFrame'
 import Button from '../ui/Button'
+import TextArea from '../ui/TextArea'
 import TextInput from '../ui/TextInput'
 import MarketplaceCard, { type MarketplaceCardAction } from './MarketplaceCard'
 import MarketplaceComposeDock from './MarketplaceComposeDock'
 import MarketplaceDetail from './MarketplaceDetail'
 import LabCapabilityPrepPage from './LabCapabilityPrepPage'
+import MarketplaceDetailSections from './MarketplaceDetailSections'
+import MarketplaceWorkflowPreview from './MarketplaceWorkflowPreview'
 import { useProductLabStore } from '../../state/productLabStore'
 import {
   buildAgentDetailModel,
@@ -135,17 +138,14 @@ export default function MarketplaceOverlay() {
   const refreshMcpCatalog = useWorkbenchStore((s) => s.refreshMcpCatalog)
   const installMcpFromCatalog = useWorkbenchStore((s) => s.installMcpFromCatalog)
   const uninstallMcpListing = useWorkbenchStore((s) => s.uninstallMcpListing)
-  const disableMcpCatalogListing = useWorkbenchStore((s) => s.disableMcpCatalogListing)
   const reportMcpCatalogListing = useWorkbenchStore((s) => s.reportMcpCatalogListing)
   const refreshSkillCatalog = useWorkbenchStore((s) => s.refreshSkillCatalog)
   const installSkillFromCatalog = useWorkbenchStore((s) => s.installSkillFromCatalog)
   const uninstallSkillFromCatalog = useWorkbenchStore((s) => s.uninstallSkillFromCatalog)
-  const disableSkillCatalogListing = useWorkbenchStore((s) => s.disableSkillCatalogListing)
   const reportSkillCatalogListing = useWorkbenchStore((s) => s.reportSkillCatalogListing)
   const refreshRulesCatalog = useWorkbenchStore((s) => s.refreshRulesCatalog)
   const installRulesFromCatalog = useWorkbenchStore((s) => s.installRulesFromCatalog)
   const uninstallRulesFromCatalog = useWorkbenchStore((s) => s.uninstallRulesFromCatalog)
-  const disableRulesCatalogListing = useWorkbenchStore((s) => s.disableRulesCatalogListing)
   const reportRulesCatalogListing = useWorkbenchStore((s) => s.reportRulesCatalogListing)
   const listMcpCatalog = useWorkbenchStore((s) => s.listMcpCatalog)
   const listSkillCatalog = useWorkbenchStore((s) => s.listSkillCatalog)
@@ -161,7 +161,6 @@ export default function MarketplaceOverlay() {
   const refreshAgentCatalog = useWorkbenchStore((s) => s.refreshAgentCatalog)
   const installAgentFromCatalog = useWorkbenchStore((s) => s.installAgentFromCatalog)
   const uninstallAgentFromCatalog = useWorkbenchStore((s) => s.uninstallAgentFromCatalog)
-  const disableAgentCatalogListing = useWorkbenchStore((s) => s.disableAgentCatalogListing)
   const reportAgentCatalogListing = useWorkbenchStore((s) => s.reportAgentCatalogListing)
   const listAgentCatalog = useWorkbenchStore((s) => s.listAgentCatalog)
   const refreshInstalledMarketplaceAgents = useWorkbenchStore(
@@ -174,7 +173,6 @@ export default function MarketplaceOverlay() {
   const refreshWorkflowCatalog = useWorkbenchStore((s) => s.refreshWorkflowCatalog)
   const installWorkflowFromCatalog = useWorkbenchStore((s) => s.installWorkflowFromCatalog)
   const uninstallWorkflowFromCatalog = useWorkbenchStore((s) => s.uninstallWorkflowFromCatalog)
-  const disableWorkflowCatalogListing = useWorkbenchStore((s) => s.disableWorkflowCatalogListing)
   const reportWorkflowCatalogListing = useWorkbenchStore((s) => s.reportWorkflowCatalogListing)
   const listWorkflowCatalog = useWorkbenchStore((s) => s.listWorkflowCatalog)
   const refreshInstalledMarketplaceWorkflows = useWorkbenchStore(
@@ -187,7 +185,6 @@ export default function MarketplaceOverlay() {
   const refreshStencilCatalog = useWorkbenchStore((s) => s.refreshStencilCatalog)
   const installStencilFromCatalog = useWorkbenchStore((s) => s.installStencilFromCatalog)
   const uninstallStencilFromCatalog = useWorkbenchStore((s) => s.uninstallStencilFromCatalog)
-  const disableStencilCatalogListing = useWorkbenchStore((s) => s.disableStencilCatalogListing)
   const reportStencilCatalogListing = useWorkbenchStore((s) => s.reportStencilCatalogListing)
   const listStencilCatalog = useWorkbenchStore((s) => s.listStencilCatalog)
   const refreshInstalledMarketplaceStencils = useWorkbenchStore(
@@ -1179,35 +1176,18 @@ export default function MarketplaceOverlay() {
             void runMcpAction(listing, action)
           }}
           secondaryActions={
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={loading}
-                onClick={() => {
-                  void disableMcpCatalogListing(listing.id).then((ok) => {
-                    if (ok) {
-                      setDetail(null)
-                      void loadMcp(false)
-                    }
-                  })
-                }}
-              >
-                {ts('chat.marketplace.hide')}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={loading}
-                onClick={() => {
-                  void reportMcpCatalogListing({ listingId: listing.id }).then((ok) => {
-                    if (ok) void loadMcp(false)
-                  })
-                }}
-              >
-                {ts('chat.marketplace.report')}
-              </Button>
-            </>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={loading}
+              onClick={() => {
+                void reportMcpCatalogListing({ listingId: listing.id }).then((ok) => {
+                  if (ok) void loadMcp(false)
+                })
+              }}
+            >
+              {ts('chat.marketplace.report')}
+            </Button>
           }
         >
           {listing.requiresAuth ? (
@@ -1264,35 +1244,18 @@ export default function MarketplaceOverlay() {
             void runRulesAction(listing, action)
           }}
           secondaryActions={
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={loading}
-                onClick={() => {
-                  void disableRulesCatalogListing(listing.id).then((ok) => {
-                    if (ok) {
-                      setDetail(null)
-                      void loadRules(false)
-                    }
-                  })
-                }}
-              >
-                {ts('chat.marketplace.hide')}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={loading}
-                onClick={() => {
-                  void reportRulesCatalogListing({ listingId: listing.id }).then((ok) => {
-                    if (ok) void loadRules(false)
-                  })
-                }}
-              >
-                {ts('chat.marketplace.report')}
-              </Button>
-            </>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={loading}
+              onClick={() => {
+                void reportRulesCatalogListing({ listingId: listing.id }).then((ok) => {
+                  if (ok) void loadRules(false)
+                })
+              }}
+            >
+              {ts('chat.marketplace.report')}
+            </Button>
           }
         />
       )
@@ -1354,35 +1317,18 @@ export default function MarketplaceOverlay() {
             void runAgentAction(listing, action)
           }}
           secondaryActions={
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={loading}
-                onClick={() => {
-                  void disableAgentCatalogListing(listing.id).then((ok) => {
-                    if (ok) {
-                      setDetail(null)
-                      void loadAgents(false)
-                    }
-                  })
-                }}
-              >
-                {ts('chat.marketplace.hide')}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={loading}
-                onClick={() => {
-                  void reportAgentCatalogListing({ listingId: listing.id }).then((ok) => {
-                    if (ok) void loadAgents(false)
-                  })
-                }}
-              >
-                {ts('chat.marketplace.report')}
-              </Button>
-            </>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={loading}
+              onClick={() => {
+                void reportAgentCatalogListing({ listingId: listing.id }).then((ok) => {
+                  if (ok) void loadAgents(false)
+                })
+              }}
+            >
+              {ts('chat.marketplace.report')}
+            </Button>
           }
         />
       )
@@ -1431,35 +1377,18 @@ export default function MarketplaceOverlay() {
             void runStencilAction(listing, action)
           }}
           secondaryActions={
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={loading}
-                onClick={() => {
-                  void disableStencilCatalogListing(listing.id).then((ok) => {
-                    if (ok) {
-                      setDetail(null)
-                      void loadStencils(false)
-                    }
-                  })
-                }}
-              >
-                {ts('chat.marketplace.hide')}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={loading}
-                onClick={() => {
-                  void reportStencilCatalogListing({ listingId: listing.id }).then((ok) => {
-                    if (ok) void loadStencils(false)
-                  })
-                }}
-              >
-                {ts('chat.marketplace.report')}
-              </Button>
-            </>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={loading}
+              onClick={() => {
+                void reportStencilCatalogListing({ listingId: listing.id }).then((ok) => {
+                  if (ok) void loadStencils(false)
+                })
+              }}
+            >
+              {ts('chat.marketplace.report')}
+            </Button>
           }
         />
       )
@@ -1508,35 +1437,32 @@ export default function MarketplaceOverlay() {
             void runWorkflowAction(listing, action)
           }}
           secondaryActions={
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={loading}
-                onClick={() => {
-                  void disableWorkflowCatalogListing(listing.id).then((ok) => {
-                    if (ok) {
-                      setDetail(null)
-                      void loadWorkflows(false)
-                    }
-                  })
-                }}
-              >
-                {ts('chat.marketplace.hide')}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={loading}
-                onClick={() => {
-                  void reportWorkflowCatalogListing({ listingId: listing.id }).then((ok) => {
-                    if (ok) void loadWorkflows(false)
-                  })
-                }}
-              >
-                {ts('chat.marketplace.report')}
-              </Button>
-            </>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={loading}
+              onClick={() => {
+                void reportWorkflowCatalogListing({ listingId: listing.id }).then((ok) => {
+                  if (ok) void loadWorkflows(false)
+                })
+              }}
+            >
+              {ts('chat.marketplace.report')}
+            </Button>
+          }
+          body={
+            <MarketplaceWorkflowPreview
+              key={listing.id}
+              draft={listing.draft}
+              details={
+                <MarketplaceDetailSections
+                  {...detailSectionLabels}
+                  model={model}
+                  disabled={loading}
+                  busy={busyId === listing.id}
+                />
+              }
+            />
           }
         />
       )
@@ -1580,35 +1506,18 @@ export default function MarketplaceOverlay() {
           void runSkillAction(listing, action)
         }}
         secondaryActions={
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={loading}
-              onClick={() => {
-                void disableSkillCatalogListing(listing.id).then((ok) => {
-                  if (ok) {
-                    setDetail(null)
-                    void loadSkills(false)
-                  }
-                })
-              }}
-            >
-              {ts('chat.marketplace.hide')}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={loading}
-              onClick={() => {
-                void reportSkillCatalogListing({ listingId: listing.id }).then((ok) => {
-                  if (ok) void loadSkills(false)
-                })
-              }}
-            >
-              {ts('chat.marketplace.report')}
-            </Button>
-          </>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={loading}
+            onClick={() => {
+              void reportSkillCatalogListing({ listingId: listing.id }).then((ok) => {
+                if (ok) void loadSkills(false)
+              })
+            }}
+          >
+            {ts('chat.marketplace.report')}
+          </Button>
         }
       />
     )
@@ -1700,8 +1609,9 @@ export default function MarketplaceOverlay() {
             </div>
             {viewMode === 'catalog' && gitUrlEnabled ? (
               <div className={styles.gitUrlBar}>
-                <input
-                  className={styles.gitUrlInput}
+                <TextInput
+                  fieldClassName={styles.barField}
+                  size="sm"
                   type="url"
                   value={gitUrl}
                   disabled={gitInstalling || loading}
@@ -1731,8 +1641,10 @@ export default function MarketplaceOverlay() {
             ) : null}
             {viewMode === 'catalog' && packImportEnabled ? (
               <div className={styles.importPackBar}>
-                <textarea
-                  className={styles.importPackInput}
+                <TextArea
+                  fieldClassName={styles.barField}
+                  size="sm"
+                  mono
                   value={packJson}
                   onChange={(e) => setPackJson(e.target.value)}
                   placeholder={ts('chat.marketplace.importPackPlaceholder')}

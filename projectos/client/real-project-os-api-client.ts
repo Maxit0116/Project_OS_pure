@@ -1489,8 +1489,49 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.startLoopInstance(projectId, loopId, specVersion, featureNodeId);
   }
 
+  startLoopInstanceWithParams(
+    projectId: string,
+    loopId: string,
+    params: Record<string, unknown>,
+    options?: { specVersion?: string; idempotencyKey?: string },
+  ) {
+    return this.transport.startLoopInstanceWithParams(projectId, loopId, params, options);
+  }
+
+  startLoopInstanceFromEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ) {
+    return this.transport.startLoopInstanceFromEvent(projectId, loopId, event);
+  }
+
+  restoreLoopInstanceFromCheckpoint(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ) {
+    return this.transport.restoreLoopInstanceFromCheckpoint(projectId, loopId, instanceId);
+  }
+
+  listLoopRunHistory(projectId: string, loopId: string) {
+    return this.transport.listLoopRunHistory(projectId, loopId);
+  }
+
+  deriveDraftFromLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ) {
+    return this.transport.deriveDraftFromLoopInstance(projectId, loopId, instanceId);
+  }
+
   pauseLoopInstance(projectId: string, loopId: string, instanceId: string) {
     return this.transport.pauseLoopInstance(projectId, loopId, instanceId);
+  }
+
+  cancelLoopInstance(projectId: string, loopId: string, instanceId: string) {
+    return this.transport.cancelLoopInstance(projectId, loopId, instanceId);
   }
 
   resumeLoopInstance(projectId: string, loopId: string, instanceId: string) {

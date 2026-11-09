@@ -41,6 +41,7 @@ import {
 } from '@contracts/index'
 import { GraphOverlayFrame } from '../GraphOverlay/GraphOverlayFrame'
 import Checkbox from '../ui/Checkbox'
+import TextInput from '../ui/TextInput'
 import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useBottomDockStore } from '../../state/bottomDockStore'
@@ -2574,7 +2575,7 @@ export default function GithubGraphOverlay() {
                       <div className={styles.createPopoverNode}>
                         {popupNode.name}
                       </div>
-                      <input
+                      <TextInput
                         ref={featureTitleRef}
                         className={styles.input}
                         value={featureTitle}
@@ -2637,7 +2638,7 @@ export default function GithubGraphOverlay() {
                         {ts('chat.githubGraph.fullBranchName')}:{' '}
                         <code>{composedPreview || '—'}</code>
                       </div>
-                      <input
+                      <TextInput
                         ref={shortNameRef}
                         className={styles.input}
                         value={shortName}
@@ -2685,7 +2686,7 @@ export default function GithubGraphOverlay() {
                       <div className={styles.createPopoverNode}>
                         {popupNode.name}
                       </div>
-                      <input
+                      <TextInput
                         ref={renameInputRef}
                         className={styles.input}
                         value={renameTo}

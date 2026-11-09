@@ -35,25 +35,6 @@
   color: var(--tech-text-secondary, var(--color-text-secondary));
 }
 
-.input,
-.textarea {
-  width: 100%;
-  padding: 7px 9px;
-  border: 1px solid var(--tech-border, var(--color-border-subtle));
-  border-radius: 4px;
-  background: var(--tech-bg-canvas, var(--color-bg-canvas));
-  color: var(--tech-text-primary, var(--color-text-primary));
-  font: inherit;
-  font-size: var(--font-size-sm);
-  resize: vertical;
-}
-
-.input:focus,
-.textarea:focus {
-  outline: none;
-  box-shadow: var(--tech-shadow-focus);
-}
-
 .chips {
   display: flex;
   flex-wrap: wrap;

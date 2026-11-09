@@ -371,6 +371,21 @@ describe("loop-runtime Terminal + deferred GitHub", () => {
               cursorNodeId: conditionId,
               hitlQuestionIds: [],
               featureNodeId: "feat_1",
+              // Jumping past verify: mark upstream nodes succeeded so ready-set
+              // does not reopen n_test ahead of the approval gate.
+              nodeRecords: (item.nodeRecords ?? compiled.specDraft.nodes.map((node) => ({
+                nodeId: node.id,
+                status: "pending" as const,
+                updatedAt: item.startedAt,
+              }))).map((record) =>
+                record.nodeId === conditionId
+                  ? { ...record, status: "ready" as const }
+                  : record.nodeId === approvalId ||
+                      record.nodeId === prId ||
+                      record.nodeId.startsWith("n_review")
+                    ? { ...record, status: "pending" as const }
+                    : { ...record, status: "succeeded" as const },
+              ),
               artifacts: [
                 ...(item.artifacts ?? []),
                 {

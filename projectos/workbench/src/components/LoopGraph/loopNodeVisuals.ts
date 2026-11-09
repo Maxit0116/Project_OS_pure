@@ -10,9 +10,11 @@ import {
   GitBranch,
   GitFork,
   GitPullRequest,
+  Hourglass,
   Merge,
   MessageSquareWarning,
   Puzzle,
+  RefreshCw,
   Repeat,
   SearchCheck,
   Server,
@@ -41,6 +43,8 @@ export type LoopVisualKey =
   | 'logic.loop'
   | 'logic.merge'
   | 'logic.exit'
+  | 'logic.retry'
+  | 'logic.wait'
   | 'human.approval'
   | 'human.review'
   | 'human.input'
@@ -135,6 +139,20 @@ const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
     category: 'logic',
     Icon: CircleCheck,
     shortLabel: 'Exit',
+    categoryClass: 'catLogic',
+  },
+  'logic.retry': {
+    key: 'logic.retry',
+    category: 'logic',
+    Icon: RefreshCw,
+    shortLabel: 'Retry',
+    categoryClass: 'catLogic',
+  },
+  'logic.wait': {
+    key: 'logic.wait',
+    category: 'logic',
+    Icon: Hourglass,
+    shortLabel: 'Wait',
     categoryClass: 'catLogic',
   },
   'human.approval': {
@@ -244,6 +262,8 @@ export function visualKeyFromArchitecture(node: {
   if (node.logicKind === 'loop') return 'logic.loop'
   if (node.logicKind === 'merge') return 'logic.merge'
   if (node.logicKind === 'exit') return 'logic.exit'
+  if (node.logicKind === 'retry') return 'logic.retry'
+  if (node.logicKind === 'wait') return 'logic.wait'
   if (node.humanMode === 'approval') return 'human.approval'
   if (node.humanMode === 'review') return 'human.review'
   if (node.humanMode === 'input') return 'human.input'
@@ -252,6 +272,10 @@ export function visualKeyFromArchitecture(node: {
   if (node.type === 'logic') return 'logic.condition'
   if (node.type === 'human') return 'human.approval'
   return 'draft'
+}
+
+export function visualForKey(key: LoopVisualKey): LoopNodeVisual {
+  return VISUALS[key] ?? VISUALS.draft
 }
 
 export function visualForIntentNode(node: IntentGraphNode): LoopNodeVisual {

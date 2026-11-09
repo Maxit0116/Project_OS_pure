@@ -13,10 +13,11 @@ export function disabledRulesListingIdSet(
 
 export function filterInstallableRulesListings(
   document: RulesCatalogDocument,
-  prefs: RulesMarketplacePrefs | undefined,
+  _prefs: RulesMarketplacePrefs | undefined,
 ): RulesCatalogListing[] {
-  const disabled = disabledRulesListingIdSet(prefs);
-  return document.listings.filter((listing) => !disabled.has(listing.id));
+  // Hide/disable is retired — catalog listings stay visible.
+  void _prefs;
+  return document.listings;
 }
 
 export function withDisabledRulesListing(

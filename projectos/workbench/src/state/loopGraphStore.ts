@@ -172,6 +172,18 @@ interface LoopGraphStore {
   resumeRun: () => Promise<void>
   advanceRun: () => Promise<void>
   resolveHitl: (answers: LoopHitlAnswer[]) => Promise<void>
+  restoreFromCheckpoint: (instanceId: string) => Promise<void>
+  deriveDraftFromRun: (instanceId: string) => Promise<void>
+  refreshRunHistory: () => Promise<void>
+  runHistory: Array<{
+    id: string
+    status: string
+    specVersion: string
+    startedAt: string
+    completedAt?: string
+    round: number
+    errorMessage?: string
+  }>
   linkActiveSession: () => Promise<void>
   unlinkSession: (sessionId: string) => Promise<void>
 }
@@ -217,6 +229,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   composerDraft: '',
   composerSheet: 'none',
   authoringBusy: false,
+  runHistory: [],
 
   clear: () => {
     if (persistTimer) {
@@ -235,6 +248,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       connectingFromId: null,
       pendingDelete: null,
       applying: false,
+      runHistory: [],
       composerDraft: '',
       composerSheet: 'none',
       authoringBusy: false,
@@ -1463,11 +1477,65 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         featureNodeId,
       )
       const heads = await client.listLoopGraphs(project.projectId)
-      set({ document, heads, phase: 'run', loading: false })
+      const runHistory = await client.listLoopRunHistory(project.projectId, loopId)
+      set({ document, heads, phase: 'run', loading: false, runHistory })
     } catch (error) {
       set({
         loading: false,
         error: error instanceof Error ? error.message : 'Start failed',
+      })
+    }
+  },
+
+  refreshRunHistory: async () => {
+    const { client, project } = useWorkbenchStore.getState()
+    const loopId = get().activeLoopId
+    if (!client || !project || !loopId) return
+    try {
+      const runHistory = await client.listLoopRunHistory(project.projectId, loopId)
+      set({ runHistory })
+    } catch {
+      // History is best-effort for the Run panel.
+    }
+  },
+
+  restoreFromCheckpoint: async (instanceId) => {
+    const { client, project } = useWorkbenchStore.getState()
+    const loopId = get().activeLoopId
+    if (!client || !project || !loopId) return
+    set({ loading: true, error: null })
+    try {
+      const document = await client.restoreLoopInstanceFromCheckpoint(
+        project.projectId,
+        loopId,
+        instanceId,
+      )
+      const runHistory = await client.listLoopRunHistory(project.projectId, loopId)
+      set({ document, phase: 'run', loading: false, runHistory })
+    } catch (error) {
+      set({
+        loading: false,
+        error: error instanceof Error ? error.message : 'Restore failed',
+      })
+    }
+  },
+
+  deriveDraftFromRun: async (instanceId) => {
+    const { client, project } = useWorkbenchStore.getState()
+    const loopId = get().activeLoopId
+    if (!client || !project || !loopId) return
+    set({ loading: true, error: null })
+    try {
+      const document = await client.deriveDraftFromLoopInstance(
+        project.projectId,
+        loopId,
+        instanceId,
+      )
+      set({ document, phase: 'draw', loading: false })
+    } catch (error) {
+      set({
+        loading: false,
+        error: error instanceof Error ? error.message : 'Derive draft failed',
       })
     }
   },

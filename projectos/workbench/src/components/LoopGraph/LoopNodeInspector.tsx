@@ -16,6 +16,8 @@ import {
   VoiceInputErrorBanner,
 } from '../ChatPanel/VoiceInputControls'
 import { isCommunityMcpServer } from './LoopConfigAssetPicker'
+import TextArea from '../ui/TextArea'
+import TextInput from '../ui/TextInput'
 import styles from './LoopNodeInspector.module.css'
 
 interface Props {
@@ -85,14 +87,13 @@ export default function LoopNodeInspector({
               <span className={styles.chip}>{node.satelliteKind}</span>
             ) : null}
           </div>
-          <label className={styles.field}>
-            <span>{ts('chat.loopGraph.inspectorTitle')}</span>
-            <input
-              value={node.title}
-              disabled={readOnly}
-              onChange={(event) => onChange({ title: event.target.value })}
-            />
-          </label>
+          <TextInput
+            fieldClassName={styles.field}
+            label={ts('chat.loopGraph.inspectorTitle')}
+            value={node.title}
+            disabled={readOnly}
+            onChange={(event) => onChange({ title: event.target.value })}
+          />
           <pre className={styles.artifactBody}>
             {JSON.stringify(node.configRef ?? {}, null, 2)}
           </pre>
@@ -114,16 +115,14 @@ export default function LoopNodeInspector({
     <aside className={shellClass} aria-label={ts('chat.loopGraph.inspector')}>
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>{ts('chat.loopGraph.inspectorDuty')}</h3>
-        <label className={styles.field}>
-          <span>{ts('chat.loopGraph.inspectorTitle')}</span>
-          <input
-            value={node.title}
-            disabled={readOnly}
-            onChange={(event) => onChange({ title: event.target.value })}
-          />
-        </label>
-        <label className={styles.field}>
-          <span>{ts('chat.loopGraph.inspectorPrompt')}</span>
+        <TextInput
+          fieldClassName={styles.field}
+          label={ts('chat.loopGraph.inspectorTitle')}
+          value={node.title}
+          disabled={readOnly}
+          onChange={(event) => onChange({ title: event.target.value })}
+        />
+        <div className={styles.field}>
           {composeVoice.voice.state.error ? (
             <VoiceInputErrorBanner
               errorKey={composeVoice.voice.state.error}
@@ -132,7 +131,10 @@ export default function LoopNodeInspector({
             />
           ) : null}
           <div className={styles.promptWrap}>
-            <textarea
+            <TextArea
+              label={ts('chat.loopGraph.inspectorPrompt')}
+              fieldClassName={styles.promptField}
+              resize="vertical"
               value={node.prompt}
               disabled={readOnly}
               rows={4}
@@ -162,7 +164,7 @@ export default function LoopNodeInspector({
             />
             <VoiceInputDock {...composeVoice.dockProps} />
           </div>
-        </label>
+        </div>
         <div className={styles.metaRow}>
           <span className={styles.chip}>{arch.type}</span>
           {arch.agentRole ? <span className={styles.chip}>{arch.agentRole}</span> : null}
@@ -289,19 +291,18 @@ export default function LoopNodeInspector({
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>{ts('chat.loopGraph.inspectorConfig')}</h3>
         {arch.type === 'logic' && arch.logicKind === 'loop' ? (
-          <label className={styles.field}>
-            <span>{ts('chat.loopGraph.inspectorMaxIterations')}</span>
-            <input
-              type="number"
-              min={1}
-              max={50}
-              disabled={readOnly}
-              value={node.maxIterations ?? 3}
-              onChange={(event) =>
-                onChange({ maxIterations: Number(event.target.value) || 1 })
-              }
-            />
-          </label>
+          <TextInput
+            fieldClassName={styles.field}
+            type="number"
+            min={1}
+            max={50}
+            label={ts('chat.loopGraph.inspectorMaxIterations')}
+            disabled={readOnly}
+            value={node.maxIterations ?? 3}
+            onChange={(event) =>
+              onChange({ maxIterations: Number(event.target.value) || 1 })
+            }
+          />
         ) : null}
         {arch.type === 'agent' && arch.agentRole === 'planner' ? (
           <p className={styles.hint}>{ts('chat.loopGraph.inspectorPlannerHint')}</p>

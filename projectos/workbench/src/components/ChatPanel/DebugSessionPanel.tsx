@@ -3,6 +3,7 @@ import type { BugAlignmentItem, DebugSession } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import Button from '../ui/Button'
 import Checkbox from '../ui/Checkbox'
+import TextArea from '../ui/TextArea'
 import HypothesisCard from '../DebugHarness/HypothesisCard'
 import toneStyles from './composer/chatModeTone.module.css'
 import styles from './DebugSessionPanel.module.css'
@@ -134,8 +135,9 @@ export default function DebugSessionPanel({
                     {ts('alignment.addComment')}
                   </button>
                   {draft?.commentOpen ? (
-                    <textarea
+                    <TextArea
                       className={styles.commentInput}
+                      resize="vertical"
                       value={draft.comment}
                       disabled={fixInProgress}
                       placeholder={ts('debug.commentPlaceholder')}

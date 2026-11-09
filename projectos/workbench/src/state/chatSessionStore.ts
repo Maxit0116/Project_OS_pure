@@ -77,6 +77,11 @@ let scheduledPersistSessionId: string | null = null
 let titleSummarizeTimer: ReturnType<typeof setTimeout> | null = null
 /** Prevent concurrent forkSession races (slow summarize + switchSession). */
 let forkSessionInFlight = false
+/**
+ * True after conversation activity schedules a persist. Leave-flush without this
+ * flag must not bump lastUpdatedAt (keeps parallel working-set order stable).
+ */
+let activityDirty = false
 
 /** Silent GC for empty shells — no toast; caller must ensure session is not active. */
 async function tryDeleteDisposableEmptySession(
@@ -747,7 +752,11 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     const sessionId = activeSessionId
     const workbench = useWorkbenchStore.getState()
     const existingHead = heads.find((head) => head.id === sessionId)
-    const record = buildChatSessionRecord(workbench, sessionId, existingHead)
+    const touchActivity = activityDirty || !existingHead
+    activityDirty = false
+    const record = buildChatSessionRecord(workbench, sessionId, existingHead, {
+      touchActivity,
+    })
     await client.upsertChatSession(project.projectId, record)
 
     if (get().activeSessionId === sessionId) {
@@ -767,7 +776,10 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     const existingHead = heads.find((head) => head.id === activeSessionId)
     if (!existingHead) return
     const workbench = useWorkbenchStore.getState()
-    const draft = buildChatSessionRecord(workbench, activeSessionId, existingHead)
+    // Optimistic head projection always floats the session for the working set.
+    const draft = buildChatSessionRecord(workbench, activeSessionId, existingHead, {
+      touchActivity: true,
+    })
     const existingRecord: ChatSessionRecord = {
       version: '0.2.0',
       head: existingHead,
@@ -789,6 +801,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   schedulePersist: () => {
     const sessionId = get().activeSessionId
     if (!sessionId) return
+    activityDirty = true
     // Optimistic Session Graph update before the debounced disk write.
     get().syncActiveHeadFromWorkbench()
     if (persistTimer) clearTimeout(persistTimer)

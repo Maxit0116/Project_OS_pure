@@ -70,3 +70,12 @@
   box-shadow: 0 0 0 1000px var(--tech-bg-muted) inset;
   transition: background-color 99999s ease-out;
 }
+
+.sm {
+  padding: 6px 9px;
+  font-size: var(--font-size-xs);
+}
+
+.mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}

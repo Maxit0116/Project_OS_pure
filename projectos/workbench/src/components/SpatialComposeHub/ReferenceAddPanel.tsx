@@ -11,6 +11,7 @@ import {
 } from '@contracts/hub-references'
 import type { ComposeHubStrings } from './composeHubStrings'
 import type { ComposeHubDataSource } from './hubActions'
+import TextInput from '../ui/TextInput'
 import {
   filterReferencesForTab,
   isLinksLibraryRef,
@@ -227,8 +228,9 @@ export default function ReferenceAddPanel({
       </div>
 
       <div className={styles.refUrlRow}>
-        <input
-          className={styles.refUrlInput}
+        <TextInput
+          fieldClassName={styles.refUrlFieldGrow}
+          size="sm"
           value={draft}
           placeholder={strings.referencesAddUrlPlaceholder}
           aria-label={strings.referencesAddUrl}
@@ -343,8 +345,9 @@ export default function ReferenceAddPanel({
             ))}
           </div>
           <div className={styles.refUrlRow}>
-            <input
-              className={styles.refUrlInput}
+            <TextInput
+              fieldClassName={styles.refUrlFieldGrow}
+              size="sm"
               value={folderDraft}
               placeholder={strings.referencesFolderPlaceholder}
               aria-label={strings.referencesFolderNew}

@@ -1,11 +1,16 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   trimLoopInstanceEvents,
   type LoopGraphDocument,
   type LoopHitlAnswer,
   type LoopInstance,
+  type LoopInstanceCheckpoint,
   type LoopInstanceEvent,
+  type LoopLaunch,
+  type LoopNodeRecord,
+  type LoopNodeRecordStatus,
+  type LoopReplanProposal,
   type LoopSpec,
   type LoopSpecNode,
   validateLoopSpecTopology,
@@ -34,9 +39,11 @@ import {
   conditionalOutgoing,
   controlIncomingIds,
   dependsIncoming,
+  dependsOutgoingIds,
   dependsOutgoingMap,
   effectiveMaxIterations,
   evidenceToTestReport,
+  fallbackOutgoing,
   feedbackEdge,
   findRequestChangesTarget,
   humanQuestionId,
@@ -79,6 +86,126 @@ function pushEvent(
   };
 }
 
+const TERMINAL_NODE_STATUSES = new Set<LoopNodeRecordStatus>([
+  "succeeded",
+  "failed",
+  "skipped",
+  "cancelled",
+]);
+
+function upsertNodeRecord(
+  instance: LoopInstance,
+  nodeId: string,
+  patch: Partial<Omit<LoopNodeRecord, "nodeId">> & { status: LoopNodeRecordStatus },
+): LoopInstance {
+  const updatedAt = patch.updatedAt ?? nowIso();
+  const records = [...(instance.nodeRecords ?? [])];
+  const index = records.findIndex((item) => item.nodeId === nodeId);
+  const prev = index >= 0 ? records[index] : undefined;
+  const next: LoopNodeRecord = {
+    nodeId,
+    status: patch.status,
+    updatedAt,
+    ...(patch.agentRunId !== undefined
+      ? { agentRunId: patch.agentRunId }
+      : prev?.agentRunId
+        ? { agentRunId: prev.agentRunId }
+        : {}),
+    ...(patch.evidenceId !== undefined
+      ? { evidenceId: patch.evidenceId }
+      : prev?.evidenceId
+        ? { evidenceId: prev.evidenceId }
+        : {}),
+    ...(patch.artifactIds !== undefined
+      ? { artifactIds: patch.artifactIds }
+      : prev?.artifactIds
+        ? { artifactIds: prev.artifactIds }
+        : {}),
+    ...(patch.errorMessage !== undefined
+      ? { errorMessage: patch.errorMessage }
+      : prev?.errorMessage
+        ? { errorMessage: prev.errorMessage }
+        : {}),
+    ...(patch.attempt !== undefined
+      ? { attempt: patch.attempt }
+      : prev?.attempt !== undefined
+        ? { attempt: prev.attempt }
+        : {}),
+  };
+  if (index >= 0) records[index] = next;
+  else records.push(next);
+  return { ...instance, nodeRecords: records };
+}
+
+function recordStatus(
+  instance: LoopInstance,
+  nodeId: string,
+): LoopNodeRecordStatus | undefined {
+  return instance.nodeRecords?.find((item) => item.nodeId === nodeId)?.status;
+}
+
+function parentsSucceeded(spec: LoopSpec, instance: LoopInstance, nodeId: string): boolean {
+  const parents = dependsIncoming(spec, nodeId);
+  if (parents.length === 0) return true;
+  return parents.every(
+    (parentId) =>
+      recordStatus(instance, parentId) === "succeeded" || nodeCompleted(instance, parentId),
+  );
+}
+
+/** GC-2.3 P0: unlock ready nodes; pick one successor (serial drain of Parallel forks). */
+function pickNextCursor(
+  spec: LoopSpec,
+  instance: LoopInstance,
+  fromNodeId: string,
+): { cursor: string | null; instance: LoopInstance } {
+  let next = instance;
+  const children = dependsOutgoingIds(spec, fromNodeId);
+  for (const childId of children) {
+    const status = recordStatus(next, childId);
+    if (status && TERMINAL_NODE_STATUSES.has(status)) continue;
+    if (parentsSucceeded(spec, next, childId)) {
+      next = upsertNodeRecord(next, childId, { status: "ready" });
+    }
+  }
+
+  // Unlock any other nodes whose parents just became complete.
+  for (const node of spec.nodes) {
+    const status = recordStatus(next, node.id);
+    if (status && TERMINAL_NODE_STATUSES.has(status)) continue;
+    if (status === "running" || status === "waiting_approval") continue;
+    if (!parentsSucceeded(spec, next, node.id)) continue;
+    if (node.id === fromNodeId) continue;
+    next = upsertNodeRecord(next, node.id, {
+      status: architectureOf(node).logicKind === "merge" ? "waiting" : "ready",
+    });
+  }
+
+  const mergeReady = spec.nodes.find((node) => {
+    if (architectureOf(node).logicKind !== "merge") return false;
+    if (recordStatus(next, node.id) === "succeeded") return false;
+    return parentsSucceeded(spec, next, node.id);
+  });
+  if (mergeReady) {
+    next = upsertNodeRecord(next, mergeReady.id, { status: "ready" });
+    return { cursor: mergeReady.id, instance: next };
+  }
+
+  // Only "ready" (not merge "waiting") — Merge is handled above when joinable.
+  const ready = spec.nodes.filter((node) => recordStatus(next, node.id) === "ready");
+  if (ready.length > 0) {
+    return { cursor: ready[0]!.id, instance: next };
+  }
+
+  if (children.length === 1) {
+    return { cursor: children[0]!, instance: next };
+  }
+  if (children.length > 1) {
+    return { cursor: children[0]!, instance: next };
+  }
+  return { cursor: null, instance: next };
+}
+
 function cloneSpecAsPendingDraft(spec: LoopSpec, reason: string): LoopSpec {
   const copy = structuredClone(spec);
   const assumptions = [
@@ -100,6 +227,37 @@ function cloneSpecAsPendingDraft(spec: LoopSpec, reason: string): LoopSpec {
  * Record a spec revision that still needs approval.
  * The running instance keeps `specVersion` and its current node set.
  */
+function buildReplanProposal(from: LoopSpec, to: LoopSpec, reason: string): LoopReplanProposal {
+  const fromIds = new Set(from.nodes.map((node) => node.id));
+  const toIds = new Set(to.nodes.map((node) => node.id));
+  const reusedNodeIds = [...toIds].filter((id) => fromIds.has(id));
+  const addedNodeIds = [...toIds].filter((id) => !fromIds.has(id));
+  const removedNodeIds = [...fromIds].filter((id) => !toIds.has(id));
+  const fromPerms = new Set(from.permissions.map((item) => `${item.action}:${item.scope}`));
+  const permissionDelta = to.permissions
+    .map((item) => `${item.action}:${item.scope}`)
+    .filter((key) => !fromPerms.has(key));
+  const riskNotes: string[] = [];
+  if (permissionDelta.length > 0) {
+    riskNotes.push("Proposed spec adds permissions; approval must not silently expand rights.");
+  }
+  if (addedNodeIds.length > 0) {
+    riskNotes.push(`Adds ${addedNodeIds.length} node(s).`);
+  }
+  if (removedNodeIds.length > 0) {
+    riskNotes.push(`Removes ${removedNodeIds.length} node(s).`);
+  }
+  return {
+    reason: reason.slice(0, 500),
+    fromSpecVersion: from.version,
+    reusedNodeIds,
+    addedNodeIds,
+    removedNodeIds,
+    permissionDelta,
+    riskNotes,
+  };
+}
+
 function attachPendingSpecDraft(
   doc: LoopGraphDocument,
   instance: LoopInstance,
@@ -108,6 +266,9 @@ function attachPendingSpecDraft(
 ): { doc: LoopGraphDocument; instance: LoopInstance } {
   const specDraft = cloneSpecAsPendingDraft(spec, reason);
   const compiledAt = specDraft.createdAt;
+  const replan = buildReplanProposal(spec, specDraft, reason);
+  // GC-4.4: never silently expand permissions in a replan draft.
+  specDraft.permissions = spec.permissions.map((item) => ({ ...item }));
   const nextInstance = pushEvent(
     {
       ...instance,
@@ -129,9 +290,182 @@ function attachPendingSpecDraft(
         assumptions: specDraft.assumptions ?? [],
         cycleGates: specDraft.cycleGates ?? [],
         compiledAt,
+        replan,
       },
     },
   };
+}
+
+function snapshotCheckpoint(instance: LoopInstance): LoopInstanceCheckpoint {
+  return {
+    savedAt: nowIso(),
+    cursorNodeId: instance.cursorNodeId,
+    status: instance.status,
+    round: instance.round,
+    attemptCounts: { ...instance.attemptCounts },
+    ...(instance.loopIterations ? { loopIterations: { ...instance.loopIterations } } : {}),
+    ...(instance.nodeRecords
+      ? { nodeRecords: instance.nodeRecords.map((item) => ({ ...item })) }
+      : {}),
+    ...(instance.activeRunId ? { activeRunId: instance.activeRunId } : {}),
+    ...(instance.activeRunNodeId ? { activeRunNodeId: instance.activeRunNodeId } : {}),
+    ...(instance.activeRunIds ? { activeRunIds: [...instance.activeRunIds] } : {}),
+    ...(instance.hitlQuestionIds ? { hitlQuestionIds: [...instance.hitlQuestionIds] } : {}),
+  };
+}
+
+function stampCheckpoint(
+  instance: LoopInstance,
+  options?: { emitEvent?: boolean },
+): LoopInstance {
+  const checkpoint = snapshotCheckpoint(instance);
+  const next = { ...instance, checkpoint };
+  if (!options?.emitEvent) return next;
+  return pushEvent(next, {
+    type: "checkpoint_saved",
+    nodeId: instance.cursorNodeId ?? undefined,
+    message: `Checkpoint at ${checkpoint.cursorNodeId ?? "null"} (round ${checkpoint.round})`,
+  });
+}
+
+function withCheckpoint(instance: LoopInstance): LoopInstance {
+  return stampCheckpoint(instance, { emitEvent: true });
+}
+
+function replaceInstanceWithCheckpoint(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  options?: { emitEvent?: boolean },
+): LoopGraphDocument {
+  return replaceInstance(doc, stampCheckpoint(instance, options));
+}
+
+function fingerprintContext(input: {
+  featureNodeId?: string;
+  leafPath?: string;
+  specVersion: string;
+}): string {
+  return createHash("sha256")
+    .update(
+      `${input.specVersion}|${input.featureNodeId ?? ""}|${input.leafPath ?? ""}`,
+      "utf8",
+    )
+    .digest("hex")
+    .slice(0, 32);
+}
+
+function applyBudgetAndFreshness(
+  instance: LoopInstance,
+  spec: LoopSpec,
+  execution: LoopExecutionHooks | undefined,
+): LoopInstance {
+  const startedMs = Date.parse(instance.startedAt);
+  const wallClockMs = Number.isFinite(startedMs)
+    ? Math.max(0, Date.now() - startedMs)
+    : 0;
+  const retries = Object.values(instance.attemptCounts).reduce((sum, n) => sum + n, 0);
+  let next: LoopInstance = {
+    ...instance,
+    budgetUsage: {
+      ...(instance.budgetUsage ?? {}),
+      wallClockMs,
+      retries,
+    },
+  };
+
+  const featureNodeId =
+    instance.featureNodeId ?? execution?.leaf?.featureNodeId;
+  const pathFingerprint = fingerprintContext({
+    ...(featureNodeId ? { featureNodeId } : {}),
+    ...(execution?.leaf?.filePath ? { leafPath: execution.leaf.filePath } : {}),
+    specVersion: instance.specVersion,
+  });
+  const baselineId = next.freshness?.baselineId ?? pathFingerprint;
+  const stale = next.freshness?.baselineId
+    ? next.freshness.baselineId !== pathFingerprint
+    : false;
+  next = {
+    ...next,
+    freshness: {
+      status: next.freshness?.baselineId ? (stale ? "stale" : "fresh") : "fresh",
+      baselineId,
+      pathFingerprint,
+      checkedAt: nowIso(),
+    },
+  };
+
+  if (stale && (spec.stalePolicy ?? "warn") === "pause_hitl") {
+    next = pushEvent(
+      {
+        ...next,
+        status: "awaiting_hitl",
+        hitlQuestionIds: ["freshness_stale"],
+      },
+      {
+        type: "freshness_stale",
+        nodeId: next.cursorNodeId ?? undefined,
+        message: "Context fingerprint changed since baseline",
+      },
+    );
+    next = pushEvent(next, {
+      type: "awaiting_hitl",
+      nodeId: next.cursorNodeId ?? undefined,
+      message: "Freshness stale — confirm continue",
+    });
+    return next;
+  }
+  if (stale) {
+    next = pushEvent(next, {
+      type: "freshness_stale",
+      nodeId: next.cursorNodeId ?? undefined,
+      message: "Context fingerprint changed (warn-only)",
+    });
+  }
+
+  const tokenBudget = spec.stopPolicy.maxBudgetTokens;
+  if (typeof tokenBudget === "number" && (next.budgetUsage?.tokens ?? 0) > tokenBudget) {
+    next = pushEvent(
+      {
+        ...next,
+        status: "awaiting_hitl",
+        hitlQuestionIds: ["budget_exceeded"],
+      },
+      {
+        type: "budget_exceeded",
+        message: `Token budget exceeded (${next.budgetUsage?.tokens}/${tokenBudget})`,
+      },
+    );
+    next = pushEvent(next, {
+      type: "awaiting_hitl",
+      message: "Budget exceeded — confirm continue",
+    });
+  }
+  return next;
+}
+
+function validateLaunchParams(
+  spec: LoopSpec,
+  params: Record<string, unknown> | undefined,
+): void {
+  const declared = spec.inputParams ?? [];
+  if (declared.length === 0) return;
+  const provided = params ?? {};
+  for (const param of declared) {
+    const value = provided[param.name] ?? param.defaultValue;
+    if (param.required !== false && (value === undefined || value === null || value === "")) {
+      throw new Error(`Missing required launch param: ${param.name}`);
+    }
+    if (value === undefined) continue;
+    if (param.type === "string" && typeof value !== "string") {
+      throw new Error(`Launch param ${param.name} must be a string`);
+    }
+    if (param.type === "number" && typeof value !== "number") {
+      throw new Error(`Launch param ${param.name} must be a number`);
+    }
+    if (param.type === "boolean" && typeof value !== "boolean") {
+      throw new Error(`Launch param ${param.name} must be a boolean`);
+    }
+  }
 }
 
 function entryNodeId(spec: LoopSpec): string {
@@ -163,10 +497,54 @@ function failNode(
   instance: LoopInstance,
   nodeId: string,
   message: string,
+  options?: { execution?: LoopExecutionHooks; spec?: LoopSpec },
 ): LoopGraphDocument {
-  const next = pushEvent(
+  let next = upsertNodeRecord(instance, nodeId, {
+    status: "failed",
+    errorMessage: message.slice(0, 1000),
+  });
+
+  const spec = options?.spec ?? findSpec(doc, instance.specVersion);
+  const fallback = spec ? fallbackOutgoing(spec, nodeId) : undefined;
+  if (fallback && spec) {
+    next = pushEvent(next, {
+      type: "fallback_taken",
+      nodeId,
+      message: `Fallback to ${fallback.to}: ${message}`.slice(0, 2000),
+    });
+    next = upsertNodeRecord(next, fallback.to, { status: "ready" });
+    next = {
+      ...next,
+      status: "running",
+      cursorNodeId: fallback.to,
+      errorMessage: undefined,
+      completedAt: undefined,
+      activeRunId: undefined,
+      activeRunNodeId: undefined,
+    };
+    return replaceInstance(doc, next);
+  }
+
+  if (spec?.retryPolicy.onFailure === "fallback") {
+    next = pushEvent(
+      {
+        ...next,
+        status: "awaiting_hitl",
+        hitlQuestionIds: ["fallback_missing"],
+        errorMessage: message.slice(0, 1000),
+      },
+      {
+        type: "awaiting_hitl",
+        nodeId,
+        message: "Failure policy is fallback but no fallback edge exists",
+      },
+    );
+    return replaceInstance(doc, next);
+  }
+
+  next = pushEvent(
     {
-      ...instance,
+      ...next,
       status: "error",
       errorMessage: message.slice(0, 1000),
       completedAt: nowIso(),
@@ -186,6 +564,33 @@ function isImplementRole(role: string): role is "implement" | "fix" {
  * it does not switch `specVersion`.
  * Dispatch prefers architecture `type`, then legacy roles.
  */
+function checkWallClockTimeout(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  spec: LoopSpec,
+): LoopGraphDocument | null {
+  const limit = spec.stopPolicy.maxWallClockMs;
+  if (!limit || limit <= 0) return null;
+  const started = Date.parse(instance.startedAt);
+  if (!Number.isFinite(started)) return null;
+  const elapsed = Date.now() - started;
+  if (elapsed < limit) return null;
+  const next = pushEvent(
+    {
+      ...instance,
+      status: "awaiting_hitl",
+      hitlQuestionIds: ["wall_clock_timeout"],
+      errorMessage: `Wall-clock budget exceeded (${limit}ms)`,
+    },
+    {
+      type: "awaiting_hitl",
+      nodeId: instance.cursorNodeId ?? undefined,
+      message: `Wall-clock timeout after ${elapsed}ms (limit ${limit}ms)`,
+    },
+  );
+  return replaceInstance(doc, next);
+}
+
 export function stepLoopInstance(
   doc: LoopGraphDocument,
   instanceId: string,
@@ -203,11 +608,18 @@ export function stepLoopInstance(
 
   const spec = findSpec(doc, instance.specVersion);
   if (!spec) throw new Error(`Spec not found: ${instance.specVersion}`);
+  const timedOut = checkWallClockTimeout(doc, instance, spec);
+  if (timedOut) return timedOut;
   const execution = options?.execution;
 
-  let next = instance.status === "queued"
-    ? pushEvent({ ...instance, status: "running" }, { type: "started" })
-    : instance;
+  let next = applyBudgetAndFreshness(instance, spec, execution);
+  if (next.status === "awaiting_hitl" && instance.status !== "awaiting_hitl") {
+    return replaceInstanceWithCheckpoint(doc, next, { emitEvent: true });
+  }
+
+  next = next.status === "queued"
+    ? pushEvent({ ...next, status: "running" }, { type: "started" })
+    : next;
 
   const cursor = next.cursorNodeId ?? entryNodeId(spec);
   const node = spec.nodes.find((item) => item.id === cursor);
@@ -218,6 +630,7 @@ export function stepLoopInstance(
     );
     return replaceInstance(doc, next);
   }
+  next = upsertNodeRecord(next, cursor, { status: "running" });
 
   // After HITL resolve on human/decide, advance (unless resolveLoopHitl already redirected).
   if (
@@ -257,7 +670,7 @@ export function stepLoopInstance(
     return stepVerifyNode(doc, next, spec, node, execution);
   }
 
-  return failNode(doc, next, cursor, `Unsupported loop node ${node.id}`);
+  return failNode(doc, next, cursor, `Unsupported loop node ${node.id}`, { spec });
 }
 
 function stepPlannerNode(
@@ -399,13 +812,126 @@ function stepLogicNode(
   if (kind === "loop") {
     return stepLoopLogicNode(doc, instance, spec, node);
   }
+  if (kind === "retry") {
+    return stepRetryLogicNode(doc, instance, spec, node);
+  }
+  if (kind === "wait") {
+    return stepWaitLogicNode(doc, instance, spec, node);
+  }
 
   return failNode(
     doc,
     instance,
     node.id,
     `Unsupported logic kind ${kind}`,
+    { spec },
   );
+}
+
+function stepRetryLogicNode(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  spec: LoopSpec,
+  node: LoopSpecNode,
+): LoopGraphDocument {
+  const max = node.maxIterations ?? spec.retryPolicy.maxAutoRetries ?? 3;
+  const attempts = (instance.attemptCounts[node.id] ?? 0) + 1;
+  let next = upsertNodeRecord(
+    {
+      ...instance,
+      cursorNodeId: node.id,
+      attemptCounts: { ...instance.attemptCounts, [node.id]: attempts },
+    },
+    node.id,
+    { status: "running", attempt: attempts },
+  );
+  next = pushEvent(next, {
+    type: "node_entered",
+    nodeId: node.id,
+    message: `Retry gate ${attempts}/${max}`,
+  });
+
+  if (attempts > max) {
+    next = pushEvent(
+      {
+        ...next,
+        status: "awaiting_hitl",
+        hitlQuestionIds: ["stop_policy"],
+      },
+      {
+        type: "awaiting_hitl",
+        nodeId: node.id,
+        message: `Retry budget exhausted (${max})`,
+      },
+    );
+    next = upsertNodeRecord(next, node.id, { status: "waiting_approval" });
+    return replaceInstance(doc, next);
+  }
+
+  const target =
+    dependsOutgoingIds(spec, node.id)[0] ??
+    feedbackTarget(spec)?.to ??
+    null;
+  if (!target) {
+    return failNode(doc, next, node.id, "Retry node has no depends/feedback target", {
+      spec,
+    });
+  }
+
+  next = pushEvent(next, {
+    type: "node_completed",
+    nodeId: node.id,
+    message: `Retry redirect to ${target} (attempt ${attempts})`,
+  });
+  next = upsertNodeRecord(next, node.id, { status: "succeeded" });
+  next = upsertNodeRecord(next, target, { status: "ready", attempt: attempts });
+  return replaceInstance(doc, {
+    ...next,
+    cursorNodeId: target,
+    round: next.round + 1,
+    activeRunId: undefined,
+    activeRunNodeId: undefined,
+    updatedAt: nowIso(),
+  });
+}
+
+function stepWaitLogicNode(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  spec: LoopSpec,
+  node: LoopSpecNode,
+): LoopGraphDocument {
+  let next = upsertNodeRecord(
+    { ...instance, cursorNodeId: node.id, status: "running" },
+    node.id,
+    { status: "waiting" },
+  );
+  next = pushEvent(next, {
+    type: "node_entered",
+    nodeId: node.id,
+    message: node.goal,
+  });
+
+  const parents = dependsIncoming(spec, node.id);
+  const missing = parents.filter(
+    (parentId) =>
+      recordStatus(next, parentId) !== "succeeded" && !nodeCompleted(next, parentId),
+  );
+  if (missing.length > 0) {
+    next = pushEvent(next, {
+      type: "message",
+      nodeId: node.id,
+      message: `Wait for: ${missing.join(", ")}`,
+    });
+    return replaceInstance(doc, next);
+  }
+
+  next = pushEvent(next, {
+    type: "node_completed",
+    nodeId: node.id,
+    message: "Wait satisfied",
+  });
+  return advanceCursor(doc, next, spec, node.id);
 }
 
 function stepConditionNode(
@@ -568,21 +1094,65 @@ function stepMergeNode(
   spec: LoopSpec,
   node: LoopSpecNode,
 ): LoopGraphDocument {
-  let next = pushEvent(
+  let next = upsertNodeRecord(
     { ...instance, cursorNodeId: node.id, status: "running" },
-    { type: "node_entered", nodeId: node.id, message: node.goal },
+    node.id,
+    { status: "waiting" },
   );
+  next = pushEvent(next, {
+    type: "node_entered",
+    nodeId: node.id,
+    message: node.goal,
+  });
   const parents = dependsIncoming(spec, node.id);
-  const missing = parents.filter((parentId) => !nodeCompleted(next, parentId));
+  const missing = parents.filter(
+    (parentId) =>
+      recordStatus(next, parentId) !== "succeeded" && !nodeCompleted(next, parentId),
+  );
   if (missing.length > 0) {
     next = pushEvent(next, {
       type: "message",
       nodeId: node.id,
       message: `Merge waiting for: ${missing.join(", ")}`,
     });
-    // Single-active-run MVP: cannot complete missing parents later in parallel.
-    // Stay running so advance can re-check; if still missing after parents should
-    // have finished, treat as blocked HITL.
+
+    // P0 serial drain: if other fork siblings are ready, leave Merge and run them.
+    const readySibling = spec.nodes.find((candidate) => {
+      if (candidate.id === node.id) return false;
+      return recordStatus(next, candidate.id) === "ready";
+    });
+    if (readySibling) {
+      return replaceInstance(doc, {
+        ...next,
+        cursorNodeId: readySibling.id,
+        updatedAt: nowIso(),
+      });
+    }
+
+    const failedParent = parents.find(
+      (parentId) => recordStatus(next, parentId) === "failed",
+    );
+    if (failedParent) {
+      const fallback = fallbackOutgoing(spec, failedParent);
+      if (fallback) {
+        return failNode(doc, next, failedParent, "Merge parent failed", { spec });
+      }
+      next = pushEvent(
+        {
+          ...next,
+          status: "awaiting_hitl",
+          hitlQuestionIds: ["merge_blocked"],
+        },
+        {
+          type: "awaiting_hitl",
+          nodeId: node.id,
+          message: `Merge blocked: parent ${failedParent} failed`,
+        },
+      );
+      return replaceInstance(doc, next);
+    }
+
+    // No parents ever succeeded and nothing else is ready → blocked.
     if (parents.length > 0 && missing.length === parents.length) {
       next = pushEvent(
         {
@@ -600,6 +1170,7 @@ function stepMergeNode(
     return replaceInstance(doc, next);
   }
 
+  next = upsertNodeRecord(next, node.id, { status: "succeeded" });
   next = pushEvent(next, {
     type: "node_completed",
     nodeId: node.id,
@@ -746,7 +1317,7 @@ function stepGithubAction(
       githubResult = execution.executeGithubOperation({ operation, payload });
     } catch (error) {
       const message = error instanceof Error ? error.message : "GitHub operation failed";
-      return failNode(doc, instance, node.id, message);
+      return failNode(doc, instance, node.id, message, { spec });
     }
   }
 
@@ -871,11 +1442,13 @@ function stepTerminalAction(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Terminal execution failed";
-    return failNode(doc, instance, node.id, message);
+    return failNode(doc, instance, node.id, message, { spec });
   }
 
   if (result.policyDenied) {
-    return failNode(doc, instance, node.id, result.message || "Terminal policy_denied");
+    return failNode(doc, instance, node.id, result.message || "Terminal policy_denied", {
+      spec,
+    });
   }
   if (result.blocked || result.timedOut) {
     let next = pushEvent(
@@ -902,7 +1475,9 @@ function stepTerminalAction(
     return replaceInstance(doc, next);
   }
   if (!result.ok) {
-    return failNode(doc, instance, node.id, result.message || "Terminal command failed");
+    return failNode(doc, instance, node.id, result.message || "Terminal command failed", {
+      spec,
+    });
   }
 
   let next = pushArtifact(instance, {
@@ -998,7 +1573,7 @@ function stepImplementNode(
   if (!polling) {
     const leaf = execution?.leaf ?? null;
     if (!leaf || !execution) {
-      return failNode(doc, next, node.id, LOOP_FILES_NOT_ATTACHED);
+      return failNode(doc, next, node.id, LOOP_FILES_NOT_ATTACHED, { spec });
     }
     const implementRole: "implement" | "fix" =
       node.role === "fix" || node.repairMode ? "fix" : "implement";
@@ -1017,22 +1592,36 @@ function stepImplementNode(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : LOOP_FILES_NOT_ATTACHED;
-      return failNode(doc, next, node.id, message);
+      return failNode(doc, next, node.id, message, { spec });
     }
+    const priorIds = activeRunIdsOf(next);
     next = {
       ...next,
       activeRunId: run.runId,
       activeRunNodeId: node.id,
       featureNodeId: leaf.featureNodeId,
+      activeRunIds: [...new Set([...priorIds, run.runId])],
     };
   }
 
   if (!run || !next.activeRunId) {
-    return failNode(doc, next, node.id, LOOP_FILES_NOT_ATTACHED);
+    return failNode(doc, next, node.id, LOOP_FILES_NOT_ATTACHED, { spec });
   }
 
   if (run.status === "queued" || run.status === "running") {
-    return replaceInstance(doc, { ...next, status: "running" });
+    const runningDoc = replaceInstanceWithCheckpoint(doc, {
+      ...next,
+      status: "running",
+    });
+    return kickConcurrentReadyRuns(
+      runningDoc,
+      runningDoc.instances.find((item) => item.id === next.id) ?? {
+        ...next,
+        status: "running",
+      },
+      spec,
+      execution,
+    );
   }
   if (run.status === "interrupted") {
     return replaceInstance(doc, pushEvent(
@@ -1088,6 +1677,7 @@ function stepImplementNode(
     run.status === "cancelled"
       ? `Agent run ${run.runId} cancelled`
       : `Agent run ${run.runId} did not apply`,
+    { spec },
   );
 }
 
@@ -1227,11 +1817,15 @@ function stepVerifyNode(
     const fb = feedbackTarget(spec);
     const round = working.round + 1;
     if (!fb || fb.from !== nodeId) {
-      return failNode(doc, working, nodeId, "Verification failed without feedback edge");
+      return failNode(doc, working, nodeId, "Verification failed without feedback edge", {
+        spec,
+      });
     }
     const target = spec.nodes.find((item) => item.id === fb.to);
     if (!target || !isImplementRole(target.role)) {
-      return failNode(doc, working, nodeId, "Feedback target is not an implement node");
+      return failNode(doc, working, nodeId, "Feedback target is not an implement node", {
+        spec,
+      });
     }
     const attempts = (working.attemptCounts[fb.to] ?? 0) + 1;
     const max = effectiveMaxIterations(spec, fb.to);
@@ -1294,28 +1888,118 @@ function advanceCursor(
   spec: LoopSpec,
   cursor: string,
 ): LoopGraphDocument {
-  const nextId = dependsOutgoingMap(spec).get(cursor);
-  if (!nextId) {
-    const next = pushEvent(
-      { ...instance, status: "complete", completedAt: nowIso(), cursorNodeId: cursor },
+  let next = upsertNodeRecord(instance, cursor, { status: "succeeded" });
+  const picked = pickNextCursor(spec, next, cursor);
+  next = picked.instance;
+  if (!picked.cursor) {
+    next = pushEvent(
+      {
+        ...next,
+        status: "complete",
+        completedAt: nowIso(),
+        cursorNodeId: cursor,
+      },
       { type: "completed", message: "Loop complete" },
     );
-    return replaceInstance(doc, next);
+    return replaceInstanceWithCheckpoint(doc, next, { emitEvent: true });
   }
-  return replaceInstance(doc, { ...instance, cursorNodeId: nextId, updatedAt: nowIso() });
+  next = upsertNodeRecord(next, picked.cursor, { status: "ready" });
+  // Keep activeRunId so verify / evidence steppers can read the just-finished run.
+  return replaceInstanceWithCheckpoint(doc, {
+    ...next,
+    cursorNodeId: picked.cursor,
+    updatedAt: nowIso(),
+  });
 }
+
+/**
+ * GC-7.1: when multi_run is enabled, attempt to start ready sibling implement nodes
+ * while one AgentRun is already in flight. Shared leaf write scope → blocked + HITL.
+ */
+function kickConcurrentReadyRuns(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  spec: LoopSpec,
+  execution: LoopExecutionHooks | undefined,
+): LoopGraphDocument {
+  if (!execution?.allowConcurrentLoopRuns) return doc;
+  if (instance.status !== "running") return doc;
+  const inFlight = activeRunIdsOf(instance);
+  if (inFlight.length === 0) return doc;
+
+  const readySiblings = spec.nodes.filter((node) => {
+    if (recordStatus(instance, node.id) !== "ready") return false;
+    if (node.id === instance.cursorNodeId || node.id === instance.activeRunNodeId) {
+      return false;
+    }
+    return isImplementRole(node.role) || isAgentNode(node);
+  });
+  if (readySiblings.length === 0) return doc;
+
+  // Shared worktree leaf: starting a second writer is unsafe.
+  if (execution.leaf) {
+    let next = pushEvent(
+      {
+        ...instance,
+        status: "blocked",
+        hitlQuestionIds: ["write_conflict"],
+        activeRunIds: inFlight,
+      },
+      {
+        type: "awaiting_hitl",
+        nodeId: readySiblings[0]!.id,
+        message:
+          "Parallel multi_run write conflict on shared leaf — resolve HITL to continue serially",
+      },
+    );
+    next = {
+      ...next,
+      status: "awaiting_hitl",
+    };
+    return replaceInstanceWithCheckpoint(doc, next, { emitEvent: true });
+  }
+
+  // No leaf bound yet: track sibling as ready-but-blocked for observability.
+  return replaceInstanceWithCheckpoint(
+    doc,
+    {
+      ...instance,
+      activeRunIds: inFlight,
+    },
+  );
+}
+
+export type StartLoopInstanceOptions = {
+  specVersion?: string;
+  execution?: LoopExecutionHooks;
+  launch?: LoopLaunch;
+  /** When restoring after crash: reuse checkpoint fields instead of fresh cursor. */
+  restoreCheckpoint?: boolean;
+};
 
 export function startLoopInstance(
   workspaceRoot: string,
   loopId: string,
-  specVersion?: string,
-  execution?: LoopExecutionHooks,
+  specVersionOrOptions?: string | StartLoopInstanceOptions,
+  executionArg?: LoopExecutionHooks,
 ): LoopGraphDocument {
+  const options: StartLoopInstanceOptions =
+    typeof specVersionOrOptions === "string" || specVersionOrOptions === undefined
+      ? {
+          ...(specVersionOrOptions ? { specVersion: specVersionOrOptions } : {}),
+          ...(executionArg ? { execution: executionArg } : {}),
+          launch: { kind: "manual" },
+        }
+      : {
+          launch: { kind: "manual" },
+          ...specVersionOrOptions,
+        };
+
   const doc = getLoopGraph(workspaceRoot, loopId);
   if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
   const spec =
-    (specVersion
-      ? doc.approvedSpecs.find((item) => item.version === specVersion)
+    (options.specVersion
+      ? doc.approvedSpecs.find((item) => item.version === options.specVersion)
       : doc.approvedSpecs[doc.approvedSpecs.length - 1]) ?? undefined;
   if (!spec) throw new Error("No approved Loop Spec to run");
   const issues = validateLoopSpecTopology(spec);
@@ -1323,29 +2007,66 @@ export function startLoopInstance(
     throw new Error(issues.map((issue) => issue.message).join("; "));
   }
 
+  validateLaunchParams(spec, options.launch?.params);
+
+  const idempotencyKey = options.launch?.idempotencyKey;
+  if (idempotencyKey) {
+    const existingByKey = doc.instances.find(
+      (item) => item.launch?.idempotencyKey === idempotencyKey,
+    );
+    if (existingByKey) {
+      return doc;
+    }
+  }
+
   const active = doc.instances.find((item) =>
     item.status === "queued" ||
     item.status === "running" ||
     item.status === "paused" ||
     item.status === "awaiting_hitl" ||
-    item.status === "awaiting_review",
+    item.status === "awaiting_review" ||
+    item.status === "blocked",
   );
   if (active) {
     throw new Error("A loop instance is already active");
   }
 
   const startedAt = nowIso();
-  const instance: LoopInstance = {
+  const entry = entryNodeId(spec);
+  const execution = options.execution;
+  const pathFingerprint = fingerprintContext({
+    specVersion: spec.version,
+    ...(execution?.leaf?.featureNodeId
+      ? { featureNodeId: execution.leaf.featureNodeId }
+      : {}),
+    ...(execution?.leaf?.filePath ? { leafPath: execution.leaf.filePath } : {}),
+  });
+  let instance: LoopInstance = {
     id: `inst_${randomUUID()}`,
     specVersion: spec.version,
     status: "queued",
-    cursorNodeId: entryNodeId(spec),
+    cursorNodeId: entry,
     round: 0,
     attemptCounts: {},
+    nodeRecords: spec.nodes.map((node) => ({
+      nodeId: node.id,
+      status: node.id === entry ? ("ready" as const) : ("pending" as const),
+      updatedAt: startedAt,
+    })),
+    freshness: {
+      status: "fresh",
+      baselineId: pathFingerprint,
+      pathFingerprint,
+      checkedAt: startedAt,
+    },
+    budgetUsage: { tokens: 0, wallClockMs: 0, retries: 0 },
+    ...(options.launch ? { launch: options.launch } : {}),
     events: [],
     startedAt,
     updatedAt: startedAt,
   };
+  instance = upsertNodeRecord(instance, entry, { status: "ready" });
+  instance = withCheckpoint(instance);
 
   let nextDoc: LoopGraphDocument = {
     ...doc,
@@ -1355,10 +2076,168 @@ export function startLoopInstance(
   return upsertLoopGraph(workspaceRoot, nextDoc);
 }
 
+export function startLoopInstanceWithParams(
+  workspaceRoot: string,
+  loopId: string,
+  params: Record<string, unknown>,
+  options?: Omit<StartLoopInstanceOptions, "launch"> & {
+    idempotencyKey?: string;
+  },
+): LoopGraphDocument {
+  return startLoopInstance(workspaceRoot, loopId, {
+    ...options,
+    launch: {
+      kind: "params",
+      params,
+      ...(options?.idempotencyKey
+        ? { idempotencyKey: options.idempotencyKey }
+        : {}),
+    },
+  });
+}
+
+export function startLoopInstanceFromEvent(
+  workspaceRoot: string,
+  loopId: string,
+  event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  options?: Omit<StartLoopInstanceOptions, "launch">,
+): LoopGraphDocument {
+  const dedupeKey = `event:${event.eventType}:${event.eventId}`;
+  return startLoopInstance(workspaceRoot, loopId, {
+    ...options,
+    launch: {
+      kind: "event",
+      eventId: event.eventId,
+      eventType: event.eventType,
+      ...(event.payload ? { params: event.payload } : {}),
+      idempotencyKey: dedupeKey,
+    },
+  });
+}
+
+export function restoreLoopInstanceFromCheckpoint(
+  workspaceRoot: string,
+  loopId: string,
+  instanceId: string,
+  execution?: LoopExecutionHooks,
+): LoopGraphDocument {
+  const doc = getLoopGraph(workspaceRoot, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance) throw new Error(`Instance not found: ${instanceId}`);
+  const checkpoint = instance.checkpoint;
+  if (!checkpoint) throw new Error(`No checkpoint on instance ${instanceId}`);
+
+  let restored: LoopInstance = {
+    ...instance,
+    status:
+      checkpoint.status === "complete" || checkpoint.status === "cancelled"
+        ? "running"
+        : checkpoint.status === "error"
+          ? "running"
+          : checkpoint.status,
+    cursorNodeId: checkpoint.cursorNodeId,
+    round: checkpoint.round,
+    attemptCounts: { ...checkpoint.attemptCounts },
+    ...(checkpoint.loopIterations
+      ? { loopIterations: { ...checkpoint.loopIterations } }
+      : {}),
+    ...(checkpoint.nodeRecords
+      ? { nodeRecords: checkpoint.nodeRecords.map((item) => ({ ...item })) }
+      : {}),
+    ...(checkpoint.activeRunId ? { activeRunId: checkpoint.activeRunId } : {}),
+    ...(checkpoint.activeRunNodeId
+      ? { activeRunNodeId: checkpoint.activeRunNodeId }
+      : {}),
+    ...(checkpoint.activeRunIds ? { activeRunIds: [...checkpoint.activeRunIds] } : {}),
+    ...(checkpoint.hitlQuestionIds
+      ? { hitlQuestionIds: [...checkpoint.hitlQuestionIds] }
+      : { hitlQuestionIds: [] }),
+    errorMessage: undefined,
+    completedAt: undefined,
+    updatedAt: nowIso(),
+  };
+  restored = pushEvent(restored, {
+    type: "message",
+    message: `Restored from checkpoint saved at ${checkpoint.savedAt}`,
+  });
+  let nextDoc = replaceInstance(doc, restored);
+  if (restored.status === "paused") {
+    return upsertLoopGraph(workspaceRoot, nextDoc);
+  }
+  if (restored.status === "awaiting_hitl" || restored.status === "awaiting_review") {
+    return upsertLoopGraph(workspaceRoot, nextDoc);
+  }
+  nextDoc = stepLoopInstance(
+    nextDoc,
+    instanceId,
+    execution !== undefined ? { execution } : {},
+  );
+  return upsertLoopGraph(workspaceRoot, nextDoc);
+}
+
+export function listLoopRunHistory(
+  workspaceRoot: string,
+  loopId: string,
+): Array<Pick<LoopInstance, "id" | "status" | "specVersion" | "startedAt" | "completedAt" | "round" | "launch" | "errorMessage">> {
+  const doc = getLoopGraph(workspaceRoot, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  return [...doc.instances]
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    .map((item) => ({
+      id: item.id,
+      status: item.status,
+      specVersion: item.specVersion,
+      startedAt: item.startedAt,
+      ...(item.completedAt ? { completedAt: item.completedAt } : {}),
+      round: item.round,
+      ...(item.launch ? { launch: item.launch } : {}),
+      ...(item.errorMessage ? { errorMessage: item.errorMessage } : {}),
+    }));
+}
+
+/** GC-6.3 weak Iterate: copy current draft from a finished instance's approved spec graphRevision cue. */
+export function deriveDraftFromInstance(
+  workspaceRoot: string,
+  loopId: string,
+  instanceId: string,
+): LoopGraphDocument {
+  const doc = getLoopGraph(workspaceRoot, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance) throw new Error(`Instance not found: ${instanceId}`);
+  const spec = findSpec(doc, instance.specVersion);
+  if (!spec) throw new Error(`Spec not found: ${instance.specVersion}`);
+
+  const now = nowIso();
+  const nextDraft = {
+    ...doc.draft,
+    revision: doc.draft.revision + 1,
+    graphPrompt:
+      `${doc.draft.graphPrompt}\n\n[Derived from run ${instance.id} · ${instance.status}]`.slice(
+        0,
+        4000,
+      ),
+  };
+  return upsertLoopGraph(workspaceRoot, {
+    ...doc,
+    draft: nextDraft,
+    updatedAt: now,
+  });
+}
+
+function activeRunIdsOf(instance: LoopInstance): string[] {
+  const ids = new Set<string>();
+  if (instance.activeRunId) ids.add(instance.activeRunId);
+  for (const id of instance.activeRunIds ?? []) ids.add(id);
+  return [...ids];
+}
+
 export function pauseLoopInstance(
   workspaceRoot: string,
   loopId: string,
   instanceId: string,
+  execution?: LoopExecutionHooks,
 ): LoopGraphDocument {
   const doc = getLoopGraph(workspaceRoot, loopId);
   if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
@@ -1371,10 +2250,67 @@ export function pauseLoopInstance(
   ) {
     return doc;
   }
-  const next = pushEvent({ ...instance, status: "paused" }, {
+  for (const runId of activeRunIdsOf(instance)) {
+    try {
+      execution?.pauseAgentRun?.(runId);
+    } catch {
+      // Pause should still mark the Loop instance even if a run hook fails.
+    }
+  }
+  let next = instance;
+  if (instance.cursorNodeId) {
+    next = upsertNodeRecord(next, instance.cursorNodeId, { status: "waiting" });
+  }
+  next = pushEvent({ ...next, status: "paused" }, {
     type: "paused",
     message: "Paused by user",
   });
+  return upsertLoopGraph(
+    workspaceRoot,
+    replaceInstanceWithCheckpoint(doc, next, { emitEvent: true }),
+  );
+}
+
+export function cancelLoopInstance(
+  workspaceRoot: string,
+  loopId: string,
+  instanceId: string,
+  execution?: LoopExecutionHooks,
+): LoopGraphDocument {
+  const doc = getLoopGraph(workspaceRoot, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance) throw new Error(`Instance not found: ${instanceId}`);
+  if (
+    instance.status === "complete" ||
+    instance.status === "cancelled" ||
+    instance.status === "error"
+  ) {
+    return doc;
+  }
+  for (const runId of activeRunIdsOf(instance)) {
+    try {
+      execution?.cancelAgentRun?.(runId);
+    } catch {
+      // Cancel should still mark the Loop instance even if a run hook fails.
+    }
+  }
+  let next = instance;
+  if (instance.cursorNodeId) {
+    next = upsertNodeRecord(next, instance.cursorNodeId, { status: "cancelled" });
+  }
+  next = pushEvent(
+    {
+      ...next,
+      status: "cancelled",
+      completedAt: nowIso(),
+      activeRunId: undefined,
+      activeRunNodeId: undefined,
+      activeRunIds: undefined,
+      hitlQuestionIds: [],
+    },
+    { type: "cancelled", message: "Cancelled by user" },
+  );
   return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
 }
 
@@ -1389,10 +2325,49 @@ export function resumeLoopInstance(
   const instance = doc.instances.find((item) => item.id === instanceId);
   if (!instance) throw new Error(`Instance not found: ${instanceId}`);
   if (instance.status !== "paused") return doc;
-  let next = pushEvent({ ...instance, status: "running" }, {
+
+  // GC-4.3: unknown in-flight side effects → blocked (do not blind-continue).
+  for (const runId of activeRunIdsOf(instance)) {
+    const view = execution?.readRun(runId) ?? null;
+    if (!view) {
+      const blocked = pushEvent(
+        {
+          ...instance,
+          status: "blocked",
+          hitlQuestionIds: ["unknown_side_effects"],
+        },
+        {
+          type: "awaiting_hitl",
+          message: `Cannot safely resume — AgentRun ${runId} is missing from runtime`,
+        },
+      );
+      return upsertLoopGraph(
+        workspaceRoot,
+        replaceInstanceWithCheckpoint(
+          doc,
+          { ...blocked, status: "awaiting_hitl" },
+          { emitEvent: true },
+        ),
+      );
+    }
+  }
+
+  for (const runId of activeRunIdsOf(instance)) {
+    try {
+      execution?.continueAgentRun?.(runId);
+    } catch {
+      // Resume continues Loop stepping even if harness continue fails.
+    }
+  }
+  let next = instance;
+  if (instance.cursorNodeId) {
+    next = upsertNodeRecord(next, instance.cursorNodeId, { status: "ready" });
+  }
+  next = pushEvent({ ...next, status: "running" }, {
     type: "resumed",
     message: "Resumed by user",
   });
+  next = stampCheckpoint(next, { emitEvent: true });
   let nextDoc = replaceInstance(doc, next);
   nextDoc = stepLoopInstance(nextDoc, instanceId, execution !== undefined ? { execution } : {});
   return upsertLoopGraph(workspaceRoot, nextDoc);
@@ -1428,10 +2403,38 @@ export function resolveLoopHitl(
     },
   );
 
-  // stop_policy / loop_max_iterations HITL: end unless continue
+  const humanGateQuestions = (instance.hitlQuestionIds ?? []).filter(
+    (id) => id.startsWith("human_") || id.startsWith("decide_"),
+  );
+  // GC-3.4: policy/system HITL also gets a HumanDecision (human_* still recorded below).
+  if (humanGateQuestions.length === 0) {
+    next = pushArtifact(next, {
+      nodeId: instance.cursorNodeId ?? "loop",
+      kind: "human_decision",
+      data: {
+        mode: "gate",
+        questionIds: instance.hitlQuestionIds ?? [],
+        answers: answers.map((item) => ({
+          questionId: item.questionId,
+          answer: item.answer,
+          ...(item.editedPayload ? { editedPayload: item.editedPayload } : {}),
+        })),
+        summary: summary || "HITL resolved",
+        at: nowIso(),
+        nodeId: instance.cursorNodeId ?? null,
+      },
+    });
+  }
+
+  // stop_policy / loop_max_iterations / wall_clock_timeout / freshness / budget / conflict HITL
   if (
     instance.hitlQuestionIds?.includes("stop_policy") ||
-    instance.hitlQuestionIds?.includes("loop_max_iterations")
+    instance.hitlQuestionIds?.includes("loop_max_iterations") ||
+    instance.hitlQuestionIds?.includes("wall_clock_timeout") ||
+    instance.hitlQuestionIds?.includes("freshness_stale") ||
+    instance.hitlQuestionIds?.includes("budget_exceeded") ||
+    instance.hitlQuestionIds?.includes("write_conflict") ||
+    instance.hitlQuestionIds?.includes("unknown_side_effects")
   ) {
     const continueAnswer = answers.find((item) =>
       /continue|继续/i.test(item.answer),
@@ -1447,6 +2450,16 @@ export function resolveLoopHitl(
         { type: "errored", message: "Stop policy HITL declined continue" },
       );
       return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
+    }
+    // Fall back to serial drain after conflict / unknown side-effect acknowledgement.
+    if (
+      instance.hitlQuestionIds?.includes("write_conflict") ||
+      instance.hitlQuestionIds?.includes("unknown_side_effects")
+    ) {
+      next = {
+        ...next,
+        activeRunIds: next.activeRunId ? [next.activeRunId] : undefined,
+      };
     }
   }
 

@@ -63,3 +63,17 @@
   cursor: not-allowed;
   color: var(--tech-text-secondary);
 }
+
+.sm {
+  padding: 6px 9px;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.resizeVertical {
+  resize: vertical;
+}

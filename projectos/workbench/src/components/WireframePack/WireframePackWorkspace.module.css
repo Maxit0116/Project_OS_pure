@@ -291,20 +291,9 @@
   flex-shrink: 0;
 }
 
-.composerInput {
+.composerFieldGrow {
   flex: 1;
   min-width: 0;
-  border: 1px solid var(--tech-border);
-  border-radius: 4px;
-  background: var(--tech-bg-canvas);
-  color: var(--tech-text-primary);
-  padding: 8px 10px;
-  font-size: var(--font-size-sm);
-}
-
-.composerInput:focus-visible {
-  outline: none;
-  box-shadow: var(--tech-shadow-focus);
 }
 
 .briefBox {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { MapArtifactType } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import Button from '../ui/Button'
+import TextInput from '../ui/TextInput'
 import { GlassLens } from '../Glass'
 import { MAP_CREATE_ARTIFACT_ACTIONS } from './mapCreateActions'
 import styles from './MapArtifactTitleDialog.module.css'
@@ -78,7 +79,7 @@ export default function MapArtifactTitleDialog({
               {ts(promptKey, { type: ts(typeLabel) })}
             </p>
           </div>
-          <input
+          <TextInput
             ref={inputRef}
             type="text"
             className={styles.input}

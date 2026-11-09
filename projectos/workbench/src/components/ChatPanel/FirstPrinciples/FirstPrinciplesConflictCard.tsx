@@ -5,6 +5,7 @@ import type {
 } from '@contracts/index'
 import { useI18n } from '../../../i18n'
 import Button from '../../ui/Button'
+import TextArea from '../../ui/TextArea'
 import refinementStyles from '../PromptRefinementCard.module.css'
 import styles from './FirstPrinciples.module.css'
 
@@ -57,17 +58,16 @@ export default function FirstPrinciplesConflictCard({
         </Button>
       </div>
 
-      <div className={styles.thesisField}>
-        <label htmlFor="fp-conflict-rephrase">{ts('firstPrinciples.conflict.rephrase')}</label>
-        <textarea
-          id="fp-conflict-rephrase"
-          rows={2}
-          value={rephrase}
-          disabled={submitting}
-          onChange={(event) => setRephrase(event.target.value)}
-          placeholder={ts('firstPrinciples.conflict.rephrasePlaceholder')}
-        />
-      </div>
+      <TextArea
+        fieldClassName={styles.thesisField}
+        id="fp-conflict-rephrase"
+        label={ts('firstPrinciples.conflict.rephrase')}
+        rows={2}
+        value={rephrase}
+        disabled={submitting}
+        onChange={(event) => setRephrase(event.target.value)}
+        placeholder={ts('firstPrinciples.conflict.rephrasePlaceholder')}
+      />
       <div className={refinementStyles.actions}>
         <Button
           variant="mode"

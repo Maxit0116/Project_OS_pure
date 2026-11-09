@@ -93,14 +93,14 @@ describe("ProjectOSLocalApi skill catalog surface", () => {
     }
   });
 
-  it("hides disabled skill listings", async () => {
+  it("keeps disabled skill listings visible", async () => {
     const { api, projectId, workspaceRoot } = await createApi();
     try {
       const before = await api.listSkillCatalog(projectId);
       const target = before.document.listings[0]!;
       await api.disableSkillCatalogListing(projectId, target.id);
       const after = await api.listSkillCatalog(projectId);
-      expect(after.document.listings.every((l) => l.id !== target.id)).toBe(true);
+      expect(after.document.listings.some((l) => l.id === target.id)).toBe(true);
     } finally {
       await rm(workspaceRoot, { recursive: true, force: true });
     }

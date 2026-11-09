@@ -14,6 +14,7 @@ import AgentDraftCard from '../AgentWorkforce/AgentDraftCard'
 import AgentActivityIndicator from '../ui/AgentActivityIndicator'
 import Button from '../ui/Button'
 import Chip from '../ui/Chip'
+import TextInput from '../ui/TextInput'
 import styles from './LoopGoalComposer.module.css'
 
 const COMPOSER_MODES: LoopComposerMode[] = ['ask', 'edit', 'create_agent']
@@ -193,7 +194,7 @@ export default function LoopGoalComposer() {
             ))}
           </div>
         ) : null}
-        <input
+        <TextInput
           id={`loop-clarify-${question.id}`}
           className={styles.clarifyInput}
           value={value}

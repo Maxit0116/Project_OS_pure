@@ -109,6 +109,43 @@ describe('chatSessionSync', () => {
     expect(record.head.titleSource).toBe('manual')
   })
 
+  it('preserves lastUpdatedAt when touchActivity is false', () => {
+    const record = buildChatSessionRecord(
+      baseState,
+      'chat_1',
+      {
+        id: 'chat_1',
+        title: 'Quiet session',
+        createdAt: '2026-08-02T00:00:00.000Z',
+        lastUpdatedAt: '2026-08-02T00:00:00.000Z',
+        chatMode: 'ask',
+        isArchived: false,
+        status: 'idle',
+      },
+      { touchActivity: false },
+    )
+    expect(record.head.lastUpdatedAt).toBe('2026-08-02T00:00:00.000Z')
+  })
+
+  it('bumps lastUpdatedAt when touchActivity is true', () => {
+    const before = Date.now()
+    const record = buildChatSessionRecord(
+      baseState,
+      'chat_1',
+      {
+        id: 'chat_1',
+        title: 'Active session',
+        createdAt: '2026-08-02T00:00:00.000Z',
+        lastUpdatedAt: '2026-08-02T00:00:00.000Z',
+        chatMode: 'ask',
+        isArchived: false,
+        status: 'idle',
+      },
+      { touchActivity: true },
+    )
+    expect(Date.parse(record.head.lastUpdatedAt)).toBeGreaterThanOrEqual(before)
+  })
+
   it('resolvePersistedChatSessionTitle preserves manual titles', () => {
     expect(
       resolvePersistedChatSessionTitle({

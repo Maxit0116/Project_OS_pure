@@ -8,6 +8,7 @@ import {
   nextCaptureVersionTitle,
   partitionSpatialCaptures,
 } from '@contracts/spatial-capture-session'
+import TextInput from '../components/ui/TextInput'
 
 export type PlacementMode = SpatialCapturePlacement['mode']
 
@@ -191,15 +192,14 @@ export default function OverlaySavePlacementDialog({
         </label>
 
         {(mode === 'new_folder' || mode === 'merge_misc') && (
-          <label className="overlay-save-field">
-            <span>Folder name</span>
-            <input
-              value={folderName}
-              onChange={(event) => setFolderName(event.target.value)}
-              placeholder="LoginUX"
-              autoFocus
-            />
-          </label>
+          <TextInput
+            fieldClassName="overlay-save-field"
+            label="Folder name"
+            value={folderName}
+            onChange={(event) => setFolderName(event.target.value)}
+            placeholder="LoginUX"
+            autoFocus
+          />
         )}
 
         {mode === 'join_folder' && (
@@ -244,18 +244,17 @@ export default function OverlaySavePlacementDialog({
           </label>
         )}
 
-        <label className="overlay-save-field">
-          <span>Capture name</span>
-          <input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder={
-              mode === 'misc'
-                ? 'Optional title'
-                : 'e.g. LoginUX-1'
-            }
-          />
-        </label>
+        <TextInput
+          fieldClassName="overlay-save-field"
+          label="Capture name"
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder={
+            mode === 'misc'
+              ? 'Optional title'
+              : 'e.g. LoginUX-1'
+          }
+        />
 
         <div className="overlay-save-prompt-actions">
           <button

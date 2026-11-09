@@ -10,6 +10,8 @@
 | [`Loops-Graph-Node-Architecture-Dev-Plan.md`](./Loops-Graph-Node-Architecture-Dev-Plan.md) | **并行权威（2026-11-03）**：四类 Node（Agent/Action/Logic/Human）、Node Contract、Artifact 数据流、Condition/有限 Loop、Human 模式；接管本文件 §7「Condition 永久延期」与「仅 implement/verify/fix/decide 产品分类」的表述。本文件仍负责 Studio 壳、真 pause/cancel、Fresh·Stale、重规划与触发。 |
 | [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | **UI 落地（2026-11-03）**：图标+短标题节点、右侧可折叠 Palette、Palette→Canvas DnD、整份 Inspector 改为节点旁浮动 Duty 卡；细化本文件 LG-1.1/1.2 的展示层。 |
 | [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | **Agent 配置层连线（设计中）**：Model/Memory/Capabilities 虚线卫星；不改变本文件 Studio 可靠性与非 iPaaS 边界。 |
+| [`Loops-Graph-Review-Visual-Dev-Plan.md`](./Loops-Graph-Review-Visual-Dev-Plan.md) | **Review 可视化审批台（2026-11-09）**：Intent strip + 只读 Path Map + Gate 联动；承接并细化本文件 LG-1.4 的展示与强制确认体验。 |
+| [`Loops-Graph-Gaps-Closure-Dev-Plan.md`](./Loops-Graph-Gaps-Closure-Dev-Plan.md) | **缺口补全总控（2026-11-09）**：六机制（含受控 Parallel）+ Recovery/可观测性/触发。与本文件 LG-2–LG-6 重叠的验收以 **GC-\*** 为准；本文件仍保留 Studio 壳与决策基线。 |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | **已落地底座**：P-0–P-3（规格冻结、implement=AgentRun、verify=证据、HITL）。本计划在其上扩展产品与可靠性，不重做 P-0–P-3。 |
 | [`backend/Backend-Dev-Plan.md`](./backend/Backend-Dev-Plan.md) | 后端索引；Loop = 工作流定义，Run = 一次执行。 |
 | [`Live-Graph-Agent-Observability-Dev-Plan.md`](./Live-Graph-Agent-Observability-Dev-Plan.md) | C4 上的执行投影；与 Loop 共享诚实事件源。 |
@@ -559,6 +561,7 @@ Running → …
 | 风险 | 低 |
 | 复杂度 | S |
 | DoD | review 门闩测试绿 |
+| 展示演进 | **扫读/可视化审批台**见 [`Loops-Graph-Review-Visual-Dev-Plan.md`](./Loops-Graph-Review-Visual-Dev-Plan.md)（RV-2.2 收口本任务的强制确认缺口） |
 
 ---
 

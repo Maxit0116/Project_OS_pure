@@ -99,13 +99,19 @@ import {
   mockGetLoopInstanceEvents,
   mockLinkLoopGraphToSession,
   mockListLoopGraphs,
+  mockCancelLoopInstance,
+  mockDeriveDraftFromLoopInstance,
+  mockListLoopRunHistory,
   mockPauseLoopInstance,
   mockResolveLoopHitl,
+  mockRestoreLoopInstanceFromCheckpoint,
   mockResumeLoopInstance,
   mockSendLoopAuthoringTurn,
   mockSetLastActiveLoopGraph,
   mockSetLoopComposerMode,
   mockStartLoopInstance,
+  mockStartLoopInstanceFromEvent,
+  mockStartLoopInstanceWithParams,
   mockUndoLoopDraft,
   mockUnlinkLoopGraphFromSession,
   mockUpsertLoopGraph,
@@ -483,12 +489,76 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     return Promise.resolve(mockStartLoopInstance(projectId, loopId, specVersion));
   }
 
+  override startLoopInstanceWithParams(
+    projectId: string,
+    loopId: string,
+    params: Record<string, unknown>,
+    options?: { specVersion?: string; idempotencyKey?: string },
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(
+      mockStartLoopInstanceWithParams(projectId, loopId, params, options),
+    );
+  }
+
+  override startLoopInstanceFromEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockStartLoopInstanceFromEvent(projectId, loopId, event));
+  }
+
+  override restoreLoopInstanceFromCheckpoint(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(
+      mockRestoreLoopInstanceFromCheckpoint(projectId, loopId, instanceId),
+    );
+  }
+
+  override listLoopRunHistory(
+    projectId: string,
+    loopId: string,
+  ): Promise<
+    Array<{
+      id: string;
+      status: string;
+      specVersion: string;
+      startedAt: string;
+      completedAt?: string;
+      round: number;
+      errorMessage?: string;
+    }>
+  > {
+    return Promise.resolve(mockListLoopRunHistory(projectId, loopId));
+  }
+
+  override deriveDraftFromLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(
+      mockDeriveDraftFromLoopInstance(projectId, loopId, instanceId),
+    );
+  }
+
   override pauseLoopInstance(
     projectId: string,
     loopId: string,
     instanceId: string,
   ): Promise<LoopGraphDocument> {
     return Promise.resolve(mockPauseLoopInstance(projectId, loopId, instanceId));
+  }
+
+  override cancelLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockCancelLoopInstance(projectId, loopId, instanceId));
   }
 
   override resumeLoopInstance(

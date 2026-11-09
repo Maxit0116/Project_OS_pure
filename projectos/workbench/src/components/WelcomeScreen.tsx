@@ -10,6 +10,7 @@ import {
 } from '../state/recentWorkspaces'
 import type { ThemePreference } from '../styles/theme'
 import Button from './ui/Button'
+import TextInput from './ui/TextInput'
 import styles from './WelcomeScreen.module.css'
 import {
   closeWelcomeImportDialog,
@@ -201,12 +202,11 @@ export default function WelcomeScreen({
               }}
             >
               <h2 className={styles.dialogTitle}>{ts('welcome.openProject')}</h2>
-              <label className={styles.dialogLabel} htmlFor="workspace-path">
-                {ts('welcome.pathLabel')}
-              </label>
-              <input
+              <TextInput
                 id="workspace-path"
-                className={styles.dialogInput}
+                fieldClassName={styles.dialogField}
+                label={ts('welcome.pathLabel')}
+                mono
                 value={workspacePath}
                 onChange={(event) => setWorkspacePath(event.target.value)}
                 placeholder={ts('welcome.pathPlaceholder')}
@@ -228,12 +228,11 @@ export default function WelcomeScreen({
               }}
             >
               <h2 className={styles.dialogTitle}>{ts('welcome.cloneRepo')}</h2>
-              <label className={styles.dialogLabel} htmlFor="clone-url">
-                {ts('welcome.cloneUrlLabel')}
-              </label>
-              <input
+              <TextInput
                 id="clone-url"
-                className={styles.dialogInput}
+                fieldClassName={styles.dialogField}
+                label={ts('welcome.cloneUrlLabel')}
+                mono
                 value={cloneUrl}
                 onChange={(event) => setCloneUrl(event.target.value)}
                 placeholder={ts('welcome.cloneUrlPlaceholder')}

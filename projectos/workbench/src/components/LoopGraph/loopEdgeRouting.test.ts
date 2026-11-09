@@ -6,6 +6,7 @@ import {
   portPoint,
   preferredPortsForPair,
   routeLoopEdge,
+  formatEdgeLabel,
   truncateEdgeLabel,
 } from './loopEdgeRouting'
 
@@ -64,7 +65,13 @@ describe('loopEdgeRouting', () => {
     expect(routed.mid.x).toBeLessThan(nodeB.position.x + LOOP_NODE_W)
   })
 
-  it('truncates edge labels', () => {
+  it('formats edge labels without dropping content', () => {
+    expect(formatEdgeLabel('  short  label ')).toBe('short label')
+    const long = 'On review pass, request final approval before create PR'
+    expect(formatEdgeLabel(long)).toBe(long)
+  })
+
+  it('keeps truncateEdgeLabel for callers that still need a short preview', () => {
     expect(truncateEdgeLabel('short')).toBe('short')
     expect(truncateEdgeLabel('x'.repeat(50)).endsWith('…')).toBe(true)
   })

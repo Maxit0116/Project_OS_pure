@@ -3,6 +3,7 @@ import { PROJECT_DESCRIPTION_MAX_CHARACTERS } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
+import TextArea from '../ui/TextArea'
 import SettingsGroup from './SettingsGroup'
 import SettingsRow from './SettingsRow'
 import styles from './SettingsPanel.module.css'
@@ -50,8 +51,7 @@ export default function ProjectDescriptionSection() {
           description={ts('settings.projectDescriptionHelp')}
           stacked
         >
-          <textarea
-            className={styles.textarea}
+          <TextArea
             value={draft}
             rows={7}
             aria-label={ts('settings.projectDescriptionLabel')}
