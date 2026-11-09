@@ -2488,6 +2488,7 @@ const en = {
       awaiting_review: 'Awaiting review',
       error: 'Error',
       interrupted: 'Interrupted',
+      cancelled: 'Stopped',
     },
     toastRunning: 'Agent is running…',
     actionTrace: 'Action trace',

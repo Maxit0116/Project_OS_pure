@@ -2447,6 +2447,7 @@ const zh = {
       awaiting_review: '待审核',
       error: '错误',
       interrupted: '已中断',
+      cancelled: '已停止',
     },
     toastRunning: 'Agent 正在执行…',
     actionTrace: '操作记录',
