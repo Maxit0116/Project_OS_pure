@@ -1918,7 +1918,8 @@ const zh = {
       materialsParseLevel_structured_selection: '已选定表格范围',
       materialsParseLevel_full_text_parse: '全文已解析',
       materialsParseLevel_vision_attach: '将随模型请求附带图片',
-      materialsParseLevel_unsupported: '当前环境不支持此解析',
+      materialsParseLevel_unsupported:
+        '当前环境不支持此解析（PDF 需宿主 Poppler `pdftotext`：apt poppler-utils / brew poppler — 产品不自动安装）',
       materialsParseStatus_ok: '可用',
       materialsParseStatus_pending: '处理中',
       materialsParseStatus_partial: '部分可用',
@@ -2529,6 +2530,9 @@ const zh = {
     close: '关闭 Agent 流程',
     emptyTitle: 'Agent 流程',
     emptyDesc: '询问节点或文件可查看上下文轨迹；确认修改后可跟踪 Agent 执行过程。',
+    runMissingTitle: '关联 Run 不存在',
+    runMissingDesc:
+      'DutyCard 指向的 Agent Run 未落盘。跳转仍绑定该 runId，不会把空闲空页当作成功。',
     streaming: '正在接收事件…',
     waitingFirstStep: '正在执行第一步，等待模型响应…',
     reviewDiff: '查看修改方案',

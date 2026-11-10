@@ -3,7 +3,7 @@
 **状态**：Design freeze draft（2026-10-20）。**仅文档**；本计划不授权开始实现切片，直到 Phase 0 检查清单关闭。  
 **范围**：在复用现有 Agent Runtime / Harness / Verification / Function Map 的前提下，把已有 Loop Graph 提升为可定义、可批准、可运行、可恢复、可重规划、可与 C4 / Agent Flow / Session Graph 联动的工作流系统。  
 **产品定位一句话**：Loops Graph 是面向代码 Agent 的可视化闭环编排器——定义可批准工作流，执行绑定真实 AgentRun 与 VerificationEvidence；不是通用 iPaaS，也不是第二张 C4。  
-**UI 诚实澄清（2026-11-10）**：文首/D3/LG-1.1 仍写「固定侧栏 Inspector」；现行落地以 [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) 的 **DutyCard（节点旁浮动）** 为准。旧 Studio 侧栏描述 **未授权当已验收**，与 DutyCard **冲突时以 Visual Authoring + 实机 DOM 为准**。  
+**UI 落地（2026-11-10 同步）**：节点详情以 Pure **浮动 DutyCard**（[`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) `LoopNodeDutyCard`：画布节点旁浮动壳，内嵌 `LoopNodeInspector`）为准——**不是**固定右侧栏 Inspector。下文 D3/LG-1.1 已按 DutyCard 改写；旧「侧栏 Inspector」字样仅作历史对照，**不得当已验收的产品壳**。不擅自改全局 UI。  
 **与已有计划的关系**：
 
 | 文档 | 关系 |
@@ -42,7 +42,7 @@ Project OS 已具备 Loop Graph 的**最小可运行闭环**：意图画布 → 
 
 缺口集中在**产品工作流工作室**与**可靠性语义**，而不是「从零写编排引擎」：
 
-- 画布缺 Palette / 侧栏 Inspector / Preset；配置仍偏节点卡片。  
+- 画布曾缺 Palette / 节点详情壳 / Preset；现行详情壳为浮动 DutyCard（非固定侧栏）。  
 - 暂停/取消未强制下传到 `pauseAgentRun` / `cancelAgentRun`。  
 - 无 Context Baseline / Fresh·Stale；无结构化重规划提案；无参数化/事件触发启动。  
 - 拓扑仍限制为**单链 depends + 至多一条 feedback**；无并行调度（与 Backend 锁定一致）。  
@@ -86,7 +86,7 @@ Project OS 已具备 Loop Graph 的**最小可运行闭环**：意图画布 → 
 |----|------|----------|
 | D1 | 混合规划 | 节点内策略可调；目标/验收/权限/预算不可静默改；重规划走提案 |
 | D2 | 节点 = 任务边界 | 调度器管依赖/验收/重试/审批；Runtime 管节点内推理与工具 |
-| D3 | 双层画布 | 画布简洁；详情在侧栏 Inspector |
+| D3 | 双层画布 | 画布简洁；详情在节点旁浮动 DutyCard（内嵌 Inspector；非固定侧栏） |
 | D4 | 三种启动统一为 Workflow Run | 手动 / 参数化 / 事件 → 同一 `LoopInstance` 创建路径与审计 |
 | D5 | 定义版本固定；项目事实可实时读 | `specVersion` 冻结；文件/Git/测试可读；关键边界做 freshness |
 | D6 | 有限自动重试 | 工具级 vs 节点级；策略化，非散落常量 |
@@ -474,28 +474,28 @@ Running → …
 
 ### Phase 1 — 定义、画布与校验体验
 
-#### LG-1.1 双层画布：节点侧栏 Inspector
+#### LG-1.1 双层画布：节点旁浮动 DutyCard（Inspector）
 
 | 字段 | 内容 |
 |------|------|
 | Task ID | LG-1.1 |
-| 名称 | 选中节点侧栏：目标/IO/验收/策略/历史 |
+| 名称 | 选中/双击节点 → 浮动 DutyCard：目标/IO/验收/策略/历史（非固定侧栏） |
 | Phase | 1 |
 | 优先级 | P0 |
 | 类型 | Frontend |
 | 产品需求 | D3 |
-| 现状 | 配置挤在 `LoopGraphOverlay` 卡片/展开区 |
-| 实现范围 | 新增 Inspector 面板组件；画布仅名称/角色/状态/短结果；读写 `loopGraphStore` + draft/spec 字段 |
-| 可能修改 | `LoopGraphOverlay.tsx`、`LoopGraphOverlay.module.css`、**待新增** `LoopNodeInspector.tsx`、`loopGraphStore.ts`、i18n `en.ts`/`zh.ts` |
-| 接口/类型 | 复用 `IntentGraphNode` / `LoopSpecNode`；可选 UI-only selection state |
+| 现状 | **已落地**：`LoopNodeDutyCard` 浮动壳 + `LoopNodeInspector`（Visual Authoring UI-3）；画布节点仅短卡 |
+| 实现范围 | DutyCard 定位/关闭；内嵌目标/IO/验收/策略/关联 Run；读写 `loopGraphStore` + draft/spec |
+| 可能修改 | `LoopNodeDutyCard.tsx`、`LoopNodeInspector.tsx`、`LoopGraphOverlay.tsx`、`loopGraphStore.ts`、i18n |
+| 接口/类型 | 复用 `IntentGraphNode` / `LoopSpecNode`；UI selection → DutyCard |
 | 前置 | LG-0.1 |
 | 契约 | 不把前端当作运行权威 |
-| 验收 | 选中节点后画布不堆详情；侧栏可编辑 prompt/role；compile 仍走 readiness |
-| 测试 | 组件测试 + store 单测 |
+| 验收 | 双击/`Open Duty` 打开浮动卡；画布不堆详情；可编辑 prompt/role；compile 仍走 readiness |
+| 测试 | 组件测试 + store 单测；GC-6.6 关联 Run Electron |
 | 安全 | 权限字段只读展示来自 spec.permissions，编辑走批准流 |
-| 风险 | CSS/布局回归 → 特性开关或分 PR |
+| 风险 | 浮动定位遮挡 → DutyCard 锚点跟随节点 |
 | 复杂度 | M |
-| DoD | draw/review/run 三 phase 均可打开 Inspector |
+| DoD | draw/review/run 三 phase 均可打开 DutyCard（非固定侧栏） |
 
 #### LG-1.2 节点 Palette 与最小 Preset
 

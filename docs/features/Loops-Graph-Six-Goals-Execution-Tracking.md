@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10（PR10 tip `eaf6b39`）— §9 **实附证据图** `GC72-SECTION9-EVIDENCE-MAP-eaf6b39.json`；Electron **Start→Pause→Resume** 同实例 UI ok；GC-6.6 a255 重挂**撤销**，fresh 捕获 **ok:false（空闲页）** 如实不足；RunBinding tip-final rebuild outstanding **已纠正**。**不宣称总交验 / 非 shipped / 非 live**。
+**Updated**: 2026-11-10（PR10 tip pending after durable GC66）— Electron **Start→Pause→Resume** 同实例 UI ok（独立复核）；GC-6.6 a255 重挂**撤销** + ab55 不可变失败保留；**durable** `loops-gc66-durable-*` DutyCard→同 run 非空时间轴/重开/缺失诚实错误 **ok:true**（DI `local_tools` 正式落盘 AgentRun）；Studio 文首已同步浮动 DutyCard；PDF pdftotext 外部依赖提示+缺工具 fail-closed；ACL 矩阵 = 后续不入范围。**不宣称总交验 / 非 shipped / 非 live**。
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
@@ -26,7 +26,7 @@
 | # | Goal | 状态摘要 |
 |---|------|----------|
 | 1 | 连接器 GitHub…PostHog（11 平台不删）+ **Gmail 追加** | Batch1/2 **contract**/live待验；Batch3 **implemented_contract**（supabase/posthog loopback 适配器+settle；write_rows high-risk 密封；live **未接**）；Gmail loopback **实现/contract** + settle `attachments_get`（accountRef/50M）；真邮箱 **未接** |
-| 2 | Condition/parallel/loop/timer/retry/pause/resume | GC 主体 **实现/contract**；Inspector logic UI **component 测**；GC-6.5 minimap **实现**；GC-6.6 DutyCard→`openAgentFlowForRun`→`data-tour=agent-flow` **localE2E**；DutyCard 入口 = **dblclick** `[data-loop-node]` / Open Duty（≠ Review 架构详情）；GC-7.2 §9 逐项测映射；**仍非** shipped/live |
+| 2 | Condition/parallel/loop/timer/retry/pause/resume | GC 主体 **实现/contract**；Inspector logic UI **component 测**；GC-6.5 minimap **实现**；GC-6.6 DutyCard→`openAgentFlowForRun`→同 run **非空** Agent Flow（durable AgentRun）**localE2E** `loops-gc66-durable-*`；DutyCard 入口 = **dblclick** `[data-loop-node]` / Open Duty（≠ Review 架构详情）；GC-7.2 §9 逐项测映射；**仍非** shipped/live |
 | 3 | Reusable Agents + 互调 | wiring **实现**；预算 contract；**LocalApi 产品入口** planner DevPlan→coder 交接（loopback·非 live）；≠ 仅预算 |
 | 4 | Human review/approval | binding/runtime gate **contract**；**LocalApi** approve/reject/takeover→paused 同实例事件；`runApprovalContextDigest`；OAuth **未配置** |
 | 5 | Engineering context | digester + Verify **实现/contract**；RunBinding 条款**已逐项核**（见 [`RUNBINDING-GAP.md`](./RUNBINDING-GAP.md)）；无未核「或许还有」 |
@@ -50,7 +50,7 @@
 | 切片 | 状态 |
 |------|------|
 | PW Project run binding / 预检 / 项目手动 E2E | **实现/localE2E（非 live）**：rail 选已保存流程 → `openSavedFlowForRun` / Run 页 → materials→preflight→start；taskPack 保存/重开/隔离 Intent；DI `local_tools` fail→feedback→语义 fix→green；ChangeSet+TestReport 含 failed+passed、exitCode、unifiedDiff；UI Diff 展开 + exit DOM（`loops-b-ui-06-diff-passed-viewport.png`；单屏不能当全文验收）。runBinding 隔离；cancel **contract**。付费 live / Issue 快捷入口 **未完** |
-| TM TaskMaterial schema + Pure 输入复用 | **实现加深（仍非全勾）**：首批 plaintext/md/json/csv/log=`text_preview`；CSV/XLSX=`structured_selection`（上传默认选区+UI 列行）；PDF=`full_text_parse` 仅当 pdftotext（缺工具如实 unsupported）；png/jpeg=`vision_attach`。Electron ingest + **URL 面板** `ingestLoopUrlMaterial`（DNS-pin；失败成卡）。节点投影 `projectMaterialsForNode` **offline**。PW-7：面板表单 + **From editor selection** 实入口（无选区诚实报错；非 live Issue 拉票）。TM-8：`writeMaterialRereviewEvidence`→taskPack 持久化 + ack + preflight `material_rereview_required`（不机械全图重跑）。证据：`/opt/cursor/artifacts/loops-evidence-bundle-evidence.json` + `loops-evidence-bundle-*.png` |
+| TM TaskMaterial schema + Pure 输入复用 | **实现加深（仍非全勾）**：首批 plaintext/md/json/csv/log=`text_preview`；CSV/XLSX=`structured_selection`（上传默认选区+UI 列行）；PDF=`full_text_parse` **仅当宿主 `pdftotext`（Poppler）存在**；缺工具 → `unsupported` + 可安装说明（apt `poppler-utils` / brew `poppler`；**产品不自动安装 / 不擅自 Mac 安装**）；存在时解析、缺失 fail-closed（`loop-material-pdf.ts` / `loop-materials-security-audit.test.ts`）。png/jpeg=`vision_attach`。Electron ingest + **URL 面板** `ingestLoopUrlMaterial`（DNS-pin；失败成卡）。节点投影 `projectMaterialsForNode` **offline**。PW-7/TM-8 同前。证据：`/opt/cursor/artifacts/loops-evidence-bundle-evidence.json` + `loops-evidence-bundle-*.png` |
 | URL SSRF 默认拒内网 | **实现/contract**：`loop-url-fetch-policy` + 生产 `fetchLoopUrlMaterial`（DNS 解析与 socket 绑定、多 A/AAAA 过滤私网、redirect 每跳重钉、无跨 host 凭证、登录墙≠已读） |
 | 离线事件全天排队 | **实现/contract（非 live push）**：`.projectos/loop-event-queue.json` 持久 enqueue/dedupe/drain/recover + LocalApi；≠ 24/7 外网 webhook |
 
@@ -65,7 +65,7 @@
 | URL/header/body 脱敏 + fake-secret | **contract** |
 | Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现**；暗色保留；A3 连续陈旧（planner 改标题保 retry=2；retry 2→1 保 1；重开）：`loops-a3-*`。**UI Accept-disabled ≠ server reject**（server 拒绝仅独立 contract：`loop-approval-runtime-gate` / `acceptLoopGraphEditOffer`）。B：`loops-b-pw-failfix-evidence.json` + `loops-b-ui-failfix-e2e-evidence.json` + `loops-b-ui-05-artifact-cards-visible.png`（可见产物卡；勿用错标题空图）。**不得**用 fatal 后手改当连续通过 |
 | LocalApi→adapter→loopback settle | **实现**/contract 路径；GitHub write / connector（含 Gmail）缺 `credentialRefId` 或无 DI transport **fail-closed**（catalog ≠ authorized）；live未验 |
-| Studio 旧「固定侧栏 Inspector」文首 vs DutyCard | **冲突未消**：Studio D3/LG-1.1 仍写侧栏；现行 UI 为 Overlay 内 DutyCard / Inspector empty hint——**不以旧 Studio 文首当已验收** |
+| Studio 文首 vs DutyCard | **已同步文档**：Studio D3/LG-1.1 改写为 Pure **浮动 DutyCard**（非固定侧栏）；不擅自改全局 UI |
 | GC 总勾选 / 发布门禁 | GC-7.2 §9 **逐项测映射已写**（Gaps §9）；**仍不得**宣称 shipped/live/总交验 |
 
 ---
@@ -112,7 +112,8 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 ```
 
 **未完成范围（明列；不把所有余项归真账号）**：
-- PDF `full_text_parse` 需宿主 pdftotext（本云环境未装 → 诚实 unsupported）
+- PDF：宿主缺 `pdftotext` 时产品边界已明确（unsupported + 安装说明）；本云未装 → 走缺失路径；**不**自动装 Mac/Poppler
+- 完整 ACL 矩阵 = **原文后续增强**（不入本阶段范围）
 - PW-7 live Issue/PR 拉票；编辑器选区依赖用户先选中（无选区诚实失败）
 - Gmail 真邮箱 / OAuth / users.watch·Pub/Sub / 发送审批；增量同步 ≠ 24/7
 - SaaS Batch1/2 live；Batch3 live 项目未接（适配器已 loopback）；离线队列已实现但仍 **非** 外网 24/7 push
@@ -136,8 +137,8 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 |------------------------|------|
 | DutyCard 入口 | Electron `loops-gc-dutycard-*` dblclick（独立复核已过） |
 | Minimap 平移 | 同上 shot02（复核确认前后平移） |
-| 关联 Run **跳转** | **不足**：fresh `loops-gc66-jump-fresh-*` 新 hash 捕获 overlay 打开但 **空闲页**、`data-agent-flow-active-run` 未绑同 run；a255 同字节重挂 **已撤销**；不可变失败 rawlog `eefe4b60` 保留。store 测仅 overlay+bind API |
-| pause/resume **状态变** | Electron UI `loops-start-pause-resume-*` Start enabled→实例+runBinding→Pause paused→Resume 同实例（DI local_tools）；另 LocalApi `loop-pause-resume.local-api.test.ts` |
+| 关联 Run **同 run 非空** | **durable ok**：`loops-gc66-durable-*` DutyCard→`data-agent-flow-active-run` 同 runId + 非空闲时间轴；重开 `getAgentRun`/UI 一致；缺失 run 诚实错误（非空闲成功页）。DI `local_tools` 写正式 `agent-runs/*.run.json`+jsonl。历史：a255 重挂撤销；ab55 `eefe4b60` 不可变失败保留；fresh `loops-gc66-jump-fresh-*` ok:false 作缺口层证据 |
+| pause/resume **状态变** | Electron UI `loops-start-pause-resume-*` Start enabled→awaiting_hitl→Pause paused→Resume 同实例（DI local_tools；**非**同 AgentRun 宣称）；另 LocalApi `loop-pause-resume.local-api.test.ts` |
 | Batch3/Gmail settle LocalApi | `loop-batch3-gmail-offline.local-api.test.ts`（accountRef/50M/write seal/freeze） |
 | 离线队列跨 reopen | 同上 + `loop-offline-event-queue.local-api.test.ts` |
 
@@ -146,7 +147,7 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 | Goal | 必需项 | 产品入口 | 级别 | 阻塞 |
 |------|--------|----------|------|------|
 | 1 连接器 | Batch1–3 + Gmail settle fail-closed | LocalApi `settlePendingConnectorOp`；runtime 排队含 gmail/supabase/posthog | **实现/contract/LocalApi** | **未live**（真 OAuth/邮箱/云项目） |
-| 2 控制流 | 六机制 + DutyCard/minimap/关联 Run | Draw DutyCard；Gaps §9 测映射；GC-6.6 跳转 | **实现/contract/localE2E** | **未live**；UI start 操作需人工体验 |
+| 2 控制流 | 六机制 + DutyCard/minimap/关联 Run 非空 | Draw DutyCard；Gaps §9；GC-6.6 durable E2E | **实现/contract/localE2E** | **未live** |
 | 3 Agents | planner→coder 交接 | LocalApi G3 | **LocalApi** | **未live** ModelGateway |
 | 4 HITL | approve/reject/takeover + binding | LocalApi G4；approval-binding | **LocalApi/contract** | OAuth HITL **未配置** |
 | 5 RunBinding | 身份/冻结/批准失效 | 见 RUNBINDING-GAP | **contract/LocalApi** | live digest **未授权** |
@@ -155,7 +156,7 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 
 **需用户 live 授权（单列；本流不擅用）**：Gmail OAuth 真邮箱；Supabase/PostHog 真项目；SaaS Batch1/2 OAuth；付费 ModelGateway；Mac 实机；真实外发/merge。
 
-**无账号阶段剩余（明确）**：GC-6.6 同 run **非空闲** Agent 流程上下文（需耐久真实 AgentRun；当前 fresh 捕获不足）；完整 ACL 矩阵 = **原文后续增强**（§3.1 已写部分）；PDF pdftotext 宿主工具；Studio 侧栏文首 vs DutyCard 文档冲突。
+**无账号阶段剩余（明确）**：完整 ACL 矩阵 = **原文后续增强**（不入本阶段）；其余既定项（GC-6.6 durable / Studio DutyCard 文案 / PDF 外部依赖提示）本 tip **已收**。仍 **非** shipped/live/总交验。
 
 **DOM/Runtime 开链（云端 Linux xvfb，非 Mac）** — **不宣称闭环 / live / shipped**：
 - Electron 材料证据 bundle（实入口）：`/opt/cursor/artifacts/loops-evidence-bundle-evidence.json`

@@ -38,6 +38,10 @@ export type PdfParseResult =
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
+/** External host dependency tip — product fail-closes; does not auto-install. */
+export const PDFTOTEXT_MISSING_HINT =
+  "pdftotext not installed — PDF page selection recorded but full_text_parse unavailable. Install Poppler (`pdftotext`): Debian/Ubuntu `sudo apt-get install poppler-utils`; macOS `brew install poppler` (host admin installs only — product does not auto-install).";
+
 export function pdftotextAvailable(): boolean {
   const spawned = spawnSync("pdftotext", ["-v"], { encoding: "utf8" });
   // poppler prints version to stderr; status may be 0 or 99
@@ -79,8 +83,7 @@ export function parsePdfFile(
       ok: false,
       parseLevel: "unsupported",
       toolMissing: true,
-      error:
-        "pdftotext not installed — PDF page selection recorded but full_text_parse unavailable",
+      error: PDFTOTEXT_MISSING_HINT,
       ...(selection ? { selection } : {}),
     };
   }
@@ -150,8 +153,7 @@ export function parsePdfFileAsync(
       ok: false,
       parseLevel: "unsupported",
       toolMissing: true,
-      error:
-        "pdftotext not installed — PDF page selection recorded but full_text_parse unavailable",
+      error: PDFTOTEXT_MISSING_HINT,
       ...(selection ? { selection } : {}),
     });
   }

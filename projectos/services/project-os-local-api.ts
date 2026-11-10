@@ -173,6 +173,10 @@ import {
   type LoopExecutionHooks,
 } from "./loop-execution.js";
 import { LoopExecutionLoopbackHost } from "./loop-execution-loopback.js";
+import {
+  appendLoopbackDurableVerification,
+  persistLoopbackDurableAgentRun,
+} from "./loop-execution-loopback-durable.js";
 import { createWorkspacePathDigester } from "./loop-approval-binding.js";
 import { getLoopGraph } from "./loop-graph-service.js";
 
@@ -9321,13 +9325,78 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       return productionHooks;
     }
     // Explicit loopback·local_tools — real local file/test tools, not live provider.
-    return this.loopExecutionLoopback.buildHooks({
+    // Wrap start/verify so DI runs land on the formal durable AgentRun path
+    // (snapshot + jsonl + run index), not memory-only Map masquerading as restoreable.
+    const hooks = this.loopExecutionLoopback.buildHooks({
       workspaceRoot: workspace.workspaceRoot,
       nodes: graphNodes,
       ...(featureNodeId ? { featureNodeId } : {}),
       ...(options?.materials ? { materials: options.materials } : {}),
       fallback: productionHooks,
     });
+    const memoryStart = hooks.startAgentRun;
+    const memoryVerify = hooks.requestVerification;
+    return {
+      ...hooks,
+      startAgentRun: (input) => {
+        const view = memoryStart(input);
+        const audit = this.loopExecutionLoopback.getLastAudit();
+        try {
+          persistLoopbackDurableAgentRun({
+            projectOSRoot: workspace.projectOSRoot,
+            projectId: workspace.project.projectId,
+            runId: view.runId,
+            featureNodeId: input.featureNodeId,
+            filePath: input.filePath,
+            ...(view.unifiedDiff
+              ? { unifiedDiff: view.unifiedDiff }
+              : audit?.unifiedDiff
+                ? { unifiedDiff: audit.unifiedDiff }
+                : {}),
+            status: view.status === "error" ? "error" : "complete",
+          });
+        } catch (error) {
+          console.error(
+            "[projectos] loopback·local_tools durable persist failed",
+            error,
+          );
+          throw new ProjectOSError(
+            "agent_orchestration_failed",
+            `loopback·local_tools could not persist durable AgentRun '${view.runId}'`,
+            { cause: error },
+          );
+        }
+        return view;
+      },
+      requestVerification: (runId) => {
+        memoryVerify?.(runId);
+        const evidence = hooks.readEvidence(runId);
+        if (!evidence) return;
+        const audit = this.loopExecutionLoopback.getLastAudit();
+        try {
+          appendLoopbackDurableVerification({
+            projectOSRoot: workspace.projectOSRoot,
+            runId,
+            command: audit?.command ?? evidence.command ?? "loopback-verify",
+            status: evidence.status,
+            exitCode:
+              audit?.exitCode !== undefined
+                ? audit.exitCode
+                : evidence.exitCode !== undefined
+                  ? evidence.exitCode
+                  : null,
+            ...(audit?.stdout ? { stdout: audit.stdout } : {}),
+            ...(audit?.stderr ? { stderr: audit.stderr } : {}),
+            evidenceId: evidence.id,
+          });
+        } catch (error) {
+          console.error(
+            "[projectos] loopback·local_tools durable verify append failed",
+            error,
+          );
+        }
+      },
+    };
   }
 
   /**

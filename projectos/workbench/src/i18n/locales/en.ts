@@ -1951,7 +1951,8 @@ const en = {
       materialsParseLevel_structured_selection: 'Table range selected',
       materialsParseLevel_full_text_parse: 'Full text parsed',
       materialsParseLevel_vision_attach: 'Image will attach with the model request',
-      materialsParseLevel_unsupported: 'Not supported in this environment',
+      materialsParseLevel_unsupported:
+        'Not supported in this environment (PDF needs host Poppler `pdftotext`: apt poppler-utils / brew poppler — not auto-installed)',
       materialsParseStatus_ok: 'Ready',
       materialsParseStatus_pending: 'Pending',
       materialsParseStatus_partial: 'Partial',
@@ -2575,6 +2576,9 @@ const en = {
     close: 'Close Agent Flow',
     emptyTitle: 'Agent Flow',
     emptyDesc: 'Ask about a node or file to see its context trace, or confirm a change to follow the agent run.',
+    runMissingTitle: 'Associated run not found',
+    runMissingDesc:
+      'This DutyCard points at an Agent Run that is not on disk. The jump stayed bound to that run id and did not treat the idle empty page as success.',
     streaming: 'Streaming events…',
     waitingFirstStep: 'Running first step — waiting for model…',
     reviewDiff: 'Review proposed change',

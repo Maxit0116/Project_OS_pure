@@ -684,11 +684,11 @@ freshness?
 
 **仍非总交验**：无付费 live、无 OAuth、无真邮箱。
 
-**Electron UI 已核（非「人工体验」转交）**：`loops-start-pause-resume-*` Start enabled 点按→实例+runBinding→Pause paused→Resume 同实例（DI `local_tools`）。
+**Electron UI 已核（非「人工体验」转交）**：`loops-start-pause-resume-*` Start enabled→awaiting_hitl→Pause paused→Resume 同实例（DI `local_tools`；独立复核；activeRunId 可为空，不宣称同 AgentRun）。
 
-**GC-6.6**：a255 重挂图 **已撤销**；不可变失败 rawlog `eefe4b60` 保留；fresh `loops-gc66-jump-fresh-*` **ok:false**（打开 Agent 流程但是空闲页、无同 run 上下文）— **不足**，见 §9 证据图 JSON。
+**GC-6.6**：a255 重挂图 **已撤销**；不可变失败 rawlog `eefe4b60` 保留；fresh `loops-gc66-jump-fresh-*` **ok:false**（空闲页）作历史缺口层；**durable** `loops-gc66-durable-*` **ok:true** — DutyCard 同 run 非空时间轴 + 重开一致 + 缺失诚实错误（正式 `agent-runs` 落盘，禁 synthetic）。见 §9 证据图 JSON。
 
-**需用户 live 授权（非本流可自动项）**：真 Gmail/OAuth/云项目；付费 ModelGateway；Mac；真实外发。
+**需用户 live 授权（非本流可自动项）**：真 Gmail/OAuth/云项目；付费 ModelGateway；Mac；真实外发。完整 ACL 矩阵 = **后续增强，不入本阶段**。
 
 ---
 
