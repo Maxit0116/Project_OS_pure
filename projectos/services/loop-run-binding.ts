@@ -574,12 +574,31 @@ export function assertCodeDigestComplete(binding: LoopRunBinding): void {
   }
 }
 
-/** Credential used at action time must be in the frozen permission set. */
+/**
+ * Credential used at action/settle time must be in the frozen permission set.
+ * - No credentialRefId → nothing to gate (callers still require cred for write ops).
+ * - Credential present without RunBinding / without frozen permissionSet → fail-closed.
+ *   Schema `permissionSet` optional ≠ “unfrozen allow-all”.
+ */
 export function assertCredentialAllowedByFreeze(
   binding: LoopRunBinding | undefined,
   credentialRefId: string | undefined,
 ): { ok: true } | { ok: false; reason: string } {
-  if (!binding?.permissionSet || !credentialRefId) return { ok: true };
+  if (!credentialRefId) return { ok: true };
+  if (!binding) {
+    return {
+      ok: false,
+      reason:
+        "Credential ref present but instance has no RunBinding freeze (old/hand-seeded/unbound settle fail-closed)",
+    };
+  }
+  if (!binding.permissionSet) {
+    return {
+      ok: false,
+      reason:
+        "Credential ref present but RunBinding.permissionSet was not frozen (optional ≠ allow-all)",
+    };
+  }
   if (binding.permissionSet.credentialRefIds.includes(credentialRefId)) {
     return { ok: true };
   }

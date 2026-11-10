@@ -4,6 +4,11 @@
  * DutyCard associated-run jump share the same lifecycle as production runs.
  *
  * Not a live model. Memory-only Map runs must not masquerade as durable.
+ *
+ * Timeline honesty: events here are **schema-valid synthetic DI timeline** for
+ * restore/jump (run_started / apply_result / …). They are NOT live ModelGateway
+ * apply audit and MUST NOT invent a real undoable backupId — omit backupId so
+ * Agent Flow Undo cannot treat DI disk identity as recoverable apply backup.
  */
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -105,7 +110,7 @@ export function persistLoopbackDurableAgentRun(
       phaseId: stepId,
       payload: {
         filesWritten: [input.filePath],
-        backupId: `backup_loopback_${input.runId}`,
+        // No backupId — synthetic DI timeline ≠ real restoreApplyBackup target.
         outcome: status === "complete" ? "applied" : "rejected",
       },
     }),

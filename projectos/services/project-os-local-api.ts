@@ -9512,6 +9512,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     options?: {
       branch?: string;
       materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      /**
+       * Compatibility flag only. LocalApi project starts always require preflight;
+       * skipPreflight:true is ignored (never a production bypass).
+       */
       skipPreflight?: boolean;
     },
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
@@ -9534,7 +9538,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         }),
         launch: { kind: "manual" },
         projectId,
-        requirePreflight: options?.skipPreflight !== true,
+        requirePreflight: true,
         ...(options?.branch ? { branch: options.branch } : {}),
         ...(options?.materials ? { materials: options.materials } : {}),
       });
@@ -9556,6 +9560,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       idempotencyKey?: string;
       branch?: string;
       materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      /** Compatibility only — LocalApi always requires preflight. */
       skipPreflight?: boolean;
     },
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
@@ -9575,7 +9580,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             : {}),
           execution: this.loopHooksFor(workspace, loopId),
           projectId,
-          requirePreflight: options?.skipPreflight !== true,
+          requirePreflight: true,
           ...(options?.branch ? { branch: options.branch } : {}),
           ...(options?.materials ? { materials: options.materials } : {}),
         },
@@ -9596,6 +9601,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     options?: {
       branch?: string;
       materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      /** Compatibility only — LocalApi always requires preflight. */
       skipPreflight?: boolean;
     },
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
@@ -9611,7 +9617,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         {
           execution: this.loopHooksFor(workspace, loopId),
           projectId,
-          requirePreflight: options?.skipPreflight !== true,
+          requirePreflight: true,
           ...(options?.branch ? { branch: options.branch } : {}),
           ...(options?.materials ? { materials: options.materials } : {}),
         },

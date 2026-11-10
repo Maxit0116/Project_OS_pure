@@ -17,6 +17,7 @@
 | incomplete 阻断生产 start | `assertCodeDigestComplete` ← `startLoopInstance` requirePreflight | contract + runtime | `loop-run-binding.test.ts`；`loop-runtime-service.ts` start gate |
 | budget/permissionSet **消费时冻结** | snapshot + runtime freeze check | contract | `loop-run-binding.test.ts` freeze；`assertCredentialAllowedByFreeze` |
 | 凭证不在 frozen set → 拒 | runtime connector / settle | contract + LocalApi | runtime Batch1 路径；`settleConnectorOperation` + `loop-batch3-gmail-offline.local-api.test.ts` freeze 负例 |
+| 有 credential 但无 binding / 无 permissionSet / 空 set → 拒 | `assertCredentialAllowedByFreeze` | contract | `loop-run-binding.test.ts` fail-closed cases（optional ≠ allow-all） |
 | 审批上下文 `runApprovalContextDigest` | approval binding | contract | `loop-approval-binding.test.ts` |
 | 材料/预算 digest 漂移 → 批准失效 | `isApprovalBindingCurrent` | contract | same · rejects reuse when materials/budget drifts |
 | ChangeSet contentDigest 漂移 → approval_stale / 预检阻 HTTP | GitHub dispatch | contract | same · preflight blocks when digests stale |
@@ -32,6 +33,7 @@
 | OAuth HITL 真人审批会话 | **未配置** |
 | 用 helpers-only 冒充 LocalApi settle | **禁止**；Batch3/Gmail 已补 LocalApi 负例 |
 | **完整 ACL 矩阵**（超出 freeze + credentialRefIds + HITL high-risk） | **原文后续增强**：Project-Workflow §3.1 写明 `budget`/`permissionSet` 为**部分**（stopPolicy/retryPolicy）；**不是**本阶段以 live 借口跳过的必需项 |
+| 桌面自动 settle UI / 离线队列自动 recover | **本阶段边界 = LocalApi + IPC 队列 API**（`enqueueOfflineLoopEvent` / `drainOfflineLoopEventQueue`）；非 DI `executeConnectorOperation` 拒绝且不排队；**不以** mock/`contracts/api` 存在冒充桌面完整自动链路 |
 
 ## 结论
 

@@ -17,7 +17,9 @@ import {
 } from "./loop-graph-service.js";
 import { compileLoopGraphDraft } from "./loop-graph-compiler.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
+import { agentRunsIndexPath } from "./agent-pool-index.js";
 import { agentRunLogPath, agentRunSnapshotPath } from "./harness/persisted-run.js";
+import { reconcileInterruptedAgentRuns } from "./harness/interrupted-runs.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 
@@ -143,14 +145,38 @@ describe("DI local_tools durable AgentRun (LocalApi)", () => {
     expect(events.some((e) => e.type === "run_started")).toBe(true);
     expect(events.some((e) => e.type === "apply_result")).toBe(true);
     expect(events.length).toBeGreaterThanOrEqual(3);
+    // Synthetic DI timeline must not invent undoable backupId.
+    const applyEvt = events.find((e) => e.type === "apply_result");
+    expect(
+      applyEvt && "payload" in applyEvt
+        ? (applyEvt.payload as { backupId?: string }).backupId
+        : undefined,
+    ).toBeUndefined();
 
-    // Simulate reopen: new LocalApi against same workspace disk.
+    const indexPath = agentRunsIndexPath(workspace.projectOSRoot);
+    expect(existsSync(indexPath)).toBe(true);
+    const indexBefore = readFileSync(indexPath, "utf8");
+    expect(indexBefore).toContain(runId);
+    expect(indexBefore).not.toContain("run_interrupted");
+
+    // Formal reconcile (same as openWorkspace) must not rewrite index as a fake run.
+    const notes = reconcileInterruptedAgentRuns(workspace.projectOSRoot);
+    expect(notes.every((n) => n.runId !== "index")).toBe(true);
+    expect(readFileSync(indexPath, "utf8")).toBe(indexBefore);
+
+    // Simulate reopen: new LocalApi openWorkspace → reconcile again.
     const api2 = new ProjectOSLocalApi({ sampleWorkspaceRoot: sample });
     await api2.openSampleWorkspace();
+    expect(readFileSync(indexPath, "utf8")).toBe(indexBefore);
     const run2 = await api2.getAgentRun(runId);
     expect(run2.runId).toBe(runId);
     const events2 = await api2.getAgentRunEvents(runId);
     expect(events2.length).toBe(events.length);
+
+    const api3 = new ProjectOSLocalApi({ sampleWorkspaceRoot: sample });
+    await api3.openSampleWorkspace();
+    expect(readFileSync(indexPath, "utf8")).toBe(indexBefore);
+    expect((await api3.getAgentRun(runId)).runId).toBe(runId);
 
     await expect(api2.getAgentRun("run_definitely_missing_xyz")).rejects.toMatchObject({
       code: "run_not_found",

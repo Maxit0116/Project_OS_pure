@@ -444,7 +444,12 @@ function readJsonLinesArtifactsInDirectory(
   }
 
   for (const fileName of readdirSync(directory)
-    .filter((name) => name.endsWith(".jsonl"))
+    .filter((name) => {
+      if (!name.endsWith(".jsonl")) return false;
+      // Pool index under agent-runs is not an AgentRun event log.
+      if (relativeDirectory === "agent-runs" && name === "index.jsonl") return false;
+      return true;
+    })
     .sort()) {
     const artifact = join(relativeDirectory, fileName);
     let source: string;

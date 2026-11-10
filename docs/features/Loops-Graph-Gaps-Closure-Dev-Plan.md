@@ -686,7 +686,7 @@ freshness?
 
 **Electron UI 已核（非「人工体验」转交）**：`loops-start-pause-resume-*` Start enabled→awaiting_hitl→Pause paused→Resume 同实例（DI `local_tools`；独立复核；activeRunId 可为空，不宣称同 AgentRun）。
 
-**GC-6.6**：a255 重挂图 **已撤销**；不可变失败 rawlog `eefe4b60` 保留；fresh `loops-gc66-jump-fresh-*` **ok:false**（空闲页）作历史缺口层；**durable** `loops-gc66-durable-*` **ok:true** — DutyCard 同 run 非空时间轴 + 重开一致 + 缺失诚实错误（正式 `agent-runs` 落盘，禁 synthetic）。见 §9 证据图 JSON。
+**GC-6.6**：a255 重挂图 **已撤销**；不可变失败 rawlog `eefe4b60` 保留；fresh/dirty durable 层另存。**DI durable**：正式 `agent-runs` 落盘可 restore；timeline 为 **schema 合成 DI 事件**（≠ live apply 审计；**无**可执行真实 undo backup）。最终 clean 同源捕获待修复后独立复核再封门禁。
 
 **需用户 live 授权（非本流可自动项）**：真 Gmail/OAuth/云项目；付费 ModelGateway；Mac；真实外发。完整 ACL 矩阵 = **后续增强，不入本阶段**。
 
@@ -744,3 +744,4 @@ GC-0 Docs
 | 2026-11-10 | **交叉引用**：接入 Project Workflow + Task Materials 权威计划（PW/TM）；六目标跟踪表同步；明确离线事件全天排队仍未实现 |
 | 2026-11-10 | **GC-6.5/6.6/7.2 收尾**：`LoopGraphMinimap` 点击平移；DutyCard Runtime「打开关联 Agent Run」→ `openAgentFlowForRun(activeRunId)`；产品入口确认 = Draw **dblclick** `[data-loop-node]` / 右键 Open Duty（**不是** Review 架构节点详情）；§9 六机制/成熟能力/回归清单保持可勾；**仍非** shipped/live/总交验 |
 | 2026-11-10 | **GC-7.2 §9 逐项测映射**写入本节；Batch3/Gmail/队列 LocalApi 负例；runtime 连接器路径含 gmail/supabase/posthog（禁合成 Executed 成功）；pause/resume LocalApi 状态变；关联 Run Electron **跳转** `data-tour=agent-flow`（非按钮存在）；**仍非** shipped/live |
+| 2026-11-10 | **复审最小修复**：reconcile 跳过 `agent-runs/index.jsonl`；credential 缺 freeze fail-closed；settle/offline **交验边界 = LocalApi+IPC**（非桌面自动 UI）；DI 合成 timeline **无**伪 backupId；LocalApi `skipPreflight` 忽略。**仍非**最终 clean 门禁/总交验 |

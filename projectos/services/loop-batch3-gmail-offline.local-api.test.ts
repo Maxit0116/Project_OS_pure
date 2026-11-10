@@ -83,6 +83,25 @@ describe("LocalApi Batch3/Gmail settle + offline queue (production entry)", () =
     return { api, project, workspaceRoot, doc, loopId: doc.id };
   }
 
+  function freezeBinding(
+    projectId: string,
+    workspaceRoot: string,
+    credentialRefIds: string[],
+  ): Record<string, unknown> {
+    return {
+      projectId,
+      workspaceRoot,
+      specVersion: "spec_b3gm_1",
+      createdAt: "2026-11-10T00:00:00.000Z",
+      codeDigest: "abc",
+      codeDigestStatus: "complete",
+      permissionSet: {
+        credentialRefIds,
+        requireHitlForHighRisk: true,
+      },
+    };
+  }
+
   function seedPending(
     workspaceRoot: string,
     loopId: string,
@@ -115,21 +134,26 @@ describe("LocalApi Batch3/Gmail settle + offline queue (production entry)", () =
     const scripted = createScriptedTransport([]);
     api.replaceLoopConnectorTransportForTests(scripted.transport);
     api.replaceLoopConnectorSecretResolverForTests(() => "tok");
-    seedPending(workspaceRoot, loopId, {
-      nodeId: "n_att",
-      vendorId: "gmail",
-      capabilityId: "attachments_get",
-      payload: {
-        messageId: "m1",
-        attachmentId: "a1",
-        filename: "x.bin",
-        mimeType: "application/octet-stream",
-        accountRefId: "other_acct",
+    seedPending(
+      workspaceRoot,
+      loopId,
+      {
+        nodeId: "n_att",
+        vendorId: "gmail",
+        capabilityId: "attachments_get",
+        payload: {
+          messageId: "m1",
+          attachmentId: "a1",
+          filename: "x.bin",
+          mimeType: "application/octet-stream",
+          accountRefId: "other_acct",
+        },
+        credentialRefId: "cred_gmail",
+        idempotencyKey: "gm-local-mismatch",
+        queuedAt: "2026-11-10T00:00:00.000Z",
       },
-      credentialRefId: "cred_gmail",
-      idempotencyKey: "gm-local-mismatch",
-      queuedAt: "2026-11-10T00:00:00.000Z",
-    });
+      freezeBinding(project.projectId, workspaceRoot, ["cred_gmail"]),
+    );
 
     const settled = await api.settlePendingConnectorOp(
       project.projectId,
@@ -148,22 +172,27 @@ describe("LocalApi Batch3/Gmail settle + offline queue (production entry)", () =
     const scripted = createScriptedTransport([]);
     api.replaceLoopConnectorTransportForTests(scripted.transport);
     api.replaceLoopConnectorSecretResolverForTests(() => "tok");
-    seedPending(workspaceRoot, loopId, {
-      nodeId: "n_att",
-      vendorId: "gmail",
-      capabilityId: "attachments_get",
-      payload: {
-        messageId: "m1",
-        attachmentId: "a1",
-        filename: "huge.bin",
-        mimeType: "application/octet-stream",
-        accountRefId: "cred_gmail",
-        sizeBytes: 50_000_001,
+    seedPending(
+      workspaceRoot,
+      loopId,
+      {
+        nodeId: "n_att",
+        vendorId: "gmail",
+        capabilityId: "attachments_get",
+        payload: {
+          messageId: "m1",
+          attachmentId: "a1",
+          filename: "huge.bin",
+          mimeType: "application/octet-stream",
+          accountRefId: "cred_gmail",
+          sizeBytes: 50_000_001,
+        },
+        credentialRefId: "cred_gmail",
+        idempotencyKey: "gm-local-size",
+        queuedAt: "2026-11-10T00:00:00.000Z",
       },
-      credentialRefId: "cred_gmail",
-      idempotencyKey: "gm-local-size",
-      queuedAt: "2026-11-10T00:00:00.000Z",
-    });
+      freezeBinding(project.projectId, workspaceRoot, ["cred_gmail"]),
+    );
 
     const settled = await api.settlePendingConnectorOp(
       project.projectId,
@@ -191,18 +220,23 @@ describe("LocalApi Batch3/Gmail settle + offline queue (production entry)", () =
     ]);
     api.replaceLoopConnectorTransportForTests(scripted.transport);
     api.replaceLoopConnectorSecretResolverForTests(() => "sb_secret");
-    seedPending(workspaceRoot, loopId, {
-      nodeId: "n_sb",
-      vendorId: "supabase",
-      capabilityId: "read_rows",
-      payload: {
-        projectUrl: "https://example.supabase.co",
-        table: "items",
+    seedPending(
+      workspaceRoot,
+      loopId,
+      {
+        nodeId: "n_sb",
+        vendorId: "supabase",
+        capabilityId: "read_rows",
+        payload: {
+          projectUrl: "https://example.supabase.co",
+          table: "items",
+        },
+        credentialRefId: "cred_sb",
+        idempotencyKey: "sb-local-read",
+        queuedAt: "2026-11-10T00:00:00.000Z",
       },
-      credentialRefId: "cred_sb",
-      idempotencyKey: "sb-local-read",
-      queuedAt: "2026-11-10T00:00:00.000Z",
-    });
+      freezeBinding(project.projectId, workspaceRoot, ["cred_sb"]),
+    );
 
     const settled = await api.settlePendingConnectorOp(
       project.projectId,
@@ -218,19 +252,24 @@ describe("LocalApi Batch3/Gmail settle + offline queue (production entry)", () =
     const scripted = createScriptedTransport([]);
     api.replaceLoopConnectorTransportForTests(scripted.transport);
     api.replaceLoopConnectorSecretResolverForTests(() => "sb_secret");
-    seedPending(workspaceRoot, loopId, {
-      nodeId: "n_sb",
-      vendorId: "supabase",
-      capabilityId: "write_rows",
-      payload: {
-        projectUrl: "https://example.supabase.co",
-        table: "items",
-        rows: [{ id: 1 }],
+    seedPending(
+      workspaceRoot,
+      loopId,
+      {
+        nodeId: "n_sb",
+        vendorId: "supabase",
+        capabilityId: "write_rows",
+        payload: {
+          projectUrl: "https://example.supabase.co",
+          table: "items",
+          rows: [{ id: 1 }],
+        },
+        credentialRefId: "cred_sb",
+        idempotencyKey: "sb-local-write",
+        queuedAt: "2026-11-10T00:00:00.000Z",
       },
-      credentialRefId: "cred_sb",
-      idempotencyKey: "sb-local-write",
-      queuedAt: "2026-11-10T00:00:00.000Z",
-    });
+      freezeBinding(project.projectId, workspaceRoot, ["cred_sb"]),
+    );
 
     const settled = await api.settlePendingConnectorOp(
       project.projectId,
@@ -286,6 +325,36 @@ describe("LocalApi Batch3/Gmail settle + offline queue (production entry)", () =
     expect(settled.result.ok).toBe(false);
     if (!settled.result.ok) {
       expect(settled.result.message).toMatch(/not in frozen permissionSet/);
+    }
+    expect(scripted.requests).toHaveLength(0);
+  });
+
+  it("settle LocalApi refuses credential when instance has no RunBinding", async () => {
+    const { api, project, workspaceRoot, loopId } = await openWithLoop("No binding settle");
+    const scripted = createScriptedTransport([]);
+    api.replaceLoopConnectorTransportForTests(scripted.transport);
+    api.replaceLoopConnectorSecretResolverForTests(() => "sb_secret");
+    seedPending(workspaceRoot, loopId, {
+      nodeId: "n_sb",
+      vendorId: "supabase",
+      capabilityId: "read_rows",
+      payload: {
+        projectUrl: "https://example.supabase.co",
+        table: "items",
+      },
+      credentialRefId: "cred_sb",
+      idempotencyKey: "sb-nobind",
+      queuedAt: "2026-11-10T00:00:00.000Z",
+    });
+
+    const settled = await api.settlePendingConnectorOp(
+      project.projectId,
+      loopId,
+      "inst_settle",
+    );
+    expect(settled.result.ok).toBe(false);
+    if (!settled.result.ok) {
+      expect(settled.result.message).toMatch(/no RunBinding freeze|permissionSet was not frozen/);
     }
     expect(scripted.requests).toHaveLength(0);
   });

@@ -146,6 +146,48 @@ describe("reconcileInterruptedAgentRuns", () => {
     expect(raw).not.toContain("backupId");
   });
 
+  it("skips agent-runs/index.jsonl (never treats basename as runId)", () => {
+    const root = mkdtempSync(join(tmpdir(), "pos-interrupt-index-"));
+    const dir = join(root, "agent-runs");
+    mkdirSync(dir, { recursive: true });
+    const indexBody =
+      `${JSON.stringify({
+        runId: "run_real",
+        definitionId: "def_x",
+        poolRunId: "pool_x",
+        rootRunId: "run_real",
+        parentRunId: null,
+        sessionId: null,
+        loopInstanceId: null,
+        status: "complete",
+        attempt: 1,
+        startedAt: "2026-10-20T00:00:00.000Z",
+        acceptance: "none",
+        title: "t",
+      })}\n`;
+    writeFileSync(join(dir, "index.jsonl"), indexBody, "utf8");
+    writeFileSync(
+      join(dir, "run_open.jsonl"),
+      `${JSON.stringify({
+        eventId: "evt_1",
+        runId: "run_open",
+        timestamp: "2026-10-20T00:00:00.000Z",
+        type: "run_started",
+      })}\n`,
+      "utf8",
+    );
+
+    const notes = reconcileInterruptedAgentRuns(root);
+    expect(notes.map((n) => n.runId)).toEqual(["run_open"]);
+    expect(readFileSync(join(dir, "index.jsonl"), "utf8")).toBe(indexBody);
+    expect(readFileSync(join(dir, "index.jsonl"), "utf8")).not.toContain(
+      "run_interrupted",
+    );
+    // Second reconcile must still leave index untouched.
+    reconcileInterruptedAgentRuns(root);
+    expect(readFileSync(join(dir, "index.jsonl"), "utf8")).toBe(indexBody);
+  });
+
   it("does not reconcile another workspace's agent-runs directory", () => {
     const rootA = mkdtempSync(join(tmpdir(), "pos-interrupt-a-"));
     const rootB = mkdtempSync(join(tmpdir(), "pos-interrupt-b-"));

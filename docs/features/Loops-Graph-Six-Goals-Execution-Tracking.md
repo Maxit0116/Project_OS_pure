@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10（PR10 tip `7ac2a91`；product code `219949a`；parent `eaf6b39` Start/Pause）— Electron **Start→Pause→Resume** 同实例 UI ok（独立复核）；GC-6.6 a255 重挂**撤销** + ab55 不可变失败保留；**durable** `loops-gc66-durable-*` DutyCard→同 run 非空时间轴/重开/缺失诚实错误 **ok:true**（DI `local_tools` 正式落盘 AgentRun）；Studio 文首已同步浮动 DutyCard；PDF pdftotext 外部依赖提示+缺工具 fail-closed；ACL 矩阵 = 后续不入范围；门禁包 `pr10-7ac2a91-tip-final-gate.zip`。**不宣称总交验 / 非 shipped / 非 live**。
+**Updated**: 2026-11-10（PR10 tip `7ac2a91` 门禁包保留；product 待叠加 review-fix：index reconcile / freeze fail-closed / settle 边界诚实 / DI 无伪 backupId / skipPreflight 收敛；parent durable `219949a`）— Electron **Start→Pause→Resume** 同实例 UI ok（独立复核）；GC-6.6 a255 重挂**撤销** + ab55 不可变失败保留；**durable DI** 正式落盘可 restore（**合成 timeline ≠ live apply；无真实 undo backup**）；Studio/PDF/ACL 同前；**最终 clean 同源门禁待独立代码复核后再封**。**不宣称总交验 / 非 shipped / 非 live**。
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
@@ -64,7 +64,7 @@
 | 非幂等 POST 不盲重试；timeout/abort unknown；ledger | **contract** |
 | URL/header/body 脱敏 + fake-secret | **contract** |
 | Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现**；暗色保留；A3 连续陈旧（planner 改标题保 retry=2；retry 2→1 保 1；重开）：`loops-a3-*`。**UI Accept-disabled ≠ server reject**（server 拒绝仅独立 contract：`loop-approval-runtime-gate` / `acceptLoopGraphEditOffer`）。B：`loops-b-pw-failfix-evidence.json` + `loops-b-ui-failfix-e2e-evidence.json` + `loops-b-ui-05-artifact-cards-visible.png`（可见产物卡；勿用错标题空图）。**不得**用 fatal 后手改当连续通过 |
-| LocalApi→adapter→loopback settle | **实现**/contract 路径；GitHub write / connector（含 Gmail）缺 `credentialRefId` 或无 DI transport **fail-closed**（catalog ≠ authorized）；live未验 |
+| LocalApi→adapter→loopback settle | **实现**/contract 路径（**本阶段产品入口 = LocalApi + IPC 队列 API**；`settlePendingConnectorOp` 不在 ProjectOSApi 桌面自动 UI/自动 recover——不以 mock 冒充桌面完整产品）；GitHub write / connector 缺 `credentialRefId` / 无 DI transport / **无 RunBinding·permissionSet 冻结** **fail-closed**；live未验 |
 | Studio 文首 vs DutyCard | **已同步文档**：Studio D3/LG-1.1 改写为 Pure **浮动 DutyCard**（非固定侧栏）；不擅自改全局 UI |
 | GC 总勾选 / 发布门禁 | GC-7.2 §9 **逐项测映射已写**（Gaps §9）；**仍不得**宣称 shipped/live/总交验 |
 
@@ -137,7 +137,7 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 |------------------------|------|
 | DutyCard 入口 | Electron `loops-gc-dutycard-*` dblclick（独立复核已过） |
 | Minimap 平移 | 同上 shot02（复核确认前后平移） |
-| 关联 Run **同 run 非空** | **durable ok**：`loops-gc66-durable-*` DutyCard→`data-agent-flow-active-run` 同 runId + 非空闲时间轴；重开 `getAgentRun`/UI 一致；缺失 run 诚实错误（非空闲成功页）。DI `local_tools` 写正式 `agent-runs/*.run.json`+jsonl。历史：a255 重挂撤销；ab55 `eefe4b60` 不可变失败保留；fresh `loops-gc66-jump-fresh-*` ok:false 作缺口层证据 |
+| 关联 Run **同 run 非空** | **durable DI**：正式 `agent-runs` 落盘 + DutyCard 同 run 非空时间轴/重开/缺失诚实错误。**诚实边界**：DI timeline 为 schema 合成事件（非 live ModelGateway apply 审计；**无**可撤销真实 backupId）。历史：a255 撤销；ab55 `eefe4b60` 保留；dirty/fresh 层另存，不冒充最终 clean 同源 |
 | pause/resume **状态变** | Electron UI `loops-start-pause-resume-*` Start enabled→awaiting_hitl→Pause paused→Resume 同实例（DI local_tools；**非**同 AgentRun 宣称）；另 LocalApi `loop-pause-resume.local-api.test.ts` |
 | Batch3/Gmail settle LocalApi | `loop-batch3-gmail-offline.local-api.test.ts`（accountRef/50M/write seal/freeze） |
 | 离线队列跨 reopen | 同上 + `loop-offline-event-queue.local-api.test.ts` |

@@ -178,7 +178,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | SEC-2 | 非幂等 POST 不盲重试；timeout/abort unknown；脱敏全链 | **contract** |
 | CON-1 | Batch1 GitHub/Slack/Feishu/Lark/Sentry | **contract** + GitHub/connector offline credential fail-closed / live未验 |
 | CON-2 | Batch2 Linear/Jira/Notion/Vercel-list | **contract** / live未验 |
-| CON-3 | Batch3 Supabase/PostHog | **implemented_contract**（loopback 适配器+settle；write_rows high-risk 密封；live 未接） |
+| CON-3 | Batch3 Supabase/PostHog | **implemented_contract**（loopback 适配器+`settlePendingConnectorOp`；write_rows high-risk 密封；live 未接）。**本阶段交验边界 = LocalApi + IPC 离线队列 API**（非 ProjectOSApi 桌面自动 settle/UI 自动 recover；不以 mock 冒充桌面完整产品） |
 
 ### 4.4 连续脚本（与前轮手工+AI 同回归）
 

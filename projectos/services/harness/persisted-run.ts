@@ -49,6 +49,23 @@ export function isSafeRunId(runId: string): boolean {
     !runId.includes("\0");
 }
 
+/**
+ * Reserved jsonl basenames under `.projectos/agent-runs/` that are NOT AgentRun
+ * event logs (e.g. the pool index). Reconcile / fixture loaders must skip these
+ * so they are never treated as runId=`index` (or similar) and rewritten.
+ */
+export const AGENT_RUNS_RESERVED_JSONL = new Set([
+  "index.jsonl",
+]);
+
+/** True when `name` is an AgentRun event log file (`{runId}.jsonl`), not an index. */
+export function isAgentRunEventLogFileName(name: string): boolean {
+  if (!name.endsWith(".jsonl")) return false;
+  if (AGENT_RUNS_RESERVED_JSONL.has(name)) return false;
+  const runId = name.slice(0, -".jsonl".length);
+  return isSafeRunId(runId);
+}
+
 export function agentRunLogPath(projectOSRoot: string, runId: string): string {
   return join(projectOSRoot, "agent-runs", `${runId}.jsonl`);
 }

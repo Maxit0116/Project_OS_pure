@@ -309,6 +309,34 @@ describe("loop-run-binding identity + freeze", () => {
     expect(denied.ok).toBe(false);
   });
 
+  it("credential present fail-closes without binding / permissionSet / empty set", () => {
+    // Legitimate no-credential call stays ok (callers still require cred for writes).
+    expect(assertCredentialAllowedByFreeze(undefined, undefined).ok).toBe(true);
+    expect(
+      assertCredentialAllowedByFreeze(
+        { permissionSet: { credentialRefIds: ["a"], requireHitlForHighRisk: true } } as never,
+        undefined,
+      ).ok,
+    ).toBe(true);
+
+    const noBinding = assertCredentialAllowedByFreeze(undefined, "cred_x");
+    expect(noBinding.ok).toBe(false);
+    if (!noBinding.ok) expect(noBinding.reason).toMatch(/no RunBinding freeze/);
+
+    const noSet = assertCredentialAllowedByFreeze({} as never, "cred_x");
+    expect(noSet.ok).toBe(false);
+    if (!noSet.ok) expect(noSet.reason).toMatch(/permissionSet was not frozen/);
+
+    const emptySet = assertCredentialAllowedByFreeze(
+      {
+        permissionSet: { credentialRefIds: [], requireHitlForHighRisk: true },
+      } as never,
+      "cred_x",
+    );
+    expect(emptySet.ok).toBe(false);
+    if (!emptySet.ok) expect(emptySet.reason).toMatch(/not in frozen permissionSet/);
+  });
+
   it("approval context digest changes when materials/definition/budget/code change", () => {
     const root = mkdtempSync(join(tmpdir(), "rb-ctx-"));
     disposable.push(root);
