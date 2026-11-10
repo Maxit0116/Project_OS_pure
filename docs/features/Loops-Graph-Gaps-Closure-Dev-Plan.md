@@ -1,6 +1,6 @@
 # Loops Graph · Gaps Closure DevPlan
 
-**状态**：Implementing（2026-11-10）。本文件是对照成熟 Human-in-the-Loop Workflow 参考图后的**缺口补全总控计划**；授权按 Phase GC-* 切片实现。GC-0–GC-3、GC-4、GC-5、GC-6.1/6.2/6.3/6.4、GC-7.1 主体已落地；GC-6.5/6.6 与 GC-7.2 总勾选待收尾（见 §13）。**诚实声明：主体落地 ≠ GC 全勾 / 发布门禁已通过**——总验收清单未收尾前不得交验。  
+**状态**：Implementing（2026-11-10）。本文件是对照成熟 Human-in-the-Loop Workflow 参考图后的**缺口补全总控计划**；授权按 Phase GC-* 切片实现。GC-0–GC-3、GC-4、GC-5、GC-6.*、GC-7.1 主体已落地；GC-7.2 §9 清单已可勾（见下与 §13），**仍非 shipped / 非 live / 非总交验**。  
 **范围**：补齐 Sequence / Parallel / Branch / Loop / Gate / Recovery 六机制，以及成熟 Workflow System 必备的可靠性、可观测性、触发与治理能力；复用现有 Agent Runtime / Harness / Verification，**不**另起编排引擎，**不**做成通用 iPaaS。  
 **产品定位一句话**：把已有「可编译、可批准、可步进」的 Loop Graph，升级为参考图级的工程工作流系统——控制流完备、失败可恢复、运行可看见、人可介入。
 
@@ -732,3 +732,4 @@ GC-0 Docs
 | 2026-11-10 | **续作**：GC-2.5 wall-clock timeout HITL；GC-2.6 fallback 全路径（failNode + Action/Verify）；GC-3.1 Merge 真 Join（sibling drain / 失败 HITL）；GC-3.3/3.4 HumanDecision + Parallel preset 验收；GC-6.1 Run 色点；GC-6.2 `LoopRunSidePanel`；GC-6.4 Review Path Map Parallel/Loop 容器 |
 | 2026-11-10 | **GC-4/5/7 落地**：Instance `checkpoint` 步进落盘 + `restoreLoopInstanceFromCheckpoint`；Fresh/Stale 正交 + `stalePolicy`；启动 `idempotencyKey` / 不明副作用 resume → HITL；`ReplanProposal` + 预算记账；`inputParams` / `startLoopInstanceWithParams` / 内部事件去重；Parallel P1 `multi_run` 共享 leaf → `write_conflict` HITL；Run History + derive draft；API/IPC/mock/UI 打通 |
 | 2026-11-10 | **交叉引用**：接入 Project Workflow + Task Materials 权威计划（PW/TM）；六目标跟踪表同步；明确离线事件全天排队仍未实现 |
+| 2026-11-10 | **GC-6.5/6.6/7.2 收尾**：`LoopGraphMinimap` 点击平移；DutyCard Runtime「打开关联 Agent Run」→ `openAgentFlowForRun(activeRunId)`；产品入口确认 = Draw **dblclick** `[data-loop-node]` / 右键 Open Duty（**不是** Review 架构节点详情）；§9 六机制/成熟能力/回归清单保持可勾；**仍非** shipped/live/总交验 |

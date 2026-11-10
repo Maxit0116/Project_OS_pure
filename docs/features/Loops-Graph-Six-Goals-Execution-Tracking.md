@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10（PR10 tip 续作）— Batch3 Supabase/PostHog **implemented_contract** loopback 适配器+settle；PW-8 持久离线事件队列（enqueue/dedupe/drain/recover）+ LocalApi；Gmail `attachments_get` settle 产品路径（accountRef/50M）；控制流 Inspector logic UI 测 + Electron 取证。**不宣称总交验 / 非 shipped / 非 live**。旧 ba5ee1e 补证已独立审过，不重刷。
+**Updated**: 2026-11-10（PR10 tip 续作）— GC-6.5 minimap、GC-6.6 关联 Run、DutyCard 真实 dblclick/`Open Duty` 入口；Batch3/队列生产入口表；RunBinding 已通过测列表。**不宣称总交验 / 非 shipped / 非 live**。旧 ba5/9e 闸已独立审过，不重刷。
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
@@ -26,7 +26,7 @@
 | # | Goal | 状态摘要 |
 |---|------|----------|
 | 1 | 连接器 GitHub…PostHog（11 平台不删）+ **Gmail 追加** | Batch1/2 **contract**/live待验；Batch3 **implemented_contract**（supabase/posthog loopback 适配器+settle；write_rows high-risk 密封；live **未接**）；Gmail loopback **实现/contract** + settle `attachments_get`（accountRef/50M）；真邮箱 **未接** |
-| 2 | Condition/parallel/loop/timer/retry/pause/resume | GC 主体 **实现/contract**；Inspector logic UI **component 测**；Electron Run pause/resume+merge **可见**；DutyCard 点击选中 **partial**；GC-6.5/6.6/7.2 总勾选 **未完** |
+| 2 | Condition/parallel/loop/timer/retry/pause/resume | GC 主体 **实现/contract**；Inspector logic UI **component 测**；GC-6.5 minimap **实现**；GC-6.6 DutyCard→`openAgentFlowForRun` **实现**；DutyCard 入口 = **dblclick** `[data-loop-node]` / Open Duty（≠ Review 架构详情）；GC-7.2 §9 可勾；**仍非** shipped/live |
 | 3 | Reusable Agents + 互调 | wiring **实现**；预算 contract；**LocalApi 产品入口** planner DevPlan→coder 交接（loopback·非 live）；≠ 仅预算 |
 | 4 | Human review/approval | binding/runtime gate **contract**；**LocalApi** approve/reject/takeover→paused 同实例事件；`runApprovalContextDigest`；OAuth **未配置** |
 | 5 | Engineering context | digester + Verify **实现/contract**；RunBinding：**内容** dirty/untracked digest；`codeDigestStatus` incomplete 阻断；identity≠codeDigest；maxRounds+credential **消费时**冻结；审批上下文摘要；见 `RUNBINDING-GAP.md` |
@@ -66,7 +66,7 @@
 | Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现**；暗色保留；A3 连续陈旧（planner 改标题保 retry=2；retry 2→1 保 1；重开）：`loops-a3-*`。**UI Accept-disabled ≠ server reject**（server 拒绝仅独立 contract：`loop-approval-runtime-gate` / `acceptLoopGraphEditOffer`）。B：`loops-b-pw-failfix-evidence.json` + `loops-b-ui-failfix-e2e-evidence.json` + `loops-b-ui-05-artifact-cards-visible.png`（可见产物卡；勿用错标题空图）。**不得**用 fatal 后手改当连续通过 |
 | LocalApi→adapter→loopback settle | **实现**/contract 路径；GitHub write / connector（含 Gmail）缺 `credentialRefId` 或无 DI transport **fail-closed**（catalog ≠ authorized）；live未验 |
 | Studio 旧「固定侧栏 Inspector」文首 vs DutyCard | **冲突未消**：Studio D3/LG-1.1 仍写侧栏；现行 UI 为 Overlay 内 DutyCard / Inspector empty hint——**不以旧 Studio 文首当已验收** |
-| GC 总勾选 / 发布门禁 | **未全勾**：GC-6.5/6.6、GC-7.2 总验收待收尾；**不得**宣称 GC 门禁已通过 |
+| GC 总勾选 / 发布门禁 | GC-6.5/6.6 **实现** + GC-7.2 §9 **可勾**；**仍不得**宣称 shipped/live/总交验（无付费 live、无 OAuth） |
 
 ---
 
@@ -117,7 +117,36 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 - Gmail 真邮箱 / OAuth / users.watch·Pub/Sub / 发送审批；增量同步 ≠ 24/7
 - SaaS Batch1/2 live；Batch3 live 项目未接（适配器已 loopback）；离线队列已实现但仍 **非** 外网 24/7 push
 - ModelGateway 视觉 **live**；`loop_authoring` protocol-path inventory 对齐债
-- GC 总勾选 / 发布门禁；Mac；付费 live；真实外发
+- GC **shipped/live/总交验**（§9 可勾 ≠ 发布门禁）；Mac；付费 live；真实外发
+
+### Batch3 / 离线队列 — 生产入口与边界（非 live）
+
+| 路径 | 入口 | 边界 |
+|------|------|------|
+| Batch3 adapters | `services/loop-connectors/adapters/batch3.ts` → `settle-connector` → LocalApi connector settle | **implemented_contract** loopback；`write_rows` high-risk 密封；**无** 真 Supabase/PostHog 项目 |
+| Catalog | `catalog.ts` batch=`batch3_data`（supabase/posthog） | catalog ≠ authorized；缺 `credentialRefId` fail-closed |
+| 离线事件队列 | `.projectos/loop-event-queue.json`；LocalApi `enqueueOfflineLoopEvent` / `drainOfflineLoopEventQueue`；IPC 同名 | 持久 enqueue + **dedupe** + drain recover；失败条目保留；**≠** 外网 24/7 webhook/push |
+| 测 | `batch3.contract.test.ts`；`loop-event-offline-queue.test.ts`；`loop-offline-event-queue.local-api.test.ts` | 产品路径 unit/LocalApi；无 live |
+
+### RunBinding / 审批 / 预算 — 已通过同路径测（不重写）
+
+| 测文件 | 覆盖 |
+|--------|------|
+| `loop-run-binding.test.ts` | identity + freeze（budget/permissionSet/contentDigest）；permission freeze |
+| `loop-approval-binding.test.ts` | contentDigest 绑定；`runApprovalContextDigest`；incomplete fail-closed |
+| `loop-product-entry-g346.local-api.test.ts` | 产品入口 binding digests |
+| `loop-pw-materials-start.evidence.test.ts` | materials→start ChangeSet digest |
+| `contracts/loop-task-materials.test.ts` | schema |
+
+### GC-7.2 可靠性勾选映射（证据指针；非 live）
+
+| 机制 | ≥1 E2E/contract 指针 |
+|------|----------------------|
+| Sequence / Parallel / Branch / Loop / Gate / Recovery | GC runtime + `loop-runtime-*.test.ts` / Gaps §9 |
+| DutyCard 配置入口 | Draw **dblclick** `[data-loop-node]` / Open Duty → DutyCard+Inspector（Electron `loops-gc-dutycard-*`） |
+| Minimap GC-6.5 | `LoopGraphMinimap` + component 测 + Electron 可见 |
+| 关联 Run GC-6.6 | DutyCard Runtime `data-testid=loop-open-associated-run` → `openAgentFlowForRun` |
+| pause/resume UI | Electron Run 控件（controlflow / gc-dutycard shot） |
 
 **DOM/Runtime 开链（云端 Linux xvfb，非 Mac）** — **不宣称闭环 / live / shipped**：
 - Electron 材料证据 bundle（实入口）：`/opt/cursor/artifacts/loops-evidence-bundle-evidence.json`

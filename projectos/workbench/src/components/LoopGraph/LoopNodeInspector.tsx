@@ -8,6 +8,7 @@ import {
 } from '@contracts/index'
 import { resolveAgentWiring } from '../../../../services/loop-agent-wiring'
 import { useI18n } from '../../i18n'
+import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useComposePromptVoice } from '../ChatPanel/composer/useComposePromptVoice'
@@ -53,6 +54,7 @@ export default function LoopNodeInspector({
     (s) => s.applyWiringToAgentDefinition,
   )
   const saveWiringAsNewAgent = useLoopGraphStore((s) => s.saveWiringAsNewAgent)
+  const openAgentFlowForRun = useChatSessionStore((s) => s.openAgentFlowForRun)
   const settings = useWorkbenchStore((s) => s.settings)
   const shellClass = embedded ? styles.embedded : styles.inspector
   const nodeRef = useRef(node)
@@ -560,26 +562,41 @@ export default function LoopNodeInspector({
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>{ts('chat.loopGraph.inspectorRuntime')}</h3>
         {activeInstance ? (
-          <div className={styles.kv}>
-            <div>
-              <span>status</span>
-              <strong>{activeInstance.status}</strong>
-            </div>
-            <div>
-              <span>cursor</span>
-              <strong>{isCursor ? 'yes' : 'no'}</strong>
-            </div>
-            <div>
-              <span>attempts</span>
-              <strong>{activeInstance.attemptCounts[node.id] ?? 0}</strong>
-            </div>
-            {typeof activeInstance.loopIterations?.[node.id] === 'number' ? (
+          <>
+            <div className={styles.kv}>
               <div>
-                <span>loop</span>
-                <strong>{activeInstance.loopIterations[node.id]}</strong>
+                <span>status</span>
+                <strong>{activeInstance.status}</strong>
               </div>
-            ) : null}
-          </div>
+              <div>
+                <span>cursor</span>
+                <strong>{isCursor ? 'yes' : 'no'}</strong>
+              </div>
+              <div>
+                <span>attempts</span>
+                <strong>{activeInstance.attemptCounts[node.id] ?? 0}</strong>
+              </div>
+              {typeof activeInstance.loopIterations?.[node.id] === 'number' ? (
+                <div>
+                  <span>loop</span>
+                  <strong>{activeInstance.loopIterations[node.id]}</strong>
+                </div>
+              ) : null}
+            </div>
+            {activeInstance.activeRunId ? (
+              <button
+                type="button"
+                className={styles.openAssociatedRun}
+                data-testid="loop-open-associated-run"
+                data-loop-open-associated-run={activeInstance.activeRunId}
+                onClick={() => openAgentFlowForRun(activeInstance.activeRunId ?? null)}
+              >
+                {ts('chat.loopGraph.openAssociatedRun')}
+              </button>
+            ) : (
+              <p className={styles.hint}>{ts('chat.loopGraph.openAssociatedRunIdle')}</p>
+            )}
+          </>
         ) : (
           <p className={styles.hint}>{ts('chat.loopGraph.inspectorRuntimeIdle')}</p>
         )}

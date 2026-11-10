@@ -31,6 +31,7 @@ import LoopConfigAssetPicker, {
 } from './LoopConfigAssetPicker'
 import LoopGraphPalette from './LoopGraphPalette'
 import LoopNodeDutyCard from './LoopNodeDutyCard'
+import LoopGraphMinimap from './LoopGraphMinimap'
 import LoopGraphRail from './LoopGraphRail'
 import LoopRunSidePanel from './LoopRunSidePanel'
 import LoopRunMaterialsPanel from './LoopRunMaterialsPanel'
@@ -135,6 +136,7 @@ export default function LoopGraphOverlay() {
   const setCanvasSelectedNodeId = useLoopGraphStore((s) => s.setCanvasSelectedNodeId)
 
   const [viewport, setViewport] = useState({ x: 32, y: 32, scale: 1 })
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 })
   const [dragging, setDragging] = useState(false)
   const [railLayout, setRailLayout] = useState<LoopGraphRailLayout>(() =>
     emptyLoopGraphRailLayout(),
@@ -252,6 +254,22 @@ export default function LoopGraphOverlay() {
       setDutyCardNodeId(null)
     }
   }, [document, dutyCardNodeId])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const el = canvasRef.current
+    if (!el) return undefined
+    const sync = () => {
+      setCanvasSize({
+        width: Math.max(1, el.clientWidth),
+        height: Math.max(1, el.clientHeight),
+      })
+    }
+    sync()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(sync) : null
+    ro?.observe(el)
+    return () => ro?.disconnect()
+  }, [open, phase, document?.id])
 
   useEffect(() => {
     if (phase !== 'run') return
@@ -1368,6 +1386,22 @@ export default function LoopGraphOverlay() {
 
             {phase === 'draw' && document ? <LoopGoalComposer /> : null}
 
+            {document && phase !== 'review' && draft.nodes.length > 0 ? (
+              <LoopGraphMinimap
+                nodes={draft.nodes}
+                viewport={viewport}
+                canvasWidth={canvasSize.width}
+                canvasHeight={canvasSize.height}
+                onPanToWorld={(worldX, worldY) => {
+                  setViewport((prev) => ({
+                    ...prev,
+                    x: canvasSize.width / 2 - worldX * prev.scale,
+                    y: canvasSize.height / 2 - worldY * prev.scale,
+                  }))
+                }}
+              />
+            ) : null}
+
             {(() => {
               const dutyNode = dutyCardNodeId
                 ? document?.draft.nodes.find((item) => item.id === dutyCardNodeId)
@@ -1376,8 +1410,8 @@ export default function LoopGraphOverlay() {
               const canvasEl = canvasRef.current
               // Host covers the whole stage (canvas + composer). Keep the card
               // fully inside the canvas band so composer never covers the form.
-              const canvasW = canvasEl?.clientWidth ?? 800
-              const canvasH = canvasEl?.clientHeight ?? 600
+              const canvasW = canvasEl?.clientWidth ?? canvasSize.width
+              const canvasH = canvasEl?.clientHeight ?? canvasSize.height
               const cardW = Math.min(380, Math.max(280, canvasW - 24))
               const cardH = Math.min(520, Math.max(280, canvasH - 16))
               let left =

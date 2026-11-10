@@ -172,7 +172,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 
 | ID | 验收项 | 状态 |
 |----|--------|------|
-| DE-1 | DutyCard 类型表单 Agent/Action/Logic/Human | **实现** + 暗色实机 style 已读；SaaS 截字/密度局部整理（wrap + node z-index）；截图见 Six-Goals |
+| DE-1 | DutyCard 类型表单 Agent/Action/Logic/Human | **实现**；产品入口 = Draw **dblclick** `[data-loop-node]` / 右键 Open Duty（**≠** Review 架构节点详情）；含 GC-6.6 关联 Run；截图见 Six-Goals |
 | DE-2 | Provider authoring loopback：空图；审批闸语义；连续陈旧负例 | **实现/证据**（**loopback·not live**）：A3 连续脚本无 fatal——改其他字段保 retry=2；改 retry→1 则保 1（不假恢复 2）；timeout 恒 7777、无 9999；重开一致。**UI Accept-disabled ≠ server reject**（分层：UI 禁用 vs `acceptLoopGraphEditOffer` / runtime gate **contract**）。付费 live **未验** |
 | SEC-1 | High-risk / catalog_only 不可调用方绕过 | **contract** |
 | SEC-2 | 非幂等 POST 不盲重试；timeout/abort unknown；脱敏全链 | **contract** |

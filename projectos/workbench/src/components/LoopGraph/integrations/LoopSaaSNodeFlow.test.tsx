@@ -42,6 +42,12 @@ vi.mock('../../../state/loopGraphStore', () => ({
     selector({ document: null }),
 }))
 
+vi.mock('../../../state/chatSessionStore', () => ({
+  useChatSessionStore: (
+    selector: (s: { openAgentFlowForRun: (runId: string | null) => void }) => unknown,
+  ) => selector({ openAgentFlowForRun: vi.fn() }),
+}))
+
 vi.mock('../../../state/workbenchStore', () => ({
   useWorkbenchStore: (selector: (s: { settings: null }) => unknown) =>
     selector({ settings: null }),
