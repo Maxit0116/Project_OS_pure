@@ -9673,6 +9673,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
                   prompt: "Approve before continue",
                   type: "human",
                   humanMode: "approval",
+                  humanAssignee: "operator",
                   position: { x: 320, y: 180 },
                 },
               ],
@@ -9681,12 +9682,116 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             targetedNodeIds: ["n_loopback_approval"],
           };
         }
+        const wantsScaffold =
+          /(?:\bgenerate\b|\bscaffold\b|\bcreate\b[^\n]{0,40}\bworkflow\b|\bempty\b|\b生成\b|\b创建流程\b)/i.test(
+            request,
+          );
+        if (wantsScaffold) {
+          return {
+            kind: "graph",
+            summary: "loopback: scaffold Agent/Action/Logic/Human workflow",
+            assistantMessage:
+              "[loopback·not live] Scaffolded mixed graph from empty; review Accept/Dismiss.",
+            draft: {
+              revision: 1,
+              graphPrompt: "Ship a small feature with review and tests",
+              nodes: [
+                {
+                  id: "n_planner",
+                  title: "Planner",
+                  prompt: "Analyze goal and write a DevPlan",
+                  type: "agent",
+                  agentRole: "planner",
+                  position: { x: 80, y: 40 },
+                  timeoutMs: 60_000,
+                },
+                {
+                  id: "n_retry",
+                  title: "Retry gate",
+                  prompt: "Retry failed implementation up to limit",
+                  type: "logic",
+                  logicKind: "retry",
+                  retryLimit: 1,
+                  position: { x: 80, y: 160 },
+                },
+                {
+                  id: "n_coder",
+                  title: "Coder",
+                  prompt: "Implement the next DevPlan task",
+                  type: "agent",
+                  agentRole: "coder",
+                  position: { x: 80, y: 280 },
+                  timeoutMs: 120_000,
+                },
+                {
+                  id: "n_test",
+                  title: "Run Tests",
+                  prompt: "Execute the project test command and produce a TestReport.",
+                  type: "action",
+                  actionIntegration: "test",
+                  actionOperation: "run",
+                  position: { x: 80, y: 400 },
+                  timeoutMs: 90_000,
+                },
+                {
+                  id: "n_sentry",
+                  title: "Sentry Issues",
+                  prompt: "List recent Sentry issues for triage context.",
+                  type: "action",
+                  actionIntegration: "sentry",
+                  actionOperation: "list_issues",
+                  position: { x: 320, y: 280 },
+                  timeoutMs: 30_000,
+                },
+                {
+                  id: "n_human",
+                  title: "Human Review",
+                  prompt: "Review plan before coding",
+                  type: "human",
+                  humanMode: "review",
+                  humanAssignee: "operator",
+                  position: { x: 320, y: 100 },
+                },
+              ],
+              edges: [
+                {
+                  id: "e1",
+                  source: "n_planner",
+                  target: "n_human",
+                  kind: "depends",
+                  prompt: "Hand DevPlan to human review",
+                },
+                {
+                  id: "e2",
+                  source: "n_human",
+                  target: "n_retry",
+                  kind: "depends",
+                  prompt: "On accept, enter retry-bounded implement",
+                },
+                {
+                  id: "e3",
+                  source: "n_retry",
+                  target: "n_coder",
+                  kind: "depends",
+                  prompt: "Implement next task",
+                },
+                {
+                  id: "e4",
+                  source: "n_coder",
+                  target: "n_test",
+                  kind: "depends",
+                  prompt: "Run tests after implementation",
+                },
+              ],
+            },
+          };
+        }
         return {
           kind: "clarify",
           openQuestions: [
             {
               question:
-                "[loopback·not live] Specify nodeId=… timeout=… or ask to insert approval.",
+                "[loopback·not live] Say generate workflow, nodeId=… timeout=…, or insert approval.",
             },
           ],
           assistantMessage: "[loopback·not live] Need a concrete edit target.",
@@ -9782,6 +9887,22 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       throw new ProjectOSError(
         "loop_graph_invalid",
         error instanceof Error ? error.message : "Failed to undo draft",
+      );
+    }
+  }
+
+  async redoLoopDraft(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { redoLoopDraft } = await import("./loop-graph-service.js");
+    try {
+      return redoLoopDraft(workspace.workspaceRoot, loopId);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to redo draft",
       );
     }
   }

@@ -118,6 +118,7 @@ interface LoopGraphStore {
   acceptGraphEditOffer: () => Promise<void>
   dismissGraphEditOffer: () => Promise<void>
   undoDraft: () => Promise<void>
+  redoDraft: () => Promise<void>
   beginAuthorNode: (position: { x: number; y: number }) => Promise<string | null>
   beginAuthorNodeFromPalette: (
     paletteItemId: string,
@@ -489,6 +490,27 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       set({
         authoringBusy: false,
         error: error instanceof Error ? error.message : 'Undo failed',
+      })
+    }
+  },
+
+  redoDraft: async () => {
+    const { client, project } = useWorkbenchStore.getState()
+    const loopId = get().activeLoopId
+    if (!client || !project || !loopId) return
+    if (typeof client.redoLoopDraft !== 'function') {
+      set({ error: 'redoLoopDraft unavailable on this client' })
+      return
+    }
+    set({ authoringBusy: true, error: null })
+    try {
+      const next = await client.redoLoopDraft(project.projectId, loopId)
+      const heads = await client.listLoopGraphs(project.projectId)
+      set({ document: next, heads, authoringBusy: false })
+    } catch (error) {
+      set({
+        authoringBusy: false,
+        error: error instanceof Error ? error.message : 'Redo failed',
       })
     }
   },

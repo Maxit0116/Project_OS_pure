@@ -13,6 +13,7 @@ import {
   type LoopLogicKind,
   type LoopNodeType,
 } from "./loop-node-architecture.js";
+import { LoopTaskMaterialSchema } from "./loop-task-materials.js";
 
 export {
   LOOP_ACTION_INTEGRATIONS,
@@ -705,6 +706,8 @@ export const LoopInstanceSchema = z
         codeDigest: z.string().trim().min(1).max(128).optional(),
         specVersion: z.string().min(1),
         taskInputId: z.string().min(1).optional(),
+        /** Frozen task materials at start — definition edits must not rewrite. */
+        materials: z.array(LoopTaskMaterialSchema).max(64).optional(),
         credentialRefIds: z.array(z.string().min(1).max(120)).max(32).optional(),
         preflightNotes: z.array(z.string().trim().min(1).max(500)).max(40).optional(),
         createdAt: z.string().min(1),
@@ -877,6 +880,11 @@ export const LoopGraphDocumentSchema = z
       steps: [],
     }),
     draftHistory: z
+      .array(IntentGraphHistoryEntrySchema)
+      .max(LOOP_DRAFT_HISTORY_MAX)
+      .default([]),
+    /** Populated by undo; cleared on new Accept / persist edits. */
+    draftRedoStack: z
       .array(IntentGraphHistoryEntrySchema)
       .max(LOOP_DRAFT_HISTORY_MAX)
       .default([]),
@@ -1116,6 +1124,9 @@ export function normalizeLoopGraphDocument(raw: unknown): LoopGraphDocument {
         : emptyAuthoringTrace(),
     draftHistory: Array.isArray(base.draftHistory)
       ? base.draftHistory.slice(0, LOOP_DRAFT_HISTORY_MAX)
+      : [],
+    draftRedoStack: Array.isArray(base.draftRedoStack)
+      ? base.draftRedoStack.slice(0, LOOP_DRAFT_HISTORY_MAX)
       : [],
   });
 }

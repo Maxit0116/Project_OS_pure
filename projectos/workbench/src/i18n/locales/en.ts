@@ -1999,6 +1999,7 @@ const en = {
       engineRulesHint: 'Deterministic heuristics only — explicitly not AI.',
       send: 'Send',
       undoDraft: 'Undo',
+      redoDraft: 'Redo',
       agentFlowSheet: 'Agent flow',
       goalContextSheet: 'Goal context',
       clarifySheet: 'Clarifications',

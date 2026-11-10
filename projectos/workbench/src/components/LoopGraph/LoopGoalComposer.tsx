@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { Bot, ChevronUp, MessageSquare, Pencil, Undo2 } from 'lucide-react'
+import { Bot, ChevronUp, MessageSquare, Pencil, Redo2, Undo2 } from 'lucide-react'
 import type { LoopComposerMode, LoopOpenQuestion } from '@contracts/index'
 import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea'
 import { useI18n } from '../../i18n'
@@ -43,6 +43,7 @@ export default function LoopGoalComposer() {
   const acceptGraphEditOffer = useLoopGraphStore((s) => s.acceptGraphEditOffer)
   const dismissGraphEditOffer = useLoopGraphStore((s) => s.dismissGraphEditOffer)
   const undoDraft = useLoopGraphStore((s) => s.undoDraft)
+  const redoDraft = useLoopGraphStore((s) => s.redoDraft)
   const beginAuthorNodeFromPalette = useLoopGraphStore((s) => s.beginAuthorNodeFromPalette)
   const expandAgentWiring = useLoopGraphStore((s) => s.expandAgentWiring)
   const submitCreateAgentPrompt = useWorkbenchStore((s) => s.submitCreateAgentPrompt)
@@ -66,6 +67,7 @@ export default function LoopGoalComposer() {
   const trace = loopDocument?.authoringTrace
   const offer = loopDocument?.pendingGraphEditOffer
   const canUndo = (loopDocument?.draftHistory?.length ?? 0) > 0
+  const canRedo = (loopDocument?.draftRedoStack?.length ?? 0) > 0
 
   const openQuestions = draftContext?.openQuestions ?? []
   const needsClarification = openQuestions.some((q) => !q.answer?.trim())
@@ -584,6 +586,17 @@ export default function LoopGoalComposer() {
               >
                 <Undo2 size={14} aria-hidden />
                 <span>{ts('chat.loopGraph.undoDraft')}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.undoButton}
+                disabled={authoringBusy || !canRedo}
+                title={ts('chat.loopGraph.redoDraft')}
+                aria-label={ts('chat.loopGraph.redoDraft')}
+                onClick={() => void redoDraft()}
+              >
+                <Redo2 size={14} aria-hidden />
+                <span>{ts('chat.loopGraph.redoDraft')}</span>
               </button>
               <VoiceInputDock {...composeVoice.dockProps} inline />
               <Button

@@ -2977,6 +2977,7 @@ export function startLoopInstance(
           ...(options.materials?.length
             ? {
                 taskInputId: `task_${randomUUID()}`,
+                materials: options.materials,
               }
             : {}),
           codeDigest: pathFingerprint,

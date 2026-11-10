@@ -379,6 +379,7 @@ export function mergePreservingUntargeted(
   }
   const targetSet = new Set(targetedNodeIds);
   const proposedById = new Map(proposed.nodes.map((node) => [node.id, node]));
+  const baseIds = new Set(base.nodes.map((node) => node.id));
   const nodes = base.nodes.map((node) => {
     if (!targetSet.has(node.id)) return node;
     const next = proposedById.get(node.id);
@@ -391,6 +392,12 @@ export function mergePreservingUntargeted(
       position: next.position ?? node.position,
     };
   });
+  // Targeted inserts: append proposed nodes that are targeted but absent from base.
+  for (const id of targetSet) {
+    if (baseIds.has(id)) continue;
+    const next = proposedById.get(id);
+    if (next) nodes.push(next);
+  }
   // Edges: keep base edges not touching only-target rewires; prefer proposed edges
   // that reference preserved endpoints.
   const nodeIds = new Set(nodes.map((node) => node.id));

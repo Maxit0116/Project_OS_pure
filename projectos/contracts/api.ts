@@ -1098,6 +1098,7 @@ export interface ProjectOSApi {
   acceptLoopGraphEditOffer(projectId: string, loopId: string): Promise<LoopGraphDocument>;
   dismissLoopGraphEditOffer(projectId: string, loopId: string): Promise<LoopGraphDocument>;
   undoLoopDraft(projectId: string, loopId: string): Promise<LoopGraphDocument>;
+  redoLoopDraft(projectId: string, loopId: string): Promise<LoopGraphDocument>;
   setLoopComposerMode(
     projectId: string,
     loopId: string,

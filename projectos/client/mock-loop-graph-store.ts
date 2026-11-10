@@ -858,15 +858,54 @@ export function mockUndoLoopDraft(
     throw new Error("Nothing to undo");
   }
   const previous = doc.draftHistory[doc.draftHistory.length - 1]!;
+  const redoStack = pushIntentGraphHistory(doc.draftRedoStack ?? [], {
+    id: `redo_${randomUUID()}`,
+    at: new Date().toISOString(),
+    label: previous.label,
+    draft: doc.draft,
+  });
   return mockUpsertLoopGraph(projectId, {
     ...doc,
     draft: previous.draft,
     draftHistory: doc.draftHistory.slice(0, -1),
+    draftRedoStack: redoStack,
     authoringTrace: buildCompleteTrace([
       {
         id: `step_${randomUUID()}`,
         kind: "applying_patch",
         label: `Undid: ${previous.label}`,
+        at: new Date().toISOString(),
+      },
+    ]),
+  });
+}
+
+export function mockRedoLoopDraft(
+  projectId: string,
+  loopId: string,
+): LoopGraphDocument {
+  const doc = mockRequireLoop(projectId, loopId);
+  const redoStack = doc.draftRedoStack ?? [];
+  if (redoStack.length === 0) {
+    throw new Error("Nothing to redo");
+  }
+  const next = redoStack[redoStack.length - 1]!;
+  const history = pushIntentGraphHistory(doc.draftHistory, {
+    id: `hist_${randomUUID()}`,
+    at: new Date().toISOString(),
+    label: `Before redo: ${next.label}`.slice(0, 120),
+    draft: doc.draft,
+  });
+  return mockUpsertLoopGraph(projectId, {
+    ...doc,
+    draft: next.draft,
+    draftHistory: history,
+    draftRedoStack: redoStack.slice(0, -1),
+    authoringTrace: buildCompleteTrace([
+      {
+        id: `step_${randomUUID()}`,
+        kind: "applying_patch",
+        label: `Redid: ${next.label}`,
         at: new Date().toISOString(),
       },
     ]),

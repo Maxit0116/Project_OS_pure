@@ -1618,6 +1618,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.undoLoopDraft(projectId, loopId);
   }
 
+  redoLoopDraft(projectId: string, loopId: string) {
+    return this.transport.redoLoopDraft(projectId, loopId);
+  }
+
   setLoopComposerMode(
     projectId: string,
     loopId: string,

@@ -272,6 +272,7 @@ const PROJECTOS_IPC_SIGNATURES = {
   acceptLoopGraphEditOffer: ['string', 'string'],
   dismissLoopGraphEditOffer: ['string', 'string'],
   undoLoopDraft: ['string', 'string'],
+  redoLoopDraft: ['string', 'string'],
   setLoopComposerMode: ['string', 'string', 'string'],
   ensureDiagramDesignSkill: ['string'],
   getDiagramSkillPackStatus: ['string'],

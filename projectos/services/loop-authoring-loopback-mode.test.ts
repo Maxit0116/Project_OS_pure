@@ -1,28 +1,18 @@
 /**
  * Electron IPC loopback mode — parse user_request only (not draft Human nodes).
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
+import { setLoopAuthoringCompleteOverride } from "./loop-graph-service.js";
 
 describe("setLoopAuthoringLoopbackMode demo_edit", () => {
-  const roots: string[] = [];
-  afterEach(() => {
-    for (const root of roots.splice(0)) {
-      try {
-        rmSync(root, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
-    }
+  afterEach(async () => {
+    setLoopAuthoringCompleteOverride(null);
   });
 
   it("timeout patch ignores Human nodes in authoring prompt context", async () => {
-    const root = mkdtempSync(join(tmpdir(), "loopback-mode-"));
-    roots.push(root);
-    const api = new ProjectOSLocalApi({ workspaceRoot: root });
+    // No workspace needed — demo_edit only injects the complete override.
+    const api = new ProjectOSLocalApi({});
     const mode = await api.setLoopAuthoringLoopbackMode("demo_edit");
     expect(mode).toEqual({ mode: "demo_edit", live: false });
 
@@ -53,9 +43,7 @@ describe("setLoopAuthoringLoopbackMode demo_edit", () => {
   });
 
   it("insert approval still matches explicit approval request", async () => {
-    const root = mkdtempSync(join(tmpdir(), "loopback-mode-"));
-    roots.push(root);
-    const api = new ProjectOSLocalApi({ workspaceRoot: root });
+    const api = new ProjectOSLocalApi({});
     await api.setLoopAuthoringLoopbackMode("demo_edit");
     const { getLoopAuthoringCompleteOverride } = await import("./loop-graph-service.js");
     const complete = getLoopAuthoringCompleteOverride();
@@ -66,6 +54,28 @@ describe("setLoopAuthoringLoopbackMode demo_edit", () => {
     const parsed = JSON.parse(raw) as { kind: string; summary?: string };
     expect(parsed.kind).toBe("graph");
     expect(parsed.summary).toMatch(/insert human approval/i);
+    await api.setLoopAuthoringLoopbackMode("off");
+  });
+
+  it("scaffold generates mixed Agent/Action/Logic/Human graph", async () => {
+    const api = new ProjectOSLocalApi({});
+    await api.setLoopAuthoringLoopbackMode("demo_edit");
+    const { getLoopAuthoringCompleteOverride } = await import("./loop-graph-service.js");
+    const complete = getLoopAuthoringCompleteOverride();
+    const raw = await complete!({
+      system: "test",
+      user: ["mode: edit", "user_request: generate workflow from empty"].join("\n"),
+    });
+    const parsed = JSON.parse(raw) as {
+      kind: string;
+      draft?: { nodes: Array<{ id: string; type?: string }> };
+    };
+    expect(parsed.kind).toBe("graph");
+    const types = new Set((parsed.draft?.nodes ?? []).map((n) => n.type));
+    expect(types.has("agent")).toBe(true);
+    expect(types.has("action")).toBe(true);
+    expect(types.has("logic")).toBe(true);
+    expect(types.has("human")).toBe(true);
     await api.setLoopAuthoringLoopbackMode("off");
   });
 });

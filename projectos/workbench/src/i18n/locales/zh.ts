@@ -1965,6 +1965,7 @@ const zh = {
       engineRulesHint: '仅确定性启发式 — 明确非 AI。',
       send: '发送',
       undoDraft: '撤销',
+      redoDraft: '重做',
       agentFlowSheet: 'Agent 流程',
       goalContextSheet: 'Goal context',
       clarifySheet: '澄清',

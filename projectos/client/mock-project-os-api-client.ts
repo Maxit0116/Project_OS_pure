@@ -113,6 +113,7 @@ import {
   mockStartLoopInstanceFromEvent,
   mockStartLoopInstanceWithParams,
   mockUndoLoopDraft,
+  mockRedoLoopDraft,
   mockUnlinkLoopGraphFromSession,
   mockUpsertLoopGraph,
 } from "./mock-loop-graph-store.js";
@@ -690,6 +691,10 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
 
   override undoLoopDraft(projectId: string, loopId: string): Promise<LoopGraphDocument> {
     return Promise.resolve(mockUndoLoopDraft(projectId, loopId));
+  }
+
+  override redoLoopDraft(projectId: string, loopId: string): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockRedoLoopDraft(projectId, loopId));
   }
 
   override setLoopComposerMode(

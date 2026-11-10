@@ -1989,6 +1989,13 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("undoLoopDraft", projectId, loopId);
   }
 
+  redoLoopDraft(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("redoLoopDraft", projectId, loopId);
+  }
+
   setLoopComposerMode(
     projectId: string,
     loopId: string,

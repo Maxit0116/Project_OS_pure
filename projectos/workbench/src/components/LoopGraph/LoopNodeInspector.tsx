@@ -186,12 +186,30 @@ export default function LoopNodeInspector({
           {arch.logicKind ? <span className={styles.chip}>{arch.logicKind}</span> : null}
         </div>
         {arch.type === 'agent' ? (
-          <p className={styles.hint}>
-            {ts('workforce.assignedAgent')}:{' '}
-            {node.agentDefinitionId
-              ? node.agentDefinitionId
-              : ts('workforce.assignedGeneral')}
-          </p>
+          <>
+            <p className={styles.hint}>
+              {ts('workforce.assignedAgent')}:{' '}
+              {node.agentDefinitionId
+                ? node.agentDefinitionId
+                : ts('workforce.assignedGeneral')}
+            </p>
+            <TextInput
+              fieldClassName={styles.field}
+              type="number"
+              min={1}
+              max={600000}
+              label="Timeout (ms)"
+              data-testid="agent-timeout-ms"
+              value={node.timeoutMs ?? ''}
+              disabled={readOnly}
+              onChange={(event) => {
+                const raw = event.target.value
+                onChange({
+                  timeoutMs: raw === '' ? undefined : Number(raw) || undefined,
+                })
+              }}
+            />
+          </>
         ) : null}
       </section>
 

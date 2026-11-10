@@ -617,6 +617,8 @@ export function acceptLoopGraphEditOffer(
       ...doc,
       draft: offer.proposedDraft,
       draftHistory: history,
+      // New applied edit invalidates redo forward stack.
+      draftRedoStack: [],
       pendingGraphEditOffer: undefined,
       authoringThread: [...doc.authoringThread, assistant].slice(-200),
       authoringTrace: buildCompleteTrace([
@@ -648,6 +650,7 @@ export function acceptLoopGraphEditOffer(
     ...doc,
     draft: skeleton.draft,
     draftHistory: history,
+    draftRedoStack: [],
     pendingGraphEditOffer: undefined,
     authoringThread: [...doc.authoringThread, assistant].slice(-200),
     authoringTrace: buildCompleteTrace(skeleton.steps),
@@ -675,15 +678,55 @@ export function undoLoopDraft(
   }
   const previous = doc.draftHistory[doc.draftHistory.length - 1]!;
   const remaining = doc.draftHistory.slice(0, -1);
+  const redoStack = pushIntentGraphHistory(doc.draftRedoStack ?? [], {
+    id: `redo_${randomUUID()}`,
+    at: new Date().toISOString(),
+    label: previous.label,
+    draft: doc.draft,
+  });
   return upsertLoopGraph(workspaceRoot, {
     ...doc,
     draft: previous.draft,
     draftHistory: remaining,
+    draftRedoStack: redoStack,
     authoringTrace: buildCompleteTrace([
       {
         id: `step_${randomUUID()}`,
         kind: "applying_patch",
         label: `Undid: ${previous.label}`,
+        at: new Date().toISOString(),
+      },
+    ]),
+  });
+}
+
+export function redoLoopDraft(
+  workspaceRoot: string,
+  loopId: string,
+): LoopGraphDocument {
+  const doc = requireLoop(workspaceRoot, loopId);
+  const redoStack = doc.draftRedoStack ?? [];
+  if (redoStack.length === 0) {
+    throw new Error("Nothing to redo");
+  }
+  const next = redoStack[redoStack.length - 1]!;
+  const remainingRedo = redoStack.slice(0, -1);
+  const history = pushIntentGraphHistory(doc.draftHistory, {
+    id: `hist_${randomUUID()}`,
+    at: new Date().toISOString(),
+    label: `Before redo: ${next.label}`.slice(0, 120),
+    draft: doc.draft,
+  });
+  return upsertLoopGraph(workspaceRoot, {
+    ...doc,
+    draft: next.draft,
+    draftHistory: history,
+    draftRedoStack: remainingRedo,
+    authoringTrace: buildCompleteTrace([
+      {
+        id: `step_${randomUUID()}`,
+        kind: "applying_patch",
+        label: `Redid: ${next.label}`,
         at: new Date().toISOString(),
       },
     ]),

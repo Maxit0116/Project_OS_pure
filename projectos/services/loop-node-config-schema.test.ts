@@ -84,4 +84,26 @@ describe("loop-node-config-schema", () => {
       true,
     );
   });
+
+  it("mergePreservingUntargeted inserts targeted nodes absent from base", () => {
+    const base = draft([
+      node({ id: "keep", title: "Keep", prompt: "manual" }),
+    ], []);
+    const proposed = draft([
+      node({
+        id: "n_loopback_approval",
+        title: "Approval gate",
+        prompt: "Approve",
+        type: "human",
+      }),
+    ], []);
+    const merged = mergePreservingUntargeted(base, proposed, [
+      "n_loopback_approval",
+    ]);
+    expect(merged.nodes.map((n) => n.id).sort()).toEqual([
+      "keep",
+      "n_loopback_approval",
+    ]);
+    expect(merged.nodes.find((n) => n.id === "keep")?.prompt).toBe("manual");
+  });
 });

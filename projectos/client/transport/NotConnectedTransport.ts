@@ -1745,6 +1745,13 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async redoLoopDraft(
+    _projectId: string,
+    _loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
   async setLoopComposerMode(
     _projectId: string,
     _loopId: string,
