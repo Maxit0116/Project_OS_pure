@@ -1,18 +1,21 @@
 # Loops Graph · Gmail Connector（只读首期 + 发送边界）
 
 **状态**：权威计划 + 首期只读契约开发（2026-11-10 **新增**；**不在** [`5814430`](https://github.com/Maxit0116/Project_OS_pure/commit/5814430be36e0e990e49bcd84887f1b6208a5772) 范围内）。  
+**落地提交**：[`a9103ea`](https://github.com/Maxit0116/Project_OS_pure/commit/a9103eabf841c8ca8bc774b08457d748607c01c7)（同流 PR10；入文档 ≠ 交验完成）。  
 **入文档 ≠ 完成。** 本流只做离线契约 / 生产入口 loopback；**不**连接用户邮箱、**不**真实读写/发信/删归档/标已读、**不**部署 Pub/Sub、**不**付费、**不**安装 Bot Gmail 插件。  
 **同流**：追加到既有 Auto 主线（安全门禁 / 双作者入口 / Project Workflow + Task Materials），**不另开 PR 层**；保留原 11 平台清单，Gmail 为**追加**连接器。
 
-## 权威互链（完成后以真实 SHA / 路径为准）
+## 权威互链（真实路径）
 
-| 文档 | 关系 |
+| 文档 / 代码 | 关系 |
 |------|------|
-| [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) | 执行实况矩阵（计划/实现/contract/live/待验）；Gmail 行与本文件同步 |
-| [`Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](./Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) | 邮件→TaskMaterial / RunBinding / 预检；材料不可信；私密邮件外泄前预览脱敏 |
-| [`Loops-Graph-Workflow-Studio-Dev-Plan.md`](./Loops-Graph-Workflow-Studio-Dev-Plan.md) | Studio / DutyCard 手工配置入口复用；不另造邮箱皮肤 |
-| [`Loops-Graph-Gaps-Closure-Dev-Plan.md`](./Loops-Graph-Gaps-Closure-Dev-Plan.md) | 触发/可靠 settle；Gmail push ≠ 普通 webhook 载信 |
-| [`bugs.md`](../../bugs.md) | SSRF / 密钥边界；邮件 HTML/附件视为不可信输入 |
+| [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) | 执行实况矩阵；Gmail 行与本文件同步 |
+| [`Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](./Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) | 邮件→TaskMaterial / RunBinding / 预检 |
+| [`Loops-Graph-Workflow-Studio-Dev-Plan.md`](./Loops-Graph-Workflow-Studio-Dev-Plan.md) | Studio / DutyCard 手工配置入口 |
+| [`Loops-Graph-Gaps-Closure-Dev-Plan.md`](./Loops-Graph-Gaps-Closure-Dev-Plan.md) | 触发/settle；push ≠ 普通 webhook 载信 |
+| [`bugs.md`](../../bugs.md) | SSRF / 密钥；邮件 HTML/附件不可信 |
+| [`projectos/services/loop-connectors/adapters/gmail.ts`](../../projectos/services/loop-connectors/adapters/gmail.ts) | 只读 adapter + MIME/TaskMaterial（loopback） |
+| [`projectos/services/loop-connectors/gmail.contract.test.ts`](../../projectos/services/loop-connectors/gmail.contract.test.ts) | contract 测试 |
 | 官方（核实用，非本仓实现承诺） | [Scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) · [Push](https://developers.google.com/workspace/gmail/api/guides/push) · [Sync](https://developers.google.com/workspace/gmail/api/guides/sync) · [Restricted verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification) · [Workspace user-data policy](https://developers.google.com/workspace/workspace-api-user-data-developer-policy) |
 
 ---
