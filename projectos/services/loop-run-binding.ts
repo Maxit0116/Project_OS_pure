@@ -194,7 +194,7 @@ export function freezeRunBudget(spec: LoopSpec): FrozenRunBudget {
   const agent = resolveAgentCallBudgetLimits(spec);
   return {
     maxRounds: Math.max(1, spec.stopPolicy?.maxRounds ?? 1),
-    maxRetries: Math.max(0, spec.retryPolicy?.maxAttempts ?? 0),
+    maxRetries: Math.max(0, spec.retryPolicy?.maxAutoRetries ?? 0),
     maxAgentCalls: agent.maxAgentCalls,
     maxAgentCallDepth: agent.maxAgentCallDepth,
   };

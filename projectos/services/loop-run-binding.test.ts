@@ -65,7 +65,7 @@ function minimalSpec(): LoopSpec {
     ],
     edges: [],
     stopPolicy: { maxRounds: 2 },
-    retryPolicy: { maxAttempts: 1 },
+    retryPolicy: { maxAutoRetries: 1, onFailure: "retry" },
   } as LoopSpec;
 }
 
