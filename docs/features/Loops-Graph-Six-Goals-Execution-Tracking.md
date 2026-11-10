@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10（PR10 tip `219949a`；product parent `eaf6b39` Start/Pause）— Electron **Start→Pause→Resume** 同实例 UI ok（独立复核）；GC-6.6 a255 重挂**撤销** + ab55 不可变失败保留；**durable** `loops-gc66-durable-*` DutyCard→同 run 非空时间轴/重开/缺失诚实错误 **ok:true**（DI `local_tools` 正式落盘 AgentRun）；Studio 文首已同步浮动 DutyCard；PDF pdftotext 外部依赖提示+缺工具 fail-closed；ACL 矩阵 = 后续不入范围。**不宣称总交验 / 非 shipped / 非 live**。
+**Updated**: 2026-11-10（PR10 tip `7ac2a91`；product code `219949a`；parent `eaf6b39` Start/Pause）— Electron **Start→Pause→Resume** 同实例 UI ok（独立复核）；GC-6.6 a255 重挂**撤销** + ab55 不可变失败保留；**durable** `loops-gc66-durable-*` DutyCard→同 run 非空时间轴/重开/缺失诚实错误 **ok:true**（DI `local_tools` 正式落盘 AgentRun）；Studio 文首已同步浮动 DutyCard；PDF pdftotext 外部依赖提示+缺工具 fail-closed；ACL 矩阵 = 后续不入范围；门禁包 `pr10-7ac2a91-tip-final-gate.zip`。**不宣称总交验 / 非 shipped / 非 live**。
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
