@@ -1,5 +1,12 @@
 # Progress
 
+## 2026-11-10 - Loops Graph: authority docs for project workflow + materials (Auto stream)
+
+- **Asked (PM):** Sync full Loops scope (six goals, 11 platforms, manual+real-Agent dual entry, Pure UI, security) plus increments A (project-bound workflow runs) and B (multi-type task materials) into existing authoritative docs; produce a reviewable **docs-first** commit with SHA/links; do not treat docs as completion; continue same Auto PR stream without duplicate engines.
+- **Docs landed:** New authority plan [`docs/features/Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](docs/features/Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) (full scope, stage deps, contracts, acceptance matrix with 计划/实现/contract/live/待验). Updated cross-links in Six-Goals tracking, Gaps Closure, Workflow Studio, `README.md`, `feature-list.md`, `project_description.md`, and `bugs.md` (SSRF pointer for URL materials).
+- **Code (same stream, not this docs commit):** Security gates, DutyCard typed forms, provider authoring loopback, batch2 connector contracts continue on `cursor/loops-dispatch-evidence-cab8` — see tracking table for contract vs live.
+- **Not done / external:** Live OAuth, paid model three-round, Mac, merge, production write; offline all-day event queue remains **未实现**.
+
 ## 2026-11-07 (S9) - merging origin/graph, Keychain storage, Developer ID build prepared
 
 - **Asked:** "1,3, yes. 2 after merging": run external repositories' own tests (1), merge `origin/graph` (3), then signing, Keychain and a second Mac (2). Details are in `build_plan.md` §0 ("S9").

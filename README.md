@@ -9,6 +9,10 @@ Project OS is a graph-centered AI development environment. It connects product s
 - [Progress log](progress.md)
 - [Investor and partner overview](docs/Project-OS-Investor-Overview.md)
 - [Repository transition handoff](TRANSFER-HANDOFF.md)
+- [Loops Graph · six goals tracking](docs/features/Loops-Graph-Six-Goals-Execution-Tracking.md) — execution status (planned/implemented/contract/live); documenting ≠ done
+- [Loops Graph · project workflow + task materials](docs/features/Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) — project-bound runs and multi-type task inputs (authority plan)
+- [Loops Graph · gaps closure](docs/features/Loops-Graph-Gaps-Closure-Dev-Plan.md) — control-flow / reliability master plan
+- [Bug register](bugs.md) — includes SSRF lessons for URL/material fetch policy
 
 ## Current branch
 

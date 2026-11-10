@@ -1,87 +1,81 @@
 # Loops Graph · Six Goals Execution Tracking
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
-**Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9 `ccf2804`; targets `graph`; no third stack layer)  
-**Prior tip**: `615fa644` / reliability WIP on `38404db`  
-**Updated**: 2026-11-10 (reliability + n8n SaaS UI + connector batch1 contracts)
+**Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
+**Updated**: 2026-11-10 — security/dual-entry WIP + **Project Workflow / Materials** 权威计划入仓  
 
-Status keys: **已有已测** · **已有待测/需增强** · **需新增** · **未配置/不可用** · **契约已测/live待验**（禁止标假完成；catalog/logo ≠ 接通）
+状态键：**计划** · **实现** · **contract** · **live** · **待验** · **未配置** · **catalog_only**  
+**入文档 ≠ 完成。**
 
-| # | Goal | Inventory (source-checked) | Status |
-|---|------|----------------------------|--------|
-| 1 | GitHub/Slack/Feishu/Lark/Sentry + Trigger/Action/Webhook/HTTP | GitHub `settleGithubDispatch` **已有已测**；统一 `loop-connectors/` 框架 + Slack/Feishu/Lark/Sentry **契约已测/live待验**；Linear→PostHog **catalog_only** | 分批不删范围 |
-| 2 | Condition/parallel/loop/timer/retry/pause/resume | GC + parallel drain **已有已测**；cancel/pause mid-dispatch 不复活 **已有已测** | 回归保留 |
-| 3 | Reusable Agents + 互调 | roles/wiring **已有待测/需增强**；`loop-agent-call-budget` **已有已测** | — |
-| 4 | Human review/approval | binding + choice whitelist **已有已测**；外部 actor 签名（Slack/Feishu/Lark）**契约已测**；`local_declared` 拒审批 **已有已测**；真实 OAuth/账号 **未配置** | — |
-| 5 | Engineering context | workspace digester + Verify evidence binding **已有已测** | — |
-| 6 | Observability | dispatch journal / approval_stale / connector audit redaction **已有已测** | — |
+## 权威互链
 
-## Reliability slice (retained)
+| 文档 | 角色 |
+|------|------|
+| [`Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](./Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) | **增量 A/B 权威**：项目内真实 workflow run + 多类型任务材料；阶段依赖与验收矩阵 |
+| [`Loops-Graph-Gaps-Closure-Dev-Plan.md`](./Loops-Graph-Gaps-Closure-Dev-Plan.md) | 六机制 / 可靠性总控（GC-*） |
+| [`Loops-Graph-Workflow-Studio-Dev-Plan.md`](./Loops-Graph-Workflow-Studio-Dev-Plan.md) | Studio 壳与 D1–D9 决策基线 |
+| [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | DutyCard / Palette 手工入口 |
+| [`Loops-Graph-Node-Architecture-Dev-Plan.md`](./Loops-Graph-Node-Architecture-Dev-Plan.md) | 四类节点合同 |
+| [`bugs.md`](../../bugs.md) | H3 SSRF — URL 材料读取须默认拒内网 |
 
-1. **Prepare → final gate → transport** with `preparing` vs `http_started` (deny clears only preparing).
-2. **Identity-safe writeback** after every await; no fake CAS.
-3. **Verify** via `requestVerification` (read-only), once-per-attempt digest.
-4. LocalApi settle DI + probes; agent call budget; offline connector fail-closed.
+---
 
-## n8n-like SaaS node UI (authorized local UX)
+## 六目标实况
 
-- Independent Pure cards (`LoopSaaSNodeCard` + Overlay/Palette brand icons). **No n8n source/CSS** (Sustainable Use License).
-- Local icons: GitHub/Slack/飞书 Feishu/Lark/Sentry — see `workbench/.../integrations/PROVENANCE.md`.
-- Runtime status badges (未配置/未实现) separate from brand logo; disconnected nodes block run.
-- Fixture screenshots: `/opt/cursor/artifacts/loops-saas-nodes-before-crop.png` · `loops-saas-nodes-after-crop.png` (zoom=1, mixed Agent/Human/Logic).
+| # | Goal | 状态摘要 |
+|---|------|----------|
+| 1 | 连接器 GitHub…PostHog（11 平台不删） | Batch1 **contract**/live待验；Batch2 Linear/Jira/Notion/Vercel-list **contract**/live待验；Batch3 **catalog_only** |
+| 2 | Condition/parallel/loop/timer/retry/pause/resume | GC 主体 **实现/contract**；DutyCard logic 表单 **实现**/UI待验 |
+| 3 | Reusable Agents + 互调 | wiring **实现**/待增强 |
+| 4 | Human review/approval | binding **contract**；DutyCard human 表单 **实现**/UI待验；OAuth **未配置** |
+| 5 | Engineering context | digester + Verify binding **实现/contract**；完整 RunBinding **计划**（见 PW） |
+| 6 | Observability | journal/redaction **contract** |
 
-## Product connectors — full scope (batched)
+---
 
-### Batch 1 — reliability closed → GitHub deepen + collab + Sentry（本切片）
+## Authoring 基线（事实）
 
-| Vendor | API pin | Triggers | Actions / Notify | Impl | Live |
-|--------|---------|----------|------------------|------|------|
-| GitHub | REST 2022-11-28 | `pr_opened` (partial) | `create_pr`, `create_branch` via `settleGithubDispatch` | **reuse_existing / 已有已测** | contract_tested；真实 token **未配置本轮** |
-| Slack | Web API + Events | `message_trigger` | `chat_postMessage`; `incoming_webhook_notify` (**notify-only**); `interaction_approval` (signed) | **implemented_contract** | **契约已测/live待验** |
-| 飞书 Feishu | open.feishu.cn OpenAPI v1 | `event_message_receive` | `im_message_create`; `custom_bot_notify` (**notify-only**); `card_action_approval` | **implemented_contract** | **契约已测/live待验** |
-| Lark | open.larksuite.com OpenAPI v1 | same shape, **separate host/brand** | same as Feishu, Lark host | **implemented_contract** | **契约已测/live待验** |
-| Sentry | API v0 | `issue_created_webhook` | `list_issues`, `get_issue` | **implemented_contract** | **契约已测/live待验** |
+| 项 | 事实 | 状态 |
+|----|------|------|
+| Heuristic vs LLM | 默认同 `*Heuristic`；`sendLoopAuthoringTurnAsync` + injectable provider（ModelGateway 可接） | provider **contract**（loopback）；**live未验** |
+| Workflow + 选中节点上下文 | Provider prompt 含全 draft + `selectedNodeId`；heuristic **不消费**选中 | provider **contract** |
+| 局部 patch / ID 保留 | `applyIntentNodePatch` / `mergePreservingUntargeted` + Accept/Undo/stale | **contract** |
+| 真实 provider 三轮 | 无自动读 key / 无付费 live | **live未验**（外部缺口） |
 
-Shared framework (`projectos/services/loop-connectors/`):
+---
 
-- Credential **refs only** (schemes: oauth/bot/webhook/signing/api_key) — secrets never in frontend assets.
-- Injectable HTTP transport + bounded 429/5xx retry; **POST timeout → `unknown_outcome` no blind resend**; AbortSignal cancel.
-- Webhook HMAC verify + dedupe anti-replay; Slack/Feishu/Lark approval rejects `local_declared`.
-- Audit events with redacted Authorization headers.
-- High-risk defaults: Vercel promote/rollback & Supabase production writes **disabled** until independent auth (catalog flags).
+## 增量 A/B 状态（摘自权威计划；详表见该文档 §4）
 
-### Batch 2 — tasks / docs / deploy（catalog only this round）
+| 切片 | 状态 |
+|------|------|
+| PW Project run binding / 预检 / 项目手动 E2E | **计划**（底座 Spec/Instance 已有） |
+| TM TaskMaterial schema + Pure 输入复用 | **计划** |
+| URL SSRF 默认拒内网 | **计划**（须 contract；对齐 bugs H3） |
+| 离线事件全天排队 | **未实现**（不可承诺） |
 
-| Vendor | Triggers | Actions | Impl | Live |
-|--------|----------|---------|------|------|
-| Linear | issue webhooks | `create_issue` | catalog_only | unconfigured |
-| Jira Cloud | issue updated | `create_issue` | catalog_only | unconfigured |
-| Notion | page updated | `create_page` | catalog_only | unconfigured |
-| Vercel | — | list (read); promote/rollback **default OFF** | catalog_only | disabled_high_risk |
+---
 
-### Batch 3 — data（catalog only this round）
+## 安全门禁（221b231 / 持续）
 
-| Vendor | Triggers | Actions | Impl | Live |
-|--------|----------|---------|------|------|
-| Supabase | — | read/RPC allowlist; production write **default OFF** | catalog_only | disabled_high_risk |
-| PostHog | — | capture / query insights | catalog_only | unconfigured |
+| 项 | 状态 |
+|----|------|
+| High-risk / catalog_only 强制 | **contract** |
+| 非幂等 POST 不盲重试；timeout/abort unknown；ledger | **contract** |
+| URL/header/body 脱敏 + fake-secret | **contract** |
+| Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现** / 真实 DOM **待验** |
+| LocalApi→adapter→loopback settle | **实现**/contract 路径；live未验 |
 
-## Actual delivered this round (not wish-list)
+---
 
-1. Reliability harden settle/Verify/budget/offline (prior WIP retained).
-2. n8n-like SaaS node visuals + palette Feishu/Slack/Lark/Sentry/GitHub + DOM/registry tests + screenshots.
-3. `loop-connectors` production adapters + contract tests (request construct, cred ref, signature/replay, 429 retry, timeout unknown, cancel, redaction, notify≠approval).
-4. Tracking table above with per-vendor Trigger/Action and honest live status.
-
-**Not done / blocked on real user**: OAuth connect, reading existing credentials, live outbound Slack/Feishu/Lark/Sentry/GitHub, paid SaaS, merge, Mac, GroK Bot connector install as substitute.
-
-## Verification
+## 验证闸（每推送更新）
 
 ```text
-npx vitest run <12 loop/connector/UI files>
-→ Test Files 12 passed | Tests 88 passed | exit 0
-
-Typecheck: 159 error TS (baseline ~160–161 on 615fa644/38404db; no new loop-connector regressions)
+# 近期 Loops 发现集示例（以当次命令输出为准）
+npx vitest run services/loop-* workbench/src/components/LoopGraph
+# 记录：Test Files / Tests / exit
+# tsc --noEmit：目标不引入 loop-* 新回归；近期基线约 160 error TS（仓库既有债）
 ```
 
-No merge / paid / live outbound / Mac / third PR layer.
+近期本地闸（实现切片，非文档完成）：**29 files / 157 tests passed**；tsc **160**（无新增 loop-connectors/authoring 回归）。
+
+No merge / paid live / Mac / 真实外发。

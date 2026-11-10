@@ -13,6 +13,8 @@
 | [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | Draw 识读合同；本文件扩展 Run 态投影与控制流容器可视化。 |
 | [`Loops-Graph-Review-Visual-Dev-Plan.md`](./Loops-Graph-Review-Visual-Dev-Plan.md) | Review 审批台已落地 MVP；本文件要求 Path Map 支持 Parallel/Branch/Loop 容器识读，不重做审批壳。 |
 | [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | 配置卫星；本文件不改 wiring 语义。 |
+| [`Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](./Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) | **并行权威（2026-11-10）**：项目内真实 Workflow Run 绑定 + 多类型 Task Materials（PW-\* / TM-\*）。依赖本文件已落地 GC 能力；不重做六机制。验收矩阵与分期以该文件 + [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) 为准。 |
+| [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) | 六目标 + 连接器 + 双入口 + PW/TM **执行实况**（计划/实现/contract/live/待验）。 |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | P-0–P-3 底座不变。 |
 | [`Agent-Harness-Dev-Plan.md`](./Agent-Harness-Dev-Plan.md) | Pause/Cancel/Resume 必须打到 harness。 |
 | [`Agent-Flow-Activity-Dev-Plan.md`](./Agent-Flow-Activity-Dev-Plan.md) | 节点内轨迹仍归 Agent Flow；Loops 只投影任务单元状态与产物引用。 |
@@ -728,3 +730,4 @@ GC-0 Docs
 | 2026-11-09 | **开始落地**：GC-0 文档交叉链接；GC-1 拓扑解锁（depends fan-out、多 feedback、`fallback` 边）；GC-2.1 nodeRecords；GC-2.2 `cancelLoopInstance` + pause/cancel/resume 下传 Agent hooks；GC-2.3 ready-set 串行排空 Parallel；GC-2.4 `logic.retry`/`wait` stepper；Palette `retry`/`wait`；Preset `parallel_research` |
 | 2026-11-10 | **续作**：GC-2.5 wall-clock timeout HITL；GC-2.6 fallback 全路径（failNode + Action/Verify）；GC-3.1 Merge 真 Join（sibling drain / 失败 HITL）；GC-3.3/3.4 HumanDecision + Parallel preset 验收；GC-6.1 Run 色点；GC-6.2 `LoopRunSidePanel`；GC-6.4 Review Path Map Parallel/Loop 容器 |
 | 2026-11-10 | **GC-4/5/7 落地**：Instance `checkpoint` 步进落盘 + `restoreLoopInstanceFromCheckpoint`；Fresh/Stale 正交 + `stalePolicy`；启动 `idempotencyKey` / 不明副作用 resume → HITL；`ReplanProposal` + 预算记账；`inputParams` / `startLoopInstanceWithParams` / 内部事件去重；Parallel P1 `multi_run` 共享 leaf → `write_conflict` HITL；Run History + derive draft；API/IPC/mock/UI 打通 |
+| 2026-11-10 | **交叉引用**：接入 Project Workflow + Task Materials 权威计划（PW/TM）；六目标跟踪表同步；明确离线事件全天排队仍未实现 |

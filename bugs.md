@@ -108,6 +108,8 @@ Medium/low corrections: **M35, M41, M43, L45 = REFUTED** (details below); **M44,
 ### BUG-H3 — SSRF + no timeout + unbounded body in external-agent connector — CONFIRMED (H)
 `contracts/settings.ts:93` (bare `endpoint`); `services/connectors/external-agent-connector.ts`. Arbitrary endpoint receives the stored auth secret; no timeout; uncapped body → `169.254.169.254` reachable + token exfil. **Fix:** scheme/host allowlist + `fetchWithTimeout` + size cap.
 
+**Loops / Task Materials follow-on (2026-11-10):** URL and file materials for Loop runs are untrusted references. Production URL fetch must default-deny localhost/link-local/private ranges, block redirect bypass, and never treat embedded instructions as authorization. Loopback DI tests may inject transports; production policy must not be relaxed. Authority: [`docs/features/Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](docs/features/Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) §5.
+
 ### BUG-H4 — Privileged IPC channels lack sender/frame validation — CONFIRMED · Verified sev **M**
 `desktop/src/main/registerProjectOsIpc.ts:67`, `registerTerminalIpc.ts`, `registerShellIpc.ts` (only design-preview channels validate), window has `webviewTag:true`. **Codex:** confirmed but **Medium** — impact is *missing main-boundary hardening*; current guest isolation makes direct-guest exploitation not reachable as originally worded. **Fix:** `assertTrustedHostRenderer`-style gate on all non-design channels.
 
