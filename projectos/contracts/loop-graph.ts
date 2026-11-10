@@ -13,7 +13,10 @@ import {
   type LoopLogicKind,
   type LoopNodeType,
 } from "./loop-node-architecture.js";
-import { LoopTaskMaterialSchema } from "./loop-task-materials.js";
+import {
+  LoopRunBindingSchema,
+  LoopTaskMaterialSchema,
+} from "./loop-task-materials.js";
 
 export {
   LOOP_ACTION_INTEGRATIONS,
@@ -697,23 +700,7 @@ export const LoopInstanceSchema = z
      * Project/run binding snapshot for project-workflow starts.
      * Editing Intent/Spec must not rewrite this after the run is created.
      */
-    runBinding: z
-      .object({
-        projectId: z.string().min(1),
-        workspaceRoot: z.string().min(1).optional(),
-        repo: z.string().trim().min(1).max(240).optional(),
-        branch: z.string().trim().min(1).max(240).optional(),
-        codeDigest: z.string().trim().min(1).max(128).optional(),
-        specVersion: z.string().min(1),
-        taskInputId: z.string().min(1).optional(),
-        /** Frozen task materials at start — definition edits must not rewrite. */
-        materials: z.array(LoopTaskMaterialSchema).max(64).optional(),
-        credentialRefIds: z.array(z.string().min(1).max(120)).max(32).optional(),
-        preflightNotes: z.array(z.string().trim().min(1).max(500)).max(40).optional(),
-        createdAt: z.string().min(1),
-      })
-      .strict()
-      .optional(),
+    runBinding: LoopRunBindingSchema.optional(),
     /**
      * Live code digest captured when verification entered; must match at stamp time.
      */

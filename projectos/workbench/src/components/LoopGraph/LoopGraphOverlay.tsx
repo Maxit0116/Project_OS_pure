@@ -1428,6 +1428,7 @@ export default function LoopGraphOverlay() {
                               <button
                                 type="button"
                                 className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                                data-loop-hitl-approve=""
                                 onClick={() =>
                                   void resolveHitl([
                                     {
@@ -1443,11 +1444,28 @@ export default function LoopGraphOverlay() {
                               <button
                                 type="button"
                                 className={styles.actionButton}
+                                data-loop-hitl-reject=""
                                 onClick={() =>
                                   void resolveHitl([{ questionId, answer: 'reject' }])
                                 }
                               >
                                 {ts('chat.loopGraph.hitlReject')}
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.actionButton}
+                                data-loop-hitl-takeover=""
+                                onClick={() =>
+                                  void resolveHitl([
+                                    {
+                                      questionId,
+                                      answer: 'takeover',
+                                      editedPayload: { humanTakeover: true },
+                                    },
+                                  ])
+                                }
+                              >
+                                {ts('chat.loopGraph.hitlTakeover')}
                               </button>
                             </>
                           ) : null}

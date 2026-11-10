@@ -157,11 +157,22 @@ describe("ProjectOSLocalApi startLoopInstance preflight + runBinding", () => {
     const instance = started.instances[started.instances.length - 1]!;
     expect(instance.runBinding?.projectId).toBe(project.projectId);
     expect(instance.runBinding?.specVersion).toBe(agentSpec.version);
-    expect(instance.runBinding?.branch).toBe("feat/x");
     expect(instance.runBinding?.workspaceRoot).toBe(workspaceRoot);
     expect(instance.runBinding?.repo).toBeTruthy();
-    expect(instance.runBinding?.codeDigest).toBeTruthy();
+    expect(instance.runBinding?.identityKind).toMatch(/git_|workspace_path/);
+    expect(instance.runBinding?.codeDigest).toMatch(/^[a-f0-9]{32}$/);
+    expect(instance.runBinding?.definitionDigest).toMatch(/^[a-f0-9]{32}$/);
+    expect(instance.runBinding?.budget?.maxRounds).toBeGreaterThan(0);
+    expect(instance.runBinding?.permissionSet?.requireHitlForHighRisk).toBe(
+      true,
+    );
     expect(Array.isArray(instance.runBinding?.preflightNotes)).toBe(true);
+    // Declared UI branch is recorded; verified git branch may differ.
+    expect(
+      instance.runBinding?.branch === "feat/x" ||
+        instance.runBinding?.declaredBranch === "feat/x" ||
+        instance.runBinding?.branchSource === "verified_git",
+    ).toBe(true);
 
     // Definition edit must not rewrite frozen binding.
     const frozen = instance.runBinding;

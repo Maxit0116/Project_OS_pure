@@ -1936,6 +1936,13 @@ const en = {
       materialsHideDiagnostics: 'Hide technical details',
       materialsCsvColumns: 'Columns (comma)',
       materialsCsvRows: 'Row range',
+      materialsXlsxSheet: 'Sheet',
+      materialsXlsxRange: 'Cell range (e.g. A1:B50)',
+      hitlTakeover: 'Take over',
+      runShowDiff: 'Show Diff',
+      runHideDiff: 'Hide Diff',
+      runTestFailedHint:
+        'Test failed — keep evidence and continue repair; cancel does not wipe Diff/reports already produced.',
       materialsParseLevel_text_preview: 'Text preview',
       materialsParseLevel_structured_selection: 'Table range selected',
       materialsParseLevel_full_text_parse: 'Full text parsed',

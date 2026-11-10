@@ -27,10 +27,10 @@
 |---|------|----------|
 | 1 | 连接器 GitHub…PostHog（11 平台不删）+ **Gmail 追加** | Batch1 **contract**/live待验；Batch2 Linear/Jira/Notion/Vercel-list **contract**/live待验；Batch3 **catalog_only**；Gmail readonly **实现/contract（loopback）**/真实邮箱 **未接** |
 | 2 | Condition/parallel/loop/timer/retry/pause/resume | GC 主体 **实现/contract**；DutyCard logic 表单 **实现**/UI待验 |
-| 3 | Reusable Agents + 互调 | wiring **实现**；互调预算 `loop-agent-call-budget` **contract**（depth/count）；Agent→Agent 调用面仍可加深 |
-| 4 | Human review/approval | binding **contract**；`before_write`/`before_test`/`before_external` 插入语义 + reject/approve/drift/orphan runtime **contract**；DutyCard **实现**/材料状态中文友好；OAuth **未配置** |
-| 5 | Engineering context | digester + Verify binding **实现/contract**；RunBinding 生产路径补 `workspaceRoot`/`repo`/`credentialRefIds`/`preflightNotes`（见 `/opt/cursor/artifacts/pr-final/RUNBINDING-GAP.md`）；完整字段矩阵仍有余项 |
-| 6 | Observability | journal/redaction **contract**；AgentPool waterfall/KPI **实现**；Loop Run 观测 UI 仍可加深 |
+| 3 | Reusable Agents + 互调 | wiring **实现**；互调预算 depth/count **contract**；完成/失败 `recordAgentCallEnd`；cancel **unwind depth**；冻结预算优先自 `runBinding.budget` |
+| 4 | Human review/approval | binding **contract**；runtime gate **contract**；DutyCard **实现**；Run HITL Approve/Reject/**Takeover** 入口；材料状态中文友好；OAuth **未配置**/live未验 |
+| 5 | Engineering context | digester + Verify **实现/contract**；RunBinding 共享创建：真实 repo 身份/`headSha`/dirty/`definitionDigest`/`materialsDigest`/budget+permissionSet 冻结；event/params 同预检；见 `RUNBINDING-GAP.md` |
+| 6 | Observability | journal/redaction **contract**；AgentPool waterfall/KPI **实现**；Run 侧栏 Diff 展开 + 失败测试恢复提示 **实现**；live未验 |
 
 ---
 

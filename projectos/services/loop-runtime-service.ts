@@ -47,6 +47,7 @@ import {
 } from "./loop-approval-binding.js";
 import {
   assertAgentCallBudget,
+  recordAgentCallEnd,
   recordAgentCallStart,
   resolveAgentCallBudgetLimits,
 } from "./loop-agent-call-budget.js";
@@ -54,6 +55,10 @@ import {
   describeOfflineConnector,
   invokeOfflineConnector,
 } from "./loop-connector-offline.js";
+import {
+  assertLaunchContextForBinding,
+  buildRunBindingSnapshot,
+} from "./loop-run-binding.js";
 import { preflightLoopRunStart } from "./loop-run-preflight.js";
 import {
   architectureOf,
@@ -2102,9 +2107,15 @@ function stepImplementNode(
     if (!leaf || !execution) {
       return failNode(doc, next, node.id, LOOP_FILES_NOT_ATTACHED, { spec });
     }
+    const frozenBudget = next.runBinding?.budget;
     const budget = assertAgentCallBudget(
       next,
-      resolveAgentCallBudgetLimits(spec),
+      frozenBudget
+        ? {
+            maxAgentCalls: frozenBudget.maxAgentCalls,
+            maxAgentCallDepth: frozenBudget.maxAgentCallDepth,
+          }
+        : resolveAgentCallBudgetLimits(spec),
     );
     if (!budget.ok) {
       return failNode(doc, next, node.id, budget.reason, { spec });
@@ -2235,6 +2246,7 @@ function stepImplementNode(
         },
       };
     }
+    next = recordAgentCallEnd(next);
     next = pushEvent(next, {
       type: "node_completed",
       nodeId: node.id,
@@ -2248,7 +2260,7 @@ function stepImplementNode(
 
   return failNode(
     doc,
-    next,
+    recordAgentCallEnd(next),
     node.id,
     run.status === "cancelled"
       ? `Agent run ${run.runId} cancelled`
@@ -2917,6 +2929,23 @@ export function startLoopInstance(
     throw new Error(issues.map((issue) => issue.message).join("; "));
   }
 
+  const launchKind =
+    options.launch?.kind === "event"
+      ? "event"
+      : options.launch?.kind === "params"
+        ? "params"
+        : "manual";
+  // Production project starts always freeze RunBinding via shared create+preflight.
+  // Unit helpers may omit projectId (no binding); never skip binding when projectId set
+  // without preflight — that would sneak past permission/context gates.
+  if (options.projectId) {
+    assertLaunchContextForBinding({
+      projectId: options.projectId,
+      requirePreflight: options.requirePreflight === true,
+      launchKind,
+    });
+  }
+
   let preflightNotes: string[] | undefined;
   if (options.requirePreflight === true) {
     const preflight = preflightLoopRunStart({
@@ -2971,40 +3000,20 @@ export function startLoopInstance(
       : {}),
     ...(execution?.leaf?.filePath ? { leafPath: execution.leaf.filePath } : {}),
   });
-  const credentialRefIds = [
-    ...new Set(
-      [
-        ...doc.draft.nodes.map((node) => node.credentialRefId),
-        ...spec.nodes.map((node) =>
-          "credentialRefId" in node
-            ? (node as { credentialRefId?: string }).credentialRefId
-            : undefined,
-        ),
-      ].filter((id): id is string => Boolean(id && id.trim())),
-    ),
-  ].slice(0, 32);
-  const repoName = workspaceRoot.split(/[/\\]/).filter(Boolean).at(-1);
   const runBinding =
     options.runBinding ??
     (options.projectId
-      ? {
+      ? buildRunBindingSnapshot({
           projectId: options.projectId,
           workspaceRoot,
-          ...(repoName ? { repo: repoName } : {}),
-          specVersion: spec.version,
+          document: doc,
+          spec,
           createdAt: startedAt,
-          ...(options.branch ? { branch: options.branch } : {}),
-          ...(options.materials?.length
-            ? {
-                taskInputId: `task_${randomUUID()}`,
-                materials: options.materials,
-              }
-            : {}),
-          ...(credentialRefIds.length ? { credentialRefIds } : {}),
-          // Present whenever production start required preflight (may be empty).
+          launchKind,
+          ...(options.materials ? { materials: options.materials } : {}),
+          ...(options.branch ? { declaredBranch: options.branch } : {}),
           ...(preflightNotes ? { preflightNotes } : {}),
-          codeDigest: pathFingerprint,
-        }
+        })
       : undefined);
 
   let instance: LoopInstance = {
@@ -3266,9 +3275,15 @@ export function cancelLoopInstance(
   if (instance.cursorNodeId) {
     next = upsertNodeRecord(next, instance.cursorNodeId, { status: "cancelled" });
   }
-  next = pushEvent(
+  // Unwind agent-call depth on cancel so nested budget cannot leak across runs.
+  let cancelled = next;
+  const depth = cancelled.budgetUsage?.agentCallDepth ?? 0;
+  for (let i = 0; i < depth; i += 1) {
+    cancelled = recordAgentCallEnd(cancelled);
+  }
+  cancelled = pushEvent(
     {
-      ...next,
+      ...cancelled,
       status: "cancelled",
       completedAt: nowIso(),
       activeRunId: undefined,
@@ -3278,7 +3293,7 @@ export function cancelLoopInstance(
     },
     { type: "cancelled", message: "Cancelled by user" },
   );
-  return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
+  return upsertLoopGraph(workspaceRoot, replaceInstance(doc, cancelled));
 }
 
 export function resumeLoopInstance(

@@ -157,17 +157,65 @@ export const LoopTaskMaterialSchema = z
   })
   .strict();
 
+export const LoopRepoIdentityKindSchema = z.enum([
+  "git_remote",
+  "git_local",
+  "workspace_path",
+  "unbound",
+]);
+
+export const LoopBranchSourceSchema = z.enum([
+  "verified_git",
+  "declared_unverified",
+  "none",
+]);
+
+export const LoopFrozenRunBudgetSchema = z
+  .object({
+    maxRounds: z.number().int().positive(),
+    maxRetries: z.number().int().nonnegative(),
+    maxAgentCalls: z.number().int().positive(),
+    maxAgentCallDepth: z.number().int().positive(),
+  })
+  .strict();
+
+export const LoopFrozenPermissionSetSchema = z
+  .object({
+    /** Credential refs only — never tokens. */
+    credentialRefIds: z.array(z.string().min(1).max(120)).max(32),
+    requireHitlForHighRisk: z.literal(true),
+  })
+  .strict();
+
 export const LoopRunBindingSchema = z
   .object({
     projectId: z.string().min(1),
     workspaceRoot: z.string().min(1).optional(),
-    repo: z.string().trim().min(1).max(240).optional(),
+    /**
+     * Repo identity string: git remote URL, `git-local:…@sha`, or `workspace:<abs>`.
+     * Never a bare folder basename pretending to be a git remote.
+     */
+    repo: z.string().trim().min(1).max(500).optional(),
+    identityKind: LoopRepoIdentityKindSchema.optional(),
+    remoteUrl: z.string().trim().min(1).max(500).optional(),
+    headSha: z.string().trim().min(7).max(64).optional(),
     branch: z.string().trim().min(1).max(240).optional(),
+    branchSource: LoopBranchSourceSchema.optional(),
+    /** UI/event declared branch when it differs from verified git branch. */
+    declaredBranch: z.string().trim().min(1).max(240).optional(),
+    /** Content-oriented start fingerprint (HEAD + dirty / workspace identity). */
     codeDigest: z.string().trim().min(1).max(128).optional(),
+    workspaceDirtyDigest: z.string().trim().min(1).max(128).optional(),
+    definitionDigest: z.string().trim().min(1).max(128).optional(),
+    materialsDigest: z.string().trim().min(1).max(128).optional(),
     specVersion: z.string().min(1),
     taskInputId: z.string().min(1).optional(),
     materials: z.array(LoopTaskMaterialSchema).max(64).optional(),
     credentialRefIds: z.array(z.string().min(1).max(120)).max(32).optional(),
+    /** Frozen from Spec at start — definition edits must not rewrite this. */
+    budget: LoopFrozenRunBudgetSchema.optional(),
+    /** Frozen permission/credential policy at start. */
+    permissionSet: LoopFrozenPermissionSetSchema.optional(),
     /** Human-readable preflight checklist snapshot at confirm time. */
     preflightNotes: z.array(z.string().trim().min(1).max(500)).max(40).optional(),
     createdAt: z.string().min(1),

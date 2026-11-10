@@ -216,7 +216,9 @@ export default function LoopRunSidePanel({ instance, history = [] }: Props) {
                               setExpandedDiffId((id) => (id === item.id ? null : item.id))
                             }
                           >
-                            {expanded ? 'Hide Diff' : 'Show Diff'}
+                            {expanded
+                              ? ts('chat.loopGraph.runHideDiff')
+                              : ts('chat.loopGraph.runShowDiff')}
                           </button>
                           {expanded ? (
                             <pre
@@ -259,6 +261,14 @@ export default function LoopRunSidePanel({ instance, history = [] }: Props) {
                       {digest ? (
                         <p className={styles.artifactMono}>
                           validated: {digest.slice(0, 16)}…
+                        </p>
+                      ) : null}
+                      {status === 'failed' ? (
+                        <p
+                          className={styles.artifactLine}
+                          data-loop-artifact-test-failed-hint=""
+                        >
+                          {ts('chat.loopGraph.runTestFailedHint')}
                         </p>
                       ) : null}
                     </div>

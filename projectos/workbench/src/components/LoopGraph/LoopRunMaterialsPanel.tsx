@@ -77,6 +77,10 @@ export default function LoopRunMaterialsPanel() {
   >({})
   /** Raw CSV text keyed by material id — selection reshapes textPreview in pack. */
   const [csvRawById, setCsvRawById] = useState<Record<string, string>>({})
+  /** Ephemeral XLSX bytes for sheet/range re-ingest — never written into Intent. */
+  const [xlsxBytesById, setXlsxBytesById] = useState<
+    Record<string, { fileName: string; mimeType: string; bytesBase64: string }>
+  >({})
   const [pw7Kind, setPw7Kind] = useState<
     'issue' | 'pull_request' | 'code_selection' | 'error_context'
   >('issue')
@@ -93,6 +97,35 @@ export default function LoopRunMaterialsPanel() {
       }
     }
   }, [imageObjectUrls])
+
+  const reingestXlsx = async (
+    materialId: string,
+    selection: { sheet: string; cellRange: string },
+  ) => {
+    const held = xlsxBytesById[materialId]
+    const { client, project } = useWorkbenchStore.getState()
+    if (!held || !client || !project || typeof client.ingestLoopTaskMaterial !== 'function') {
+      return
+    }
+    setFileError(null)
+    const result = await client.ingestLoopTaskMaterial(project.projectId, {
+      fileName: held.fileName,
+      mimeType: held.mimeType,
+      bytesBase64: held.bytesBase64,
+      materialId,
+      xlsxSelection: {
+        sheet: selection.sheet,
+        cellRange: selection.cellRange,
+      },
+    })
+    if (result.material) {
+      replaceRunMaterial(materialId, { ...result.material, id: materialId })
+      setExpandedId(materialId)
+    }
+    if (!result.ok) {
+      setFileError(result.error ?? 'XLSX re-ingest failed')
+    }
+  }
 
   const addText = () => {
     const title = textTitle.trim() || textBody.trim().slice(0, 80) || 'Task text'
@@ -336,10 +369,11 @@ export default function LoopRunMaterialsPanel() {
       for (let i = 0; i < bytes.length; i += chunk) {
         binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
       }
+      const bytesBase64 = btoa(binary)
       const result = await client.ingestLoopTaskMaterial(project.projectId, {
         fileName: file.name,
         mimeType: mime,
-        bytesBase64: btoa(binary),
+        bytesBase64,
         ...(replacingId ? { materialId: replacingId } : {}),
         // First-batch default: first sheet A1:B50 so upload is structured_selection,
         // not text_preview-only. User can still refine via table controls later.
@@ -351,6 +385,16 @@ export default function LoopRunMaterialsPanel() {
           : {}),
       })
       if (result.material) {
+        if (format.formatId === 'xlsx') {
+          setXlsxBytesById((prev) => ({
+            ...prev,
+            [result.material!.id]: {
+              fileName: file.name,
+              mimeType: mime,
+              bytesBase64,
+            },
+          }))
+        }
         if (replacingId) {
           replaceRunMaterial(replacingId, { ...result.material, id: replacingId })
           setReplacingId(null)
@@ -493,7 +537,10 @@ export default function LoopRunMaterialsPanel() {
   }
 
   const blockers = preflight?.items.filter((item) => item.severity === 'blocker') ?? []
-  const canStart = preflight?.canStart === true
+  const rereviewBlocks =
+    Boolean(materialRereview?.requiresRereview) &&
+    !materialRereview?.acknowledgedAt
+  const canStart = preflight?.canStart === true && !rereviewBlocks
 
   return (
     <div className={styles.panel} data-loop-run-materials="">
@@ -654,6 +701,51 @@ export default function LoopRunMaterialsPanel() {
                           applyCsvStructure(material.id, {
                             rowStart: Number(match[1]),
                             rowEnd: Number(match[2]),
+                          })
+                        }}
+                      />
+                    </label>
+                  </div>
+                ) : null}
+                {material.kind === 'table' &&
+                (material.title.toLowerCase().endsWith('.xlsx') ||
+                  material.mimeType?.includes('spreadsheet')) &&
+                xlsxBytesById[material.id] ? (
+                  <div
+                    className={styles.csvControls}
+                    data-loop-material-xlsx-controls=""
+                  >
+                    <label className={styles.field}>
+                      <span>{ts('chat.loopGraph.materialsXlsxSheet')}</span>
+                      <input
+                        type="text"
+                        defaultValue={material.tablePreview?.sheet ?? 'Data'}
+                        data-loop-material-xlsx-sheet=""
+                        onBlur={(event) => {
+                          const sheet = event.target.value.trim() || 'Data'
+                          const range =
+                            material.tablePreview?.rowRange ?? 'A1:B50'
+                          void reingestXlsx(material.id, {
+                            sheet,
+                            cellRange: range,
+                          })
+                        }}
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>{ts('chat.loopGraph.materialsXlsxRange')}</span>
+                      <input
+                        type="text"
+                        defaultValue={
+                          material.tablePreview?.rowRange ?? 'A1:B50'
+                        }
+                        data-loop-material-xlsx-range=""
+                        onBlur={(event) => {
+                          const cellRange =
+                            event.target.value.trim() || 'A1:B50'
+                          void reingestXlsx(material.id, {
+                            sheet: material.tablePreview?.sheet ?? 'Data',
+                            cellRange,
                           })
                         }}
                       />

@@ -11,6 +11,7 @@ import { join, relative, resolve, sep } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { sampleRunnableEnv } from "./sample-runnable-env.js";
 import {
   allocateLoopbackPort,
   terminateProcessGroup,
@@ -760,11 +761,11 @@ function createRunnableSample(): string {
   execFileSync(
     process.execPath,
     [join(root, "node_modules/prisma/build/index.js"), "migrate", "deploy"],
-    { cwd: root, env: process.env, stdio: "pipe" },
+    { cwd: root, env: sampleRunnableEnv(root), stdio: "pipe" },
   );
   execFileSync(process.execPath, [join(root, "prisma/seed.cjs")], {
     cwd: root,
-    env: process.env,
+    env: sampleRunnableEnv(root),
     stdio: "pipe",
   });
   return root;
@@ -787,10 +788,7 @@ async function startRunnableSample(root: string): Promise<string> {
       detached: process.platform !== "win32",
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        NEXT_TELEMETRY_DISABLED: "1",
-      },
+      env: sampleRunnableEnv(root),
     },
   );
   if (child.pid === undefined) {

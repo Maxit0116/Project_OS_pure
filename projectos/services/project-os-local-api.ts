@@ -9482,12 +9482,19 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     projectId: string,
     loopId: string,
     params: Record<string, unknown>,
-    options?: { specVersion?: string; idempotencyKey?: string },
+    options?: {
+      specVersion?: string;
+      idempotencyKey?: string;
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { startLoopInstanceWithParams } = await import("./loop-runtime-service.js");
     const version = options?.specVersion?.trim() || undefined;
     try {
+      // Same shared create/preflight/RunBinding path as manual start — no sneak-past.
       const started = startLoopInstanceWithParams(
         workspace.workspaceRoot,
         loopId,
@@ -9498,6 +9505,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             ? { idempotencyKey: options.idempotencyKey }
             : {}),
           execution: this.loopHooksFor(workspace, loopId),
+          projectId,
+          requirePreflight: options?.skipPreflight !== true,
+          ...(options?.branch ? { branch: options.branch } : {}),
+          ...(options?.materials ? { materials: options.materials } : {}),
         },
       );
       return await this.settleLoopRuns(workspace, loopId, started);
@@ -9513,15 +9524,28 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     projectId: string,
     loopId: string,
     event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+    options?: {
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { startLoopInstanceFromEvent } = await import("./loop-runtime-service.js");
     try {
+      // Event entry shares the same preflight + frozen RunBinding — missing
+      // context/permissions surface as blockers, not silent bypass.
       const started = startLoopInstanceFromEvent(
         workspace.workspaceRoot,
         loopId,
         event,
-        { execution: this.loopHooksFor(workspace, loopId) },
+        {
+          execution: this.loopHooksFor(workspace, loopId),
+          projectId,
+          requirePreflight: options?.skipPreflight !== true,
+          ...(options?.branch ? { branch: options.branch } : {}),
+          ...(options?.materials ? { materials: options.materials } : {}),
+        },
       );
       return await this.settleLoopRuns(workspace, loopId, started);
     } catch (error) {
