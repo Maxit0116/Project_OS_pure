@@ -13,7 +13,7 @@ describe('GC-6.6 associated Run jump (store semantic)', () => {
       activeRunId: null,
       flowStatus: 'idle',
       refineLoading: false,
-      client: null,
+      client: undefined,
     })
     useChatSessionStore.getState().closeAgentFlow()
   })
