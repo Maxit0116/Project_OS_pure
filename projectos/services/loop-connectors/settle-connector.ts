@@ -8,7 +8,9 @@ import {
   posthogQueryInsights,
   supabaseInvokeRpcReadonly,
   supabaseReadRows,
+  supabaseWriteRows,
 } from "./adapters/batch3.js";
+import { assertCredentialAllowedByFreeze } from "../loop-run-binding.js";
 import { feishuLarkSendMessage } from "./adapters/feishu-lark.js";
 import {
   gmailAttachmentsGet,
@@ -102,6 +104,47 @@ export async function settleConnectorOperation(
   if (!doc) throw new Error("Loop document missing for connector settle");
   const instance = doc.instances.find((item) => item.id === deps.instanceId);
   if (!instance) throw new Error(`Instance ${deps.instanceId} missing`);
+
+  // Consumption freeze: credential must be in RunBinding.permissionSet when present.
+  const freezeCred = assertCredentialAllowedByFreeze(
+    instance.runBinding,
+    pending.credentialRefId,
+  );
+  if (!freezeCred.ok) {
+    const blocked: LoopConnectorResult = {
+      ok: false,
+      vendorId: pending.vendorId,
+      capabilityId: pending.capabilityId,
+      code: "auth_missing",
+      message: freezeCred.reason,
+      retryable: false,
+      unknownOutcome: false,
+      audit: {
+        at: new Date().toISOString(),
+        vendorId: pending.vendorId,
+        capabilityId: pending.capabilityId,
+        credentialRefId: pending.credentialRefId,
+        idempotencyKey: pending.idempotencyKey,
+        requestSummary: "blocked_before_transport",
+        outcome: "blocked",
+        code: "auth_missing",
+        message: freezeCred.reason,
+      },
+    };
+    const nextBlocked = pushAuditArtifact(
+      {
+        ...instance,
+        cursorNodeId: pending.nodeId,
+        status: "error",
+        errorMessage: redactSecretsInText(blocked.message).slice(0, 1000),
+      },
+      blocked,
+    );
+    const savedBlocked = deps.saveDocument(
+      replaceInstance(doc, { ...nextBlocked, pendingConnectorOp: undefined }),
+    );
+    return { doc: savedBlocked, result: blocked };
+  }
 
   const secret = deps.resolveSecret(pending.credentialRefId);
   const credential: LoopCredentialRef = {
@@ -252,6 +295,19 @@ export async function settleConnectorOperation(
         ...(typeof pending.payload.limit === "number"
           ? { limit: pending.payload.limit }
           : {}),
+        ...(secret ? { accessToken: secret } : {}),
+      },
+      ctx,
+    );
+  } else if (pending.vendorId === "supabase" && pending.capabilityId === "write_rows") {
+    // Settle never auto-authorizes high-risk writes — omit highRiskAuthorized.
+    result = await supabaseWriteRows(
+      {
+        projectUrl: String(pending.payload.projectUrl ?? ""),
+        table: String(pending.payload.table ?? ""),
+        rows: Array.isArray(pending.payload.rows) ? pending.payload.rows : [],
+        credential,
+        idempotencyKey: pending.idempotencyKey,
         ...(secret ? { accessToken: secret } : {}),
       },
       ctx,

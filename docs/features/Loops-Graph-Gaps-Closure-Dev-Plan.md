@@ -655,30 +655,34 @@ freshness?
 
 ## 9. 验收清单（Definition of Done）
 
+**GC-7.2 逐项可验证映射（2026-11-10）**：下列每条勾选均指向**具体测名/入口**；≠ shipped/live。UI 按钮存在 ≠ 已操作。
+
 ### 9.1 六机制
 
-- [x] **Sequence**：线性 preset 跑通  
-- [x] **Parallel**：fan-out → 串行排空 → Merge join → 继续  
-- [x] **Branch**：Condition pass/fail 双路径  
-- [x] **Loop**：有限迭代 + 达上限 HITL；≥1 条确认过的 feedback  
-- [x] **Gate**：Human approval/review/input 可暂停并恢复；Decision 可查  
-- [x] **Recovery**：retry / fallback / pause_hitl / 真 cancel 可演示  
+- [x] **Sequence**：线性 preset 跑通 → `loop-runtime-roles.test.ts` · Feature Development preset；`loop-runtime-actions.test.ts` · Feature Development E2E leaf+PR  
+- [x] **Parallel**：fan-out → 串行排空 → Merge → `loop-runtime-service.test.ts` · drains parallel depends fan-out into Merge (P0 serial)  
+- [x] **Branch**：Condition pass/fail → `loop-runtime-architecture.test.ts` · branches Condition on TestReport；Condition pass path reaches Exit  
+- [x] **Loop**：有限迭代 + 达上限 HITL → `loop-runtime-architecture.test.ts` · Loop logic node stops after maxIterations；feedback 路径见 `loop-runtime-service.test.ts` · follows failed evidence  
+- [x] **Gate**：Human approval/review + Decision → architecture · Human approval edit payload；Human review request_changes；`loop-runtime-service.test.ts` · resolves decide via HITL；LocalApi pause/resume 状态变 → `loop-pause-resume.local-api.test.ts`  
+- [x] **Recovery**：retry / fallback / pause / cancel → `takes a fallback edge`；`cancels an active instance and forwards cancelAgentRun`；`pauses an interrupted agent run`；`asks a person when stop policy is exhausted`  
 
 ### 9.2 成熟能力
 
-- [x] nodeRecords 色点在 Run 可见  
-- [x] Parallel/Loop 容器可见（Draw 或 Run 至少一处 + Review 只读）  
-- [x] pause/cancel 下传 AgentRun  
-- [x] checkpoint 可恢复  
-- [x] Fresh/Stale 正交  
-- [x] 参数化或事件启动至少一种  
-- [x] Artifacts + Decisions + History 面板  
-- [x] 旧 `loop-graphs` JSON 仍可读可跑  
+- [x] nodeRecords 色点 → runtime Merge drain 断言 nodeRecords；UI `toneFromNodeRecordStatus` / Electron Run 色点历史证据  
+- [x] Parallel/Loop 容器 → Review Path Map GC-6.4 + `loopReviewLayout.test.ts`  
+- [x] pause/cancel 下传 AgentRun → runtime pause/cancel hooks (`hooks.paused` / `cancelAgentRun`)  
+- [x] checkpoint 可恢复 → `persists checkpoints and restores cursor/nodeRecords (GC-4.1)`  
+- [x] Fresh/Stale 正交 → `marks freshness stale and budgets wall clock (GC-4.2 / GC-4.5)`  
+- [x] 参数化或事件启动 → `dedupes launch by idempotencyKey`；`dedupes internal event launches (GC-5.2)`；offline queue LocalApi drain → `loop-batch3-gmail-offline.local-api.test.ts` / `loop-offline-event-queue.local-api.test.ts`  
+- [x] Artifacts + Decisions + History → `lists run history (GC-6.3)`；UI `LoopRunSidePanel` `data-loop-run-side-panel` / artifacts / decisions  
+- [x] 旧 `loop-graphs` JSON → `loop-graph*.test.ts` normalize/compat  
 
 ### 9.3 回归
 
-- [x] `loop-runtime-*.test.ts` / `loop-graph*.test.ts` / Review layout 测试绿  
-- [x] Feature Development 示范 workflow 仍满足 NA 验收不变量  
+- [x] `loop-runtime-*.test.ts` / `loop-graph*.test.ts` / Review layout — tip full `npm test` 绿  
+- [x] Feature Development 示范 workflow NA 不变量 — roles/actions Feature Development E2E  
+
+**仍非总交验**：无付费 live、无 OAuth、无真邮箱；Electron 历史图「控件可见」≠ start/pause 已点击操作（pause/resume **状态变**以 LocalApi 测为准）。
 
 ---
 
@@ -733,3 +737,4 @@ GC-0 Docs
 | 2026-11-10 | **GC-4/5/7 落地**：Instance `checkpoint` 步进落盘 + `restoreLoopInstanceFromCheckpoint`；Fresh/Stale 正交 + `stalePolicy`；启动 `idempotencyKey` / 不明副作用 resume → HITL；`ReplanProposal` + 预算记账；`inputParams` / `startLoopInstanceWithParams` / 内部事件去重；Parallel P1 `multi_run` 共享 leaf → `write_conflict` HITL；Run History + derive draft；API/IPC/mock/UI 打通 |
 | 2026-11-10 | **交叉引用**：接入 Project Workflow + Task Materials 权威计划（PW/TM）；六目标跟踪表同步；明确离线事件全天排队仍未实现 |
 | 2026-11-10 | **GC-6.5/6.6/7.2 收尾**：`LoopGraphMinimap` 点击平移；DutyCard Runtime「打开关联 Agent Run」→ `openAgentFlowForRun(activeRunId)`；产品入口确认 = Draw **dblclick** `[data-loop-node]` / 右键 Open Duty（**不是** Review 架构节点详情）；§9 六机制/成熟能力/回归清单保持可勾；**仍非** shipped/live/总交验 |
+| 2026-11-10 | **GC-7.2 §9 逐项测映射**写入本节；Batch3/Gmail/队列 LocalApi 负例；runtime 连接器路径含 gmail/supabase/posthog（禁合成 Executed 成功）；pause/resume LocalApi 状态变；关联 Run **跳转**证据；**仍非** shipped/live |

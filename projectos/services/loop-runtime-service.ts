@@ -1345,11 +1345,20 @@ function stepActionNode(
   if (arch.actionIntegration === "terminal") {
     return stepTerminalAction(doc, next, spec, node, execution, payload, Boolean(hasApproval));
   }
+  // SaaS connectors (Batch1–3 + Gmail): freeze check + DI settle / fail-closed.
+  // Must not fall through to the synthetic "Executed …" success below.
   if (
     arch.actionIntegration === "slack" ||
     arch.actionIntegration === "feishu" ||
     arch.actionIntegration === "lark" ||
-    arch.actionIntegration === "sentry"
+    arch.actionIntegration === "sentry" ||
+    arch.actionIntegration === "gmail" ||
+    arch.actionIntegration === "supabase" ||
+    arch.actionIntegration === "posthog" ||
+    arch.actionIntegration === "linear" ||
+    arch.actionIntegration === "jira_cloud" ||
+    arch.actionIntegration === "notion" ||
+    arch.actionIntegration === "vercel"
   ) {
     const capabilityId = arch.actionOperation ?? "post_message";
     const credentialRefId =
@@ -1465,24 +1474,36 @@ function stepActionNode(
       return advanceCursor(doc, advanced, spec, node.id);
     }
 
-    // No DI bridge — fail closed (brand ≠ executable).
-    const descriptor = describeOfflineConnector(
-      arch.actionIntegration,
-      credentialRefId ? "offline" : "unconfigured",
-    );
-    const blocked = invokeOfflineConnector(descriptor, capabilityId);
+    // No DI bridge — fail closed (brand ≠ executable). Never synthetic success.
+    const offlineKind = arch.actionIntegration;
+    const blockedMessage =
+      offlineKind === "slack" ||
+      offlineKind === "feishu" ||
+      offlineKind === "lark" ||
+      offlineKind === "sentry" ||
+      offlineKind === "github"
+        ? invokeOfflineConnector(
+            describeOfflineConnector(
+              offlineKind,
+              credentialRefId ? "offline" : "unconfigured",
+            ),
+            capabilityId,
+          ).message
+        : credentialRefId
+          ? `${offlineKind}.${capabilityId} offline — inject connector transport/secret before settle (configured ≠ authorized / not live)`
+          : `${offlineKind}.${capabilityId} unconfigured — credentialRefId required (catalog ≠ authorized)`;
     next = pushEvent(
       {
         ...next,
         status: "error",
-        errorMessage: blocked.message.slice(0, 1000),
+        errorMessage: blockedMessage.slice(0, 1000),
         pendingActionPayload: undefined,
         pendingApprovalBinding: undefined,
       },
       {
         type: "node_failed",
         nodeId: node.id,
-        message: blocked.message,
+        message: blockedMessage,
       },
     );
     return replaceInstance(doc, next);

@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10（PR10 tip 续作）— GC-6.5 minimap、GC-6.6 关联 Run、DutyCard 真实 dblclick/`Open Duty` 入口；Batch3/队列生产入口表；RunBinding 已通过测列表。**不宣称总交验 / 非 shipped / 非 live**。旧 ba5/9e 闸已独立审过，不重刷。
+**Updated**: 2026-11-10（PR10 tip 续作）— 六目标最终范围审计 + GC-7.2 §9 逐项测映射；RunBinding 见 [`RUNBINDING-GAP.md`](./RUNBINDING-GAP.md)（无「gaps if any」）；Batch3/Gmail/队列 **LocalApi** 负例；GC-6.6 **跳转**语义（agent-flow overlay）。**不宣称总交验 / 非 shipped / 非 live**。旧 ba5/9e/c0da 闸不重刷。
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
@@ -29,7 +29,7 @@
 | 2 | Condition/parallel/loop/timer/retry/pause/resume | GC 主体 **实现/contract**；Inspector logic UI **component 测**；GC-6.5 minimap **实现**；GC-6.6 DutyCard→`openAgentFlowForRun` **实现**；DutyCard 入口 = **dblclick** `[data-loop-node]` / Open Duty（≠ Review 架构详情）；GC-7.2 §9 可勾；**仍非** shipped/live |
 | 3 | Reusable Agents + 互调 | wiring **实现**；预算 contract；**LocalApi 产品入口** planner DevPlan→coder 交接（loopback·非 live）；≠ 仅预算 |
 | 4 | Human review/approval | binding/runtime gate **contract**；**LocalApi** approve/reject/takeover→paused 同实例事件；`runApprovalContextDigest`；OAuth **未配置** |
-| 5 | Engineering context | digester + Verify **实现/contract**；RunBinding：**内容** dirty/untracked digest；`codeDigestStatus` incomplete 阻断；identity≠codeDigest；maxRounds+credential **消费时**冻结；审批上下文摘要；见 `RUNBINDING-GAP.md` |
+| 5 | Engineering context | digester + Verify **实现/contract**；RunBinding 条款**已逐项核**（见 [`RUNBINDING-GAP.md`](./RUNBINDING-GAP.md)）；无未核「或许还有」 |
 | 6 | Observability | journal/redaction **contract**；Diff 展开；**LocalApi** fail TestReport→feedback 路径（同实例事件；≠ 仅提示）；live未验 |
 
 ---
@@ -66,7 +66,7 @@
 | Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现**；暗色保留；A3 连续陈旧（planner 改标题保 retry=2；retry 2→1 保 1；重开）：`loops-a3-*`。**UI Accept-disabled ≠ server reject**（server 拒绝仅独立 contract：`loop-approval-runtime-gate` / `acceptLoopGraphEditOffer`）。B：`loops-b-pw-failfix-evidence.json` + `loops-b-ui-failfix-e2e-evidence.json` + `loops-b-ui-05-artifact-cards-visible.png`（可见产物卡；勿用错标题空图）。**不得**用 fatal 后手改当连续通过 |
 | LocalApi→adapter→loopback settle | **实现**/contract 路径；GitHub write / connector（含 Gmail）缺 `credentialRefId` 或无 DI transport **fail-closed**（catalog ≠ authorized）；live未验 |
 | Studio 旧「固定侧栏 Inspector」文首 vs DutyCard | **冲突未消**：Studio D3/LG-1.1 仍写侧栏；现行 UI 为 Overlay 内 DutyCard / Inspector empty hint——**不以旧 Studio 文首当已验收** |
-| GC 总勾选 / 发布门禁 | GC-6.5/6.6 **实现** + GC-7.2 §9 **可勾**；**仍不得**宣称 shipped/live/总交验（无付费 live、无 OAuth） |
+| GC 总勾选 / 发布门禁 | GC-7.2 §9 **逐项测映射已写**（Gaps §9）；**仍不得**宣称 shipped/live/总交验 |
 
 ---
 
@@ -128,25 +128,32 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 | 离线事件队列 | `.projectos/loop-event-queue.json`；LocalApi `enqueueOfflineLoopEvent` / `drainOfflineLoopEventQueue`；IPC 同名 | 持久 enqueue + **dedupe** + drain recover；失败条目保留；**≠** 外网 24/7 webhook/push |
 | 测 | `batch3.contract.test.ts`；`loop-event-offline-queue.test.ts`；`loop-offline-event-queue.local-api.test.ts` | 产品路径 unit/LocalApi；无 live |
 
-### RunBinding / 审批 / 预算 — 已通过同路径测（不重写）
+### RunBinding — 见 [`RUNBINDING-GAP.md`](./RUNBINDING-GAP.md)（已核清单；无假设余项）
 
-| 测文件 | 覆盖 |
-|--------|------|
-| `loop-run-binding.test.ts` | identity + freeze（budget/permissionSet/contentDigest）；permission freeze |
-| `loop-approval-binding.test.ts` | contentDigest 绑定；`runApprovalContextDigest`；incomplete fail-closed |
-| `loop-product-entry-g346.local-api.test.ts` | 产品入口 binding digests |
-| `loop-pw-materials-start.evidence.test.ts` | materials→start ChangeSet digest |
-| `contracts/loop-task-materials.test.ts` | schema |
+### GC-7.2 §9 — 见 Gaps Closure §9 逐项测名映射
 
-### GC-7.2 可靠性勾选映射（证据指针；非 live）
+| 产品语义（非控件存在） | 证据 |
+|------------------------|------|
+| DutyCard 入口 | Electron `loops-gc-dutycard-*` dblclick（独立复核已过） |
+| Minimap 平移 | 同上 shot02（复核确认前后平移） |
+| 关联 Run **跳转** | `openAgentFlowForRun` → `canvasOverlay=agent-flow`；Electron `loops-gc66-run-jump-*`；store 测 `LoopNodeInspector.gc66-jump.test.tsx` |
+| pause/resume **状态变** | LocalApi `loop-pause-resume.local-api.test.ts`（paused 事件→resumed）；**不**用图4 `startEnabled=false` 冒充已操作 |
+| Batch3/Gmail settle LocalApi | `loop-batch3-gmail-offline.local-api.test.ts`（accountRef/50M/write seal/freeze） |
+| 离线队列跨 reopen | 同上 + `loop-offline-event-queue.local-api.test.ts` |
 
-| 机制 | ≥1 E2E/contract 指针 |
-|------|----------------------|
-| Sequence / Parallel / Branch / Loop / Gate / Recovery | GC runtime + `loop-runtime-*.test.ts` / Gaps §9 |
-| DutyCard 配置入口 | Draw **dblclick** `[data-loop-node]` / Open Duty → DutyCard+Inspector（Electron `loops-gc-dutycard-*`） |
-| Minimap GC-6.5 | `LoopGraphMinimap` + component 测 + Electron 可见 |
-| 关联 Run GC-6.6 | DutyCard Runtime `data-testid=loop-open-associated-run` → `openAgentFlowForRun` |
-| pause/resume UI | Electron Run 控件（controlflow / gc-dutycard shot） |
+### 六目标最终范围审计（原阶段必需 → 入口 / 级别 / 阻塞）
+
+| Goal | 必需项 | 产品入口 | 级别 | 阻塞 |
+|------|--------|----------|------|------|
+| 1 连接器 | Batch1–3 + Gmail settle fail-closed | LocalApi `settlePendingConnectorOp`；runtime 排队含 gmail/supabase/posthog | **实现/contract/LocalApi** | **未live**（真 OAuth/邮箱/云项目） |
+| 2 控制流 | 六机制 + DutyCard/minimap/关联 Run | Draw DutyCard；Gaps §9 测映射；GC-6.6 跳转 | **实现/contract/localE2E** | **未live**；UI start 操作需人工体验 |
+| 3 Agents | planner→coder 交接 | LocalApi G3 | **LocalApi** | **未live** ModelGateway |
+| 4 HITL | approve/reject/takeover + binding | LocalApi G4；approval-binding | **LocalApi/contract** | OAuth HITL **未配置** |
+| 5 RunBinding | 身份/冻结/批准失效 | 见 RUNBINDING-GAP | **contract/LocalApi** | live digest **未授权** |
+| 6 Observe | fail→feedback；Diff | LocalApi G6 | **LocalApi** | live observe **未验** |
+| PW/TM | materials/preflight/TM-8 | 既有 tip 证据包 | **localE2E** | Issue 拉票/真 PR **未live** |
+
+**需用户 live 授权（单列；本流不擅用）**：Gmail OAuth 真邮箱；Supabase/PostHog 真项目；SaaS Batch1/2 OAuth；付费 ModelGateway；Mac 实机；真实外发/merge。
 
 **DOM/Runtime 开链（云端 Linux xvfb，非 Mac）** — **不宣称闭环 / live / shipped**：
 - Electron 材料证据 bundle（实入口）：`/opt/cursor/artifacts/loops-evidence-bundle-evidence.json`
