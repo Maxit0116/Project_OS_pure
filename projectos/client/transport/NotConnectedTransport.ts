@@ -1552,11 +1552,39 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async preflightLoopRun(
+    _projectId: string,
+    _loopId: string,
+    _options?: {
+      specVersion?: string;
+      branch?: string;
+      materials?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial[];
+    },
+  ): Promise<{
+    ok: boolean;
+    canStart: boolean;
+    items: Array<{
+      id: string;
+      severity: "blocker" | "warning" | "info";
+      code: string;
+      message: string;
+      nodeId?: string;
+      materialId?: string;
+    }>;
+  }> {
+    return transportNotConnected();
+  }
+
   async startLoopInstance(
     _projectId: string,
     _loopId: string,
     _specVersion?: string,
     _featureNodeId?: string,
+    _options?: {
+      branch?: string;
+      materials?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return transportNotConnected();
   }
@@ -1665,6 +1693,12 @@ export class NotConnectedTransport implements ProjectOSApi {
     _loopId: string,
     _request: import("../../contracts/loop-graph.js").LoopAuthoringTurnRequest,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async setLoopAuthoringLoopbackMode(
+    _mode: "off" | "demo_edit",
+  ): Promise<{ mode: "off" | "demo_edit"; live: false }> {
     return transportNotConnected();
   }
 

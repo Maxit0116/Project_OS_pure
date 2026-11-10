@@ -1,8 +1,9 @@
 .card {
   position: absolute;
-  z-index: 24;
-  width: min(300px, calc(100% - 24px));
-  max-height: min(420px, calc(100% - 24px));
+  /* Above canvas chrome and LoopGoalComposer sibling (stage-level host). */
+  z-index: 40;
+  width: min(380px, calc(100% - 24px));
+  max-height: min(520px, calc(100% - 24px));
   display: flex;
   flex-direction: column;
   border: 1px solid var(--tech-border-strong);
@@ -11,6 +12,7 @@
   box-shadow: var(--tech-shadow-md);
   overflow: hidden;
   transition: opacity 180ms var(--ease-out, ease-out);
+  pointer-events: auto;
 }
 
 .header {

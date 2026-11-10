@@ -9620,6 +9620,82 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     mod.setLoopAuthoringCompleteOverride(complete);
   }
 
+  /**
+   * Serializable loopback authoring mode for Electron IPC (no paid live model).
+   * `off` clears override so unconfigured provider fails closed.
+   * `demo_edit` returns deterministic JSON patches from the user prompt text.
+   */
+  async setLoopAuthoringLoopbackMode(
+    mode: "off" | "demo_edit",
+  ): Promise<{ mode: "off" | "demo_edit"; live: false }> {
+    if (mode === "off") {
+      await this.setLoopAuthoringCompleteOverride(null);
+      return { mode: "off", live: false };
+    }
+    const { createLoopbackAuthoringComplete } = await import(
+      "./loop-goal-authoring-provider.js"
+    );
+    await this.setLoopAuthoringCompleteOverride(
+      createLoopbackAuthoringComplete((userPrompt) => {
+        // Only the user_request line — full authoring prompt embeds Human nodes
+        // and would false-match /human|approval/ against draft context.
+        const requestMatch = /^user_request:\s*(.*)$/m.exec(userPrompt);
+        const request = (requestMatch?.[1] ?? userPrompt).trim();
+        const timeoutMatch = /timeout\s*[:=]?\s*(\d{2,7})/i.exec(request);
+        const nodeIdMatch = /nodeId[:=]\s*([a-zA-Z0-9_-]+)/i.exec(request);
+        const wantsApproval =
+          /(?:\binsert\b[^\n]{0,40}\bapproval\b|\bapproval\b\s*node|\b审批\b)/i.test(
+            request,
+          );
+        if (timeoutMatch && nodeIdMatch && !wantsApproval) {
+          return {
+            kind: "node_patch",
+            nodeId: nodeIdMatch[1]!,
+            patch: { timeoutMs: Number(timeoutMatch[1]) },
+            summary: `loopback: set timeoutMs=${timeoutMatch[1]} on ${nodeIdMatch[1]}`,
+            assistantMessage:
+              "[loopback·not live] Patched timeout only; untargeted nodes/edges preserved.",
+          };
+        }
+        if (wantsApproval) {
+          return {
+            kind: "graph",
+            summary: "loopback: insert human approval node",
+            assistantMessage:
+              "[loopback·not live] Inserted human approval; review Accept/Dismiss.",
+            draft: {
+              revision: 1,
+              graphPrompt: "loopback demo",
+              nodes: [
+                {
+                  id: "n_loopback_approval",
+                  title: "Approval gate",
+                  prompt: "Approve before continue",
+                  type: "human",
+                  humanMode: "approval",
+                  position: { x: 320, y: 180 },
+                },
+              ],
+              edges: [],
+            },
+            targetedNodeIds: ["n_loopback_approval"],
+          };
+        }
+        return {
+          kind: "clarify",
+          openQuestions: [
+            {
+              question:
+                "[loopback·not live] Specify nodeId=… timeout=… or ask to insert approval.",
+            },
+          ],
+          assistantMessage: "[loopback·not live] Need a concrete edit target.",
+        };
+      }),
+    );
+    return { mode: "demo_edit", live: false };
+  }
+
   async answerLoopGoalClarification(
     projectId: string,
     loopId: string,

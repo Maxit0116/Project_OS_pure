@@ -61,6 +61,14 @@
 
 **预览策略（诚实）**：产品预览为 **plaintext-only**（`sanitizeGmailHtml` 已降级为去标签纯文本别名，**命名≠安全证明**）。**不**渲染 HTML、**不**执行脚本、**不**加载远程图/跟踪像素；MIME 二进制用 `Buffer` 测真实 `measuredSizeBytes`，禁止用 `Math.min(50M)` 伪造长度；正文/附件经 `gmail://…` `contentRef` + `resolveGmailMaterialContent` 按账号作用域取回。
 
+**账号绑定 / 材料消费边界（2026-11-10）**：
+- `contentRef` 的 `accountRefId` 必须与 `input.credential.credentialId` 一致（`assertGmailAccountBinding`）；跨账号在 **HTTP 前** 拒（`account_ref_mismatch`，0 请求）。
+- `format=raw|minimal` **不得** 以空 `decoded` 冒充成功全文；须 `format=full`。
+- MIME `text/*` 仅有 `attachmentId` → `deferredBodyParts`（**不是**文件附件）；不得因当附件而丢长正文。
+- 正文预览裁 8000 → `previewTruncated` / material `parseStatus=partial` / resolve `completeness=preview_only`；**不得**当全量已读。
+- 声明或实测 >50M：材料 `parseStatus=failed`；`attachments_get` / resolve 在消费边界拒并 **不释放 bytes**；未下载的 declared 尺寸 **不得** 填成 `measuredSizeBytes`。
+- run 快照保留 `gmail.historyId` / `version` 来源版本字段（mailbox history 观测值，非 live 续读证明）。
+
 ---
 
 ## 4. 发送 / 草稿 / 审批（后续；边界现在写死）
@@ -101,7 +109,8 @@
 |------|------|------|----------|------------|---------------|
 | 文档互链 + scope/push 矩阵 | ✓ 本文件 | — | — | — | — |
 | catalog `gmail` + readonly caps | ✓ | 本流 | 本流 | ✗ | ✗ |
-| MIME / TaskMaterial 映射 | ✓ | 本流（charset/partial/measuredSize 透明；非全 MIME 宣称） | 本流 | ✗ | ✗ |
+| MIME / TaskMaterial 映射 | ✓ | 本流（charset/partial/measuredSize 透明；deferred body；非全 MIME 宣称） | 本流 | ✗ | ✗ |
+| accountRef 绑定 + 50M 消费拒 + preview≠full | ✓ | 本流 | 本流（负例） | ✗ | ✗ |
 | poll_history 404→resync + signal | ✓ | 本流（production error 路径） | 本流 | ✗ | ✗ |
 | OAuth / PKCE / 真邮箱 | ✓ 边界 | ✗ | ✗ | ✗ | ✗ |
 | Pub/Sub watch | ✓ 边界 | ✗ | ✗ | ✗ | ✗ |
@@ -117,3 +126,4 @@
 |------|------|
 | 2026-11-10 | 初版：Terran 确认加入当前 Auto 流；只读首期 + 发送/push 边界；官方 scopes/push/sync 核实；与 PW/TM/Six-Goals 互链 |
 | 2026-11-10 | 安全预览改为 plaintext-only；poll_history 404 生产 remap；MIME/材料链诚实边界 |
+| 2026-11-10 | accountRef 绑定 0-HTTP 拒；raw/minimal 拒空 decoded；deferred text body；preview_only；50M 消费拒 |

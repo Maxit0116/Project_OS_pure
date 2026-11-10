@@ -52,6 +52,7 @@ export default function LoopNodeDutyCard({
       style={{ left, top }}
       role="dialog"
       aria-label={ts('chat.loopGraph.dutyCard')}
+      data-testid="loop-node-duty-card"
       data-zone-interactive
       onPointerDown={(event) => event.stopPropagation()}
       onWheel={(event) => event.stopPropagation()}

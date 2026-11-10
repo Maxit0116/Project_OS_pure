@@ -49,8 +49,8 @@
 
 | 切片 | 状态 |
 |------|------|
-| PW Project run binding / 预检 / 项目手动 E2E | **S2 contract 初版**（RunBinding 子集 + start preflight）；项目手动 E2E / 完整绑定 **未齐** |
-| TM TaskMaterial schema + Pure 输入复用 | **S2 contract 初版**（schema + Gmail→material）；Pure 材料卡 UI **待验** |
+| PW Project run binding / 预检 / 项目手动 E2E | **S2 contract** + Electron 材料/预检面板首闭环（无 Spec→blocker）；完整项目手动 E2E / 绑定字段 **未齐** |
+| TM TaskMaterial schema + Pure 输入复用 | **S2 contract**（schema + Gmail→material）+ Electron 文字材料暂存 UI；多格式 Pure 卡 **待验** |
 | URL SSRF 默认拒内网 | **contract**（`loop-url-fetch-policy`）；生产读取未接 |
 | 离线事件全天排队 | **未实现**（不可承诺） |
 
@@ -63,7 +63,7 @@
 | High-risk / catalog_only 强制 | **contract** |
 | 非幂等 POST 不盲重试；timeout/abort unknown；ledger | **contract** |
 | URL/header/body 脱敏 + fake-secret | **contract** |
-| Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现**；云端 Electron Overlay+DutyCard **已截**（见证据）；保存重开节点保留 **已截**；浅色主题切换 **已截** |
+| Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现**；云端 Electron Overlay+DutyCard **已截**（DutyCard 完整可见、不被 composer 遮挡；SaaS 未配置徽标可见）；retry=2 保存重开 **已截**；主题 dataset 已读；**不得**用旧全浅空图冒充暗色验收 |
 | LocalApi→adapter→loopback settle | **实现**/contract 路径；live未验 |
 | Studio 旧「固定侧栏 Inspector」文首 vs DutyCard | **冲突未消**：Studio D3/LG-1.1 仍写侧栏；现行 UI 为 Overlay 内 DutyCard / Inspector empty hint——**不以旧 Studio 文首当已验收** |
 | GC 总勾选 / 发布门禁 | **未全勾**：GC-6.5/6.6、GC-7.2 总验收待收尾；**不得**宣称 GC 门禁已通过 |
@@ -77,6 +77,7 @@
 | 文档 scope/push/sync 矩阵 + Limited Use | **计划权威**（本仓新文件） |
 | catalog + messages_search/get / threads_get / attachments→TM | **实现/contract**（loopback；无真邮箱） |
 | 预览 plaintext-only（非 HTML sanitize 宣称） | **实现/contract** |
+| accountRef 绑定 / preview≠full / 50M 消费拒 / deferred text body | **实现/contract（负例）** |
 | 在线 poll_history（非全天监听；404→resync_required） | **实现/contract（loopback）**；非完整轮询器 |
 | users.watch → Pub/Sub | **计划**；首期不部署 |
 | 发送审批 / compose | **计划**；默认关 |
@@ -98,14 +99,18 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 
 近期本地闸（实现切片，非文档完成；以当次命令为准）：
 ```text
-# → Test Files 40 passed / Tests 209 passed（exit 0）
-# projectos tsc --noEmit -p tsconfig.json：22 error TS
-#   pristine 对照（同目录同命令 @ b0f4436 工作树暂存前后）：同为 22 / 同文件集 — 不证明消除基线债；本切片无新增
-# workbench npm run build：仍失败（xmlns / OrbState / ParentBatchAuth 等基线，未抹）exit 1
+# → Test Files 41 passed / Tests 217 passed（exit 0）— 见 vitest-discovery-command.txt
+# projectos tsc --noEmit -p tsconfig.json：约 25 error TS（本切片）
+#   分层对照：graph@bec3dd7 同配置约 159 error TS（大量 electron 模块解析等环境债）
+#   vs b0f4436「22=22」仅证明该次提交未增债，**不**证明整 PR 栈相对 graph 无新增
+# workbench npm run build：仍失败 exit 1
+#   本切片新增 mock preflight 类型已修；其余为基线（session-affinity / OrbState /
+#   ParentBatchAuth / AgentFlow / DiffHighlightedColumn / local-api affinity profile…）
+#   loop-approval-binding 未用 import 已清；local-api 2751+ affinity 为既有债保留准确阻塞
 ```
 
-**DOM 开链（云端 Linux xvfb，非 Mac）**：`electron-vite build` + `npx electron . --remote-debugging-port=9222` 真下 LocalApi host；Welcome→打开示例→Loop 图 Overlay→添加节点→DutyCard；light 主题与关闭重开 **真实截图**（`/opt/cursor/artifacts/loops-electron-*.png`）。Vite `node:fs` 失败 **不是** Electron 不可跑证据。
+**DOM 开链（云端 Linux xvfb，非 Mac）**：真实 Electron LocalApi host；混合 A/A/L/H + SaaS 未配置；DutyCard 完整可见；Composer loopback（标 **loopback·not live**）timeout Accept / approval Dismiss；Run 材料预检 blocker 显式；截图 `/opt/cursor/artifacts/loops-ui-*.png`。**不得**用旧全浅空图冒充暗色；无配置须明确失败（非静默 rules）。
 
-**graph 只读分叉**（不 rebase/merge）：`HEAD...origin/graph` = 12 ahead / 22 behind；tip `34af374`；merge-base `bec3dd7`。graph 自 MB 重叠 loops 路径仅 `loop-runtime-service` / roles test / Overlay xmlns 删 / ReviewPathMap xmlns 删——**无** gmail/authoring/materials 碰撞；集成时注意 Overlay/runtime 手工合并。
+**graph 只读分叉**（不 rebase/merge/force）：tip `34af374`；merge-base `bec3dd7`。只读兼容审阅；集成注意 Overlay/runtime 手工合并。
 
-No merge / paid live / Mac / 真实外发 / 真 Gmail。
+No merge / paid live / Mac / 真实外发 / 真 Gmail / 凭据授权。

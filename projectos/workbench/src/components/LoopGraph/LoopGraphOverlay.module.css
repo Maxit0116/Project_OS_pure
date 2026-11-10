@@ -149,11 +149,24 @@
 }
 
 .stage {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-width: 0;
   min-height: 0;
+}
+
+.dutyCardHost {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.dutyCardHost > * {
+  pointer-events: auto;
 }
 
 .banner {

@@ -33,6 +33,7 @@ import LoopGraphPalette from './LoopGraphPalette'
 import LoopNodeDutyCard from './LoopNodeDutyCard'
 import LoopGraphRail from './LoopGraphRail'
 import LoopRunSidePanel from './LoopRunSidePanel'
+import LoopRunMaterialsPanel from './LoopRunMaterialsPanel'
 import { LoopSaaSNodeCard } from './integrations/LoopSaaSNodeCard'
 import type { LoopSaaSNodeCardState } from './integrations/LoopSaaSNodeCard'
 import { runtimeStatusBlocksExecution } from './integrations/loopIntegrationRegistry'
@@ -123,7 +124,6 @@ export default function LoopGraphOverlay() {
   const removeAuthoringTarget = useLoopGraphStore((s) => s.removeAuthoringTarget)
   const compile = useLoopGraphStore((s) => s.compile)
   const approve = useLoopGraphStore((s) => s.approve)
-  const startRun = useLoopGraphStore((s) => s.startRun)
   const pauseRun = useLoopGraphStore((s) => s.pauseRun)
   const resumeRun = useLoopGraphStore((s) => s.resumeRun)
   const advanceRun = useLoopGraphStore((s) => s.advanceRun)
@@ -614,14 +614,6 @@ export default function LoopGraphOverlay() {
             ) : null}
             {phase === 'run' ? (
               <>
-                <button
-                  type="button"
-                  className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
-                  onClick={() => void startRun()}
-                  disabled={!document?.approvedSpecs.length}
-                >
-                  {ts('chat.loopGraph.start')}
-                </button>
                 <button type="button" className={styles.actionButton} onClick={() => void pauseRun()}>
                   {ts('chat.loopGraph.pause')}
                 </button>
@@ -935,7 +927,6 @@ export default function LoopGraphOverlay() {
                                 pointerEvents="none"
                               >
                                 <div
-                                  xmlns="http://www.w3.org/1999/xhtml"
                                   className={`${styles.edgeLabelChip} ${
                                     incomplete ? styles.edgeLabelChipPending : ''
                                   }`}
@@ -1358,48 +1349,6 @@ export default function LoopGraphOverlay() {
                       )
                     })}
                   </div>
-                  {(() => {
-                    const dutyNode = dutyCardNodeId
-                      ? draft.nodes.find((item) => item.id === dutyCardNodeId)
-                      : null
-                    if (!dutyNode) return null
-                    const canvasEl = canvasRef.current
-                    const canvasW = canvasEl?.clientWidth ?? 800
-                    const canvasH = canvasEl?.clientHeight ?? 600
-                    const cardW = 300
-                    const cardH = 420
-                    let left =
-                      viewport.x + (dutyNode.position.x + NODE_W) * viewport.scale + 12
-                    let top = viewport.y + dutyNode.position.y * viewport.scale
-                    if (left + cardW > canvasW - 8) {
-                      left =
-                        viewport.x + dutyNode.position.x * viewport.scale - cardW - 12
-                    }
-                    left = Math.max(8, Math.min(left, canvasW - cardW - 8))
-                    top = Math.max(
-                      8,
-                      Math.min(top, canvasH - Math.min(cardH, 280) - 8),
-                    )
-                    return (
-                      <LoopNodeDutyCard
-                        node={dutyNode}
-                        specNode={
-                          document?.approvedSpecs
-                            .at(-1)
-                            ?.nodes.find((item) => item.id === dutyNode.id) ?? null
-                        }
-                        activeInstance={activeInstance}
-                        readOnly={phase !== 'draw'}
-                        left={left}
-                        top={top}
-                        onClose={() => setDutyCardNodeId(null)}
-                        onChange={(patch) => {
-                          if (phase !== 'draw') return
-                          updateNode(dutyNode.id, patch)
-                        }}
-                      />
-                    )
-                  })()}
                   </>
                 )}
               </div>
@@ -1407,9 +1356,54 @@ export default function LoopGraphOverlay() {
 
             {phase === 'draw' && document ? <LoopGoalComposer /> : null}
 
-            {phase === 'run' && activeInstance ? (
+            {(() => {
+              const dutyNode = dutyCardNodeId
+                ? document?.draft.nodes.find((item) => item.id === dutyCardNodeId)
+                : null
+              if (!dutyNode || phase === 'review') return null
+              const canvasEl = canvasRef.current
+              // Host covers the whole stage (canvas + composer). Keep the card
+              // fully inside the canvas band so composer never covers the form.
+              const canvasW = canvasEl?.clientWidth ?? 800
+              const canvasH = canvasEl?.clientHeight ?? 600
+              const cardW = Math.min(380, Math.max(280, canvasW - 24))
+              const cardH = Math.min(520, Math.max(280, canvasH - 16))
+              let left =
+                viewport.x + (dutyNode.position.x + NODE_W) * viewport.scale + 12
+              let top = viewport.y + dutyNode.position.y * viewport.scale
+              if (left + cardW > canvasW - 8) {
+                left =
+                  viewport.x + dutyNode.position.x * viewport.scale - cardW - 12
+              }
+              left = Math.max(8, Math.min(left, canvasW - cardW - 8))
+              top = Math.max(8, Math.min(top, canvasH - cardH - 8))
+              return (
+                <div className={styles.dutyCardHost} data-loop-duty-host="">
+                  <LoopNodeDutyCard
+                    node={dutyNode}
+                    specNode={
+                      document?.approvedSpecs
+                        .at(-1)
+                        ?.nodes.find((item) => item.id === dutyNode.id) ?? null
+                    }
+                    activeInstance={activeInstance}
+                    readOnly={phase !== 'draw'}
+                    left={left}
+                    top={top}
+                    onClose={() => setDutyCardNodeId(null)}
+                    onChange={(patch) => {
+                      if (phase !== 'draw') return
+                      updateNode(dutyNode.id, patch)
+                    }}
+                  />
+                </div>
+              )
+            })()}
+
+            {phase === 'run' ? (
               <div className={styles.runPanel}>
-                {activeInstance.status === 'awaiting_hitl' ? (
+                <LoopRunMaterialsPanel />
+                {activeInstance?.status === 'awaiting_hitl' ? (
                   <div className={styles.hitlActions}>
                     {(activeInstance.hitlQuestionIds ?? ['continue']).map((questionId) => {
                       const isApproval = questionId.includes('approval')
@@ -1496,10 +1490,12 @@ export default function LoopGraphOverlay() {
                     })}
                   </div>
                 ) : null}
-                <LoopRunSidePanel
-                  instance={activeInstance}
-                  history={runHistory}
-                />
+                {activeInstance ? (
+                  <LoopRunSidePanel
+                    instance={activeInstance}
+                    history={runHistory}
+                  />
+                ) : null}
               </div>
             ) : null}
           </div>

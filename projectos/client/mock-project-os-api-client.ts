@@ -480,11 +480,41 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     return Promise.resolve(mockApproveLoopSpec(projectId, loopId, spec));
   }
 
+  override async preflightLoopRun(
+    _projectId: string,
+    _loopId: string,
+    _options?: {
+      specVersion?: string;
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+    },
+  ): Promise<import("../services/loop-run-preflight.js").LoopPreflightResult> {
+    // Browser mock has no LocalApi document — honest empty checklist, not a fake pass.
+    return {
+      ok: false,
+      canStart: false,
+      items: [
+        {
+          id: "pf_mock_host",
+          severity: "blocker",
+          code: "no_approved_spec",
+          message:
+            "preflightLoopRun requires Electron LocalApi host — browser mock cannot certify run readiness",
+        },
+      ],
+    };
+  }
+
   override startLoopInstance(
     projectId: string,
     loopId: string,
     specVersion?: string,
     _featureNodeId?: string,
+    _options?: {
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ): Promise<LoopGraphDocument> {
     return Promise.resolve(mockStartLoopInstance(projectId, loopId, specVersion));
   }
@@ -610,6 +640,16 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
       );
     }
     return mockSendLoopAuthoringTurn(projectId, loopId, request);
+  }
+
+  override async setLoopAuthoringLoopbackMode(
+    mode: "off" | "demo_edit",
+  ): Promise<{ mode: "off" | "demo_edit"; live: false }> {
+    // Browser mock has no LocalApi host — loopback injection is Electron-only.
+    if (mode === "off") return { mode: "off", live: false };
+    throw new Error(
+      "setLoopAuthoringLoopbackMode requires Electron LocalApi host (loopback·not live).",
+    );
   }
 
   override answerLoopGoalClarification(

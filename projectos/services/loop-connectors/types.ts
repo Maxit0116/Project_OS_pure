@@ -126,7 +126,11 @@ export type LoopConnectorErrorCode =
   | "transport_error"
   | "http_error"
   /** Gmail history.list startHistoryId expired — caller must full-resync cursor. */
-  | "resync_required";
+  | "resync_required"
+  /** contentRef accountRefId does not bind the provided credential — 0 HTTP. */
+  | "account_ref_mismatch"
+  /** Declared/measured bytes exceed consumption limit — refuse download/release. */
+  | "size_limit";
 
 export type LoopConnectorResult<T = unknown> =
   | {

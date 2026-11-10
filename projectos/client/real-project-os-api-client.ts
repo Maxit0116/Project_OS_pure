@@ -1480,13 +1480,36 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.approveLoopSpec(projectId, loopId, spec);
   }
 
+  preflightLoopRun(
+    projectId: string,
+    loopId: string,
+    options?: {
+      specVersion?: string;
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+    },
+  ) {
+    return this.transport.preflightLoopRun(projectId, loopId, options);
+  }
+
   startLoopInstance(
     projectId: string,
     loopId: string,
     specVersion?: string,
     featureNodeId?: string,
+    options?: {
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ) {
-    return this.transport.startLoopInstance(projectId, loopId, specVersion, featureNodeId);
+    return this.transport.startLoopInstance(
+      projectId,
+      loopId,
+      specVersion,
+      featureNodeId,
+      options,
+    );
   }
 
   startLoopInstanceWithParams(
@@ -1561,6 +1584,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     request: import("../contracts/loop-graph.js").LoopAuthoringTurnRequest,
   ) {
     return this.transport.sendLoopAuthoringTurn(projectId, loopId, request);
+  }
+
+  setLoopAuthoringLoopbackMode(mode: "off" | "demo_edit") {
+    return this.transport.setLoopAuthoringLoopbackMode(mode);
   }
 
   answerLoopGoalClarification(

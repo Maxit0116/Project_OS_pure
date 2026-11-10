@@ -975,11 +975,40 @@ export interface ProjectOSApi {
     loopId: string,
     spec: LoopSpec,
   ): Promise<LoopGraphDocument>;
+  /**
+   * Project-workflow preflight checklist — does not start a run.
+   * Materials/branch optional; approval presence ≠ start authorization.
+   */
+  preflightLoopRun(
+    projectId: string,
+    loopId: string,
+    options?: {
+      specVersion?: string;
+      branch?: string;
+      materials?: import("./loop-task-materials.js").LoopTaskMaterial[];
+    },
+  ): Promise<{
+    ok: boolean;
+    canStart: boolean;
+    items: Array<{
+      id: string;
+      severity: "blocker" | "warning" | "info";
+      code: string;
+      message: string;
+      nodeId?: string;
+      materialId?: string;
+    }>;
+  }>;
   startLoopInstance(
     projectId: string,
     loopId: string,
     specVersion?: string,
     featureNodeId?: string,
+    options?: {
+      branch?: string;
+      materials?: import("./loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ): Promise<LoopGraphDocument>;
   startLoopInstanceWithParams(
     projectId: string,
@@ -1052,6 +1081,13 @@ export interface ProjectOSApi {
     loopId: string,
     request: import("./loop-graph.js").LoopAuthoringTurnRequest,
   ): Promise<LoopGraphDocument>;
+  /**
+   * Electron/IPC-serializable loopback authoring (not live/paid).
+   * `off` clears override → unconfigured provider fails closed.
+   */
+  setLoopAuthoringLoopbackMode(
+    mode: "off" | "demo_edit",
+  ): Promise<{ mode: "off" | "demo_edit"; live: false }>;
   answerLoopGoalClarification(
     projectId: string,
     loopId: string,

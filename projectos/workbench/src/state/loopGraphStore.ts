@@ -17,6 +17,7 @@ import type {
   LoopPaletteItem,
   LoopSatelliteKind,
   LoopSpec,
+  LoopTaskMaterial,
 } from '@contracts/index'
 import {
   configPortForSatelliteKind,
@@ -180,6 +181,27 @@ interface LoopGraphStore {
   suggestEdgeKindForActiveSession: () => IntentEdgeKind | null
   compile: () => Promise<void>
   approve: (spec?: LoopSpec) => Promise<void>
+  /** Draft materials for the next manual start (not definition authoring). */
+  runMaterials: LoopTaskMaterial[]
+  runBranch: string
+  preflightResult: {
+    ok: boolean
+    canStart: boolean
+    items: Array<{
+      id: string
+      severity: 'blocker' | 'warning' | 'info'
+      code: string
+      message: string
+      nodeId?: string
+      materialId?: string
+    }>
+  } | null
+  preflightBusy: boolean
+  setRunBranch: (branch: string) => void
+  addRunMaterial: (material: LoopTaskMaterial) => void
+  removeRunMaterial: (materialId: string) => void
+  clearRunMaterials: () => void
+  runPreflight: () => Promise<void>
   startRun: () => Promise<void>
   pauseRun: () => Promise<void>
   resumeRun: () => Promise<void>
@@ -245,6 +267,10 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   composerDraft: '',
   composerSheet: 'none',
   authoringBusy: false,
+  runMaterials: [],
+  runBranch: '',
+  preflightResult: null,
+  preflightBusy: false,
   authoringEngine: 'provider',
   canvasSelectedNodeId: null,
   runHistory: [],
@@ -271,6 +297,10 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       composerSheet: 'none',
       authoringBusy: false,
       authoringEngine: 'provider',
+      runMaterials: [],
+      runBranch: '',
+      preflightResult: null,
+      preflightBusy: false,
     })
   },
 
@@ -1488,6 +1518,47 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     }
   },
 
+  setRunBranch: (branch) => set({ runBranch: branch, preflightResult: null }),
+  addRunMaterial: (material) =>
+    set((state) => ({
+      runMaterials: [...state.runMaterials, material],
+      preflightResult: null,
+    })),
+  removeRunMaterial: (materialId) =>
+    set((state) => ({
+      runMaterials: state.runMaterials.filter((item) => item.id !== materialId),
+      preflightResult: null,
+    })),
+  clearRunMaterials: () => set({ runMaterials: [], preflightResult: null }),
+  runPreflight: async () => {
+    const { client, project } = useWorkbenchStore.getState()
+    const loopId = get().activeLoopId
+    if (!client || !project || !loopId) return
+    if (typeof client.preflightLoopRun !== 'function') {
+      set({
+        error:
+          'preflightLoopRun is unavailable on this client — Electron LocalApi host required',
+        preflightResult: null,
+      })
+      return
+    }
+    set({ preflightBusy: true, error: null })
+    try {
+      const branch = get().runBranch.trim()
+      const materials = get().runMaterials
+      const preflightResult = await client.preflightLoopRun(project.projectId, loopId, {
+        ...(branch ? { branch } : {}),
+        ...(materials.length ? { materials } : {}),
+      })
+      set({ preflightResult, preflightBusy: false })
+    } catch (error) {
+      set({
+        preflightBusy: false,
+        preflightResult: null,
+        error: error instanceof Error ? error.message : 'Preflight failed',
+      })
+    }
+  },
   startRun: async () => {
     const { client, project } = useWorkbenchStore.getState()
     const loopId = get().activeLoopId
@@ -1495,15 +1566,30 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const featureNodeId = useWorkbenchStore.getState().selectedNodeId ?? undefined
+      const branch = get().runBranch.trim()
+      const materials = get().runMaterials
       const document = await client.startLoopInstance(
         project.projectId,
         loopId,
         undefined,
         featureNodeId,
+        {
+          ...(branch ? { branch } : {}),
+          ...(materials.length ? { materials } : {}),
+        },
       )
       const heads = await client.listLoopGraphs(project.projectId)
       const runHistory = await client.listLoopRunHistory(project.projectId, loopId)
-      set({ document, heads, phase: 'run', loading: false, runHistory })
+      set({
+        document,
+        heads,
+        phase: 'run',
+        loading: false,
+        runHistory,
+        // Binding snapshot is on the instance — clear staging draft after start.
+        runMaterials: [],
+        preflightResult: null,
+      })
     } catch (error) {
       set({
         loading: false,

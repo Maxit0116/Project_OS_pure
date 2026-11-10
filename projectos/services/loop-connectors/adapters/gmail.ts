@@ -53,21 +53,55 @@ export type GmailDecodedBody = {
    * Plaintext-only preview derived from plain or HTML-stripped text.
    * Product preview MUST use this (or textPlain) — not HTML. Name is not a
    * "sanitized HTML is safe" claim; remote HTML is refused for display.
+   * May be truncated at GMAIL_TEXT_PREVIEW_MAX — see previewTruncated.
    */
   previewText: string;
+  /** True when previewText is a capped slice — not a full-body read. */
+  previewTruncated: boolean;
+  /** Character length of the plaintext source before preview cap. */
+  fullTextLength: number;
   charsetNotes: string[];
   partial: boolean;
+  /**
+   * text/plain|html parts that only have attachmentId (no inline data).
+   * Must be fetched separately — never treat as file attachments that drop body.
+   */
+  deferredBodyParts: Array<{
+    attachmentId: string;
+    mimeType: string;
+    filename?: string;
+    declaredSizeBytes: number;
+  }>;
   attachments: Array<{
     attachmentId: string;
     filename: string;
     mimeType: string;
-    /** Provider-declared size when present. */
+    /** Provider-declared size when present (not a measured fact). */
     declaredSizeBytes: number;
-    /** Measured base64-decoded byte length. */
-    measuredSizeBytes: number;
+    /**
+     * Measured base64-decoded byte length when bytes were actually decoded.
+     * Absent when only a declared size is known — never copy declared→measured.
+     */
+    measuredSizeBytes?: number;
     binary: boolean;
   }>;
 };
+
+/** Trusted account binding: contentRef account must equal credential id before any HTTP. */
+export function assertGmailAccountBinding(
+  contentRefAccountId: string,
+  credential: LoopCredentialRef,
+): { ok: true } | { ok: false; message: string } {
+  const expected = credential.credentialId.trim();
+  const got = contentRefAccountId.trim();
+  if (!expected || !got || expected !== got) {
+    return {
+      ok: false,
+      message: `gmail_account_ref_mismatch: contentRef account "${got}" does not bind credential "${expected}" — refusing before HTTP`,
+    };
+  }
+  return { ok: true };
+}
 
 async function resolveToken(
   input: { accessToken?: string; credential: LoopCredentialRef },
@@ -139,6 +173,7 @@ export function decodeGmailMimeTree(root: GmailMimePart | undefined): GmailDecod
   const textParts: string[] = [];
   const htmlParts: string[] = [];
   const attachments: GmailDecodedBody["attachments"] = [];
+  const deferredBodyParts: GmailDecodedBody["deferredBodyParts"] = [];
   const charsetNotes: string[] = [];
   let partial = false;
 
@@ -153,12 +188,25 @@ export function decodeGmailMimeTree(root: GmailMimePart | undefined): GmailDecod
     const filename = part.filename?.trim() ?? "";
     if (attachmentId) {
       const declared = Math.max(0, part.body?.size ?? 0);
+      // Large text/html bodies often arrive as attachmentId without inline data.
+      // Do NOT classify them as file attachments — that drops the message body.
+      if (mime.startsWith("text/plain") || mime.startsWith("text/html")) {
+        deferredBodyParts.push({
+          attachmentId,
+          mimeType: mime,
+          ...(filename ? { filename } : {}),
+          declaredSizeBytes: declared,
+        });
+        charsetNotes.push(`body_via_attachment:${attachmentId}`);
+        partial = true;
+        return;
+      }
       attachments.push({
         attachmentId,
         filename: filename || "attachment",
         mimeType: mime,
         declaredSizeBytes: declared,
-        measuredSizeBytes: declared,
+        // No bytes decoded here — declared must not become measured.
         binary: !mime.startsWith("text/"),
       });
       return;
@@ -201,16 +249,24 @@ export function decodeGmailMimeTree(root: GmailMimePart | undefined): GmailDecod
   walk(root);
   const textPlain = textParts.join("\n");
   const textHtmlRaw = htmlParts.join("\n");
-  const previewText = (
-    textPlain.trim() || htmlToPlaintextPreview(textHtmlRaw)
-  ).slice(0, GMAIL_TEXT_PREVIEW_MAX);
+  const fullSource = textPlain.trim() || htmlToPlaintextPreview(textHtmlRaw);
+  const previewTruncated = fullSource.length > GMAIL_TEXT_PREVIEW_MAX;
+  const previewText = fullSource.slice(0, GMAIL_TEXT_PREVIEW_MAX);
   if (textHtmlRaw && !textPlain.trim()) partial = true;
+  if (previewTruncated) {
+    partial = true;
+    charsetNotes.push(`preview_truncated_at_${GMAIL_TEXT_PREVIEW_MAX}`);
+  }
+  if (deferredBodyParts.length > 0) partial = true;
   return {
     textPlain,
     textHtmlRaw,
     previewText,
+    previewTruncated,
+    fullTextLength: fullSource.length,
     charsetNotes,
     partial,
+    deferredBodyParts,
     attachments,
   };
 }
@@ -228,6 +284,7 @@ export function gmailAttachmentToTaskMaterial(input: {
   mimeType: string;
   /** Provider-declared size (may be missing). */
   sizeBytes: number;
+  /** Only when bytes were actually decoded — never copy declared into this. */
   measuredSizeBytes?: number;
   historyId?: string;
   runId?: string;
@@ -235,9 +292,13 @@ export function gmailAttachmentToTaskMaterial(input: {
 }): LoopTaskMaterial {
   const now = input.nowIso ?? new Date().toISOString();
   const declared = Math.max(0, input.sizeBytes);
-  const measured = Math.max(0, input.measuredSizeBytes ?? declared);
+  const measured =
+    typeof input.measuredSizeBytes === "number"
+      ? Math.max(0, input.measuredSizeBytes)
+      : undefined;
   const overLimit =
-    declared > GMAIL_MAX_ATTACHMENT_BYTES || measured > GMAIL_MAX_ATTACHMENT_BYTES;
+    declared > GMAIL_MAX_ATTACHMENT_BYTES ||
+    (typeof measured === "number" && measured > GMAIL_MAX_ATTACHMENT_BYTES);
   const kind =
     input.mimeType.startsWith("image/")
       ? ("image" as const)
@@ -262,13 +323,18 @@ export function gmailAttachmentToTaskMaterial(input: {
     parseStatus: overLimit ? "failed" : "pending",
     ...(overLimit
       ? {
-          parseMessage: `Attachment exceeds ${GMAIL_MAX_ATTACHMENT_BYTES} byte limit (declared=${declared}, measured=${measured})`,
+          parseMessage: `Attachment exceeds ${GMAIL_MAX_ATTACHMENT_BYTES} byte limit (declared=${declared}${typeof measured === "number" ? `, measured=${measured}` : ", measured=unknown"})`,
         }
       : {}),
     mimeType: input.mimeType.slice(0, 120),
-    // Honest sizes — do not Math.min clamp declared into a fake compliant value.
-    ...(declared <= GMAIL_MAX_ATTACHMENT_BYTES ? { sizeBytes: declared } : {}),
-    measuredSizeBytes: measured,
+    // Honest sizes — do not Math.min clamp declared; do not invent measured.
+    ...(declared > 0 && declared <= GMAIL_MAX_ATTACHMENT_BYTES
+      ? { sizeBytes: declared }
+      : {}),
+    ...(typeof measured === "number" && measured <= GMAIL_MAX_ATTACHMENT_BYTES
+      ? { measuredSizeBytes: measured }
+      : {}),
+    version: 1,
     gmail: {
       accountRefId: input.accountRefId,
       messageId: input.messageId,
@@ -289,17 +355,38 @@ export function gmailMessageBodyToTaskMaterial(input: {
   nowIso?: string;
 }): LoopTaskMaterial {
   const now = input.nowIso ?? new Date().toISOString();
-  const body = input.decoded.previewText.trim();
+  if (input.decoded.deferredBodyParts.length > 0 && !input.decoded.previewText.trim()) {
+    throw new Error(
+      "Gmail body is deferred to attachment parts; resolve deferred body before promoting material",
+    );
+  }
+  const preview = input.decoded.previewText.trim();
   // Snippet alone is never enough — require decoded body preview.
-  if (!body) {
+  if (!preview) {
     throw new Error(
       "Gmail message has no decoded body; refusing to promote snippet as content",
     );
   }
-  const measured = Buffer.byteLength(body, "utf8");
+  const fullSource =
+    input.decoded.textPlain.trim() ||
+    htmlToPlaintextPreview(input.decoded.textHtmlRaw);
+  const fullMeasured = Buffer.byteLength(fullSource, "utf8");
+  const previewTruncated =
+    input.decoded.previewTruncated || fullSource.length > GMAIL_TEXT_PREVIEW_MAX;
   const partial =
     input.decoded.partial ||
+    previewTruncated ||
+    input.decoded.deferredBodyParts.length > 0 ||
     Boolean(input.decoded.textHtmlRaw && !input.decoded.textPlain.trim());
+  const notes = [
+    ...input.decoded.charsetNotes,
+    ...(previewTruncated
+      ? [`truncated_preview_only:${GMAIL_TEXT_PREVIEW_MAX}_of_${input.decoded.fullTextLength}`]
+      : []),
+    ...(input.decoded.deferredBodyParts.length
+      ? [`deferred_body_parts:${input.decoded.deferredBodyParts.length}`]
+      : []),
+  ];
   return {
     id: `mat_gmail_${input.accountRefId}_msg_${input.message.id}`.slice(0, 120),
     kind: "text",
@@ -310,20 +397,26 @@ export function gmailMessageBodyToTaskMaterial(input: {
     ).slice(0, 240),
     source: "gmail",
     contentRef: `gmail://${input.accountRefId}/messages/${input.message.id}/body`,
-    // Preview is local plaintext; full bytes still require contentRef resolve.
+    // Truncated preview must never be parseStatus=ok (not a full-body read).
     parseStatus: partial ? "partial" : "ok",
     ...(partial
       ? {
           parseMessage:
-            input.decoded.charsetNotes.join("; ") ||
+            notes.join("; ") ||
             "HTML-only or non-UTF8 charset — plaintext preview only; HTML not rendered",
         }
       : {}),
-    textPreview: body.slice(0, GMAIL_TEXT_PREVIEW_MAX),
+    textPreview: preview.slice(0, GMAIL_TEXT_PREVIEW_MAX),
     mimeType: "text/plain",
-    sizeBytes: measured,
-    measuredSizeBytes: measured,
+    // Honest sizes only — never Math.min-clamp measured to pretend under limit.
+    ...(fullMeasured <= GMAIL_MAX_ATTACHMENT_BYTES
+      ? { sizeBytes: fullMeasured, measuredSizeBytes: fullMeasured }
+      : {
+          parseStatus: "failed" as const,
+          parseMessage: `Body measured ${fullMeasured} exceeds ${GMAIL_MAX_ATTACHMENT_BYTES}`,
+        }),
     charset: "utf-8",
+    version: 1,
     gmail: {
       accountRefId: input.accountRefId,
       messageId: input.message.id,
@@ -338,8 +431,9 @@ export function gmailMessageBodyToTaskMaterial(input: {
 
 /**
  * Resolve a gmail:// contentRef via the same production messages.get / attachments.get path.
- * Returns plaintext preview for bodies; attachments return measured bytes metadata only
- * until a workspace blob store is wired (phase-1 honesty).
+ * Bodies return truncated-preview honesty (completeness=preview_only|full_inline).
+ * Attachments refuse oversize at the consumption boundary (no bytes returned).
+ * Cross-account contentRef vs credential is rejected with 0 HTTP.
  */
 export async function resolveGmailMaterialContent(
   contentRef: string,
@@ -347,38 +441,85 @@ export async function resolveGmailMaterialContent(
     credential: LoopCredentialRef;
     accessToken?: string;
     idempotencyKey: string;
+    /** Optional declared size from run snapshot — used to refuse before download. */
+    declaredSizeBytes?: number;
   },
   ctx: ConnectorDispatchContext,
 ): Promise<
-  | { kind: "body"; materialPreview: string; messageId: string; accountRefId: string }
-  | { kind: "attachment"; bytes: Buffer; attachmentId: string; messageId: string; accountRefId: string }
-  | { kind: "error"; message: string }
+  | {
+      kind: "body";
+      materialPreview: string;
+      messageId: string;
+      accountRefId: string;
+      completeness: "preview_only" | "full_inline";
+      previewTruncated: boolean;
+      fullTextLength: number;
+      historyId?: string;
+    }
+  | {
+      kind: "attachment";
+      bytes: Buffer;
+      attachmentId: string;
+      messageId: string;
+      accountRefId: string;
+      measuredSizeBytes: number;
+    }
+  | { kind: "error"; message: string; code?: string }
 > {
   const match = /^gmail:\/\/([^/]+)\/messages\/([^/]+)\/(body|attachments\/([^/]+))$/.exec(
     contentRef,
   );
-  if (!match) return { kind: "error", message: "Invalid gmail contentRef" };
+  if (!match) return { kind: "error", message: "Invalid gmail contentRef", code: "invalid_ref" };
   const accountRefId = match[1]!;
   const messageId = match[2]!;
+  const bound = assertGmailAccountBinding(accountRefId, input.credential);
+  if (!bound.ok) {
+    return { kind: "error", message: bound.message, code: "account_ref_mismatch" };
+  }
   if (match[3] === "body") {
     const got = await gmailMessagesGet(
       {
         messageId,
         credential: input.credential,
         idempotencyKey: input.idempotencyKey,
+        format: "full",
         ...(input.accessToken ? { accessToken: input.accessToken } : {}),
       },
       ctx,
     );
     if (!got.ok) return { kind: "error", message: got.message };
+    const decoded = got.data.decoded;
+    if (decoded.deferredBodyParts.length > 0 && !decoded.previewText.trim()) {
+      return {
+        kind: "error",
+        message:
+          "Body stored as deferred attachment parts — fetch deferred body before resolve",
+        code: "deferred_body",
+      };
+    }
+    const truncated = decoded.previewTruncated || decoded.partial;
     return {
       kind: "body",
-      materialPreview: got.data.decoded.previewText,
+      materialPreview: decoded.previewText,
       messageId,
       accountRefId,
+      completeness: truncated ? "preview_only" : "full_inline",
+      previewTruncated: decoded.previewTruncated,
+      fullTextLength: decoded.fullTextLength,
+      ...(got.data.message.historyId ? { historyId: got.data.message.historyId } : {}),
     };
   }
   const attachmentId = match[4]!;
+  if (
+    typeof input.declaredSizeBytes === "number" &&
+    input.declaredSizeBytes > GMAIL_MAX_ATTACHMENT_BYTES
+  ) {
+    return {
+      kind: "error",
+      message: `Attachment declared size ${input.declaredSizeBytes} exceeds ${GMAIL_MAX_ATTACHMENT_BYTES} — refuse before download`,
+      code: "size_limit",
+    };
+  }
   const got = await gmailAttachmentsGet({
     messageId,
     attachmentId,
@@ -387,15 +528,34 @@ export async function resolveGmailMaterialContent(
     credential: input.credential,
     idempotencyKey: input.idempotencyKey,
     accountRefId,
+    ...(typeof input.declaredSizeBytes === "number"
+      ? { sizeBytes: input.declaredSizeBytes }
+      : {}),
     ...(input.accessToken ? { accessToken: input.accessToken } : {}),
   }, ctx);
-  if (!got.ok) return { kind: "error", message: got.message };
+  if (!got.ok) return { kind: "error", message: got.message, code: got.code };
+  if (got.data.sizeBytes > GMAIL_MAX_ATTACHMENT_BYTES) {
+    return {
+      kind: "error",
+      message: `Attachment measured ${got.data.sizeBytes} exceeds ${GMAIL_MAX_ATTACHMENT_BYTES} — bytes not released to consumer`,
+      code: "size_limit",
+    };
+  }
+  // parseOk already refused oversize in attachments_get when material failed.
+  if (got.data.material.parseStatus === "failed") {
+    return {
+      kind: "error",
+      message: got.data.material.parseMessage ?? "Attachment failed size/parse gate",
+      code: "size_limit",
+    };
+  }
   return {
     kind: "attachment",
     bytes: decodeGmailBase64Bytes(got.data.bytesBase64),
     attachmentId,
     messageId,
     accountRefId,
+    measuredSizeBytes: got.data.sizeBytes,
   };
 }
 
@@ -505,9 +665,16 @@ export async function gmailMessagesGet(
     parseOk: (bodyText) => {
       const message = JSON.parse(bodyText) as GmailMessagePayload;
       if (!message.id) throw new Error("gmail_message_missing_id");
+      // raw/minimal intentionally lack a decodable MIME tree — do not return empty
+      // decoded as a successful full-body read (would promote false material ok).
+      if (format === "raw" || format === "minimal") {
+        throw new Error(
+          `gmail_format_${format}_has_no_decoded_body — request format=full for MIME decode`,
+        );
+      }
       const decoded = decodeGmailMimeTree(message.payload);
-      if (format === "full" && !decoded.textPlain && !decoded.textHtmlRaw) {
-        // Minimal/metadata responses legitimately lack body; full must not fall back to snippet.
+      if (!decoded.textPlain && !decoded.textHtmlRaw && decoded.deferredBodyParts.length === 0) {
+        // Full must not fall back to snippet.
         if (message.snippet && !message.payload) {
           throw new Error("gmail_refusing_snippet_as_body");
         }
@@ -592,6 +759,31 @@ export async function gmailAttachmentsGet(
 ): Promise<
   LoopConnectorResult<{ material: LoopTaskMaterial; bytesBase64: string; sizeBytes: number }>
 > {
+  const accountRefId = input.accountRefId ?? input.credential.credentialId;
+  const bound = assertGmailAccountBinding(accountRefId, input.credential);
+  if (!bound.ok) {
+    return blockedResult({
+      vendorId: "gmail",
+      capabilityId: "attachments_get",
+      code: "account_ref_mismatch",
+      message: bound.message,
+      idempotencyKey: input.idempotencyKey,
+      credentialRefId: input.credential.credentialId,
+    });
+  }
+  if (
+    typeof input.sizeBytes === "number" &&
+    input.sizeBytes > GMAIL_MAX_ATTACHMENT_BYTES
+  ) {
+    return blockedResult({
+      vendorId: "gmail",
+      capabilityId: "attachments_get",
+      code: "size_limit",
+      message: `Attachment declared size ${input.sizeBytes} exceeds ${GMAIL_MAX_ATTACHMENT_BYTES} — refuse before HTTP`,
+      idempotencyKey: input.idempotencyKey,
+      credentialRefId: input.credential.credentialId,
+    });
+  }
   const token = await resolveToken(input, ctx);
   if (!token) {
     return blockedResult({
@@ -618,10 +810,23 @@ export async function gmailAttachmentsGet(
     parseOk: (bodyText) => {
       const parsed = JSON.parse(bodyText) as { data?: string; size?: number };
       if (!parsed.data) throw new Error("gmail_attachment_missing_data");
-      const measured = decodeGmailBase64Bytes(parsed.data).byteLength;
+      // Prefer provider size header before allocating full decode when possible.
+      if (
+        typeof parsed.size === "number" &&
+        parsed.size > GMAIL_MAX_ATTACHMENT_BYTES
+      ) {
+        throw new Error(
+          `gmail_attachment_over_limit_declared:${parsed.size}`,
+        );
+      }
+      const bytes = decodeGmailBase64Bytes(parsed.data);
+      const measured = bytes.byteLength;
+      if (measured > GMAIL_MAX_ATTACHMENT_BYTES) {
+        throw new Error(`gmail_attachment_over_limit_measured:${measured}`);
+      }
       const declared = parsed.size ?? input.sizeBytes ?? measured;
       const material = gmailAttachmentToTaskMaterial({
-        accountRefId: input.accountRefId ?? input.credential.credentialId,
+        accountRefId,
         messageId: input.messageId,
         ...(input.threadId ? { threadId: input.threadId } : {}),
         attachmentId: input.attachmentId,
@@ -630,6 +835,9 @@ export async function gmailAttachmentsGet(
         sizeBytes: declared,
         measuredSizeBytes: measured,
       });
+      if (material.parseStatus === "failed") {
+        throw new Error(material.parseMessage ?? "gmail_attachment_parse_failed");
+      }
       return { material, bytesBase64: parsed.data, sizeBytes: measured };
     },
   });

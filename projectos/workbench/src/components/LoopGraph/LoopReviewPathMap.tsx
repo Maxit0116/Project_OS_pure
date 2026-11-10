@@ -122,7 +122,6 @@ export default function LoopReviewPathMap({
                 height={box.height}
               >
                 <div
-                  xmlns="http://www.w3.org/1999/xhtml"
                   className={`${styles.nodeChip} ${styles[visual.categoryClass] ?? ''}`}
                   aria-label={`${visual.shortLabel}: ${node.goal}`}
                 >

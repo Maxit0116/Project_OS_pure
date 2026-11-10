@@ -148,7 +148,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 |----|--------|------|------|
 | PW-1 | 项目内选择已保存流程并启动 | 计划 | — |
 | PW-2 | Run 绑定 project/repo/workspace/branch/codeDigest/specVersion | **contract 初版** / 产品路径待验 | LocalApi start 接线 RunBinding 子集；完整字段 **未齐** |
-| PW-3 | 预检：缺配置 / 分支 / Agent / 审批点列表，确认后才开跑 | **contract 初版**（start preflight） / UI 待验 | `loop-local-api-start-preflight`；审批通过 ≠ 开跑 |
+| PW-3 | 预检：缺配置 / 分支 / Agent / 审批点列表，确认后才开跑 | **contract** + **Electron UI 首闭环**（材料面板→LocalApi `preflightLoopRun`；无 approved Spec 时 Start 禁用并显式 blocker） / 完整项目手动 E2E 待验 | `LoopRunMaterialsPanel` + IPC；**非** store 预写假通过；审批通过 ≠ 开跑 |
 | PW-4 | 隔离工作区编码+测试+人工；产出 Diff/TestReport/Preview 或 PR | 部分实现 / live未验 | AgentRun + Verify + GitHub settle **契约/已有**；项目手动 E2E **待验** |
 | PW-5 | 失败保留证据可续；cancel/recover | 部分实现 | checkpoint / cancel **已有已测**；项目路径 **待验** |
 | PW-6 | 编辑定义不污染运行中 Instance 快照 | 实现（底座） / 待验（产品路径） | Spec 冻结 D5/GC-D8 |
@@ -159,7 +159,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 
 | ID | 验收项 | 状态 | 证据 |
 |----|--------|------|------|
-| TM-1 | 文字任务描述 | **contract 初版**（schema+Gmail body→material）；产品卡片 UI **待验** | `loop-task-materials` + gmail adapter |
+| TM-1 | 文字任务描述 | **contract** + Electron 暂存文字材料 UI 首闭环（run 阶段）；完整材料卡/多格式 **待验** | `loop-task-materials` + gmail adapter + `LoopRunMaterialsPanel` |
 | TM-2 | 图片用途标注 + 不支持提示 | 计划 | — |
 | TM-3 | 文件/API/log 卡片 + 解析状态 | **contract 初版**（parseStatus/measuredSize/charset/partial）；UI **待验** | schema fields |
 | TM-4 | CSV/XLSX sheet/列/范围 + 角色 | 计划 | — |
@@ -173,7 +173,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | ID | 验收项 | 状态 |
 |----|--------|------|
 | DE-1 | DutyCard 类型表单 Agent/Action/Logic/Human | 实现 / UI待验 |
-| DE-2 | Provider authoring loopback：局部 patch 保 ID/边；Accept/Dismiss/Undo；陈旧拒绝 | **contract**；**live未验** |
+| DE-2 | Provider authoring loopback：局部 patch 保 ID/边；Accept/Dismiss/Undo；陈旧拒绝 | **contract** + Electron Composer/`setLoopAuthoringLoopbackMode(demo_edit)`（**loopback·not live**）：timeout Accept、approval Dismiss 已截；付费 live **未验** |
 | SEC-1 | High-risk / catalog_only 不可调用方绕过 | **contract** |
 | SEC-2 | 非幂等 POST 不盲重试；timeout/abort unknown；脱敏全链 | **contract** |
 | CON-1 | Batch1 GitHub/Slack/Feishu/Lark/Sentry | **contract** / live未验 |

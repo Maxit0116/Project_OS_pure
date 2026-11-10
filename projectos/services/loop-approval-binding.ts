@@ -11,7 +11,6 @@ import type { LoopExecutionHooks } from "./loop-execution.js";
 import { stableStringify } from "./loop-intent-graph-diff.js";
 import {
   combineFileDigests,
-  createWorkspacePathDigester,
   EMPTY_CODE_DIGEST,
   type WorkspacePathDigestResult,
 } from "./loop-workspace-digest.js";
