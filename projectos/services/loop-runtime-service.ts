@@ -1480,8 +1480,7 @@ function stepActionNode(
       offlineKind === "slack" ||
       offlineKind === "feishu" ||
       offlineKind === "lark" ||
-      offlineKind === "sentry" ||
-      offlineKind === "github"
+      offlineKind === "sentry"
         ? invokeOfflineConnector(
             describeOfflineConnector(
               offlineKind,

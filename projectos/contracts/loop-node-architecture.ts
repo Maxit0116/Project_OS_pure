@@ -73,6 +73,13 @@ export const LOOP_ACTION_INTEGRATIONS = [
   "lark",
   "sentry",
   "gmail",
+  /** Batch2/3 catalog vendors — same Action schema; settle via connector path. */
+  "linear",
+  "jira_cloud",
+  "notion",
+  "vercel",
+  "supabase",
+  "posthog",
 ] as const;
 export type LoopActionIntegration = (typeof LOOP_ACTION_INTEGRATIONS)[number];
 
