@@ -269,15 +269,13 @@ export function captureWorkspaceIdentity(
   if (!hasGit) {
     const walked = walkNonGitSources(workspaceRoot);
     const incompleteReasons = [...walked.incompleteReasons];
-    const codeDigestStatus: CodeDigestStatus =
-      incompleteReasons.length === 0 && walked.entries.length > 0
-        ? "complete"
-        : "incomplete";
     if (walked.entries.length === 0 && incompleteReasons.length === 0) {
       incompleteReasons.push("nongit_no_source_files");
     }
     const contentMaterial = stableStringify(walked.entries);
     const codeDigest = hashText(`nongit-content:${contentMaterial}`);
+    const status: CodeDigestStatus =
+      incompleteReasons.length === 0 ? "complete" : "incomplete";
     return {
       identityKind: "workspace_path",
       workspaceRoot,
@@ -287,8 +285,7 @@ export function captureWorkspaceIdentity(
       identityDigest,
       workspaceDirtyDigest: codeDigest,
       codeDigest,
-      codeDigestStatus:
-        incompleteReasons.length === 0 ? "complete" : "incomplete",
+      codeDigestStatus: status,
       incompleteReasons,
     };
   }
