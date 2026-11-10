@@ -9651,7 +9651,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           },
         );
         const instance = started.instances[started.instances.length - 1];
-        return { instanceId: instance?.id };
+        return instance?.id ? { instanceId: instance.id } : {};
       },
       { max: options?.max ?? 50 },
     );

@@ -224,11 +224,11 @@ export function drainOfflineLoopEventQueue(
         ...(entry.payload ? { payload: entry.payload } : {}),
       });
       const at = nowIso();
+      const { lastError: _drop, ...rest } = entry;
       entries[i] = {
-        ...entry,
+        ...rest,
         status: "drained",
         updatedAt: at,
-        lastError: undefined,
         ...(started?.instanceId ? { drainedInstanceId: started.instanceId } : {}),
       };
       drained.push(entries[i]!);
