@@ -200,6 +200,7 @@ interface LoopGraphStore {
   preflightBusy: boolean
   setRunBranch: (branch: string) => void
   addRunMaterial: (material: LoopTaskMaterial) => void
+  replaceRunMaterial: (materialId: string, material: LoopTaskMaterial) => void
   removeRunMaterial: (materialId: string) => void
   clearRunMaterials: () => void
   runPreflight: () => Promise<void>
@@ -230,13 +231,13 @@ function patchDraftDocument(
   document: LoopGraphDocument,
   draft: IntentGraph,
 ): LoopGraphDocument {
-  const revisionChanged = draft.revision !== document.draft.revision
+  // Keep pending AI offer after manual revision bumps so UI can mark it stale
+  // (data-loop-graph-edit-offer-stale) and Accept is disabled; server still
+  // rejects mismatched baseRevision if Accept is forced.
   return {
     ...document,
     draft,
     updatedAt: new Date().toISOString(),
-    // Manual canvas/save bumps revision — drop AI offer so Accept cannot overwrite.
-    ...(revisionChanged ? { pendingGraphEditOffer: undefined } : {}),
   }
 }
 
@@ -1544,6 +1545,13 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   addRunMaterial: (material) =>
     set((state) => ({
       runMaterials: [...state.runMaterials, material],
+      preflightResult: null,
+    })),
+  replaceRunMaterial: (materialId, material) =>
+    set((state) => ({
+      runMaterials: state.runMaterials.map((item) =>
+        item.id === materialId ? material : item,
+      ),
       preflightResult: null,
     })),
   removeRunMaterial: (materialId) =>

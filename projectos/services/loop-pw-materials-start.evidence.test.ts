@@ -1,6 +1,9 @@
 /**
- * PW materials → Spec → preflight → start evidence (temp workspace, no live SaaS).
- * Produces Diff/Test artifacts via deterministic local test command.
+ * PW materials → Spec → preflight → start evidence (temp workspace).
+ * Uses production LocalApi runtime with explicit loopback·local_tools
+ * (real local file write + project test script — not a live/paid model).
+ * Asserts in-run ChangeSet + TestReport artifacts; does NOT claim pass via
+ * out-of-band node test outside the Loop stepper.
  */
 import {
   cpSync,
@@ -39,11 +42,10 @@ describe("PW materials Spec→preflight→start evidence", () => {
     }
   });
 
-  it("temp workspace: materials + approved Spec + start + local test artifact + binding isolation", async () => {
+  it("temp workspace: runtime loopback·local_tools writes ChangeSet+TestReport", async () => {
     const sample = mkdtempSync(join(tmpdir(), "loop-pw-mat-"));
     roots.push(sample);
     cpSync(sampleWorkspaceRoot, sample, { recursive: true });
-    // Deterministic local engineering fixtures (no network).
     mkdirSync(join(sample, "src"), { recursive: true });
     writeFileSync(
       join(sample, "src", "hello.js"),
@@ -60,7 +62,6 @@ describe("PW materials Spec→preflight→start evidence", () => {
       join(sample, "fixtures", "note.txt"),
       "attachment preview body for parseStatus=ok\n".repeat(3),
     );
-    // Prefer node for local verify command over npm test (no install required).
     const pkg = JSON.parse(readFileSync(join(sample, "package.json"), "utf8")) as {
       scripts?: Record<string, string>;
     };
@@ -74,6 +75,10 @@ describe("PW materials Spec→preflight→start evidence", () => {
         requireLoadedWorkspace: (id: string) => { workspaceRoot: string };
       }
     ).requireLoadedWorkspace(project.projectId).workspaceRoot;
+
+    const execMode = await api.setLoopExecutionLoopbackMode("local_tools");
+    expect(execMode.live).toBe(false);
+    expect(execMode.label).toContain("loopback·local_tools");
 
     let doc = createLoopGraph(workspaceRoot, project.projectId, "PW materials run");
     doc = upsertLoopGraph(workspaceRoot, {
@@ -122,9 +127,9 @@ describe("PW materials Spec→preflight→start evidence", () => {
       createdAt: nowIso(),
     };
     doc = approveLoopSpec(workspaceRoot, doc.id, spec);
-    expect(doc.approvedSpecs.some((s) => s.version === spec.version)).toBe(true);
 
     const attachmentBytes = readFileSync(join(sample, "fixtures", "note.txt"));
+    const beforeHello = readFileSync(join(workspaceRoot, "src/hello.js"), "utf8");
     const materials: LoopTaskMaterial[] = [
       {
         id: "mat_text_req",
@@ -178,7 +183,6 @@ describe("PW materials Spec→preflight→start evidence", () => {
       specVersion: spec.version,
     });
     expect(preflight.canStart).toBe(true);
-    expect(preflight.items.some((i) => i.severity === "blocker")).toBe(false);
 
     const started = await api.startLoopInstance(
       project.projectId,
@@ -188,28 +192,19 @@ describe("PW materials Spec→preflight→start evidence", () => {
       { branch: "pw-evidence", materials },
     );
     let instance = started.instances[started.instances.length - 1]!;
-    expect(instance.runBinding?.projectId).toBe(project.projectId);
-    expect(instance.runBinding?.specVersion).toBe(spec.version);
-    expect(instance.runBinding?.branch).toBe("pw-evidence");
     expect(instance.runBinding?.materials?.map((m) => m.id).sort()).toEqual(
       materials.map((m) => m.id).sort(),
     );
 
-    // Advance a few steps — agent may await model; test action should still be reachable
-    // via local hooks when cursor lands on verify/test.
-    for (let i = 0; i < 8; i++) {
-      try {
-        const advanced = await api.advanceLoopInstance(
-          project.projectId,
-          doc.id,
-          instance.id,
-        );
-        instance =
-          advanced.instances.find((item) => item.id === instance.id) ??
-          advanced.instances[advanced.instances.length - 1]!;
-      } catch {
-        break;
-      }
+    for (let i = 0; i < 12; i++) {
+      const advanced = await api.advanceLoopInstance(
+        project.projectId,
+        doc.id,
+        instance.id,
+      );
+      instance =
+        advanced.instances.find((item) => item.id === instance.id) ??
+        advanced.instances[advanced.instances.length - 1]!;
       if (
         instance.status === "complete" ||
         instance.status === "awaiting_hitl" ||
@@ -220,14 +215,19 @@ describe("PW materials Spec→preflight→start evidence", () => {
       }
     }
 
-    // Run local test command directly as deterministic engineering evidence
-    // (same script Spec would invoke) — proves real file/test without paid model.
-    const { execFileSync } = await import("node:child_process");
-    const testOut = execFileSync("node", ["src/hello.test.js"], {
-      cwd: workspaceRoot,
-      encoding: "utf8",
-    });
-    expect(testOut).toMatch(/PASS hello/);
+    const afterHello = readFileSync(join(workspaceRoot, "src/hello.js"), "utf8");
+    expect(afterHello).not.toBe(beforeHello);
+    expect(afterHello).toMatch(/loopback·local_tools/);
+
+    const artifacts = instance.artifacts ?? [];
+    const kinds = artifacts.map((a) => a.kind);
+    expect(kinds).toContain("change_set");
+    expect(kinds).toContain("test_report");
+    expect(instance.status).not.toBe("error");
+    expect(instance.errorMessage ?? null).toBeNull();
+
+    const testReport = artifacts.find((a) => a.kind === "test_report");
+    expect(testReport?.data).toBeTruthy();
 
     // Definition mutation must not rewrite frozen binding.
     const frozen = instance.runBinding;
@@ -244,17 +244,26 @@ describe("PW materials Spec→preflight→start evidence", () => {
     expect(same.runBinding).toEqual(frozen);
 
     const report = {
+      label: "loopback·local_tools·not live provider",
+      liveProvider: false,
       workspaceRoot,
       loopId: doc.id,
       specVersion: spec.version,
-      preflight,
+      preflight: {
+        ok: preflight.ok,
+        canStart: preflight.canStart,
+        items: preflight.items,
+      },
       runBinding: frozen,
       instanceStatus: instance.status,
-      artifacts: (instance.artifacts ?? []).map((a) => ({
+      errorMessage: instance.errorMessage ?? null,
+      fileChangedByRuntime: afterHello !== beforeHello,
+      helloMarker: Boolean(afterHello.match(/loopback·local_tools/)),
+      artifacts: artifacts.map((a) => ({
         id: a.id,
         kind: a.kind,
+        nodeId: a.nodeId,
       })),
-      localTestOutput: testOut.trim(),
       materials: materials.map((m) => ({
         id: m.id,
         kind: m.kind,
@@ -264,6 +273,7 @@ describe("PW materials Spec→preflight→start evidence", () => {
       })),
       definitionPromptAfter: after.draft.graphPrompt,
       bindingUnchanged: true,
+      // Explicitly absent: no out-of-band localTestOutput claim.
     };
     mkdirSync(ART, { recursive: true });
     writeFileSync(

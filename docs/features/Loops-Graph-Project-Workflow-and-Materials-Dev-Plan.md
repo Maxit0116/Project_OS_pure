@@ -148,8 +148,8 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 |----|--------|------|------|
 | PW-1 | 项目内选择已保存流程并启动 | 计划 | — |
 | PW-2 | Run 绑定 project/repo/workspace/branch/codeDigest/specVersion | **contract 初版** / 产品路径待验 | LocalApi start 接线 RunBinding 子集；完整字段 **未齐** |
-| PW-3 | 预检：缺配置 / 分支 / Agent / 审批点列表，确认后才开跑 | **contract** + **Electron UI 首闭环** + **隔离 temp workspace 证据测**（`loop-pw-materials-start.evidence.test.ts`：approved Spec→preflight `canStart`→start；无 Spec 禁用 ≠ 本切片通过条件） / 完整 Diff·Verify UI 手工 E2E 待验 | `LoopRunMaterialsPanel` + IPC；**非** store 预写假通过；审批通过 ≠ 开跑 |
-| PW-4 | 隔离工作区编码+测试+人工；产出 Diff/TestReport/Preview 或 PR | **contract** 最小链：temp repo 本地 `node` 单测 PASS + runBinding 材料快照隔离；Diff/Test UI·产物面板 **待验**；live/外发 **未验** | AgentRun + Verify + GitHub settle **契约/已有**；项目手动 UI E2E **待验** |
+| PW-3 | 预检：缺配置 / 分支 / Agent / 审批点列表，确认后才开跑 | **contract** + Electron 材料/预检面板 + 孤儿审批闸 **blocker**；temp 证据测 Spec→preflight→start；无 Spec 禁用 ≠ 通过条件 | `LoopRunMaterialsPanel` + `validateApprovalGateWiring`；审批通过 ≠ 开跑 |
+| PW-4 | 隔离工作区编码+测试+人工；产出 Diff/TestReport/Preview 或 PR | **实现/证据**：`setLoopExecutionLoopbackMode('local_tools')`（**loopback·local_tools·not live provider**）生产 stepper 写文件→ChangeSet→跑 package test→TestReport；`instanceStatus=complete`；**禁止** run 外单测冒充。Diff/Test UI 面板 E2E **工程待续**；live 付费模型 **未验** | LocalApi settle + loopback host；GitHub 外发 **未验** |
 | PW-5 | 失败保留证据可续；cancel/recover | 部分实现 | checkpoint / cancel **已有已测**；项目路径 **待验** |
 | PW-6 | 编辑定义不污染运行中 Instance 快照 | 实现（底座） / 待验（产品路径） | Spec 冻结 D5/GC-D8 |
 | PW-7 | Issue/PR/选中代码/错误上下文快捷调用同 run | 计划 | — |
@@ -159,9 +159,9 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 
 | ID | 验收项 | 状态 | 证据 |
 |----|--------|------|------|
-| TM-1 | 文字任务描述 | **contract** + Electron 暂存文字材料 UI + **证据测** text `parseStatus=ok` 入 runBinding；完整材料卡/多格式 Pure **待验** | `loop-task-materials` + gmail adapter + `LoopRunMaterialsPanel` |
+| TM-1 | 文字任务描述 | **实现**：材料卡预览/替换/错误 + text/`project_ref`/`file` 入 runBinding；多格式 Pure **分期** | `LoopRunMaterialsPanel` |
 | TM-2 | 图片用途标注 + 不支持提示 | 计划 | — |
-| TM-3 | 文件/API/log 卡片 + 解析状态 | **contract** + 证据测：`file` 附件 plaintext preview/`parseStatus=ok` + `project_ref` 入 runBinding；图片/表格/URL 等 **诚实分期**；URL 安全限制 **不放宽**；UI 多格式卡 **待验** | schema fields + `loop-pw-materials-start.evidence.test.ts` |
+| TM-3 | 文件/API/log 卡片 + 解析状态 | **实现首批**：plaintext 预览/`unsupported`/`failed` 错误态 + 替换；图片/表格/URL **诚实分期**；URL 安全限制 **不放宽** | `LoopRunMaterialsPanel` + schema |
 | TM-4 | CSV/XLSX sheet/列/范围 + 角色 | 计划 | — |
 | TM-5 | URL 来源 + 鉴权/读取失败 + SSRF 默认拒内网 | **contract**（`loop-url-fetch-policy`）；生产读取 **未接** | bugs H3 |
 | TM-6 | 项目文件/C4/测试引用免重复上传 | 计划（C4 引用底座已有） | — |
@@ -172,8 +172,8 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 
 | ID | 验收项 | 状态 |
 |----|--------|------|
-| DE-1 | DutyCard 类型表单 Agent/Action/Logic/Human | **实现** + 云端 Electron 暗色实机：dataset/style 已读（`--tech-bg`/`--tech-text-primary`）；A/A/L/H + Approval 字段可见；SaaS 未配置徽标可见；截图路径见 Six-Goals 证据段 |
-| DE-2 | Provider authoring loopback：局部 patch 保 ID/边；Accept/Dismiss/Undo/Redo；陈旧；关图/重开应用 | **contract** + Electron **完整四步**（**loopback·not live**）：空→scaffold Accept→手工 retry=2→timeout=7777→insert `n_loopback_approval` Accept；Dismiss/Undo/Redo/stale；overlay+**应用重开** ID/边/timeout/retry/approval 一致；disk 快照；付费 live **未验** |
+| DE-1 | DutyCard 类型表单 Agent/Action/Logic/Human | **实现** + 暗色实机 style 已读；SaaS 截字/密度局部整理（wrap + node z-index）；截图见 Six-Goals |
+| DE-2 | Provider authoring loopback：空图生成；审批闸重连边；陈旧负例 | **实现/证据**（**loopback·not live**）：`新建 Loop` 空图→scaffold(+6/−0)→retry=2→timeout=7777→`approval_insert` 重连 `e4:coder→approval`/`e_appr_e4:approval→test`；手工改草稿后 offer `stale=true` Accept 禁用且 7777/retry2 保留；服务端 stale reject 单测；付费 live **未验** |
 | SEC-1 | High-risk / catalog_only 不可调用方绕过 | **contract** |
 | SEC-2 | 非幂等 POST 不盲重试；timeout/abort unknown；脱敏全链 | **contract** |
 | CON-1 | Batch1 GitHub/Slack/Feishu/Lark/Sentry | **contract** / live未验 |

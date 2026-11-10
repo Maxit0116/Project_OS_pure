@@ -172,8 +172,13 @@ import {
   resolveLoopLeafWriteScope,
   type LoopExecutionHooks,
 } from "./loop-execution.js";
+import { LoopExecutionLoopbackHost } from "./loop-execution-loopback.js";
 import { createWorkspacePathDigester } from "./loop-approval-binding.js";
 import { getLoopGraph } from "./loop-graph-service.js";
+
+function createLoopExecutionLoopbackHost(): LoopExecutionLoopbackHost {
+  return new LoopExecutionLoopbackHost();
+}
 import {
   evaluateTerminalPolicyDecision,
   isHighRiskTerminalCommand,
@@ -1005,6 +1010,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     { workspace: LoadedProjectOSWorkspace; runId: string }
   >();
   private readonly fallbackNotices = new Map<string, string>();
+  /** Explicit loopback·local_tools host (not live/paid model). */
+  private readonly loopExecutionLoopback = createLoopExecutionLoopbackHost();
   private readonly codeFileUnderstandingInflight = new Map<
     string,
     Promise<CodeFileUnderstandingEntry>
@@ -8955,23 +8962,34 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       : doc?.approvedSpecs[doc.approvedSpecs.length - 1];
     return this.loopExecutionHooks(workspace, instance?.featureNodeId, {
       allowConcurrentLoopRuns: spec?.parallelMode === "multi_run",
+      ...(instance?.runBinding?.materials
+        ? { materials: instance.runBinding.materials }
+        : {}),
     });
   }
 
   private loopExecutionHooks(
     workspace: LoadedProjectOSWorkspace,
     featureNodeId?: string,
-    options?: { allowConcurrentLoopRuns?: boolean },
+    options?: {
+      allowConcurrentLoopRuns?: boolean;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+    },
   ): LoopExecutionHooks {
     const allowConcurrentLoopRuns = Boolean(options?.allowConcurrentLoopRuns);
-    const leaf = resolveLoopLeafWriteScope(
-      workspace.graph.nodes.map((node) => ({
-        id: node.id,
-        ...(node.children !== undefined ? { children: node.children } : {}),
-        linkedFiles: node.linkedFiles.map((file) => ({ path: file.path })),
-      })),
-      featureNodeId,
-    );
+    const graphNodes = workspace.graph.nodes.map((node) => ({
+      id: node.id,
+      ...(node.children !== undefined ? { children: node.children } : {}),
+      linkedFiles: node.linkedFiles.map((file) => ({ path: file.path })),
+    }));
+    const leaf =
+      this.loopExecutionLoopback.mode === "local_tools"
+        ? this.loopExecutionLoopback.resolveLeaf({
+            nodes: graphNodes,
+            ...(featureNodeId ? { featureNodeId } : {}),
+            ...(options?.materials ? { materials: options.materials } : {}),
+          })
+        : resolveLoopLeafWriteScope(graphNodes, featureNodeId);
     const emptyMemory: MemoryInjectionSnapshot = {
       markdown: "",
       hash: hashMemoryIndex(""),
@@ -8979,7 +8997,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       entryCount: 0,
       skippedStaleCount: 0,
     };
-    return {
+    const productionHooks: LoopExecutionHooks = {
       leaf,
       digestWorkspacePaths: createWorkspacePathDigester(workspace.workspaceRoot),
       executeGithubOperation: (input) => {
@@ -9280,6 +9298,18 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         });
       },
     };
+
+    if (this.loopExecutionLoopback.mode !== "local_tools") {
+      return productionHooks;
+    }
+    // Explicit loopback·local_tools — real local file/test tools, not live provider.
+    return this.loopExecutionLoopback.buildHooks({
+      workspaceRoot: workspace.workspaceRoot,
+      nodes: graphNodes,
+      ...(featureNodeId ? { featureNodeId } : {}),
+      ...(options?.materials ? { materials: options.materials } : {}),
+      fallback: productionHooks,
+    });
   }
 
   /**
@@ -9336,6 +9366,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         ...(version ? { specVersion: version } : {}),
         execution: this.loopExecutionHooks(workspace, selectedFeatureNodeId, {
           allowConcurrentLoopRuns: spec?.parallelMode === "multi_run",
+          ...(options?.materials ? { materials: options.materials } : {}),
         }),
         launch: { kind: "manual" },
         projectId,
@@ -9625,6 +9656,23 @@ export class ProjectOSLocalApi implements ProjectOSApi {
    * `off` clears override so unconfigured provider fails closed.
    * `demo_edit` returns deterministic JSON patches from the user prompt text.
    */
+  /**
+   * Explicit loopback·local_tools for Loop implement/verify (real local file +
+   * project test script). Not a live/paid model provider.
+   */
+  async setLoopExecutionLoopbackMode(
+    mode: "off" | "local_tools",
+  ): Promise<{ mode: "off" | "local_tools"; live: false; label: string }> {
+    const next = this.loopExecutionLoopback.setMode(mode);
+    return {
+      ...next,
+      label:
+        mode === "local_tools"
+          ? "loopback·local_tools·not live provider"
+          : "loopback·off",
+    };
+  }
+
   async setLoopAuthoringLoopbackMode(
     mode: "off" | "demo_edit",
   ): Promise<{ mode: "off" | "demo_edit"; live: false }> {
@@ -9659,27 +9707,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         }
         if (wantsApproval) {
           return {
-            kind: "graph",
-            summary: "loopback: insert human approval node",
+            kind: "approval_insert",
+            summary: "loopback: insert human approval node on path",
             assistantMessage:
-              "[loopback·not live] Inserted human approval; review Accept/Dismiss.",
-            draft: {
-              revision: 1,
-              graphPrompt: "loopback demo",
-              nodes: [
-                {
-                  id: "n_loopback_approval",
-                  title: "Approval gate",
-                  prompt: "Approve before continue",
-                  type: "human",
-                  humanMode: "approval",
-                  humanAssignee: "operator",
-                  position: { x: 320, y: 180 },
-                },
-              ],
-              edges: [],
-            },
-            targetedNodeIds: ["n_loopback_approval"],
+              "[loopback·not live] Inserted human approval on depends path (rewired edges); review Accept/Dismiss.",
+            approvalNodeId: "n_loopback_approval",
           };
         }
         const wantsScaffold =

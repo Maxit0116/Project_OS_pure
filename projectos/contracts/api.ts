@@ -1088,6 +1088,13 @@ export interface ProjectOSApi {
   setLoopAuthoringLoopbackMode(
     mode: "off" | "demo_edit",
   ): Promise<{ mode: "off" | "demo_edit"; live: false }>;
+  /**
+   * Explicit loopback·local_tools for Loop implement/verify (local file + test).
+   * Not a live/paid model.
+   */
+  setLoopExecutionLoopbackMode(
+    mode: "off" | "local_tools",
+  ): Promise<{ mode: "off" | "local_tools"; live: false; label: string }>;
   answerLoopGoalClarification(
     projectId: string,
     loopId: string,

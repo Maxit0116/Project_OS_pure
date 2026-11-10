@@ -392,7 +392,26 @@ export default function LoopGoalComposer() {
       </div>
 
       {offer ? (
-        <div className={styles.offerCard} data-loop-graph-edit-offer="">
+        <div
+          className={styles.offerCard}
+          data-loop-graph-edit-offer=""
+          data-loop-graph-edit-offer-stale={
+            typeof offer.baseRevision === 'number' &&
+            offer.baseRevision !== loopDocument?.draft.revision
+              ? 'true'
+              : 'false'
+          }
+        >
+          {typeof offer.baseRevision === 'number' &&
+          offer.baseRevision !== loopDocument?.draft.revision ? (
+            <p
+              className={styles.offerStale}
+              data-loop-graph-edit-offer-stale-banner=""
+              role="status"
+            >
+              {ts('chat.loopGraph.graphEditOfferStale')}
+            </p>
+          ) : null}
           <p>{offer.reason}</p>
           {offer.diff?.summaryLines?.length ? (
             <ul className={styles.offerDiff} data-loop-graph-edit-diff="">
@@ -413,8 +432,13 @@ export default function LoopGoalComposer() {
             <button
               type="button"
               className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
-              disabled={authoringBusy}
+              disabled={
+                authoringBusy ||
+                (typeof offer.baseRevision === 'number' &&
+                  offer.baseRevision !== loopDocument?.draft.revision)
+              }
               onClick={() => void acceptGraphEditOffer()}
+              data-loop-graph-edit-accept=""
             >
               {ts('chat.loopGraph.acceptGraphEdit')}
             </button>
@@ -423,6 +447,7 @@ export default function LoopGoalComposer() {
               className={styles.actionButton}
               disabled={authoringBusy}
               onClick={() => void dismissGraphEditOffer()}
+              data-loop-graph-edit-dismiss=""
             >
               {ts('chat.loopGraph.dismissGraphEdit')}
             </button>

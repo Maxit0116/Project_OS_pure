@@ -22,6 +22,10 @@ import {
   validateLoopNodeConfig,
   type IntentGraphNodePatch,
 } from "./loop-node-config-schema.js";
+import {
+  insertApprovalGate,
+  validateApprovalGateWiring,
+} from "./loop-approval-insert.js";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -81,6 +85,16 @@ const ProviderGraphReplaceSchema = z
   })
   .strict();
 
+const ProviderApprovalInsertSchema = z
+  .object({
+    kind: z.literal("approval_insert"),
+    afterNodeId: z.string().min(1).optional(),
+    approvalNodeId: z.string().min(1).optional(),
+    summary: z.string().trim().min(1).max(500),
+    assistantMessage: z.string().trim().min(1).max(2000).optional(),
+  })
+  .strict();
+
 const ProviderClarifySchema = z
   .object({
     kind: z.literal("clarify"),
@@ -116,6 +130,7 @@ export const LoopAuthoringProviderResponseSchema = z.discriminatedUnion("kind", 
   ProviderAskResponseSchema,
   ProviderNodePatchSchema,
   ProviderGraphReplaceSchema,
+  ProviderApprovalInsertSchema,
   ProviderClarifySchema,
   ProviderRejectSchema,
 ]);
@@ -363,6 +378,48 @@ export async function runLoopAuthoringProvider(input: {
       draftGoalContext,
       needsClarification: openQuestions.some((q) => !q.answer?.trim()),
     };
+  }
+
+  if (parsed.kind === "approval_insert") {
+    try {
+      const proposed = insertApprovalGate(input.draft, {
+        ...(parsed.afterNodeId ? { afterNodeId: parsed.afterNodeId } : {}),
+        ...(parsed.approvalNodeId
+          ? { approvalNodeId: parsed.approvalNodeId }
+          : {}),
+      });
+      const wiring = validateApprovalGateWiring(proposed);
+      const blockers = wiring.filter((issue) => issue.code === "approval_orphaned");
+      if (blockers.length > 0) {
+        return {
+          source: "provider",
+          steps,
+          assistantMessage: blockers.map((b) => b.message).join("; "),
+          rejected: { code: "invalid_patch", message: blockers[0]!.message },
+        };
+      }
+      return {
+        source: "provider",
+        steps,
+        assistantMessage:
+          parsed.assistantMessage ??
+          `${parsed.summary} Review the proposed graph diff, then Accept or Dismiss.`,
+        proposedDraft: {
+          ...proposed,
+          revision: input.draft.revision + 1,
+        },
+        summary: parsed.summary,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "approval insert failed";
+      return {
+        source: "provider",
+        steps,
+        assistantMessage: message,
+        rejected: { code: "invalid_patch", message },
+      };
+    }
   }
 
   if (parsed.kind === "node_patch") {

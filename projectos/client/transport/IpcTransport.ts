@@ -1940,6 +1940,12 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("sendLoopAuthoringTurn", projectId, loopId, request);
   }
 
+  setLoopExecutionLoopbackMode(
+    mode: "off" | "local_tools",
+  ): Promise<{ mode: "off" | "local_tools"; live: false; label: string }> {
+    return this.invoke("setLoopExecutionLoopbackMode", mode);
+  }
+
   setLoopAuthoringLoopbackMode(
     mode: "off" | "demo_edit",
   ): Promise<{ mode: "off" | "demo_edit"; live: false }> {

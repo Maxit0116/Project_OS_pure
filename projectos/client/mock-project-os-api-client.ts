@@ -643,6 +643,14 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     return mockSendLoopAuthoringTurn(projectId, loopId, request);
   }
 
+  override async setLoopExecutionLoopbackMode(
+    _mode: "off" | "local_tools",
+  ): Promise<{ mode: "off" | "local_tools"; live: false; label: string }> {
+    throw new Error(
+      "setLoopExecutionLoopbackMode requires Electron LocalApi host (loopback·local_tools).",
+    );
+  }
+
   override async setLoopAuthoringLoopbackMode(
     mode: "off" | "demo_edit",
   ): Promise<{ mode: "off" | "demo_edit"; live: false }> {

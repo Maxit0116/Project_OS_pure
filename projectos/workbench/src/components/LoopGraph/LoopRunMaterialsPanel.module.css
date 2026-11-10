@@ -84,6 +84,60 @@
   font-size: 12px;
 }
 
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  font-size: 12px;
+}
+
+.cardActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.preview {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.parseMsg,
+.fileError,
+.replaceHint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--tech-warning, #c9a227);
+}
+
+.fileError {
+  color: var(--tech-danger, #f87171);
+}
+
+.linkish {
+  border: none;
+  background: transparent;
+  color: var(--tech-accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 0;
+}
+
 .rowMain {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

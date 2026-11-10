@@ -1590,6 +1590,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.setLoopAuthoringLoopbackMode(mode);
   }
 
+  setLoopExecutionLoopbackMode(mode: "off" | "local_tools") {
+    return this.transport.setLoopExecutionLoopbackMode(mode);
+  }
+
   answerLoopGoalClarification(
     projectId: string,
     loopId: string,

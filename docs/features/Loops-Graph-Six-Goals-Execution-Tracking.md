@@ -49,8 +49,8 @@
 
 | 切片 | 状态 |
 |------|------|
-| PW Project run binding / 预检 / 项目手动 E2E | **S2 contract** + Electron 材料/预检面板 + **temp workspace 证据测**（Spec→preflight→start + materials 入 runBinding；不以「无 Spec Start 禁用」当通过）；Diff/Test UI 手工 E2E **待验** |
-| TM TaskMaterial schema + Pure 输入复用 | **S2 contract**（schema + Gmail→material）+ Electron 文字材料 + 证据测 text/`project_ref`/`file` preview；图片/表格/URL **分期**；多格式 Pure 卡 **待验** |
+| PW Project run binding / 预检 / 项目手动 E2E | **实现/证据**：temp Spec→preflight→`local_tools` runtime 写文件→ChangeSet+TestReport（`instanceStatus=complete`）；Diff/Test UI E2E **工程待续**（非用户侧阻塞） |
+| TM TaskMaterial schema + Pure 输入复用 | **实现首批**材料卡预览/替换/错误 + text/`project_ref`/`file`；图片/表格/URL **分期** |
 | URL SSRF 默认拒内网 | **contract**（`loop-url-fetch-policy`）；生产读取未接 |
 | 离线事件全天排队 | **未实现**（不可承诺） |
 
@@ -63,7 +63,7 @@
 | High-risk / catalog_only 强制 | **contract** |
 | 非幂等 POST 不盲重试；timeout/abort unknown；ledger | **contract** |
 | URL/header/body 脱敏 + fake-secret | **contract** |
-| Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现**；云端 Electron Overlay+DutyCard **已截**（暗色 dataset + `--tech-bg`/`--tech-text-primary` 已读；A/A/L/H+Approval 字段完整可见；SaaS 未配置徽标）；retry=2 + timeout=7777 + approval 插入后 **应用重开**一致；artifact：`/opt/cursor/artifacts/loops-a-*.png` + `loops-a-evidence.json`；**不得**用旧全浅空图冒充暗色验收 |
+| Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现**；暗色 style 已读保留；A2 空图+审批闸接线+陈旧负例：`/opt/cursor/artifacts/loops-a2-*.png` + `loops-a2-evidence.json` + `loops-a2-disk-snapshot.json`；B runtime：`loops-b-pw-materials-evidence.json`（complete + ChangeSet/TestReport）；**不得**用旧全浅空图或 run 外单测冒充 |
 | LocalApi→adapter→loopback settle | **实现**/contract 路径；live未验 |
 | Studio 旧「固定侧栏 Inspector」文首 vs DutyCard | **冲突未消**：Studio D3/LG-1.1 仍写侧栏；现行 UI 为 Overlay 内 DutyCard / Inspector empty hint——**不以旧 Studio 文首当已验收** |
 | GC 总勾选 / 发布门禁 | **未全勾**：GC-6.5/6.6、GC-7.2 总验收待收尾；**不得**宣称 GC 门禁已通过 |
@@ -108,8 +108,11 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 #   本切片相关 mock preflight / materials 类型已对齐，不扩无关全局重构。
 ```
 
-**DOM 开链（云端 Linux xvfb，非 Mac）**：真实 Electron LocalApi host；**完整四步 authoring**（**loopback·not live**）：scaffold Accept→手工 retry=2→timeout=7777→insert Human Approval Accept；Dismiss/Undo/Redo/stale；关图+**应用重开**断言 ID/边/参数；disk：`loops-a-disk-snapshot.json`；暗色 style 已读；DutyCard A/A/L/H+Approval；SaaS 未配置；证据 `/opt/cursor/artifacts/loops-a-*.png` + `loops-a-evidence.json` + `loops-b-pw-materials-evidence.json`。**不得**用旧全浅空图冒充暗色；无配置须明确失败（非静默 rules）。
+**DOM/Runtime 开链（云端 Linux xvfb，非 Mac）**：
+- Authoring A2（**loopback·not live**）：真空图→scaffold→retry=2→timeout=7777→`approval_insert` 重连边；陈旧 offer UI+服务端拒绝；证据 `loops-a2-*`。
+- Project B（**loopback·local_tools·not live provider**）：Spec→preflight→runtime 改文件→ChangeSet+TestReport；证据 `loops-b-pw-materials-evidence.json`（`instanceStatus=complete`，无 run 外单测冒充）。
+- Diff/Test UI E2E、多格式 Pure 卡属工程待续；**真外部阻塞**仅账号/OAuth/付费 live/外发/Mac。
 
-**graph 只读分叉**（不 rebase/merge/force）：tip `34af374`；merge-base `bec3dd7`。只读兼容审阅；集成注意 Overlay/runtime 手工合并。
+**graph 只读分叉**（不 rebase/merge/force）：tip `34af374`；merge-base `bec3dd7`。
 
 No merge / paid live / Mac / 真实外发 / 真 Gmail / 凭据授权。

@@ -8,6 +8,7 @@ import type {
   LoopSpec,
 } from "../contracts/loop-graph.js";
 import type { LoopTaskMaterial } from "../contracts/loop-task-materials.js";
+import { validateApprovalGateWiring } from "./loop-approval-insert.js";
 import { validateLoopNodeConfig } from "./loop-node-config-schema.js";
 import { classifyLoopMaterialUrl } from "./loop-url-fetch-policy.js";
 
@@ -127,6 +128,17 @@ export function preflightLoopRunStart(input: {
         nodeId: node.id,
       });
     }
+  }
+
+  // Approval gates must sit on depends paths — orphan decoration is a blocker.
+  for (const issue of validateApprovalGateWiring(input.document.draft)) {
+    items.push({
+      id: `pf_gate_${issue.code}_${issue.nodeId ?? "graph"}`,
+      severity: "blocker",
+      code: "human_gate",
+      message: issue.message,
+      ...(issue.nodeId ? { nodeId: issue.nodeId } : {}),
+    });
   }
 
   for (const material of input.materials ?? []) {

@@ -1696,6 +1696,14 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async setLoopExecutionLoopbackMode(
+    _mode: "off" | "local_tools",
+  ): Promise<{ mode: "off" | "local_tools"; live: false; label: string }> {
+    throw new Error(
+      "setLoopExecutionLoopbackMode requires Electron LocalApi host (loopback·local_tools).",
+    );
+  }
+
   async setLoopAuthoringLoopbackMode(
     _mode: "off" | "demo_edit",
   ): Promise<{ mode: "off" | "demo_edit"; live: false }> {

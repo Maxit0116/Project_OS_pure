@@ -266,6 +266,7 @@ const PROJECTOS_IPC_SIGNATURES = {
   advanceLoopInstance: ['string', 'string', 'string'],
   sendLoopAuthoringTurn: ['string', 'string', 'record'],
   setLoopAuthoringLoopbackMode: ['string'],
+  setLoopExecutionLoopbackMode: ['string'],
   answerLoopGoalClarification: ['string', 'string', 'array'],
   cancelLoopGoalClarification: ['string', 'string'],
   confirmLoopGoalContext: ['string', 'string'],

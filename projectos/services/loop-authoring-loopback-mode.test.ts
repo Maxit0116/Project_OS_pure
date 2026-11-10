@@ -52,7 +52,7 @@ describe("setLoopAuthoringLoopbackMode demo_edit", () => {
       user: ["mode: edit", "user_request: insert approval"].join("\n"),
     });
     const parsed = JSON.parse(raw) as { kind: string; summary?: string };
-    expect(parsed.kind).toBe("graph");
+    expect(parsed.kind).toBe("approval_insert");
     expect(parsed.summary).toMatch(/insert human approval/i);
     await api.setLoopAuthoringLoopbackMode("off");
   });

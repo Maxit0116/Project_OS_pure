@@ -98,19 +98,22 @@
 .loopSaaSNodeCard__name {
   font-size: 13px;
   font-weight: 650;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.25;
+  /* Prefer wrap over truncating vendor/op labels (Sentry Issues etc.). */
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  word-break: break-word;
 }
 
 .loopSaaSNodeCard__op {
   font-size: 11px;
   opacity: 0.72;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.25;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  word-break: break-word;
 }
 
 .loopSaaSNodeCard__badge {
