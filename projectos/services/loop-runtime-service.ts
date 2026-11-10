@@ -46,6 +46,15 @@ import {
   isApprovalChoice,
 } from "./loop-approval-binding.js";
 import {
+  assertAgentCallBudget,
+  recordAgentCallStart,
+  resolveAgentCallBudgetLimits,
+} from "./loop-agent-call-budget.js";
+import {
+  describeOfflineConnector,
+  invokeOfflineConnector,
+} from "./loop-connector-offline.js";
+import {
   architectureOf,
   conditionalOutgoing,
   controlIncomingIds,
@@ -1328,6 +1337,37 @@ function stepActionNode(
   if (arch.actionIntegration === "terminal") {
     return stepTerminalAction(doc, next, spec, node, execution, payload, Boolean(hasApproval));
   }
+  if (
+    arch.actionIntegration === "slack" ||
+    arch.actionIntegration === "feishu" ||
+    arch.actionIntegration === "lark" ||
+    arch.actionIntegration === "sentry"
+  ) {
+    // Brand presence ≠ executable — fail closed until connector is configured.
+    const descriptor = describeOfflineConnector(
+      arch.actionIntegration,
+      "unconfigured",
+    );
+    const blocked = invokeOfflineConnector(
+      descriptor,
+      arch.actionOperation ?? "post_message",
+    );
+    next = pushEvent(
+      {
+        ...next,
+        status: "error",
+        errorMessage: blocked.message.slice(0, 1000),
+        pendingActionPayload: undefined,
+        pendingApprovalBinding: undefined,
+      },
+      {
+        type: "node_failed",
+        nodeId: node.id,
+        message: blocked.message,
+      },
+    );
+    return replaceInstance(doc, next);
+  }
 
   next = pushArtifact(next, {
     nodeId: node.id,
@@ -1644,8 +1684,9 @@ export function preflightPendingGithubDispatch(
 
 /**
  * Block dispatch with zero HTTP — clear queue and re-require approval.
- * Never clears `in_flight` / journaled-unknown pending: wiping would let a later
- * approve create a second side effect after an ambiguous HTTP attempt.
+ * Never clears `http_started` / legacy `in_flight` / journaled-unknown pending:
+ * wiping would let a later approve create a second side effect.
+ * `preparing` (no transport yet) may clear.
  */
 export function denyPendingGithubOpBeforeHttp(
   doc: LoopGraphDocument,
@@ -1658,11 +1699,15 @@ export function denyPendingGithubOpBeforeHttp(
   const journaledUnknown = (pending.dispatchJournal ?? []).some(
     (item) => item.kind === "unknown",
   );
-  if (pending.dispatchState === "in_flight" || journaledUnknown) {
+  const httpMayHaveStarted =
+    pending.dispatchState === "http_started" ||
+    pending.dispatchState === "in_flight" ||
+    journaledUnknown;
+  if (httpMayHaveStarted) {
     const entry = {
       at: nowIso(),
       kind: "unknown" as const,
-      message: `deny-before-HTTP refused to clear in_flight/unknown: ${reason}`.slice(
+      message: `deny-before-HTTP refused to clear http_started/unknown: ${reason}`.slice(
         0,
         500,
       ),
@@ -1674,7 +1719,7 @@ export function denyPendingGithubOpBeforeHttp(
       cursorNodeId: pending.nodeId,
       pendingGithubOp: {
         ...pending,
-        dispatchState: "in_flight",
+        dispatchState: "http_started",
         dispatchJournal: [...(pending.dispatchJournal ?? []), entry].slice(-20),
       },
       updatedAt: nowIso(),
@@ -1716,25 +1761,85 @@ export function denyPendingGithubOpBeforeHttp(
   return replaceInstance(doc, blocked);
 }
 
-/** Mark pending op in_flight immediately before HTTP (crash → query, don't blind resend). */
-export function markPendingGithubOpInFlight(
+/** Mark preparing (token/import window) — no remote side effect yet. */
+export function markPendingGithubOpPreparing(
   doc: LoopGraphDocument,
   instanceId: string,
   attemptId: string,
 ): LoopGraphDocument {
   const instance = doc.instances.find((item) => item.id === instanceId);
   if (!instance?.pendingGithubOp) return doc;
-  if (instance.pendingGithubOp.dispatchState === "in_flight") return doc;
+  if (
+    instance.pendingGithubOp.dispatchState === "http_started" ||
+    instance.pendingGithubOp.dispatchState === "in_flight"
+  ) {
+    return doc;
+  }
+  const journal = [
+    ...(instance.pendingGithubOp.dispatchJournal ?? []),
+    {
+      at: nowIso(),
+      kind: "preparing" as const,
+      message: `Preparing dispatch ${attemptId}`,
+    },
+  ].slice(-20);
   return replaceInstance(doc, {
     ...instance,
     pendingGithubOp: {
       ...instance.pendingGithubOp,
-      dispatchState: "in_flight",
+      dispatchState: "preparing",
       dispatchAttemptId: attemptId,
-      httpAttemptedAt: nowIso(),
+      dispatchJournal: journal,
     },
     updatedAt: nowIso(),
   });
+}
+
+/**
+ * Atomic claim immediately before transport/push (crash → lookup, don't blind resend).
+ * Legacy alias: markPendingGithubOpInFlight.
+ */
+export function markPendingGithubOpHttpStarted(
+  doc: LoopGraphDocument,
+  instanceId: string,
+  attemptId: string,
+): LoopGraphDocument {
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance?.pendingGithubOp) return doc;
+  if (
+    instance.pendingGithubOp.dispatchState === "http_started" ||
+    instance.pendingGithubOp.dispatchState === "in_flight"
+  ) {
+    return doc;
+  }
+  const journal = [
+    ...(instance.pendingGithubOp.dispatchJournal ?? []),
+    {
+      at: nowIso(),
+      kind: "http_started" as const,
+      message: `HTTP/push claimed ${attemptId}`,
+    },
+  ].slice(-20);
+  return replaceInstance(doc, {
+    ...instance,
+    pendingGithubOp: {
+      ...instance.pendingGithubOp,
+      dispatchState: "http_started",
+      dispatchAttemptId: attemptId,
+      httpAttemptedAt: nowIso(),
+      dispatchJournal: journal,
+    },
+    updatedAt: nowIso(),
+  });
+}
+
+/** @deprecated Use markPendingGithubOpHttpStarted */
+export function markPendingGithubOpInFlight(
+  doc: LoopGraphDocument,
+  instanceId: string,
+  attemptId: string,
+): LoopGraphDocument {
+  return markPendingGithubOpHttpStarted(doc, instanceId, attemptId);
 }
 
 /**
@@ -1893,6 +1998,13 @@ function stepImplementNode(
     if (!leaf || !execution) {
       return failNode(doc, next, node.id, LOOP_FILES_NOT_ATTACHED, { spec });
     }
+    const budget = assertAgentCallBudget(
+      next,
+      resolveAgentCallBudgetLimits(spec),
+    );
+    if (!budget.ok) {
+      return failNode(doc, next, node.id, budget.reason, { spec });
+    }
     const implementRole: "implement" | "fix" =
       node.role === "fix" || node.repairMode ? "fix" : "implement";
     try {
@@ -1913,13 +2025,13 @@ function stepImplementNode(
       return failNode(doc, next, node.id, message, { spec });
     }
     const priorIds = activeRunIdsOf(next);
-    next = {
+    next = recordAgentCallStart({
       ...next,
       activeRunId: run.runId,
       activeRunNodeId: node.id,
       featureNodeId: leaf.featureNodeId,
       activeRunIds: [...new Set([...priorIds, run.runId])],
-    };
+    });
   }
 
   if (!run || !next.activeRunId) {
@@ -2057,15 +2169,23 @@ function stepVerifyNode(
   const entering =
     !(last?.type === "node_entered" && last.nodeId === nodeId);
   let working =
-    entering
+    entering && !instance.verificationCodeDigest
       ? pushEvent(
           { ...instance, cursorNodeId: nodeId },
-          { type: "node_entered", nodeId, message: specNode?.goal ?? "Verify" },
+          {
+            type: "node_entered",
+            nodeId,
+            message: specNode?.goal ?? "Verify",
+            ...(instance.activeRunId
+              ? { agentRunId: instance.activeRunId }
+              : {}),
+          },
         )
       : { ...instance, cursorNodeId: nodeId };
 
-  // Capture live delivery-scope digest at verification start (not ChangeSet self-stamp).
-  if (entering || !working.verificationCodeDigest) {
+  // Capture live delivery-scope digest once per verify attempt (not ChangeSet self-stamp).
+  // Do not re-snapshot on HITL re-entry — that would let new code + old evidence stamp.
+  if (!working.verificationCodeDigest) {
     const scope = accumulateDeliveryScope(working);
     if (scope.parseFailed || scope.emptyIllegal) {
       const next = pushEvent(
@@ -2152,88 +2272,67 @@ function stepVerifyNode(
     }
     // New verification session — do not inherit a prior evidence id.
     working = { ...working, verificationEvidenceId: undefined };
-  }
-
-  // Bind a verify-owned test run so we never stamp leftover implement evidence
-  // against a newly captured code digest (old cache + new code).
-  const ownsVerifyRun =
-    Boolean(working.activeRunId) && working.activeRunNodeId === nodeId;
-  if (!ownsVerifyRun) {
-    const leaf = execution?.leaf ?? null;
-    if (leaf && execution) {
+    // Kick read-only configured tests against the bound AgentRun (no writable agent).
+    if (working.activeRunId && execution?.requestVerification) {
       try {
-        const testRun = execution.startAgentRun({
-          specNodeId: nodeId,
-          role: "fix",
-          featureNodeId: leaf.featureNodeId,
-          filePath: leaf.filePath,
-          goal: specNode?.goal ?? "Verify",
-          agentRole: "tester",
-        });
-        const priorIds = activeRunIdsOf(working);
-        working = {
-          ...working,
-          activeRunId: testRun.runId,
-          activeRunNodeId: nodeId,
-          featureNodeId: leaf.featureNodeId,
-          activeRunIds: [...new Set([...priorIds, testRun.runId])],
-          status: "running",
-          hitlQuestionIds: undefined,
-        };
+        execution.requestVerification(working.activeRunId);
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : LOOP_FILES_NOT_ATTACHED;
-        return failNode(doc, working, nodeId, message, { spec });
+          error instanceof Error ? error.message : "Verification request failed";
+        const next = pushEvent(
+          {
+            ...working,
+            status: "awaiting_hitl",
+            hitlQuestionIds: ["verification_not_run"],
+          },
+          {
+            type: "awaiting_hitl",
+            nodeId,
+            message: `Verification could not start: ${message.slice(0, 300)}`,
+          },
+        );
+        return replaceInstance(doc, next);
       }
-    } else if (working.activeRunId) {
-      const next = pushEvent(
-        {
-          ...working,
-          status: "awaiting_hitl",
-          hitlQuestionIds: ["verification_not_run"],
-          verificationEvidenceId: undefined,
-        },
-        {
-          type: "awaiting_hitl",
-          nodeId,
-          message:
-            "Refuse to stamp prior-node evidence against verify snapshot; attach leaf and re-run tests",
-          ...(working.activeRunId ? { agentRunId: working.activeRunId } : {}),
-        },
-      );
-      return replaceInstance(doc, next);
     }
   }
 
-  const runView =
-    working.activeRunId && execution
-      ? execution.readRun(working.activeRunId)
-      : null;
-  if (
-    runView &&
-    (runView.status === "queued" || runView.status === "running")
-  ) {
-    const evidenceWhileRunning = working.activeRunId
-      ? execution?.readEvidence(working.activeRunId) ?? null
-      : null;
-    // Stay running only while evidence has not arrived yet. Explicit not_run
-    // falls through to HITL (verification_not_run).
-    if (
-      !evidenceWhileRunning ||
-      evidenceWhileRunning.runId !== working.activeRunId
-    ) {
-      return replaceInstance(doc, {
+  if (!working.activeRunId) {
+    const next = pushEvent(
+      {
         ...working,
-        status: "running",
-        updatedAt: nowIso(),
-      });
-    }
+        status: "awaiting_hitl",
+        hitlQuestionIds: ["verification_not_run"],
+      },
+      {
+        type: "awaiting_hitl",
+        nodeId,
+        message: LOOP_VERIFICATION_NOT_RUN,
+      },
+    );
+    return replaceInstance(doc, next);
   }
 
-  const evidence = working.activeRunId
-    ? execution?.readEvidence(working.activeRunId) ?? null
-    : null;
-  if (!evidence || evidence.status === "not_run" || evidence.runId !== working.activeRunId) {
+  const runView = execution?.readRun(working.activeRunId) ?? null;
+  // Side-effect / implement run still in flight: never stamp early evidence.
+  if (
+    !runView ||
+    runView.status === "queued" ||
+    runView.status === "running" ||
+    runView.status === "awaiting_review"
+  ) {
+    return replaceInstance(doc, {
+      ...working,
+      status: "running",
+      updatedAt: nowIso(),
+    });
+  }
+
+  const evidence = execution?.readEvidence(working.activeRunId) ?? null;
+  if (
+    !evidence ||
+    evidence.status === "not_run" ||
+    evidence.runId !== working.activeRunId
+  ) {
     const next = pushEvent(
       {
         ...working,
@@ -2480,6 +2579,8 @@ function stepVerifyNode(
           cursorNodeId: failBranch.to,
           activeRunId: undefined,
           activeRunNodeId: undefined,
+          verificationCodeDigest: undefined,
+          verificationEvidenceId: undefined,
           attemptCounts: {
             ...working.attemptCounts,
             [failBranch.to]: attempts,
@@ -2516,6 +2617,8 @@ function stepVerifyNode(
           ...working,
           status: "awaiting_hitl",
           round,
+          verificationCodeDigest: undefined,
+          verificationEvidenceId: undefined,
           attemptCounts: {
             ...working.attemptCounts,
             [fb.to]: attempts,
@@ -2538,6 +2641,8 @@ function stepVerifyNode(
         cursorNodeId: fb.to,
         activeRunId: undefined,
         activeRunNodeId: undefined,
+        verificationCodeDigest: undefined,
+        verificationEvidenceId: undefined,
         attemptCounts: {
           ...working.attemptCounts,
           [fb.to]: attempts,
@@ -2553,7 +2658,13 @@ function stepVerifyNode(
     return replaceInstance(doc, next);
   }
 
-  const next = pushEvent(working, {
+  const next = pushEvent(
+    {
+      ...working,
+      verificationCodeDigest: undefined,
+      verificationEvidenceId: undefined,
+    },
+    {
     type: "node_completed",
     nodeId,
     message: "Verification passed",

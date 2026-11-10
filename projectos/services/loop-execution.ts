@@ -107,6 +107,11 @@ export interface LoopExecutionHooks {
   readRun: (runId: string) => LoopAgentRunView | null;
   readEvidence: (runId: string) => LoopEvidenceView | null;
   startAgentRun: (input: LoopAgentRunRequest) => LoopAgentRunView;
+  /**
+   * Kick configured verification/tests for an existing AgentRun (read-only).
+   * Must not start a writable fix/change agent — repairs use explicit repair nodes.
+   */
+  requestVerification?: (runId: string) => void;
   /** Optional GitHub bridge (sync). May return `deferred: true` for async settle. */
   executeGithubOperation?: (
     input: LoopGithubOperationRequest,

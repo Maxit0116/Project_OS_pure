@@ -43,6 +43,7 @@ function scriptedLoopExecution(filePath = "src/login.ts"): {
   execution: LoopExecutionHooks;
   starts: string[];
   requests: Array<{ filePath: string; goal: string }>;
+  verificationRequests: string[];
   paused: string[];
   cancelled: string[];
   finishApply: () => void;
@@ -55,6 +56,7 @@ function scriptedLoopExecution(filePath = "src/login.ts"): {
   const runs = new Map<string, LoopAgentRunView>();
   const evidence = new Map<string, LoopEvidenceView>();
   const starts: string[] = [];
+  const verificationRequests: string[] = [];
   const paused: string[] = [];
   const cancelled: string[] = [];
   const requests: Array<{ filePath: string; goal: string }> = [];
@@ -72,6 +74,9 @@ function scriptedLoopExecution(filePath = "src/login.ts"): {
     }),
     readRun: (runId) => runs.get(runId) ?? null,
     readEvidence: (runId) => evidence.get(runId) ?? null,
+    requestVerification: (runId) => {
+      verificationRequests.push(runId);
+    },
     startAgentRun: (input) => {
       requests.push({ filePath: input.filePath, goal: input.goal });
       if (input.filePath !== filePath) {
@@ -99,6 +104,7 @@ function scriptedLoopExecution(filePath = "src/login.ts"): {
     execution,
     starts,
     requests,
+    verificationRequests,
     paused,
     cancelled,
     finishApply: () => {
@@ -277,8 +283,6 @@ describe("loop-runtime-service", () => {
     expect(doc.instances[0]?.specVersion).toBe(boundVersion);
     expect(doc.instances[0]?.cursorNodeId).toBe("n2");
 
-    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
-    expect(hooks.starts).toContain("run_2");
     hooks.failEvidence();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     const instance = doc.instances[0]!;
@@ -290,6 +294,8 @@ describe("loop-runtime-service", () => {
     expect(doc.approvedSpecs[0]!.nodes.map((node) => node.id)).toEqual(boundNodes);
     expect(doc.pendingCompile?.specDraft.version).not.toBe(boundVersion);
     expect(doc.pendingCompile?.specDraft.nodes.map((node) => node.id)).toEqual(boundNodes);
+    expect(hooks.starts).toEqual(["run_1"]);
+    expect(hooks.verificationRequests).toContain("run_1");
 
     const replacement: LoopSpec = {
       ...approved,
@@ -651,20 +657,19 @@ describe("loop-runtime-service", () => {
     const instanceId = doc.instances[0]!.id;
     hooks.finishApply();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
-    // Verify starts its own test run (does not stamp implement evidence).
-    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
-    expect(hooks.starts).toEqual(["run_1", "run_2"]);
     hooks.failEvidence();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(doc.instances[0]).toMatchObject({ cursorNodeId: "n1", round: 1 });
     expect(doc.instances[0]?.activeRunId).toBeUndefined();
     expect(doc.instances[0]?.events.some((event) =>
-      event.type === "feedback_taken" && event.evidenceId === "evidence_run_2",
+      event.type === "feedback_taken" && event.evidenceId === "evidence_run_1",
     )).toBe(true);
+    expect(hooks.starts).toEqual(["run_1"]);
+    expect(hooks.verificationRequests).toEqual(["run_1"]);
 
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
-    expect(hooks.starts).toEqual(["run_1", "run_2", "run_3"]);
-    expect(doc.instances[0]?.activeRunId).toBe("run_3");
+    expect(hooks.starts).toEqual(["run_1", "run_2"]);
+    expect(doc.instances[0]?.activeRunId).toBe("run_2");
 
     const notRunRoot = mkdtempSync(join(tmpdir(), "loop-rt-"));
     roots.push(notRunRoot);
@@ -673,13 +678,12 @@ describe("loop-runtime-service", () => {
     notRun = startLoopInstance(notRunRoot, notRun.id, undefined, notRunHooks.execution);
     notRunHooks.finishApply();
     notRun = advanceLoopInstance(notRunRoot, notRun.id, notRun.instances[0]!.id, notRunHooks.execution);
-    notRun = advanceLoopInstance(notRunRoot, notRun.id, notRun.instances[0]!.id, notRunHooks.execution);
-    expect(notRunHooks.starts).toEqual(["run_1", "run_2"]);
     notRunHooks.markNotRun();
     notRun = advanceLoopInstance(notRunRoot, notRun.id, notRun.instances[0]!.id, notRunHooks.execution);
     expect(notRun.instances[0]?.status).toBe("awaiting_hitl");
     expect(notRun.instances[0]?.events.at(-1)?.message).toBe(LOOP_VERIFICATION_NOT_RUN);
-    expect(notRunHooks.starts).toEqual(["run_1", "run_2"]);
+    expect(notRunHooks.starts).toEqual(["run_1"]);
+    expect(notRunHooks.verificationRequests).toEqual(["run_1"]);
   });
 
   it("asks a person when stop policy is exhausted and records the answer on the instance", () => {
@@ -691,13 +695,11 @@ describe("loop-runtime-service", () => {
     const instanceId = doc.instances[0]!.id;
     hooks.finishApply();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
-    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     hooks.failEvidence();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(doc.instances[0]?.cursorNodeId).toBe("n1");
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     hooks.finishApply();
-    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     hooks.failEvidence();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
@@ -706,7 +708,7 @@ describe("loop-runtime-service", () => {
     const eventCount = doc.instances[0]!.events.length;
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(doc.instances[0]?.events).toHaveLength(eventCount);
-    expect(hooks.starts).toEqual(["run_1", "run_2", "run_3", "run_4"]);
+    expect(hooks.starts).toEqual(["run_1", "run_2"]);
 
     doc = resolveLoopHitl(root, doc.id, instanceId, [
       { questionId: "stop_policy", answer: "stop" },
@@ -1017,7 +1019,7 @@ describe("loop-runtime-service", () => {
     expect(doc.instances[0]?.hitlQuestionIds).toEqual(["unknown_side_effects"]);
   });
 
-  it("Verify starts a real test run and refuses old evidence after code changes", () => {
+  it("Verify requests read-only tests, blocks early evidence, refuses stamp after code change", () => {
     const root = mkdtempSync(join(tmpdir(), "loop-rt-verify-"));
     roots.push(root);
     mkdirSync(join(root, "src"), { recursive: true });
@@ -1028,34 +1030,62 @@ describe("loop-runtime-service", () => {
     hooks.execution.digestWorkspacePaths = digester;
     doc = startLoopInstance(root, doc.id, undefined, hooks.execution);
     const instanceId = doc.instances[0]!.id;
+
+    // Early evidence while implement still running must not complete the node.
+    hooks.setStatus("running", false);
+    hooks.passEvidence();
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(doc.instances[0]?.cursorNodeId).toBe("n1");
+    expect(
+      (doc.instances[0]?.artifacts ?? []).some(
+        (item) => item.kind === "test_report",
+      ),
+    ).toBe(false);
+
     hooks.finishApply();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(doc.instances[0]?.cursorNodeId).toBe("n2");
 
-    // Enter verify → must start a dedicated test run (not stamp implement evidence).
+    // Clear evidence so verify enter only requests tests (no stamp yet).
+    hooks.markNotRun();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
-    expect(hooks.starts).toEqual(["run_1", "run_2"]);
-    expect(hooks.requests.at(-1)?.goal).toMatch(/Verify/i);
-    expect(doc.instances[0]?.activeRunNodeId).toBe("n2");
+    expect(hooks.starts).toEqual(["run_1"]);
+    expect(hooks.verificationRequests).toEqual(["run_1"]);
     expect(doc.instances[0]?.verificationCodeDigest).toBeTruthy();
-    expect(doc.instances[0]?.status).toBe("running");
-
-    // Old implement evidence alone must not produce a test_report stamp.
-    const baseReadEvidence = hooks.execution.readEvidence;
-    hooks.execution.readEvidence = (runId) =>
-      runId === "run_1"
-        ? { id: "evidence_run_1", runId: "run_1", status: "passed" }
-        : baseReadEvidence(runId);
-    const blocked = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(
-      blocked.instances[0]?.artifacts?.some((item) => item.kind === "test_report"),
+      (doc.instances[0]?.artifacts ?? []).some(
+        (item) => item.kind === "test_report",
+      ),
     ).toBe(false);
-    expect(blocked.instances[0]?.verificationEvidenceId).toBeUndefined();
 
-    // Code changes after verify start → even fresh verify evidence cannot get a new stamp.
+    // evidence.runId must match activeRunId; foreign id cannot stamp.
+    const baseReadEvidence = hooks.execution.readEvidence;
+    hooks.execution.readEvidence = () => ({
+      id: "evidence_other",
+      runId: "run_other",
+      status: "passed",
+    });
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(
+      (doc.instances[0]?.artifacts ?? []).some(
+        (item) => item.kind === "test_report",
+      ),
+    ).toBe(false);
+
+    // Code changes after verify start → refuse stamp even with matching evidence.
+    // awaiting_hitl is not steppable — resume running while keeping the start digest.
     hooks.execution.readEvidence = baseReadEvidence;
     writeFileSync(join(root, "src/login.ts"), "v2-new-code\n", "utf8");
     hooks.passEvidence();
+    doc = {
+      ...doc,
+      instances: doc.instances.map((item) =>
+        item.id === instanceId
+          ? { ...item, status: "running" as const, hitlQuestionIds: [] }
+          : item,
+      ),
+    };
+    doc = upsertLoopGraph(root, doc);
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(doc.instances[0]?.status).toBe("awaiting_hitl");
     expect(
@@ -1064,7 +1094,9 @@ describe("loop-runtime-service", () => {
       ),
     ).toBe(true);
     expect(
-      doc.instances[0]?.artifacts?.some((item) => item.kind === "test_report"),
+      (doc.instances[0]?.artifacts ?? []).some(
+        (item) => item.kind === "test_report",
+      ),
     ).toBe(false);
   });
 });

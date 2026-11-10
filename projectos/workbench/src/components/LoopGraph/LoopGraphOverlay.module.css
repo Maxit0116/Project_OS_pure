@@ -420,6 +420,45 @@
   border-radius: 6px;
 }
 
+.nodeIconBrand {
+  color: var(--tech-text-primary);
+  background: color-mix(in srgb, var(--tech-bg-muted) 88%, transparent);
+  border: 1px solid var(--tech-border);
+}
+
+.nodeSaas {
+  border-radius: 10px;
+}
+
+.nodeSaasBlocked {
+  border-style: dashed;
+}
+
+.nodeOpMeta {
+  display: block;
+  margin-top: 1px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--tech-text-secondary);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saasBlockedBadge {
+  display: inline-block;
+  margin-top: 2px;
+  margin-right: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--tech-bg-muted);
+  color: var(--tech-warning);
+}
+
 .incompleteMark {
   flex-shrink: 0;
   font-size: 10px;

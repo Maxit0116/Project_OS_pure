@@ -5,6 +5,7 @@ import {
   isConfigNode,
   isLoopLogicNode,
   isMergeNode,
+  LOOP_ACTION_INTEGRATIONS,
   withArchitectureDefaults,
   type LoopActionIntegration,
   type LoopAgentRole,
@@ -92,7 +93,7 @@ export const LoopHumanModeSchema = z.enum([
   "takeover",
 ]);
 
-export const LoopActionIntegrationSchema = z.enum(["github", "test", "terminal"]);
+export const LoopActionIntegrationSchema = z.enum(LOOP_ACTION_INTEGRATIONS);
 
 export const LoopLogicKindSchema = z.enum([
   "condition",
@@ -500,6 +501,10 @@ export const LoopBudgetUsageSchema = z
     tokens: z.number().int().nonnegative().optional(),
     wallClockMs: z.number().int().nonnegative().optional(),
     retries: z.number().int().nonnegative().optional(),
+    /** Agent↔agent / loop-started AgentRun count (互调预算). */
+    agentCalls: z.number().int().nonnegative().optional(),
+    /** Nested agent call depth for the active chain. */
+    agentCallDepth: z.number().int().nonnegative().optional(),
   })
   .strict();
 
@@ -581,16 +586,20 @@ export const LoopInstanceSchema = z
         payload: z.record(z.string(), z.unknown()),
         queuedAt: z.string().min(1),
         /**
-         * queued = not sent; in_flight = HTTP attempted (unknown until settled);
-         * settled reserved for persistence edges — prefer github_op_result artifact.
+         * queued = not sent;
+         * preparing = token/import window (no remote side effect yet — may clear);
+         * http_started = transport/push claimed (unknown until settled — must not clear);
+         * in_flight = legacy alias of http_started (treated as side-effect unknown).
          */
-        dispatchState: z.enum(["queued", "in_flight"]).optional(),
+        dispatchState: z
+          .enum(["queued", "preparing", "http_started", "in_flight"])
+          .optional(),
         /** Stable key for query-before-resend (instance+node+op+payload digest). */
         idempotencyKey: z.string().trim().min(1).max(160).optional(),
         dispatchAttemptId: z.string().min(1).optional(),
         httpAttemptedAt: z.string().min(1).optional(),
         /**
-         * Durable journal for unknown/in_flight outcomes — must not be erased by
+         * Durable journal for http_started/unknown outcomes — must not be erased by
          * deny-before-HTTP so a later approve cannot create a second side effect.
          */
         dispatchJournal: z
@@ -600,11 +609,14 @@ export const LoopInstanceSchema = z
                 at: z.string().min(1),
                 kind: z.enum([
                   "queued",
+                  "preparing",
+                  "http_started",
                   "in_flight",
                   "unknown",
                   "lookup_hit",
                   "completed",
                   "denied_preflight",
+                  "orphaned_result",
                 ]),
                 message: z.string().trim().max(500),
               })

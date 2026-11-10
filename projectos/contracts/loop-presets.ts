@@ -50,7 +50,9 @@ export const LoopPaletteItemSchema = z
         humanMode: z
           .enum(["approval", "review", "input", "decision", "takeover"])
           .optional(),
-        actionIntegration: z.enum(["github", "test", "terminal"]).optional(),
+        actionIntegration: z
+          .enum(["github", "test", "terminal", "slack", "feishu", "lark", "sentry"])
+          .optional(),
         actionOperation: z.string().trim().min(1).max(80).optional(),
         logicKind: z
           .enum(["condition", "loop", "merge", "exit", "retry", "wait"])
@@ -194,6 +196,60 @@ export const LOOP_PALETTE_ITEMS: LoopPaletteItem[] = [
       type: "action",
       actionIntegration: "github",
       actionOperation: "create_branch",
+    },
+  },
+  {
+    id: "action.slack.post_message",
+    category: "action",
+    title: "Slack Message",
+    description: "Post a Slack message (account required — offline until configured)",
+    seed: {
+      title: "Slack Message",
+      prompt: "Post the approved message to the configured Slack channel.",
+      type: "action",
+      actionIntegration: "slack",
+      actionOperation: "post_message",
+    },
+  },
+  {
+    id: "action.feishu.post_message",
+    category: "action",
+    title: "飞书消息",
+    description:
+      "Send a Feishu IM message (domestic open.feishu.cn — not Lark; offline until configured)",
+    seed: {
+      title: "飞书消息",
+      prompt: "Send the approved message to the configured Feishu chat.",
+      type: "action",
+      actionIntegration: "feishu",
+      actionOperation: "post_message",
+    },
+  },
+  {
+    id: "action.lark.post_message",
+    category: "action",
+    title: "Lark Message",
+    description:
+      "Post a Lark message (international Lark brand — not Feishu; offline until configured)",
+    seed: {
+      title: "Lark Message",
+      prompt: "Post the approved message to the configured Lark chat.",
+      type: "action",
+      actionIntegration: "lark",
+      actionOperation: "post_message",
+    },
+  },
+  {
+    id: "action.sentry.list_issues",
+    category: "action",
+    title: "Sentry Issues",
+    description: "List Sentry issues (API token required — offline until configured)",
+    seed: {
+      title: "Sentry Issues",
+      prompt: "List recent Sentry issues for the configured project.",
+      type: "action",
+      actionIntegration: "sentry",
+      actionOperation: "list_issues",
     },
   },
   {

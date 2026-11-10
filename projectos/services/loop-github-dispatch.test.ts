@@ -380,7 +380,7 @@ describe("settleGithubDispatch production scheduler", () => {
     const root = mkdtempSync(join(tmpdir(), "loop-disp-pre-"));
     roots.push(root);
     const { hooks, loopId } = seedPending(root, { dirtyAfter: true });
-    const counters: GithubDispatchCounters = { createCalls: 0, lookupCalls: 0 };
+    const counters: GithubDispatchCounters = { prepareCalls: 0, transportCalls: 0, lookupCalls: 0, sideEffectCalls: 0 };
     const doc = getLoopGraph(root, loopId)!;
     await settleGithubDispatch({
       instanceId: doc.instances[0]!.id,
@@ -389,11 +389,12 @@ describe("settleGithubDispatch production scheduler", () => {
       hooksFor: () => hooks,
       counters,
       listPullRequests: async () => ({ available: true, pullRequests: [] }),
-      createOperation: async () => {
+      prepareOperation: async () => ({}),
+      transportOperation: async () => {
         throw new Error("must not create");
       },
     });
-    expect(counters.createCalls).toBe(0);
+    expect(counters.transportCalls).toBe(0);
     const after = getLoopGraph(root, loopId)!;
     expect(after.instances[0]?.pendingGithubOp).toBeUndefined();
     expect(after.instances[0]?.status).toBe("awaiting_hitl");
@@ -404,7 +405,7 @@ describe("settleGithubDispatch production scheduler", () => {
     roots.push(root);
     const { hooks, digester, loopId } = seedPending(root);
     const doc = getLoopGraph(root, loopId)!;
-    const counters: GithubDispatchCounters = { createCalls: 0, lookupCalls: 0 };
+    const counters: GithubDispatchCounters = { prepareCalls: 0, transportCalls: 0, lookupCalls: 0, sideEffectCalls: 0 };
     await settleGithubDispatch({
       instanceId: doc.instances[0]!.id,
       loadDocument: () => getLoopGraph(root, loopId),
@@ -412,7 +413,8 @@ describe("settleGithubDispatch production scheduler", () => {
       hooksFor: () => ({ ...hooks, digestWorkspacePaths: digester }),
       counters,
       listPullRequests: async () => ({ available: true, pullRequests: [] }),
-      createOperation: async () => {
+      prepareOperation: async () => ({}),
+      transportOperation: async () => {
         writeFileSync(join(root, "src/a.ts"), "mid\n", "utf8");
         return {
           ok: true,
@@ -422,7 +424,7 @@ describe("settleGithubDispatch production scheduler", () => {
         };
       },
     });
-    expect(counters.createCalls).toBe(1);
+    expect(counters.transportCalls).toBe(1);
     const after = getLoopGraph(root, loopId)!;
     const gh = after.instances[0]?.artifacts?.find(
       (item) => item.kind === "github_op_result",
@@ -455,7 +457,7 @@ describe("settleGithubDispatch production scheduler", () => {
         },
       ],
     });
-    const counters: GithubDispatchCounters = { createCalls: 0, lookupCalls: 0 };
+    const counters: GithubDispatchCounters = { prepareCalls: 0, transportCalls: 0, lookupCalls: 0, sideEffectCalls: 0 };
     await settleGithubDispatch({
       instanceId: inst.id,
       loadDocument: () => getLoopGraph(root, loopId),
@@ -475,14 +477,15 @@ describe("settleGithubDispatch production scheduler", () => {
           },
         ],
       }),
-      createOperation: async () => {
+      prepareOperation: async () => ({}),
+      transportOperation: async () => {
         throw new Error("must not create");
       },
     });
-    expect(counters.createCalls).toBe(0);
+    expect(counters.transportCalls).toBe(0);
     expect(counters.lookupCalls).toBe(1);
     const after = getLoopGraph(root, loopId)!;
-    expect(after.instances[0]?.pendingGithubOp?.dispatchState).toBe("in_flight");
+    expect(after.instances[0]?.pendingGithubOp?.dispatchState).toBe("http_started");
     expect(
       after.instances[0]?.pendingGithubOp?.dispatchJournal?.some(
         (item) => item.kind === "unknown",
@@ -495,7 +498,7 @@ describe("settleGithubDispatch production scheduler", () => {
     roots.push(root);
     const { hooks, loopId } = seedPending(root);
     const doc = getLoopGraph(root, loopId)!;
-    const counters: GithubDispatchCounters = { createCalls: 0, lookupCalls: 0 };
+    const counters: GithubDispatchCounters = { prepareCalls: 0, transportCalls: 0, lookupCalls: 0, sideEffectCalls: 0 };
     const deps = {
       instanceId: doc.instances[0]!.id,
       loadDocument: () => getLoopGraph(root, loopId),
@@ -503,7 +506,8 @@ describe("settleGithubDispatch production scheduler", () => {
       hooksFor: () => hooks,
       counters,
       listPullRequests: async () => ({ available: true, pullRequests: [] }),
-      createOperation: async () => {
+      prepareOperation: async () => ({}),
+      transportOperation: async () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
         return {
           ok: true,
@@ -517,7 +521,7 @@ describe("settleGithubDispatch production scheduler", () => {
       settleGithubDispatch(deps),
       settleGithubDispatch(deps),
     ]);
-    expect(counters.createCalls).toBe(1);
+    expect(counters.transportCalls).toBe(1);
   });
 
   it("cancel before dispatch → 0 create", async () => {
@@ -532,7 +536,7 @@ describe("settleGithubDispatch production scheduler", () => {
         status: "cancelled" as const,
       })),
     });
-    const counters: GithubDispatchCounters = { createCalls: 0, lookupCalls: 0 };
+    const counters: GithubDispatchCounters = { prepareCalls: 0, transportCalls: 0, lookupCalls: 0, sideEffectCalls: 0 };
     await settleGithubDispatch({
       instanceId: doc.instances[0]!.id,
       loadDocument: () => getLoopGraph(root, loopId),
@@ -540,11 +544,12 @@ describe("settleGithubDispatch production scheduler", () => {
       hooksFor: () => hooks,
       counters,
       listPullRequests: async () => ({ available: true, pullRequests: [] }),
-      createOperation: async () => {
+      prepareOperation: async () => ({}),
+      transportOperation: async () => {
         throw new Error("must not create");
       },
     });
-    expect(counters.createCalls).toBe(0);
+    expect(counters.transportCalls).toBe(0);
   });
 
   it("does not reuse priorResult for same node with different idempotencyKey", async () => {
@@ -581,7 +586,7 @@ describe("settleGithubDispatch production scheduler", () => {
         },
       ],
     });
-    const counters: GithubDispatchCounters = { createCalls: 0, lookupCalls: 0 };
+    const counters: GithubDispatchCounters = { prepareCalls: 0, transportCalls: 0, lookupCalls: 0, sideEffectCalls: 0 };
     await settleGithubDispatch({
       instanceId: inst.id,
       loadDocument: () => getLoopGraph(root, loopId),
@@ -589,14 +594,15 @@ describe("settleGithubDispatch production scheduler", () => {
       hooksFor: () => hooks,
       counters,
       listPullRequests: async () => ({ available: true, pullRequests: [] }),
-      createOperation: async () => ({
+      prepareOperation: async () => ({}),
+      transportOperation: async () => ({
         ok: true,
         url: "https://example/pr/22",
         number: 22,
         message: "new",
       }),
     });
-    expect(counters.createCalls).toBe(1);
+    expect(counters.transportCalls).toBe(1);
     const after = getLoopGraph(root, loopId)!;
     const numbers = (after.instances[0]?.artifacts ?? [])
       .filter((item) => item.kind === "github_op_result")
@@ -633,7 +639,7 @@ describe("settleGithubDispatch production scheduler", () => {
         },
       ],
     });
-    const counters: GithubDispatchCounters = { createCalls: 0, lookupCalls: 0 };
+    const counters: GithubDispatchCounters = { prepareCalls: 0, transportCalls: 0, lookupCalls: 0, sideEffectCalls: 0 };
     await settleGithubDispatch({
       instanceId: inst.id,
       loadDocument: () => getLoopGraph(root, loopId),
@@ -641,21 +647,22 @@ describe("settleGithubDispatch production scheduler", () => {
       hooksFor: () => hooks,
       counters,
       listPullRequests: async () => ({ available: true, pullRequests: [] }),
-      createOperation: async () => ({
+      prepareOperation: async () => ({}),
+      transportOperation: async () => ({
         ok: true,
         url: "https://example/pr/23",
         number: 23,
         message: "new",
       }),
     });
-    expect(counters.createCalls).toBe(1);
+    expect(counters.transportCalls).toBe(1);
   });
 
   it("pause mid-flight does not resurrect run; audits result when HTTP ok", async () => {
     const root = mkdtempSync(join(tmpdir(), "loop-disp-pause-"));
     roots.push(root);
     const { hooks, digester, loopId } = seedPending(root);
-    const counters: GithubDispatchCounters = { createCalls: 0, lookupCalls: 0 };
+    const counters: GithubDispatchCounters = { prepareCalls: 0, transportCalls: 0, lookupCalls: 0, sideEffectCalls: 0 };
     await settleGithubDispatch({
       instanceId: getLoopGraph(root, loopId)!.instances[0]!.id,
       loadDocument: () => getLoopGraph(root, loopId),
@@ -663,7 +670,8 @@ describe("settleGithubDispatch production scheduler", () => {
       hooksFor: () => ({ ...hooks, digestWorkspacePaths: digester }),
       counters,
       listPullRequests: async () => ({ available: true, pullRequests: [] }),
-      createOperation: async () => {
+      prepareOperation: async () => ({}),
+      transportOperation: async () => {
         const latest = getLoopGraph(root, loopId)!;
         upsertLoopGraph(root, {
           ...latest,
@@ -680,7 +688,7 @@ describe("settleGithubDispatch production scheduler", () => {
         };
       },
     });
-    expect(counters.createCalls).toBe(1);
+    expect(counters.transportCalls).toBe(1);
     const after = getLoopGraph(root, loopId)!;
     expect(after.instances[0]?.status).toBe("paused");
     expect(after.instances[0]?.pendingGithubOp).toBeUndefined();
@@ -721,7 +729,7 @@ describe("settleGithubDispatch production scheduler", () => {
         },
       ],
     });
-    const counters: GithubDispatchCounters = { createCalls: 0, lookupCalls: 0 };
+    const counters: GithubDispatchCounters = { prepareCalls: 0, transportCalls: 0, lookupCalls: 0, sideEffectCalls: 0 };
     // Second settle still looks up, never creates, never clears pending.
     await settleGithubDispatch({
       instanceId: inst.id,
@@ -730,16 +738,145 @@ describe("settleGithubDispatch production scheduler", () => {
       hooksFor: () => hooks,
       counters,
       listPullRequests: async () => ({ available: true, pullRequests: [] }),
-      createOperation: async () => {
+      prepareOperation: async () => ({}),
+      transportOperation: async () => {
         throw new Error("must not create");
       },
     });
-    expect(counters.createCalls).toBe(0);
+    expect(counters.transportCalls).toBe(0);
     expect(counters.lookupCalls).toBe(1);
     const after = getLoopGraph(root, loopId)!;
-    expect(after.instances[0]?.pendingGithubOp?.dispatchState).toBe("in_flight");
+    expect(after.instances[0]?.pendingGithubOp?.dispatchState).toBe("http_started");
     expect(
       (after.instances[0]?.pendingGithubOp?.dispatchJournal ?? []).length,
     ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("final gate blocks transport when code goes stale during prepare (no in_flight exemption)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-disp-prep-stale-"));
+    roots.push(root);
+    const { hooks, digester, loopId } = seedPending(root);
+    const counters: GithubDispatchCounters = {
+      prepareCalls: 0,
+      transportCalls: 0,
+      lookupCalls: 0,
+      sideEffectCalls: 0,
+    };
+    await settleGithubDispatch({
+      instanceId: getLoopGraph(root, loopId)!.instances[0]!.id,
+      loadDocument: () => getLoopGraph(root, loopId),
+      saveDocument: (next) => upsertLoopGraph(root, next),
+      hooksFor: () => ({ ...hooks, digestWorkspacePaths: digester }),
+      counters,
+      listPullRequests: async () => ({ available: true, pullRequests: [] }),
+      prepareOperation: async () => {
+        // Mutate workspace during prepare — must fail final gate, 0 transport.
+        writeFileSync(join(root, "src/a.ts"), "stale-during-prepare\n", "utf8");
+        return {};
+      },
+      transportOperation: async () => {
+        throw new Error("must not transport");
+      },
+    });
+    expect(counters.prepareCalls).toBe(1);
+    expect(counters.transportCalls).toBe(0);
+    expect(counters.sideEffectCalls).toBe(0);
+    const after = getLoopGraph(root, loopId)!;
+    // preparing is clearable — pending gone, re-approve required
+    expect(after.instances[0]?.pendingGithubOp).toBeUndefined();
+  });
+
+  it("lookup mid-cancel does not apply recovery onto cleared/replaced pending", async () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-disp-lookup-cancel-"));
+    roots.push(root);
+    const { hooks, loopId } = seedPending(root);
+    let doc = getLoopGraph(root, loopId)!;
+    const inst = doc.instances[0]!;
+    const originalKey = inst.pendingGithubOp!.idempotencyKey!;
+    doc = upsertLoopGraph(root, {
+      ...doc,
+      instances: [
+        {
+          ...inst,
+          pendingGithubOp: {
+            ...inst.pendingGithubOp!,
+            dispatchState: "http_started",
+            dispatchAttemptId: "gh_1",
+            httpAttemptedAt: "2026-11-10T00:00:01.000Z",
+          },
+        },
+      ],
+    });
+    const counters: GithubDispatchCounters = {
+      prepareCalls: 0,
+      transportCalls: 0,
+      lookupCalls: 0,
+      sideEffectCalls: 0,
+    };
+    await settleGithubDispatch({
+      instanceId: inst.id,
+      loadDocument: () => getLoopGraph(root, loopId),
+      saveDocument: (next) => upsertLoopGraph(root, next),
+      hooksFor: () => hooks,
+      counters,
+      listPullRequests: async () => {
+        // During lookup await: replace with a different pending identity.
+        const latest = getLoopGraph(root, loopId)!;
+        const cur = latest.instances[0]!;
+        upsertLoopGraph(root, {
+          ...latest,
+          instances: [
+            {
+              ...cur,
+              pendingGithubOp: {
+                ...cur.pendingGithubOp!,
+                idempotencyKey: "brand-new-pending-key",
+                payload: { title: "other", head: "feat/y", base: "main" },
+                dispatchState: "queued",
+                dispatchAttemptId: undefined,
+                httpAttemptedAt: undefined,
+              },
+            },
+          ],
+        });
+        return {
+          available: true,
+          pullRequests: [
+            {
+              number: 3,
+              title: "feat",
+              url: "https://example/pr/3",
+              headRef: "feat/x",
+              baseRef: "main",
+              state: "open" as const,
+            },
+          ],
+        };
+      },
+      prepareOperation: async () => ({}),
+      transportOperation: async () => {
+        throw new Error("must not transport");
+      },
+    });
+    expect(counters.transportCalls).toBe(0);
+    expect(counters.lookupCalls).toBe(1);
+    const after = getLoopGraph(root, loopId)!;
+    const pending = after.instances[0]?.pendingGithubOp;
+    expect(pending?.idempotencyKey).toBe("brand-new-pending-key");
+    expect(pending?.dispatchState).toBe("queued");
+    // Must not have completed with PR #3 onto the new pending.
+    expect(
+      (after.instances[0]?.artifacts ?? []).some(
+        (item) =>
+          item.kind === "github_op_result" &&
+          (item.data as { number?: number }).number === 3,
+      ),
+    ).toBe(false);
+    expect(
+      after.instances[0]?.events.some((event) =>
+        (event.message ?? "").includes("Orphaned"),
+      ),
+    ).toBe(true);
+    void originalKey;
   });
 });

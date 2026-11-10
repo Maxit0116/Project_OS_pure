@@ -1,0 +1,397 @@
+import type { LoopConnectorVendorMeta } from "./types.js";
+
+/**
+ * Product connector catalog — Trigger/Action inventory with honest impl/live status.
+ * Logo/registry presence alone never implies live = verified.
+ */
+export const LOOP_CONNECTOR_CATALOG: Record<
+  LoopConnectorVendorMeta["id"],
+  LoopConnectorVendorMeta
+> = {
+  github: {
+    id: "github",
+    displayName: "GitHub",
+    iconKey: "github",
+    batch: "batch1_collab_observability",
+    apiVersion: "GitHub REST API 2022-11-28 (+ GraphQL where used)",
+    apiDocsUrl: "https://docs.github.com/en/rest",
+    implStatus: "reuse_existing",
+    liveStatus: "contract_tested",
+    capabilities: [
+      {
+        id: "create_pr",
+        kind: "action",
+        label: "Create pull request",
+        risk: "write_high",
+        apiSurface: "POST /repos/{owner}/{repo}/pulls",
+      },
+      {
+        id: "create_branch",
+        kind: "action",
+        label: "Create branch",
+        risk: "write_low",
+        apiSurface: "POST /repos/{owner}/{repo}/git/refs",
+      },
+      {
+        id: "pr_opened",
+        kind: "trigger",
+        label: "Pull request opened",
+        risk: "read",
+        apiSurface: "webhook: pull_request.opened",
+        notes: "Webhook receiver path still partial outside settle dispatch",
+      },
+    ],
+  },
+  slack: {
+    id: "slack",
+    displayName: "Slack",
+    iconKey: "slack",
+    batch: "batch1_collab_observability",
+    apiVersion: "Slack Web API methods as of 2024-10 + Events API",
+    apiDocsUrl: "https://api.slack.com/methods",
+    implStatus: "implemented_contract",
+    liveStatus: "contract_tested",
+    capabilities: [
+      {
+        id: "chat_postMessage",
+        kind: "action",
+        label: "Post message (Web API)",
+        risk: "write_low",
+        apiSurface: "chat.postMessage",
+      },
+      {
+        id: "incoming_webhook_notify",
+        kind: "notify",
+        label: "Incoming Webhook notify",
+        risk: "notify",
+        apiSurface: "Incoming Webhooks",
+        notes: "Notify-only — must not masquerade as approval",
+      },
+      {
+        id: "message_trigger",
+        kind: "trigger",
+        label: "Message / app mention",
+        risk: "read",
+        apiSurface: "Events API message / app_mention",
+      },
+      {
+        id: "interaction_approval",
+        kind: "action",
+        label: "Interactive approval (signed)",
+        risk: "approval_gate",
+        apiSurface: "Interactivity + Signing Secret",
+        notes: "Requires verifiable actor + signature; local_declared insufficient",
+      },
+    ],
+  },
+  feishu: {
+    id: "feishu",
+    displayName: "飞书 Feishu",
+    iconKey: "feishu",
+    batch: "batch1_collab_observability",
+    apiVersion: "Feishu OpenAPI v1 (open.feishu.cn)",
+    apiDocsUrl: "https://open.feishu.cn/document/",
+    brandNote: "Domestic Feishu platform — distinct from international Lark.",
+    implStatus: "implemented_contract",
+    liveStatus: "contract_tested",
+    capabilities: [
+      {
+        id: "im_message_create",
+        kind: "action",
+        label: "Send IM message",
+        risk: "write_low",
+        apiSurface: "POST /open-apis/im/v1/messages",
+      },
+      {
+        id: "custom_bot_notify",
+        kind: "notify",
+        label: "Custom bot webhook notify",
+        risk: "notify",
+        apiSurface: "Custom bot webhook",
+        notes: "Notify-only — not approval",
+      },
+      {
+        id: "event_message_receive",
+        kind: "trigger",
+        label: "Receive message event",
+        risk: "read",
+        apiSurface: "Event subscription im.message.receive_v1",
+      },
+      {
+        id: "card_action_approval",
+        kind: "action",
+        label: "Card action approval (signed)",
+        risk: "approval_gate",
+        apiSurface: "Card interaction + encrypt key / verification token",
+      },
+    ],
+  },
+  lark: {
+    id: "lark",
+    displayName: "Lark",
+    iconKey: "lark",
+    batch: "batch1_collab_observability",
+    apiVersion: "Lark OpenAPI v1 (open.larksuite.com)",
+    apiDocsUrl: "https://open.larksuite.com/document/",
+    brandNote: "International Lark — not Feishu brand/API host.",
+    implStatus: "implemented_contract",
+    liveStatus: "contract_tested",
+    capabilities: [
+      {
+        id: "im_message_create",
+        kind: "action",
+        label: "Send IM message",
+        risk: "write_low",
+        apiSurface: "POST /open-apis/im/v1/messages",
+      },
+      {
+        id: "custom_bot_notify",
+        kind: "notify",
+        label: "Custom bot webhook notify",
+        risk: "notify",
+        apiSurface: "Custom bot webhook",
+        notes: "Notify-only — not approval",
+      },
+      {
+        id: "event_message_receive",
+        kind: "trigger",
+        label: "Receive message event",
+        risk: "read",
+        apiSurface: "Event subscription im.message.receive_v1",
+      },
+      {
+        id: "card_action_approval",
+        kind: "action",
+        label: "Card action approval (signed)",
+        risk: "approval_gate",
+        apiSurface: "Card interaction + verification",
+      },
+    ],
+  },
+  sentry: {
+    id: "sentry",
+    displayName: "Sentry",
+    iconKey: "sentry",
+    batch: "batch1_collab_observability",
+    apiVersion: "Sentry API v0 (https://sentry.io/api/0/)",
+    apiDocsUrl: "https://docs.sentry.io/api/",
+    implStatus: "implemented_contract",
+    liveStatus: "contract_tested",
+    capabilities: [
+      {
+        id: "list_issues",
+        kind: "action",
+        label: "List issues",
+        risk: "read",
+        apiSurface: "GET /api/0/projects/{org}/{project}/issues/",
+      },
+      {
+        id: "get_issue",
+        kind: "action",
+        label: "Get issue",
+        risk: "read",
+        apiSurface: "GET /api/0/issues/{issue_id}/",
+      },
+      {
+        id: "issue_created_webhook",
+        kind: "trigger",
+        label: "Issue created webhook",
+        risk: "read",
+        apiSurface: "Sentry webhook issue",
+      },
+    ],
+  },
+  linear: {
+    id: "linear",
+    displayName: "Linear",
+    iconKey: "linear",
+    batch: "batch2_tasks_docs_deploy",
+    apiVersion: "Linear GraphQL API",
+    apiDocsUrl: "https://developers.linear.app/docs/graphql/working-with-the-graphql-api",
+    implStatus: "catalog_only",
+    liveStatus: "unconfigured",
+    capabilities: [
+      {
+        id: "create_issue",
+        kind: "action",
+        label: "Create issue",
+        risk: "write_low",
+        apiSurface: "mutation issueCreate",
+      },
+      {
+        id: "issue_trigger",
+        kind: "trigger",
+        label: "Issue created/updated",
+        risk: "read",
+        apiSurface: "Webhooks",
+      },
+    ],
+  },
+  jira_cloud: {
+    id: "jira_cloud",
+    displayName: "Jira Cloud",
+    iconKey: "jira",
+    batch: "batch2_tasks_docs_deploy",
+    apiVersion: "Jira Cloud REST v3",
+    apiDocsUrl: "https://developer.atlassian.com/cloud/jira/platform/rest/v3/",
+    implStatus: "catalog_only",
+    liveStatus: "unconfigured",
+    capabilities: [
+      {
+        id: "create_issue",
+        kind: "action",
+        label: "Create issue",
+        risk: "write_low",
+        apiSurface: "POST /rest/api/3/issue",
+      },
+      {
+        id: "issue_updated_trigger",
+        kind: "trigger",
+        label: "Issue updated",
+        risk: "read",
+        apiSurface: "Jira webhooks",
+      },
+    ],
+  },
+  notion: {
+    id: "notion",
+    displayName: "Notion",
+    iconKey: "notion",
+    batch: "batch2_tasks_docs_deploy",
+    apiVersion: "Notion API 2022-06-28",
+    apiDocsUrl: "https://developers.notion.com/reference/intro",
+    implStatus: "catalog_only",
+    liveStatus: "unconfigured",
+    capabilities: [
+      {
+        id: "create_page",
+        kind: "action",
+        label: "Create page",
+        risk: "write_low",
+        apiSurface: "POST /v1/pages",
+      },
+      {
+        id: "page_updated_trigger",
+        kind: "trigger",
+        label: "Page updated",
+        risk: "read",
+        apiSurface: "Notion webhooks (where available)",
+      },
+    ],
+  },
+  vercel: {
+    id: "vercel",
+    displayName: "Vercel",
+    iconKey: "vercel",
+    batch: "batch2_tasks_docs_deploy",
+    apiVersion: "Vercel REST API",
+    apiDocsUrl: "https://vercel.com/docs/rest-api",
+    implStatus: "catalog_only",
+    liveStatus: "disabled_high_risk",
+    highRiskDefaultOff: true,
+    capabilities: [
+      {
+        id: "list_deployments",
+        kind: "action",
+        label: "List deployments",
+        risk: "read",
+        apiSurface: "GET /v6/deployments",
+      },
+      {
+        id: "promote",
+        kind: "action",
+        label: "Promote deployment",
+        risk: "write_high",
+        apiSurface: "promote endpoints",
+        notes: "Default OFF — requires independent explicit authorization",
+      },
+      {
+        id: "rollback",
+        kind: "action",
+        label: "Rollback deployment",
+        risk: "write_high",
+        apiSurface: "rollback endpoints",
+        notes: "Default OFF — requires independent explicit authorization",
+      },
+    ],
+  },
+  supabase: {
+    id: "supabase",
+    displayName: "Supabase",
+    iconKey: "supabase",
+    batch: "batch3_data",
+    apiVersion: "PostgREST / Management API",
+    apiDocsUrl: "https://supabase.com/docs/reference",
+    implStatus: "catalog_only",
+    liveStatus: "disabled_high_risk",
+    highRiskDefaultOff: true,
+    capabilities: [
+      {
+        id: "read_rows",
+        kind: "action",
+        label: "Read rows (default)",
+        risk: "read",
+        apiSurface: "GET /rest/v1/{table}",
+      },
+      {
+        id: "invoke_rpc_readonly",
+        kind: "action",
+        label: "Invoke bounded read RPC",
+        risk: "read",
+        apiSurface: "POST /rest/v1/rpc/{fn}",
+        notes: "Explicit allowlist only",
+      },
+      {
+        id: "write_rows",
+        kind: "action",
+        label: "Write rows (production)",
+        risk: "write_high",
+        apiSurface: "POST/PATCH /rest/v1/{table}",
+        notes: "Default OFF in production",
+      },
+    ],
+  },
+  posthog: {
+    id: "posthog",
+    displayName: "PostHog",
+    iconKey: "posthog",
+    batch: "batch3_data",
+    apiVersion: "PostHog API",
+    apiDocsUrl: "https://posthog.com/docs/api",
+    implStatus: "catalog_only",
+    liveStatus: "unconfigured",
+    capabilities: [
+      {
+        id: "capture_event",
+        kind: "action",
+        label: "Capture event",
+        risk: "write_low",
+        apiSurface: "POST /capture/",
+      },
+      {
+        id: "query_insights",
+        kind: "action",
+        label: "Query insights",
+        risk: "read",
+        apiSurface: "insights endpoints",
+      },
+    ],
+  },
+};
+
+export function listConnectorVendors(): LoopConnectorVendorMeta[] {
+  return Object.values(LOOP_CONNECTOR_CATALOG);
+}
+
+export function getConnectorVendor(
+  id: string | undefined | null,
+): LoopConnectorVendorMeta | null {
+  if (!id) return null;
+  return LOOP_CONNECTOR_CATALOG[id as LoopConnectorVendorMeta["id"]] ?? null;
+}
+
+export function listBatch1Vendors(): LoopConnectorVendorMeta[] {
+  return listConnectorVendors().filter(
+    (item) => item.batch === "batch1_collab_observability",
+  );
+}

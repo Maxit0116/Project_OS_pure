@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type WheelEvent } from 'react'
 import { isConfigNode, type IntentGraph } from '@contracts/index'
 import { expectedConfigPort, nodeBoxSize } from './loopWiringVisuals'
+import { LoopIntegrationIcon } from './integrations/LoopIntegrationIcon'
 import { visualForIntentNode } from './loopNodeVisuals'
 import { formatEdgeLabel, routeLoopEdge } from './loopEdgeRouting'
 import styles from './LoopGraphCanvasPreview.module.css'
@@ -264,10 +265,21 @@ export default function LoopGraphCanvasPreview({
               >
                 <div className={styles.nodeTop}>
                   <span className={`${styles.nodeIcon} ${categoryClass}`} aria-hidden>
-                    <NodeIcon size={15} strokeWidth={1.75} />
+                    {visual.integrationIconKey ? (
+                      <LoopIntegrationIcon
+                        integrationId={visual.integrationId}
+                        iconKey={visual.integrationIconKey}
+                        size={15}
+                      />
+                    ) : (
+                      <NodeIcon size={15} strokeWidth={1.75} />
+                    )}
                   </span>
                   <span className={styles.nodeTitle}>
                     {node.title || visual.shortLabel}
+                    {visual.operationLabel ? (
+                      <span className={styles.nodeOpMeta}>{visual.operationLabel}</span>
+                    ) : null}
                   </span>
                 </div>
                 {!configSatellite && node.prompt.trim() ? (

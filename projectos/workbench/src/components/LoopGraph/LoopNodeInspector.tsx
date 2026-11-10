@@ -16,6 +16,12 @@ import {
   VoiceInputErrorBanner,
 } from '../ChatPanel/VoiceInputControls'
 import { isCommunityMcpServer } from './LoopConfigAssetPicker'
+import { LoopIntegrationIcon } from './integrations/LoopIntegrationIcon'
+import {
+  getLoopIntegration,
+  runtimeStatusBlocksExecution,
+  runtimeStatusNextStep,
+} from './integrations/loopIntegrationRegistry'
 import TextArea from '../ui/TextArea'
 import TextInput from '../ui/TextInput'
 import styles from './LoopNodeInspector.module.css'
@@ -186,6 +192,59 @@ export default function LoopNodeInspector({
           </p>
         ) : null}
       </section>
+
+      {arch.type === 'action' && arch.actionIntegration ? (
+        <section className={styles.section} data-testid="saas-action-config">
+          <h3 className={styles.sectionTitle}>Integration</h3>
+          <div className={styles.metaRow}>
+            <span className={styles.chip} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              <LoopIntegrationIcon
+                integrationId={arch.actionIntegration}
+                size={14}
+              />
+              {getLoopIntegration(arch.actionIntegration)?.displayName ??
+                arch.actionIntegration}
+            </span>
+          </div>
+          {(() => {
+            const meta = getLoopIntegration(arch.actionIntegration)
+            const status = meta?.defaultRuntimeStatus ?? 'unconfigured'
+            const blocked = runtimeStatusBlocksExecution(status)
+            return (
+              <>
+                <label className={styles.field}>
+                  <span>Action</span>
+                  <select
+                    data-testid="saas-action-select"
+                    value={arch.actionOperation ?? ''}
+                    disabled={readOnly || !meta}
+                    onChange={(event) =>
+                      onChange({ actionOperation: event.target.value || undefined })
+                    }
+                  >
+                    {(meta?.actions ?? []).map((action) => (
+                      <option key={action.id} value={action.id}>
+                        {action.label} ({action.kind})
+                      </option>
+                    ))}
+                    {!meta ? (
+                      <option value={arch.actionOperation ?? ''}>
+                        {arch.actionOperation ?? '—'}
+                      </option>
+                    ) : null}
+                  </select>
+                </label>
+                {blocked && meta ? (
+                  <p className={styles.hint} data-testid="saas-runtime-next-step">
+                    {runtimeStatusNextStep(meta, status)}
+                  </p>
+                ) : null}
+                {meta?.brandNote ? <p className={styles.hint}>{meta.brandNote}</p> : null}
+              </>
+            )
+          })()}
+        </section>
+      ) : null}
 
       {arch.type === 'agent' && wiring ? (
         <section className={styles.section}>

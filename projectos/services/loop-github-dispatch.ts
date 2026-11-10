@@ -1,6 +1,9 @@
 /**
  * Single production GitHub settle scheduler (LocalApi + tests share this).
- * Preflight before create HTTP; strict PR lookup; CAS across awaits; journal unknown.
+ *
+ * Flow: prepare (awaitable, no side effects) → final auth/code gate →
+ * atomic http_started claim → transport (create/push). Identity-safe writeback
+ * after every await — never apply an old result onto a replaced pending.
  */
 import type { ListedPullRequest } from "./git-context-service.js";
 import type { LoopGraphDocument, LoopInstance } from "../contracts/loop-graph.js";
@@ -9,29 +12,45 @@ import { digestOperationPayload } from "./loop-approval-binding.js";
 import {
   completePendingGithubOp,
   denyPendingGithubOpBeforeHttp,
-  markPendingGithubOpInFlight,
+  markPendingGithubOpHttpStarted,
+  markPendingGithubOpPreparing,
   preflightPendingGithubDispatch,
 } from "./loop-runtime-service.js";
 
 export type GithubDispatchCounters = {
-  createCalls: number;
+  prepareCalls: number;
+  transportCalls: number;
   lookupCalls: number;
+  /** Push/create side effects inside transport (create_pr pushHead / create_branch push). */
+  sideEffectCalls: number;
+};
+
+export type GithubDispatchPrepared = {
+  accessToken?: string;
 };
 
 export type SettleGithubDispatchDeps = {
   instanceId: string;
-  /** Always load latest persisted document (CAS). */
+  /** Always load latest persisted document before mutating. */
   loadDocument: () => LoopGraphDocument | null;
   saveDocument: (doc: LoopGraphDocument) => LoopGraphDocument;
   hooksFor: (doc: LoopGraphDocument) => LoopExecutionHooks;
-  createOperation: (pending: NonNullable<LoopInstance["pendingGithubOp"]>) =>
-    | Promise<LoopGithubOperationResult>
-    | LoopGithubOperationResult;
-  listPullRequests: () =>
+  /** Awaitable setup only — token resolve / dynamic import. No push/create. */
+  prepareOperation: (
+    pending: NonNullable<LoopInstance["pendingGithubOp"]>,
+  ) => Promise<GithubDispatchPrepared> | GithubDispatchPrepared;
+  /**
+   * Actual remote side effects (push head, create PR/branch). Invoked only after
+   * final gate + persisted http_started claim.
+   */
+  transportOperation: (
+    pending: NonNullable<LoopInstance["pendingGithubOp"]>,
+    prepared: GithubDispatchPrepared,
+  ) => Promise<LoopGithubOperationResult> | LoopGithubOperationResult;
+  listPullRequests: (prepared?: GithubDispatchPrepared) =>
     | Promise<{
         available: boolean;
         pullRequests: ListedPullRequest[];
-        /** True when caller knows the page may be truncated. */
         incomplete?: boolean;
         message?: string;
       }>
@@ -94,7 +113,31 @@ function replaceInstance(
   };
 }
 
-/** Keep in_flight + journal; do NOT clear pending (blocks create#2 via re-approve). */
+/** True when HTTP/push may already have happened (must not clear / must not create#2). */
+export function isHttpStartedDispatchState(
+  state: NonNullable<LoopInstance["pendingGithubOp"]>["dispatchState"] | undefined,
+): boolean {
+  return state === "http_started" || state === "in_flight";
+}
+
+export function sameGithubDispatchIdentity(
+  expected: {
+    idempotencyKey?: string;
+    dispatchAttemptId?: string;
+  },
+  pending: NonNullable<LoopInstance["pendingGithubOp"]> | undefined,
+): boolean {
+  if (!pending) return false;
+  if (expected.idempotencyKey) {
+    return pending.idempotencyKey === expected.idempotencyKey;
+  }
+  if (expected.dispatchAttemptId) {
+    return pending.dispatchAttemptId === expected.dispatchAttemptId;
+  }
+  return false;
+}
+
+/** Keep http_started + journal; do NOT clear pending (blocks create#2 via re-approve). */
 export function blockUnknownInFlightGithubDispatch(
   doc: LoopGraphDocument,
   instanceId: string,
@@ -105,7 +148,7 @@ export function blockUnknownInFlightGithubDispatch(
   const pending = appendJournal(
     {
       ...instance.pendingGithubOp,
-      dispatchState: "in_flight",
+      dispatchState: "http_started",
     },
     "unknown",
     reason,
@@ -134,6 +177,48 @@ export function blockUnknownInFlightGithubDispatch(
   return replaceInstance(doc, withEvent);
 }
 
+/**
+ * When pending was replaced/cleared during an await, journal the orphaned outcome
+ * on the instance without mutating the new pending.
+ */
+export function journalOrphanedGithubDispatchResult(
+  doc: LoopGraphDocument,
+  instanceId: string,
+  message: string,
+): LoopGraphDocument {
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance) return doc;
+  const at = new Date().toISOString();
+  const events = [
+    ...instance.events,
+    {
+      id: `evt_${Date.now()}`,
+      at,
+      type: "awaiting_hitl" as const,
+      message: `Orphaned GitHub dispatch result (not applied to current pending): ${message.slice(0, 400)}`,
+    },
+  ].slice(-200);
+  // If a pending still exists but identity differs, append orphan journal entry only.
+  if (instance.pendingGithubOp) {
+    const pending = appendJournal(
+      instance.pendingGithubOp,
+      "orphaned_result",
+      message,
+    );
+    return replaceInstance(doc, {
+      ...instance,
+      pendingGithubOp: pending,
+      events,
+      updatedAt: at,
+    });
+  }
+  return replaceInstance(doc, {
+    ...instance,
+    events,
+    updatedAt: at,
+  });
+}
+
 /** Parse `owner:ref` or bare `ref` — owner missing means identity incomplete for forks. */
 export function parseGithubHeadIdentity(head: string): {
   owner?: string;
@@ -152,8 +237,6 @@ export function parseGithubHeadIdentity(head: string): {
 /**
  * Strict match against ListedPullRequest contract fields (headRef/baseRef/state,
  * optional headOwner/headSha when the list DTO provides them).
- * Missing payload identity, unknown refs, cross-fork same branch name, multi-match,
- * closed/merged, incomplete list → unknown (safe block, never treat as success).
  */
 export function matchListedPullRequestForPending(
   pending: NonNullable<LoopInstance["pendingGithubOp"]>,
@@ -211,7 +294,6 @@ export function matchListedPullRequestForPending(
     const listedOwner = (pr.headOwner?.trim() || listedHead.owner || "").toLowerCase();
     const wantOwner = (want.owner || "").toLowerCase();
     if (listedHead.ref !== want.ref) continue;
-    // Cross-fork / owner mismatch: same branch name is not identity.
     if (wantOwner || listedOwner) {
       if (!wantOwner || !listedOwner || wantOwner !== listedOwner) continue;
     }
@@ -233,11 +315,6 @@ export function matchListedPullRequestForPending(
   return { kind: "exact", pr: matches[0]! };
 }
 
-/**
- * Reuse prior github_op_result only when dispatch identity matches
- * (idempotencyKey + operationDigest + engineering baseline when bound).
- * nodeId alone is never an idempotency key.
- */
 export function findPriorGithubOpResult(
   instance: LoopInstance,
   pending: NonNullable<LoopInstance["pendingGithubOp"]>,
@@ -269,7 +346,6 @@ export function findPriorGithubOpResult(
       refs?: Record<string, string>;
     };
     if (data.ok !== true) continue;
-    // Missing identity fields → cannot prove same dispatch (fail closed).
     if (
       typeof data.idempotencyKey !== "string" ||
       !data.idempotencyKey ||
@@ -304,33 +380,83 @@ export function findPriorGithubOpResult(
   return null;
 }
 
+type IdentitySnapshot = {
+  idempotencyKey?: string;
+  dispatchAttemptId?: string;
+};
+
+function loadForIdentity(
+  deps: SettleGithubDispatchDeps,
+  expected: IdentitySnapshot,
+):
+  | {
+      ok: true;
+      doc: LoopGraphDocument;
+      instance: LoopInstance;
+      pending: NonNullable<LoopInstance["pendingGithubOp"]>;
+    }
+  | {
+      ok: false;
+      doc: LoopGraphDocument | null;
+      reason: "missing_doc" | "cleared" | "replaced";
+    } {
+  const latest = deps.loadDocument();
+  if (!latest) return { ok: false, doc: null, reason: "missing_doc" };
+  const instance = latest.instances.find((item) => item.id === deps.instanceId);
+  if (!instance) return { ok: false, doc: latest, reason: "cleared" };
+  if (!instance.pendingGithubOp) {
+    return { ok: false, doc: latest, reason: "cleared" };
+  }
+  if (!sameGithubDispatchIdentity(expected, instance.pendingGithubOp)) {
+    return { ok: false, doc: latest, reason: "replaced" };
+  }
+  return {
+    ok: true,
+    doc: latest,
+    instance,
+    pending: instance.pendingGithubOp,
+  };
+}
+
 /**
  * Production settle entry — used by ProjectOsLocalApi and unit/integration tests.
  */
 export async function settleGithubDispatch(
   deps: SettleGithubDispatchDeps,
 ): Promise<LoopGraphDocument> {
-  const lockKey = `${deps.instanceId}`;
-  return withInstanceLock(lockKey, async () => {
-    const counters = deps.counters ?? { createCalls: 0, lookupCalls: 0 };
+  return withInstanceLock(deps.instanceId, async () => {
+    const counters = deps.counters ?? {
+      prepareCalls: 0,
+      transportCalls: 0,
+      lookupCalls: 0,
+      sideEffectCalls: 0,
+    };
 
     let doc = deps.loadDocument();
     if (!doc) throw new Error("Loop document missing during GitHub settle");
     let instance = doc.instances.find((item) => item.id === deps.instanceId);
     if (!instance?.pendingGithubOp) return doc;
     let pending = instance.pendingGithubOp;
+    const identity: IdentitySnapshot = {
+      ...(pending.idempotencyKey
+        ? { idempotencyKey: pending.idempotencyKey }
+        : {}),
+      ...(pending.dispatchAttemptId
+        ? { dispatchAttemptId: pending.dispatchAttemptId }
+        : {}),
+    };
 
     const hooks = deps.hooksFor(doc);
     const prior = findPriorGithubOpResult(instance, pending);
     if (prior) {
-      // Same dispatch identity — audit-append even under cancel/pause; do not resurrect.
       return deps.saveDocument(
         completePendingGithubOp(
           doc,
           deps.instanceId,
           {
             ok: true,
-            message: prior.message ?? "Reusing prior result for same dispatch identity",
+            message:
+              prior.message ?? "Reusing prior result for same dispatch identity",
             ...(prior.url ? { url: prior.url } : {}),
             ...(typeof prior.number === "number" ? { number: prior.number } : {}),
             ...(prior.refs ? { refs: prior.refs } : {}),
@@ -345,10 +471,28 @@ export async function settleGithubDispatch(
       );
     }
 
-    if (pending.dispatchState === "in_flight") {
+    // Recovery path: HTTP may already have happened.
+    if (isHttpStartedDispatchState(pending.dispatchState)) {
       counters.lookupCalls += 1;
       const listed = await deps.listPullRequests();
+      const afterLookup = loadForIdentity(deps, identity);
+      if (!afterLookup.ok) {
+        if (!afterLookup.doc) {
+          throw new Error("Loop document missing after PR lookup");
+        }
+        return deps.saveDocument(
+          journalOrphanedGithubDispatchResult(
+            afterLookup.doc,
+            deps.instanceId,
+            `Lookup finished but pending ${afterLookup.reason}; result not applied`,
+          ),
+        );
+      }
+      doc = afterLookup.doc;
+      instance = afterLookup.instance;
+      pending = afterLookup.pending;
       const matched = matchListedPullRequestForPending(pending, listed);
+      const latestHooks = deps.hooksFor(doc);
       if (matched.kind === "exact") {
         return deps.saveDocument(
           completePendingGithubOp(
@@ -366,7 +510,7 @@ export async function settleGithubDispatch(
                 ]),
               ),
             },
-            hooks,
+            latestHooks,
             {
               httpCompleted: true,
               deliveryStale:
@@ -375,13 +519,12 @@ export async function settleGithubDispatch(
           ),
         );
       }
-      // Cancel/pause/unknown: keep journaled in_flight (never deny-clear → create#2).
       return deps.saveDocument(
         blockUnknownInFlightGithubDispatch(
           doc,
           deps.instanceId,
           instance.status === "cancelled" || instance.status === "paused"
-            ? `Instance ${instance.status} with unresolved in_flight: ${matched.reason}`
+            ? `Instance ${instance.status} with unresolved http_started: ${matched.reason}`
             : matched.reason,
         ),
       );
@@ -409,132 +552,156 @@ export async function settleGithubDispatch(
       );
     }
 
-    const beforeMarkUpdatedAt = instance.updatedAt;
     const attemptId = `gh_dispatch_${Date.now()}`;
     doc = deps.saveDocument(
-      markPendingGithubOpInFlight(doc, deps.instanceId, attemptId),
+      markPendingGithubOpPreparing(doc, deps.instanceId, attemptId),
     );
+    identity.dispatchAttemptId = attemptId;
 
-    // Re-check cancel/auth window after awaits that may follow (token/import/create).
-    const recheckAfterAwait = (): {
-      ok: true;
-      doc: LoopGraphDocument;
-      instance: LoopInstance;
-      pending: NonNullable<LoopInstance["pendingGithubOp"]>;
-      hooks: LoopExecutionHooks;
-    } | { ok: false; doc: LoopGraphDocument; reason: string } => {
-      const latest = deps.loadDocument();
-      if (!latest) {
-        return { ok: false, doc, reason: "Document disappeared during settle" };
-      }
-      const latestInstance = latest.instances.find(
-        (item) => item.id === deps.instanceId,
-      );
-      if (!latestInstance?.pendingGithubOp) {
-        return {
-          ok: false,
-          doc: latest,
-          reason: "Pending GitHub op cleared concurrently",
-        };
-      }
-      if (
-        latestInstance.status === "cancelled" ||
-        latestInstance.status === "paused"
-      ) {
-        return {
-          ok: false,
-          doc: latest,
-          reason: `Instance ${latestInstance.status} during dispatch window`,
-        };
-      }
-      if (
-        latestInstance.pendingGithubOp.idempotencyKey &&
-        pending.idempotencyKey &&
-        latestInstance.pendingGithubOp.idempotencyKey !== pending.idempotencyKey
-      ) {
-        return {
-          ok: false,
-          doc: latest,
-          reason: "Pending dispatch identity changed concurrently",
-        };
-      }
-      const latestHooks = deps.hooksFor(latest);
-      const still = preflightPendingGithubDispatch(
-        latest,
-        deps.instanceId,
-        latestHooks,
-      );
-      if (!still.ok && latestInstance.pendingGithubOp.dispatchState !== "in_flight") {
-        return { ok: false, doc: latest, reason: still.reason };
-      }
-      return {
-        ok: true,
-        doc: latest,
-        instance: latestInstance,
-        pending: latestInstance.pendingGithubOp,
-        hooks: latestHooks,
-      };
-    };
-
-    // Token/import window — caller may await before create; we recheck here too.
-    let gate = recheckAfterAwait();
-    if (!gate.ok) {
-      if (gate.reason.includes("cancelled") || gate.reason.includes("paused")) {
-        // Keep journal; do not clear in_flight if HTTP never started after cancel.
-        const inst = gate.doc.instances.find((item) => item.id === deps.instanceId);
-        if (inst?.pendingGithubOp?.dispatchState === "in_flight") {
-          return deps.saveDocument(
-            blockUnknownInFlightGithubDispatch(
-              gate.doc,
-              deps.instanceId,
-              `${gate.reason}; HTTP not started`,
-            ),
-          );
-        }
-      }
-      return deps.saveDocument(
-        denyPendingGithubOpBeforeHttp(gate.doc, deps.instanceId, gate.reason),
-      );
-    }
-
-    counters.createCalls += 1;
-    let result: LoopGithubOperationResult;
+    // —— prepare window (awaitable, no side effects) ——
+    counters.prepareCalls += 1;
+    let prepared: GithubDispatchPrepared;
     try {
-      result = await deps.createOperation(gate.pending);
+      const prepPending = loadForIdentity(deps, identity);
+      if (!prepPending.ok) {
+        const latest = prepPending.doc ?? deps.loadDocument() ?? doc;
+        return deps.saveDocument(
+          denyPendingGithubOpBeforeHttp(
+            latest,
+            deps.instanceId,
+            "Pending cleared/replaced during prepare window",
+          ),
+        );
+      }
+      prepared = await deps.prepareOperation(prepPending.pending);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "GitHub create failed";
-      const afterErr = deps.loadDocument() ?? gate.doc;
+      const message =
+        error instanceof Error ? error.message : "GitHub prepare failed";
+      const latest = deps.loadDocument() ?? doc;
       return deps.saveDocument(
-        blockUnknownInFlightGithubDispatch(
-          afterErr,
+        denyPendingGithubOpBeforeHttp(
+          latest,
           deps.instanceId,
-          `Create threw before confirmed result: ${message}`,
+          `Prepare failed before HTTP: ${message}`,
         ),
       );
     }
 
-    gate = recheckAfterAwait();
-    const latestDoc = gate.ok ? gate.doc : gate.doc;
-    const latestHooks = gate.ok
-      ? gate.hooks
-      : deps.hooksFor(latestDoc);
+    // —— final gate: ALWAYS re-validate auth/code (preparing is NOT an exemption) ——
+    const beforeClaim = loadForIdentity(deps, identity);
+    if (!beforeClaim.ok) {
+      const latest = beforeClaim.doc ?? deps.loadDocument();
+      if (!latest) throw new Error("Loop document missing before HTTP claim");
+      return deps.saveDocument(
+        journalOrphanedGithubDispatchResult(
+          latest,
+          deps.instanceId,
+          `Prepare finished but pending ${beforeClaim.reason}; transport skipped`,
+        ),
+      );
+    }
+    if (
+      beforeClaim.instance.status === "cancelled" ||
+      beforeClaim.instance.status === "paused"
+    ) {
+      return deps.saveDocument(
+        denyPendingGithubOpBeforeHttp(
+          beforeClaim.doc,
+          deps.instanceId,
+          `Instance ${beforeClaim.instance.status} during prepare window (HTTP not started)`,
+        ),
+      );
+    }
+    const claimHooks = deps.hooksFor(beforeClaim.doc);
+    const finalGate = preflightPendingGithubDispatch(
+      beforeClaim.doc,
+      deps.instanceId,
+      claimHooks,
+    );
+    if (!finalGate.ok) {
+      // preparing → clearable; never skip this check just because state≠queued
+      return deps.saveDocument(
+        denyPendingGithubOpBeforeHttp(
+          beforeClaim.doc,
+          deps.instanceId,
+          finalGate.reason,
+        ),
+      );
+    }
+
+    // —— atomic http_started claim (persisted before any transport) ——
+    doc = deps.saveDocument(
+      markPendingGithubOpHttpStarted(beforeClaim.doc, deps.instanceId, attemptId),
+    );
+
+    counters.transportCalls += 1;
+    counters.sideEffectCalls += 1;
+    let result: LoopGithubOperationResult;
+    try {
+      const transportPending = loadForIdentity(deps, identity);
+      if (!transportPending.ok) {
+        const latest = transportPending.doc ?? deps.loadDocument();
+        if (!latest) throw new Error("Loop document missing at transport");
+        return deps.saveDocument(
+          blockUnknownInFlightGithubDispatch(
+            latest,
+            deps.instanceId,
+            `Pending ${transportPending.reason} after http_started claim; transport aborted`,
+          ),
+        );
+      }
+      result = await deps.transportOperation(transportPending.pending, prepared);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "GitHub transport failed";
+      const afterErr = loadForIdentity(deps, identity);
+      const latest = afterErr.ok
+        ? afterErr.doc
+        : afterErr.doc ?? deps.loadDocument() ?? doc;
+      if (!afterErr.ok) {
+        return deps.saveDocument(
+          journalOrphanedGithubDispatchResult(
+            latest,
+            deps.instanceId,
+            `Transport threw (${message}) and pending ${afterErr.reason}`,
+          ),
+        );
+      }
+      return deps.saveDocument(
+        blockUnknownInFlightGithubDispatch(
+          latest,
+          deps.instanceId,
+          `Transport threw before confirmed result: ${message}`,
+        ),
+      );
+    }
+
+    // —— writeback: only against the original dispatch identity ——
+    const afterTransport = loadForIdentity(deps, identity);
+    if (!afterTransport.ok) {
+      const latest = afterTransport.doc ?? deps.loadDocument();
+      if (!latest) throw new Error("Loop document missing after transport");
+      return deps.saveDocument(
+        journalOrphanedGithubDispatchResult(
+          latest,
+          deps.instanceId,
+          `Transport returned ok=${result.ok} but pending ${afterTransport.reason}; not applied to new pending`,
+        ),
+      );
+    }
+    doc = afterTransport.doc;
+    instance = afterTransport.instance;
+    const latestHooks = deps.hooksFor(doc);
     const postflight = preflightPendingGithubDispatch(
-      latestDoc,
+      doc,
       deps.instanceId,
       latestHooks,
     );
 
-    // If cancelled mid-flight but HTTP returned ok — audit-append, do not resurrect.
-    const latestInstance = latestDoc.instances.find(
-      (item) => item.id === deps.instanceId,
-    );
-    if (
-      latestInstance &&
-      (latestInstance.status === "cancelled" || latestInstance.status === "paused")
-    ) {
+    if (instance.status === "cancelled" || instance.status === "paused") {
       if (result.ok) {
         return deps.saveDocument(
-          completePendingGithubOp(latestDoc, deps.instanceId, result, latestHooks, {
+          completePendingGithubOp(doc, deps.instanceId, result, latestHooks, {
             httpCompleted: true,
             deliveryStale: true,
           }),
@@ -542,16 +709,15 @@ export async function settleGithubDispatch(
       }
       return deps.saveDocument(
         blockUnknownInFlightGithubDispatch(
-          latestDoc,
+          doc,
           deps.instanceId,
           "Instance cancelled/paused with failed/unknown HTTP outcome",
         ),
       );
     }
 
-    void beforeMarkUpdatedAt;
     return deps.saveDocument(
-      completePendingGithubOp(latestDoc, deps.instanceId, result, latestHooks, {
+      completePendingGithubOp(doc, deps.instanceId, result, latestHooks, {
         httpCompleted: true,
         deliveryStale: result.ok && !postflight.ok,
       }),
@@ -575,8 +741,13 @@ export async function settlePendingGithubOpWithProbe(
   listPullRequests?: SettleGithubDispatchDeps["listPullRequests"],
 ): Promise<LoopGraphDocument> {
   let current = doc;
-  const counters = probe;
-  return settleGithubDispatch({
+  const counters: GithubDispatchCounters = {
+    prepareCalls: 0,
+    transportCalls: 0,
+    lookupCalls: 0,
+    sideEffectCalls: 0,
+  };
+  const result = await settleGithubDispatch({
     instanceId,
     loadDocument: () => current,
     saveDocument: (next) => {
@@ -592,11 +763,19 @@ export async function settlePendingGithubOpWithProbe(
           throw new Error("unused");
         },
       },
-    createOperation: (pending) =>
-      probe.create({ operation: pending.operation, payload: pending.payload }),
+    prepareOperation: async () => ({}),
+    transportOperation: (pending) => {
+      probe.createCalls += 1;
+      return probe.create({
+        operation: pending.operation,
+        payload: pending.payload,
+      });
+    },
     listPullRequests:
       listPullRequests ??
       (async () => ({ available: false, pullRequests: [] })),
     counters,
   });
+  probe.lookupCalls = counters.lookupCalls;
+  return result;
 }

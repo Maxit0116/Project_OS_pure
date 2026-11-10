@@ -8479,8 +8479,78 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   }
 
   /**
-   * Production GitHub settle — delegates to shared `settleGithubDispatch`
-   * (same implementation exercised by LocalApi loopback probes).
+   * Optional DI for GitHub prepare/transport (tests). Production resolves token +
+   * git-context create/push. Prepare must not push; transport owns side effects.
+   */
+  private loopGithubTransportOverride:
+    | {
+        prepare?: () =>
+          | Promise<{ accessToken?: string }>
+          | { accessToken?: string };
+        transportCreatePr?: (input: {
+          title: string;
+          head?: string;
+          base?: string;
+          body?: string;
+          accessToken?: string;
+        }) => Promise<{
+          ok: boolean;
+          message: string;
+          url?: string;
+          number?: number;
+        }>;
+        transportCreateBranch?: (input: {
+          branch: string;
+          from?: string;
+          accessToken?: string;
+        }) => Promise<{ ok: boolean; message: string }>;
+        listPullRequests?: (accessToken?: string) => Promise<{
+          available: boolean;
+          pullRequests: import("./git-context-service.js").ListedPullRequest[];
+          incomplete?: boolean;
+          message?: string;
+        }>;
+      }
+    | undefined;
+
+  /** Test-only: inject prepare/transport for LocalApi settle without live GitHub. */
+  replaceLoopGithubTransportForTests(
+    transport:
+      | NonNullable<ProjectOSLocalApi["loopGithubTransportOverride"]>
+      | undefined,
+  ): void {
+    this.loopGithubTransportOverride = transport;
+  }
+
+  /**
+   * Test-only: run production settlePendingGithubOp for one instance
+   * (persisted load/save + DI transport).
+   */
+  async settlePendingGithubOpForTests(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getLoopGraph, upsertLoopGraph } = await import(
+      "./loop-graph-service.js"
+    );
+    const { completePendingGithubOp } = await import("./loop-runtime-service.js");
+    const document = getLoopGraph(workspace.workspaceRoot, loopId);
+    if (!document) throw new Error(`Loop not found: ${loopId}`);
+    return this.settlePendingGithubOp(
+      workspace,
+      loopId,
+      document,
+      instanceId,
+      completePendingGithubOp,
+      upsertLoopGraph,
+    );
+  }
+
+  /**
+   * Production GitHub settle — prepare (token) → final gate inside scheduler →
+   * transport (push/create). Shared `settleGithubDispatch` is the only path.
    */
   private async settlePendingGithubOp(
     workspace: LoadedProjectOSWorkspace,
@@ -8493,6 +8563,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const { settleGithubDispatch } = await import("./loop-github-dispatch.js");
     const { getLoopGraph } = await import("./loop-graph-service.js");
     void document;
+    const override = this.loopGithubTransportOverride;
     return settleGithubDispatch({
       instanceId,
       loadDocument: () => getLoopGraph(workspace.workspaceRoot, loopId),
@@ -8503,13 +8574,21 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           loopId,
           doc.instances.find((item) => item.id === instanceId)?.id ?? instanceId,
         ),
-      listPullRequests: async () => {
-        const { listGithubPullRequests } = await import("./git-context-service.js");
+      prepareOperation: async () => {
+        if (override?.prepare) return override.prepare();
         const token = await this.resolveGithubAccessToken();
+        return token ? { accessToken: token } : {};
+      },
+      listPullRequests: async (prepared) => {
+        if (override?.listPullRequests) {
+          return override.listPullRequests(prepared?.accessToken);
+        }
+        const { listGithubPullRequests } = await import("./git-context-service.js");
         const listed = await listGithubPullRequests(workspace.workspaceRoot, {
-          ...(token ? { accessToken: token } : {}),
+          ...(prepared?.accessToken
+            ? { accessToken: prepared.accessToken }
+            : {}),
         });
-        // per_page/limit 50 — treat as potentially incomplete when saturated.
         return {
           available: listed.available,
           pullRequests: listed.pullRequests,
@@ -8517,25 +8596,59 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           ...(listed.message ? { message: listed.message } : {}),
         };
       },
-      createOperation: async (pending) => {
+      transportOperation: async (pending, prepared) => {
         const payload = pending.payload;
         if (pending.operation === "create_pr") {
-          const { createGithubPullRequest } = await import("./git-context-service.js");
-          const token = await this.resolveGithubAccessToken();
           const title =
             typeof payload.title === "string" && payload.title.trim()
               ? payload.title.trim()
               : "Loop Graph pull request";
+          const head =
+            typeof payload.head === "string" ? payload.head : undefined;
+          const base =
+            typeof payload.base === "string" ? payload.base : undefined;
+          const body =
+            typeof payload.body === "string" ? payload.body : undefined;
+          if (override?.transportCreatePr) {
+            const remote = await override.transportCreatePr({
+              title,
+              ...(head ? { head } : {}),
+              ...(base ? { base } : {}),
+              ...(body ? { body } : {}),
+              ...(prepared.accessToken
+                ? { accessToken: prepared.accessToken }
+                : {}),
+            });
+            return {
+              ok: remote.ok,
+              message: remote.message,
+              ...(remote.url ? { url: remote.url } : {}),
+              ...(typeof remote.number === "number"
+                ? { number: remote.number }
+                : {}),
+              refs: Object.fromEntries(
+                Object.entries(payload).map(([key, value]) => [
+                  key,
+                  String(value),
+                ]),
+              ),
+            };
+          }
+          const { createGithubPullRequest } = await import(
+            "./git-context-service.js"
+          );
           const remote = await createGithubPullRequest(
             workspace.workspaceRoot,
             {
               title,
-              ...(typeof payload.head === "string" ? { head: payload.head } : {}),
-              ...(typeof payload.base === "string" ? { base: payload.base } : {}),
-              ...(typeof payload.body === "string" ? { body: payload.body } : {}),
+              ...(head ? { head } : {}),
+              ...(base ? { base } : {}),
+              ...(body ? { body } : {}),
             },
             {
-              ...(token ? { accessToken: token } : {}),
+              ...(prepared.accessToken
+                ? { accessToken: prepared.accessToken }
+                : {}),
               pushHead: true,
             },
           );
@@ -8543,30 +8656,55 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             ok: remote.ok,
             message: remote.message,
             ...(remote.url ? { url: remote.url } : {}),
-            ...(typeof remote.number === "number" ? { number: remote.number } : {}),
+            ...(typeof remote.number === "number"
+              ? { number: remote.number }
+              : {}),
             refs: Object.fromEntries(
-              Object.entries(payload).map(([key, value]) => [key, String(value)]),
+              Object.entries(payload).map(([key, value]) => [
+                key,
+                String(value),
+              ]),
             ),
           };
         }
         if (pending.operation === "create_branch") {
-          const { createGitBranch } = await import("./git-context-service.js");
-          const token = await this.resolveGithubAccessToken();
           const branch =
             (typeof payload.branch === "string" && payload.branch.trim()) ||
             (typeof payload.name === "string" && payload.name.trim()) ||
             "";
+          const from =
+            typeof payload.from === "string" ? payload.from : undefined;
+          if (override?.transportCreateBranch) {
+            const created = await override.transportCreateBranch({
+              branch,
+              ...(from ? { from } : {}),
+              ...(prepared.accessToken
+                ? { accessToken: prepared.accessToken }
+                : {}),
+            });
+            return {
+              ok: created.ok,
+              message: created.message,
+              refs: {
+                branch,
+                ...(from ? { from } : {}),
+              },
+            };
+          }
+          const { createGitBranch } = await import("./git-context-service.js");
           const created = createGitBranch(workspace.workspaceRoot, branch, {
-            ...(typeof payload.from === "string" ? { from: payload.from } : {}),
+            ...(from ? { from } : {}),
             push: true,
-            ...(token ? { accessToken: token } : {}),
+            ...(prepared.accessToken
+              ? { accessToken: prepared.accessToken }
+              : {}),
           });
           return {
             ok: created.ok,
             message: created.message,
             refs: {
               branch,
-              ...(typeof payload.from === "string" ? { from: payload.from } : {}),
+              ...(from ? { from } : {}),
             },
           };
         }
@@ -8853,6 +8991,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           runId,
           status: evidence.status,
         };
+      },
+      /** Read-only verification kick — never starts a writable fix/change agent. */
+      requestVerification: (runId) => {
+        void this.runVerification(runId).catch(() => {
+          // Evidence stays not_run / prior status; verify stepper polls readEvidence.
+        });
       },
       allowConcurrentLoopRuns,
       startAgentRun: (input) => {

@@ -17,6 +17,10 @@ describe('loopNodeVisuals', () => {
       'action.test',
       'action.github.create_pr',
       'action.github.create_branch',
+      'action.slack.post_message',
+      'action.feishu.post_message',
+      'action.lark.post_message',
+      'action.sentry.list_issues',
       'action.terminal',
       'logic.condition',
       'logic.loop',
@@ -29,6 +33,33 @@ describe('loopNodeVisuals', () => {
     const keys = ids.map((id) => visualForPaletteItem({ id }).key)
     expect(new Set(keys).size).toBe(ids.length)
     expect(keys.every((key) => key !== 'draft')).toBe(true)
+  })
+
+  it('attaches brand icon keys for GitHub/Slack/Lark actions', () => {
+    expect(visualForPaletteItem({ id: 'action.github.create_pr' }).integrationIconKey).toBe(
+      'github',
+    )
+    expect(visualForPaletteItem({ id: 'action.slack.post_message' }).integrationIconKey).toBe(
+      'slack',
+    )
+    expect(visualForPaletteItem({ id: 'action.feishu.post_message' }).integrationIconKey).toBe(
+      'feishu',
+    )
+    expect(visualForPaletteItem({ id: 'action.lark.post_message' }).integrationIconKey).toBe(
+      'lark',
+    )
+    expect(visualForPaletteItem({ id: 'action.sentry.list_issues' }).integrationIconKey).toBe(
+      'sentry',
+    )
+    expect(visualKeyFromArchitecture({ actionIntegration: 'slack' })).toBe(
+      'action.slack.post_message',
+    )
+    expect(visualKeyFromArchitecture({ actionIntegration: 'feishu' })).toBe(
+      'action.feishu.post_message',
+    )
+    expect(visualKeyFromArchitecture({ actionIntegration: 'lark' })).toBe(
+      'action.lark.post_message',
+    )
   })
 
   it('resolves architecture fields in priority order', () => {

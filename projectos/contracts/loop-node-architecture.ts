@@ -64,7 +64,15 @@ export const LOOP_HUMAN_MODES = [
 ] as const;
 export type LoopHumanMode = (typeof LOOP_HUMAN_MODES)[number];
 
-export const LOOP_ACTION_INTEGRATIONS = ["github", "test", "terminal"] as const;
+export const LOOP_ACTION_INTEGRATIONS = [
+  "github",
+  "test",
+  "terminal",
+  "slack",
+  "feishu",
+  "lark",
+  "sentry",
+] as const;
 export type LoopActionIntegration = (typeof LOOP_ACTION_INTEGRATIONS)[number];
 
 export const LOOP_LOGIC_KINDS = [

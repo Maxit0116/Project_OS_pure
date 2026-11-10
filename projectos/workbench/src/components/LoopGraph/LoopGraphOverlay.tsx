@@ -33,6 +33,12 @@ import LoopGraphPalette from './LoopGraphPalette'
 import LoopNodeDutyCard from './LoopNodeDutyCard'
 import LoopGraphRail from './LoopGraphRail'
 import LoopRunSidePanel from './LoopRunSidePanel'
+import { LoopIntegrationIcon } from './integrations/LoopIntegrationIcon'
+import {
+  getLoopIntegration,
+  runtimeStatusBlocksExecution,
+  runtimeStatusNextStep,
+} from './integrations/loopIntegrationRegistry'
 import {
   decodePaletteDragPayload,
   LOOP_PALETTE_MIME,
@@ -1023,6 +1029,13 @@ export default function LoopGraphOverlay() {
                                 : runTone === 'waiting' || runTone === 'waiting_approval'
                                   ? styles.nodeHitl
                                   : ''
+                          } ${
+                            visual.integrationIconKey ? styles.nodeSaas : ''
+                          } ${
+                            visual.defaultRuntimeStatus &&
+                            runtimeStatusBlocksExecution(visual.defaultRuntimeStatus)
+                              ? styles.nodeSaasBlocked
+                              : ''
                           }`}
                           style={{
                             left: node.position.x,
@@ -1032,6 +1045,8 @@ export default function LoopGraphOverlay() {
                           }}
                           data-loop-node={node.id}
                           data-loop-node-status={runTone ?? undefined}
+                          data-loop-integration={visual.integrationId ?? undefined}
+                          data-loop-runtime-status={visual.defaultRuntimeStatus ?? undefined}
                           aria-label={`${visual.shortLabel}: ${node.title || ts('chat.loopGraph.untitledNode')}`}
                           onDoubleClick={(event) => {
                             event.stopPropagation()
@@ -1169,14 +1184,47 @@ export default function LoopGraphOverlay() {
                               />
                             ) : null}
                             <span
-                              className={`${styles.nodeIcon} ${categoryClass}`}
+                              className={`${styles.nodeIcon} ${categoryClass} ${
+                                visual.integrationIconKey ? styles.nodeIconBrand : ''
+                              }`}
                               title={visual.shortLabel}
                               aria-hidden
                             >
-                              <NodeIcon size={15} strokeWidth={1.75} />
+                              {visual.integrationIconKey ? (
+                                <LoopIntegrationIcon
+                                  integrationId={visual.integrationId}
+                                  iconKey={visual.integrationIconKey}
+                                  size={16}
+                                />
+                              ) : (
+                                <NodeIcon size={15} strokeWidth={1.75} />
+                              )}
                             </span>
                             <span className={styles.nodeTitle}>
                               {node.title || visual.shortLabel}
+                              {visual.operationLabel ? (
+                                <span className={styles.nodeOpMeta}>{visual.operationLabel}</span>
+                              ) : null}
+                              {visual.integrationId &&
+                              visual.defaultRuntimeStatus &&
+                              runtimeStatusBlocksExecution(visual.defaultRuntimeStatus) ? (
+                                <span
+                                  className={styles.saasBlockedBadge}
+                                  title={(() => {
+                                    const meta = getLoopIntegration(visual.integrationId)
+                                    return meta
+                                      ? runtimeStatusNextStep(
+                                          meta,
+                                          visual.defaultRuntimeStatus,
+                                        )
+                                      : undefined
+                                  })()}
+                                >
+                                  {visual.defaultRuntimeStatus === 'unimplemented'
+                                    ? '未实现'
+                                    : '未配置'}
+                                </span>
+                              ) : null}
                               {isAgentDuty ? (
                                 <span className={styles.nodeAgentMeta}>
                                   {node.agentDefinitionId

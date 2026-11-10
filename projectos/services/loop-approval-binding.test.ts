@@ -584,7 +584,7 @@ describe("loop approval binding (engineering baseline)", () => {
     );
     expect(probe.createCalls).toBe(0);
     expect(probe.lookupCalls).toBe(1);
-    expect(doc.instances[0]?.pendingGithubOp?.dispatchState).toBe("in_flight");
+    expect(doc.instances[0]?.pendingGithubOp?.dispatchState).toBe("http_started");
     expect(
       (doc.instances[0]?.artifacts ?? []).some(
         (item) => item.kind === "github_op_result",

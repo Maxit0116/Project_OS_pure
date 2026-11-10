@@ -140,6 +140,18 @@
   font-weight: 600;
 }
 
+.nodeOpMeta {
+  display: block;
+  margin-top: 1px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--tech-text-secondary);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .nodePrompt {
   margin: 0;
   max-height: 2.7em;

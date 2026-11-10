@@ -1,0 +1,118 @@
+.loopSaaSNodeCard {
+  --loop-saas-logo-accent: #fff;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 148px;
+  max-width: 220px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--tech-border, #2a3344) 80%, transparent);
+  background: color-mix(in srgb, var(--tech-panel, #121820) 92%, transparent);
+  color: var(--tech-text, #e8eef7);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 1px 0 color-mix(in srgb, #000 35%, transparent);
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.loopSaaSNodeCard:hover,
+.loopSaaSNodeCard--hover {
+  border-color: color-mix(in srgb, var(--tech-accent, #5b9fd4) 55%, transparent);
+}
+
+.loopSaaSNodeCard--selected {
+  border-color: var(--tech-accent, #5b9fd4);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tech-accent, #5b9fd4) 45%, transparent);
+}
+
+.loopSaaSNodeCard--disabled,
+.loopSaaSNodeCard[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.loopSaaSNodeCard--blocked {
+  border-style: dashed;
+}
+
+.loopSaaSNodeCard--error {
+  border-color: color-mix(in srgb, #e35d6a 70%, transparent);
+}
+
+.loopSaaSNodeCard--running {
+  border-color: color-mix(in srgb, #e0b44f 70%, transparent);
+}
+
+.loopSaaSNodeCard--complete {
+  border-color: color-mix(in srgb, #3fbf7f 70%, transparent);
+}
+
+.loopSaaSNodeCard--awaiting_hitl {
+  border-color: color-mix(in srgb, #c48bff 70%, transparent);
+}
+
+.loopSaaSNodeCard__logo {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--tech-surface, #1a2230) 90%, transparent);
+}
+
+.loopSaaSNodeCard__logo img {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+.loopSaaSNodeCard__fallback {
+  font-weight: 700;
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.loopSaaSNodeCard__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.loopSaaSNodeCard__name {
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loopSaaSNodeCard__op {
+  font-size: 11px;
+  opacity: 0.72;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loopSaaSNodeCard__badge {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tech-surface, #1a2230) 88%, transparent);
+  white-space: nowrap;
+}
+
+.loopSaaSNodeCard__badge--error {
+  color: #ffb4bc;
+}
+
+.loopSaaSNodeCard__badge--ok {
+  color: #9be7c0;
+}
