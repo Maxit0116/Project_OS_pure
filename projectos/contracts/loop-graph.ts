@@ -209,6 +209,15 @@ export const IntentGraphPositionSchema = z
   })
   .strict();
 
+export const IntentGraphNodeActionParamsSchema = z
+  .record(
+    z.string().min(1).max(80),
+    z.union([z.string().max(2000), z.number().finite(), z.boolean()]),
+  )
+  .refine((value) => Object.keys(value).length <= 32, {
+    message: "actionParams supports at most 32 keys",
+  });
+
 export const IntentGraphNodeSchema = z
   .object({
     id: z.string().min(1),
@@ -225,6 +234,23 @@ export const IntentGraphNodeSchema = z
     logicKind: LoopLogicKindSchema.optional(),
     maxIterations: z.number().int().positive().max(50).optional(),
     repairMode: z.boolean().optional(),
+    /** Credential reference id — secret material never stored on the node. */
+    credentialRefId: z.string().trim().min(1).max(120).optional(),
+    /** Per-node timeout (ms) for applicable Action/Logic waits. */
+    timeoutMs: z.number().int().positive().max(600_000).optional(),
+    /** Logic retry limit when logicKind === "retry". */
+    retryLimit: z.number().int().positive().max(20).optional(),
+    /** Logic wait duration when logicKind === "wait". */
+    waitMs: z.number().int().nonnegative().max(3_600_000).optional(),
+    /** Human assignee / approver label (not auth proof). */
+    humanAssignee: z.string().trim().min(1).max(120).optional(),
+    /** Allowed human operations for approval/decision nodes. */
+    humanAllowedActions: z
+      .array(z.string().trim().min(1).max(80))
+      .max(12)
+      .optional(),
+    /** Typed Action parameters (shared manual + AI schema). */
+    actionParams: IntentGraphNodeActionParamsSchema.optional(),
     /** Present when `type === "config"` (Agent wiring satellite). */
     satelliteKind: LoopSatelliteKindSchema.optional(),
     /** Asset pointer for a config satellite. */
@@ -578,6 +604,26 @@ export const LoopInstanceSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * SaaS connector Action queued for async settle (Slack/Feishu/Lark/Sentry/…).
+     * Settled via loop-connectors settleConnectorOperation — never auto-executes
+     * without LocalApi/transport DI.
+     */
+    pendingConnectorOp: z
+      .object({
+        nodeId: z.string().min(1),
+        vendorId: z.string().trim().min(1).max(40),
+        capabilityId: z.string().trim().min(1).max(80),
+        payload: z.record(z.string(), z.unknown()),
+        credentialRefId: z.string().trim().min(1).max(120),
+        idempotencyKey: z.string().trim().min(1).max(160),
+        queuedAt: z.string().min(1),
+        dispatchState: z
+          .enum(["queued", "preparing", "http_started", "in_flight"])
+          .optional(),
+      })
+      .strict()
+      .optional(),
     /** GitHub Action queued for async settle (REST create_pr, etc.). */
     pendingGithubOp: z
       .object({
@@ -643,6 +689,25 @@ export const LoopInstanceSchema = z
           })
           .strict()
           .optional(),
+      })
+      .strict()
+      .optional(),
+    /**
+     * Project/run binding snapshot for project-workflow starts.
+     * Editing Intent/Spec must not rewrite this after the run is created.
+     */
+    runBinding: z
+      .object({
+        projectId: z.string().min(1),
+        workspaceRoot: z.string().min(1).optional(),
+        repo: z.string().trim().min(1).max(240).optional(),
+        branch: z.string().trim().min(1).max(240).optional(),
+        codeDigest: z.string().trim().min(1).max(128).optional(),
+        specVersion: z.string().min(1),
+        taskInputId: z.string().min(1).optional(),
+        credentialRefIds: z.array(z.string().min(1).max(120)).max(32).optional(),
+        preflightNotes: z.array(z.string().trim().min(1).max(500)).max(40).optional(),
+        createdAt: z.string().min(1),
       })
       .strict()
       .optional(),
@@ -844,6 +909,16 @@ export const LoopAuthoringTurnRequestSchema = z
   .object({
     mode: LoopComposerModeSchema,
     text: z.string().trim().min(1).max(4000),
+    /**
+     * Optional canvas selection — Edit prompts may target a single node.
+     * Omitted = whole-workflow context (still includes full draft in provider path).
+     */
+    selectedNodeId: z.string().min(1).optional(),
+    /**
+     * When true, prefer the ModelGateway provider path over heuristics.
+     * Loopback/tests inject a gateway; live keys are never auto-read this round.
+     */
+    useProvider: z.boolean().optional(),
   })
   .strict();
 

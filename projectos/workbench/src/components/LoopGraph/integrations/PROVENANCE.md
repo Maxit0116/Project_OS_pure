@@ -18,11 +18,11 @@ Fixture screenshots: `fixtures/saas-node-comparison.html` (before Lucide-letter 
 
 | Key | File | Source | Asset license | Trademark |
 |-----|------|--------|---------------|-----------|
-| github | `icons/github.svg` | Simple Icons path geometry (simpleicons.org) | CC0 1.0 for SVG path packaging | GitHub® trademark of GitHub, Inc. |
-| slack | `icons/slack.svg` | Simple Icons path geometry | CC0 1.0 for SVG path packaging | Slack® trademark of Salesforce, Inc. |
-| feishu | `icons/feishu.svg` | Pure-authored geometric mark for **飞书 Feishu** display | Original Pure-authored SVG | 飞书 / Feishu trademarks of ByteDance — distinct from Lark |
-| lark | `icons/lark.svg` | Independent geometric mark for **Lark** (international) | Original Pure-authored SVG | Lark™ trademark of ByteDance — not Feishu naming/host |
-| sentry | `icons/sentry.svg` | Simple Icons-inspired geometric path | CC0-style packaging / Pure-adapted | Sentry® trademark of Functional Software, Inc. |
+| github | `icons/github.svg` | Simple Icons GitHub path; **light fill `#f0f6fc`** for dark Pure surfaces | CC0 1.0 path packaging | GitHub® trademark of GitHub, Inc. |
+| slack | `icons/slack.svg` | Simple Icons Slack geometry + Slack brand palette fills (E01E5A/36C5F0/2EB67D/ECB22E) | CC0 1.0 path; colors for identification | Slack® trademark of Salesforce, Inc. |
+| feishu | `icons/feishu.svg` | **Typographic “飞书” wordmark tile only** — not an official Feishu glyph (no verified compatible official SVG in-env) | Original Pure-authored | 飞书 / Feishu trademarks of ByteDance — distinct from Lark |
+| lark | `icons/lark.svg` | **Typographic “Lark” wordmark tile only** — not an official Lark glyph | Original Pure-authored | Lark™ trademark of ByteDance — not Feishu host/naming |
+| sentry | `icons/sentry.svg` | Simple Icons Sentry path + brand accent `#F15B56` | CC0 1.0 path packaging | Sentry® trademark of Functional Software, Inc. |
 
 Rules:
 - No runtime CDN/hotlink fetches.

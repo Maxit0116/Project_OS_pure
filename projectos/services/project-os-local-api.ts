@@ -8522,6 +8522,29 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     this.loopGithubTransportOverride = transport;
   }
 
+  private loopConnectorTransportOverride:
+    | import("./loop-connectors/http-transport.js").LoopConnectorTransport
+    | undefined;
+
+  private loopConnectorSecretResolver:
+    | ((credentialRefId: string) => string | null)
+    | undefined;
+
+  /** Test/loopback: inject SaaS connector HTTP transport (no live OAuth). */
+  replaceLoopConnectorTransportForTests(
+    transport:
+      | import("./loop-connectors/http-transport.js").LoopConnectorTransport
+      | undefined,
+  ): void {
+    this.loopConnectorTransportOverride = transport;
+  }
+
+  replaceLoopConnectorSecretResolverForTests(
+    resolve: ((credentialRefId: string) => string | null) | undefined,
+  ): void {
+    this.loopConnectorSecretResolver = resolve;
+  }
+
   /**
    * Test-only: run production settlePendingGithubOp for one instance
    * (persisted load/save + DI transport).
@@ -8546,6 +8569,80 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       completePendingGithubOp,
       upsertLoopGraph,
     );
+  }
+
+  /**
+   * Test/loopback: LocalApi → settleConnectorOperation → adapter → transport → audit.
+   * Inject transport via setLoopConnectorTransportOverride; secrets via resolve map.
+   */
+  async settlePendingConnectorOpForTests(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    options?: {
+      resolveSecret?: (credentialRefId: string) => string | null;
+    },
+  ): Promise<{
+    document: import("../contracts/loop-graph.js").LoopGraphDocument;
+    result: import("./loop-connectors/types.js").LoopConnectorResult;
+  }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getLoopGraph, upsertLoopGraph } = await import(
+      "./loop-graph-service.js"
+    );
+    const { settleConnectorOperation } = await import(
+      "./loop-connectors/settle-connector.js"
+    );
+    const document = getLoopGraph(workspace.workspaceRoot, loopId);
+    if (!document) throw new Error(`Loop not found: ${loopId}`);
+    const instance = document.instances.find((item) => item.id === instanceId);
+    const pending = instance?.pendingConnectorOp;
+    if (!pending) throw new Error(`No pendingConnectorOp on ${instanceId}`);
+    const transport =
+      this.loopConnectorTransportOverride ??
+      (await import("./loop-connectors/http-transport.js")).createFetchTransport();
+    const settled = await settleConnectorOperation(
+      {
+        nodeId: pending.nodeId,
+        vendorId: pending.vendorId as import("./loop-connectors/types.js").LoopConnectorVendorId,
+        capabilityId: pending.capabilityId,
+        payload: pending.payload,
+        credentialRefId: pending.credentialRefId,
+        idempotencyKey: pending.idempotencyKey,
+        queuedAt: pending.queuedAt,
+        ...(pending.dispatchState
+          ? { dispatchState: pending.dispatchState }
+          : {}),
+      },
+      {
+        instanceId,
+        loadDocument: () => getLoopGraph(workspace.workspaceRoot, loopId),
+        saveDocument: (doc) => upsertLoopGraph(workspace.workspaceRoot, doc),
+        ctx: { transport },
+        resolveSecret:
+          options?.resolveSecret ??
+          this.loopConnectorSecretResolver ??
+          (() => null),
+      },
+    );
+    // Clear pending on success/known failure after audit write.
+    const after = settled.doc;
+    const inst = after.instances.find((item) => item.id === instanceId);
+    if (inst?.pendingConnectorOp) {
+      const cleared = {
+        ...after,
+        instances: after.instances.map((item) =>
+          item.id === instanceId
+            ? { ...item, pendingConnectorOp: undefined }
+            : item,
+        ),
+      };
+      return {
+        document: upsertLoopGraph(workspace.workspaceRoot, cleared),
+        result: settled.result,
+      };
+    }
+    return { document: settled.doc, result: settled.result };
   }
 
   /**
@@ -8748,6 +8845,20 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         continue;
       }
 
+      if (
+        instance.pendingConnectorOp &&
+        (this.loopConnectorTransportOverride ||
+          this.loopConnectorSecretResolver)
+      ) {
+        const settled = await this.settlePendingConnectorOpForTests(
+          workspace.project.id,
+          loopId,
+          instance.id,
+        );
+        current = settled.document;
+        continue;
+      }
+
       const hooks = this.loopHooksFor(workspace, loopId, instance.id);
       const inFlightRunIds = [
         ...new Set([
@@ -8877,6 +8988,37 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           simulated: true,
           message: `GitHub ${input.operation} simulated after approval`,
           refs: payloadRefs,
+        };
+      },
+      executeConnectorOperation: (input) => {
+        const cred =
+          input.credentialRefId ??
+          (typeof input.payload.credentialRefId === "string"
+            ? input.payload.credentialRefId
+            : undefined);
+        if (!cred) {
+          return {
+            ok: false,
+            message:
+              "Missing credentialRefId — connector Action is not runnable (configured ≠ authorized)",
+          };
+        }
+        // Only queue when a settle transport/secret path is wired (tests/loopback).
+        // Otherwise fail closed — brand presence ≠ executable.
+        if (
+          !this.loopConnectorTransportOverride &&
+          !this.loopConnectorSecretResolver
+        ) {
+          return {
+            ok: false,
+            message: `${input.vendorId} connector offline/unconfigured for settle (no transport DI)`,
+          };
+        }
+        return {
+          ok: true,
+          deferred: true,
+          credentialRefId: cred,
+          message: `${input.vendorId}.${input.capabilityId} queued for settle`,
         };
       },
       executeTerminalCommand: (input) => {
@@ -9360,15 +9502,38 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     request: import("../contracts/loop-graph.js").LoopAuthoringTurnRequest,
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
-    const { sendLoopAuthoringTurn } = await import("./loop-graph-service.js");
+    const { sendLoopAuthoringTurnAsync } = await import("./loop-graph-service.js");
     try {
-      return sendLoopAuthoringTurn(workspace.workspaceRoot, loopId, request);
+      // Provider path when override/useProvider set; else heuristics (never pretends LLM).
+      return await sendLoopAuthoringTurnAsync(
+        workspace.workspaceRoot,
+        loopId,
+        request,
+      );
     } catch (error) {
       throw new ProjectOSError(
         "loop_graph_invalid",
         error instanceof Error ? error.message : "Failed to send authoring turn",
       );
     }
+  }
+
+  /**
+   * Test/loopback: inject authoring complete fn. Null clears.
+   * Does not read user API keys or make paid live calls.
+   */
+  setLoopAuthoringCompleteOverride(
+    complete:
+      | ((input: {
+          system: string;
+          user: string;
+          signal?: AbortSignal;
+        }) => Promise<string>)
+      | null,
+  ): void {
+    void import("./loop-graph-service.js").then((mod) => {
+      mod.setLoopAuthoringCompleteOverride(complete);
+    });
   }
 
   async answerLoopGoalClarification(

@@ -80,6 +80,8 @@ interface LoopGraphStore {
   composerDraft: string
   composerSheet: LoopComposerSheet
   authoringBusy: boolean
+  /** Canvas selection for AI Edit context (DutyCard / Overlay). */
+  canvasSelectedNodeId: string | null
 
   loadForWorkspace: () => Promise<void>
   clear: () => void
@@ -93,6 +95,7 @@ interface LoopGraphStore {
   setConnectingFrom: (nodeId: string | null) => void
   setPendingDelete: (target: LoopDeleteTarget | null) => void
   setComposerDraft: (value: string) => void
+  setCanvasSelectedNodeId: (nodeId: string | null) => void
   /** Open a sheet, or collapse it if already open (bookmark toggle). */
   toggleComposerSheet: (sheet: Exclude<LoopComposerSheet, 'none'>) => void
   setComposerSheet: (sheet: LoopComposerSheet) => void
@@ -232,6 +235,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   composerDraft: '',
   composerSheet: 'none',
   authoringBusy: false,
+  canvasSelectedNodeId: null,
   runHistory: [],
 
   clear: () => {
@@ -265,6 +269,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   setPendingDelete: (target) => set({ pendingDelete: target }),
 
   setComposerDraft: (value) => set({ composerDraft: value }),
+  setCanvasSelectedNodeId: (nodeId) => set({ canvasSelectedNodeId: nodeId }),
 
   setComposerSheet: (sheet) => set({ composerSheet: sheet }),
 
@@ -306,9 +311,13 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
 
     set({ authoringBusy: true, composerSheet: 'flow', error: null })
     try {
+      const selectedNodeId = get().canvasSelectedNodeId ?? undefined
       const next = await client.sendLoopAuthoringTurn(project.projectId, loopId, {
         mode: document.composerMode ?? 'ask',
         text,
+        ...(selectedNodeId ? { selectedNodeId } : {}),
+        // Prefer provider when LocalApi has an override; server falls back to heuristic.
+        useProvider: true,
       })
       const heads = await client.listLoopGraphs(project.projectId)
       set({

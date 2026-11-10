@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import {
   getLoopIntegration,
   resolveLoopIntegrationIconUrl,
@@ -6,6 +6,7 @@ import {
   runtimeStatusNextStep,
   type LoopIntegrationRuntimeStatus,
 } from './loopIntegrationRegistry'
+import './LoopSaaSNodeCard.css'
 
 export type LoopSaaSNodeCardState =
   | 'idle'
@@ -27,6 +28,12 @@ export type LoopSaaSNodeCardProps = {
   className?: string
   style?: CSSProperties
   onSelect?: () => void
+  /**
+   * Canvas embed: non-button chrome so Overlay owns ports/drag/selection.
+   * Standalone (default): interactive button for palette/tests.
+   */
+  embedded?: boolean
+  children?: ReactNode
 }
 
 /**
@@ -42,6 +49,8 @@ export function LoopSaaSNodeCard({
   className,
   style,
   onSelect,
+  embedded = false,
+  children,
 }: LoopSaaSNodeCardProps) {
   const meta = getLoopIntegration(integrationId)
   const displayName = titleOverride ?? meta?.displayName ?? integrationId
@@ -62,6 +71,7 @@ export function LoopSaaSNodeCard({
 
   const classes = [
     'loopSaaSNodeCard',
+    embedded ? 'loopSaaSNodeCard--embedded' : '',
     `loopSaaSNodeCard--${state}`,
     blocked ? 'loopSaaSNodeCard--blocked' : '',
     className ?? '',
@@ -69,23 +79,8 @@ export function LoopSaaSNodeCard({
     .filter(Boolean)
     .join(' ')
 
-  return (
-    <button
-      type="button"
-      className={classes}
-      style={style}
-      data-integration={integrationId}
-      data-runtime-status={status}
-      data-state={state}
-      data-blocked={blocked ? 'true' : 'false'}
-      aria-label={`${displayName}: ${operationLabel}`}
-      aria-disabled={blocked || state === 'disabled'}
-      title={blocked ? nextStep : `${displayName} · ${operationLabel}`}
-      onClick={() => {
-        if (state === 'disabled') return
-        onSelect?.()
-      }}
-    >
+  const body = (
+    <>
       <span className="loopSaaSNodeCard__logo" aria-hidden="true">
         {iconUrl ? (
           <img src={iconUrl} alt="" width={28} height={28} draggable={false} />
@@ -116,6 +111,45 @@ export function LoopSaaSNodeCard({
       {state === 'complete' ? (
         <span className="loopSaaSNodeCard__badge loopSaaSNodeCard__badge--ok">完成</span>
       ) : null}
+      {children}
+    </>
+  )
+
+  if (embedded) {
+    return (
+      <div
+        className={classes}
+        style={style}
+        data-integration={integrationId}
+        data-runtime-status={status}
+        data-state={state}
+        data-blocked={blocked ? 'true' : 'false'}
+        data-saas-card="embedded"
+        title={blocked ? nextStep : `${displayName} · ${operationLabel}`}
+      >
+        {body}
+      </div>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      className={classes}
+      style={style}
+      data-integration={integrationId}
+      data-runtime-status={status}
+      data-state={state}
+      data-blocked={blocked ? 'true' : 'false'}
+      aria-label={`${displayName}: ${operationLabel}`}
+      aria-disabled={blocked || state === 'disabled'}
+      title={blocked ? nextStep : `${displayName} · ${operationLabel}`}
+      onClick={() => {
+        if (state === 'disabled') return
+        onSelect?.()
+      }}
+    >
+      {body}
     </button>
   )
 }

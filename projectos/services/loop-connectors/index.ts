@@ -6,3 +6,5 @@ export * from "./dispatch.js";
 export * from "./adapters/slack.js";
 export * from "./adapters/feishu-lark.js";
 export * from "./adapters/sentry.js";
+export * from "./adapters/batch2.js";
+export * from "./settle-connector.js";

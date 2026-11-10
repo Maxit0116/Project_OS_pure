@@ -33,11 +33,28 @@ import {
   buildRunningTrace,
   makeAuthoringMessage,
 } from "./loop-goal-authoring-service.js";
+import {
+  runLoopAuthoringProvider,
+  type LoopAuthoringCompleteFn,
+} from "./loop-goal-authoring-provider.js";
 import { diffIntentGraphs } from "./loop-intent-graph-diff.js";
 import {
   buildCoarseLoopSkeletonFromGoal,
   editLoopGraphHeuristic,
 } from "./loop-graph-edit-service.js";
+
+/** Injectable provider complete — tests/LocalApi set this; never auto-reads user keys. */
+let authoringCompleteOverride: LoopAuthoringCompleteFn | null = null;
+
+export function setLoopAuthoringCompleteOverride(
+  complete: LoopAuthoringCompleteFn | null,
+): void {
+  authoringCompleteOverride = complete;
+}
+
+export function getLoopAuthoringCompleteOverride(): LoopAuthoringCompleteFn | null {
+  return authoringCompleteOverride;
+}
 
 const LOOP_GRAPHS_DIR = join(".projectos", "loop-graphs");
 const INDEX_PATH = join(LOOP_GRAPHS_DIR, "index.json");
@@ -239,12 +256,29 @@ export function setLoopComposerMode(
   });
 }
 
+/**
+ * Sync heuristic Ask/Edit path (baseline). Prefer `sendLoopAuthoringTurnAsync`
+ * when a provider override is set or `useProvider` is requested.
+ */
 export function sendLoopAuthoringTurn(
   workspaceRoot: string,
   loopId: string,
   request: LoopAuthoringTurnRequest,
 ): LoopGraphDocument {
   const parsed = LoopAuthoringTurnRequestSchema.parse(request);
+  if (parsed.useProvider || authoringCompleteOverride) {
+    throw new Error(
+      "Provider authoring requires sendLoopAuthoringTurnAsync (heuristic path refused)",
+    );
+  }
+  return sendLoopAuthoringTurnHeuristic(workspaceRoot, loopId, parsed);
+}
+
+function sendLoopAuthoringTurnHeuristic(
+  workspaceRoot: string,
+  loopId: string,
+  parsed: LoopAuthoringTurnRequest,
+): LoopGraphDocument {
   const doc = requireLoop(workspaceRoot, loopId);
   const userMessage = makeAuthoringMessage("user", parsed.text);
 
@@ -298,6 +332,125 @@ export function sendLoopAuthoringTurn(
         ? { baseGoalRevision: goalContext.revision }
         : {}),
       summary: edit.summary.slice(0, 1000),
+      diff,
+    },
+  });
+}
+
+/**
+ * Provider-capable authoring. Uses injectable complete when set / useProvider;
+ * otherwise falls back to deterministic heuristics (never pretends to be LLM).
+ */
+export async function sendLoopAuthoringTurnAsync(
+  workspaceRoot: string,
+  loopId: string,
+  request: LoopAuthoringTurnRequest,
+): Promise<LoopGraphDocument> {
+  const parsed = LoopAuthoringTurnRequestSchema.parse(request);
+  const complete = authoringCompleteOverride;
+  const wantProvider = Boolean(parsed.useProvider || complete);
+  if (!wantProvider || !complete) {
+    return sendLoopAuthoringTurnHeuristic(workspaceRoot, loopId, parsed);
+  }
+
+  const doc = requireLoop(workspaceRoot, loopId);
+  const userMessage = makeAuthoringMessage("user", parsed.text);
+
+  if (parsed.mode === "ask") {
+    const unanswered = doc.draftGoalContext?.openQuestions.some((q) => !q.answer?.trim());
+    if (unanswered) {
+      throw new Error("Answer clarifying questions before sending another Ask turn");
+    }
+  }
+
+  if (parsed.mode === "create_agent") {
+    // Not part of Ask/Edit provider authoring — fall back to heuristic edit stub.
+    return sendLoopAuthoringTurnHeuristic(workspaceRoot, loopId, {
+      ...parsed,
+      mode: "edit",
+    });
+  }
+
+  const goalContext = doc.confirmedGoalContext ?? doc.draftGoalContext;
+  const providerResult = await runLoopAuthoringProvider({
+    mode: parsed.mode,
+    text: parsed.text,
+    draft: doc.draft,
+    threadLength: doc.authoringThread.length,
+    deps: { complete },
+    ...(parsed.selectedNodeId ? { selectedNodeId: parsed.selectedNodeId } : {}),
+    ...(goalContext ? { goalContext } : {}),
+  });
+
+  if (providerResult.rejected) {
+    const assistant = makeAuthoringMessage(
+      "assistant",
+      providerResult.assistantMessage,
+    );
+    return upsertLoopGraph(workspaceRoot, {
+      ...doc,
+      composerMode: parsed.mode,
+      authoringThread: [...doc.authoringThread, userMessage, assistant].slice(-200),
+      authoringTrace: buildCompleteTrace(providerResult.steps),
+    });
+  }
+
+  if (parsed.mode === "ask") {
+    const assistant = makeAuthoringMessage(
+      "assistant",
+      providerResult.assistantMessage,
+    );
+    return upsertLoopGraph(workspaceRoot, {
+      ...doc,
+      composerMode: "ask",
+      authoringThread: [...doc.authoringThread, userMessage, assistant].slice(-200),
+      ...(providerResult.draftGoalContext
+        ? { draftGoalContext: providerResult.draftGoalContext }
+        : {}),
+      authoringTrace: buildCompleteTrace(providerResult.steps),
+      pendingGraphEditOffer: undefined,
+    });
+  }
+
+  if (!providerResult.proposedDraft) {
+    const assistant = makeAuthoringMessage(
+      "assistant",
+      providerResult.assistantMessage ||
+        "Provider returned no graph proposal; clarify and retry.",
+    );
+    return upsertLoopGraph(workspaceRoot, {
+      ...doc,
+      composerMode: "edit",
+      authoringThread: [...doc.authoringThread, userMessage, assistant].slice(-200),
+      authoringTrace: buildCompleteTrace(providerResult.steps),
+      ...(providerResult.draftGoalContext
+        ? { draftGoalContext: providerResult.draftGoalContext }
+        : {}),
+    });
+  }
+
+  const diff = diffIntentGraphs(doc.draft, providerResult.proposedDraft);
+  const summary =
+    providerResult.summary ?? "Proposed graph edit via provider";
+  const assistant = makeAuthoringMessage(
+    "assistant",
+    providerResult.assistantMessage ||
+      `${summary} Review the proposed graph diff, then Accept or Dismiss.`,
+  );
+  return upsertLoopGraph(workspaceRoot, {
+    ...doc,
+    composerMode: "edit",
+    authoringThread: [...doc.authoringThread, userMessage, assistant].slice(-200),
+    authoringTrace: buildCompleteTrace(providerResult.steps),
+    pendingGraphEditOffer: {
+      reason: summary.slice(0, 500),
+      createdAt: new Date().toISOString(),
+      proposedDraft: providerResult.proposedDraft,
+      baseRevision: doc.draft.revision,
+      ...(typeof goalContext?.revision === "number"
+        ? { baseGoalRevision: goalContext.revision }
+        : {}),
+      summary: summary.slice(0, 1000),
       diff,
     },
   });

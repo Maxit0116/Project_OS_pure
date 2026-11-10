@@ -5,6 +5,8 @@
   gap: 10px;
   min-width: 148px;
   max-width: 220px;
+  width: 100%;
+  box-sizing: border-box;
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--tech-border, #2a3344) 80%, transparent);
@@ -15,6 +17,17 @@
   cursor: pointer;
   box-shadow: 0 1px 0 color-mix(in srgb, #000 35%, transparent);
   transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.loopSaaSNodeCard--embedded {
+  cursor: inherit;
+  pointer-events: none;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  min-width: 0;
+  max-width: none;
 }
 
 .loopSaaSNodeCard:hover,

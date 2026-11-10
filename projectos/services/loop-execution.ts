@@ -116,6 +116,22 @@ export interface LoopExecutionHooks {
   executeGithubOperation?: (
     input: LoopGithubOperationRequest,
   ) => LoopGithubOperationResult;
+  /**
+   * Optional SaaS connector bridge. When present and returning deferred,
+   * runtime queues pendingConnectorOp for LocalApi settle (adapter→transport).
+   */
+  executeConnectorOperation?: (input: {
+    vendorId: string;
+    capabilityId: string;
+    payload: Record<string, unknown>;
+    credentialRefId?: string;
+    nodeId: string;
+  }) => {
+    ok: boolean;
+    deferred?: boolean;
+    message?: string;
+    credentialRefId?: string;
+  };
   /** Optional Terminal bridge (sync policy + optional spawn). */
   executeTerminalCommand?: (
     input: LoopTerminalCommandRequest,

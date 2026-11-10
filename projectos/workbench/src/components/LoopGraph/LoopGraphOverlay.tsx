@@ -33,12 +33,9 @@ import LoopGraphPalette from './LoopGraphPalette'
 import LoopNodeDutyCard from './LoopNodeDutyCard'
 import LoopGraphRail from './LoopGraphRail'
 import LoopRunSidePanel from './LoopRunSidePanel'
-import { LoopIntegrationIcon } from './integrations/LoopIntegrationIcon'
-import {
-  getLoopIntegration,
-  runtimeStatusBlocksExecution,
-  runtimeStatusNextStep,
-} from './integrations/loopIntegrationRegistry'
+import { LoopSaaSNodeCard } from './integrations/LoopSaaSNodeCard'
+import type { LoopSaaSNodeCardState } from './integrations/LoopSaaSNodeCard'
+import { runtimeStatusBlocksExecution } from './integrations/loopIntegrationRegistry'
 import {
   decodePaletteDragPayload,
   LOOP_PALETTE_MIME,
@@ -134,6 +131,7 @@ export default function LoopGraphOverlay() {
   const runHistory = useLoopGraphStore((s) => s.runHistory)
   const refreshRunHistory = useLoopGraphStore((s) => s.refreshRunHistory)
   const linkActiveSession = useLoopGraphStore((s) => s.linkActiveSession)
+  const setCanvasSelectedNodeId = useLoopGraphStore((s) => s.setCanvasSelectedNodeId)
 
   const [viewport, setViewport] = useState({ x: 32, y: 32, scale: 1 })
   const [dragging, setDragging] = useState(false)
@@ -141,7 +139,11 @@ export default function LoopGraphOverlay() {
     emptyLoopGraphRailLayout(),
   )
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedNodeId, setSelectedNodeIdState] = useState<string | null>(null)
+  const setSelectedNodeId = (nodeId: string | null) => {
+    setSelectedNodeIdState(nodeId)
+    setCanvasSelectedNodeId(nodeId)
+  }
   const railLayoutRef = useRef(railLayout)
   railLayoutRef.current = railLayout
   const [expandedNodeIds, setExpandedNodeIds] = useState<Record<string, boolean>>({})
@@ -1183,79 +1185,75 @@ export default function LoopGraphOverlay() {
                                 aria-label={runTone}
                               />
                             ) : null}
-                            <span
-                              className={`${styles.nodeIcon} ${categoryClass} ${
-                                visual.integrationIconKey ? styles.nodeIconBrand : ''
-                              }`}
-                              title={visual.shortLabel}
-                              aria-hidden
-                            >
-                              {visual.integrationIconKey ? (
-                                <LoopIntegrationIcon
-                                  integrationId={visual.integrationId}
-                                  iconKey={visual.integrationIconKey}
-                                  size={16}
-                                />
-                              ) : (
-                                <NodeIcon size={15} strokeWidth={1.75} />
-                              )}
-                            </span>
-                            <span className={styles.nodeTitle}>
-                              {node.title || visual.shortLabel}
-                              {visual.operationLabel ? (
-                                <span className={styles.nodeOpMeta}>{visual.operationLabel}</span>
-                              ) : null}
-                              {visual.integrationId &&
-                              visual.defaultRuntimeStatus &&
-                              runtimeStatusBlocksExecution(visual.defaultRuntimeStatus) ? (
+                            {visual.integrationId && visual.integrationIconKey ? (
+                              <LoopSaaSNodeCard
+                                embedded
+                                integrationId={visual.integrationId}
+                                operationLabel={
+                                  visual.operationLabel ?? visual.shortLabel
+                                }
+                                titleOverride={node.title || undefined}
+                                runtimeStatus={visual.defaultRuntimeStatus}
+                                state={(() => {
+                                  if (selectedNodeId === node.id) return 'selected'
+                                  if (isCursor && phase === 'run') return 'running'
+                                  if (isHitl) return 'awaiting_hitl'
+                                  if (
+                                    runTone === 'failed' ||
+                                    runTone === 'blocked'
+                                  ) {
+                                    return 'error'
+                                  }
+                                  if (runTone === 'succeeded') return 'complete'
+                                  return 'idle'
+                                })() as LoopSaaSNodeCardState}
+                              />
+                            ) : (
+                              <>
                                 <span
-                                  className={styles.saasBlockedBadge}
-                                  title={(() => {
-                                    const meta = getLoopIntegration(visual.integrationId)
-                                    return meta
-                                      ? runtimeStatusNextStep(
-                                          meta,
-                                          visual.defaultRuntimeStatus,
-                                        )
-                                      : undefined
-                                  })()}
+                                  className={`${styles.nodeIcon} ${categoryClass}`}
+                                  title={visual.shortLabel}
+                                  aria-hidden
                                 >
-                                  {visual.defaultRuntimeStatus === 'unimplemented'
-                                    ? '未实现'
-                                    : '未配置'}
+                                  <NodeIcon size={15} strokeWidth={1.75} />
                                 </span>
-                              ) : null}
-                              {isAgentDuty ? (
-                                <span className={styles.nodeAgentMeta}>
-                                  {node.agentDefinitionId
-                                    ? ts('workforce.assignedAgent')
-                                    : ts('workforce.assignedGeneral')}
-                                  {node.agentDefinitionId
-                                    ? ` · ${node.agentDefinitionId.slice(0, 10)}`
-                                    : ''}
+                                <span className={styles.nodeTitle}>
+                                  {node.title || visual.shortLabel}
+                                  {isAgentDuty ? (
+                                    <span className={styles.nodeAgentMeta}>
+                                      {node.agentDefinitionId
+                                        ? ts('workforce.assignedAgent')
+                                        : ts('workforce.assignedGeneral')}
+                                      {node.agentDefinitionId
+                                        ? ` · ${node.agentDefinitionId.slice(0, 10)}`
+                                        : ''}
+                                    </span>
+                                  ) : null}
+                                  {configSatellite &&
+                                  node.satelliteKind === 'mcp' &&
+                                  isCommunityMcpServer(
+                                    settings?.mcpServers?.find(
+                                      (server) =>
+                                        server.id === node.configRef?.mcpServerId,
+                                    ),
+                                  ) ? (
+                                    <span className={styles.communityBadge}>
+                                      {ts('chat.loopGraph.wiringMcpCommunity')}
+                                    </span>
+                                  ) : null}
+                                  {configSatellite &&
+                                  node.satelliteKind === 'mcp' &&
+                                  settings?.mcpServers?.find(
+                                    (server) =>
+                                      server.id === node.configRef?.mcpServerId,
+                                  )?.enabled === false ? (
+                                    <span className={styles.disabledBadge}>
+                                      {ts('chat.loopGraph.wiringMcpDisabled')}
+                                    </span>
+                                  ) : null}
                                 </span>
-                              ) : null}
-                              {configSatellite &&
-                              node.satelliteKind === 'mcp' &&
-                              isCommunityMcpServer(
-                                settings?.mcpServers?.find(
-                                  (server) => server.id === node.configRef?.mcpServerId,
-                                ),
-                              ) ? (
-                                <span className={styles.communityBadge}>
-                                  {ts('chat.loopGraph.wiringMcpCommunity')}
-                                </span>
-                              ) : null}
-                              {configSatellite &&
-                              node.satelliteKind === 'mcp' &&
-                              settings?.mcpServers?.find(
-                                (server) => server.id === node.configRef?.mcpServerId,
-                              )?.enabled === false ? (
-                                <span className={styles.disabledBadge}>
-                                  {ts('chat.loopGraph.wiringMcpDisabled')}
-                                </span>
-                              ) : null}
-                            </span>
+                              </>
+                            )}
                             {incomplete ? (
                               <span className={styles.incompleteMark}>
                                 {ts('chat.loopGraph.incomplete')}

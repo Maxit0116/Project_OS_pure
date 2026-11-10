@@ -1,7 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Lark">
-  <!-- Pure-authored neutral chat-mark (not an official Feishu glyph). -->
-  <path fill="currentColor" d="M4 5.5A3.5 3.5 0 0 1 7.5 2h9A3.5 3.5 0 0 1 20 5.5v7A3.5 3.5 0 0 1 16.5 16H12l-3.2 3.2c-.7.7-1.8.2-1.8-.7V16H7.5A3.5 3.5 0 0 1 4 12.5v-7z"/>
-  <circle fill="var(--loop-saas-logo-accent, #fff)" cx="9" cy="9" r="1.1"/>
-  <circle fill="var(--loop-saas-logo-accent, #fff)" cx="12" cy="9" r="1.1"/>
-  <circle fill="var(--loop-saas-logo-accent, #fff)" cx="15" cy="9" r="1.1"/>
+  <!-- Typographic mark only — NOT an official Lark trademark glyph.
+       Distinct from Feishu; official brand SVG not available under verified compatible license. -->
+  <rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="#00D6B9"/>
+  <text x="12" y="15.2" text-anchor="middle" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="7.5" font-weight="700" fill="#0B1B1A">Lark</text>
 </svg>

@@ -1,14 +1,18 @@
 import { getConnectorVendor } from "./catalog.js";
 import {
   executeConnectorHttp,
+  redactErrorBody,
+  redactSecretsInText,
   summarizeRequest,
   type LoopConnectorTransport,
+  type OperationLedger,
 } from "./http-transport.js";
 import type {
   LoopConnectorAuditEvent,
   LoopConnectorErrorCode,
   LoopConnectorHttpRequest,
   LoopConnectorResult,
+  LoopConnectorRiskClass,
   LoopConnectorVendorId,
   LoopCredentialRef,
 } from "./types.js";
@@ -21,7 +25,11 @@ export type ConnectorDispatchContext = {
   ) => string | null | Promise<string | null>;
   signal?: AbortSignal;
   nowIso?: () => string;
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  ledger?: OperationLedger;
+  beforeAttempt?: (attempt: number) =>
+    | { ok: true }
+    | { ok: false; code: LoopConnectorErrorCode; message: string };
 };
 
 function auditBase(
@@ -55,7 +63,7 @@ export function blockedResult<T = unknown>(input: {
     vendorId: input.vendorId,
     capabilityId: input.capabilityId,
     code: input.code,
-    message: input.message,
+    message: redactSecretsInText(input.message),
     retryable: false,
     unknownOutcome: false,
     audit: {
@@ -69,21 +77,41 @@ export function blockedResult<T = unknown>(input: {
       requestSummary: "blocked_before_transport",
       outcome: "blocked",
       code: input.code,
-      message: input.message,
+      message: redactSecretsInText(input.message),
     },
   };
 }
 
+/** Trusted capability policy — not caller-controlled. */
+export function capabilityRequiresHighRiskAuth(
+  risk: LoopConnectorRiskClass,
+  vendorHighRiskDefaultOff: boolean | undefined,
+): boolean {
+  if (risk === "write_high" || risk === "approval_gate") return true;
+  // Vendor-level highRiskDefaultOff only applies to write/notify side effects —
+  // never seal read capabilities.
+  if (vendorHighRiskDefaultOff && (risk === "write_low" || risk === "notify")) {
+    return true;
+  }
+  return false;
+}
+
+export function capabilityIsIdempotent(risk: LoopConnectorRiskClass): boolean {
+  return risk === "read";
+}
+
 /**
- * Shared production-shaped dispatch: catalog/risk gates → HTTP execute → map errors.
- * Adapters build the request; this never logs secrets.
+ * Shared production dispatch: catalog/risk gates → HTTP execute → map errors.
+ * High-risk and catalog_only are enforced from trusted catalog metadata.
  */
 export async function dispatchConnectorRequest<T>(input: {
   request: LoopConnectorHttpRequest;
   ctx: ConnectorDispatchContext;
   parseOk: (bodyText: string, status: number) => T;
-  /** When capability is high-risk and vendor defaults off. */
-  requireHighRiskAuthorization?: boolean;
+  /**
+   * Independent explicit authorization for high-risk ops.
+   * Omission means NOT authorized — cannot bypass by skipping the flag.
+   */
   highRiskAuthorized?: boolean;
 }): Promise<LoopConnectorResult<T>> {
   const nowIso = input.ctx.nowIso ?? (() => new Date().toISOString());
@@ -94,6 +122,17 @@ export async function dispatchConnectorRequest<T>(input: {
       capabilityId: input.request.capabilityId,
       code: "unconfigured",
       message: `Unknown vendor ${input.request.vendorId}`,
+      idempotencyKey: input.request.idempotencyKey,
+      nowIso,
+    });
+  }
+
+  if (vendor.implStatus === "catalog_only") {
+    return blockedResult({
+      vendorId: input.request.vendorId,
+      capabilityId: input.request.capabilityId,
+      code: "unconfigured",
+      message: `${vendor.displayName} is catalog_only — adapter not implemented for dispatch`,
       idempotencyKey: input.request.idempotencyKey,
       nowIso,
     });
@@ -114,15 +153,14 @@ export async function dispatchConnectorRequest<T>(input: {
   }
 
   if (
-    (capability.risk === "write_high" || vendor.highRiskDefaultOff) &&
-    input.requireHighRiskAuthorization &&
+    capabilityRequiresHighRiskAuth(capability.risk, vendor.highRiskDefaultOff) &&
     !input.highRiskAuthorized
   ) {
     return blockedResult({
       vendorId: input.request.vendorId,
       capabilityId: input.request.capabilityId,
       code: "high_risk_disabled",
-      message: `${vendor.displayName}.${capability.id} is high-risk and not independently authorized`,
+      message: `${vendor.displayName}.${capability.id} requires independent high-risk authorization`,
       idempotencyKey: input.request.idempotencyKey,
       ...(input.request.credentialRefId
         ? { credentialRefId: input.request.credentialRefId }
@@ -145,8 +183,13 @@ export async function dispatchConnectorRequest<T>(input: {
   const base = auditBase(input.request, nowIso);
   const outcome = await executeConnectorHttp(input.request, {
     transport: input.ctx.transport,
+    idempotent: capabilityIsIdempotent(capability.risk),
     ...(input.ctx.signal ? { signal: input.ctx.signal } : {}),
     ...(input.ctx.sleep ? { sleep: input.ctx.sleep } : {}),
+    ...(input.ctx.ledger ? { ledger: input.ctx.ledger } : {}),
+    ...(input.ctx.beforeAttempt
+      ? { beforeAttempt: input.ctx.beforeAttempt }
+      : {}),
   });
 
   if (outcome.kind === "error") {
@@ -155,14 +198,14 @@ export async function dispatchConnectorRequest<T>(input: {
       vendorId: input.request.vendorId,
       capabilityId: input.request.capabilityId,
       code: outcome.code,
-      message: outcome.message,
+      message: redactSecretsInText(outcome.message),
       retryable: outcome.retryable,
       unknownOutcome: outcome.unknownOutcome,
       audit: {
         ...base,
         outcome: outcome.unknownOutcome ? "unknown" : "error",
         code: outcome.code,
-        message: outcome.message,
+        message: redactSecretsInText(outcome.message),
       },
     };
   }
@@ -192,7 +235,7 @@ export async function dispatchConnectorRequest<T>(input: {
       vendorId: input.request.vendorId,
       capabilityId: input.request.capabilityId,
       code: "rate_limited",
-      message: `${vendor.displayName} rate limited after retries`,
+      message: `${vendor.displayName} rate limited`,
       retryable: false,
       unknownOutcome: false,
       audit: {
@@ -218,7 +261,7 @@ export async function dispatchConnectorRequest<T>(input: {
         httpStatus: response.status,
         outcome: "error",
         code: "http_error",
-        message: response.bodyText.slice(0, 200),
+        message: redactErrorBody(response.bodyText),
       },
     };
   }
@@ -238,8 +281,9 @@ export async function dispatchConnectorRequest<T>(input: {
       },
     };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to parse connector response";
+    const message = redactSecretsInText(
+      error instanceof Error ? error.message : "Failed to parse connector response",
+    );
     return {
       ok: false,
       vendorId: input.request.vendorId,

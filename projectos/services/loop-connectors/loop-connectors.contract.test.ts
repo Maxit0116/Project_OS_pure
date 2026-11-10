@@ -59,7 +59,12 @@ describe("loop-connectors catalog honesty", () => {
     expect(batch1).toEqual(
       expect.arrayContaining(["github", "slack", "feishu", "lark", "sentry"]),
     );
-    expect(all.find((item) => item.id === "linear")?.implStatus).toBe("catalog_only");
+    expect(all.find((item) => item.id === "linear")?.implStatus).toBe(
+      "implemented_contract",
+    );
+    expect(all.find((item) => item.id === "supabase")?.implStatus).toBe(
+      "catalog_only",
+    );
     expect(all.find((item) => item.id === "vercel")?.highRiskDefaultOff).toBe(true);
     expect(all.find((item) => item.id === "supabase")?.highRiskDefaultOff).toBe(true);
   });
@@ -356,9 +361,48 @@ describe("Sentry adapter + HTTP resilience", () => {
     if (!denied.ok) expect(denied.code).toBe("auth_rejected");
   });
 
-  it("retries 429 then succeeds; timeout on POST yields unknown_outcome without blind resend", async () => {
-    const { executeConnectorHttp } = await import("./http-transport.js");
-    const rate = createScriptedTransport([
+  it("idempotent GET retries 429; non-idempotent POST refuses 429/5xx blind resend", async () => {
+    const { executeConnectorHttp, createMemoryOperationLedger } = await import(
+      "./http-transport.js"
+    );
+    const rateGet = createScriptedTransport([
+      {
+        response: {
+          status: 429,
+          headers: { "retry-after": "0" },
+          bodyText: "",
+          durationMs: 1,
+        },
+      },
+      {
+        response: {
+          status: 200,
+          headers: {},
+          bodyText: "[]",
+          durationMs: 1,
+        },
+      },
+    ]);
+    const getOutcome = await executeConnectorHttp(
+      {
+        vendorId: "sentry",
+        capabilityId: "list_issues",
+        method: "GET",
+        url: "https://sentry.io/api/0/x",
+        headers: {},
+        idempotencyKey: "r-get",
+        timeoutMs: 1000,
+      },
+      {
+        transport: rateGet.transport,
+        sleep: async () => undefined,
+        idempotent: true,
+      },
+    );
+    expect(getOutcome.kind).toBe("response");
+    expect(rateGet.requests).toHaveLength(2);
+
+    const ratePost = createScriptedTransport([
       {
         response: {
           status: 429,
@@ -376,7 +420,7 @@ describe("Sentry adapter + HTTP resilience", () => {
         },
       },
     ]);
-    const rateOutcome = await executeConnectorHttp(
+    const post429 = await executeConnectorHttp(
       {
         vendorId: "slack",
         capabilityId: "incoming_webhook_notify",
@@ -384,13 +428,50 @@ describe("Sentry adapter + HTTP resilience", () => {
         url: "https://hooks.example/x",
         headers: {},
         body: "{}",
-        idempotencyKey: "r1",
+        idempotencyKey: "r-post",
         timeoutMs: 1000,
       },
-      { transport: rate.transport, sleep: async () => undefined },
+      {
+        transport: ratePost.transport,
+        sleep: async () => undefined,
+        ledger: createMemoryOperationLedger(),
+      },
     );
-    expect(rateOutcome.kind).toBe("response");
-    expect(rate.requests).toHaveLength(2);
+    expect(post429.kind).toBe("error");
+    if (post429.kind === "error") {
+      expect(post429.code).toBe("rate_limited");
+      expect(post429.unknownOutcome).toBe(false);
+    }
+    expect(ratePost.requests).toHaveLength(1);
+
+    const post502 = createScriptedTransport([
+      {
+        response: {
+          status: 502,
+          headers: {},
+          bodyText: "bad gateway",
+          durationMs: 1,
+        },
+      },
+    ]);
+    const unknown502 = await executeConnectorHttp(
+      {
+        vendorId: "slack",
+        capabilityId: "chat_postMessage",
+        method: "POST",
+        url: "https://slack.com/api/chat.postMessage",
+        headers: {},
+        body: "{}",
+        idempotencyKey: "p502",
+        timeoutMs: 1000,
+      },
+      { transport: post502.transport, sleep: async () => undefined },
+    );
+    expect(unknown502.kind).toBe("error");
+    if (unknown502.kind === "error") {
+      expect(unknown502.code).toBe("unknown_outcome");
+      expect(unknown502.unknownOutcome).toBe(true);
+    }
 
     const timed = createScriptedTransport([{ error: new Error("timeout") }]);
     const unknown = await executeConnectorHttp(
@@ -412,6 +493,166 @@ describe("Sentry adapter + HTTP resilience", () => {
       expect(unknown.unknownOutcome).toBe(true);
     }
     expect(timed.requests).toHaveLength(1);
+  });
+
+  it("forces high-risk / catalog_only from capability policy (no caller bypass)", async () => {
+    const { dispatchConnectorRequest } = await import("./dispatch.js");
+    const scripted = createScriptedTransport([]);
+    // GitHub create_pr is write_high + reuse_existing — omit auth flag must block.
+    const highRisk = await dispatchConnectorRequest({
+      ctx: { transport: scripted.transport },
+      request: {
+        vendorId: "github",
+        capabilityId: "create_pr",
+        method: "POST",
+        url: "https://api.github.com/repos/o/r/pulls",
+        headers: {},
+        body: "{}",
+        idempotencyKey: "hr1",
+        timeoutMs: 1000,
+        credentialRefId: "cred_gh",
+      },
+      parseOk: () => ({}),
+      // omit highRiskAuthorized — must block
+    });
+    expect(highRisk.ok).toBe(false);
+    if (!highRisk.ok) expect(highRisk.code).toBe("high_risk_disabled");
+    expect(scripted.requests).toHaveLength(0);
+
+    const catalogOnly = await dispatchConnectorRequest({
+      ctx: { transport: scripted.transport },
+      request: {
+        vendorId: "supabase",
+        capabilityId: "write_rows",
+        method: "POST",
+        url: "https://example.supabase.co/rest/v1/t",
+        headers: {},
+        body: "{}",
+        idempotencyKey: "co1",
+        timeoutMs: 1000,
+        credentialRefId: "cred_s",
+      },
+      parseOk: () => ({}),
+      highRiskAuthorized: true,
+    });
+    expect(catalogOnly.ok).toBe(false);
+    if (!catalogOnly.ok) expect(catalogOnly.code).toBe("unconfigured");
+
+    // Vercel promote remains sealed without independent high-risk auth.
+    const vercelPromote = await dispatchConnectorRequest({
+      ctx: { transport: scripted.transport },
+      request: {
+        vendorId: "vercel",
+        capabilityId: "promote",
+        method: "POST",
+        url: "https://api.vercel.com/v1/promote",
+        headers: {},
+        body: "{}",
+        idempotencyKey: "vp1",
+        timeoutMs: 1000,
+        credentialRefId: "cred_v",
+      },
+      parseOk: () => ({}),
+    });
+    expect(vercelPromote.ok).toBe(false);
+    if (!vercelPromote.ok) expect(vercelPromote.code).toBe("high_risk_disabled");
+  });
+
+  it("batch2 adapters construct requests via loopback transport", async () => {
+    const { linearCreateIssue, vercelListDeployments } = await import(
+      "./adapters/batch2.js"
+    );
+    const linearCred: LoopCredentialRef = {
+      vendorId: "linear",
+      credentialId: "cred_lin",
+      scheme: "api_key_ref",
+      label: "Linear (redacted)",
+    };
+    const scripted = createScriptedTransport([
+      {
+        response: {
+          status: 200,
+          headers: {},
+          bodyText: JSON.stringify({
+            data: {
+              issueCreate: {
+                success: true,
+                issue: { id: "iss_1", title: "Bug" },
+              },
+            },
+          }),
+          durationMs: 3,
+        },
+      },
+    ]);
+    const created = await linearCreateIssue(
+      {
+        title: "Bug",
+        teamId: "team_1",
+        credential: linearCred,
+        idempotencyKey: "lin-1",
+        accessToken: "lin_secret_token",
+      },
+      { transport: scripted.transport },
+    );
+    expect(created.ok).toBe(true);
+    expect(scripted.requests[0]?.url).toContain("linear.app");
+    expect(created.audit.requestSummary).not.toContain("lin_secret_token");
+
+    const vercelCred: LoopCredentialRef = {
+      vendorId: "vercel",
+      credentialId: "cred_ver",
+      scheme: "api_key_ref",
+      label: "Vercel (redacted)",
+    };
+    const listScript = createScriptedTransport([
+      {
+        response: {
+          status: 200,
+          headers: {},
+          bodyText: JSON.stringify({ deployments: [{ uid: "dpl_1" }] }),
+          durationMs: 2,
+        },
+      },
+    ]);
+    const listed = await vercelListDeployments(
+      {
+        projectId: "prj_1",
+        credential: vercelCred,
+        idempotencyKey: "ver-1",
+        accessToken: "vercel_secret",
+      },
+      { transport: listScript.transport },
+    );
+    expect(listed.ok).toBe(true);
+    if (listed.ok) expect(listed.data.ids).toEqual(["dpl_1"]);
+  });
+
+  it("redacts webhook URLs and fake secrets across audit helpers", async () => {
+    const {
+      redactSecretsInText,
+      redactUrlForAudit,
+      summarizeRequest,
+    } = await import("./http-transport.js");
+    const leak =
+      "Bearer sk-live-abc123 xoxb-111-222-secret sntrys_abc.def hooks.slack.com/services/T/B/X";
+    expect(redactSecretsInText(leak)).not.toMatch(/sk-live|xoxb-111|sntrys_abc|T\/B\/X/);
+    expect(
+      redactUrlForAudit("https://hooks.slack.com/services/T000/B000/XXXX"),
+    ).toContain("[webhook-redacted]");
+    expect(
+      summarizeRequest({
+        vendorId: "slack",
+        capabilityId: "incoming_webhook_notify",
+        method: "POST",
+        url: "https://hooks.slack.com/services/T/B/SECRET",
+        headers: { Authorization: "Bearer super-secret" },
+        body: '{"text":"hi"}',
+        idempotencyKey: "x",
+        timeoutMs: 1,
+        credentialRefId: "cred",
+      }),
+    ).not.toMatch(/super-secret|\/SECRET/);
   });
 
   it("honors cancel via AbortSignal", async () => {

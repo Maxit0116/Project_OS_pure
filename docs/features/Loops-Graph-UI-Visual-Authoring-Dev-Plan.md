@@ -20,6 +20,8 @@
 | [`Loops-Graph-Node-Architecture-Dev-Plan.md`](./Loops-Graph-Node-Architecture-Dev-Plan.md) | 四类 Node 语义权威；本计划只做**展示与作者ing UX**，不改 Contract |
 | [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | Agent 底端口 / 虚线卫星 / Config Palette；在本计划图标卡与 Duty 卡之上叠加**配置层连线** |
 | [`Loops-Graph-Review-Visual-Dev-Plan.md`](./Loops-Graph-Review-Visual-Dev-Plan.md) | Review 只读 Path Map **复用**本计划 `loopNodeVisuals` 识读合同；不在 Review 重做可编辑画布 |
+| [`Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](./Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) | 项目 Run / Task Materials；手工 DutyCard 仍是配置入口，材料上传不得悄悄改定义 |
+| [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) | 执行实况（含双入口 UI 待验） |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | 执行底座不变 |
 
 **设计原则（ai-devtool-ui + ui-ux-pro-max，适配本仓）**：

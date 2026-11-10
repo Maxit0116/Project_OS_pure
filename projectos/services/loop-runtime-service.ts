@@ -1343,15 +1343,118 @@ function stepActionNode(
     arch.actionIntegration === "lark" ||
     arch.actionIntegration === "sentry"
   ) {
-    // Brand presence ≠ executable — fail closed until connector is configured.
+    const capabilityId = arch.actionOperation ?? "post_message";
+    const credentialRefId =
+      typeof payload.credentialRefId === "string"
+        ? payload.credentialRefId
+        : typeof (node as { credentialRefId?: string }).credentialRefId ===
+            "string"
+          ? (node as { credentialRefId?: string }).credentialRefId
+          : undefined;
+
+    if (execution?.executeConnectorOperation) {
+      let connectorResult: {
+        ok: boolean;
+        deferred?: boolean;
+        message?: string;
+        credentialRefId?: string;
+      };
+      try {
+        connectorResult = execution.executeConnectorOperation({
+          vendorId: arch.actionIntegration,
+          capabilityId,
+          payload,
+          ...(credentialRefId ? { credentialRefId } : {}),
+          nodeId: node.id,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Connector operation failed";
+        return failNode(doc, next, node.id, message, { spec });
+      }
+      if (connectorResult.deferred) {
+        const cred =
+          connectorResult.credentialRefId ?? credentialRefId ?? "";
+        if (!cred) {
+          return failNode(
+            doc,
+            next,
+            node.id,
+            "Connector settle requires credentialRefId (configured ≠ authorized)",
+            { spec },
+          );
+        }
+        const idempotencyKey = [
+          next.id,
+          node.id,
+          arch.actionIntegration,
+          capabilityId,
+          digestOperationPayload(payload),
+        ].join(":");
+        const pendingConnectorOp = {
+          nodeId: node.id,
+          vendorId: arch.actionIntegration,
+          capabilityId,
+          payload,
+          credentialRefId: cred,
+          idempotencyKey,
+          queuedAt: nowIso(),
+          dispatchState: "queued" as const,
+        };
+        const queued = pushEvent(
+          {
+            ...next,
+            pendingActionPayload: undefined,
+            pendingApprovalBinding: undefined,
+            pendingConnectorOp,
+            status: "running" as const,
+          },
+          {
+            type: "message",
+            nodeId: node.id,
+            message:
+              connectorResult.message ??
+              `${arch.actionIntegration}.${capabilityId} queued for settle`,
+          },
+        );
+        return replaceInstance(doc, queued);
+      }
+      if (!connectorResult.ok) {
+        return failNode(
+          doc,
+          next,
+          node.id,
+          connectorResult.message || "Connector operation failed",
+          { spec },
+        );
+      }
+      let advanced = pushArtifact(next, {
+        nodeId: node.id,
+        kind: "change_set",
+        data: {
+          summary: `Connector ${arch.actionIntegration}.${capabilityId} completed`,
+        },
+      });
+      advanced = {
+        ...advanced,
+        pendingActionPayload: undefined,
+        pendingApprovalBinding: undefined,
+        pendingConnectorOp: undefined,
+      };
+      advanced = pushEvent(advanced, {
+        type: "node_completed",
+        nodeId: node.id,
+        message: `Action ${arch.actionIntegration}.${capabilityId} completed`,
+      });
+      return advanceCursor(doc, advanced, spec, node.id);
+    }
+
+    // No DI bridge — fail closed (brand ≠ executable).
     const descriptor = describeOfflineConnector(
       arch.actionIntegration,
-      "unconfigured",
+      credentialRefId ? "offline" : "unconfigured",
     );
-    const blocked = invokeOfflineConnector(
-      descriptor,
-      arch.actionOperation ?? "post_message",
-    );
+    const blocked = invokeOfflineConnector(descriptor, capabilityId);
     next = pushEvent(
       {
         ...next,

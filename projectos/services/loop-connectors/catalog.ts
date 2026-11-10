@@ -208,8 +208,8 @@ export const LOOP_CONNECTOR_CATALOG: Record<
     batch: "batch2_tasks_docs_deploy",
     apiVersion: "Linear GraphQL API",
     apiDocsUrl: "https://developers.linear.app/docs/graphql/working-with-the-graphql-api",
-    implStatus: "catalog_only",
-    liveStatus: "unconfigured",
+    implStatus: "implemented_contract",
+    liveStatus: "contract_tested",
     capabilities: [
       {
         id: "create_issue",
@@ -234,8 +234,8 @@ export const LOOP_CONNECTOR_CATALOG: Record<
     batch: "batch2_tasks_docs_deploy",
     apiVersion: "Jira Cloud REST v3",
     apiDocsUrl: "https://developer.atlassian.com/cloud/jira/platform/rest/v3/",
-    implStatus: "catalog_only",
-    liveStatus: "unconfigured",
+    implStatus: "implemented_contract",
+    liveStatus: "contract_tested",
     capabilities: [
       {
         id: "create_issue",
@@ -260,8 +260,8 @@ export const LOOP_CONNECTOR_CATALOG: Record<
     batch: "batch2_tasks_docs_deploy",
     apiVersion: "Notion API 2022-06-28",
     apiDocsUrl: "https://developers.notion.com/reference/intro",
-    implStatus: "catalog_only",
-    liveStatus: "unconfigured",
+    implStatus: "implemented_contract",
+    liveStatus: "contract_tested",
     capabilities: [
       {
         id: "create_page",
@@ -286,7 +286,7 @@ export const LOOP_CONNECTOR_CATALOG: Record<
     batch: "batch2_tasks_docs_deploy",
     apiVersion: "Vercel REST API",
     apiDocsUrl: "https://vercel.com/docs/rest-api",
-    implStatus: "catalog_only",
+    implStatus: "implemented_contract",
     liveStatus: "disabled_high_risk",
     highRiskDefaultOff: true,
     capabilities: [
