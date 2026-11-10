@@ -594,7 +594,7 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
 
   override enqueueOfflineLoopEvent(
     _projectId: string,
-    loopId: string,
+    _loopId: string,
     event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
   ): Promise<{
     outcome: "queued" | "dropped_duplicate";
