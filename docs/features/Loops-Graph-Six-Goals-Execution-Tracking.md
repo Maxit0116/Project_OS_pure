@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10 — 材料首批可用（txt/csv/xlsx/pdf/png）+ URL DNS-pin SSRF + TM-8 重审 + PW-7 UI + ModelGateway 离线 contract；gate ATTRIBUTION 诚实修正（非 live）  
+**Updated**: 2026-11-10 (`9453616`) — 材料首批可用（txt/csv/xlsx/pdf/png）+ URL DNS-pin SSRF + TM-8 重审 + PW-7 UI + ModelGateway 离线 contract；gate ATTRIBUTION 诚实修正（非 live）  
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
