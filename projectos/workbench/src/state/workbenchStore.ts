@@ -1181,7 +1181,6 @@ export async function reconcileStaleFlowStatus(
     if (run.status === 'error') return 'error'
     // These used to fall through to "complete", which told a person an interrupted or stopped run had finished.
     if (run.status === 'interrupted') return 'interrupted'
-    if (run.status === 'cancelled') return 'idle'
     return 'complete'
   } catch {
     return 'idle'

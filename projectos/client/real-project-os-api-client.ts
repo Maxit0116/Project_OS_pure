@@ -1492,6 +1492,24 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.preflightLoopRun(projectId, loopId, options);
   }
 
+  ingestLoopTaskMaterial(
+    projectId: string,
+    input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ) {
+    return this.transport.ingestLoopTaskMaterial(projectId, input);
+  }
+
   startLoopInstance(
     projectId: string,
     loopId: string,

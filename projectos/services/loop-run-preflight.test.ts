@@ -26,6 +26,7 @@ describe("loop-run-preflight", () => {
       {
         version: "spec_1",
         graphRevision: 1,
+        createdAt: new Date().toISOString(),
         goal: "Ship",
         nodes: [
           {

@@ -3,6 +3,7 @@
  * No live mailbox, no send, no Pub/Sub deploy in this module.
  */
 import type { LoopTaskMaterial } from "../../../contracts/loop-task-materials.js";
+import { dedupeConnectorIds } from "../../loop-connector-recover-dedup.js";
 import {
   blockedResult,
   dispatchConnectorRequest,
@@ -872,6 +873,8 @@ export async function gmailPollHistory(
     history: Array<{ id?: string; messagesAdded?: unknown[] }>;
     nextPageToken?: string;
     onlineOnly: true;
+    /** Updated seen-id window after incremental dedupe (caller persists). */
+    seenHistoryIds?: string[];
     /** When set, discard startHistoryId and perform full sync. */
     requiresFullResync?: boolean;
   }>
@@ -923,11 +926,19 @@ export async function gmailPollHistory(
         history?: Array<{ id?: string; messagesAdded?: unknown[] }>;
         nextPageToken?: string;
       };
-      const seen = new Set(input.seenHistoryIds ?? []);
+      const incomingIds = (parsed.history ?? [])
+        .map((item) => item.id)
+        .filter((id): id is string => Boolean(id));
+      const deduped = dedupeConnectorIds(
+        { seenIds: [...(input.seenHistoryIds ?? [])] },
+        incomingIds,
+      );
+      const novelQueue = [...deduped.novel];
       const history = (parsed.history ?? []).filter((item) => {
         if (!item.id) return true;
-        if (seen.has(item.id)) return false;
-        seen.add(item.id);
+        const idx = novelQueue.indexOf(item.id);
+        if (idx < 0) return false;
+        novelQueue.splice(idx, 1);
         return true;
       });
       return {
@@ -935,10 +946,12 @@ export async function gmailPollHistory(
         history,
         ...(parsed.nextPageToken ? { nextPageToken: parsed.nextPageToken } : {}),
         onlineOnly: true as const,
+        seenHistoryIds: deduped.state.seenIds,
       };
     },
   });
   // Production path: non-2xx never reaches parseOk — remap expired cursor here.
+  // Callers should run recoverConnectorCursor(..., "resync_required") then full sync.
   if (!result.ok && result.audit.httpStatus === 404) {
     return {
       ok: false,
@@ -946,7 +959,7 @@ export async function gmailPollHistory(
       capabilityId: "poll_history",
       code: "resync_required",
       message:
-        "Gmail historyId expired (HTTP 404) — discard cursor and perform full sync; not a complete poller",
+        "Gmail historyId expired (HTTP 404) — discard cursor via recoverConnectorCursor and perform full sync; not a complete poller",
       retryable: false,
       unknownOutcome: false,
       audit: {

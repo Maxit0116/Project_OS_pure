@@ -1921,7 +1921,7 @@ const en = {
       materialsAddRef: 'Add project reference',
       materialsAddFile: 'Attach file',
       materialsFileHint:
-        'Levels: plaintext/md/json/csv/log = text_preview only (CSV ≠ sheet/column). image/xlsx/pdf = unsupported + kept as cards; vision/model preflight for images.',
+        'Levels: plaintext/md/json/csv/log = text_preview; CSV/XLSX structured_selection after apply; PDF full_text_parse via pdftotext; png/jpeg vision_attach when verified bytes + vision apiFormat. XLSX/PDF need Electron host ingest.',
       materialsList: 'Staged materials',
       materialsEmpty: 'No materials staged yet.',
       materialsRemove: 'Remove material',

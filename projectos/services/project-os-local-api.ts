@@ -2740,7 +2740,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
     const deps = {
       gateway: this.modelGateway,
-      profile,
+      profile: profile ?? null,
       projectId,
       mode,
       callsUsedToday: Math.max(0, request.callsUsedToday ?? 0),
@@ -2798,7 +2798,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
     return judgeRouteSuggestion(request.prompt, request.suggestion, recordsById, {
       gateway: this.modelGateway,
-      profile,
+      profile: profile ?? null,
       projectId,
       mode,
       callsUsedToday: Math.max(0, request.callsUsedToday ?? 0),
@@ -2812,9 +2812,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   ): Promise<import("../contracts/chat-session.js").ChatSessionRecord | null> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { getChatSession, upsertChatSession } = await import("./chat-session-service.js");
-    const { summarizeChatSessionContextForRecord } = await import(
-      "./chat-session-title-summarize.js"
-    );
     const {
       buildForkedChatSession,
       deriveSessionContextDigest,
@@ -9374,6 +9371,46 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     });
   }
 
+  /**
+   * Electron/LocalApi host ingest for multi-type task materials (xlsx/pdf/csv/image/text).
+   * Browser mock must not claim parse success for host-only formats.
+   */
+  async ingestLoopTaskMaterial(
+    projectId: string,
+    input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ): Promise<import("./loop-material-ingest.js").IngestLoopMaterialResult> {
+    this.requireLoadedWorkspace(projectId);
+    const { ingestLoopTaskMaterial } = await import("./loop-material-ingest.js");
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(input.bytesBase64, "base64");
+    } catch {
+      return { ok: false, error: "Invalid bytesBase64" };
+    }
+    if (!bytes.byteLength) {
+      return { ok: false, error: "Empty file bytes" };
+    }
+    return ingestLoopTaskMaterial({
+      fileName: input.fileName,
+      ...(input.mimeType ? { mimeType: input.mimeType } : {}),
+      bytes: new Uint8Array(bytes),
+      ...(input.materialId ? { materialId: input.materialId } : {}),
+      ...(input.xlsxSelection ? { xlsxSelection: input.xlsxSelection } : {}),
+      ...(input.pdfSelection ? { pdfSelection: input.pdfSelection } : {}),
+    });
+  }
+
   async startLoopInstance(
     projectId: string,
     loopId: string,
@@ -9505,7 +9542,17 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   > {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { listLoopRunHistory } = await import("./loop-runtime-service.js");
-    return listLoopRunHistory(workspace.workspaceRoot, loopId);
+    const rows = listLoopRunHistory(workspace.workspaceRoot, loopId);
+    // Map to the public history shape — do not leak launch payload through this API.
+    return rows.map((item) => ({
+      id: item.id,
+      status: item.status,
+      specVersion: item.specVersion,
+      startedAt: item.startedAt,
+      ...(item.completedAt ? { completedAt: item.completedAt } : {}),
+      round: item.round,
+      ...(item.errorMessage ? { errorMessage: item.errorMessage } : {}),
+    }));
   }
 
   async deriveDraftFromLoopInstance(

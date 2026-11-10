@@ -49,7 +49,6 @@ import {
   type BatchValidationResult,
 } from "../../contracts/batch-validation.js";
 import type { VerificationRunResult } from "../../contracts/exec-command.js";
-import type { RunDecision } from "../../contracts/run-state.js";
 import {
   ASK_USER_STAGES,
   MAX_RUN_QUESTIONS,
@@ -137,7 +136,6 @@ import { mayAttemptBatchSynthesisAfterError } from "./batch-validation-error-pol
 import {
   batchValidationNeedsHumanReview,
   isEvidenceValidBatchValidation,
-  isEvidenceValidProposalValidation,
   proposalValidationNeedsHumanReview,
 } from "./batch-validation-evidence.js";
 import type { LoadedProjectOSWorkspace } from "../../persistence/workspace-store.js";

@@ -1,7 +1,6 @@
 /**
- * Minimal XLSX sheet/range reader (OOXML) via system `unzip -p`.
- * No sheetjs dependency. First usable: list sheets + extract cell text for a sheet/range.
- * Not a full Excel engine — formulas/shared-string edge cases may be partial.
+ * Minimal XLSX sheet/range reader (OOXML) via argv-only `unzip` (no shell).
+ * Guards: path traversal, zip bomb size caps, no external relationships, no formula exec.
  */
 import { spawnSync } from "node:child_process";
 
@@ -9,7 +8,6 @@ export type XlsxSheetInfo = { name: string; path: string };
 
 export type XlsxSelection = {
   sheet?: string;
-  /** A1-style range e.g. A1:C10 — optional; default used range. */
   cellRange?: string;
   role?: "requirement" | "test" | "business";
 };
@@ -25,14 +23,9 @@ export type XlsxParseResult =
     }
   | { ok: false; error: string };
 
-function unzipEntry(xlsxPath: string, entry: string): string | null {
-  const spawned = spawnSync("unzip", ["-p", xlsxPath, entry], {
-    encoding: "utf8",
-    maxBuffer: 8 * 1024 * 1024,
-  });
-  if (spawned.status !== 0) return null;
-  return spawned.stdout ?? "";
-}
+const MAX_ENTRY_UNCOMPRESSED = 4 * 1024 * 1024;
+const MAX_TOTAL_UNCOMPRESSED = 12 * 1024 * 1024;
+const SAFE_ENTRY = /^xl\/[A-Za-z0-9._/-]+$/;
 
 function decodeXmlEntities(value: string): string {
   return value
@@ -41,6 +34,77 @@ function decodeXmlEntities(value: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
     .replace(/&amp;/g, "&");
+}
+
+function assertSafeEntry(entry: string): string | null {
+  const normalized = entry.replace(/^\/+/, "").replace(/\\/g, "/");
+  if (
+    normalized.includes("..") ||
+    normalized.startsWith("/") ||
+    !SAFE_ENTRY.test(normalized)
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
+/** List entries with sizes via `unzip -Z -1` / `-l` — argv only, no shell. */
+function listZipEntries(
+  xlsxPath: string,
+): Array<{ name: string; uncompressed: number }> | null {
+  const spawned = spawnSync("unzip", ["-Z", "-1", xlsxPath], {
+    encoding: "utf8",
+    maxBuffer: 1 * 1024 * 1024,
+  });
+  // Fallback to unzip -l parsing when -Z unsupported
+  if (spawned.status !== 0) {
+    const listed = spawnSync("unzip", ["-l", xlsxPath], {
+      encoding: "utf8",
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    if (listed.status !== 0) return null;
+    const rows: Array<{ name: string; uncompressed: number }> = [];
+    for (const line of (listed.stdout ?? "").split("\n")) {
+      const m = /^\s*(\d+)\s+\d{2}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+(.+)$/.exec(line);
+      if (!m) continue;
+      const name = m[2]!.trim();
+      if (name.endsWith("/")) continue;
+      rows.push({ name, uncompressed: Number(m[1]) });
+    }
+    return rows;
+  }
+  const names = (spawned.stdout ?? "")
+    .split("\n")
+    .map((n) => n.trim())
+    .filter(Boolean);
+  // Without sizes from -Z -1 alone, use unzip -l for sizes
+  const listed = spawnSync("unzip", ["-l", xlsxPath], {
+    encoding: "utf8",
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  const sizeByName = new Map<string, number>();
+  for (const line of (listed.stdout ?? "").split("\n")) {
+    const m = /^\s*(\d+)\s+\d{2}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+(.+)$/.exec(line);
+    if (!m) continue;
+    sizeByName.set(m[2]!.trim(), Number(m[1]));
+  }
+  return names.map((name) => ({
+    name,
+    uncompressed: sizeByName.get(name) ?? 0,
+  }));
+}
+
+function unzipEntry(xlsxPath: string, entry: string): string | null {
+  const safe = assertSafeEntry(entry);
+  if (!safe) return null;
+  const spawned = spawnSync("unzip", ["-p", xlsxPath, safe], {
+    encoding: "utf8",
+    maxBuffer: MAX_ENTRY_UNCOMPRESSED,
+  });
+  if (spawned.status !== 0) return null;
+  const out = spawned.stdout ?? "";
+  if (Buffer.byteLength(out, "utf8") > MAX_ENTRY_UNCOMPRESSED) return null;
+  return out;
 }
 
 function listSheets(workbookXml: string): XlsxSheetInfo[] {
@@ -54,18 +118,22 @@ function listSheets(workbookXml: string): XlsxSheetInfo[] {
   return sheets;
 }
 
-function mapSheetPaths(relsXml: string): Record<string, string> {
+function mapSheetPaths(relsXml: string): Record<string, string> | { error: string } {
   const map: Record<string, string> = {};
   const re =
     /<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"[^>]*\/>/gi;
   let match: RegExpExecArray | null;
   while ((match = re.exec(relsXml))) {
-    const target = match[2]!.replace(/^\//, "");
-    map[match[1]!] = target.startsWith("worksheets/")
-      ? `xl/${target}`
-      : target.startsWith("xl/")
-        ? target
-        : `xl/${target}`;
+    const target = match[2]!.trim();
+    if (/^https?:\/\//i.test(target) || target.includes("..")) {
+      return { error: `External/unsafe relationship target denied: ${target}` };
+    }
+    const normalized = target.replace(/^\//, "");
+    map[match[1]!] = normalized.startsWith("worksheets/")
+      ? `xl/${normalized}`
+      : normalized.startsWith("xl/")
+        ? normalized
+        : `xl/${normalized}`;
   }
   return map;
 }
@@ -140,14 +208,25 @@ function extractSheetMatrix(
     ) {
       continue;
     }
+    // Skip formula execution — only read cached <v> or inlineStr text.
     const type = /(?:^|\s)t="([^"]*)"/i.exec(attrs)?.[1] ?? "";
-    const raw = /<v>([\s\S]*?)<\/v>/i.exec(inner)?.[1] ?? "";
-    let value = raw;
-    if (type === "s") {
-      const idx = Number(raw);
-      value = Number.isFinite(idx) ? (shared[idx] ?? "") : "";
+    let value = "";
+    if (type === "inlineStr") {
+      const texts = [...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/gi)].map((m) =>
+        decodeXmlEntities(m[1] ?? ""),
+      );
+      value = texts.join("");
+    } else {
+      const raw = /<v>([\s\S]*?)<\/v>/i.exec(inner)?.[1] ?? "";
+      if (type === "s") {
+        const idx = Number(raw);
+        value = Number.isFinite(idx) ? (shared[idx] ?? "") : "";
+      } else {
+        // numeric / boolean / cached formula result — treat as plain text, never eval
+        value = raw;
+      }
     }
-    cells.set(`${pos.row}:${pos.col}`, decodeXmlEntities(value));
+    cells.set(`${pos.row}:${pos.col}`, value);
     maxRow = Math.max(maxRow, pos.row);
     maxCol = Math.max(maxCol, pos.col);
   }
@@ -155,6 +234,7 @@ function extractSheetMatrix(
   const r2 = bounds?.r2 ?? maxRow;
   const c1 = bounds?.c1 ?? 1;
   const c2 = bounds?.c2 ?? maxCol;
+  if (r2 < r1 || c2 < c1) return [];
   const matrix: string[][] = [];
   for (let r = r1; r <= r2; r += 1) {
     const row: string[] = [];
@@ -170,12 +250,30 @@ export function parseXlsxFile(
   xlsxPath: string,
   selection?: XlsxSelection | null,
 ): XlsxParseResult {
+  const entries = listZipEntries(xlsxPath);
+  if (!entries) {
+    return { ok: false, error: "XLSX listing failed (unzip unavailable or corrupt)" };
+  }
+  let total = 0;
+  for (const entry of entries) {
+    if (entry.name.includes("..") || entry.name.startsWith("/")) {
+      return { ok: false, error: `Zip path traversal denied: ${entry.name}` };
+    }
+    if (entry.uncompressed > MAX_ENTRY_UNCOMPRESSED) {
+      return {
+        ok: false,
+        error: `Zip entry ${entry.name} uncompressed ${entry.uncompressed}B exceeds cap`,
+      };
+    }
+    total += entry.uncompressed;
+    if (total > MAX_TOTAL_UNCOMPRESSED) {
+      return { ok: false, error: "Zip total uncompressed size exceeds bomb cap" };
+    }
+  }
+
   const workbook = unzipEntry(xlsxPath, "xl/workbook.xml");
   if (!workbook) {
-    return {
-      ok: false,
-      error: "XLSX workbook.xml missing or unzip unavailable",
-    };
+    return { ok: false, error: "XLSX workbook.xml missing or denied" };
   }
   const rels = unzipEntry(xlsxPath, "xl/_rels/workbook.xml.rels") ?? "";
   const sheets = listSheets(workbook);
@@ -183,6 +281,9 @@ export function parseXlsxFile(
     return { ok: false, error: "XLSX has no sheets" };
   }
   const pathMap = mapSheetPaths(rels);
+  if ("error" in pathMap) {
+    return { ok: false, error: pathMap.error };
+  }
   const wanted =
     sheets.find((s) => s.name === selection?.sheet) ?? sheets[0]!;
   const sheetPath = pathMap[wanted.path];

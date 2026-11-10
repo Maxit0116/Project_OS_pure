@@ -69,7 +69,7 @@ function hasDecisionSignal(
 function isHardExcluded(
   record: ChatSessionRecord,
   pinnedIds: ReadonlyArray<string>,
-  options: { activeSessionId?: string | null; snoozedUntil?: SessionTidySnoozeMap; nowMs?: number },
+  options: { activeSessionId?: string | null | undefined; snoozedUntil?: SessionTidySnoozeMap | undefined; nowMs?: number },
 ): boolean {
   const nowMs = options.nowMs ?? Date.now();
   const { head } = record;
@@ -104,10 +104,12 @@ function alreadyRelated(
   return false;
 }
 
-function scorePair(a: ChatSessionRecord, b: ChatSessionRecord): {
+type PairScore = {
   score: number;
   reasons: SessionTidyReason[];
-} {
+};
+
+function scorePair(a: ChatSessionRecord, b: ChatSessionRecord): PairScore {
   const scored = scoreSessionPair(a, b);
   return {
     score: scored.score,

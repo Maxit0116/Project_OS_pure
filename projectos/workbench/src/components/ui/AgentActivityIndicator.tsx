@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react'
-import ThinkingOrb, { type OrbState } from './ThinkingOrb'
+import ThinkingOrb, { type ActivityOrbState } from './ThinkingOrb'
 import LiveStatusPulse from './LiveStatusPulse'
 import styles from './AgentActivityIndicator.module.css'
 
 type Variant = 'inline' | 'pill'
 
 interface Props {
-  state?: OrbState
+  state?: ActivityOrbState
   label: string
   variant?: Variant
   className?: string

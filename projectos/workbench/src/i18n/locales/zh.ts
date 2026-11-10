@@ -1889,7 +1889,7 @@ const zh = {
       materialsAddRef: '添加项目引用',
       materialsAddFile: '附加文件',
       materialsFileHint:
-        '级别：plaintext/md/json/csv/log = 仅 text_preview（CSV ≠ 工作表/列范围）。image/xlsx/pdf = unsupported 且保留卡片；图片按 model 能力预检。',
+        '级别：plaintext/md/json/csv/log = text_preview；CSV/XLSX 选择后 structured_selection；PDF 经 pdftotext 为 full_text_parse；png/jpeg 在校验字节+视觉 apiFormat 后 vision_attach。XLSX/PDF 需 Electron 宿主 ingest。',
       materialsList: '已暂存材料',
       materialsEmpty: '尚未暂存材料。',
       materialsRemove: '移除材料',

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { LoopTaskMaterial } from '@contracts/index'
 import { classifyLoopMaterialFormat } from '@contracts/loop-task-material-formats'
 import { evaluateImageMaterialCapability } from '@contracts/loop-material-vision-preflight'
@@ -7,6 +7,11 @@ import { normalizeModelProfile } from '@contracts/settings'
 import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
+import { buildPw7ContextMaterial } from '../../../../services/loop-pw7-context-materials'
+import {
+  assessMaterialChangeImpact,
+  type MaterialChangeImpact,
+} from '../../../../services/loop-material-rereview'
 import LoopMaterialImagePreview from './LoopMaterialImagePreview'
 import styles from './LoopRunMaterialsPanel.module.css'
 
@@ -56,6 +61,16 @@ export default function LoopRunMaterialsPanel() {
   >({})
   /** Raw CSV text keyed by material id — selection reshapes textPreview in pack. */
   const [csvRawById, setCsvRawById] = useState<Record<string, string>>({})
+  const [pw7Kind, setPw7Kind] = useState<
+    'issue' | 'pull_request' | 'code_selection' | 'error_context'
+  >('issue')
+  const [pw7Title, setPw7Title] = useState('')
+  const [pw7Body, setPw7Body] = useState('')
+  const [pw7Ref, setPw7Ref] = useState('')
+  const [materialImpact, setMaterialImpact] = useState<MaterialChangeImpact | null>(
+    null,
+  )
+  const priorMaterialsRef = useRef<LoopTaskMaterial[]>([])
 
   useEffect(() => {
     return () => {
@@ -64,6 +79,19 @@ export default function LoopRunMaterialsPanel() {
       }
     }
   }, [imageObjectUrls])
+
+  useEffect(() => {
+    const impact = assessMaterialChangeImpact({
+      previous: priorMaterialsRef.current,
+      next: materials,
+    })
+    if (impact.materialsChanged) {
+      setMaterialImpact(impact)
+      priorMaterialsRef.current = materials.map((item) => ({ ...item }))
+    } else if (!priorMaterialsRef.current.length && materials.length) {
+      priorMaterialsRef.current = materials.map((item) => ({ ...item }))
+    }
+  }, [materials])
 
   const addText = () => {
     const title = textTitle.trim() || textBody.trim().slice(0, 80) || 'Task text'
@@ -266,6 +294,63 @@ export default function LoopRunMaterialsPanel() {
         setReplacingId(null)
       } else {
         addRunMaterial(material)
+      }
+      return
+    }
+    if (format.formatId === 'xlsx' || format.formatId === 'pdf') {
+      const { client, project } = useWorkbenchStore.getState()
+      if (!client || !project || typeof client.ingestLoopTaskMaterial !== 'function') {
+        const msg =
+          'XLSX/PDF ingest requires Electron LocalApi host (unzip/pdftotext) — browser alone cannot parse'
+        setFileError(msg)
+        const blocked: LoopTaskMaterial = {
+          id: replacingId ?? newMaterialId(`mat_${format.formatId}`),
+          kind: format.formatId === 'xlsx' ? 'table' : 'file',
+          purpose: format.formatId === 'xlsx' ? 'test_data' : 'requirement',
+          title: file.name.slice(0, 240),
+          source: 'upload',
+          parseStatus: 'unsupported',
+          parseLevel: 'unsupported',
+          parseMessage: msg,
+          mimeType: mime,
+          sizeBytes: file.size,
+          measuredSizeBytes: file.size,
+          version: 1,
+          runOverride: true,
+          createdAt: now,
+          updatedAt: now,
+        }
+        if (replacingId) {
+          replaceRunMaterial(replacingId, blocked)
+          setReplacingId(null)
+        } else {
+          addRunMaterial(blocked)
+        }
+        return
+      }
+      const buffer = await file.arrayBuffer()
+      let binary = ''
+      const bytes = new Uint8Array(buffer)
+      const chunk = 0x8000
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+      }
+      const result = await client.ingestLoopTaskMaterial(project.projectId, {
+        fileName: file.name,
+        mimeType: mime,
+        bytesBase64: btoa(binary),
+        ...(replacingId ? { materialId: replacingId } : {}),
+      })
+      if (result.material) {
+        if (replacingId) {
+          replaceRunMaterial(replacingId, { ...result.material, id: replacingId })
+          setReplacingId(null)
+        } else {
+          addRunMaterial(result.material)
+        }
+      }
+      if (!result.ok) {
+        setFileError(result.error ?? 'ingest failed')
       }
       return
     }
@@ -487,6 +572,83 @@ export default function LoopRunMaterialsPanel() {
           <p className={styles.hint}>{ts('chat.loopGraph.materialsFileHint')}</p>
         )}
       </section>
+
+      <section className={styles.section} data-loop-pw7-context="">
+        <h4 className={styles.heading}>PW-7 context → same run</h4>
+        <p className={styles.hint}>
+          Issue / PR / code selection / error context as task materials (not authoring).
+        </p>
+        <select
+          value={pw7Kind}
+          onChange={(event) =>
+            setPw7Kind(
+              event.target.value as
+                | 'issue'
+                | 'pull_request'
+                | 'code_selection'
+                | 'error_context',
+            )
+          }
+          data-loop-pw7-kind=""
+        >
+          <option value="issue">issue</option>
+          <option value="pull_request">pull_request</option>
+          <option value="code_selection">code_selection</option>
+          <option value="error_context">error_context</option>
+        </select>
+        <input
+          type="text"
+          value={pw7Title}
+          onChange={(event) => setPw7Title(event.target.value)}
+          placeholder="title"
+          data-loop-pw7-title=""
+        />
+        <input
+          type="text"
+          value={pw7Ref}
+          onChange={(event) => setPw7Ref(event.target.value)}
+          placeholder="repo#123 or path:lines"
+          data-loop-pw7-ref=""
+        />
+        <textarea
+          value={pw7Body}
+          onChange={(event) => setPw7Body(event.target.value)}
+          placeholder="context body"
+          rows={2}
+          data-loop-pw7-body=""
+        />
+        <button
+          type="button"
+          className={styles.secondary}
+          data-loop-pw7-add=""
+          onClick={() => {
+            const title = pw7Title.trim()
+            if (!title) return
+            const material = buildPw7ContextMaterial({
+              kind: pw7Kind,
+              title,
+              ...(pw7Body.trim() ? { body: pw7Body.trim() } : {}),
+              ...(pw7Ref.trim() ? { ref: pw7Ref.trim() } : {}),
+            })
+            addRunMaterial(material)
+            setPw7Title('')
+            setPw7Body('')
+            setPw7Ref('')
+          }}
+        >
+          Add PW-7 material
+        </button>
+      </section>
+
+      {materialImpact?.requiresRereview ? (
+        <p
+          className={styles.fileError}
+          data-loop-material-rereview=""
+          role="status"
+        >
+          TM-8: {materialImpact.reason}
+        </p>
+      ) : null}
 
       <section className={styles.section}>
         <h4 className={styles.heading}>{ts('chat.loopGraph.materialsList')}</h4>

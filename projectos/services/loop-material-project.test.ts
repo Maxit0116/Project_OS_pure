@@ -47,7 +47,8 @@ describe("projectMaterialsForNode", () => {
           source: "upload",
           parseStatus: "ok",
           parseLevel: "vision_attach",
-          contentRef: "data:image/png;base64,YWJj",
+          contentRef:
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nK0AAAAASUVORK5CYII=",
           bindingNodeIds: ["n_impl"],
           createdAt: new Date().toISOString(),
         },
@@ -56,7 +57,13 @@ describe("projectMaterialsForNode", () => {
     expect(projected.materials.map((m) => m.id).sort()).toEqual(["img", "t1"]);
     expect(projected.textBundle).toMatch(/structured_selection|name,score/);
     expect(projected.textBundle).not.toMatch(/should not include/);
-    expect(projected.images).toEqual([{ mimeType: "image/png", base64: "YWJj" }]);
+    expect(projected.images).toEqual([
+      {
+        mimeType: "image/png",
+        base64:
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nK0AAAAASUVORK5CYII=",
+      },
+    ]);
     expect(projected.visionBlocked).toBe(false);
   });
 
@@ -78,7 +85,8 @@ describe("projectMaterialsForNode", () => {
           source: "upload",
           parseStatus: "unsupported",
           parseLevel: "unsupported",
-          contentRef: "data:image/png;base64,YWJj",
+          contentRef:
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nK0AAAAASUVORK5CYII=",
           createdAt: new Date().toISOString(),
         },
       ],

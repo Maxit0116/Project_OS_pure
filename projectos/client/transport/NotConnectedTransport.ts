@@ -1575,6 +1575,28 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async ingestLoopTaskMaterial(
+    _projectId: string,
+    _input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial;
+  }> {
+    return transportNotConnected();
+  }
+
   async startLoopInstance(
     _projectId: string,
     _loopId: string,

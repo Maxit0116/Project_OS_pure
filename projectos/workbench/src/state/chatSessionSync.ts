@@ -40,6 +40,7 @@ export type ChatSessionSyncState = Pick<
   | 'refineLoading'
   | 'activeRunId'
   | 'latestAskTrace'
+  | 'pendingIntent'
   | 'pendingPlan'
   | 'planConfirmed'
   | 'latestPlanTrace'

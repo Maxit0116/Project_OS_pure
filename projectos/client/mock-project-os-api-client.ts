@@ -506,6 +506,41 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     };
   }
 
+  override async ingestLoopTaskMaterial(
+    _projectId: string,
+    input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ): Promise<import("../services/loop-material-ingest.js").IngestLoopMaterialResult> {
+    // Node/vitest mock can run parsers; real browser without host still fails inside ingest.
+    const { ingestLoopTaskMaterial } = await import(
+      "../services/loop-material-ingest.js"
+    );
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(input.bytesBase64, "base64");
+    } catch {
+      return { ok: false, error: "Invalid bytesBase64" };
+    }
+    return ingestLoopTaskMaterial({
+      fileName: input.fileName,
+      ...(input.mimeType ? { mimeType: input.mimeType } : {}),
+      bytes: new Uint8Array(bytes),
+      ...(input.materialId ? { materialId: input.materialId } : {}),
+      ...(input.xlsxSelection ? { xlsxSelection: input.xlsxSelection } : {}),
+      ...(input.pdfSelection ? { pdfSelection: input.pdfSelection } : {}),
+    });
+  }
+
   override startLoopInstance(
     projectId: string,
     loopId: string,

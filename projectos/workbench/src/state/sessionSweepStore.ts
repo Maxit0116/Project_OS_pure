@@ -1,9 +1,7 @@
 import type {
   ChatSessionRecord,
   SessionContextDigest,
-  SessionSweepPlan,
   SessionTidyActionKind,
-  SessionTidyPlan,
 } from '@contracts/index'
 import {
   absorbSessionIntoAnchor,

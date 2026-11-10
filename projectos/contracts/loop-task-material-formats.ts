@@ -5,8 +5,11 @@
  * - text_preview: capped plaintext preview only
  * - structured_selection: CSV/XLSX column/sheet/row applied (see parsers)
  * - full_text_parse: PDF text extract when tool available
- * - vision_attach: image → ModelGateway.images
+ * - vision_attach: image → ModelGateway.images (needs verified bytes + vision apiFormat)
  * - unsupported: deferred/blocked — correct safety state, not “done”
+ *
+ * Classification alone ≠ parse complete: CSV/XLSX need selection apply;
+ * PDF needs pdftotext; image needs contentRef magic + vision profile.
  */
 export type LoopMaterialParseLevel =
   | "text_preview"
@@ -27,21 +30,17 @@ const TEXT_PREVIEW_MIME = new Set([
 
 const TEXT_PREVIEW_EXT = /\.(txt|md|json|csv|log)$/i;
 
-/** Explicitly deferred in first batch (must not silently parse as ok). */
+/** Still deferred — not first-batch usable. */
 const DEFERRED_MIME_PREFIXES = [
-  "image/",
   "audio/",
   "video/",
-  "application/pdf",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml",
   "application/vnd.ms-powerpoint",
   "application/vnd.openxmlformats-officedocument.presentationml",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml",
 ];
 
-const DEFERRED_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|pdf|xlsx?|xls|pptx?|docx?)$/i;
+const DEFERRED_EXT = /\.(gif|webp|svg|bmp|pptx?|docx?|xls)$/i;
 
 export type LoopMaterialFormatClassification = {
   support: LoopMaterialFormatSupport;
@@ -62,13 +61,19 @@ export type LoopMaterialFormatClassification = {
 };
 
 function detectFormatId(mime: string, name: string): LoopMaterialFormatClassification["formatId"] {
-  if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name)) {
+  if (
+    (mime.startsWith("image/") && !/gif|webp|svg|bmp/i.test(mime)) ||
+    /\.(png|jpe?g)$/i.test(name)
+  ) {
+    return "image";
+  }
+  if (mime.startsWith("image/") || /\.(gif|webp|svg|bmp)$/i.test(name)) {
     return "image";
   }
   if (
     mime.includes("spreadsheet") ||
     mime.includes("ms-excel") ||
-    /\.xlsx?$/i.test(name)
+    /\.xlsx$/i.test(name)
   ) {
     return "xlsx";
   }
@@ -89,27 +94,56 @@ export function classifyLoopMaterialFormat(input: {
   const name = (input.fileName ?? "").trim();
   const formatId = detectFormatId(mime, name);
 
+  // First-batch usable image path (png/jpeg only) — vision_attach after bytes+profile.
+  if (
+    formatId === "image" &&
+    (mime === "image/png" ||
+      mime === "image/jpeg" ||
+      /\.(png|jpe?g)$/i.test(name)) &&
+    !/\.(gif|webp|svg|bmp)$/i.test(name)
+  ) {
+    return {
+      support: "vision_attach",
+      parseLevel: "vision_attach",
+      formatId: "image",
+      reason:
+        "First-batch image: png/jpeg → vision_attach when verified data: contentRef + openai_chat/anthropic_messages; otherwise preflight blocks",
+    };
+  }
+
+  if (formatId === "xlsx" && (mime.includes("spreadsheet") || /\.xlsx$/i.test(name))) {
+    return {
+      support: "structured_selection",
+      parseLevel: "structured_selection",
+      formatId: "xlsx",
+      reason:
+        "First-batch XLSX: OOXML sheet/A1 range via loop-material-xlsx (Electron/LocalApi ingest); classify ≠ applied selection",
+    };
+  }
+
+  if (formatId === "pdf") {
+    return {
+      support: "full_text_parse",
+      parseLevel: "full_text_parse",
+      formatId: "pdf",
+      reason:
+        "First-batch PDF: full_text_parse via pdftotext when installed; missing tool / encrypted / scanned → unsupported + page selection kept",
+    };
+  }
+
   if (DEFERRED_EXT.test(name) || DEFERRED_MIME_PREFIXES.some((p) => mime.startsWith(p))) {
-    const deferredNote =
-      formatId === "image"
-        ? " — keep card; vision via ModelGateway apiFormat preflight (openai_chat/anthropic_messages → vision_attach)"
-        : formatId === "xlsx"
-          ? " — use OOXML sheet/range parser (services/loop-material-xlsx); classify alone ≠ structured"
-          : formatId === "pdf"
-            ? " — page extract via pdftotext when available (otherwise unsupported + page selection kept)"
-            : " — not text_preview; structured_selection requires parser apply";
     return {
       support: "unsupported",
       parseLevel: "unsupported",
-      formatId,
-      reason: `First-batch: “${mime || name || "binary"}” is unsupported${deferredNote}`,
+      formatId: formatId === "image" ? "image" : "other_binary",
+      reason: `First-batch: “${mime || name || "binary"}” is unsupported (deferred format)`,
     };
   }
 
   if (TEXT_PREVIEW_MIME.has(mime) || TEXT_PREVIEW_EXT.test(name)) {
     const csvNote =
       formatId === "csv"
-        ? " — raw CSV text_preview only; sheet/column/range selection NOT implemented"
+        ? " — raw text_preview on ingest; structured_selection after column/row apply (loop-material-csv)"
         : formatId === "json"
           ? " — raw JSON text_preview only; field/schema selection NOT implemented"
           : " — capped text_preview only; full_text_parse NOT implemented";
@@ -134,7 +168,7 @@ export function classifyLoopMaterialFormat(input: {
     support: "unsupported",
     parseLevel: "unsupported",
     formatId: "other_binary",
-    reason: `First-batch: “${mime || name}” unsupported (text_preview only for plaintext/md/json/csv/log)`,
+    reason: `First-batch: “${mime || name}” unsupported (usable: plaintext/md/json/csv/log/png/jpeg/xlsx/pdf)`,
   };
 }
 

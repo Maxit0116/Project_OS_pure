@@ -999,6 +999,29 @@ export interface ProjectOSApi {
       materialId?: string;
     }>;
   }>;
+  /**
+   * Host-side multi-type material ingest (xlsx/pdf via unzip/pdftotext).
+   * Browser mock returns fail-closed for host-only formats.
+   */
+  ingestLoopTaskMaterial(
+    projectId: string,
+    input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("./loop-task-materials.js").LoopTaskMaterial;
+  }>;
   startLoopInstance(
     projectId: string,
     loopId: string,

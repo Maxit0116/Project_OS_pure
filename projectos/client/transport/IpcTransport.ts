@@ -1801,6 +1801,28 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("preflightLoopRun", projectId, loopId, options ?? {});
   }
 
+  ingestLoopTaskMaterial(
+    projectId: string,
+    input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial;
+  }> {
+    return this.invoke("ingestLoopTaskMaterial", projectId, input);
+  }
+
   startLoopInstance(
     projectId: string,
     loopId: string,

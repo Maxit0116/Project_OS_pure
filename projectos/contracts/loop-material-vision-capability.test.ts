@@ -35,7 +35,9 @@ describe("loop-material-vision-capability (ModelGateway)", () => {
     expect(ollama.supportsVision).toBe(false);
   });
 
-  it("builds ModelGateway images[] from data: contentRef materials", () => {
+  it("builds ModelGateway images[] from verified PNG data: contentRef materials", () => {
+    const pngB64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nK0AAAAASUVORK5CYII=";
     const parts = materialImagesToGatewayParts([
       {
         id: "img1",
@@ -46,11 +48,44 @@ describe("loop-material-vision-capability (ModelGateway)", () => {
         parseStatus: "ok",
         parseLevel: "vision_attach",
         mimeType: "image/png",
-        contentRef: "data:image/png;base64,YWJjMTIz",
+        contentRef: `data:image/png;base64,${pngB64}`,
         createdAt: new Date().toISOString(),
       },
     ]);
-    expect(parts).toEqual([{ mimeType: "image/png", base64: "YWJjMTIz" }]);
+    expect(parts).toEqual([{ mimeType: "image/png", base64: pngB64 }]);
     expect(materialsRequireVision([{ kind: "image" } as never])).toBe(true);
+  });
+
+  it("rejects magic-mismatch and upload:// contentRef (no silent attach)", () => {
+    expect(
+      materialImagesToGatewayParts([
+        {
+          id: "bad",
+          kind: "image",
+          purpose: "error_screenshot",
+          title: "x.png",
+          source: "upload",
+          parseStatus: "ok",
+          parseLevel: "vision_attach",
+          contentRef: "data:image/png;base64,YWJjMTIz",
+          createdAt: new Date().toISOString(),
+        },
+      ]),
+    ).toEqual([]);
+    expect(
+      materialImagesToGatewayParts([
+        {
+          id: "path",
+          kind: "image",
+          purpose: "error_screenshot",
+          title: "x.png",
+          source: "upload",
+          parseStatus: "ok",
+          parseLevel: "vision_attach",
+          contentRef: "upload://x.png",
+          createdAt: new Date().toISOString(),
+        },
+      ]),
+    ).toEqual([]);
   });
 });

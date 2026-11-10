@@ -16,30 +16,43 @@ describe("loop-task-material-formats (first-batch matrix)", () => {
       expect(result.support).toBe("text_preview");
       expect(result.parseLevel).toBe("text_preview");
       expect(result.formatId).toBe(sample.id);
-      expect(result.reason).not.toMatch(/structured_selection|full_text_parse implemented/i);
       if (sample.id === "csv") {
-        expect(result.reason).toMatch(/sheet\/column\/range selection NOT implemented/i);
+        expect(result.reason).toMatch(/structured_selection after column\/row apply/i);
       }
     }
   });
 
-  it("marks image / xlsx / pdf explicitly unsupported (safety ≠ feature done)", () => {
-    for (const sample of [
-      { mimeType: "image/png", fileName: "shot.png", id: "image" },
-      { mimeType: "image/jpeg", fileName: "photo.jpg", id: "image" },
-      {
+  it("marks png/jpeg/xlsx/pdf as first-batch usable levels (not blanket unsupported)", () => {
+    expect(
+      classifyLoopMaterialFormat({ mimeType: "image/png", fileName: "shot.png" }),
+    ).toMatchObject({ formatId: "image", parseLevel: "vision_attach" });
+    expect(
+      classifyLoopMaterialFormat({ mimeType: "image/jpeg", fileName: "photo.jpg" }),
+    ).toMatchObject({ formatId: "image", parseLevel: "vision_attach" });
+    expect(
+      classifyLoopMaterialFormat({
         mimeType:
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         fileName: "table.xlsx",
-        id: "xlsx",
+      }),
+    ).toMatchObject({ formatId: "xlsx", parseLevel: "structured_selection" });
+    expect(
+      classifyLoopMaterialFormat({ mimeType: "application/pdf", fileName: "spec.pdf" }),
+    ).toMatchObject({ formatId: "pdf", parseLevel: "full_text_parse" });
+  });
+
+  it("keeps gif/webp/docx deferred unsupported", () => {
+    for (const sample of [
+      { mimeType: "image/gif", fileName: "a.gif" },
+      { mimeType: "image/webp", fileName: "a.webp" },
+      {
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        fileName: "a.docx",
       },
-      { mimeType: "application/pdf", fileName: "spec.pdf", id: "pdf" },
-    ] as const) {
+    ]) {
       const result = classifyLoopMaterialFormat(sample);
-      expect(result.support).toBe("unsupported");
       expect(result.parseLevel).toBe("unsupported");
-      expect(result.formatId).toBe(sample.id);
-      expect(result.reason).toMatch(/unsupported/i);
     }
   });
 });

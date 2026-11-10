@@ -21,7 +21,7 @@ interface Props {
   onScroll?: (scrollTop: number) => void
 }
 
-function lineClassName(line: RenderLine | null): string {
+function lineClassName(line: RenderLine | null, side: ColumnSide): string {
   if (!line) return styles.linePlaceholder
 
   const classes = [styles.line]
@@ -91,7 +91,7 @@ export default function DiffHighlightedColumn({
             const lineId = `${side}-${index}`
 
             return (
-              <div key={lineId} className={lineClassName(line)}>
+              <div key={lineId} className={lineClassName(line, side)}>
                 <span className={styles.lineNumber}>
                   {lineNumber ?? ''}
                 </span>

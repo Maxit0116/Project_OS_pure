@@ -9,6 +9,7 @@ import type { ModelApiFormat, ModelProfile } from "./settings.js";
 import { normalizeModelProfile } from "./settings.js";
 import type { ModelImagePart } from "./model-gateway.js";
 import type { LoopTaskMaterial } from "./loop-task-materials.js";
+import { resolveSafeImageContentRef } from "./loop-material-image-bytes.js";
 
 export type LoopVisionCapability = {
   supportsVision: boolean;
@@ -42,13 +43,11 @@ export function resolveLoopVisionCapability(
   };
 }
 
-const DATA_URL_RE =
-  /^data:(image\/png|image\/jpeg);base64,([A-Za-z0-9+/=\s]+)$/i;
-
 /**
  * Build ModelGateway `images` parts from run materials.
- * Only png/jpeg with data: contentRef or inline gateway payload; max 4 parts.
- * Does not invent vision when bytes are missing.
+ * Only png/jpeg with verified data: contentRef (MIME + magic + size); max 4 parts.
+ * Does not invent vision when bytes are missing; path/upload refs do not attach.
+ * Prompt/file instructions cannot increase privileges past this gate.
  */
 export function materialImagesToGatewayParts(
   materials: LoopTaskMaterial[] | undefined,
@@ -62,13 +61,9 @@ export function materialImagesToGatewayParts(
       continue;
     }
     if (material.parseStatus === "failed") continue;
-    const ref = material.contentRef?.trim() ?? "";
-    const match = DATA_URL_RE.exec(ref);
-    if (!match) continue;
-    const mimeType = match[1]!.toLowerCase() as "image/png" | "image/jpeg";
-    const base64 = match[2]!.replace(/\s+/g, "");
-    if (!base64 || base64.length > 6_000_000) continue;
-    out.push({ mimeType, base64 });
+    const resolved = resolveSafeImageContentRef(material.contentRef);
+    if (!resolved.ok) continue;
+    out.push({ mimeType: resolved.mimeType, base64: resolved.base64 });
   }
   return out;
 }
