@@ -56,6 +56,8 @@ import {
   invokeOfflineConnector,
 } from "./loop-connector-offline.js";
 import {
+  assertCodeDigestComplete,
+  assertCredentialAllowedByFreeze,
   assertLaunchContextForBinding,
   buildRunBindingSnapshot,
 } from "./loop-run-binding.js";
@@ -1357,6 +1359,14 @@ function stepActionNode(
             "string"
           ? (node as { credentialRefId?: string }).credentialRefId
           : undefined;
+
+    const freezeCred = assertCredentialAllowedByFreeze(
+      next.runBinding,
+      credentialRefId,
+    );
+    if (!freezeCred.ok) {
+      return failNode(doc, next, node.id, freezeCred.reason, { spec });
+    }
 
     if (execution?.executeConnectorOperation) {
       let connectorResult: {
@@ -2728,7 +2738,10 @@ function stepVerifyNode(
     }
     const attempts = (working.attemptCounts[fb.to] ?? 0) + 1;
     const max = effectiveMaxIterations(spec, fb.to);
-    if (round > spec.stopPolicy.maxRounds || attempts > max) {
+    // Frozen budget at start wins over live Spec edits (consumption, not serialize-only).
+    const frozenMaxRounds = working.runBinding?.budget?.maxRounds;
+    const maxRounds = frozenMaxRounds ?? spec.stopPolicy.maxRounds;
+    if (round > maxRounds || attempts > max) {
       const next = pushEvent(
         {
           ...working,
@@ -2745,7 +2758,7 @@ function stepVerifyNode(
         {
           type: "awaiting_hitl",
           nodeId,
-          message: `Stop policy reached (${Math.min(spec.stopPolicy.maxRounds, max)} rounds)`,
+          message: `Stop policy reached (${Math.min(maxRounds, max)} rounds)`,
           evidenceId: evidence.id,
         },
       );
@@ -3015,6 +3028,10 @@ export function startLoopInstance(
           ...(preflightNotes ? { preflightNotes } : {}),
         })
       : undefined);
+  // Production starts: incomplete content digests must fail closed (not path-hash masquerade).
+  if (runBinding && options.requirePreflight === true) {
+    assertCodeDigestComplete(runBinding);
+  }
 
   let instance: LoopInstance = {
     id: `inst_${randomUUID()}`,
@@ -3502,7 +3519,7 @@ export function resolveLoopHitl(
       return upsertLoopGraph(workspaceRoot, nextDoc);
     }
 
-    if (mode === "approval") {
+    if (mode === "approval" || mode === "takeover") {
       // Exact whitelist via isApprovalChoice — never substring-match "approve"
       // inside phrases like "not approved".
       const affirmative = isApprovalChoice(choice);
@@ -3510,6 +3527,49 @@ export function resolveLoopHitl(
         /^(reject|denied|deny|拒绝|驳回|not approved|not_approved|unapproved|disapprove|不同意|不批准)$/i.test(
           choice.trim(),
         );
+      const explicitTakeover =
+        mode === "takeover" ||
+        /^(takeover|take.?over|接管)$/i.test(choice.trim()) ||
+        Boolean(
+          answer.editedPayload &&
+            typeof answer.editedPayload === "object" &&
+            (answer.editedPayload as { humanTakeover?: unknown }).humanTakeover ===
+              true,
+        );
+      if (explicitTakeover) {
+        // Human takeover: invalidate any pending side-effect approval; pause with
+        // readable NodeRun context so a later resume/agent can continue from cursor.
+        next = invalidatePendingApproval(next, "Human took over the task");
+        next = pushArtifact(next, {
+          nodeId: cursorNode.id,
+          kind: "human_decision",
+          data: {
+            mode: "takeover",
+            choice: "takeover",
+            ...(answer.editedPayload ? { editedPayload: answer.editedPayload } : {}),
+            ...(answer.actor ? { actor: answer.actor } : {}),
+            at: nowIso(),
+            nodeId: cursorNode.id,
+            cursorNodeId: cursorNode.id,
+            preservedStatus: instance.status,
+          },
+        });
+        next = pushEvent(
+          {
+            ...next,
+            status: "paused",
+            hitlQuestionIds: [],
+            pendingActionPayload: undefined,
+            pendingApprovalBinding: undefined,
+          },
+          {
+            type: "paused",
+            nodeId: cursorNode.id,
+            message: "Human takeover — Agent must read current NodeRun context on resume",
+          },
+        );
+        return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
+      }
       const actionTarget = (() => {
         if (isActionNode(cursorNode) && !isTestActionNode(cursorNode)) {
           return cursorNode;
@@ -3644,6 +3704,7 @@ export function resolveLoopHitl(
           actionNodeId: actionTarget.id,
           engineering,
           operationDigest,
+          instance: next,
           ...(actionArch?.actionIntegration
             ? { actionIntegration: actionArch.actionIntegration }
             : {}),
@@ -3688,6 +3749,12 @@ export function resolveLoopHitl(
             engineeringBaseline: bindingPayload.engineeringBaseline,
             ...(bindingPayload.codeDigest
               ? { codeDigest: bindingPayload.codeDigest }
+              : {}),
+            ...(bindingPayload.runApprovalContextDigest
+              ? {
+                  runApprovalContextDigest:
+                    bindingPayload.runApprovalContextDigest,
+                }
               : {}),
             operationDigest: bindingPayload.operationDigest,
             ...(answer.actor ? { actor: answer.actor } : {}),

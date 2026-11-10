@@ -289,11 +289,12 @@ export function humanQuestionId(node: LoopSpecNode): string {
 
 export function parseHumanModeFromQuestionId(
   questionId: string,
-): "approval" | "review" | "input" | "decision" | "legacy" {
+): "approval" | "review" | "input" | "decision" | "takeover" | "legacy" {
   if (questionId.startsWith("human_approval_")) return "approval";
   if (questionId.startsWith("human_review_")) return "review";
   if (questionId.startsWith("human_input_")) return "input";
   if (questionId.startsWith("human_decision_")) return "decision";
+  if (questionId.startsWith("human_takeover_")) return "takeover";
   if (questionId.startsWith("decide_")) return "legacy";
   return "legacy";
 }

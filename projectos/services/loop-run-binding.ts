@@ -1,14 +1,25 @@
 /**
  * Shared RunBinding snapshot for every Loop start entry (manual / params / event).
- * Freezes workspace identity, content digest, approved budget/permissions, and
- * material/definition versions so later Intent/Spec edits cannot rewrite the run.
+ *
+ * Identity vs content:
+ * - identityDigest / repo / identityKind describe *where* the workspace is
+ * - codeDigest digests *file contents* (HEAD when clean git; dirty/untracked bytes;
+ *   bounded non-git source walk). Never substitute path-only identity for content.
+ *
+ * Incomplete digests (truncated / oversized / unreadable) are explicit and must
+ * block production start / approval reuse — never pretend a path hash is complete.
  *
  * Credentials: ref ids only — never tokens.
- * Git: verified remote/HEAD/branch when .git exists; otherwise explicit non-git identity.
+ * Budget/permission freeze is consumed at runtime (see loop-runtime-service).
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+} from "node:fs";
+import { join, relative, sep } from "node:path";
 import { execFileSync } from "node:child_process";
 
 import type { LoopGraphDocument, LoopSpec } from "../contracts/loop-graph.js";
@@ -28,6 +39,8 @@ export type RepoIdentityKind =
 
 export type BranchSource = "verified_git" | "declared_unverified" | "none";
 
+export type CodeDigestStatus = "complete" | "incomplete";
+
 export type FrozenRunBudget = {
   maxRounds: number;
   maxRetries: number;
@@ -37,24 +50,26 @@ export type FrozenRunBudget = {
 
 export type FrozenPermissionSet = {
   credentialRefIds: string[];
-  /** High-risk terminal/external actions require HITL — frozen at start. */
   requireHitlForHighRisk: true;
 };
 
 export type WorkspaceIdentitySnapshot = {
   identityKind: RepoIdentityKind;
   workspaceRoot: string;
-  /** Human + machine identity: remote URL, or `workspace:<abs>`, never a bare pretend-git name. */
   repo: string;
   remoteUrl?: string;
   headSha?: string;
-  /** Verified git branch when available; otherwise omitted or declared-only. */
   branch?: string;
   branchSource: BranchSource;
-  /** Porcelain + dirty path content fingerprint (or clean marker). */
-  workspaceDirtyDigest: string;
-  /** Declared branch from UI/event when it differs from verified git branch. */
   declaredBranch?: string;
+  /** Identity-only fingerprint (path/remote) — NOT a code content digest. */
+  identityDigest: string;
+  /** Content digest of dirty/untracked (or clean HEAD marker). */
+  workspaceDirtyDigest: string;
+  /** Content digest used as RunBinding.codeDigest. */
+  codeDigest: string;
+  codeDigestStatus: CodeDigestStatus;
+  incompleteReasons: string[];
 };
 
 export type BuildRunBindingInput = {
@@ -66,22 +81,47 @@ export type BuildRunBindingInput = {
   materials?: LoopTaskMaterial[];
   declaredBranch?: string;
   preflightNotes?: string[];
-  /** When event/params omit required launch context, callers must block before this. */
   launchKind: "manual" | "params" | "event";
 };
 
-function gitCapture(
-  workspaceRoot: string,
-  args: string[],
-): string | null {
+export const MAX_DIRTY_PATHS = 200;
+export const MAX_FILE_BYTES = 2 * 1024 * 1024;
+export const MAX_NONGIT_FILES = 100;
+
+const SOURCE_EXT = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+  ".md",
+  ".css",
+  ".prisma",
+  ".sql",
+]);
+
+const SKIP_DIRS = new Set([
+  ".git",
+  "node_modules",
+  ".next",
+  "dist",
+  "out",
+  "coverage",
+  ".projectos",
+]);
+
+function gitCapture(workspaceRoot: string, args: string[]): string | null {
   try {
+    // Do NOT String.trim() the whole payload — porcelain leading spaces are
+    // significant (e.g. " M path" → XY=" M"). Only strip trailing newlines.
     return execFileSync("git", args, {
       cwd: workspaceRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 5_000,
-    })
-      .trim();
+    }).replace(/\n+$/u, "");
   } catch {
     return null;
   }
@@ -91,8 +131,132 @@ function hashText(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex").slice(0, 32);
 }
 
+function isSecretishPath(path: string): boolean {
+  const lower = path.toLowerCase();
+  return (
+    lower.includes(".env") ||
+    lower.includes("credential") ||
+    lower.includes("secret") ||
+    lower.endsWith(".pem") ||
+    lower.endsWith(".key")
+  );
+}
+
+function parsePorcelainPath(line: string): string | null {
+  // XY PATH or XY PATH -> PATH2
+  if (line.length < 4) return null;
+  const body = line.slice(3);
+  const arrow = body.indexOf(" -> ");
+  const raw = arrow >= 0 ? body.slice(arrow + 4) : body;
+  const path = raw.trim().replace(/^"|"$/g, "");
+  return path || null;
+}
+
+type PathContentResult = {
+  entries: Array<[string, string]>;
+  incompleteReasons: string[];
+  truncated: boolean;
+};
+
+function digestPathList(
+  workspaceRoot: string,
+  paths: string[],
+  limit: number,
+): PathContentResult {
+  const incompleteReasons: string[] = [];
+  const entries: Array<[string, string]> = [];
+  const unique = [...new Set(paths.map((p) => p.trim()).filter(Boolean))];
+  const truncated = unique.length > limit;
+  if (truncated) {
+    incompleteReasons.push(`path_list_truncated:${unique.length}>${limit}`);
+  }
+  for (const path of unique.slice(0, limit)) {
+    if (isSecretishPath(path)) {
+      entries.push([path, "skipped:secretish"]);
+      continue;
+    }
+    const abs = join(workspaceRoot, path);
+    try {
+      if (!existsSync(abs)) {
+        entries.push([path, "missing"]);
+        continue;
+      }
+      const st = lstatSync(abs);
+      if (st.isSymbolicLink()) {
+        incompleteReasons.push(`symlink:${path}`);
+        entries.push([path, "unreadable:symlink"]);
+        continue;
+      }
+      if (!st.isFile()) {
+        entries.push([path, "nonfile"]);
+        continue;
+      }
+      if (st.size > MAX_FILE_BYTES) {
+        incompleteReasons.push(`oversized:${path}:${st.size}`);
+        entries.push([path, `unreadable:oversized:${st.size}`]);
+        continue;
+      }
+      entries.push([path, digestBytes(readFileSync(abs))]);
+    } catch {
+      incompleteReasons.push(`unreadable:${path}`);
+      entries.push([path, "unreadable"]);
+    }
+  }
+  entries.sort(([a], [b]) => a.localeCompare(b));
+  return { entries, incompleteReasons, truncated };
+}
+
+function walkNonGitSources(workspaceRoot: string): PathContentResult {
+  const found: string[] = [];
+  const incompleteReasons: string[] = [];
+  const stack = [workspaceRoot];
+  while (stack.length && found.length <= MAX_NONGIT_FILES) {
+    const dir = stack.pop()!;
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      incompleteReasons.push(`unreadable_dir:${relative(workspaceRoot, dir) || "."}`);
+      continue;
+    }
+    for (const name of names) {
+      if (SKIP_DIRS.has(name)) continue;
+      const abs = join(dir, name);
+      let st;
+      try {
+        st = lstatSync(abs);
+      } catch {
+        incompleteReasons.push(`unreadable:${relative(workspaceRoot, abs)}`);
+        continue;
+      }
+      if (st.isDirectory()) {
+        stack.push(abs);
+        continue;
+      }
+      if (!st.isFile() || st.isSymbolicLink()) continue;
+      const rel = relative(workspaceRoot, abs).split(sep).join("/");
+      const dot = rel.lastIndexOf(".");
+      const ext = dot >= 0 ? rel.slice(dot).toLowerCase() : "";
+      if (!SOURCE_EXT.has(ext)) continue;
+      found.push(rel);
+      if (found.length > MAX_NONGIT_FILES) break;
+    }
+  }
+  if (found.length > MAX_NONGIT_FILES || stack.length > 0) {
+    incompleteReasons.push(
+      `nongit_walk_truncated:files=${found.length},pendingDirs=${stack.length}`,
+    );
+  }
+  return digestPathList(
+    workspaceRoot,
+    found.slice(0, MAX_NONGIT_FILES),
+    MAX_NONGIT_FILES,
+  );
+}
+
 /**
- * Resolve workspace identity without pretending a non-git folder is a git repo.
+ * Resolve workspace identity + content digests.
+ * identityDigest ≠ codeDigest for non-git (path hash must not pretend to be content).
  */
 export function captureWorkspaceIdentity(
   workspaceRoot: string,
@@ -100,59 +264,102 @@ export function captureWorkspaceIdentity(
 ): WorkspaceIdentitySnapshot {
   const gitDir = join(workspaceRoot, ".git");
   const hasGit = existsSync(gitDir);
+  const identityDigest = hashText(`identity:${workspaceRoot}`);
+
   if (!hasGit) {
+    const walked = walkNonGitSources(workspaceRoot);
+    const incompleteReasons = [...walked.incompleteReasons];
+    const codeDigestStatus: CodeDigestStatus =
+      incompleteReasons.length === 0 && walked.entries.length > 0
+        ? "complete"
+        : "incomplete";
+    if (walked.entries.length === 0 && incompleteReasons.length === 0) {
+      incompleteReasons.push("nongit_no_source_files");
+    }
+    const contentMaterial = stableStringify(walked.entries);
+    const codeDigest = hashText(`nongit-content:${contentMaterial}`);
     return {
       identityKind: "workspace_path",
       workspaceRoot,
       repo: `workspace:${workspaceRoot}`,
       branchSource: declaredBranch ? "declared_unverified" : "none",
       ...(declaredBranch ? { branch: declaredBranch, declaredBranch } : {}),
-      workspaceDirtyDigest: hashText(`nongit:${workspaceRoot}`),
+      identityDigest,
+      workspaceDirtyDigest: codeDigest,
+      codeDigest,
+      codeDigestStatus:
+        incompleteReasons.length === 0 ? "complete" : "incomplete",
+      incompleteReasons,
     };
   }
 
   const headSha = gitCapture(workspaceRoot, ["rev-parse", "HEAD"]) ?? undefined;
   const verifiedBranch =
-    gitCapture(workspaceRoot, ["rev-parse", "--abbrev-ref", "HEAD"]) ?? undefined;
+    gitCapture(workspaceRoot, ["rev-parse", "--abbrev-ref", "HEAD"]) ??
+    undefined;
   const remoteUrl =
     gitCapture(workspaceRoot, ["remote", "get-url", "origin"]) ?? undefined;
   const porcelain =
     gitCapture(workspaceRoot, ["status", "--porcelain", "-uall"]) ?? "";
 
-  let dirtyMaterial = `clean:${headSha ?? "unknown"}`;
-  if (porcelain.trim()) {
-    const lines = porcelain.split("\n").filter(Boolean).slice(0, 200);
-    const pathDigests: string[] = [];
-    for (const line of lines) {
-      const path = line.slice(3).trim().replace(/^.* -> /, "");
-      if (!path || path.includes(".env") || path.includes("credential")) continue;
-      try {
-        const abs = join(workspaceRoot, path);
-        if (!existsSync(abs)) {
-          pathDigests.push(`${path}:missing`);
-          continue;
-        }
-        pathDigests.push(`${path}:${digestBytes(readFileSync(abs))}`);
-      } catch {
-        pathDigests.push(`${path}:unreadable`);
-      }
-    }
-    dirtyMaterial = hashText(
-      stableStringify({ porcelain: lines, pathDigests }),
-    );
-  }
-
   const identityKind: RepoIdentityKind = remoteUrl ? "git_remote" : "git_local";
   const repo = remoteUrl
     ? remoteUrl
     : `git-local:${workspaceRoot}@${headSha ?? "nohead"}`;
-
   const branchSource: BranchSource = verifiedBranch
     ? "verified_git"
     : declaredBranch
       ? "declared_unverified"
       : "none";
   const branch = verifiedBranch ?? declaredBranch;
+
+  const lines = porcelain.split("\n").filter(Boolean);
+  const incompleteReasons: string[] = [];
+
+  if (!porcelain.trim()) {
+    // Clean tree: content matches HEAD for tracked + no untracked (-uall).
+    if (!headSha) {
+      incompleteReasons.push("git_head_unavailable");
+    }
+    const codeDigest = hashText(`git-clean-head:${headSha ?? "unknown"}`);
+    return {
+      identityKind,
+      workspaceRoot,
+      repo,
+      ...(remoteUrl ? { remoteUrl } : {}),
+      ...(headSha ? { headSha } : {}),
+      ...(branch ? { branch } : {}),
+      branchSource,
+      ...(declaredBranch && declaredBranch !== verifiedBranch
+        ? { declaredBranch }
+        : {}),
+      identityDigest: hashText(`identity:${identityKind}:${repo}`),
+      workspaceDirtyDigest: hashText("git-clean"),
+      codeDigest,
+      codeDigestStatus: incompleteReasons.length === 0 ? "complete" : "incomplete",
+      incompleteReasons,
+    };
+  }
+
+  const paths = lines
+    .map(parsePorcelainPath)
+    .filter((p): p is string => Boolean(p));
+  const digested = digestPathList(workspaceRoot, paths, MAX_DIRTY_PATHS);
+  incompleteReasons.push(...digested.incompleteReasons);
+  // Content entries change when path A→B even if porcelain status letters stay " M".
+  // Prefer content-only material for dirty digest so porcelain letter noise cannot
+  // mask OR replace byte digests; still include path list for rename/add/delete.
+  const dirtyMaterial = stableStringify({
+    paths: digested.entries.map(([p]) => p),
+    contents: digested.entries,
+  });
+  const workspaceDirtyDigest = hashText(dirtyMaterial);
+  const codeDigest = hashText(
+    stableStringify({
+      headSha: headSha ?? null,
+      dirty: workspaceDirtyDigest,
+    }),
+  );
 
   return {
     identityKind,
@@ -162,13 +369,14 @@ export function captureWorkspaceIdentity(
     ...(headSha ? { headSha } : {}),
     ...(branch ? { branch } : {}),
     branchSource,
-    workspaceDirtyDigest:
-      typeof dirtyMaterial === "string" && dirtyMaterial.length === 32
-        ? dirtyMaterial
-        : hashText(dirtyMaterial),
     ...(declaredBranch && declaredBranch !== verifiedBranch
       ? { declaredBranch }
       : {}),
+    identityDigest: hashText(`identity:${identityKind}:${repo}`),
+    workspaceDirtyDigest,
+    codeDigest,
+    codeDigestStatus: incompleteReasons.length === 0 ? "complete" : "incomplete",
+    incompleteReasons,
   };
 }
 
@@ -243,19 +451,39 @@ export function digestMaterials(materials: LoopTaskMaterial[] | undefined): stri
   );
 }
 
+export function digestFrozenBudget(budget: FrozenRunBudget): string {
+  return hashText(stableStringify(budget));
+}
+
+export function digestFrozenPermissions(
+  permissionSet: FrozenPermissionSet,
+): string {
+  return hashText(stableStringify(permissionSet));
+}
+
 /**
- * Content-oriented code digest at start:
- * git HEAD (+ dirty tree) when git; otherwise workspace path identity hash.
- * Not a path-only featureNode fingerprint.
+ * Context fingerprint frozen into approval bindings — materials / definition /
+ * code / budget / permission changes invalidate prior approvals.
  */
-export function buildCodeDigest(identity: WorkspaceIdentitySnapshot): string {
+export function digestRunApprovalContext(
+  binding: Pick<
+    LoopRunBinding,
+    | "codeDigest"
+    | "materialsDigest"
+    | "definitionDigest"
+    | "budget"
+    | "permissionSet"
+    | "codeDigestStatus"
+  >,
+): string {
   return hashText(
     stableStringify({
-      identityKind: identity.identityKind,
-      repo: identity.repo,
-      headSha: identity.headSha ?? null,
-      branch: identity.branch ?? null,
-      dirty: identity.workspaceDirtyDigest,
+      codeDigest: binding.codeDigest ?? null,
+      codeDigestStatus: binding.codeDigestStatus ?? null,
+      materialsDigest: binding.materialsDigest ?? null,
+      definitionDigest: binding.definitionDigest ?? null,
+      budget: binding.budget ?? null,
+      permissionSet: binding.permissionSet ?? null,
     }),
   );
 }
@@ -272,16 +500,18 @@ export function buildRunBindingSnapshot(
   const permissionSet = freezePermissionSet(credentialRefIds);
   const definitionDigest = digestDefinitionVersions(input.document, input.spec);
   const materialsDigest = digestMaterials(input.materials);
-  const codeDigest = buildCodeDigest(identity);
   const notes = [
     ...(input.preflightNotes ?? []),
     `identity=${identity.identityKind}`,
     `branchSource=${identity.branchSource}`,
     `launch=${input.launchKind}`,
+    `codeDigestStatus=${identity.codeDigestStatus}`,
     `definitionDigest=${definitionDigest}`,
     `materialsDigest=${materialsDigest}`,
+    `identityDigest=${identity.identityDigest}`,
     ...(identity.headSha ? [`headSha=${identity.headSha.slice(0, 12)}`] : []),
     ...(identity.remoteUrl ? [`remote=${identity.remoteUrl}`] : []),
+    ...identity.incompleteReasons.slice(0, 8).map((r) => `incomplete:${r}`),
   ].slice(0, 40);
 
   return {
@@ -289,7 +519,12 @@ export function buildRunBindingSnapshot(
     workspaceRoot: identity.workspaceRoot,
     repo: identity.repo,
     ...(identity.branch ? { branch: identity.branch } : {}),
-    codeDigest,
+    codeDigest: identity.codeDigest,
+    codeDigestStatus: identity.codeDigestStatus,
+    ...(identity.incompleteReasons.length
+      ? { incompleteReasons: identity.incompleteReasons.slice(0, 20) }
+      : {}),
+    identityDigest: identity.identityDigest,
     specVersion: input.spec.version,
     ...(input.materials?.length
       ? {
@@ -300,7 +535,6 @@ export function buildRunBindingSnapshot(
     ...(credentialRefIds.length ? { credentialRefIds } : {}),
     preflightNotes: notes,
     createdAt: input.createdAt,
-    // Extended freeze fields (schema-extended below)
     identityKind: identity.identityKind,
     branchSource: identity.branchSource,
     ...(identity.headSha ? { headSha: identity.headSha } : {}),
@@ -313,12 +547,9 @@ export function buildRunBindingSnapshot(
     materialsDigest,
     budget,
     permissionSet,
-  } as LoopRunBinding;
+  };
 }
 
-/**
- * Event/params starts must not sneak past missing project or preflight context.
- */
 export function assertLaunchContextForBinding(input: {
   projectId?: string;
   requirePreflight?: boolean;
@@ -334,4 +565,29 @@ export function assertLaunchContextForBinding(input: {
       `Loop ${input.launchKind} start blocked: preflight required for production binding`,
     );
   }
+}
+
+/** Production start must not proceed on incomplete content digests. */
+export function assertCodeDigestComplete(binding: LoopRunBinding): void {
+  if (binding.codeDigestStatus === "incomplete") {
+    const reasons = (binding.incompleteReasons ?? []).slice(0, 6).join("; ");
+    throw new Error(
+      `Loop start blocked: incomplete codeDigest (${reasons || "unspecified"})`,
+    );
+  }
+}
+
+/** Credential used at action time must be in the frozen permission set. */
+export function assertCredentialAllowedByFreeze(
+  binding: LoopRunBinding | undefined,
+  credentialRefId: string | undefined,
+): { ok: true } | { ok: false; reason: string } {
+  if (!binding?.permissionSet || !credentialRefId) return { ok: true };
+  if (binding.permissionSet.credentialRefIds.includes(credentialRefId)) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    reason: `Credential ref '${credentialRefId}' not in frozen permissionSet`,
+  };
 }

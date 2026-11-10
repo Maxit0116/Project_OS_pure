@@ -601,6 +601,8 @@ export const LoopInstanceSchema = z
         artifactIds: z.array(z.string().min(1)).max(20),
         engineeringBaseline: z.string().trim().min(1).max(128),
         codeDigest: z.string().trim().min(1).max(128).optional(),
+        /** Materials/definition/code/budget/permission freeze at approve time. */
+        runApprovalContextDigest: z.string().trim().min(1).max(128).optional(),
         operationDigest: z.string().trim().min(1).max(128),
         actor: z.string().trim().min(1).max(120).optional(),
         actorKind: z.enum(["local_declared", "unspecified"]).optional(),
@@ -686,6 +688,7 @@ export const LoopInstanceSchema = z
             artifactIds: z.array(z.string().min(1)).max(20),
             engineeringBaseline: z.string().trim().min(1).max(128),
             codeDigest: z.string().trim().min(1).max(128).optional(),
+            runApprovalContextDigest: z.string().trim().min(1).max(128).optional(),
             operationDigest: z.string().trim().min(1).max(128),
             actor: z.string().trim().min(1).max(120).optional(),
             actorKind: z.enum(["local_declared", "unspecified"]).optional(),

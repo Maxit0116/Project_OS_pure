@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10（PR10 tip 续作）— 全库 `npm run build`×3=0 + 全仓 `npm test` 发现（≠ 仅 Loops 61/266）；TM-8 证据写回/重审 ack/preflight blocker；PW-7 编辑器选区入口；Gmail `gmailIncrementalSync`（poll→recover→search，≠ helper）；URL 面板+`ingestLoopUrlMaterial`；安全负例；Electron 证据 bundle（全 `/opt` 路径）。**非 shipped / 非 live**。  
+**Updated**: 2026-11-10（PR10 tip 续作·补证）— 全库绿里程碑承认（584/3309，logSha256 `7391d952…9c002`）；**不**宣称总交验。tip-final workbench/desktop build 仍未在 6788606 重跑（日志属 935cf76）。viewport 证据已诚实改写：01/02 历史部分主张；03/04 TM8 同屏成立；`ok=false` 待 tip 重建后重拍。RunBinding：内容 digest / incomplete 阻断 / 冻结消费 / 审批上下文失效（进行中）。**非 shipped / 非 live**。  
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
@@ -27,10 +27,10 @@
 |---|------|----------|
 | 1 | 连接器 GitHub…PostHog（11 平台不删）+ **Gmail 追加** | Batch1 **contract**/live待验；Batch2 Linear/Jira/Notion/Vercel-list **contract**/live待验；Batch3 **catalog_only**；Gmail readonly **实现/contract（loopback）**/真实邮箱 **未接** |
 | 2 | Condition/parallel/loop/timer/retry/pause/resume | GC 主体 **实现/contract**；DutyCard logic 表单 **实现**/UI待验 |
-| 3 | Reusable Agents + 互调 | wiring **实现**；互调预算 depth/count **contract**；完成/失败 `recordAgentCallEnd`；cancel **unwind depth**；冻结预算优先自 `runBinding.budget` |
-| 4 | Human review/approval | binding **contract**；runtime gate **contract**；DutyCard **实现**；Run HITL Approve/Reject/**Takeover** 入口；材料状态中文友好；OAuth **未配置**/live未验 |
-| 5 | Engineering context | digester + Verify **实现/contract**；RunBinding 共享创建：真实 repo 身份/`headSha`/dirty/`definitionDigest`/`materialsDigest`/budget+permissionSet 冻结；event/params 同预检；见 `RUNBINDING-GAP.md` |
-| 6 | Observability | journal/redaction **contract**；AgentPool waterfall/KPI **实现**；Run 侧栏 Diff 展开 + 失败测试恢复提示 **实现**；live未验 |
+| 3 | Reusable Agents + 互调 | wiring **实现**；互调预算 depth/count **contract**；`recordAgentCallEnd`/cancel unwind；冻结预算消费优先；**richer consultation localE2E 仍 partial**（≠ 仅预算 contract） |
+| 4 | Human review/approval | binding **contract**；runtime gate **contract**；DutyCard **实现**；Approve/Reject；**Takeover→paused+human_decision**；`runApprovalContextDigest` 防复用；OAuth **未配置**/live未验 |
+| 5 | Engineering context | digester + Verify **实现/contract**；RunBinding：**内容** dirty/untracked digest；`codeDigestStatus` incomplete 阻断；identity≠codeDigest；maxRounds+credential **消费时**冻结；审批上下文摘要；见 `RUNBINDING-GAP.md` |
+| 6 | Observability | journal/redaction **contract**；AgentPool waterfall **实现**；Run Diff 展开 + 失败测试恢复**提示** **实现**；observe/recover 全闭环仍 **partial**（≠ 仅提示）；live未验 |
 
 ---
 

@@ -203,8 +203,23 @@ export const LoopRunBindingSchema = z
     branchSource: LoopBranchSourceSchema.optional(),
     /** UI/event declared branch when it differs from verified git branch. */
     declaredBranch: z.string().trim().min(1).max(240).optional(),
-    /** Content-oriented start fingerprint (HEAD + dirty / workspace identity). */
+    /**
+     * Content digest of workspace code at start.
+     * Must never be a path-only identity hash pretending to be complete content.
+     */
     codeDigest: z.string().trim().min(1).max(128).optional(),
+    /**
+     * complete = digest covers readable content within caps;
+     * incomplete = truncated / oversized / unreadable — blocks production start.
+     */
+    codeDigestStatus: z.enum(["complete", "incomplete"]).optional(),
+    incompleteReasons: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
+    /**
+     * Identity fingerprint (path/remote) — NOT interchangeable with codeDigest.
+     * Non-git workspaces: identityDigest ≠ codeDigest.
+     */
+    identityDigest: z.string().trim().min(1).max(128).optional(),
+    /** Content digest of dirty/untracked (or clean marker). */
     workspaceDirtyDigest: z.string().trim().min(1).max(128).optional(),
     definitionDigest: z.string().trim().min(1).max(128).optional(),
     materialsDigest: z.string().trim().min(1).max(128).optional(),

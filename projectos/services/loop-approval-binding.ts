@@ -14,6 +14,7 @@ import {
   EMPTY_CODE_DIGEST,
   type WorkspacePathDigestResult,
 } from "./loop-workspace-digest.js";
+import { digestRunApprovalContext } from "./loop-run-binding.js";
 
 export { diffIntentGraphs, stableStringify } from "./loop-intent-graph-diff.js";
 export {
@@ -360,7 +361,12 @@ export function buildApprovalBinding(input: {
   engineering: EngineeringBaselineSnapshot;
   operationDigest: string;
   actor?: string;
+  /** Instance carrying frozen RunBinding — materials/definition/code/budget/permission. */
+  instance?: LoopInstance;
 }): LoopApprovalBinding {
+  const runApprovalContextDigest = input.instance?.runBinding
+    ? digestRunApprovalContext(input.instance.runBinding)
+    : undefined;
   return {
     instanceId: input.instanceId,
     nodeId: input.actionNodeId,
@@ -369,6 +375,7 @@ export function buildApprovalBinding(input: {
     engineeringBaseline: input.engineering.baseline,
     codeDigest: input.engineering.codeDigest,
     operationDigest: input.operationDigest,
+    ...(runApprovalContextDigest ? { runApprovalContextDigest } : {}),
     ...(input.actionIntegration
       ? { actionIntegration: input.actionIntegration }
       : {}),
@@ -453,6 +460,21 @@ export function isApprovalBindingCurrent(input: {
     input.binding.codeDigest !== current.codeDigest
   ) {
     return false;
+  }
+  // Materials / definition / code / budget / permission freeze drift → stale.
+  if (
+    "runApprovalContextDigest" in input.binding &&
+    typeof input.binding.runApprovalContextDigest === "string" &&
+    input.binding.runApprovalContextDigest
+  ) {
+    const liveBinding = input.instance.runBinding;
+    if (!liveBinding) return false;
+    if (
+      digestRunApprovalContext(liveBinding) !==
+      input.binding.runApprovalContextDigest
+    ) {
+      return false;
+    }
   }
   if (input.binding.artifactIds.length !== current.artifactIds.length) {
     return false;

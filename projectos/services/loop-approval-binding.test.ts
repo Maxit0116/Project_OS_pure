@@ -929,4 +929,172 @@ describe("loop approval binding (engineering baseline)", () => {
       doc.instances[0]?.artifacts?.some((item) => item.kind === "github_op_result"),
     ).toBe(false);
   });
+
+  it("takeover invalidates pending approval and pauses with readable context", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-bind-takeover-"));
+    roots.push(root);
+    let { doc } = approvePrDoc(root);
+    doc = startLoopInstance(root, doc.id);
+    expect(doc.instances[0]?.status).toBe("awaiting_hitl");
+    const instanceId = doc.instances[0]!.id;
+    const questionId = doc.instances[0]!.hitlQuestionIds![0]!;
+    doc = resolveLoopHitl(root, doc.id, instanceId, [
+      {
+        questionId,
+        answer: "takeover",
+        actor: "terran",
+        editedPayload: { humanTakeover: true },
+      },
+    ]);
+    const after = doc.instances[0]!;
+    expect(after.status).toBe("paused");
+    expect(after.pendingApprovalBinding).toBeUndefined();
+    expect(
+      after.artifacts?.some(
+        (item) =>
+          item.kind === "human_decision" &&
+          (item.data as { mode?: string }).mode === "takeover",
+      ),
+    ).toBe(true);
+    expect(
+      after.artifacts?.some((item) => item.kind === "github_op_result"),
+    ).toBe(false);
+    expect(after.events.some((e) => e.type === "paused")).toBe(true);
+  });
+
+  it("rejects reuse of approval when runBinding materials/budget digest drifts", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-bind-ctx-drift-"));
+    roots.push(root);
+    let { doc, spec } = approvePrDoc(root);
+    const digester = createWorkspacePathDigester(root);
+    const engineering = computeEngineeringBaseline(
+      {
+        id: "inst_ctx",
+        specVersion: spec.version,
+        status: "running",
+        cursorNodeId: "n_pr",
+        round: 0,
+        attemptCounts: {},
+        events: [],
+        startedAt: "2026-11-10T00:00:00.000Z",
+        updatedAt: "2026-11-10T00:00:00.000Z",
+      },
+      { digestWorkspacePaths: digester } as never,
+    );
+    const payload = { title: "feat", base: "main", approved: true };
+    const runBinding = {
+      projectId: "proj",
+      workspaceRoot: root,
+      specVersion: spec.version,
+      createdAt: "2026-11-10T00:00:00.000Z",
+      codeDigest: "code_v1",
+      codeDigestStatus: "complete" as const,
+      materialsDigest: "mat_v1",
+      definitionDigest: "def_v1",
+      budget: {
+        maxRounds: 2,
+        maxRetries: 1,
+        maxAgentCalls: 4,
+        maxAgentCallDepth: 2,
+      },
+      permissionSet: {
+        credentialRefIds: ["cred_a"],
+        requireHitlForHighRisk: true as const,
+      },
+    };
+    const binding = buildApprovalBinding({
+      instanceId: "inst_ctx",
+      decisionNodeId: "n_approval",
+      actionNodeId: "n_pr",
+      actionIntegration: "github",
+      actionOperation: "create_pr",
+      engineering,
+      operationDigest: digestOperationPayload(payload),
+      instance: {
+        id: "inst_ctx",
+        specVersion: spec.version,
+        status: "running",
+        cursorNodeId: "n_pr",
+        round: 0,
+        attemptCounts: {},
+        events: [],
+        startedAt: "2026-11-10T00:00:00.000Z",
+        updatedAt: "2026-11-10T00:00:00.000Z",
+        runBinding,
+      },
+    });
+    expect(binding.runApprovalContextDigest).toMatch(/^[a-f0-9]{32}$/);
+
+    const liveOk = isApprovalBindingCurrent({
+      binding,
+      instance: {
+        id: "inst_ctx",
+        specVersion: spec.version,
+        status: "running",
+        cursorNodeId: "n_pr",
+        round: 0,
+        attemptCounts: {},
+        events: [],
+        startedAt: "2026-11-10T00:00:00.000Z",
+        updatedAt: "2026-11-10T00:00:00.000Z",
+        runBinding,
+      },
+      payload,
+      actionNodeId: "n_pr",
+      actionIntegration: "github",
+      actionOperation: "create_pr",
+      execution: { digestWorkspacePaths: digester } as never,
+    });
+    expect(liveOk).toBe(true);
+
+    const materialsDrifted = isApprovalBindingCurrent({
+      binding,
+      instance: {
+        id: "inst_ctx",
+        specVersion: spec.version,
+        status: "running",
+        cursorNodeId: "n_pr",
+        round: 0,
+        attemptCounts: {},
+        events: [],
+        startedAt: "2026-11-10T00:00:00.000Z",
+        updatedAt: "2026-11-10T00:00:00.000Z",
+        runBinding: {
+          ...runBinding,
+          materialsDigest: "mat_v2_changed",
+        },
+      },
+      payload,
+      actionNodeId: "n_pr",
+      actionIntegration: "github",
+      actionOperation: "create_pr",
+      execution: { digestWorkspacePaths: digester } as never,
+    });
+    expect(materialsDrifted).toBe(false);
+
+    const budgetDrifted = isApprovalBindingCurrent({
+      binding,
+      instance: {
+        id: "inst_ctx",
+        specVersion: spec.version,
+        status: "running",
+        cursorNodeId: "n_pr",
+        round: 0,
+        attemptCounts: {},
+        events: [],
+        startedAt: "2026-11-10T00:00:00.000Z",
+        updatedAt: "2026-11-10T00:00:00.000Z",
+        runBinding: {
+          ...runBinding,
+          budget: { ...runBinding.budget, maxRounds: 99 },
+        },
+      },
+      payload,
+      actionNodeId: "n_pr",
+      actionIntegration: "github",
+      actionOperation: "create_pr",
+      execution: { digestWorkspacePaths: digester } as never,
+    });
+    expect(budgetDrifted).toBe(false);
+  });
 });

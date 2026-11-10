@@ -118,6 +118,11 @@ export const LoopApprovalBindingSchema = z
     engineeringBaseline: z.string().trim().min(1).max(128),
     /** Workspace content digest bound at approve time. */
     codeDigest: z.string().trim().min(1).max(128).optional(),
+    /**
+     * Frozen RunBinding context at approve time (materials/definition/code/
+     * budget/permission). Drift invalidates the approval — cannot reuse.
+     */
+    runApprovalContextDigest: z.string().trim().min(1).max(128).optional(),
     /** Hash of the approved Action payload / params (defaults included). */
     operationDigest: z.string().trim().min(1).max(128),
     /**
