@@ -70,12 +70,14 @@ function dryHooks(
     }),
     // Stable digests so approval binding can fail-closed on real content checks
     // without requiring a full workspace fixture for dry Action suites.
-    digestWorkspacePaths: (paths) => ({
+    digestWorkspacePaths: (paths, options) => ({
       digests: Object.fromEntries(
         paths.map((path) => [path, `dry_${path.length}_${path}`]),
       ),
       missing: [],
       unreadable: [],
+      tombstones: [...(options?.deletedPaths ?? [])],
+      undeleted: [],
     }),
     ...overrides,
   };
@@ -151,12 +153,18 @@ describe("loop-runtime Terminal + deferred GitHub", () => {
 
     doc = upsertLoopGraph(
       root,
-      completePendingGithubOp(doc, doc.instances[0]!.id, {
-        ok: true,
-        url: "https://github.com/example/repo/pull/9",
-        number: 9,
-        message: "created via settle",
-      }),
+      completePendingGithubOp(
+        doc,
+        doc.instances[0]!.id,
+        {
+          ok: true,
+          url: "https://github.com/example/repo/pull/9",
+          number: 9,
+          message: "created via settle",
+        },
+        hooks,
+        { httpCompleted: true },
+      ),
     );
     expect(doc.instances[0]?.pendingGithubOp).toBeUndefined();
     expect(doc.instances[0]?.status).toBe("complete");
@@ -479,6 +487,7 @@ describe("loop-runtime Terminal + deferred GitHub", () => {
           refs: { title: "feat: feature tree" },
         },
         hooks,
+        { httpCompleted: true },
       ),
     );
     expect(doc.instances[0]?.status).toBe("complete");

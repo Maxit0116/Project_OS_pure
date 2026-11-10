@@ -144,11 +144,24 @@ export function buildChangeSetFromRun(input: {
   goal: string;
   agentRunId: string;
   task?: LoopDevPlanTask | null;
+  /** Extra delivery paths (writeScope / prior leaves) beyond the primary leaf. */
+  additionalFiles?: string[];
+  deletedFiles?: string[];
   contentDigest?: string;
   fileDigests?: Record<string, string>;
 }): LoopChangeSet {
+  const files = [
+    ...new Set(
+      [input.filePath, ...(input.additionalFiles ?? []), ...(input.task?.writeScope ?? [])]
+        .map((path) => path.trim())
+        .filter(Boolean),
+    ),
+  ].slice(0, 200);
   return LoopChangeSetSchema.parse({
-    files: [input.filePath],
+    files,
+    ...(input.deletedFiles?.length
+      ? { deletedFiles: [...new Set(input.deletedFiles)].slice(0, 200) }
+      : {}),
     summary: input.task
       ? `Completed ${input.task.id}: ${input.task.title}`
       : input.goal.slice(0, 500),

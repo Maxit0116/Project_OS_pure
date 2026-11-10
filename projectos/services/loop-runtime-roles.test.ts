@@ -26,10 +26,12 @@ function scriptedCoderHooks(): LoopExecutionHooks {
   const fileDigest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   return {
     leaf: { featureNodeId: "feat_1", filePath: "src/feature-tree.tsx" },
-    digestWorkspacePaths: (paths) => ({
+    digestWorkspacePaths: (paths, options) => ({
       digests: Object.fromEntries(paths.map((path) => [path, fileDigest])),
       missing: [],
       unreadable: [],
+      tombstones: [...(options?.deletedPaths ?? [])],
+      undeleted: [],
     }),
     readRun: (runId) => runs.get(runId) ?? null,
     readEvidence: () => null,

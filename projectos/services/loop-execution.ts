@@ -126,11 +126,17 @@ export interface LoopExecutionHooks {
   allowConcurrentLoopRuns?: boolean;
   /**
    * Digest current workspace bytes for relative paths (approval evidence).
-   * Missing digester with non-empty ChangeSet.files → fail-closed.
+   * Missing digester with non-empty delivery scope → fail-closed.
+   * Optional deletedPaths mark expected absences (tombstones).
    */
-  digestWorkspacePaths?: (paths: string[]) => {
+  digestWorkspacePaths?: (
+    paths: string[],
+    options?: { deletedPaths?: string[] },
+  ) => {
     digests: Record<string, string>;
     missing: string[];
     unreadable: string[];
+    tombstones?: string[];
+    undeleted?: string[];
   };
 }

@@ -428,6 +428,8 @@ export const LoopInstanceEventSchema = z
       "freshness_stale",
       "budget_exceeded",
       "approval_stale",
+      /** HTTP side effect kept; post-dispatch evidence drifted. */
+      "delivery_stale",
     ]),
     nodeId: z.string().min(1).optional(),
     message: z.string().trim().max(2000).optional(),
@@ -578,7 +580,16 @@ export const LoopInstanceSchema = z
         operation: z.string().trim().min(1).max(80),
         payload: z.record(z.string(), z.unknown()),
         queuedAt: z.string().min(1),
-        /** Snapshot for TOCTOU re-check before accepting settle success. */
+        /**
+         * queued = not sent; in_flight = HTTP attempted (unknown until settled);
+         * settled reserved for persistence edges — prefer github_op_result artifact.
+         */
+        dispatchState: z.enum(["queued", "in_flight"]).optional(),
+        /** Stable key for query-before-resend (instance+node+op+payload digest). */
+        idempotencyKey: z.string().trim().min(1).max(160).optional(),
+        dispatchAttemptId: z.string().min(1).optional(),
+        httpAttemptedAt: z.string().min(1).optional(),
+        /** Snapshot for TOCTOU re-check at HTTP dispatch boundary (preflight). */
         approvalBinding: z
           .object({
             decisionArtifactId: z.string().min(1),
@@ -600,6 +611,10 @@ export const LoopInstanceSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * Live code digest captured when verification entered; must match at stamp time.
+     */
+    verificationCodeDigest: z.string().trim().min(1).max(128).optional(),
     /** GC-4.1 recoverable snapshot. */
     checkpoint: LoopInstanceCheckpointSchema.optional(),
     /** GC-4.2 context freshness (orthogonal to status). */

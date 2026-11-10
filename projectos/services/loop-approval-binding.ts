@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
-import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 
 import type { LoopApprovalBinding } from "../contracts/loop-artifacts.js";
 import {
@@ -11,8 +9,22 @@ import {
 import type { LoopInstance, LoopInstanceArtifact } from "../contracts/loop-graph.js";
 import type { LoopExecutionHooks } from "./loop-execution.js";
 import { stableStringify } from "./loop-intent-graph-diff.js";
+import {
+  combineFileDigests,
+  createWorkspacePathDigester,
+  EMPTY_CODE_DIGEST,
+  type WorkspacePathDigestResult,
+} from "./loop-workspace-digest.js";
 
 export { diffIntentGraphs, stableStringify } from "./loop-intent-graph-diff.js";
+export {
+  combineFileDigests,
+  createWorkspacePathDigester,
+  digestBytes,
+  EMPTY_CODE_DIGEST,
+  resolveContainedWorkspacePath,
+  type WorkspacePathDigestResult,
+} from "./loop-workspace-digest.js";
 
 const ENGINEERING_ARTIFACT_KINDS = [
   "change_set",
@@ -20,33 +32,19 @@ const ENGINEERING_ARTIFACT_KINDS = [
   "review_result",
 ] as const;
 
-/** Empty workspace / empty ChangeSet files digest (stable). */
-export const EMPTY_CODE_DIGEST = createHash("sha256")
-  .update("[]", "utf8")
-  .digest("hex")
-  .slice(0, 32);
-
-export type WorkspacePathDigestResult = {
-  digests: Record<string, string>;
-  missing: string[];
-  unreadable: string[];
-};
-
 export type EngineeringBaselineSnapshot = {
-  /** Combined hash of code + artifact ids + evidence validation stamps. */
+  /** Combined hash of code + artifact content material + evidence stamps. */
   baseline: string;
   artifactIds: string[];
   artifacts: LoopInstanceArtifact[];
-  /** Hash of current workspace bytes for ChangeSet.files (fail-closed when unread). */
+  /** Hash of delivery-scope workspace bytes (fail-closed when unread). */
   codeDigest: string;
-  /** TestReport.validatedCodeDigest when present. */
+  /** Accumulated present paths in delivery scope. */
+  deliveryFiles: string[];
+  /** Accumulated tombstone paths. */
+  deletedFiles: string[];
   testValidatedCodeDigest?: string;
-  /** ReviewResult.validatedCodeDigest when present. */
   reviewValidatedCodeDigest?: string;
-  /**
-   * False when files cannot be read, ChangeSet lacks a content stamp while
-   * claiming files, or Test/Review stamps do not match current codeDigest.
-   */
   evidenceFresh: boolean;
   failClosedReason?: string;
 };
@@ -63,76 +61,91 @@ function latestOf(
   return undefined;
 }
 
+/** All ChangeSet artifacts in chronological order. */
+export function listChangeSetArtifacts(
+  instance: LoopInstance,
+): LoopInstanceArtifact[] {
+  return (instance.artifacts ?? []).filter((item) => item.kind === "change_set");
+}
+
+/**
+ * Accumulate delivery scope across every ChangeSet (multi-agent / multi-leaf).
+ * Later ChangeSets can tombstone earlier paths via deletedFiles.
+ */
+export function accumulateDeliveryScope(instance: LoopInstance): {
+  files: string[];
+  deletedFiles: string[];
+  parseFailed: boolean;
+  emptyIllegal: boolean;
+  latestContentDigest?: string;
+} {
+  const present = new Set<string>();
+  const deleted = new Set<string>();
+  let parseFailed = false;
+  let emptyIllegal = false;
+  let latestContentDigest: string | undefined;
+  let sawChangeSet = false;
+
+  for (const art of listChangeSetArtifacts(instance)) {
+    sawChangeSet = true;
+    const parsed = LoopChangeSetSchema.safeParse(art.data);
+    if (!parsed.success) {
+      parseFailed = true;
+      continue;
+    }
+    const data = parsed.data;
+    if (
+      data.files.length === 0 &&
+      !(data.deletedFiles && data.deletedFiles.length > 0) &&
+      !data.contentDigest
+    ) {
+      emptyIllegal = true;
+    }
+    for (const path of data.deletedFiles ?? []) {
+      present.delete(path);
+      deleted.add(path);
+    }
+    for (const path of data.files) {
+      deleted.delete(path);
+      present.add(path);
+    }
+    if (data.contentDigest) latestContentDigest = data.contentDigest;
+  }
+
+  if (!sawChangeSet) {
+    return { files: [], deletedFiles: [], parseFailed: false, emptyIllegal: false };
+  }
+
+  return {
+    files: [...present].sort(),
+    deletedFiles: [...deleted].sort(),
+    parseFailed,
+    emptyIllegal,
+    ...(latestContentDigest ? { latestContentDigest } : {}),
+  };
+}
+
+/** Stable fingerprint of engineering artifact bodies (status/content), not ids alone. */
+export function digestArtifactMaterial(
+  artifacts: LoopInstanceArtifact[],
+): string {
+  const material = artifacts.map((artifact) => ({
+    id: artifact.id,
+    kind: artifact.kind,
+    nodeId: artifact.nodeId,
+    data: artifact.data,
+  }));
+  return createHash("sha256")
+    .update(stableStringify(material), "utf8")
+    .digest("hex")
+    .slice(0, 32);
+}
+
 export function digestOperationPayload(
   payload: Record<string, unknown> | undefined,
 ): string {
   return createHash("sha256")
     .update(stableStringify(payload ?? {}), "utf8")
-    .digest("hex")
-    .slice(0, 32);
-}
-
-export function digestBytes(content: string | Buffer): string {
-  return createHash("sha256").update(content).digest("hex").slice(0, 32);
-}
-
-/**
- * Resolve a relative workspace path without escaping the root.
- * Absolute / `..` escapes → null (fail-closed).
- */
-export function resolveContainedWorkspacePath(
-  workspaceRoot: string,
-  relativePath: string,
-): string | null {
-  const trimmed = relativePath.trim();
-  if (!trimmed || isAbsolute(trimmed)) return null;
-  const root = resolve(workspaceRoot);
-  const candidate = resolve(root, normalize(trimmed));
-  const rel = relative(root, candidate);
-  if (rel.startsWith(`..${sep}`) || rel === ".." || isAbsolute(rel)) return null;
-  return candidate;
-}
-
-/** Default digester for product hooks — reads real files under workspaceRoot. */
-export function createWorkspacePathDigester(
-  workspaceRoot: string,
-): (paths: string[]) => WorkspacePathDigestResult {
-  return (paths: string[]) => {
-    const digests: Record<string, string> = {};
-    const missing: string[] = [];
-    const unreadable: string[] = [];
-    const unique = [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
-    for (const path of unique) {
-      const absolute = resolveContainedWorkspacePath(workspaceRoot, path);
-      if (!absolute) {
-        unreadable.push(path);
-        continue;
-      }
-      try {
-        const stat = statSync(absolute);
-        if (!stat.isFile()) {
-          unreadable.push(path);
-          continue;
-        }
-        digests[path] = digestBytes(readFileSync(absolute));
-      } catch (error) {
-        const code =
-          error && typeof error === "object" && "code" in error
-            ? String((error as { code?: string }).code)
-            : "";
-        if (code === "ENOENT") missing.push(path);
-        else unreadable.push(path);
-      }
-    }
-    return { digests, missing, unreadable };
-  };
-}
-
-export function combineFileDigests(digests: Record<string, string>): string {
-  const entries = Object.entries(digests).sort(([a], [b]) => a.localeCompare(b));
-  if (entries.length === 0) return EMPTY_CODE_DIGEST;
-  return createHash("sha256")
-    .update(stableStringify(entries), "utf8")
     .digest("hex")
     .slice(0, 32);
 }
@@ -147,13 +160,8 @@ export function computeEngineeringBaseline(
     if (artifact) artifacts.push(artifact);
   }
 
-  const changeSetArt = latestOf(instance, "change_set");
   const testArt = latestOf(instance, "test_report");
   const reviewArt = latestOf(instance, "review_result");
-
-  const changeSet = changeSetArt
-    ? LoopChangeSetSchema.safeParse(changeSetArt.data)
-    : null;
   const testReport = testArt
     ? LoopTestReportSchema.safeParse(testArt.data)
     : null;
@@ -161,12 +169,21 @@ export function computeEngineeringBaseline(
     ? LoopReviewResultSchema.safeParse(reviewArt.data)
     : null;
 
-  const files = changeSet?.success ? changeSet.data.files : [];
+  const scope = accumulateDeliveryScope(instance);
   let codeDigest = EMPTY_CODE_DIGEST;
   let evidenceFresh = true;
   let failClosedReason: string | undefined;
 
-  if (files.length > 0) {
+  if (scope.parseFailed) {
+    evidenceFresh = false;
+    failClosedReason = "ChangeSet artifact failed schema validation; fail-closed";
+    codeDigest = "unavailable";
+  } else if (scope.emptyIllegal) {
+    evidenceFresh = false;
+    failClosedReason =
+      "Empty/illegal ChangeSet (no files, deletions, or contentDigest); fail-closed";
+    codeDigest = "unavailable";
+  } else if (scope.files.length > 0 || scope.deletedFiles.length > 0) {
     const digester = execution?.digestWorkspacePaths;
     if (!digester) {
       evidenceFresh = false;
@@ -174,36 +191,65 @@ export function computeEngineeringBaseline(
         "Cannot verify workspace file digests (no digester); fail-closed";
       codeDigest = "unavailable";
     } else {
-      const result = digester(files);
-      if (result.missing.length > 0 || result.unreadable.length > 0) {
+      const result = digester(scope.files, {
+        deletedPaths: scope.deletedFiles,
+      }) as WorkspacePathDigestResult;
+      const undeleted = result.undeleted ?? [];
+      const unexpectedMissing = result.missing ?? [];
+      const unreadable = result.unreadable ?? [];
+      if (
+        unexpectedMissing.length > 0 ||
+        unreadable.length > 0 ||
+        undeleted.length > 0
+      ) {
         evidenceFresh = false;
-        failClosedReason = `Workspace paths missing/unreadable: ${[
-          ...result.missing,
-          ...result.unreadable,
+        failClosedReason = `Workspace delivery scope invalid: ${[
+          ...unexpectedMissing.map((path) => `missing:${path}`),
+          ...undeleted.map((path) => `undeleted:${path}`),
+          ...unreadable.map((path) => `unreadable:${path}`),
         ]
           .slice(0, 8)
           .join(", ")}`;
         codeDigest = "unavailable";
       } else {
-        codeDigest = combineFileDigests(result.digests);
-        const stamped = changeSet?.success
-          ? changeSet.data.contentDigest
-          : undefined;
-        if (stamped && stamped !== codeDigest) {
+        // Include tombstone markers in digest material so delete-only deliveries bind.
+        const withTombs = {
+          ...result.digests,
+          ...Object.fromEntries(
+            (result.tombstones ?? []).map((path) => [`tombstone:${path}`, "deleted"]),
+          ),
+        };
+        codeDigest = combineFileDigests(withTombs);
+        if (scope.latestContentDigest && scope.latestContentDigest !== codeDigest) {
           evidenceFresh = false;
           failClosedReason =
-            "Workspace content drifted from ChangeSet.contentDigest (dirty/untracked edit)";
+            "Workspace content drifted from accumulated ChangeSet.contentDigest";
         }
-        if (!stamped) {
-          // ChangeSet claimed files but never stamped bytes — cannot assert code binding.
+        if (
+          scope.files.length > 0 &&
+          !scope.latestContentDigest &&
+          Object.keys(result.digests).length > 0
+        ) {
           evidenceFresh = false;
           failClosedReason =
             "ChangeSet has files but no contentDigest; fail-closed until re-verified";
         }
       }
     }
-  } else if (changeSet?.success && changeSet.data.contentDigest) {
-    codeDigest = changeSet.data.contentDigest;
+  } else if (scope.latestContentDigest) {
+    codeDigest = scope.latestContentDigest;
+  }
+
+  // Prefer live verification snapshot when present (Verify start/end capture).
+  if (
+    instance.verificationCodeDigest &&
+    codeDigest !== "unavailable" &&
+    instance.verificationCodeDigest !== codeDigest
+  ) {
+    evidenceFresh = false;
+    failClosedReason =
+      failClosedReason ??
+      "Live workspace digest differs from verificationCodeDigest snapshot";
   }
 
   const testValidatedCodeDigest = testReport?.success
@@ -212,6 +258,17 @@ export function computeEngineeringBaseline(
   const reviewValidatedCodeDigest = reviewResult?.success
     ? reviewResult.data.validatedCodeDigest
     : undefined;
+
+  if (testArt && !testReport?.success) {
+    evidenceFresh = false;
+    failClosedReason =
+      failClosedReason ?? "TestReport artifact failed schema validation";
+  }
+  if (reviewArt && !reviewResult?.success) {
+    evidenceFresh = false;
+    failClosedReason =
+      failClosedReason ?? "ReviewResult artifact failed schema validation";
+  }
 
   if (
     testArt &&
@@ -227,7 +284,7 @@ export function computeEngineeringBaseline(
       evidenceFresh = false;
       failClosedReason =
         failClosedReason ??
-        "TestReport validated a different codeDigest than current ChangeSet";
+        "TestReport validated a different codeDigest than current delivery scope";
     }
   }
 
@@ -245,15 +302,21 @@ export function computeEngineeringBaseline(
       evidenceFresh = false;
       failClosedReason =
         failClosedReason ??
-        "ReviewResult validated a different codeDigest than current ChangeSet";
+        "ReviewResult validated a different codeDigest than current delivery scope";
     }
   }
 
+  const artifactMaterial = digestArtifactMaterial(artifacts);
   const material = {
     artifactIds: artifacts.map((artifact) => artifact.id),
+    artifactMaterial,
     codeDigest,
+    deliveryFiles: scope.files,
+    deletedFiles: scope.deletedFiles,
     testValidatedCodeDigest: testValidatedCodeDigest ?? null,
     reviewValidatedCodeDigest: reviewValidatedCodeDigest ?? null,
+    testStatus: testReport?.success ? testReport.data.status : null,
+    reviewVerdict: reviewResult?.success ? reviewResult.data.verdict : null,
     evidenceFresh,
   };
 
@@ -265,6 +328,8 @@ export function computeEngineeringBaseline(
     artifactIds: artifacts.map((artifact) => artifact.id),
     artifacts,
     codeDigest,
+    deliveryFiles: scope.files,
+    deletedFiles: scope.deletedFiles,
     ...(testValidatedCodeDigest ? { testValidatedCodeDigest } : {}),
     ...(reviewValidatedCodeDigest ? { reviewValidatedCodeDigest } : {}),
     evidenceFresh,

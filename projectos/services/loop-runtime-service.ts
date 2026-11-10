@@ -37,6 +37,7 @@ import {
 import {
   buildApprovalBinding,
   buildDefaultActionPayload,
+  accumulateDeliveryScope,
   combineFileDigests,
   computeEngineeringBaseline,
   digestOperationPayload,
@@ -1379,11 +1380,19 @@ function stepGithubAction(
 
   if (githubResult.deferred) {
     const bindingSnapshot = instance.pendingApprovalBinding;
+    const idempotencyKey = [
+      instance.id,
+      node.id,
+      operation,
+      digestOperationPayload(payload),
+    ].join(":");
     const pendingGithubOp = {
       nodeId: node.id,
       operation,
       payload,
       queuedAt: nowIso(),
+      dispatchState: "queued" as const,
+      idempotencyKey,
       ...(bindingSnapshot ? { approvalBinding: bindingSnapshot } : {}),
     };
     const queued = {
@@ -1568,14 +1577,140 @@ function stepTerminalAction(
 }
 
 /**
- * Finish a deferred GitHub Action after async settle (REST / gh).
- * Clears `pendingGithubOp`, writes GitHubOpResult, and advances.
+ * Preflight approval/cancel/target checks BEFORE any HTTP dispatch.
+ * Callers that send GitHub HTTP must invoke this and abort on !ok (zero HTTP).
+ */
+export function preflightPendingGithubDispatch(
+  doc: LoopGraphDocument,
+  instanceId: string,
+  execution?: LoopExecutionHooks,
+): { ok: true } | { ok: false; reason: string } {
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance?.pendingGithubOp) {
+    return { ok: false, reason: "No pending GitHub operation" };
+  }
+  if (
+    instance.status === "cancelled" ||
+    instance.status === "paused" ||
+    instance.status === "error" ||
+    instance.status === "complete"
+  ) {
+    return {
+      ok: false,
+      reason: `Instance status ${instance.status} forbids GitHub dispatch`,
+    };
+  }
+  const pending = instance.pendingGithubOp;
+  const spec = findSpec(doc, instance.specVersion);
+  if (!spec) return { ok: false, reason: "Spec not found" };
+  const actionNode = spec.nodes.find((item) => item.id === pending.nodeId);
+  if (!actionNode) {
+    return { ok: false, reason: `Action node missing: ${pending.nodeId}` };
+  }
+  const arch = architectureOf(actionNode);
+  if ((arch.actionOperation ?? "create_pr") !== pending.operation) {
+    return {
+      ok: false,
+      reason: `Pending operation ${pending.operation} mismatches node ${arch.actionOperation}`,
+    };
+  }
+  if (!pending.approvalBinding) {
+    return { ok: false, reason: "Pending GitHub op lacks approval binding" };
+  }
+  const stillValid = isApprovalBindingCurrent({
+    binding: pending.approvalBinding,
+    instance: {
+      ...instance,
+      pendingActionPayload: pending.payload,
+      pendingApprovalBinding: pending.approvalBinding,
+    },
+    payload: pending.payload,
+    actionNodeId: pending.nodeId,
+    ...(arch.actionIntegration
+      ? { actionIntegration: arch.actionIntegration }
+      : {}),
+    actionOperation: pending.operation,
+    ...(execution ? { execution } : {}),
+  });
+  if (!stillValid) {
+    return {
+      ok: false,
+      reason:
+        "Approval binding stale vs current run/code/operation/target (preflight)",
+    };
+  }
+  return { ok: true };
+}
+
+/** Block dispatch with zero HTTP — clear queue and re-require approval. */
+export function denyPendingGithubOpBeforeHttp(
+  doc: LoopGraphDocument,
+  instanceId: string,
+  reason: string,
+): LoopGraphDocument {
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance?.pendingGithubOp) return doc;
+  const pending = instance.pendingGithubOp;
+  let blocked = invalidatePendingApproval(
+    {
+      ...instance,
+      pendingActionPayload: pending.payload,
+      pendingApprovalBinding: pending.approvalBinding,
+    },
+    reason,
+  );
+  blocked = {
+    ...blocked,
+    pendingGithubOp: undefined,
+    status: "awaiting_hitl",
+    hitlQuestionIds: [`human_approval_${pending.nodeId}`],
+    cursorNodeId: pending.nodeId,
+  };
+  blocked = pushEvent(blocked, {
+    type: "approval_stale",
+    nodeId: pending.nodeId,
+    message: `GitHub dispatch blocked before HTTP: ${reason.slice(0, 400)}`,
+  });
+  blocked = pushEvent(blocked, {
+    type: "awaiting_hitl",
+    nodeId: pending.nodeId,
+    message: `Re-approve github.${pending.operation} (zero HTTP sent)`,
+  });
+  return replaceInstance(doc, blocked);
+}
+
+/** Mark pending op in_flight immediately before HTTP (crash → query, don't blind resend). */
+export function markPendingGithubOpInFlight(
+  doc: LoopGraphDocument,
+  instanceId: string,
+  attemptId: string,
+): LoopGraphDocument {
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance?.pendingGithubOp) return doc;
+  if (instance.pendingGithubOp.dispatchState === "in_flight") return doc;
+  return replaceInstance(doc, {
+    ...instance,
+    pendingGithubOp: {
+      ...instance.pendingGithubOp,
+      dispatchState: "in_flight",
+      dispatchAttemptId: attemptId,
+      httpAttemptedAt: nowIso(),
+    },
+    updatedAt: nowIso(),
+  });
+}
+
+/**
+ * Finish a deferred GitHub Action after HTTP returned (or after lookup of an
+ * already-created remote). Never erases a successful side effect when evidence
+ * drifts post-dispatch — records delivery_stale and keeps the result.
  */
 export function completePendingGithubOp(
   doc: LoopGraphDocument,
   instanceId: string,
   result: LoopGithubOperationResult,
   execution?: LoopExecutionHooks,
+  options?: { httpCompleted?: boolean; deliveryStale?: boolean },
 ): LoopGraphDocument {
   const instance = doc.instances.find((item) => item.id === instanceId);
   if (!instance?.pendingGithubOp) return doc;
@@ -1583,13 +1718,12 @@ export function completePendingGithubOp(
   if (!spec) throw new Error(`Spec not found: ${instance.specVersion}`);
 
   const pending = instance.pendingGithubOp;
+  const httpCompleted = options?.httpCompleted === true;
   const actionNode = spec.nodes.find((item) => item.id === pending.nodeId);
   const arch = actionNode ? architectureOf(actionNode) : undefined;
 
-  // TOCTOU: re-validate approval snapshot against current engineering baseline
-  // before accepting settle success (HTTP may already be in flight — fail-closed
-  // blocks completion/advance; callers must follow existing idempotency).
-  if (pending.approvalBinding) {
+  let deliveryStale = options?.deliveryStale === true;
+  if (httpCompleted && pending.approvalBinding && !deliveryStale) {
     const stillValid = isApprovalBindingCurrent({
       binding: pending.approvalBinding,
       instance: {
@@ -1605,35 +1739,16 @@ export function completePendingGithubOp(
       actionOperation: pending.operation,
       ...(execution ? { execution } : {}),
     });
-    if (!stillValid) {
-      let blocked = invalidatePendingApproval(
-        {
-          ...instance,
-          pendingActionPayload: pending.payload,
-          pendingApprovalBinding: pending.approvalBinding,
-        },
-        "Pending GitHub op approval became stale before settle",
-      );
-      blocked = {
-        ...blocked,
-        pendingGithubOp: undefined,
-        status: "awaiting_hitl",
-        hitlQuestionIds: [`human_approval_${pending.nodeId}`],
-        cursorNodeId: pending.nodeId,
-      };
-      blocked = pushEvent(blocked, {
-        type: "approval_stale",
-        nodeId: pending.nodeId,
-        message:
-          "GitHub settle blocked: code/params/evidence changed since approval (re-approve)",
-      });
-      blocked = pushEvent(blocked, {
-        type: "awaiting_hitl",
-        nodeId: pending.nodeId,
-        message: `Re-approve github.${pending.operation} after stale settle check`,
-      });
-      return replaceInstance(doc, blocked);
-    }
+    deliveryStale = !stillValid;
+  }
+
+  // Pre-HTTP path must use denyPendingGithubOpBeforeHttp — never wipe a real result.
+  if (!httpCompleted && !result.ok) {
+    return denyPendingGithubOpBeforeHttp(
+      doc,
+      instanceId,
+      result.message || "GitHub dispatch denied before HTTP",
+    );
   }
 
   if (!result.ok) {
@@ -1660,9 +1775,18 @@ export function completePendingGithubOp(
         ...(typeof result.number === "number" ? { number: result.number } : {}),
         ...(result.refs ? { refs: result.refs } : {}),
         message: result.message,
+        ...(deliveryStale ? { deliveryStale: true } : {}),
       },
     },
   );
+  if (deliveryStale) {
+    next = pushEvent(next, {
+      type: "delivery_stale",
+      nodeId: pending.nodeId,
+      message:
+        "GitHub side effect retained after post-dispatch evidence drift (do not redo)",
+    });
+  }
   next = pushEvent(next, {
     type: "node_completed",
     nodeId: pending.nodeId,
@@ -1763,24 +1887,50 @@ function stepImplementNode(
   }
   if (run.status === "complete" && run.applySucceeded) {
     const leafPath = execution?.leaf?.filePath ?? "unknown";
+    const priorScope = accumulateDeliveryScope(next);
+    const writeScope = bound.task?.writeScope ?? [];
+    const deliveryFiles = [
+      ...new Set(
+        [
+          ...(leafPath !== "unknown" ? [leafPath] : []),
+          ...writeScope,
+          ...priorScope.files,
+        ].filter(Boolean),
+      ),
+    ].slice(0, 200);
     let contentDigest: string | undefined;
     let fileDigests: Record<string, string> | undefined;
-    if (leafPath !== "unknown" && execution?.digestWorkspacePaths) {
-      const digested = execution.digestWorkspacePaths([leafPath]);
+    if (deliveryFiles.length > 0 && execution?.digestWorkspacePaths) {
+      const digested = execution.digestWorkspacePaths(deliveryFiles, {
+        deletedPaths: priorScope.deletedFiles,
+      });
       if (
         digested.missing.length === 0 &&
         digested.unreadable.length === 0 &&
-        digested.digests[leafPath]
+        (digested.undeleted?.length ?? 0) === 0
       ) {
         fileDigests = digested.digests;
-        contentDigest = combineFileDigests(digested.digests);
+        const withTombs = {
+          ...digested.digests,
+          ...Object.fromEntries(
+            (digested.tombstones ?? []).map((path) => [
+              `tombstone:${path}`,
+              "deleted",
+            ]),
+          ),
+        };
+        contentDigest = combineFileDigests(withTombs);
       }
     }
     const changeSet = buildChangeSetFromRun({
-      filePath: leafPath,
+      filePath: leafPath !== "unknown" ? leafPath : deliveryFiles[0] ?? "unknown",
       goal: bound.goal,
       agentRunId: run.runId,
       task: bound.task,
+      additionalFiles: deliveryFiles.filter((path) => path !== leafPath),
+      ...(priorScope.deletedFiles.length
+        ? { deletedFiles: priorScope.deletedFiles }
+        : {}),
       ...(contentDigest ? { contentDigest } : {}),
       ...(fileDigests ? { fileDigests } : {}),
     });
@@ -1834,13 +1984,103 @@ function stepVerifyNode(
       : node;
 
   const last = instance.events.at(-1);
+  const entering =
+    !(last?.type === "node_entered" && last.nodeId === nodeId);
   let working =
-    last?.type === "node_entered" && last.nodeId === nodeId
-      ? { ...instance, cursorNodeId: nodeId }
-      : pushEvent(
+    entering
+      ? pushEvent(
           { ...instance, cursorNodeId: nodeId },
           { type: "node_entered", nodeId, message: specNode?.goal ?? "Verify" },
+        )
+      : { ...instance, cursorNodeId: nodeId };
+
+  // Capture live delivery-scope digest at verification start (not ChangeSet self-stamp).
+  if (entering || !working.verificationCodeDigest) {
+    const scope = accumulateDeliveryScope(working);
+    if (scope.parseFailed || scope.emptyIllegal) {
+      const next = pushEvent(
+        {
+          ...working,
+          status: "awaiting_hitl",
+          hitlQuestionIds: ["verification_not_run"],
+        },
+        {
+          type: "awaiting_hitl",
+          nodeId,
+          message: "Verification blocked: illegal/empty ChangeSet delivery scope",
+        },
+      );
+      return replaceInstance(doc, next);
+    }
+    const hasDeliveryClaim =
+      scope.files.length > 0 || scope.deletedFiles.length > 0;
+    if (hasDeliveryClaim && !execution?.digestWorkspacePaths) {
+      const next = pushEvent(
+        {
+          ...working,
+          status: "awaiting_hitl",
+          hitlQuestionIds: ["verification_not_run"],
+          verificationCodeDigest: undefined,
+        },
+        {
+          type: "awaiting_hitl",
+          nodeId,
+          message:
+            "Verification cannot stamp evidence without workspace digester (fail-closed)",
+        },
+      );
+      return replaceInstance(doc, next);
+    }
+    if (!hasDeliveryClaim) {
+      // No ChangeSet delivery claim — bind EMPTY only (cannot invent file coverage).
+      working = {
+        ...working,
+        verificationCodeDigest: combineFileDigests({}),
+      };
+    } else {
+      const digested = execution!.digestWorkspacePaths!(scope.files, {
+        deletedPaths: scope.deletedFiles,
+      });
+      if (
+        digested.missing.length > 0 ||
+        digested.unreadable.length > 0 ||
+        (digested.undeleted?.length ?? 0) > 0
+      ) {
+        const next = pushEvent(
+          {
+            ...working,
+            status: "awaiting_hitl",
+            hitlQuestionIds: ["verification_not_run"],
+          },
+          {
+            type: "awaiting_hitl",
+            nodeId,
+            message: `Verification blocked: delivery scope unreadable/missing (${[
+              ...digested.missing,
+              ...digested.unreadable,
+              ...(digested.undeleted ?? []),
+            ]
+              .slice(0, 6)
+              .join(", ")})`,
+          },
         );
+        return replaceInstance(doc, next);
+      }
+      const withTombs = {
+        ...digested.digests,
+        ...Object.fromEntries(
+          (digested.tombstones ?? []).map((path) => [
+            `tombstone:${path}`,
+            "deleted",
+          ]),
+        ),
+      };
+      working = {
+        ...working,
+        verificationCodeDigest: combineFileDigests(withTombs),
+      };
+    }
+  }
 
   const evidence = working.activeRunId
     ? execution?.readEvidence(working.activeRunId) ?? null
@@ -1862,20 +2102,74 @@ function stepVerifyNode(
     return replaceInstance(doc, next);
   }
 
-  const latestChange = latestArtifact(working, "change_set");
-  const changeDigest =
-    latestChange &&
-    typeof latestChange.data === "object" &&
-    latestChange.data &&
-    "contentDigest" in latestChange.data
-      ? String(
-          (latestChange.data as { contentDigest?: string }).contentDigest ?? "",
-        )
-      : "";
+  // End-of-verify: re-digest and only stamp if snapshot unchanged.
+  const endScope = accumulateDeliveryScope(working);
+  const endHasClaim =
+    endScope.files.length > 0 || endScope.deletedFiles.length > 0;
+  let endDigest = combineFileDigests({});
+  if (endHasClaim) {
+    const endDigested = execution?.digestWorkspacePaths
+      ? execution.digestWorkspacePaths(endScope.files, {
+          deletedPaths: endScope.deletedFiles,
+        })
+      : null;
+    if (
+      !endDigested ||
+      endDigested.missing.length > 0 ||
+      endDigested.unreadable.length > 0 ||
+      (endDigested.undeleted?.length ?? 0) > 0
+    ) {
+      const next = pushEvent(
+        {
+          ...working,
+          status: "awaiting_hitl",
+          hitlQuestionIds: ["verification_not_run"],
+          verificationCodeDigest: undefined,
+        },
+        {
+          type: "awaiting_hitl",
+          nodeId,
+          message:
+            "Verification end digest failed; refuse to stamp stale/cached evidence",
+        },
+      );
+      return replaceInstance(doc, next);
+    }
+    endDigest = combineFileDigests({
+      ...endDigested.digests,
+      ...Object.fromEntries(
+        (endDigested.tombstones ?? []).map((path) => [
+          `tombstone:${path}`,
+          "deleted",
+        ]),
+      ),
+    });
+  }
+  if (
+    !working.verificationCodeDigest ||
+    working.verificationCodeDigest !== endDigest
+  ) {
+    const next = pushEvent(
+      {
+        ...working,
+        status: "awaiting_hitl",
+        hitlQuestionIds: ["verification_not_run"],
+        verificationCodeDigest: undefined,
+      },
+      {
+        type: "awaiting_hitl",
+        nodeId,
+        message:
+          "Code changed during verification (start/end snapshot mismatch); re-run tests",
+      },
+    );
+    return replaceInstance(doc, next);
+  }
+
   const report = evidenceToTestReport(
     evidence,
     "configured-test",
-    changeDigest || undefined,
+    endHasClaim ? endDigest : undefined,
   );
   if (report) {
     working = pushArtifact(working, {
