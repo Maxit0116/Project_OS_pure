@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react'
 import type { LoopTaskMaterial } from '@contracts/index'
 import { classifyLoopMaterialFormat } from '@contracts/loop-task-material-formats'
 import { evaluateImageMaterialCapability } from '@contracts/loop-material-vision-preflight'
+import { parseAndSelectCsv } from '@contracts/loop-material-csv'
+import { normalizeModelProfile } from '@contracts/settings'
 import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
+import { useWorkbenchStore } from '../../state/workbenchStore'
 import LoopMaterialImagePreview from './LoopMaterialImagePreview'
 import styles from './LoopRunMaterialsPanel.module.css'
 
@@ -27,6 +30,16 @@ export default function LoopRunMaterialsPanel() {
   const removeRunMaterial = useLoopGraphStore((s) => s.removeRunMaterial)
   const runPreflight = useLoopGraphStore((s) => s.runPreflight)
   const startRun = useLoopGraphStore((s) => s.startRun)
+  const settings = useWorkbenchStore((s) => s.settings)
+  const selectedModelProfileId = useWorkbenchStore((s) => s.selectedModelProfileId)
+  const activeProfile =
+    settings?.modelProfiles.find((p) => p.id === selectedModelProfileId) ??
+    settings?.modelProfiles.find((p) => p.isDefault) ??
+    settings?.modelProfiles[0] ??
+    null
+  const activeApiFormat = activeProfile
+    ? normalizeModelProfile(activeProfile).apiFormat
+    : null
 
   const [textTitle, setTextTitle] = useState('')
   const [textBody, setTextBody] = useState('')
@@ -41,6 +54,8 @@ export default function LoopRunMaterialsPanel() {
   const [imageVisionGates, setImageVisionGates] = useState<
     Record<string, string>
   >({})
+  /** Raw CSV text keyed by material id — selection reshapes textPreview in pack. */
+  const [csvRawById, setCsvRawById] = useState<Record<string, string>>({})
 
   useEffect(() => {
     return () => {
@@ -119,27 +134,52 @@ export default function LoopRunMaterialsPanel() {
       fileName: file.name,
     })
     if (format.formatId === 'image') {
-      // ModelProfile has no vision flag yet — default supportsVision=false.
-      // Keep the card; never silently drop the image.
+      const buffer = await file.arrayBuffer()
+      const bytes = new Uint8Array(buffer)
+      const mimeOk =
+        mime === 'image/png' || mime === 'image/jpeg'
+          ? mime
+          : /\.png$/i.test(file.name)
+            ? 'image/png'
+            : /\.jpe?g$/i.test(file.name)
+              ? 'image/jpeg'
+              : mime
+      let base64 = ''
+      {
+        let binary = ''
+        const chunk = 0x8000
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+        }
+        base64 = btoa(binary)
+      }
+      const hasBytes = base64.length > 0
+      const contentRef =
+        hasBytes && (mimeOk === 'image/png' || mimeOk === 'image/jpeg')
+          ? `data:${mimeOk};base64,${base64}`
+          : undefined
       const vision = evaluateImageMaterialCapability({
-        mimeType: mime,
+        mimeType: mimeOk,
         fileName: file.name,
         sizeBytes: file.size,
-        supportsVision: false,
+        apiFormat: activeApiFormat,
+        hasBytes: Boolean(contentRef),
       })
       const materialId = replacingId ?? newMaterialId('mat_image')
-      const unsupported: LoopTaskMaterial = {
+      const wired = vision.parseLevel === 'vision_attach'
+      const imageMaterial: LoopTaskMaterial = {
         id: materialId,
         kind: 'image',
         purpose: 'error_screenshot',
         title: file.name.slice(0, 240),
         source: 'upload',
-        parseStatus: 'unsupported',
-        parseLevel: 'unsupported',
+        parseStatus: wired ? 'ok' : 'unsupported',
+        parseLevel: vision.parseLevel,
         parseMessage: vision.reason,
-        mimeType: mime,
+        mimeType: mimeOk,
         sizeBytes: file.size,
         measuredSizeBytes: file.size,
+        ...(contentRef ? { contentRef } : {}),
         version: 1,
         runOverride: true,
         createdAt: now,
@@ -156,12 +196,77 @@ export default function LoopRunMaterialsPanel() {
         [materialId]: vision.visionGate,
       }))
       if (replacingId) {
-        replaceRunMaterial(replacingId, unsupported)
+        replaceRunMaterial(replacingId, imageMaterial)
         setReplacingId(null)
       } else {
-        addRunMaterial(unsupported)
+        addRunMaterial(imageMaterial)
       }
-      setFileError(unsupported.parseMessage ?? 'unsupported')
+      if (!wired) setFileError(imageMaterial.parseMessage ?? 'unsupported')
+      return
+    }
+    if (format.formatId === 'csv') {
+      const text = await file.text()
+      const parsed = parseAndSelectCsv(text)
+      const materialId = replacingId ?? newMaterialId('mat_csv')
+      if (!parsed.ok) {
+        const failed: LoopTaskMaterial = {
+          id: materialId,
+          kind: 'table',
+          purpose: 'test_data',
+          title: file.name.slice(0, 240),
+          source: 'upload',
+          parseStatus: 'failed',
+          parseLevel: 'unsupported',
+          parseMessage: parsed.error.slice(0, 500),
+          mimeType: mime || 'text/csv',
+          sizeBytes: file.size,
+          measuredSizeBytes: file.size,
+          version: 1,
+          runOverride: true,
+          createdAt: now,
+          updatedAt: now,
+        }
+        if (replacingId) {
+          replaceRunMaterial(replacingId, failed)
+          setReplacingId(null)
+        } else {
+          addRunMaterial(failed)
+        }
+        setFileError(parsed.error)
+        return
+      }
+      setCsvRawById((prev) => ({ ...prev, [materialId]: text }))
+      const material: LoopTaskMaterial = {
+        id: materialId,
+        kind: 'table',
+        purpose: 'test_data',
+        title: file.name.slice(0, 240),
+        source: 'upload',
+        parseStatus: 'ok',
+        parseLevel: parsed.parseLevel,
+        parseMessage:
+          'CSV loaded — choose columns/rows to apply structured_selection into run snapshot',
+        textPreview: parsed.textPreview,
+        tablePreview: {
+          columns: parsed.table.headers,
+          rowStart: 1,
+          rowEnd: Math.max(1, parsed.table.rows.length),
+        },
+        mimeType: mime || 'text/csv',
+        sizeBytes: file.size,
+        measuredSizeBytes: file.size,
+        contentRef: `upload://${file.name}`,
+        version: 1,
+        runOverride: true,
+        createdAt: now,
+        updatedAt: now,
+      }
+      if (replacingId) {
+        replaceRunMaterial(replacingId, material)
+        setReplacingId(null)
+      } else {
+        addRunMaterial(material)
+      }
       return
     }
     if (format.parseLevel === 'unsupported') {
@@ -245,6 +350,52 @@ export default function LoopRunMaterialsPanel() {
         addRunMaterial(failed)
       }
     }
+  }
+
+  const applyCsvStructure = (
+    materialId: string,
+    patch: {
+      columns?: string[]
+      rowStart?: number
+      rowEnd?: number
+      role?: 'requirement' | 'test' | 'business'
+    },
+  ) => {
+    const raw = csvRawById[materialId]
+    const current = materials.find((item) => item.id === materialId)
+    if (!raw || !current) return
+    const selection = {
+      columns: patch.columns ?? current.tablePreview?.columns,
+      rowStart: patch.rowStart ?? current.tablePreview?.rowStart,
+      rowEnd: patch.rowEnd ?? current.tablePreview?.rowEnd,
+      role: patch.role ?? current.tablePreview?.role,
+    }
+    const parsed = parseAndSelectCsv(raw, selection)
+    if (!parsed.ok) {
+      setFileError(parsed.error)
+      return
+    }
+    replaceRunMaterial(materialId, {
+      ...current,
+      parseStatus: 'ok',
+      parseLevel: parsed.parseLevel,
+      parseMessage:
+        parsed.parseLevel === 'structured_selection'
+          ? 'structured_selection applied — textPreview/run snapshot use selected columns/rows'
+          : current.parseMessage,
+      textPreview: parsed.textPreview,
+      tablePreview: {
+        columns: selection.columns,
+        rowStart: selection.rowStart,
+        rowEnd: selection.rowEnd,
+        rowRange:
+          selection.rowStart != null && selection.rowEnd != null
+            ? `${selection.rowStart}-${selection.rowEnd}`
+            : undefined,
+        role: selection.role,
+      },
+      updatedAt: new Date().toISOString(),
+    })
   }
 
   const blockers = preflight?.items.filter((item) => item.severity === 'blocker') ?? []
@@ -374,6 +525,51 @@ export default function LoopRunMaterialsPanel() {
                     objectUrl={imageObjectUrls[material.id] ?? null}
                     visionGate={imageVisionGates[material.id] ?? null}
                   />
+                ) : null}
+                {material.kind === 'table' &&
+                (material.mimeType === 'text/csv' ||
+                  material.title.toLowerCase().endsWith('.csv')) &&
+                csvRawById[material.id] ? (
+                  <div
+                    className={styles.csvControls}
+                    data-loop-material-csv-controls=""
+                  >
+                    <label className={styles.field}>
+                      <span>columns (comma)</span>
+                      <input
+                        type="text"
+                        defaultValue={(material.tablePreview?.columns ?? []).join(
+                          ',',
+                        )}
+                        data-loop-material-csv-columns=""
+                        onBlur={(event) => {
+                          const columns = event.target.value
+                            .split(',')
+                            .map((part) => part.trim())
+                            .filter(Boolean)
+                          applyCsvStructure(material.id, { columns })
+                        }}
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>rows</span>
+                      <input
+                        type="text"
+                        defaultValue={`${material.tablePreview?.rowStart ?? 1}-${material.tablePreview?.rowEnd ?? 1}`}
+                        data-loop-material-csv-rows=""
+                        onBlur={(event) => {
+                          const match = /^(\d+)\s*-\s*(\d+)$/.exec(
+                            event.target.value.trim(),
+                          )
+                          if (!match) return
+                          applyCsvStructure(material.id, {
+                            rowStart: Number(match[1]),
+                            rowEnd: Number(match[2]),
+                          })
+                        }}
+                      />
+                    </label>
+                  </div>
                 ) : null}
                 {expandedId === material.id && material.textPreview ? (
                   <pre

@@ -8,6 +8,11 @@ import type {
   LoopSpec,
 } from "../contracts/loop-graph.js";
 import type { LoopTaskMaterial } from "../contracts/loop-task-materials.js";
+import type { ModelProfile } from "../contracts/settings.js";
+import {
+  materialsRequireVision,
+  resolveLoopVisionCapability,
+} from "../contracts/loop-material-vision-capability.js";
 import { validateApprovalGateWiring } from "./loop-approval-insert.js";
 import { validateLoopNodeConfig } from "./loop-node-config-schema.js";
 import { classifyLoopMaterialUrl } from "./loop-url-fetch-policy.js";
@@ -23,6 +28,7 @@ export type LoopPreflightItem = {
     | "material_parse"
     | "material_url_ssrf"
     | "material_unsupported"
+    | "material_vision_blocked"
     | "branch_unspecified"
     | "ok";
   message: string;
@@ -71,6 +77,8 @@ export function preflightLoopRunStart(input: {
   specVersion?: string;
   branch?: string;
   materials?: LoopTaskMaterial[];
+  /** Active model profile — used for vision attach / block decisions. */
+  modelProfile?: ModelProfile | null;
 }): LoopPreflightResult {
   const items: LoopPreflightItem[] = [];
   const specs = input.document.approvedSpecs ?? [];
@@ -96,6 +104,18 @@ export function preflightLoopRunStart(input: {
       code: "branch_unspecified",
       message: "Branch not specified — run binding will omit branch until confirmed",
     });
+  }
+
+  if (materialsRequireVision(input.materials)) {
+    const vision = resolveLoopVisionCapability(input.modelProfile ?? null);
+    if (!vision.supportsVision) {
+      items.push({
+        id: "pf_vision_blocked",
+        severity: "blocker",
+        code: "material_vision_blocked",
+        message: `${vision.reason}. Replace image materials or switch model profile before start.`,
+      });
+    }
   }
 
   const nodes = draftNodesForSpec(input.document, spec);
@@ -152,12 +172,20 @@ export function preflightLoopRunStart(input: {
         }`,
         materialId: material.id,
       });
-    } else if (material.parseStatus === "unsupported") {
+    } else if (
+      material.parseStatus === "unsupported" &&
+      material.parseLevel !== "vision_attach"
+    ) {
+      const visionBlock =
+        material.kind === "image" ||
+        (material.mimeType ?? "").startsWith("image/");
       items.push({
         id: `pf_mat_${material.id}_unsupported`,
-        severity: "warning",
-        code: "material_unsupported",
-        message: `Material “${material.title}” is unsupported by the current model/path — will not be sent as vision/bytes`,
+        severity: visionBlock ? "blocker" : "warning",
+        code: visionBlock ? "material_vision_blocked" : "material_unsupported",
+        message: visionBlock
+          ? `Image “${material.title}” blocked — ${material.parseMessage ?? "model lacks vision; replace or change profile"}`
+          : `Material “${material.title}” is unsupported by the current path — will not be sent as structured bytes`,
         materialId: material.id,
       });
     } else if (material.parseStatus === "partial") {

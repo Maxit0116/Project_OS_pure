@@ -9350,11 +9350,27 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     if (!document) {
       throw new ProjectOSError("loop_graph_invalid", `Loop not found: ${loopId}`);
     }
+    let modelProfile = null as
+      | import("../contracts/settings.js").ModelProfile
+      | null;
+    try {
+      const settings = await this.getSettings(projectId);
+      const profiles = settings.modelProfiles ?? [];
+      const defaultId = settings.execution?.defaultModelProfileId;
+      modelProfile =
+        (defaultId ? profiles.find((p) => p.id === defaultId) : undefined) ??
+        profiles.find((p) => p.isDefault) ??
+        profiles[0] ??
+        null;
+    } catch {
+      modelProfile = null;
+    }
     return preflightLoopRunStart({
       document,
       ...(options?.specVersion ? { specVersion: options.specVersion } : {}),
       ...(options?.branch ? { branch: options.branch } : {}),
       ...(options?.materials ? { materials: options.materials } : {}),
+      modelProfile,
     });
   }
 

@@ -261,3 +261,9 @@
   color: var(--tech-text-muted);
   font-size: 11px;
 }
+
+.csvControls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}

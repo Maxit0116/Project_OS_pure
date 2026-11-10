@@ -50,7 +50,7 @@
 | 切片 | 状态 |
 |------|------|
 | PW Project run binding / 预检 / 项目手动 E2E | **实现/localE2E（非 live）**：rail 选已保存流程 → `openSavedFlowForRun` / Run 页 → materials→preflight→start；taskPack 保存/重开/隔离 Intent；DI `local_tools` fail→feedback→语义 fix→green；ChangeSet+TestReport 含 failed+passed、exitCode、unifiedDiff；UI Diff 展开 + exit DOM（`loops-b-ui-06-diff-passed-viewport.png`；单屏不能当全文验收）。runBinding 隔离；cancel **contract**。付费 live / Issue 快捷入口 **未完** |
-| TM TaskMaterial schema + Pure 输入复用 | **实现首批（精确级别）**：plaintext/md/json/csv/log = **`text_preview` only**（CSV ≠ sheet/列/范围；json ≠ field pick；≠ `full_text_parse`）；image/xlsx/pdf = **`unsupported`**（安全态≠完成）+ 图片保留卡片 + vision/model 预检（`loop-material-vision-preflight`；`eligible_not_wired`≠已接）；Pure `LoopMaterialImagePreview`；URL 生产读取 **未接** |
+| TM TaskMaterial schema + Pure 输入复用 | **实现加深（仍非全勾）**：CSV **`structured_selection`**（列/行写入 textPreview+run 快照）；XLSX OOXML sheet/range **实现/contract**；PDF `pdftotext` 页范围 **分期**（无工具=unsupported+保留页选）；image：真实 bytes→`contentRef` data URL + ModelGateway `images[]` 契约（`vision_attach` / 缺视觉 **blocker**）；URL 生产只读 fetch **实现/contract**（SSRF/DNS/redirect/无 cookie）；PW-7 上下文→材料 **contract** |
 | URL SSRF 默认拒内网 | **contract**（`loop-url-fetch-policy`）；生产读取未接 |
 | 离线事件全天排队 | **未实现**（不可承诺） |
 
@@ -99,13 +99,12 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 
 近期本地闸（实现切片，非文档完成；以当次命令为准）：
 ```text
-# → Test Files 52 passed / Tests 241 passed（exit 0）
-# projectos tsc --noEmit -p tsconfig.json：本切片 vs tip 083c77d 同命令 **22=22**（无新增）；
-#   同配置归因（只读 worktree，不 rebase）：
-#   bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398 → tsc 159；vitest discovery 子集失败/缺少本流新增测
-#   origin/graph tip 34af3746c4024d32eb38a76ff5e78021ad840697 → tsc 138
-#   详见 /opt/cursor/artifacts/gate-attribution.json — 不得用基线债掩盖本 PR 新增，也不为过门禁全局删测/重构。
-# workbench npm run build：仍失败 exit 1（基线债）；desktop renderer build 本切片成功用于 Electron 证据。
+# Loops 定向发现集（≠ 全项目）：→ Test Files 59 / Tests 255（以当次命令为准）
+# projectos tsc --noEmit -p tsconfig.json：raw **22**；归一化 unique keys 见 ATTRIBUTION
+#   bec3dd7 raw 159 / graph tip raw 138 — **不得**仅用 22<<159 宣称无回归
+#   同 lock sha256 + 同 tsc 二进制；归一化 newVsBec / resolvedVsBec / intersection
+#   完整日志：/opt/cursor/artifacts/gate-deep/ATTRIBUTION.json + */*tsc*.txt
+# workbench `tsc -b` 仍红（PR）；与 bec 对比 newVsBecCount=0（共享 node_modules）；graph tip 同工具链 0 — 归属见 ATTRIBUTION，不为过门禁删测/全局重构。
 ```
 
 **DOM/Runtime 开链（云端 Linux xvfb，非 Mac）** — 本轮**不宣称闭环 / 不宣称 live**：

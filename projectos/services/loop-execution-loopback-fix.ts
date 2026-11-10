@@ -19,7 +19,15 @@ export type FixAttemptResult = {
 
 function materialText(materials: LoopTaskMaterial[] | undefined): string {
   return (materials ?? [])
-    .map((m) => `${m.title}\n${m.textPreview ?? ""}\n${m.parseMessage ?? ""}`)
+    .map((m) => {
+      const selection =
+        m.tablePreview != null
+          ? `tablePreview=${JSON.stringify(m.tablePreview)}\n`
+          : m.pdfPreview != null
+            ? `pdfPreview=${JSON.stringify(m.pdfPreview)}\n`
+            : "";
+      return `${m.title}\nlevel=${m.parseLevel ?? m.parseStatus}\n${selection}${m.textPreview ?? ""}\n${m.parseMessage ?? ""}`;
+    })
     .join("\n");
 }
 

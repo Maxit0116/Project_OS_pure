@@ -35,13 +35,18 @@ export const LoopTaskMaterialParseStatusSchema = z.enum([
 ]);
 
 /**
- * Honest parse *level* for first-batch materials.
- * - text_preview: capped plaintext preview only (not full ingest, not structured select)
- * - unsupported: deferred format (image/xlsx/pdf/…) — safety state, not “feature done”
- * full_text_parse / structured_selection are **not implemented** yet — do not claim them.
+ * Honest parse *level* for materials.
+ * - text_preview: capped plaintext only (not full ingest)
+ * - structured_selection: CSV/XLSX column/sheet/row range applied into preview + run snapshot
+ * - full_text_parse: PDF/page (or other) text extract — claim only when extract succeeded
+ * - vision_attach: image bytes wired to ModelGateway images[] (requires vision-capable apiFormat)
+ * - unsupported: deferred / blocked — safety state, not “feature done”
  */
 export const LoopTaskMaterialParseLevelSchema = z.enum([
   "text_preview",
+  "structured_selection",
+  "full_text_parse",
+  "vision_attach",
   "unsupported",
 ]);
 
@@ -75,13 +80,27 @@ export const LoopTaskMaterialSchema = z
      * CSV at text_preview ≠ sheet/column/range structured selection.
      */
     parseLevel: LoopTaskMaterialParseLevelSchema.optional(),
-    /** Table preview metadata (CSV/XLSX) — only when structured_selection exists (not yet). */
+    /**
+     * Table / sheet selection — when set, must reshape textPreview and the
+     * material snapshot sent to bound nodes (not UI-only).
+     */
     tablePreview: z
       .object({
         sheet: z.string().trim().min(1).max(120).optional(),
         columns: z.array(z.string().trim().min(1).max(120)).max(64).optional(),
         rowRange: z.string().trim().min(1).max(40).optional(),
+        rowStart: z.number().int().positive().max(1_000_000).optional(),
+        rowEnd: z.number().int().positive().max(1_000_000).optional(),
         role: z.enum(["requirement", "test", "business"]).optional(),
+      })
+      .strict()
+      .optional(),
+    /** PDF page selection (1-based inclusive) — applies when full_text_parse succeeds. */
+    pdfPreview: z
+      .object({
+        pageStart: z.number().int().positive().max(10_000).optional(),
+        pageEnd: z.number().int().positive().max(10_000).optional(),
+        pageCount: z.number().int().nonnegative().max(10_000).optional(),
       })
       .strict()
       .optional(),
@@ -158,3 +177,6 @@ export const LoopRunBindingSchema = z
 export type LoopTaskMaterial = z.infer<typeof LoopTaskMaterialSchema>;
 export type LoopRunBinding = z.infer<typeof LoopRunBindingSchema>;
 export type LoopTaskMaterialKind = z.infer<typeof LoopTaskMaterialKindSchema>;
+export type LoopTaskMaterialParseLevel = z.infer<
+  typeof LoopTaskMaterialParseLevelSchema
+>;

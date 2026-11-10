@@ -1,38 +1,35 @@
 /**
- * Image material capability preflight (honest, offline).
+ * Image material capability preflight (honest).
  *
- * Rules:
  * - Never silently drop images — caller keeps a material card.
- * - Unsupported remains the correct safety parseLevel until a Pure vision
- *   attach path exists; this module only classifies the *gate*, not “done”.
- * - ModelProfile has no vision flag today — callers pass supportsVision
- *   explicitly (settings / gateway capability). Default false.
+ * - Vision support comes from ModelGateway apiFormat (see
+ *   loop-material-vision-capability) — not brand names.
+ * - When supportsVision: parseLevel vision_attach once bytes are in contentRef.
+ * - When !supportsVision: unsupported + explicit block (replace or change model).
  */
 import {
   classifyLoopMaterialFormat,
   type LoopMaterialFormatClassification,
 } from "./loop-task-material-formats.js";
+import type { LoopTaskMaterialParseLevel } from "./loop-task-materials.js";
+import { apiFormatSupportsVision } from "./loop-material-vision-capability.js";
+import type { ModelApiFormat } from "./settings.js";
 
 export type LoopImageVisionGate =
-  /** MIME/ext not image — use format classifier instead. */
   | "not_image"
-  /** Image, but active model does not advertise vision. */
   | "model_lacks_vision"
-  /**
-   * Model advertises vision, but Pure image→prompt attach / first usable
-   * ingest is not wired yet — eligible ≠ implemented.
-   */
-  | "eligible_not_wired"
-  /** Bytes too large for first-batch attach budget. */
-  | "oversize";
+  | "vision_wired"
+  | "oversize"
+  | "bytes_missing";
 
 export type LoopImageVisionPreflight = {
   format: LoopMaterialFormatClassification;
   visionGate: LoopImageVisionGate;
-  /** Always unsupported until image ingest is implemented. */
-  parseLevel: "unsupported";
+  parseLevel: Extract<
+    LoopTaskMaterialParseLevel,
+    "vision_attach" | "unsupported"
+  >;
   reason: string;
-  /** Soft budget for first-batch thumbnails / future attach (5 MiB). */
   maxBytes: number;
 };
 
@@ -42,8 +39,11 @@ export function evaluateImageMaterialCapability(input: {
   mimeType?: string | null;
   fileName?: string | null;
   sizeBytes?: number | null;
-  /** Explicit model vision capability — never invent from brand/name. */
+  /** Prefer apiFormat from resolved ModelProfile — source of ModelGateway truth. */
+  apiFormat?: ModelApiFormat | null;
+  /** @deprecated Prefer apiFormat; kept for call-site compatibility. */
   supportsVision?: boolean | null;
+  hasBytes?: boolean | null;
 }): LoopImageVisionPreflight {
   const format = classifyLoopMaterialFormat({
     ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
@@ -53,7 +53,10 @@ export function evaluateImageMaterialCapability(input: {
     typeof input.sizeBytes === "number" && Number.isFinite(input.sizeBytes)
       ? input.sizeBytes
       : null;
-  const supportsVision = input.supportsVision === true;
+  const supportsVision =
+    input.apiFormat != null
+      ? apiFormatSupportsVision(input.apiFormat)
+      : input.supportsVision === true;
 
   if (format.formatId !== "image") {
     return {
@@ -81,17 +84,28 @@ export function evaluateImageMaterialCapability(input: {
       visionGate: "model_lacks_vision",
       parseLevel: "unsupported",
       reason:
-        "Image kept as material card; active model lacks vision capability — parseLevel=unsupported (not silently dropped)",
+        "Image kept as material card; active ModelGateway apiFormat lacks vision — replace image or switch to openai_chat/anthropic_messages profile (blocked, not silently dropped)",
+      maxBytes: LOOP_IMAGE_MATERIAL_MAX_BYTES,
+    };
+  }
+
+  if (input.hasBytes === false) {
+    return {
+      format,
+      visionGate: "bytes_missing",
+      parseLevel: "unsupported",
+      reason:
+        "Vision-capable profile selected but image bytes missing from contentRef — cannot attach to ModelGateway.images",
       maxBytes: LOOP_IMAGE_MATERIAL_MAX_BYTES,
     };
   }
 
   return {
     format,
-    visionGate: "eligible_not_wired",
-    parseLevel: "unsupported",
+    visionGate: "vision_wired",
+    parseLevel: "vision_attach",
     reason:
-      "Model advertises vision, but Pure image→prompt attach is not wired yet — eligible_not_wired (unsupported ≠ discarded)",
+      "Image bytes will attach via ModelGatewayRequest.images (openai_chat/anthropic_messages adapters)",
     maxBytes: LOOP_IMAGE_MATERIAL_MAX_BYTES,
   };
 }

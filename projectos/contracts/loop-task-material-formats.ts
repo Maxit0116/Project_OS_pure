@@ -2,13 +2,18 @@
  * First-batch Task Materials format matrix (honest support levels).
  *
  * Levels (do not inflate):
- * - text_preview: capped plaintext preview only — NOT full document ingest,
- *   NOT JSON schema field pick, NOT CSV sheet/column/range selection
- * - unsupported: deferred (image/xlsx/pdf/…) — correct safety state, not “done”
- *
- * Planned but NOT implemented: full_text_parse, structured_selection.
+ * - text_preview: capped plaintext preview only
+ * - structured_selection: CSV/XLSX column/sheet/row applied (see parsers)
+ * - full_text_parse: PDF text extract when tool available
+ * - vision_attach: image → ModelGateway.images
+ * - unsupported: deferred/blocked — correct safety state, not “done”
  */
-export type LoopMaterialParseLevel = "text_preview" | "unsupported";
+export type LoopMaterialParseLevel =
+  | "text_preview"
+  | "structured_selection"
+  | "full_text_parse"
+  | "vision_attach"
+  | "unsupported";
 
 export type LoopMaterialFormatSupport = LoopMaterialParseLevel;
 
@@ -87,12 +92,12 @@ export function classifyLoopMaterialFormat(input: {
   if (DEFERRED_EXT.test(name) || DEFERRED_MIME_PREFIXES.some((p) => mime.startsWith(p))) {
     const deferredNote =
       formatId === "image"
-        ? " — keep card + vision/model preflight; Pure image→prompt attach not wired"
+        ? " — keep card; vision via ModelGateway apiFormat preflight (openai_chat/anthropic_messages → vision_attach)"
         : formatId === "xlsx"
-          ? " — sheet/column/range structured_selection not implemented (CSV text_preview ≠ xlsx)"
+          ? " — use OOXML sheet/range parser (services/loop-material-xlsx); classify alone ≠ structured"
           : formatId === "pdf"
-            ? " — full_text_parse / page extract not implemented"
-            : " — not text_preview; structured_selection not implemented";
+            ? " — page extract via pdftotext when available (otherwise unsupported + page selection kept)"
+            : " — not text_preview; structured_selection requires parser apply";
     return {
       support: "unsupported",
       parseLevel: "unsupported",
