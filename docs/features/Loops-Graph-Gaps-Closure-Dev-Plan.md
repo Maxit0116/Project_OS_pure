@@ -682,7 +682,9 @@ freshness?
 - [x] `loop-runtime-*.test.ts` / `loop-graph*.test.ts` / Review layout — tip full `npm test` 绿  
 - [x] Feature Development 示范 workflow NA 不变量 — roles/actions Feature Development E2E  
 
-**仍非总交验**：无付费 live、无 OAuth、无真邮箱；Electron 历史图「控件可见」≠ start/pause 已点击操作（pause/resume **状态变**以 LocalApi 测为准）。
+**仍非总交验**：无付费 live、无 OAuth、无真邮箱；Electron 历史图「控件可见」≠ start/pause 已点击操作（pause/resume **状态变**以 LocalApi 测为准）。GC-6.6 关联 Run：**真实跳转**证据 = Electron `loops-gc66-run-jump-*`（`data-tour=agent-flow`）；≠ 仅 Runtime 空闲文案/按钮存在。
+
+**需用户 live 授权 / 人工体验（非未实现缺口）**：真 Gmail/OAuth/云项目；付费 ModelGateway；Mac；真实外发；Run 页 Start 在 `startEnabled=true` 下点按；UI Pause 按钮操作入镜。
 
 ---
 
@@ -737,4 +739,4 @@ GC-0 Docs
 | 2026-11-10 | **GC-4/5/7 落地**：Instance `checkpoint` 步进落盘 + `restoreLoopInstanceFromCheckpoint`；Fresh/Stale 正交 + `stalePolicy`；启动 `idempotencyKey` / 不明副作用 resume → HITL；`ReplanProposal` + 预算记账；`inputParams` / `startLoopInstanceWithParams` / 内部事件去重；Parallel P1 `multi_run` 共享 leaf → `write_conflict` HITL；Run History + derive draft；API/IPC/mock/UI 打通 |
 | 2026-11-10 | **交叉引用**：接入 Project Workflow + Task Materials 权威计划（PW/TM）；六目标跟踪表同步；明确离线事件全天排队仍未实现 |
 | 2026-11-10 | **GC-6.5/6.6/7.2 收尾**：`LoopGraphMinimap` 点击平移；DutyCard Runtime「打开关联 Agent Run」→ `openAgentFlowForRun(activeRunId)`；产品入口确认 = Draw **dblclick** `[data-loop-node]` / 右键 Open Duty（**不是** Review 架构节点详情）；§9 六机制/成熟能力/回归清单保持可勾；**仍非** shipped/live/总交验 |
-| 2026-11-10 | **GC-7.2 §9 逐项测映射**写入本节；Batch3/Gmail/队列 LocalApi 负例；runtime 连接器路径含 gmail/supabase/posthog（禁合成 Executed 成功）；pause/resume LocalApi 状态变；关联 Run **跳转**证据；**仍非** shipped/live |
+| 2026-11-10 | **GC-7.2 §9 逐项测映射**写入本节；Batch3/Gmail/队列 LocalApi 负例；runtime 连接器路径含 gmail/supabase/posthog（禁合成 Executed 成功）；pause/resume LocalApi 状态变；关联 Run Electron **跳转** `data-tour=agent-flow`（非按钮存在）；**仍非** shipped/live |
