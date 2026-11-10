@@ -619,6 +619,12 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     if (runId && dismissed === runId) return
     if (!runId && dismissed === AGENT_FLOW_DISMISS_IDLE) return
     setCanvasOverlayState(set, 'agent-flow')
+    // GC-6.6: opening the associated Agent Run must bind that run into the
+    // Agent Flow surface — overlay-only open leaves the idle empty page.
+    if (runId) {
+      useWorkbenchStore.setState({ activeRunId: runId })
+      void restoreRunFlow(runId)
+    }
   },
 
   closeAgentFlow: () => {
