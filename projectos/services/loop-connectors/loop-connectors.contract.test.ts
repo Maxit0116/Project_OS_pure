@@ -536,7 +536,10 @@ describe("Sentry adapter + HTTP resilience", () => {
       highRiskAuthorized: true,
     });
     expect(catalogOnly.ok).toBe(false);
-    if (!catalogOnly.ok) expect(catalogOnly.code).toBe("unconfigured");
+    if (!catalogOnly.ok) {
+      expect(catalogOnly.code).toBe("catalog_only");
+      expect(catalogOnly.message).toMatch(/catalog_only/i);
+    }
 
     // Vercel promote remains sealed without independent high-risk auth.
     const vercelPromote = await dispatchConnectorRequest({

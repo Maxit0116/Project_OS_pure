@@ -112,6 +112,8 @@ export type LoopConnectorHttpResponse = {
 
 export type LoopConnectorErrorCode =
   | "unconfigured"
+  /** Vendor present in catalog but no executable adapter (Batch3 posture). */
+  | "catalog_only"
   | "auth_missing"
   | "auth_rejected"
   | "signature_invalid"

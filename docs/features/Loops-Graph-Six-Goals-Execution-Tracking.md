@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10（PR10 tip 续作·补证）— 全库绿里程碑承认（584/3309，logSha256 `7391d952…9c002`）；**不**宣称总交验。tip-final workbench/desktop build 仍未在 6788606 重跑（日志属 935cf76）。viewport 证据已诚实改写：01/02 历史部分主张；03/04 TM8 同屏成立；`ok=false` 待 tip 重建后重拍。RunBinding：内容 digest / incomplete 阻断 / 冻结消费 / 审批上下文失效（进行中）。**非 shipped / 非 live**。  
+**Updated**: 2026-11-10（PR10 tip 收口）— tip-final 闸与产品入口验真进行中；Batch3 catalog_only 显式错误码+UI「仅目录」；PW7 专用无选区错误 DOM；XLSX 展开预览可取证。**不宣称总交验 / 非 shipped / 非 live**。
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
@@ -25,12 +25,12 @@
 
 | # | Goal | 状态摘要 |
 |---|------|----------|
-| 1 | 连接器 GitHub…PostHog（11 平台不删）+ **Gmail 追加** | Batch1 **contract**/live待验；Batch2 Linear/Jira/Notion/Vercel-list **contract**/live待验；Batch3 **catalog_only**；Gmail readonly **实现/contract（loopback）**/真实邮箱 **未接** |
+| 1 | 连接器 GitHub…PostHog（11 平台不删）+ **Gmail 追加** | Batch1/2 **contract**/live待验；Batch3 **catalog_only**（dispatch=`catalog_only` 码 + UI「仅目录」；≠ live未授权遮掩）；Gmail loopback **实现/contract**/真邮箱 **未接** |
 | 2 | Condition/parallel/loop/timer/retry/pause/resume | GC 主体 **实现/contract**；DutyCard logic 表单 **实现**/UI待验 |
-| 3 | Reusable Agents + 互调 | wiring **实现**；互调预算 depth/count **contract**；`recordAgentCallEnd`/cancel unwind；冻结预算消费优先；**richer consultation localE2E 仍 partial**（≠ 仅预算 contract） |
-| 4 | Human review/approval | binding **contract**；runtime gate **contract**；DutyCard **实现**；Approve/Reject；**Takeover→paused+human_decision**；`runApprovalContextDigest` 防复用；OAuth **未配置**/live未验 |
+| 3 | Reusable Agents + 互调 | wiring **实现**；预算 contract；**LocalApi 产品入口** planner DevPlan→coder 交接（loopback·非 live）；≠ 仅预算 |
+| 4 | Human review/approval | binding/runtime gate **contract**；**LocalApi** approve/reject/takeover→paused 同实例事件；`runApprovalContextDigest`；OAuth **未配置** |
 | 5 | Engineering context | digester + Verify **实现/contract**；RunBinding：**内容** dirty/untracked digest；`codeDigestStatus` incomplete 阻断；identity≠codeDigest；maxRounds+credential **消费时**冻结；审批上下文摘要；见 `RUNBINDING-GAP.md` |
-| 6 | Observability | journal/redaction **contract**；AgentPool waterfall **实现**；Run Diff 展开 + 失败测试恢复**提示** **实现**；observe/recover 全闭环仍 **partial**（≠ 仅提示）；live未验 |
+| 6 | Observability | journal/redaction **contract**；Diff 展开；**LocalApi** fail TestReport→feedback 路径（同实例事件；≠ 仅提示）；live未验 |
 
 ---
 

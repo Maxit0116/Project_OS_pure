@@ -93,8 +93,22 @@ export function LoopSaaSNodeCard({
         <span className="loopSaaSNodeCard__op">{operationLabel}</span>
       </span>
       {blocked ? (
-        <span className="loopSaaSNodeCard__badge" data-testid="saas-blocked-badge">
-          {status === 'unimplemented' ? '未实现' : '未配置'}
+        <span
+          className="loopSaaSNodeCard__badge"
+          data-testid="saas-blocked-badge"
+          data-loop-saas-catalog-only={
+            status === 'unimplemented' &&
+            (integrationId === 'supabase' || integrationId === 'posthog')
+              ? 'true'
+              : undefined
+          }
+        >
+          {status === 'unimplemented' &&
+          (integrationId === 'supabase' || integrationId === 'posthog')
+            ? '仅目录'
+            : status === 'unimplemented'
+              ? '未实现'
+              : '未配置'}
         </span>
       ) : null}
       {state === 'awaiting_hitl' ? (

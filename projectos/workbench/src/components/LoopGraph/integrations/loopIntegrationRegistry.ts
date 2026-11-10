@@ -10,6 +10,8 @@ export type LoopIntegrationId =
   | 'lark'
   | 'sentry'
   | 'gmail'
+  | 'supabase'
+  | 'posthog'
   | 'http'
   | 'webhook'
 
@@ -110,6 +112,32 @@ const REGISTRY: Record<LoopIntegrationId, LoopIntegrationMeta> = {
       { id: 'poll_history', label: 'Online history poll', kind: 'trigger' },
     ],
   },
+  /** Batch3 catalog_only — offline product surface; not a live-auth excuse. */
+  supabase: {
+    id: 'supabase',
+    displayName: 'Supabase',
+    iconKey: 'fallback',
+    defaultRuntimeStatus: 'unimplemented',
+    brandNote:
+      'Batch3 catalog_only: capabilities listed; dispatch blocked as catalog_only (no live adapter yet).',
+    actions: [
+      { id: 'read_rows', label: 'Read rows', kind: 'action' },
+      { id: 'invoke_rpc_readonly', label: 'Read RPC', kind: 'action' },
+      { id: 'write_rows', label: 'Write rows', kind: 'action' },
+    ],
+  },
+  posthog: {
+    id: 'posthog',
+    displayName: 'PostHog',
+    iconKey: 'fallback',
+    defaultRuntimeStatus: 'unimplemented',
+    brandNote:
+      'Batch3 catalog_only: capabilities listed; dispatch blocked as catalog_only (no live adapter yet).',
+    actions: [
+      { id: 'capture_event', label: 'Capture event', kind: 'action' },
+      { id: 'query_insights', label: 'Query insights', kind: 'action' },
+    ],
+  },
   http: {
     id: 'http',
     displayName: 'HTTP',
@@ -161,6 +189,8 @@ export function integrationIdFromActionNode(input: {
     raw === 'lark' ||
     raw === 'sentry' ||
     raw === 'gmail' ||
+    raw === 'supabase' ||
+    raw === 'posthog' ||
     raw === 'http' ||
     raw === 'webhook'
   ) {
@@ -187,6 +217,9 @@ export function runtimeStatusNextStep(
     return `${meta.displayName} is offline — retry when available`
   }
   if (status === 'unimplemented') {
+    if (meta.id === 'supabase' || meta.id === 'posthog') {
+      return `${meta.displayName} is catalog_only — listed offline; not executable until an adapter ships (not a live-account gap)`
+    }
     return `${meta.displayName} connector is not implemented yet`
   }
   return `Configure ${meta.displayName} before running this node`

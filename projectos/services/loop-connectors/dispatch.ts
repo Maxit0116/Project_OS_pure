@@ -131,8 +131,8 @@ export async function dispatchConnectorRequest<T>(input: {
     return blockedResult({
       vendorId: input.request.vendorId,
       capabilityId: input.request.capabilityId,
-      code: "unconfigured",
-      message: `${vendor.displayName} is catalog_only — adapter not implemented for dispatch`,
+      code: "catalog_only",
+      message: `${vendor.displayName} is catalog_only — adapter not implemented for dispatch (offline; not a live-auth gap)`,
       idempotencyKey: input.request.idempotencyKey,
       nowIso,
     });

@@ -752,12 +752,28 @@ export default function LoopRunMaterialsPanel() {
                     </label>
                   </div>
                 ) : null}
-                {expandedId === material.id && material.textPreview ? (
+                {expandedId === material.id &&
+                (material.textPreview ||
+                  (material.tablePreview?.columns?.length ?? 0) > 0) ? (
                   <pre
                     className={styles.preview}
                     data-loop-material-preview=""
+                    data-loop-material-preview-expanded=""
+                    data-loop-material-preview-body=""
                   >
-                    {material.textPreview}
+                    {material.textPreview
+                      ? material.textPreview
+                      : [
+                          material.tablePreview?.sheet
+                            ? `sheet=${material.tablePreview.sheet}`
+                            : null,
+                          material.tablePreview?.rowRange
+                            ? `range=${material.tablePreview.rowRange}`
+                            : null,
+                          `columns=${(material.tablePreview?.columns ?? []).join(',')}`,
+                        ]
+                          .filter(Boolean)
+                          .join('\n')}
                   </pre>
                 ) : null}
                 {diagnosticsId === material.id ? (
@@ -784,7 +800,8 @@ export default function LoopRunMaterialsPanel() {
                   </details>
                 ) : null}
                 <div className={styles.cardActions}>
-                  {material.textPreview ? (
+                  {material.textPreview ||
+                  (material.tablePreview?.columns?.length ?? 0) > 0 ? (
                     <button
                       type="button"
                       className={styles.linkish}
@@ -972,6 +989,7 @@ export default function LoopRunMaterialsPanel() {
           onClick={() => {
             const selection = getEditorSelection()
             if (!selection) {
+              // Dedicated PW-7 no-selection error (not generic preflight blocker).
               setFileError(ts('chat.loopGraph.materialsPw7NoSelection'))
               return
             }
@@ -986,6 +1004,17 @@ export default function LoopRunMaterialsPanel() {
         >
           {ts('chat.loopGraph.materialsPw7FromEditor')}
         </button>
+        {fileError &&
+        /无选区|no editor selection|PW-7/i.test(fileError) ? (
+          <p
+            className={styles.fileError}
+            data-loop-pw7-no-selection=""
+            data-loop-pw7-error=""
+            role="alert"
+          >
+            {fileError}
+          </p>
+        ) : null}
         <select
           value={pw7Kind}
           onChange={(event) =>
