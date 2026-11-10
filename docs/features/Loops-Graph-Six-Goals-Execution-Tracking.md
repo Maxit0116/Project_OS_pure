@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10（PR10 tip 收口）— tip-final 闸与产品入口验真进行中；Batch3 catalog_only 显式错误码+UI「仅目录」；PW7 专用无选区错误 DOM；XLSX 展开预览可取证。**不宣称总交验 / 非 shipped / 非 live**。
+**Updated**: 2026-11-10（PR10 tip `ba5ee1e`）— tip-final 三层 build+全仓 npm test（587/3323）exit0；viewport PW7/XLSX展开/TM8 同视口 ok；LocalApi G3/G4/G6 产品入口；Batch3 catalog_only。证据：`gate-full/EXITS-ba5ee1e.txt` + `MANIFEST-ba5ee1e.json` + `loops-evidence-viewport-evidence.json`。**不宣称总交验 / 非 shipped / 非 live**。
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
@@ -97,20 +97,18 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 # 遗漏相对全仓 `npm test`：desktop e2e、非 loop* services/contracts、live Gmail/ModelGateway、SaaS OAuth
 ```
 
-近期本地闸（实现切片，非文档完成；以当次命令为准；**最终 HEAD 见 gate-full/EXITS.json + pr-final**）：
+近期 tip-final 闸（`ba5ee1e`；非总交验）：
 ```text
-# 全库 build（本轮实跑）：projectos/desktop `npm run build` = 0
-# workbench `npm run build` = `tsc -b && vite build` = 0（tsc-b  alone ≠ 全 build）
-# 全仓 npm test 原发现：22 files / 64 cases red — 分类见
-#   /opt/cursor/artifacts/fail-classify/FAIL-64-CLASSIFICATION.json
-#   loop_authoring inventory：本栈引入 → 已修协议覆盖（13 kinds）
-#   marketplace remote：inherited vs graph（缺 resolveDns DI）→ 已修
-#   validation/sample-*：environment（prisma/next）— 仍 open
-#   local-api/orchestrator/agentConversation product gaps：本 tip 已修（deliverDecision /
-#     needsReview uncertain / forceGlobalPlanner / notification-center）
-# 可见 Electron 证据（selector 入视口）：loops-evidence-visible-0{1-4}-*.png
-# 交验包：/opt/cursor/artifacts/loops-firstbatch-review-bundle.zip
-# 首批验收条件：/opt/cursor/artifacts/pr-final/FIRST-BATCH-ACCEPTANCE.md
+# builds: projectos tsc-build / workbench vite / desktop electron-vite — all EXIT 0
+#   /opt/cursor/artifacts/gate-full/projectos-npm-run-build-ba5ee1e.txt
+#   /opt/cursor/artifacts/gate-full/workbench-npm-run-build-ba5ee1e.txt
+#   /opt/cursor/artifacts/gate-full/desktop-npm-run-build-ba5ee1e.txt
+# full npm test: 587 files / 3323 tests — NPM_TEST_EXIT:0
+#   /opt/cursor/artifacts/gate-full/projectos-npm-test-ba5ee1e.txt
+# EXITS+manifest: gate-full/EXITS-ba5ee1e.txt · MANIFEST-ba5ee1e.json · REVIEW-PACK-ba5ee1e.json
+# viewport tip-final (per-shot sourceCommit/time/hash): loops-evidence-viewport-evidence.json
+#   01 PW7 no-selection · 02 XLSX A1:C3 expanded · 03 TM8 blocked · 04 TM8 acked
+# six-goal matrix: gate-full/SIX-GOALS-MATRIX-ba5ee1e.json
 ```
 
 **未完成范围（明列；不把所有余项归真账号）**：
