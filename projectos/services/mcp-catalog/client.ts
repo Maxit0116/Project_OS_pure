@@ -8,6 +8,7 @@ import {
 import {
   assertMcpHttpUrlAllowed,
   createMcpGuardedFetch,
+  type McpDnsLookup,
   McpHttpGuardError,
 } from "../mcp/mcp-http-guard.js";
 import {
@@ -39,6 +40,8 @@ export type McpCatalogClientOptions = {
   publicKeySpkiBase64?: string;
   defaultCatalogUrl?: string;
   fetchImpl?: typeof fetch;
+  /** Address lookup for the URL guard; the real DNS lookup unless a test supplies one. */
+  resolveDns?: McpDnsLookup;
   now?: () => number;
   /** Injectable bundled reader for tests. */
   readBundled?: () => { bodyUtf8: string; signatureBase64: string };
@@ -98,7 +101,7 @@ export class McpCatalogClient {
     this.publicKeySpkiBase64 =
       options.publicKeySpkiBase64 ?? readBundledCatalogPublicKey();
     this.defaultCatalogUrl = options.defaultCatalogUrl ?? MCP_CATALOG_DEFAULT_URL;
-    this.guardedFetch = createMcpGuardedFetch(options.fetchImpl ?? fetch);
+    this.guardedFetch = createMcpGuardedFetch(options.fetchImpl ?? fetch, options.resolveDns);
     this.now = options.now ?? Date.now;
     this.readBundled =
       options.readBundled ??

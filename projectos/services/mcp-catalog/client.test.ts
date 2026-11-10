@@ -10,6 +10,10 @@ import {
   readBundledCatalogSignature,
 } from "./bundled-assets.js";
 import { defaultMcpCatalogCachePath } from "./cache.js";
+import type { McpDnsLookup } from "../mcp/mcp-http-guard.js";
+
+// The URL guard looks the host up; these tests use hosts that cannot resolve (".test"), so they say where it points.
+const testDns: McpDnsLookup = async () => [{ address: "93.184.216.34" }];
 
 describe("McpCatalogClient", () => {
   it("falls back to bundled when remote fails", async () => {
@@ -18,6 +22,7 @@ describe("McpCatalogClient", () => {
       cacheRoot,
       publicKeySpkiBase64: readBundledCatalogPublicKey(),
       defaultCatalogUrl: "https://catalog.example.test/mcp/catalog.json",
+      resolveDns: testDns,
       fetchImpl: vi.fn(async () => {
         throw new Error("network down");
       }) as unknown as typeof fetch,
@@ -32,6 +37,7 @@ describe("McpCatalogClient", () => {
     const client = new McpCatalogClient({
       cacheRoot,
       publicKeySpkiBase64: readBundledCatalogPublicKey(),
+      resolveDns: testDns,
       fetchImpl: vi.fn() as unknown as typeof fetch,
     });
     const view = await client.getCatalog({
@@ -75,6 +81,7 @@ describe("McpCatalogClient", () => {
       cacheRoot,
       publicKeySpkiBase64: readBundledCatalogPublicKey(),
       defaultCatalogUrl: "https://catalog.example.test/mcp/catalog.json",
+      resolveDns: testDns,
       fetchImpl: vi.fn(async () => {
         throw new Error("network down");
       }) as unknown as typeof fetch,
@@ -95,6 +102,7 @@ describe("McpCatalogClient", () => {
       cacheRoot,
       publicKeySpkiBase64: readBundledCatalogPublicKey(),
       defaultCatalogUrl: "https://catalog.example.test/mcp/catalog.json",
+      resolveDns: testDns,
       fetchImpl,
     });
     const view = await client.getCatalog();
@@ -119,6 +127,7 @@ describe("McpCatalogClient", () => {
       cacheRoot,
       publicKeySpkiBase64: readBundledCatalogPublicKey(),
       defaultCatalogUrl: "https://catalog.example.test/mcp/catalog.json",
+      resolveDns: testDns,
       fetchImpl,
     });
     const remote = await client.getCatalog({ forceRefresh: true });

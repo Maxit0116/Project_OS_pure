@@ -10,6 +10,10 @@ import {
   readBundledSkillCatalogSignature,
 } from "./bundled-assets.js";
 import { defaultSkillCatalogCachePath } from "./cache.js";
+import type { McpDnsLookup } from "../mcp/mcp-http-guard.js";
+
+// The URL guard looks the host up; these tests use hosts that cannot resolve (".test"), so they say where it points.
+const testDns: McpDnsLookup = async () => [{ address: "93.184.216.34" }];
 
 describe("SkillCatalogClient", () => {
   it("falls back to bundled when remote fails", async () => {
@@ -18,6 +22,7 @@ describe("SkillCatalogClient", () => {
       cacheRoot,
       publicKeySpkiBase64: readBundledSkillCatalogPublicKey(),
       defaultCatalogUrl: "https://catalog.example.test/skills/catalog.json",
+      resolveDns: testDns,
       fetchImpl: vi.fn(async () => {
         throw new Error("offline");
       }) as unknown as typeof fetch,
@@ -55,6 +60,7 @@ describe("SkillCatalogClient", () => {
       cacheRoot,
       publicKeySpkiBase64: readBundledSkillCatalogPublicKey(),
       defaultCatalogUrl: "https://catalog.example.test/skills/catalog.json",
+      resolveDns: testDns,
       fetchImpl: vi.fn(async () => {
         throw new Error("offline");
       }) as unknown as typeof fetch,
@@ -72,6 +78,7 @@ describe("SkillCatalogClient", () => {
       cacheRoot,
       publicKeySpkiBase64: readBundledSkillCatalogPublicKey(),
       defaultCatalogUrl: "https://catalog.example.test/skills/catalog.json",
+      resolveDns: testDns,
       fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith(".sig")) return new Response(sig, { status: 200 });
