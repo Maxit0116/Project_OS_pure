@@ -90,6 +90,7 @@ describe('loopGraphStore authoring actions', () => {
       document: { ...baseDoc, composerMode: 'ask', draftGoalContext: undefined },
       composerDraft: 'Ship login',
       composerSheet: 'none',
+      authoringEngine: 'provider',
     })
     useWorkbenchStore.setState({
       client: {
@@ -101,7 +102,33 @@ describe('loopGraphStore authoring actions', () => {
 
     await useLoopGraphStore.getState().sendAuthoringTurn()
     expect(send).toHaveBeenCalled()
+    // Default user entry must request the real provider path.
+    expect(send.mock.calls[0]?.[2]).toMatchObject({ useProvider: true })
     expect(useLoopGraphStore.getState().composerSheet).toBe('clarify')
+  })
+
+  it('rules engine is explicit user choice and sends useProvider:false', async () => {
+    const send = vi.fn(async () =>
+      normalizeLoopGraphDocument({
+        ...baseDoc,
+        composerMode: 'edit',
+      }),
+    )
+    useLoopGraphStore.setState({
+      document: { ...baseDoc, composerMode: 'edit' },
+      composerDraft: 'tweak timeout',
+      authoringEngine: 'rules',
+      activeLoopId: 'loop_store',
+    })
+    useWorkbenchStore.setState({
+      client: {
+        sendLoopAuthoringTurn: send,
+        listLoopGraphs: vi.fn(async () => []),
+      } as never,
+      project: { projectId: 'proj' } as never,
+    })
+    await useLoopGraphStore.getState().sendAuthoringTurn()
+    expect(send.mock.calls[0]?.[2]).toMatchObject({ useProvider: false })
   })
 
   it('clears pending AI edit offer when draft revision changes', () => {

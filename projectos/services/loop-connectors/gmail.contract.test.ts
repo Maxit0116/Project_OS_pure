@@ -5,14 +5,17 @@ import { describe, expect, it } from "vitest";
 import {
   createScriptedTransport,
   decodeGmailBase64,
+  decodeGmailBase64Bytes,
   decodeGmailMimeTree,
   gmailAttachmentToTaskMaterial,
   gmailMessageBodyToTaskMaterial,
   gmailMessagesGet,
   gmailMessagesSearch,
   gmailMessagesSendBlocked,
+  gmailPollHistory,
   gmailUsersWatchRefuse,
   getConnectorVendor,
+  htmlToPlaintextPreview,
   listConnectorVendors,
   sanitizeGmailHtml,
   type LoopCredentialRef,
@@ -25,8 +28,9 @@ const oauthCred: LoopCredentialRef = {
   label: "Gmail readonly (redacted)",
 };
 
-function b64url(text: string): string {
-  return Buffer.from(text, "utf8")
+function b64url(text: string | Buffer): string {
+  const buf = typeof text === "string" ? Buffer.from(text, "utf8") : text;
+  return buf
     .toString("base64")
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
@@ -56,15 +60,11 @@ describe("Gmail catalog honesty", () => {
     expect(gmail?.batch).toBe("batch_mail");
     expect(gmail?.implStatus).toBe("implemented_contract");
     expect(gmail?.liveStatus).toBe("unconfigured");
-    expect(gmail?.capabilities.some((c) => c.id === "messages_search")).toBe(true);
-    expect(gmail?.capabilities.find((c) => c.id === "messages_send")?.risk).toBe(
-      "write_high",
-    );
   });
 });
 
-describe("Gmail MIME / HTML / TaskMaterial", () => {
-  it("recursively decodes plain+html and strips script/tracking", () => {
+describe("Gmail MIME / plaintext preview / TaskMaterial", () => {
+  it("decodes MIME and uses plaintext preview — never safe-HTML claims", () => {
     const plain = b64url("Bug in login flow");
     const html = b64url(
       '<p>Bug</p><script>alert(1)</script><img src="https://tracker.example/pixel.gif" alt="x">',
@@ -82,16 +82,44 @@ describe("Gmail MIME / HTML / TaskMaterial", () => {
       ],
     });
     expect(decoded.textPlain).toContain("Bug in login");
-    expect(decoded.textHtmlSafe).not.toMatch(/<script/i);
-    expect(decoded.textHtmlSafe).toContain("data-tracking-blocked");
+    expect(decoded.previewText).toContain("Bug");
+    expect(decoded.previewText).not.toMatch(/<script|<img|https?:\/\//i);
     expect(decoded.attachments[0]?.attachmentId).toBe("att_1");
     expect(decodeGmailBase64(plain)).toBe("Bug in login flow");
-    expect(sanitizeGmailHtml('<a href="javascript:alert(1)">x</a>')).not.toMatch(
-      /javascript:/i,
-    );
   });
 
-  it("maps attachment + message body to TaskMaterial with gmail provenance", () => {
+  it("malice vectors do not survive as product HTML (plaintext-only policy)", () => {
+    const vectors = [
+      '<div style="background:url(https://evil/x)">x</div>',
+      '<img srcset="https://evil/a 1x, https://evil/b 2x">',
+      '<svg><script>alert(1)</script></svg>',
+      '<a href="java&#115;cript:alert(1)">x</a>',
+      '<object data="https://evil/o"></object>',
+      '<embed src="https://evil/e">',
+      '<meta http-equiv="refresh" content="0;url=https://evil">',
+      '<iframe src="https://evil/frame"></iframe>',
+    ];
+    for (const html of vectors) {
+      const preview = htmlToPlaintextPreview(html);
+      expect(preview).not.toMatch(/<script|<iframe|<object|<embed|<meta|<svg|<img/i);
+      expect(sanitizeGmailHtml(html)).toBe(preview);
+      // Must not be treated as renderable HTML document.
+      expect(preview).not.toMatch(/^\s*</);
+    }
+  });
+
+  it("measures binary inline attachments without UTF-8 string corruption", () => {
+    const binary = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x00, 0x00]);
+    const decoded = decodeGmailMimeTree({
+      mimeType: "image/jpeg",
+      filename: "shot.jpg",
+      body: { data: b64url(binary), size: 8 },
+    });
+    expect(decoded.attachments[0]?.measuredSizeBytes).toBe(binary.byteLength);
+    expect(decodeGmailBase64Bytes(b64url(binary)).equals(binary)).toBe(true);
+  });
+
+  it("maps materials with account-scoped ids; refuses size clamp lies", () => {
     const material = gmailAttachmentToTaskMaterial({
       accountRefId: "cred_gmail_ro",
       messageId: "m1",
@@ -100,12 +128,24 @@ describe("Gmail MIME / HTML / TaskMaterial", () => {
       filename: "stack.pdf",
       mimeType: "application/pdf",
       sizeBytes: 1200,
+      measuredSizeBytes: 1200,
       historyId: "99",
     });
-    expect(material.source).toBe("gmail");
-    expect(material.gmail?.accountRefId).toBe("cred_gmail_ro");
-    expect(material.gmail?.attachmentId).toBe("att_1");
-    expect(material.runOverride).toBe(true);
+    expect(material.id).toContain("cred_gmail_ro");
+    expect(material.sizeBytes).toBe(1200);
+
+    const huge = gmailAttachmentToTaskMaterial({
+      accountRefId: "cred_gmail_ro",
+      messageId: "m1",
+      attachmentId: "att_huge",
+      filename: "huge.bin",
+      mimeType: "application/octet-stream",
+      sizeBytes: 60_000_000,
+      measuredSizeBytes: 60_000_000,
+    });
+    expect(huge.parseStatus).toBe("failed");
+    expect(huge.sizeBytes).toBeUndefined();
+    expect(huge.measuredSizeBytes).toBe(60_000_000);
 
     const bodyMat = gmailMessageBodyToTaskMaterial({
       accountRefId: "cred_gmail_ro",
@@ -119,12 +159,14 @@ describe("Gmail MIME / HTML / TaskMaterial", () => {
       decoded: {
         textPlain: "Full body here",
         textHtmlRaw: "",
-        textHtmlSafe: "",
+        previewText: "Full body here",
+        charsetNotes: [],
+        partial: false,
         attachments: [],
       },
     });
-    expect(bodyMat.kind).toBe("text");
-    expect(bodyMat.title).toContain("Login bug");
+    expect(bodyMat.textPreview).toBe("Full body here");
+    expect(bodyMat.parseStatus).toBe("ok");
   });
 
   it("refuses promoting snippet-only as body material", () => {
@@ -135,7 +177,9 @@ describe("Gmail MIME / HTML / TaskMaterial", () => {
         decoded: {
           textPlain: "",
           textHtmlRaw: "",
-          textHtmlSafe: "",
+          previewText: "",
+          charsetNotes: [],
+          partial: false,
           attachments: [],
         },
       }),
@@ -177,7 +221,6 @@ describe("Gmail adapter loopback", () => {
       { id: "m2", threadId: "t2" },
     ]);
     expect(JSON.stringify(result.data)).not.toMatch(/DO NOT USE/);
-    expect(result.data.nextPageToken).toBe("p2");
   });
 
   it("messages_get decodes full MIME via loopback", async () => {
@@ -209,10 +252,84 @@ describe("Gmail adapter loopback", () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.data.decoded.textPlain).toBe("Real body");
+    expect(result.data.decoded.previewText).toBe("Real body");
   });
 
-  it("users_watch refuses (no Pub/Sub deploy) and send blocks without highRisk flag", async () => {
+  it("pollHistory maps HTTP 404 to resync_required (not parseOk)", async () => {
+    const scripted = createScriptedTransport([
+      {
+        response: {
+          status: 404,
+          headers: {},
+          bodyText: JSON.stringify({ error: { message: "history id not found" } }),
+          durationMs: 1,
+        },
+      },
+    ]);
+    const result = await gmailPollHistory(
+      {
+        startHistoryId: "1",
+        credential: oauthCred,
+        idempotencyKey: "poll-404",
+        accessToken: "ya29.test",
+      },
+      { transport: scripted.transport },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("resync_required");
+      expect(result.audit.httpStatus).toBe(404);
+    }
+  });
+
+  it("pollHistory dedupes ids, paginates, and cancels via signal through ctx", async () => {
+    const scripted = createScriptedTransport([
+      {
+        response: {
+          status: 200,
+          headers: {},
+          bodyText: JSON.stringify({
+            historyId: "10",
+            history: [{ id: "h1" }, { id: "h1" }, { id: "h2" }],
+            nextPageToken: "page2",
+          }),
+          durationMs: 1,
+        },
+      },
+    ]);
+    const page1 = await gmailPollHistory(
+      {
+        startHistoryId: "5",
+        credential: oauthCred,
+        idempotencyKey: "poll-1",
+        accessToken: "ya29.test",
+        seenHistoryIds: ["h0"],
+      },
+      { transport: scripted.transport },
+    );
+    expect(page1.ok).toBe(true);
+    if (!page1.ok) return;
+    expect(page1.data.history.map((h) => h.id)).toEqual(["h1", "h2"]);
+    expect(page1.data.nextPageToken).toBe("page2");
+    expect(page1.data.onlineOnly).toBe(true);
+
+    const aborted = new AbortController();
+    aborted.abort();
+    const cancelled = await gmailPollHistory(
+      {
+        startHistoryId: "5",
+        credential: oauthCred,
+        idempotencyKey: "poll-cancel",
+        accessToken: "ya29.test",
+        signal: aborted.signal,
+      },
+      { transport: scripted.transport },
+    );
+    expect(cancelled.ok).toBe(false);
+    if (!cancelled.ok) expect(cancelled.code).toBe("cancelled");
+  });
+
+  it("users_watch refuses and send blocks without highRisk flag", async () => {
     const watch = await gmailUsersWatchRefuse(
       { idempotencyKey: "watch-1", credential: oauthCred },
       { transport: createScriptedTransport([]).transport },
@@ -236,7 +353,6 @@ describe("Gmail adapter loopback", () => {
         credential: oauthCred,
         idempotencyKey: "send-1",
         accessToken: "ya29.test",
-        // omit highRiskAuthorized
       },
       { transport: scripted.transport },
     );

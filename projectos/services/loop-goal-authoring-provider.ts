@@ -141,29 +141,64 @@ export function buildConnectorCapabilityContext(): string {
   return vendors
     .map((vendor) => {
       const caps = vendor.capabilities
-        .map(
-          (cap) =>
-            `${cap.id}(${cap.kind}/${cap.risk}/${vendor.implStatus})`,
-        )
-        .join(", ");
-      return `${vendor.id}: ${caps}`;
+        .map((cap) => {
+          const surface = cap.apiSurface ? ` api=${cap.apiSurface}` : "";
+          const notes = cap.notes ? ` notes=${cap.notes}` : "";
+          return `${cap.id}{kind:${cap.kind},risk:${cap.risk},impl:${vendor.implStatus}${surface}${notes}}`;
+        })
+        .join("; ");
+      return `${vendor.id} [${vendor.implStatus}/${vendor.liveStatus}]: ${caps}`;
     })
     .join("\n");
+}
+
+/** Compact authoritative response schema for the model (must match Zod). */
+export function buildAuthoringResponseSchemaDoc(): string {
+  return [
+    "RESPONSE_SCHEMA (exactly one object; additionalProperties forbidden):",
+    '{ "kind":"ask", "goal":string, "constraints"?:string[], "doneWhen"?:string[], "outOfScope"?:string[], "openQuestions"?:{question,options?}[], "assistantMessage":string }',
+    '{ "kind":"node_patch", "nodeId":existingId, "patch":{allowedNodeFields}, "summary":string, "assistantMessage"?:string }',
+    '{ "kind":"graph", "draft":IntentGraph{revision,graphPrompt,nodes[],edges[]}, "summary":string, "targetedNodeIds"?:string[], "assistantMessage"?:string }',
+    '{ "kind":"clarify", "openQuestions":[{question,options?},…1..6], "assistantMessage":string }',
+    '{ "kind":"reject", "code":"unknown_connector"|"unknown_field"|"invalid_patch"|"insufficient_context", "message":string }',
+  ].join("\n");
+}
+
+/** Node / edge field constraints the model may patch — mirrors validateLoopNodeConfig. */
+export function buildAuthoringNodeFieldSchemaDoc(): string {
+  return [
+    "NODE_FIELDS (patch/graph nodes): id(stable), title, prompt, type(agent|human|action|logic),",
+    "  agentRole?, humanMode?, humanAssignee?, humanAllowedActions?,",
+    "  actionIntegration?(catalog vendor id), actionOperation?(catalog capability id),",
+    "  credentialRefId?, actionParams?(≤32 scalar keys; must match capability — never invent keys),",
+    "  logicKind?(condition|loop|merge|exit|retry|wait), maxIterations?, retryLimit?, waitMs?,",
+    "  timeoutMs?, position{x,y}. Do not rename/delete untargeted ids or edges.",
+    "EDGES: id, source, target, kind(depends|…). Preserve untargeted edges exactly.",
+  ].join("\n");
 }
 
 export function buildAuthoringSystemPrompt(): string {
   return [
     "You author Project OS Loops IntentGraphs.",
-    "Return ONE JSON object matching the response schema (kind: ask|node_patch|graph|clarify|reject).",
-    "Never invent connectors, capability ids, or parameter keys outside the provided catalog.",
+    "Return ONE JSON object that validates against RESPONSE_SCHEMA below.",
+    "Never invent connectors, capability ids, or parameter keys outside the catalog.",
     "Never claim credentials exist. Configured ≠ authorized to run.",
     "For local edits, prefer kind=node_patch and preserve all non-target node ids, edges, and manual fields.",
     "If information is missing, use kind=clarify — do not guess.",
     "Generation/edit never executes the loop.",
     "",
-    "Connector catalog (trusted):",
+    buildAuthoringResponseSchemaDoc(),
+    "",
+    buildAuthoringNodeFieldSchemaDoc(),
+    "",
+    "CONNECTOR_CATALOG (trusted; capability params must match apiSurface/notes — no invented keys):",
     buildConnectorCapabilityContext(),
   ].join("\n");
+}
+
+/** UI/assistant facing — never leak Zod issue dumps or provider raw JSON. */
+export function redactAuthoringProviderError(_error: unknown): string {
+  return "Provider response did not match the Loop authoring schema. Retry with a valid JSON object.";
 }
 
 export function buildAuthoringUserPrompt(input: {
@@ -256,12 +291,11 @@ export async function runLoopAuthoringProvider(input: {
   try {
     parsed = LoopAuthoringProviderResponseSchema.parse(extractJsonObject(raw));
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Invalid provider authoring JSON";
+    const message = redactAuthoringProviderError(error);
     return {
       source: "provider",
       steps,
-      assistantMessage: `Provider response rejected: ${message}`,
+      assistantMessage: message,
       rejected: { code: "invalid_patch", message },
     };
   }
@@ -338,13 +372,16 @@ export async function runLoopAuthoringProvider(input: {
       parsed.patch as IntentGraphNodePatch,
     );
     if (!applied.ok) {
+      const safe = applied.issues
+        .map((i) => `${i.path}: ${i.code}`)
+        .join("; ");
       return {
         source: "provider",
         steps,
-        assistantMessage: `Rejected node patch: ${applied.issues.map((i) => i.message).join("; ")}`,
+        assistantMessage: `Rejected node patch (${safe || "invalid_patch"})`,
         rejected: {
           code: applied.issues[0]?.code ?? "invalid_patch",
-          message: applied.issues.map((i) => i.message).join("; "),
+          message: safe || "invalid_patch",
         },
       };
     }

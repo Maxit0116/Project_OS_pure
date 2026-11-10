@@ -1,6 +1,6 @@
 # Loops Graph · Gaps Closure DevPlan
 
-**状态**：Implementing（2026-11-10）。本文件是对照成熟 Human-in-the-Loop Workflow 参考图后的**缺口补全总控计划**；授权按 Phase GC-* 切片实现。GC-0–GC-3、GC-4、GC-5、GC-6.1/6.2/6.3/6.4、GC-7.1 主体已落地；GC-6.5/6.6 与 GC-7.2 总勾选待收尾（见 §13）。  
+**状态**：Implementing（2026-11-10）。本文件是对照成熟 Human-in-the-Loop Workflow 参考图后的**缺口补全总控计划**；授权按 Phase GC-* 切片实现。GC-0–GC-3、GC-4、GC-5、GC-6.1/6.2/6.3/6.4、GC-7.1 主体已落地；GC-6.5/6.6 与 GC-7.2 总勾选待收尾（见 §13）。**诚实声明：主体落地 ≠ GC 全勾 / 发布门禁已通过**——总验收清单未收尾前不得交验。  
 **范围**：补齐 Sequence / Parallel / Branch / Loop / Gate / Recovery 六机制，以及成熟 Workflow System 必备的可靠性、可观测性、触发与治理能力；复用现有 Agent Runtime / Harness / Verification，**不**另起编排引擎，**不**做成通用 iPaaS。  
 **产品定位一句话**：把已有「可编译、可批准、可步进」的 Loop Graph，升级为参考图级的工程工作流系统——控制流完备、失败可恢复、运行可看见、人可介入。
 

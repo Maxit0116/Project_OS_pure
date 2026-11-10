@@ -3,6 +3,7 @@
 **状态**：Design freeze draft（2026-10-20）。**仅文档**；本计划不授权开始实现切片，直到 Phase 0 检查清单关闭。  
 **范围**：在复用现有 Agent Runtime / Harness / Verification / Function Map 的前提下，把已有 Loop Graph 提升为可定义、可批准、可运行、可恢复、可重规划、可与 C4 / Agent Flow / Session Graph 联动的工作流系统。  
 **产品定位一句话**：Loops Graph 是面向代码 Agent 的可视化闭环编排器——定义可批准工作流，执行绑定真实 AgentRun 与 VerificationEvidence；不是通用 iPaaS，也不是第二张 C4。  
+**UI 诚实澄清（2026-11-10）**：文首/D3/LG-1.1 仍写「固定侧栏 Inspector」；现行落地以 [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) 的 **DutyCard（节点旁浮动）** 为准。旧 Studio 侧栏描述 **未授权当已验收**，与 DutyCard **冲突时以 Visual Authoring + 实机 DOM 为准**。  
 **与已有计划的关系**：
 
 | 文档 | 关系 |

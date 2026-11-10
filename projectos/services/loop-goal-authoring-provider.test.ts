@@ -12,7 +12,11 @@ import {
   undoLoopDraft,
   upsertLoopGraph,
 } from "./loop-graph-service.js";
-import { createLoopbackAuthoringComplete } from "./loop-goal-authoring-provider.js";
+import {
+  buildAuthoringSystemPrompt,
+  createLoopbackAuthoringComplete,
+  redactAuthoringProviderError,
+} from "./loop-goal-authoring-provider.js";
 
 describe("loop authoring provider path (loopback)", () => {
   const roots: string[] = [];
@@ -29,6 +33,19 @@ describe("loop authoring provider path (loopback)", () => {
     roots.push(root);
     return root;
   }
+
+  it("system prompt includes response + node field schemas and catalog surfaces", () => {
+    const prompt = buildAuthoringSystemPrompt();
+    expect(prompt).toMatch(/RESPONSE_SCHEMA/);
+    expect(prompt).toMatch(/NODE_FIELDS/);
+    expect(prompt).toMatch(/node_patch/);
+    expect(prompt).toMatch(/actionIntegration/);
+    expect(prompt).toMatch(/gmail/);
+    expect(prompt).toMatch(/api=/);
+    expect(redactAuthoringProviderError(new Error('["path","Zod raw"]'))).not.toMatch(
+      /Zod|path/,
+    );
+  });
 
   it("node_patch changes one timeout and preserves sibling id/edge/manual fields", async () => {
     const root = tempRoot();

@@ -31,6 +31,8 @@ export default function LoopGoalComposer() {
   const composerDraft = useLoopGraphStore((s) => s.composerDraft)
   const composerSheet = useLoopGraphStore((s) => s.composerSheet)
   const authoringBusy = useLoopGraphStore((s) => s.authoringBusy)
+  const authoringEngine = useLoopGraphStore((s) => s.authoringEngine)
+  const setAuthoringEngine = useLoopGraphStore((s) => s.setAuthoringEngine)
   const setComposerDraft = useLoopGraphStore((s) => s.setComposerDraft)
   const toggleComposerSheet = useLoopGraphStore((s) => s.toggleComposerSheet)
   const setComposerMode = useLoopGraphStore((s) => s.setComposerMode)
@@ -502,6 +504,27 @@ export default function LoopGoalComposer() {
           </div>
           <div className={styles.footer}>
             <div className={styles.leftCluster}>
+              <Chip
+                active={authoringEngine === 'provider'}
+                className={styles.modeChip}
+                aria-label={ts('chat.loopGraph.authoringEngine')}
+                title={
+                  authoringEngine === 'provider'
+                    ? ts('chat.loopGraph.engineProviderHint')
+                    : ts('chat.loopGraph.engineRulesHint')
+                }
+                disabled={authoringBusy}
+                onClick={() =>
+                  setAuthoringEngine(authoringEngine === 'provider' ? 'rules' : 'provider')
+                }
+                data-testid="loop-authoring-engine"
+              >
+                <span>
+                  {authoringEngine === 'provider'
+                    ? ts('chat.loopGraph.engineProvider')
+                    : ts('chat.loopGraph.engineRules')}
+                </span>
+              </Chip>
               <div className={styles.menuWrap} ref={modeMenuRef}>
                 <Chip
                   active={modeMenuOpen}

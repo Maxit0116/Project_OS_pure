@@ -82,6 +82,8 @@ S0  Security gates (high-risk / no blind POST retry / redaction / catalog_only)
 S1  权威文档 + 验收矩阵同步（本文件 + Tracking）  [本提交]
         ↓
 S2  共用 Input / Run 契约（TaskMaterial + RunBinding；与 LoopInstance 字段对齐）
+        【初版 contract 已入库：`contracts/loop-task-materials.ts` + preflight/start 接线；
+          完整产品 UI / 项目手动 E2E / 多格式解析仍属后续 — 勿把 schema 当 S2 全勾】
         ↓
 S3  项目手动启动「实现页面」流程 + 首批材料（文字 + 项目引用 + 基础附件元数据）
         ↓
@@ -145,8 +147,8 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | ID | 验收项 | 状态 | 证据 |
 |----|--------|------|------|
 | PW-1 | 项目内选择已保存流程并启动 | 计划 | — |
-| PW-2 | Run 绑定 project/repo/workspace/branch/codeDigest/specVersion | 部分实现 / 待验 | Instance.specVersion **已有**；完整 RunBinding **计划** |
-| PW-3 | 预检：缺配置 / 分支 / Agent / 审批点列表，确认后才开跑 | 计划 | 审批通过 ≠ 开跑（产品规则已写） |
+| PW-2 | Run 绑定 project/repo/workspace/branch/codeDigest/specVersion | **contract 初版** / 产品路径待验 | LocalApi start 接线 RunBinding 子集；完整字段 **未齐** |
+| PW-3 | 预检：缺配置 / 分支 / Agent / 审批点列表，确认后才开跑 | **contract 初版**（start preflight） / UI 待验 | `loop-local-api-start-preflight`；审批通过 ≠ 开跑 |
 | PW-4 | 隔离工作区编码+测试+人工；产出 Diff/TestReport/Preview 或 PR | 部分实现 / live未验 | AgentRun + Verify + GitHub settle **契约/已有**；项目手动 E2E **待验** |
 | PW-5 | 失败保留证据可续；cancel/recover | 部分实现 | checkpoint / cancel **已有已测**；项目路径 **待验** |
 | PW-6 | 编辑定义不污染运行中 Instance 快照 | 实现（底座） / 待验（产品路径） | Spec 冻结 D5/GC-D8 |
@@ -157,13 +159,13 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 
 | ID | 验收项 | 状态 | 证据 |
 |----|--------|------|------|
-| TM-1 | 文字任务描述 | 计划（composer 文字存在但非 TaskMaterial） | — |
+| TM-1 | 文字任务描述 | **contract 初版**（schema+Gmail body→material）；产品卡片 UI **待验** | `loop-task-materials` + gmail adapter |
 | TM-2 | 图片用途标注 + 不支持提示 | 计划 | — |
-| TM-3 | 文件/API/log 卡片 + 解析状态 | 计划 | — |
+| TM-3 | 文件/API/log 卡片 + 解析状态 | **contract 初版**（parseStatus/measuredSize/charset/partial）；UI **待验** | schema fields |
 | TM-4 | CSV/XLSX sheet/列/范围 + 角色 | 计划 | — |
-| TM-5 | URL 来源 + 鉴权/读取失败 + SSRF 默认拒内网 | 计划（策略须合同测） | bugs H3 教训 |
+| TM-5 | URL 来源 + 鉴权/读取失败 + SSRF 默认拒内网 | **contract**（`loop-url-fetch-policy`）；生产读取 **未接** | bugs H3 |
 | TM-6 | 项目文件/C4/测试引用免重复上传 | 计划（C4 引用底座已有） | — |
-| TM-7 | 增删替换 / 保存重开 / run 覆盖不改定义 | 计划 | — |
+| TM-7 | 增删替换 / 保存重开 / run 覆盖不改定义 | 计划（Electron Overlay 保存重开节点 **已截**；材料卡路径 **未验**） | — |
 | TM-8 | 材料变化提示重审；不机械全图重跑 | 计划 | — |
 
 ### 4.3 双入口 / 安全 / 连接器（交叉回归）
@@ -217,3 +219,4 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | 日期 | 变更 |
 |------|------|
 | 2026-11-10 | 初版：增量 A/B 全范围、阶段依赖、契约、验收矩阵；与 Studio/GC/Six-Goals/bugs 互链 |
+| 2026-11-10 | S2→**contract 初版**（非全勾）；PW-2/3、TM-1/3/5 状态对齐实现；材料 UI/E2E 仍待验 |

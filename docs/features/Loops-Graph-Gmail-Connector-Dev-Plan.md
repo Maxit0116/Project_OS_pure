@@ -56,10 +56,10 @@
 | `messages_get` | `users.messages.get` format=full；递归 MIME plain/HTML 解码；**list snippet ≠ body** | 实现 / contract |
 | `threads_get` | `users.threads.get` 完整线程正文 | 实现 / contract |
 | `attachments_get` | 附件按 MIME/大小映射 TaskMaterial；记录 `accountRef` / message / thread / attachment 来源与 **run 快照** | 实现 / contract |
-| `poll_history` | **在线轮询** `history.list`；明确「仅应用在线」；去重 / 分页 / 429 Retry-After 退避 / 取消 / scope 不足；**不得**声称全天监听 | 计划→实现（首期 stub+契约） |
+| `poll_history` | **在线轮询** `history.list`；明确「仅应用在线」；去重 / 分页 / 429 Retry-After 退避 / 取消 / scope 不足；**不得**声称全天监听；HTTP **404** 在 production `http_error` 路径 remap → `resync_required`（discard cursor / full sync），**不是**完整轮询器 | **实现/contract（loopback）**；真实账号 **未接** |
 | `users_watch` / PubSub push | `users.watch` → Pub/Sub → `history.list` → 读信；≥7 日续订（官方建议每日）；expiration / historyId；乱序重复漏通知；404 → 全量重同步 | **计划**；首期**不部署** Pub/Sub / 云服务 |
 
-**安全 HTML**：净化后展示；**不**执行脚本、**不**自动加载跟踪像素。
+**预览策略（诚实）**：产品预览为 **plaintext-only**（`sanitizeGmailHtml` 已降级为去标签纯文本别名，**命名≠安全证明**）。**不**渲染 HTML、**不**执行脚本、**不**加载远程图/跟踪像素；MIME 二进制用 `Buffer` 测真实 `measuredSizeBytes`，禁止用 `Math.min(50M)` 伪造长度；正文/附件经 `gmail://…` `contentRef` + `resolveGmailMaterialContent` 按账号作用域取回。
 
 ---
 
@@ -101,12 +101,13 @@
 |------|------|------|----------|------------|---------------|
 | 文档互链 + scope/push 矩阵 | ✓ 本文件 | — | — | — | — |
 | catalog `gmail` + readonly caps | ✓ | 本流 | 本流 | ✗ | ✗ |
-| MIME / TaskMaterial 映射 | ✓ | 本流 | 本流 | ✗ | ✗ |
+| MIME / TaskMaterial 映射 | ✓ | 本流（charset/partial/measuredSize 透明；非全 MIME 宣称） | 本流 | ✗ | ✗ |
+| poll_history 404→resync + signal | ✓ | 本流（production error 路径） | 本流 | ✗ | ✗ |
 | OAuth / PKCE / 真邮箱 | ✓ 边界 | ✗ | ✗ | ✗ | ✗ |
 | Pub/Sub watch | ✓ 边界 | ✗ | ✗ | ✗ | ✗ |
 | 发送审批 | ✓ 边界 | ✗ | ✗ | ✗ | ✗ |
 
-**Mock ≠ 接通。** 不得把本文件回溯进 5814430。
+**Mock ≠ 接通。** 开发只读适配 ≠ 授权连接邮箱。不得把本文件回溯进 5814430。
 
 ---
 
@@ -115,3 +116,4 @@
 | 日期 | 说明 |
 |------|------|
 | 2026-11-10 | 初版：Terran 确认加入当前 Auto 流；只读首期 + 发送/push 边界；官方 scopes/push/sync 核实；与 PW/TM/Six-Goals 互链 |
+| 2026-11-10 | 安全预览改为 plaintext-only；poll_history 404 生产 remap；MIME/材料链诚实边界 |

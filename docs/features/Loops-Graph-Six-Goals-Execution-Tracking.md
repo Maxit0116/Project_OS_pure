@@ -38,9 +38,9 @@
 
 | 项 | 事实 | 状态 |
 |----|------|------|
-| Heuristic vs LLM | 默认同 `*Heuristic`；`sendLoopAuthoringTurnAsync` + injectable provider（ModelGateway 可接） | provider **contract**（loopback）；**live未验** |
-| Workflow + 选中节点上下文 | Provider prompt 含全 draft + `selectedNodeId`；heuristic **不消费**选中 | provider **contract** |
-| 局部 patch / ID 保留 | `applyIntentNodePatch` / `mergePreservingUntargeted` + Accept/Undo/stale | **contract** |
+| Heuristic vs LLM | **默认 `authoringEngine=provider`**（Composer chip 显式；rules 须用户点选）→ store → IPC → LocalApi `useProvider:true` → ModelGateway；无配置 **fail-closed**；rules=`useProvider:false` | provider **contract** + 用户入口路径测；**live未验** |
+| Workflow + 选中节点上下文 | Provider prompt 含 RESPONSE_SCHEMA + NODE_FIELDS + catalog `api=`；全 draft + `selectedNodeId`；rules **不消费**选中 | provider **contract** |
+| 局部 patch / ID 保留 | `applyIntentNodePatch` / `mergePreservingUntargeted` + Accept/Undo/stale；错误脱敏（无 Zod/provider 原文渗 UI） | **contract** |
 | 真实 provider 三轮 | 无自动读 key / 无付费 live | **live未验**（外部缺口） |
 
 ---
@@ -49,9 +49,9 @@
 
 | 切片 | 状态 |
 |------|------|
-| PW Project run binding / 预检 / 项目手动 E2E | **计划**（底座 Spec/Instance 已有） |
-| TM TaskMaterial schema + Pure 输入复用 | **计划** |
-| URL SSRF 默认拒内网 | **计划**（须 contract；对齐 bugs H3） |
+| PW Project run binding / 预检 / 项目手动 E2E | **S2 contract 初版**（RunBinding 子集 + start preflight）；项目手动 E2E / 完整绑定 **未齐** |
+| TM TaskMaterial schema + Pure 输入复用 | **S2 contract 初版**（schema + Gmail→material）；Pure 材料卡 UI **待验** |
+| URL SSRF 默认拒内网 | **contract**（`loop-url-fetch-policy`）；生产读取未接 |
 | 离线事件全天排队 | **未实现**（不可承诺） |
 
 ---
@@ -63,8 +63,10 @@
 | High-risk / catalog_only 强制 | **contract** |
 | 非幂等 POST 不盲重试；timeout/abort unknown；ledger | **contract** |
 | URL/header/body 脱敏 + fake-secret | **contract** |
-| Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现** / 真实 DOM **待验** |
+| Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现**；云端 Electron Overlay+DutyCard **已截**（见证据）；保存重开节点保留 **已截**；浅色主题切换 **已截** |
 | LocalApi→adapter→loopback settle | **实现**/contract 路径；live未验 |
+| Studio 旧「固定侧栏 Inspector」文首 vs DutyCard | **冲突未消**：Studio D3/LG-1.1 仍写侧栏；现行 UI 为 Overlay 内 DutyCard / Inspector empty hint——**不以旧 Studio 文首当已验收** |
+| GC 总勾选 / 发布门禁 | **未全勾**：GC-6.5/6.6、GC-7.2 总验收待收尾；**不得**宣称 GC 门禁已通过 |
 
 ---
 
@@ -74,33 +76,36 @@
 |------|------|
 | 文档 scope/push/sync 矩阵 + Limited Use | **计划权威**（本仓新文件） |
 | catalog + messages_search/get / threads_get / attachments→TM | **实现/contract**（loopback；无真邮箱） |
-| 在线 poll_history（非全天监听） | **计划/部分** |
+| 预览 plaintext-only（非 HTML sanitize 宣称） | **实现/contract** |
+| 在线 poll_history（非全天监听；404→resync_required） | **实现/contract（loopback）**；非完整轮询器 |
 | users.watch → Pub/Sub | **计划**；首期不部署 |
 | 发送审批 / compose | **计划**；默认关 |
-| 真实 Gmail / OAuth live | **未配置 / 未验** |
+| 真实 Gmail / OAuth live | **未配置 / 未验**（只读开发 ≠ 授权连邮箱） |
 
 ---
 
 ## 验证闸（每推送更新）
 
 ```text
-# 近期 Loops 发现集示例（以当次命令输出为准）
-npx vitest run services/loop-* workbench/src/components/LoopGraph
-# 记录：Test Files / Tests / exit
-# tsc --noEmit：目标不引入 loop-* 新回归；近期基线约 160 error TS（仓库既有债）
+# 发现命令（完整；遗漏见 /opt/cursor/artifacts/vitest-discovery-command.txt）
+cd projectos
+env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=1 \
+  services/loop- services/loop-connectors contracts/loop- \
+  workbench/src/components/LoopGraph workbench/src/state/loop \
+  client/mock-loop-graph-store.test.ts
+# 遗漏相对全仓 `npm test`：desktop e2e、非 loop* services/contracts、live Gmail/ModelGateway、SaaS OAuth
 ```
 
 近期本地闸（实现切片，非文档完成；以当次命令为准）：
 ```text
-npx vitest run --maxWorkers=1 --minWorkers=1 \
-  services/loop- services/loop-connectors contracts/loop- \
-  workbench/src/components/LoopGraph workbench/src/state/loop \
-  client/mock-loop-graph-store.test.ts
-# → Test Files 40 passed / Tests 203 passed
-# projectos tsc --noEmit：约 22 error TS（仓库既有债；gmail adapter 无新增回归）
-# workbench npm run build：tsc -b 仍失败于既有 xmlns/OrbState/ParentBatchAuth 等（基线，未抹）
+# → Test Files 40 passed / Tests 209 passed（exit 0）
+# projectos tsc --noEmit -p tsconfig.json：22 error TS
+#   pristine 对照（同目录同命令 @ b0f4436 工作树暂存前后）：同为 22 / 同文件集 — 不证明消除基线债；本切片无新增
+# workbench npm run build：仍失败（xmlns / OrbState / ParentBatchAuth 等基线，未抹）exit 1
 ```
 
-**DOM 开链（云端 Linux）**：Vite 真实 Welcome（含打开示例入口）light/dark/键盘 **已截**；Overlay/DutyCard 需 Electron LocalApi host——Vite 不能打包 Node LocalApi（`node:fs`→500），桌面 `electron` 依赖本环境未完整装好/未跑主进程，**Overlay 真 DOM 待 Electron host**。
+**DOM 开链（云端 Linux xvfb，非 Mac）**：`electron-vite build` + `npx electron . --remote-debugging-port=9222` 真下 LocalApi host；Welcome→打开示例→Loop 图 Overlay→添加节点→DutyCard；light 主题与关闭重开 **真实截图**（`/opt/cursor/artifacts/loops-electron-*.png`）。Vite `node:fs` 失败 **不是** Electron 不可跑证据。
+
+**graph 只读分叉**（不 rebase/merge）：`HEAD...origin/graph` = 12 ahead / 22 behind；tip `34af374`；merge-base `bec3dd7`。graph 自 MB 重叠 loops 路径仅 `loop-runtime-service` / roles test / Overlay xmlns 删 / ReviewPathMap xmlns 删——**无** gmail/authoring/materials 碰撞；集成时注意 Overlay/runtime 手工合并。
 
 No merge / paid live / Mac / 真实外发 / 真 Gmail。

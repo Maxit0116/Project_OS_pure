@@ -105,7 +105,18 @@ export const LoopTaskMaterialSchema = z
     /** When true, applies only to this run and must not write back to definition. */
     runOverride: z.boolean().optional(),
     sizeBytes: z.number().int().nonnegative().max(50_000_000).optional(),
+    /**
+     * Measured byte length when known (may differ from provider-declared size).
+     * Never silently clamp declared size to pretend compliance.
+     */
+    measuredSizeBytes: z.number().int().nonnegative().max(100_000_000).optional(),
+    /**
+     * Capped plaintext preview for run UI — not a substitute for contentRef bytes.
+     * HTML bodies must be reduced to plain text before landing here.
+     */
+    textPreview: z.string().max(8_000).optional(),
     mimeType: z.string().trim().min(1).max(120).optional(),
+    charset: z.string().trim().min(1).max(40).optional(),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1).optional(),
   })

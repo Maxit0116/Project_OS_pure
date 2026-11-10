@@ -124,7 +124,9 @@ export type LoopConnectorErrorCode =
   | "high_risk_disabled"
   | "notify_only"
   | "transport_error"
-  | "http_error";
+  | "http_error"
+  /** Gmail history.list startHistoryId expired — caller must full-resync cursor. */
+  | "resync_required";
 
 export type LoopConnectorResult<T = unknown> =
   | {

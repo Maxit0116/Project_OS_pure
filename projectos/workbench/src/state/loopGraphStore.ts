@@ -54,6 +54,13 @@ export type LoopPhase = 'draw' | 'review' | 'run'
 /** Mutual-exclusive bookmark sheet above the goal composer. */
 export type LoopComposerSheet = 'none' | 'flow' | 'context' | 'clarify'
 
+/**
+ * Authoring engine for the user prompt entry.
+ * - provider (default): LocalApi → ModelGateway (useProvider:true); fails closed if unconfigured
+ * - rules: explicit heuristic / non-AI path (useProvider:false); must be user-selected
+ */
+export type LoopAuthoringEngine = 'provider' | 'rules'
+
 function sheetAfterAskTurn(document: LoopGraphDocument): LoopComposerSheet {
   const needsClarify = document.draftGoalContext?.openQuestions.some(
     (question) => !question.answer?.trim(),
@@ -80,6 +87,8 @@ interface LoopGraphStore {
   composerDraft: string
   composerSheet: LoopComposerSheet
   authoringBusy: boolean
+  /** Default provider; rules only when user explicitly selects. */
+  authoringEngine: LoopAuthoringEngine
   /** Canvas selection for AI Edit context (DutyCard / Overlay). */
   canvasSelectedNodeId: string | null
 
@@ -96,6 +105,7 @@ interface LoopGraphStore {
   setPendingDelete: (target: LoopDeleteTarget | null) => void
   setComposerDraft: (value: string) => void
   setCanvasSelectedNodeId: (nodeId: string | null) => void
+  setAuthoringEngine: (engine: LoopAuthoringEngine) => void
   /** Open a sheet, or collapse it if already open (bookmark toggle). */
   toggleComposerSheet: (sheet: Exclude<LoopComposerSheet, 'none'>) => void
   setComposerSheet: (sheet: LoopComposerSheet) => void
@@ -235,6 +245,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   composerDraft: '',
   composerSheet: 'none',
   authoringBusy: false,
+  authoringEngine: 'provider',
   canvasSelectedNodeId: null,
   runHistory: [],
 
@@ -259,6 +270,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       composerDraft: '',
       composerSheet: 'none',
       authoringBusy: false,
+      authoringEngine: 'provider',
     })
   },
 
@@ -270,6 +282,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
 
   setComposerDraft: (value) => set({ composerDraft: value }),
   setCanvasSelectedNodeId: (nodeId) => set({ canvasSelectedNodeId: nodeId }),
+  setAuthoringEngine: (engine) => set({ authoringEngine: engine }),
 
   setComposerSheet: (sheet) => set({ composerSheet: sheet }),
 
@@ -312,13 +325,14 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     set({ authoringBusy: true, composerSheet: 'flow', error: null })
     try {
       const selectedNodeId = get().canvasSelectedNodeId ?? undefined
+      // Default engine is provider → useProvider:true on the real IPC/LocalApi path.
+      // Rules mode is explicit user choice (heuristic); never silent fallback.
+      const useProvider = get().authoringEngine !== 'rules'
       const next = await client.sendLoopAuthoringTurn(project.projectId, loopId, {
         mode: document.composerMode ?? 'ask',
         text,
         ...(selectedNodeId ? { selectedNodeId } : {}),
-        // Prefer provider. LocalApi refuses silent heuristic when useProvider is true
-        // and no model/loopback complete is configured (honest failure, not fake AI).
-        useProvider: true,
+        useProvider,
       })
       const heads = await client.listLoopGraphs(project.projectId)
       set({
