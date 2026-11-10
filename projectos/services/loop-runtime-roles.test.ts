@@ -266,6 +266,11 @@ describe("loop-runtime agent roles", () => {
               status: "running" as const,
               cursorNodeId: conditionId,
               hitlQuestionIds: [],
+              // The runtime tracks completion per node: a test report alone leaves the test node "ready"
+              // and sends the cursor back to run it. A real run leaves it succeeded.
+              nodeRecords: (item.nodeRecords ?? []).map((record) =>
+                record.nodeId === "n_test" ? { ...record, status: "succeeded" as const } : record,
+              ),
               artifacts: [
                 ...(item.artifacts ?? []),
                 {

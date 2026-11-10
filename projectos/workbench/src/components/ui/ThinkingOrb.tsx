@@ -4,8 +4,11 @@ import styles from './ThinkingOrb.module.css'
 
 export type { OrbSize, OrbState, OrbTheme }
 
+/** The library's animation states plus the resting and finished states this marker also shows. */
+export type ActivityOrbState = OrbState | 'error' | 'failed' | 'complete' | 'idle'
+
 interface Props {
-  state?: OrbState
+  state?: ActivityOrbState
   size?: OrbSize
   theme?: OrbTheme
   speed?: number

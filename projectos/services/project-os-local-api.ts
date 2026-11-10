@@ -2736,7 +2736,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
     const deps = {
       gateway: this.modelGateway,
-      profile,
+      profile: profile ?? null,
       projectId,
       mode,
       callsUsedToday: Math.max(0, request.callsUsedToday ?? 0),
@@ -2794,7 +2794,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
     return judgeRouteSuggestion(request.prompt, request.suggestion, recordsById, {
       gateway: this.modelGateway,
-      profile,
+      profile: profile ?? null,
       projectId,
       mode,
       callsUsedToday: Math.max(0, request.callsUsedToday ?? 0),
@@ -2808,9 +2808,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   ): Promise<import("../contracts/chat-session.js").ChatSessionRecord | null> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { getChatSession, upsertChatSession } = await import("./chat-session-service.js");
-    const { summarizeChatSessionContextForRecord } = await import(
-      "./chat-session-title-summarize.js"
-    );
     const {
       buildForkedChatSession,
       deriveSessionContextDigest,

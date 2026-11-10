@@ -324,7 +324,7 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
           type="button"
           className={styles.delegationSummary}
           onClick={() => {
-            const target = runningStep ?? steps[steps.length - 1]
+            const target = steps.find((step) => step.status === 'running') ?? steps[steps.length - 1]
             if (target) setSelectedFlowStepId(target.id)
           }}
           data-delegation-summary

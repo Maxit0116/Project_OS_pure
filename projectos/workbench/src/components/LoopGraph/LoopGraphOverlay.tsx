@@ -927,7 +927,6 @@ export default function LoopGraphOverlay() {
                                 pointerEvents="none"
                               >
                                 <div
-                                  xmlns="http://www.w3.org/1999/xhtml"
                                   className={`${styles.edgeLabelChip} ${
                                     incomplete ? styles.edgeLabelChipPending : ''
                                   }`}

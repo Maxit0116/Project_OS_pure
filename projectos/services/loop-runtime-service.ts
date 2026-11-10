@@ -2176,10 +2176,20 @@ export function restoreLoopInstanceFromCheckpoint(
   return upsertLoopGraph(workspaceRoot, nextDoc);
 }
 
+/**
+ * A run in the history list. The optional fields are left out when empty (not set to undefined), which is
+ * how the API and its clients declare them.
+ */
+export type LoopRunHistoryItem = Pick<LoopInstance, "id" | "status" | "specVersion" | "startedAt" | "round"> & {
+  completedAt?: string;
+  launch?: NonNullable<LoopInstance["launch"]>;
+  errorMessage?: string;
+};
+
 export function listLoopRunHistory(
   workspaceRoot: string,
   loopId: string,
-): Array<Pick<LoopInstance, "id" | "status" | "specVersion" | "startedAt" | "completedAt" | "round" | "launch" | "errorMessage">> {
+): LoopRunHistoryItem[] {
   const doc = getLoopGraph(workspaceRoot, loopId);
   if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
   return [...doc.instances]

@@ -66,7 +66,7 @@ describe('cancel / Stop product DOM + state regressions (unpaid)', () => {
     )
     expect(after.flowStatus).toBe('cancelled')
     expect(after.revokedApplyRunIds).toContain('run_root')
-    expect(after.flowSteps[0]?.status).toBe('skipped')
+    expect(after.flowSteps?.[0]?.status).toBe('skipped')
   })
 
   it('operation_cancelled surfaces Stop copy, not orchestration-failed', () => {

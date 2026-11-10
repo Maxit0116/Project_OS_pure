@@ -5,6 +5,7 @@ import type { SessionSweepCandidate, SessionSweepPlan, SessionSweepReason } from
 import type {
   SessionTidyActionKind,
   SessionTidyCluster,
+  SessionTidyMember,
   SessionTidyPlan,
 } from "./session-continuity.js";
 
@@ -215,7 +216,7 @@ export function refineTidyPlanWithJudgments(
     let next: SessionTidyClusterWithLlm = {
       ...cluster,
       llmSource: "llm",
-      llmRationale: judgment.rationale || undefined,
+      ...(judgment.rationale ? { llmRationale: judgment.rationale } : {}),
       llmConfidence: judgment.confidence,
       defaultChecked: judgment.confidence === "high",
     };
@@ -238,7 +239,7 @@ function applyAccurateTidyRewrite(
     (judgment.memberActions ?? []).map((item) => [item.sessionId, item.action]),
   );
 
-  let members = cluster.members.map((member) => {
+  const adjusted = cluster.members.map((member): SessionTidyMember | null => {
     const action = actionById.get(member.sessionId);
     if (!action || action === "leave") {
       if (action === "leave" && member.role === "satellite") {
@@ -252,7 +253,9 @@ function applyAccurateTidyRewrite(
       suggestedAction: action as SessionTidyActionKind,
     };
   });
-  members = members.filter((member): member is NonNullable<typeof member> => member != null);
+  let members: SessionTidyMember[] = adjusted.filter(
+    (member): member is SessionTidyMember => member !== null,
+  );
 
   if (anchorId && members.some((member) => member.sessionId === anchorId)) {
     members = members.map((member) => ({
@@ -313,7 +316,7 @@ export function refineSweepPlanWithJudgments(
       ...candidate,
       action,
       llmSource: "llm",
-      llmRationale: judgment.rationale || undefined,
+      ...(judgment.rationale ? { llmRationale: judgment.rationale } : {}),
       llmConfidence: judgment.confidence,
       defaultChecked: judgment.confidence === "high",
     });
@@ -339,7 +342,7 @@ export function refineRouteSuggestionWithJudgment(
       confidence: "low",
       autoApply: false,
       llmSource: "llm",
-      llmRationale: judgment.rationale || undefined,
+      ...(judgment.rationale ? { llmRationale: judgment.rationale } : {}),
       reasons: suggestion.reasons,
     };
   }
@@ -364,7 +367,7 @@ export function refineRouteSuggestionWithJudgment(
     confidence,
     autoApply: Boolean(options.autoApplyHighConfidence && dualOk),
     llmSource: "llm",
-    llmRationale: judgment.rationale || undefined,
+    ...(judgment.rationale ? { llmRationale: judgment.rationale } : {}),
     ...(judgment.forkMessageId ? { forkMessageId: judgment.forkMessageId } : {}),
   };
 }
@@ -399,12 +402,12 @@ export function buildAffinitySessionCard(record: {
   head: {
     id: string;
     title: string;
-    responsibility?: string;
-    classification?: string;
-    parentSessionId?: string;
-    previewStrip?: Array<{ kind: string; title: string }>;
+    responsibility?: string | undefined;
+    classification?: string | undefined;
+    parentSessionId?: string | undefined;
+    previewStrip?: Array<{ kind: string; title: string }> | undefined;
   };
-  contextDigest?: { responsibility?: string; refs?: string[]; decisions?: string[] };
+  contextDigest?: { responsibility?: string | undefined; refs?: string[] | undefined; decisions?: string[] | undefined } | undefined;
   messages: Array<{ role: string; content: string }>;
 }): Record<string, unknown> {
   const users = record.messages

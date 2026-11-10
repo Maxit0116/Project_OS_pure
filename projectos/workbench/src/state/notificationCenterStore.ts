@@ -11,7 +11,7 @@ import {
 
 const STORAGE_KEY = 'projectos_notification_center_v1'
 
-const autoDismissTimers = new Map<string, number>()
+const autoDismissTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 function notificationId(): string {
   return `notif_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -20,7 +20,7 @@ function notificationId(): string {
 function clearAutoDismiss(id: string) {
   const timer = autoDismissTimers.get(id)
   if (timer != null) {
-    window.clearTimeout(timer)
+    clearTimeout(timer)
     autoDismissTimers.delete(id)
   }
 }
@@ -149,7 +149,7 @@ export const useNotificationCenterStore = create<NotificationCenterState>((set, 
     })
     if (ephemeral && next.status === 'active' && typeof input.autoDismissMs === 'number' && input.autoDismissMs > 0) {
       clearAutoDismiss(id)
-      const timer = window.setTimeout(() => {
+      const timer = setTimeout(() => {
         autoDismissTimers.delete(id)
         const stillActive = get().items.some(
           (item) => item.id === id && item.status === 'active',

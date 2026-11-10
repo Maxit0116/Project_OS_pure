@@ -34,6 +34,18 @@ const emptyInput = {
   chatMode: 'ask' as const,
 }
 
+/**
+ * Rows are collapsed until opened (a running row opens by itself, and the inspector opens the selected
+ * one), so a finished row's detail is rendered as the inspector shows it: selected and expanded.
+ */
+function renderOpened(activities: Array<{ id: string }>): string {
+  return (activities as Parameters<typeof AgentActivityDetails>[0]['activities'])
+    .map((activity) => renderToStaticMarkup(
+      <AgentActivityDetails activities={[activity]} selectedId={activity.id} preferExpandSelected />,
+    ))
+    .join('')
+}
+
 describe('projectAgentActivities', () => {
   it('puts grep previews in detail and only the count in the summary', () => {
     const activities = projectAgentActivities({
@@ -72,9 +84,7 @@ describe('projectAgentActivities', () => {
     expect(summaryHtml).not.toContain('SECRET_PREVIEW_LINE')
     expect(summaryHtml).not.toContain('src/auth.ts')
 
-    const detailHtml = renderToStaticMarkup(
-      <AgentActivityDetails activities={[explore!]} selectedId={explore!.id} />,
-    )
+    const detailHtml = renderOpened([explore!])
     expect(detailHtml).toContain('SECRET_PREVIEW_LINE')
     expect(detailHtml).toContain('src/auth.ts:12')
     expect(detailHtml).toContain(`data-activity-detail="${explore!.id}"`)
@@ -132,9 +142,7 @@ describe('projectAgentActivities', () => {
       exitCode: 1,
       truncated: true,
     })
-    const detailHtml = renderToStaticMarkup(
-      <AgentActivityDetails activities={[activities[2]!]} selectedId={null} />,
-    )
+    const detailHtml = renderOpened([activities[2]!])
     expect(detailHtml).toContain('FAIL_OUTPUT_BODY')
     expect(detailHtml).toMatch(/Output truncated|输出已截断/)
     expect(activities[2]?.summary).not.toContain('FAIL_OUTPUT_BODY')
@@ -193,9 +201,7 @@ describe('projectAgentActivities', () => {
     expect(greps.map((item) => item.summary).join(' ')).not.toContain('ROUND_ONE_PREVIEW')
     expect(activities.find((item) => item.kind === 'read_file')?.summary).toBe('Read auth.ts')
     expect(activities.find((item) => item.kind === 'read_file')?.summary).not.toContain('EXCERPT_BODY')
-    const detail = renderToStaticMarkup(
-      <AgentActivityDetails activities={greps} selectedId={null} />,
-    )
+    const detail = renderOpened(greps)
     expect(detail).toContain('ROUND_ONE_PREVIEW')
     expect(detail).toContain('ROUND_TWO_PREVIEW')
   })

@@ -92,8 +92,8 @@ export function isSessionSweepHardExcluded(
   head: ChatSessionHead,
   pinnedIds: ReadonlyArray<string>,
   options: {
-    activeSessionId?: string | null;
-    snoozedUntil?: SessionSweepSnoozeMap;
+    activeSessionId?: string | null | undefined;
+    snoozedUntil?: SessionSweepSnoozeMap | undefined;
     nowMs?: number;
   } = {},
 ): boolean {
