@@ -131,7 +131,9 @@ describe('loopGraphStore authoring actions', () => {
     expect(send.mock.calls[0]?.[2]).toMatchObject({ useProvider: false })
   })
 
-  it('clears pending AI edit offer when draft revision changes', () => {
+  it('keeps pending AI edit offer after draft revision change (UI stale ≠ clear; server still rejects)', () => {
+    // Layering: Accept-disabled / stale badge is UI; clearing the offer here would
+    // erase the evidence surface. Server reject remains a separate contract path.
     useLoopGraphStore.setState({
       document: {
         ...baseDoc,
@@ -170,7 +172,8 @@ describe('loopGraphStore authoring actions', () => {
     })
     const next = useLoopGraphStore.getState().document
     expect(next?.draft.revision).toBe(1)
-    expect(next?.pendingGraphEditOffer).toBeUndefined()
+    expect(next?.pendingGraphEditOffer?.baseRevision).toBe(0)
+    expect(next?.draft.revision).not.toBe(next?.pendingGraphEditOffer?.baseRevision)
   })
 
   it('restores the previous prompt when canceling clarifications', async () => {

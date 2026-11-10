@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { LoopTaskMaterial } from '@contracts/index'
+import { classifyLoopMaterialFormat } from '@contracts/loop-task-material-formats'
 import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
 import styles from './LoopRunMaterialsPanel.module.css'
@@ -7,13 +8,6 @@ import styles from './LoopRunMaterialsPanel.module.css'
 function newMaterialId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
-
-const TEXT_LIKE = new Set([
-  'text/plain',
-  'text/markdown',
-  'application/json',
-  'text/csv',
-])
 
 /**
  * First closed-loop materials + preflight UI for project manual runs.
@@ -100,10 +94,11 @@ export default function LoopRunMaterialsPanel() {
     if (!file) return
     const now = new Date().toISOString()
     const mime = file.type || 'application/octet-stream'
-    const isTextLike =
-      TEXT_LIKE.has(mime) ||
-      /\.(txt|md|json|csv|log)$/i.test(file.name)
-    if (!isTextLike) {
+    const format = classifyLoopMaterialFormat({
+      mimeType: mime,
+      fileName: file.name,
+    })
+    if (format.support === 'unsupported') {
       const unsupported: LoopTaskMaterial = {
         id: replacingId ?? newMaterialId('mat_file'),
         kind: 'file',
@@ -111,7 +106,7 @@ export default function LoopRunMaterialsPanel() {
         title: file.name.slice(0, 240),
         source: 'upload',
         parseStatus: 'unsupported',
-        parseMessage: `First-batch materials only preview plaintext; “${mime || file.name}” deferred`,
+        parseMessage: format.reason,
         mimeType: mime,
         sizeBytes: file.size,
         measuredSizeBytes: file.size,

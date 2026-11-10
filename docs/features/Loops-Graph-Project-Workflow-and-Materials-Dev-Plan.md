@@ -149,9 +149,9 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | PW-1 | 项目内选择已保存流程并启动 | 计划 | — |
 | PW-2 | Run 绑定 project/repo/workspace/branch/codeDigest/specVersion | **contract 初版** / 产品路径待验 | LocalApi start 接线 RunBinding 子集；完整字段 **未齐** |
 | PW-3 | 预检：缺配置 / 分支 / Agent / 审批点列表，确认后才开跑 | **contract** + Electron 材料/预检面板 + 孤儿审批闸 **blocker**；temp 证据测 Spec→preflight→start；无 Spec 禁用 ≠ 通过条件 | `LoopRunMaterialsPanel` + `validateApprovalGateWiring`；审批通过 ≠ 开跑 |
-| PW-4 | 隔离工作区编码+测试+人工；产出 Diff/TestReport/Preview 或 PR | **实现/证据**：DI-only `local_tools`（须 env allow；缺配置明确拒绝）；ChangeSet files/digest + TestReport command/exitCode=0 + unifiedDiff；Electron 运行相产物卡可见；cancel 保留产物 **contract**。多格式/更深 Diff UI **工程未完**；live 付费 **未验** | LocalApi settle + loopback host；GitHub 外发 **未验** |
-| PW-5 | 失败保留证据可续；cancel/recover | 部分实现 | checkpoint / cancel **已有已测**；项目路径 **待验** |
-| PW-6 | 编辑定义不污染运行中 Instance 快照 | 实现（底座） / 待验（产品路径） | Spec 冻结 D5/GC-D8 |
+| PW-4 | 隔离工作区编码+测试+人工；产出 Diff/TestReport/Preview 或 PR | **实现/证据（local deterministic E2E·非 live）**：DI-only `local_tools`（须 env allow；缺配置明确拒绝）；**语义** fail→feedback→fix→green（非 comment stamp）；ChangeSet + failed/passed TestReport + exitCode + unifiedDiff；Electron 可见产物卡 `loops-b-ui-05-*`；cancel 保留 **contract**。更深 Diff UI / 付费 live **未完** | `loop-execution-loopback-fix` + LocalApi settle；GitHub 外发 **未验** |
+| PW-5 | 失败保留证据可续；cancel/recover | 部分实现 / 证据加深 | checkpoint / cancel **已测**；failfix 路径保留 failed+passed artifacts；缺 leaf→`文件未挂接` |
+| PW-6 | 编辑定义不污染运行中 Instance 快照 | **实现/证据**（failfix 测） | Spec 冻结；start 后改 draft 不改 runBinding |
 | PW-7 | Issue/PR/选中代码/错误上下文快捷调用同 run | 计划 | — |
 | PW-8 | GitHub/Sentry/定时事件同机制；离线排队未实现须诚实 | 部分 | GitHub/Sentry **契约已测/live待验**；离线排队 **未实现** |
 
@@ -159,10 +159,10 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 
 | ID | 验收项 | 状态 | 证据 |
 |----|--------|------|------|
-| TM-1 | 文字任务描述 | **实现**：材料卡预览/替换/错误 + text/`project_ref`/`file` 入 runBinding；多格式 Pure **分期** | `LoopRunMaterialsPanel` |
-| TM-2 | 图片用途标注 + 不支持提示 | 计划 | — |
-| TM-3 | 文件/API/log 卡片 + 解析状态 | **实现首批**：plaintext 预览/`unsupported`/`failed` 错误态 + 替换；图片/表格/URL **诚实分期**；URL 安全限制 **不放宽** | `LoopRunMaterialsPanel` + schema |
-| TM-4 | CSV/XLSX sheet/列/范围 + 角色 | 计划 | — |
+| TM-1 | 文字任务描述 | **实现**：材料卡预览/替换/错误 + text/`project_ref`/`file` 入 runBinding | `LoopRunMaterialsPanel` |
+| TM-2 | 图片用途标注 + 不支持提示 | **contract/实现（负例）**：image/* → `parseStatus=unsupported`（非 ok） | `loop-task-material-formats` |
+| TM-3 | 文件/API/log 卡片 + 解析状态 | **实现首批**：plaintext/md/json/csv/log **支持预览**；image/xlsx/pdf **显式 unsupported**；URL 生产读取 **未接**；SSRF 策略 **不放宽** | `LoopRunMaterialsPanel` + formats + schema |
+| TM-4 | CSV/XLSX sheet/列/范围 + 角色 | CSV 预览 **支持**；XLSX sheet/列范围 **不支持**（unsupported） | formats 矩阵 |
 | TM-5 | URL 来源 + 鉴权/读取失败 + SSRF 默认拒内网 | **contract**（`loop-url-fetch-policy`）；生产读取 **未接** | bugs H3 |
 | TM-6 | 项目文件/C4/测试引用免重复上传 | 计划（C4 引用底座已有） | — |
 | TM-7 | 增删替换 / 保存重开 / run 覆盖不改定义 | 计划（Electron Overlay 保存重开节点 **已截**；材料卡路径 **未验**） | — |
@@ -173,7 +173,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | ID | 验收项 | 状态 |
 |----|--------|------|
 | DE-1 | DutyCard 类型表单 Agent/Action/Logic/Human | **实现** + 暗色实机 style 已读；SaaS 截字/密度局部整理（wrap + node z-index）；截图见 Six-Goals |
-| DE-2 | Provider authoring loopback：空图；审批闸语义；连续陈旧负例 | **实现/证据**（**loopback·not live**）：A3 连续脚本无 fatal——改其他字段保 retry=2；改 retry→1 则保 1（不假恢复 2）；timeout 恒 7777、无 9999；重开一致。审批 `before_write|before_test|before_external`；runtime reject/approve/drift/orphan **contract**。付费 live **未验** |
+| DE-2 | Provider authoring loopback：空图；审批闸语义；连续陈旧负例 | **实现/证据**（**loopback·not live**）：A3 连续脚本无 fatal——改其他字段保 retry=2；改 retry→1 则保 1（不假恢复 2）；timeout 恒 7777、无 9999；重开一致。**UI Accept-disabled ≠ server reject**（分层：UI 禁用 vs `acceptLoopGraphEditOffer` / runtime gate **contract**）。付费 live **未验** |
 | SEC-1 | High-risk / catalog_only 不可调用方绕过 | **contract** |
 | SEC-2 | 非幂等 POST 不盲重试；timeout/abort unknown；脱敏全链 | **contract** |
 | CON-1 | Batch1 GitHub/Slack/Feishu/Lark/Sentry | **contract** / live未验 |
@@ -220,3 +220,4 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 |------|------|
 | 2026-11-10 | 初版：增量 A/B 全范围、阶段依赖、契约、验收矩阵；与 Studio/GC/Six-Goals/bugs 互链 |
 | 2026-11-10 | S2→**contract 初版**（非全勾）；PW-2/3、TM-1/3/5 状态对齐实现；材料 UI/E2E 仍待验 |
+| 2026-11-10 | PW-4/5/6 + TM-2/3/4：fail→fix→green local deterministic E2E；格式显式支持/不支持矩阵；UI≠server 拒绝分层 |

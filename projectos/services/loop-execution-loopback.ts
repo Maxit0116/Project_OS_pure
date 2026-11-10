@@ -22,6 +22,7 @@ import type {
 } from "./loop-execution.js";
 import { resolveLoopLeafWriteScope, type LoopFeatureNode } from "./loop-execution.js";
 import { createWorkspacePathDigester } from "./loop-approval-binding.js";
+import { applyRequirementFix } from "./loop-execution-loopback-fix.js";
 
 export type LoopExecutionLoopbackMode = "off" | "local_tools";
 
@@ -31,6 +32,8 @@ export type LoopbackRunAudit = {
   beforeSha256: string;
   afterSha256: string;
   unifiedDiff: string;
+  fixMode?: "still_failing" | "fixed";
+  fixAttempt?: number;
   command?: string;
   exitCode?: number | null;
   stdout?: string;
@@ -126,36 +129,13 @@ function resolveTestCommand(workspaceRoot: string): {
   };
 }
 
-function applyDeterministicEdit(
-  workspaceRoot: string,
-  filePath: string,
-  goal: string,
-): { before: string; after: string } {
-  const abs = join(workspaceRoot, filePath);
-  const before = existsSync(abs) ? readFileSync(abs, "utf8") : "";
-  const marker = `/* loopback·local_tools ${sha256(goal).slice(0, 12)} */\n`;
-  let after = before;
-  if (!before.includes("loopback·local_tools")) {
-    after = `${marker}${before}`;
-  } else {
-    after = before.replace(
-      /\/\* loopback·local_tools [a-f0-9]+ \*\//,
-      marker.trim(),
-    );
-  }
-  if (filePath.endsWith("hello.js") && !/export\s+function\s+hello\b/.test(after)) {
-    after +=
-      (after.endsWith("\n") ? "" : "\n") +
-      "export function hello() { return 'ok'; }\n";
-  }
-  writeFileSync(abs, after, "utf8");
-  return { before, after };
-}
-
 export class LoopExecutionLoopbackHost {
   mode: LoopExecutionLoopbackMode = "off";
   private readonly runs = new Map<string, LoopbackRunState>();
   private lastAudit: LoopbackRunAudit | null = null;
+  /** 1-based implement attempts per leaf path (fail→fix→green). */
+  private readonly implementAttempts = new Map<string, number>();
+  private materials: LoopTaskMaterial[] = [];
 
   setMode(
     mode: LoopExecutionLoopbackMode,
@@ -170,8 +150,15 @@ export class LoopExecutionLoopbackHost {
     if (mode === "off") {
       this.runs.clear();
       this.lastAudit = null;
+      this.implementAttempts.clear();
+      this.materials = [];
     }
     return { mode, live: false };
+  }
+
+  /** Bind run materials so implement can read requirement text (DI only). */
+  setMaterials(materials: LoopTaskMaterial[] | undefined): void {
+    this.materials = materials ? [...materials] : [];
   }
 
   getLastAudit(): LoopbackRunAudit | null {
@@ -207,18 +194,26 @@ export class LoopExecutionLoopbackHost {
     workspaceRoot: string,
     request: LoopAgentRunRequest,
   ): LoopAgentRunView {
-    const { before, after } = applyDeterministicEdit(
+    const attempt = (this.implementAttempts.get(request.filePath) ?? 0) + 1;
+    this.implementAttempts.set(request.filePath, attempt);
+    const fix = applyRequirementFix({
       workspaceRoot,
-      request.filePath,
-      request.goal,
-    );
-    if (before === after && !existsSync(join(workspaceRoot, request.filePath))) {
+      filePath: request.filePath,
+      goal: request.goal,
+      attempt,
+      materials: this.materials,
+    });
+    if (!existsSync(join(workspaceRoot, request.filePath))) {
       throw new Error(`loopback·local_tools could not write ${request.filePath}`);
     }
     const runId = `run_loopback_${randomUUID()}`;
-    const beforeSha256 = sha256(before);
-    const afterSha256 = sha256(after);
-    const unifiedDiff = simpleUnifiedDiff(request.filePath, before, after);
+    const beforeSha256 = sha256(fix.before);
+    const afterSha256 = sha256(fix.after);
+    const unifiedDiff = simpleUnifiedDiff(
+      request.filePath,
+      fix.before,
+      fix.after,
+    );
     const state: LoopbackRunState = {
       runId,
       status: "complete",
@@ -237,6 +232,8 @@ export class LoopExecutionLoopbackHost {
       beforeSha256,
       afterSha256,
       unifiedDiff,
+      fixMode: fix.mode,
+      fixAttempt: attempt,
     };
     return {
       runId,
@@ -274,6 +271,12 @@ export class LoopExecutionLoopbackHost {
       beforeSha256: state.beforeSha256,
       afterSha256: state.afterSha256,
       unifiedDiff: state.unifiedDiff,
+      ...(this.lastAudit?.runId === runId && this.lastAudit.fixMode
+        ? {
+            fixMode: this.lastAudit.fixMode,
+            fixAttempt: this.lastAudit.fixAttempt,
+          }
+        : {}),
       command: cmd.display,
       exitCode,
       stdout: state.stdout,
@@ -303,6 +306,9 @@ export class LoopExecutionLoopbackHost {
     materials?: LoopTaskMaterial[];
     fallback?: LoopExecutionHooks;
   }): LoopExecutionHooks {
+    if (input.materials) {
+      this.setMaterials(input.materials);
+    }
     const leaf =
       this.resolveLeaf({
         nodes: input.nodes,
@@ -352,7 +358,9 @@ export class LoopExecutionLoopbackHost {
       ...(input.fallback?.executeTerminalCommand
         ? { executeTerminalCommand: input.fallback.executeTerminalCommand }
         : {}),
-      allowConcurrentLoopRuns: input.fallback?.allowConcurrentLoopRuns,
+      ...(typeof input.fallback?.allowConcurrentLoopRuns === "boolean"
+        ? { allowConcurrentLoopRuns: input.fallback.allowConcurrentLoopRuns }
+        : {}),
     };
   }
 }

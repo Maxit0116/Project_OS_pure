@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10 — security/dual-entry WIP + PW/TM + **Gmail 只读追加**（新文档，非 5814430）  
+**Updated**: 2026-11-10 — PW fail→fix→green local deterministic E2E + TM format matrix + Gmail 只读 contract（非 5814430）  
 
 状态键：**计划** · **实现** · **contract** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
@@ -49,8 +49,8 @@
 
 | 切片 | 状态 |
 |------|------|
-| PW Project run binding / 预检 / 项目手动 E2E | **实现/证据**：ChangeSet/TestReport **内容**（files/digest/command/exitCode=0/unifiedDiff）+ UI 产物卡；`local_tools` 须 `PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK=1`（普通生产缺省 fail-closed）。cancel 保留 artifacts **contract**。Diff/Test 更深交互与多格式 Pure **工程未完**（非用户阻塞） |
-| TM TaskMaterial schema + Pure 输入复用 | **实现首批**材料卡预览/替换/错误 + Electron 输入→预检→runtime→查看产物；图片/表格/URL **分期** |
+| PW Project run binding / 预检 / 项目手动 E2E | **实现/证据（local deterministic E2E·非 live）**：临时失败测试项目 + DI `local_tools`（须 env allow）语义修复 fail→feedback→green；ChangeSet/TestReport 内容含 failed+passed、exitCode、unifiedDiff（非 comment stamp）；UI 产物卡可见截图 `loops-b-ui-05-artifact-cards-visible.png`；缺 leaf→`文件未挂接`；runBinding 隔离；cancel 保留 **contract**。更深 Diff 交互/付费 live **未完** |
+| TM TaskMaterial schema + Pure 输入复用 | **实现首批**材料卡预览/替换/错误 + Electron 输入→预检→runtime→查看产物；格式矩阵：plaintext/md/json/csv/log **支持预览**；image/xlsx/pdf **显式 unsupported**（`loop-task-material-formats`）；URL 生产读取 **未接** |
 | URL SSRF 默认拒内网 | **contract**（`loop-url-fetch-policy`）；生产读取未接 |
 | 离线事件全天排队 | **未实现**（不可承诺） |
 
@@ -63,7 +63,7 @@
 | High-risk / catalog_only 强制 | **contract** |
 | 非幂等 POST 不盲重试；timeout/abort unknown；ledger | **contract** |
 | URL/header/body 脱敏 + fake-secret | **contract** |
-| Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现**；暗色保留；A3 连续陈旧（planner 改标题保 retry=2；retry 2→1 保 1；重开）：`loops-a3-*`；B 内容+UI：`loops-b-pw-materials-evidence.json` + `loops-b-ui-e2e-evidence.json` + `loops-b-ui-*.png`。**不得**用 fatal 后手改当连续通过 |
+| Overlay 真实 LoopSaaSNodeCard；DutyCard 类型表单 | **实现**；暗色保留；A3 连续陈旧（planner 改标题保 retry=2；retry 2→1 保 1；重开）：`loops-a3-*`。**UI Accept-disabled ≠ server reject**（server 拒绝仅独立 contract：`loop-approval-runtime-gate` / `acceptLoopGraphEditOffer`）。B：`loops-b-pw-failfix-evidence.json` + `loops-b-ui-failfix-e2e-evidence.json` + `loops-b-ui-05-artifact-cards-visible.png`（可见产物卡；勿用错标题空图）。**不得**用 fatal 后手改当连续通过 |
 | LocalApi→adapter→loopback settle | **实现**/contract 路径；live未验 |
 | Studio 旧「固定侧栏 Inspector」文首 vs DutyCard | **冲突未消**：Studio D3/LG-1.1 仍写侧栏；现行 UI 为 Overlay 内 DutyCard / Inspector empty hint——**不以旧 Studio 文首当已验收** |
 | GC 总勾选 / 发布门禁 | **未全勾**：GC-6.5/6.6、GC-7.2 总验收待收尾；**不得**宣称 GC 门禁已通过 |
@@ -99,20 +99,18 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 
 近期本地闸（实现切片，非文档完成；以当次命令为准）：
 ```text
-# → Test Files 41 passed / Tests 217 passed（exit 0）— 见 vitest-discovery-command.txt
-# projectos tsc --noEmit -p tsconfig.json：本切片 vs d19e92d 同命令 **22=22**（无新增）；
-#   早前误报「25」含坏 `workspaceRoot` 测例，已修。graph@bec3dd7 同配置约 159 为环境债，
-#   **不得**用 159 掩盖本轮相对 d19e92d 的新增。
-# workbench npm run build：仍失败 exit 1（基线：session-affinity / OrbState /
-#   ParentBatchAuth / AgentFlow / DiffHighlightedColumn / local-api affinity…）；
-#   本切片相关 mock preflight / materials 类型已对齐，不扩无关全局重构。
+# → Test Files 48 passed / Tests 234 passed（exit 0）— vitest-discovery-command.txt
+# projectos tsc --noEmit -p tsconfig.json：本切片 vs ae1758c 同命令 **22=22**（无新增）；
+#   不得用 graph@bec3dd7 环境债掩盖本轮相对 ae1758c 的新增。
+# workbench npm run build：仍失败 exit 1（基线债）；本切片不扩无关全局重构。
 ```
 
-**DOM/Runtime 开链（云端 Linux xvfb，非 Mac）** — 本轮**不宣称闭环**：
-- Authoring A3（**loopback·not live**，单次连续无 fatal）：空图→scaffold→retry=2→timeout=7777；陈旧①改 planner 标题保 retry=2；陈旧②retry 2→1 保最新 1；重开磁盘一致。证据 `loops-a3-evidence.json` + `loops-a3-*.png`。A2 边重连证据仍可参考，但 A2 含 fatal 后手改 **不算连续通过**。
-- Approval gate：`before_write`/`before_test`/`before_external`；runtime reject→零工具调用、approve→一次、drift→stale、orphan→preflight blocker（`loop-approval-runtime-gate.test.ts`）。
-- Project B（**DI-only** `PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK=1`）：产物内容+exitCode+diff；UI 运行相产物卡。证据 `loops-b-pw-materials-evidence.json`、`loops-b-ui-e2e-evidence.json`、`loops-b-ui-*.png`。
-- **工程未完**：多格式 Pure、更深 Diff/Test 交互、live 付费模型。**真外部阻塞**：账号/OAuth/付费 live/外发/Mac。
+**DOM/Runtime 开链（云端 Linux xvfb，非 Mac）** — 本轮**不宣称闭环 / 不宣称 live**：
+- Authoring A3（**loopback·not live**，单次连续无 fatal）：空图→scaffold→retry=2→timeout=7777；陈旧①改 planner 标题保 retry=2；陈旧②retry 2→1 保最新 1；重开磁盘一致。证据 `loops-a3-evidence.json` + `loops-a3-*.png`。A2 含 fatal 后手改 **不算连续通过**。
+- Approval：**UI Accept-disabled 不是 server 拒绝**；server reject/approve/drift/orphan 仅独立 contract（`loop-approval-runtime-gate.test.ts`）。
+- Project B（**local deterministic E2E · DI-only** `PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK=1`）：失败测试临时项目 → 语义修复 fail→feedback→green → Diff/Test 内容+exit0 → 保存重开；UI 可见产物卡（含 failed+passed greet）。证据 `loops-b-pw-failfix-evidence.json`、`loops-b-ui-failfix-e2e-evidence.json`、`loops-b-ui-05-artifact-cards-visible.png`。
+- TM 格式：**支持** plaintext/md/json/csv/log 预览；**不支持** image/xlsx/pdf（显式 unsupported）。Gmail/SaaS：Gmail readonly **contract/loopback**；Batch3 SaaS **catalog_only**；真邮箱/OAuth **未接**。
+- **工程未完**：更深 Diff/Test 交互、URL 生产读取、付费 live。**真外部阻塞**：账号/OAuth/付费 live/外发/Mac。
 
 **graph 只读分叉**（不 rebase/merge/force）：tip `34af374`；merge-base `bec3dd7`。
 
