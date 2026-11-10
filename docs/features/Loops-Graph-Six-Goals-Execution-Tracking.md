@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10 — PW fail→fix→green local deterministic E2E + TM format matrix + Gmail 只读 contract（非 5814430）  
+**Updated**: 2026-11-10 (`bc0f98d`) — PW fail→fix→green local deterministic E2E + TM format matrix + Gmail 只读 contract（非 5814430）  
 
 状态键：**计划** · **实现** · **contract** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
