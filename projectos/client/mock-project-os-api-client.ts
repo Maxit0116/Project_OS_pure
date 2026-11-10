@@ -592,6 +592,43 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     return Promise.resolve(mockStartLoopInstanceFromEvent(projectId, loopId, event));
   }
 
+  override enqueueOfflineLoopEvent(
+    _projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<{
+    outcome: "queued" | "dropped_duplicate";
+    dedupeKey: string;
+    queuedCount: number;
+  }> {
+    return Promise.resolve({
+      outcome: "queued",
+      dedupeKey: `event:${event.eventType}:${event.eventId}`,
+      queuedCount: 1,
+    });
+  }
+
+  override listOfflineLoopEventQueue(_projectId: string): Promise<
+    Array<{
+      dedupeKey: string;
+      loopId: string;
+      eventId: string;
+      eventType: string;
+      status: string;
+      enqueuedAt: string;
+      lastError?: string;
+    }>
+  > {
+    return Promise.resolve([]);
+  }
+
+  override drainOfflineLoopEventQueue(
+    _projectId: string,
+    _options?: { max?: number },
+  ): Promise<{ drained: number; failed: number; queuedRemaining: number }> {
+    return Promise.resolve({ drained: 0, failed: 0, queuedRemaining: 0 });
+  }
+
   override restoreLoopInstanceFromCheckpoint(
     projectId: string,
     loopId: string,

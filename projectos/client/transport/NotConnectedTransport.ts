@@ -1643,6 +1643,39 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async enqueueOfflineLoopEvent(
+    _projectId: string,
+    _loopId: string,
+    _event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<{
+    outcome: "queued" | "dropped_duplicate";
+    dedupeKey: string;
+    queuedCount: number;
+  }> {
+    return transportNotConnected();
+  }
+
+  async listOfflineLoopEventQueue(_projectId: string): Promise<
+    Array<{
+      dedupeKey: string;
+      loopId: string;
+      eventId: string;
+      eventType: string;
+      status: string;
+      enqueuedAt: string;
+      lastError?: string;
+    }>
+  > {
+    return transportNotConnected();
+  }
+
+  async drainOfflineLoopEventQueue(
+    _projectId: string,
+    _options?: { max?: number },
+  ): Promise<{ drained: number; failed: number; queuedRemaining: number }> {
+    return transportNotConnected();
+  }
+
   async restoreLoopInstanceFromCheckpoint(
     _projectId: string,
     _loopId: string,

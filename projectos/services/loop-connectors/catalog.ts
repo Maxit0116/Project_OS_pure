@@ -322,8 +322,9 @@ export const LOOP_CONNECTOR_CATALOG: Record<
     batch: "batch3_data",
     apiVersion: "PostgREST / Management API",
     apiDocsUrl: "https://supabase.com/docs/reference",
-    implStatus: "catalog_only",
-    liveStatus: "disabled_high_risk",
+    /** Read adapters implemented (loopback contract); write_rows high-risk sealed. Not live. */
+    implStatus: "implemented_contract",
+    liveStatus: "unconfigured",
     highRiskDefaultOff: true,
     capabilities: [
       {
@@ -358,7 +359,8 @@ export const LOOP_CONNECTOR_CATALOG: Record<
     batch: "batch3_data",
     apiVersion: "PostHog API",
     apiDocsUrl: "https://posthog.com/docs/api",
-    implStatus: "catalog_only",
+    /** Capture + insights adapters implemented (loopback contract). Not live. */
+    implStatus: "implemented_contract",
     liveStatus: "unconfigured",
     capabilities: [
       {

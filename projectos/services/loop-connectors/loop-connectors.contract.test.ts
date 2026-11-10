@@ -63,7 +63,10 @@ describe("loop-connectors catalog honesty", () => {
       "implemented_contract",
     );
     expect(all.find((item) => item.id === "supabase")?.implStatus).toBe(
-      "catalog_only",
+      "implemented_contract",
+    );
+    expect(all.find((item) => item.id === "posthog")?.implStatus).toBe(
+      "implemented_contract",
     );
     expect(all.find((item) => item.id === "vercel")?.highRiskDefaultOff).toBe(true);
     expect(all.find((item) => item.id === "supabase")?.highRiskDefaultOff).toBe(true);
@@ -519,7 +522,9 @@ describe("Sentry adapter + HTTP resilience", () => {
     if (!highRisk.ok) expect(highRisk.code).toBe("high_risk_disabled");
     expect(scripted.requests).toHaveLength(0);
 
-    const catalogOnly = await dispatchConnectorRequest({
+    // Batch3 write_rows is implemented_contract but write_high + highRiskDefaultOff —
+    // omit highRiskAuthorized must seal (no caller bypass). Not a live-auth gap.
+    const writeSealed = await dispatchConnectorRequest({
       ctx: { transport: scripted.transport },
       request: {
         vendorId: "supabase",
@@ -533,12 +538,11 @@ describe("Sentry adapter + HTTP resilience", () => {
         credentialRefId: "cred_s",
       },
       parseOk: () => ({}),
-      highRiskAuthorized: true,
+      // omit highRiskAuthorized
     });
-    expect(catalogOnly.ok).toBe(false);
-    if (!catalogOnly.ok) {
-      expect(catalogOnly.code).toBe("catalog_only");
-      expect(catalogOnly.message).toMatch(/catalog_only/i);
+    expect(writeSealed.ok).toBe(false);
+    if (!writeSealed.ok) {
+      expect(writeSealed.code).toBe("high_risk_disabled");
     }
 
     // Vercel promote remains sealed without independent high-risk auth.

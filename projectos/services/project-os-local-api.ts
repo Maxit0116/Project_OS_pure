@@ -9556,6 +9556,112 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     }
   }
 
+  /**
+   * PW-8: persist an internal event while offline / before drain.
+   * Dedupes by eventType:eventId across restarts. Not an external webhook inbox.
+   */
+  async enqueueOfflineLoopEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<{
+    outcome: "queued" | "dropped_duplicate";
+    dedupeKey: string;
+    queuedCount: number;
+  }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      enqueueOfflineLoopEvent,
+      listQueuedOfflineLoopEvents,
+    } = await import("./loop-event-offline-queue.js");
+    const result = enqueueOfflineLoopEvent(workspace.workspaceRoot, {
+      loopId,
+      eventId: event.eventId,
+      eventType: event.eventType,
+      ...(event.payload ? { payload: event.payload } : {}),
+    });
+    return {
+      outcome: result.outcome,
+      dedupeKey: result.entry.dedupeKey,
+      queuedCount: listQueuedOfflineLoopEvents(workspace.workspaceRoot).length,
+    };
+  }
+
+  async listOfflineLoopEventQueue(projectId: string): Promise<
+    Array<{
+      dedupeKey: string;
+      loopId: string;
+      eventId: string;
+      eventType: string;
+      status: string;
+      enqueuedAt: string;
+      lastError?: string;
+    }>
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { loadOfflineLoopEventQueue } = await import(
+      "./loop-event-offline-queue.js"
+    );
+    return loadOfflineLoopEventQueue(workspace.workspaceRoot).entries.map((e) => ({
+      dedupeKey: e.dedupeKey,
+      loopId: e.loopId,
+      eventId: e.eventId,
+      eventType: e.eventType,
+      status: e.status,
+      enqueuedAt: e.enqueuedAt,
+      ...(e.lastError ? { lastError: e.lastError } : {}),
+    }));
+  }
+
+  /**
+   * Recover + drain persisted offline events into startLoopInstanceFromEvent.
+   * Same-run preflight/RunBinding apply per start; duplicates stay dropped.
+   */
+  async drainOfflineLoopEventQueue(
+    projectId: string,
+    options?: { max?: number },
+  ): Promise<{
+    drained: number;
+    failed: number;
+    queuedRemaining: number;
+  }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      drainOfflineLoopEventQueue,
+      listQueuedOfflineLoopEvents,
+      recoverOfflineLoopEventQueue,
+    } = await import("./loop-event-offline-queue.js");
+    const { startLoopInstanceFromEvent } = await import("./loop-runtime-service.js");
+    recoverOfflineLoopEventQueue(workspace.workspaceRoot);
+    const result = drainOfflineLoopEventQueue(
+      workspace.workspaceRoot,
+      (ev) => {
+        const started = startLoopInstanceFromEvent(
+          workspace.workspaceRoot,
+          ev.loopId,
+          {
+            eventId: ev.eventId,
+            eventType: ev.eventType,
+            ...(ev.payload ? { payload: ev.payload } : {}),
+          },
+          {
+            execution: this.loopHooksFor(workspace, ev.loopId),
+            projectId,
+            requirePreflight: true,
+          },
+        );
+        const instance = started.instances[started.instances.length - 1];
+        return { instanceId: instance?.id };
+      },
+      { max: options?.max ?? 50 },
+    );
+    return {
+      drained: result.drained.length,
+      failed: result.failed.length,
+      queuedRemaining: listQueuedOfflineLoopEvents(workspace.workspaceRoot).length,
+    };
+  }
+
   async restoreLoopInstanceFromCheckpoint(
     projectId: string,
     loopId: string,

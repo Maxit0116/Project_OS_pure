@@ -1558,6 +1558,22 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.startLoopInstanceFromEvent(projectId, loopId, event);
   }
 
+  enqueueOfflineLoopEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ) {
+    return this.transport.enqueueOfflineLoopEvent(projectId, loopId, event);
+  }
+
+  listOfflineLoopEventQueue(projectId: string) {
+    return this.transport.listOfflineLoopEventQueue(projectId);
+  }
+
+  drainOfflineLoopEventQueue(projectId: string, options?: { max?: number }) {
+    return this.transport.drainOfflineLoopEventQueue(projectId, options);
+  }
+
   restoreLoopInstanceFromCheckpoint(
     projectId: string,
     loopId: string,

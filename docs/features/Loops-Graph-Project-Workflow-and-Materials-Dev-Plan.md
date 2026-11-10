@@ -153,7 +153,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | PW-5 | 失败保留证据可续；cancel/recover | 部分实现 / 证据加深 | checkpoint / cancel **已测**；failfix 路径保留 failed+passed artifacts；缺 leaf→`文件未挂接` |
 | PW-6 | 编辑定义不污染运行中 Instance 快照 | **实现/证据**（failfix + taskPack isolation） | Spec 冻结；taskPack 不 bump draft revision；start 后改 draft 不改 runBinding |
 | PW-7 | Issue/PR/选中代码/错误上下文快捷调用同 run | **实现/contract**：`buildPw7ContextMaterial` + 面板表单 + **`data-loop-pw7-from-editor` 实入口**（无选区诚实报错）；非 live Issue 拉票 | `loop-pw7-context-materials` + `LoopRunMaterialsPanel` + evidence-bundle-09 |
-| PW-8 | GitHub/Sentry/定时事件同机制；离线排队未实现须诚实 | 部分 | GitHub write / connector 缺 credentialRef **offline fail-closed**；Sentry **契约已测/live待验**；离线排队 **未实现** |
+| PW-8 | GitHub/Sentry/定时事件同机制；离线排队 | 部分加深 | GitHub/Sentry 同上；离线排队 **实现/contract**（持久 dedupe/drain/recover；非外网 24/7） |
 
 ### 4.2 增量 B（Materials）
 
@@ -178,7 +178,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | SEC-2 | 非幂等 POST 不盲重试；timeout/abort unknown；脱敏全链 | **contract** |
 | CON-1 | Batch1 GitHub/Slack/Feishu/Lark/Sentry | **contract** + GitHub/connector offline credential fail-closed / live未验 |
 | CON-2 | Batch2 Linear/Jira/Notion/Vercel-list | **contract** / live未验 |
-| CON-3 | Batch3 Supabase/PostHog | **catalog_only** |
+| CON-3 | Batch3 Supabase/PostHog | **implemented_contract**（loopback 适配器+settle；write_rows high-risk 密封；live 未接） |
 
 ### 4.4 连续脚本（与前轮手工+AI 同回归）
 

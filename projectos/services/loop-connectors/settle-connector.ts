@@ -3,8 +3,15 @@
  * Adapter → injectable transport → redacted audit artifact. No live OAuth.
  */
 import type { LoopGraphDocument, LoopInstance } from "../../contracts/loop-graph.js";
+import {
+  posthogCaptureEvent,
+  posthogQueryInsights,
+  supabaseInvokeRpcReadonly,
+  supabaseReadRows,
+} from "./adapters/batch3.js";
 import { feishuLarkSendMessage } from "./adapters/feishu-lark.js";
 import {
+  gmailAttachmentsGet,
   gmailMessagesGet,
   gmailMessagesSearch,
   gmailMessagesSendBlocked,
@@ -101,12 +108,20 @@ export async function settleConnectorOperation(
     vendorId: pending.vendorId,
     credentialId: pending.credentialRefId,
     scheme:
-      pending.vendorId === "sentry"
-        ? "api_key_ref"
-        : pending.capabilityId.includes("webhook") ||
-            pending.capabilityId.includes("notify")
-          ? "webhook_url_ref"
-          : "bot_token_ref",
+      pending.vendorId === "gmail"
+        ? "oauth_token_ref"
+        : pending.vendorId === "sentry" ||
+            pending.vendorId === "supabase" ||
+            pending.vendorId === "posthog" ||
+            pending.vendorId === "linear" ||
+            pending.vendorId === "jira_cloud" ||
+            pending.vendorId === "notion" ||
+            pending.vendorId === "vercel"
+          ? "api_key_ref"
+          : pending.capabilityId.includes("webhook") ||
+              pending.capabilityId.includes("notify")
+            ? "webhook_url_ref"
+            : "bot_token_ref",
     label: `${pending.vendorId} (redacted)`,
   };
 
@@ -199,6 +214,91 @@ export async function settleConnectorOperation(
         raw: String(pending.payload.raw ?? ""),
         credential,
         idempotencyKey: pending.idempotencyKey,
+        ...(secret ? { accessToken: secret } : {}),
+      },
+      ctx,
+    );
+  } else if (pending.vendorId === "gmail" && pending.capabilityId === "attachments_get") {
+    // Product consumption path: accountRef bind + 50M fail-closed before HTTP.
+    result = await gmailAttachmentsGet(
+      {
+        messageId: String(pending.payload.messageId ?? ""),
+        attachmentId: String(pending.payload.attachmentId ?? ""),
+        filename: String(pending.payload.filename ?? "attachment.bin"),
+        mimeType: String(pending.payload.mimeType ?? "application/octet-stream"),
+        credential,
+        idempotencyKey: pending.idempotencyKey,
+        ...(pending.payload.threadId
+          ? { threadId: String(pending.payload.threadId) }
+          : {}),
+        ...(typeof pending.payload.sizeBytes === "number"
+          ? { sizeBytes: pending.payload.sizeBytes }
+          : {}),
+        ...(pending.payload.accountRefId
+          ? { accountRefId: String(pending.payload.accountRefId) }
+          : {}),
+        ...(secret ? { accessToken: secret } : {}),
+      },
+      ctx,
+    );
+  } else if (pending.vendorId === "supabase" && pending.capabilityId === "read_rows") {
+    result = await supabaseReadRows(
+      {
+        projectUrl: String(pending.payload.projectUrl ?? ""),
+        table: String(pending.payload.table ?? ""),
+        credential,
+        idempotencyKey: pending.idempotencyKey,
+        ...(pending.payload.select ? { select: String(pending.payload.select) } : {}),
+        ...(typeof pending.payload.limit === "number"
+          ? { limit: pending.payload.limit }
+          : {}),
+        ...(secret ? { accessToken: secret } : {}),
+      },
+      ctx,
+    );
+  } else if (
+    pending.vendorId === "supabase" &&
+    pending.capabilityId === "invoke_rpc_readonly"
+  ) {
+    result = await supabaseInvokeRpcReadonly(
+      {
+        projectUrl: String(pending.payload.projectUrl ?? ""),
+        fn: String(pending.payload.fn ?? ""),
+        credential,
+        idempotencyKey: pending.idempotencyKey,
+        ...(pending.payload.args && typeof pending.payload.args === "object"
+          ? { args: pending.payload.args as Record<string, unknown> }
+          : {}),
+        ...(secret ? { accessToken: secret } : {}),
+      },
+      ctx,
+    );
+  } else if (pending.vendorId === "posthog" && pending.capabilityId === "query_insights") {
+    result = await posthogQueryInsights(
+      {
+        host: String(pending.payload.host ?? "https://app.posthog.com"),
+        projectId: String(pending.payload.projectId ?? ""),
+        credential,
+        idempotencyKey: pending.idempotencyKey,
+        ...(pending.payload.insightId
+          ? { insightId: String(pending.payload.insightId) }
+          : {}),
+        ...(secret ? { accessToken: secret } : {}),
+      },
+      ctx,
+    );
+  } else if (pending.vendorId === "posthog" && pending.capabilityId === "capture_event") {
+    result = await posthogCaptureEvent(
+      {
+        host: String(pending.payload.host ?? "https://app.posthog.com"),
+        event: String(pending.payload.event ?? ""),
+        distinctId: String(pending.payload.distinctId ?? ""),
+        credential,
+        idempotencyKey: pending.idempotencyKey,
+        ...(pending.payload.properties &&
+        typeof pending.payload.properties === "object"
+          ? { properties: pending.payload.properties as Record<string, unknown> }
+          : {}),
         ...(secret ? { accessToken: secret } : {}),
       },
       ctx,

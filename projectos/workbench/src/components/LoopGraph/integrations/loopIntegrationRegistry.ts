@@ -112,14 +112,14 @@ const REGISTRY: Record<LoopIntegrationId, LoopIntegrationMeta> = {
       { id: 'poll_history', label: 'Online history poll', kind: 'trigger' },
     ],
   },
-  /** Batch3 catalog_only — offline product surface; not a live-auth excuse. */
+  /** Batch3 adapters implemented (loopback contract); live unconfigured — not a live-auth excuse. */
   supabase: {
     id: 'supabase',
     displayName: 'Supabase',
     iconKey: 'fallback',
-    defaultRuntimeStatus: 'unimplemented',
+    defaultRuntimeStatus: 'auth_missing',
     brandNote:
-      'Batch3 catalog_only: capabilities listed; dispatch blocked as catalog_only (no live adapter yet).',
+      'Batch3 read adapters (loopback contract). write_rows high-risk sealed. Live Supabase project not connected.',
     actions: [
       { id: 'read_rows', label: 'Read rows', kind: 'action' },
       { id: 'invoke_rpc_readonly', label: 'Read RPC', kind: 'action' },
@@ -130,9 +130,9 @@ const REGISTRY: Record<LoopIntegrationId, LoopIntegrationMeta> = {
     id: 'posthog',
     displayName: 'PostHog',
     iconKey: 'fallback',
-    defaultRuntimeStatus: 'unimplemented',
+    defaultRuntimeStatus: 'auth_missing',
     brandNote:
-      'Batch3 catalog_only: capabilities listed; dispatch blocked as catalog_only (no live adapter yet).',
+      'Batch3 capture/insights adapters (loopback contract). Live PostHog project not connected.',
     actions: [
       { id: 'capture_event', label: 'Capture event', kind: 'action' },
       { id: 'query_insights', label: 'Query insights', kind: 'action' },
@@ -217,9 +217,6 @@ export function runtimeStatusNextStep(
     return `${meta.displayName} is offline — retry when available`
   }
   if (status === 'unimplemented') {
-    if (meta.id === 'supabase' || meta.id === 'posthog') {
-      return `${meta.displayName} is catalog_only — listed offline; not executable until an adapter ships (not a live-account gap)`
-    }
     return `${meta.displayName} connector is not implemented yet`
   }
   return `Configure ${meta.displayName} before running this node`

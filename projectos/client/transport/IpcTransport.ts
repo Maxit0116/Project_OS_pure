@@ -1882,6 +1882,39 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("startLoopInstanceFromEvent", projectId, loopId, event);
   }
 
+  enqueueOfflineLoopEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<{
+    outcome: "queued" | "dropped_duplicate";
+    dedupeKey: string;
+    queuedCount: number;
+  }> {
+    return this.invoke("enqueueOfflineLoopEvent", projectId, loopId, event);
+  }
+
+  listOfflineLoopEventQueue(projectId: string): Promise<
+    Array<{
+      dedupeKey: string;
+      loopId: string;
+      eventId: string;
+      eventType: string;
+      status: string;
+      enqueuedAt: string;
+      lastError?: string;
+    }>
+  > {
+    return this.invoke("listOfflineLoopEventQueue", projectId);
+  }
+
+  drainOfflineLoopEventQueue(
+    projectId: string,
+    options?: { max?: number },
+  ): Promise<{ drained: number; failed: number; queuedRemaining: number }> {
+    return this.invoke("drainOfflineLoopEventQueue", projectId, options ?? {});
+  }
+
   restoreLoopInstanceFromCheckpoint(
     projectId: string,
     loopId: string,
