@@ -31,4 +31,24 @@ describe("loop-task-materials contracts", () => {
     });
     expect(binding.specVersion).toBe("spec_1");
   });
+
+  it("accepts Gmail provenance materials for run snapshots", () => {
+    const material = LoopTaskMaterialSchema.parse({
+      id: "mat_gmail_1",
+      kind: "file",
+      purpose: "log",
+      title: "stack.pdf",
+      source: "gmail",
+      parseStatus: "pending",
+      gmail: {
+        accountRefId: "cred_gmail_ro",
+        messageId: "m1",
+        threadId: "t1",
+        attachmentId: "att_1",
+      },
+      runOverride: true,
+      createdAt: new Date().toISOString(),
+    });
+    expect(material.gmail?.messageId).toBe("m1");
+  });
 });

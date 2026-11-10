@@ -40,6 +40,8 @@ export const LoopTaskMaterialSourceSchema = z.enum([
   "project_ref",
   "url",
   "composer_text",
+  /** Gmail message body or attachment mapped into a run material. */
+  "gmail",
 ]);
 
 export const LoopTaskMaterialSchema = z
@@ -82,6 +84,21 @@ export const LoopTaskMaterialSchema = z
         path: z.string().trim().min(1).max(500),
         kind: z.enum(["file", "dir", "c4_node", "test"]).optional(),
         nodeId: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+    /**
+     * Gmail provenance — credential account ref + message/thread/attachment ids.
+     * Bound to the run snapshot; never implies live send or mailbox mutation.
+     */
+    gmail: z
+      .object({
+        accountRefId: z.string().trim().min(1).max(120),
+        messageId: z.string().trim().min(1).max(200).optional(),
+        threadId: z.string().trim().min(1).max(200).optional(),
+        attachmentId: z.string().trim().min(1).max(200).optional(),
+        /** Mailbox historyId observed when material was captured (poll/push sync). */
+        historyId: z.string().trim().min(1).max(64).optional(),
       })
       .strict()
       .optional(),

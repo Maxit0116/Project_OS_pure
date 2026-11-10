@@ -54,6 +54,7 @@ import {
   describeOfflineConnector,
   invokeOfflineConnector,
 } from "./loop-connector-offline.js";
+import { preflightLoopRunStart } from "./loop-run-preflight.js";
 import {
   architectureOf,
   conditionalOutgoing,
@@ -2870,6 +2871,19 @@ export type StartLoopInstanceOptions = {
   launch?: LoopLaunch;
   /** When restoring after crash: reuse checkpoint fields instead of fresh cursor. */
   restoreCheckpoint?: boolean;
+  /**
+   * Project-workflow binding snapshot — frozen on the Instance; editing
+   * Intent/Spec must not rewrite it after start.
+   */
+  runBinding?: LoopInstance["runBinding"];
+  /**
+   * When true, refuse start if preflight reports blockers.
+   * LocalApi project starts pass true; unit helpers may omit (default false).
+   */
+  requirePreflight?: boolean;
+  materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+  branch?: string;
+  projectId?: string;
 };
 
 export function startLoopInstance(
@@ -2900,6 +2914,22 @@ export function startLoopInstance(
   const issues = validateLoopSpecTopology(spec);
   if (issues.length > 0) {
     throw new Error(issues.map((issue) => issue.message).join("; "));
+  }
+
+  if (options.requirePreflight === true) {
+    const preflight = preflightLoopRunStart({
+      document: doc,
+      specVersion: spec.version,
+      ...(options.branch ? { branch: options.branch } : {}),
+      ...(options.materials ? { materials: options.materials } : {}),
+    });
+    if (!preflight.canStart) {
+      const blockers = preflight.items
+        .filter((item) => item.severity === "blocker")
+        .map((item) => item.message)
+        .join("; ");
+      throw new Error(`Loop preflight blocked start: ${blockers}`);
+    }
   }
 
   validateLaunchParams(spec, options.launch?.params);
@@ -2936,6 +2966,23 @@ export function startLoopInstance(
       : {}),
     ...(execution?.leaf?.filePath ? { leafPath: execution.leaf.filePath } : {}),
   });
+  const runBinding =
+    options.runBinding ??
+    (options.projectId
+      ? {
+          projectId: options.projectId,
+          specVersion: spec.version,
+          createdAt: startedAt,
+          ...(options.branch ? { branch: options.branch } : {}),
+          ...(options.materials?.length
+            ? {
+                taskInputId: `task_${randomUUID()}`,
+              }
+            : {}),
+          codeDigest: pathFingerprint,
+        }
+      : undefined);
+
   let instance: LoopInstance = {
     id: `inst_${randomUUID()}`,
     specVersion: spec.version,
@@ -2956,6 +3003,7 @@ export function startLoopInstance(
     },
     budgetUsage: { tokens: 0, wallClockMs: 0, retries: 0 },
     ...(options.launch ? { launch: options.launch } : {}),
+    ...(runBinding ? { runBinding } : {}),
     events: [],
     startedAt,
     updatedAt: startedAt,

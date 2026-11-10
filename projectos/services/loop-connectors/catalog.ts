@@ -377,6 +377,85 @@ export const LOOP_CONNECTOR_CATALOG: Record<
       },
     ],
   },
+  /**
+   * Appended mail connector (not a replacement for the original 11).
+   * Phase-1: gmail.readonly via loopback; no live mailbox / Pub/Sub / send.
+   */
+  gmail: {
+    id: "gmail",
+    displayName: "Gmail",
+    iconKey: "gmail",
+    batch: "batch_mail",
+    apiVersion: "Gmail API v1",
+    apiDocsUrl: "https://developers.google.com/workspace/gmail/api/reference/rest",
+    brandNote:
+      "Phase-1 gmail.readonly only. Push = users.watch→Pub/Sub→history.list (not ordinary webhook bodies). Send default off.",
+    implStatus: "implemented_contract",
+    liveStatus: "unconfigured",
+    capabilities: [
+      {
+        id: "messages_search",
+        kind: "action",
+        label: "Search messages (IDs + pageToken)",
+        risk: "read",
+        apiSurface: "GET users.messages.list?q=",
+        notes: "List returns IDs only — snippets must not masquerade as body",
+      },
+      {
+        id: "messages_get",
+        kind: "action",
+        label: "Get message (full MIME)",
+        risk: "read",
+        apiSurface: "GET users.messages.get?format=full",
+      },
+      {
+        id: "threads_get",
+        kind: "action",
+        label: "Get thread (full bodies)",
+        risk: "read",
+        apiSurface: "GET users.threads.get?format=full",
+      },
+      {
+        id: "attachments_get",
+        kind: "action",
+        label: "Get attachment → TaskMaterial",
+        risk: "read",
+        apiSurface: "GET users.messages.attachments.get",
+      },
+      {
+        id: "poll_history",
+        kind: "trigger",
+        label: "Online history poll (not 24/7 listen)",
+        risk: "read",
+        apiSurface: "GET users.history.list",
+        notes: "Online-only; dedupe/page/429/cancel; must not claim always-on",
+      },
+      {
+        id: "users_watch",
+        kind: "trigger",
+        label: "Mailbox watch (Pub/Sub)",
+        risk: "read",
+        apiSurface: "POST users.watch → Cloud Pub/Sub",
+        notes: "Catalog/planned — phase-1 does not deploy Pub/Sub",
+      },
+      {
+        id: "draft_plan",
+        kind: "action",
+        label: "In-product reply draft plan (not Gmail draft)",
+        risk: "write_low",
+        apiSurface: "product-local only",
+        notes: "Suggestion ≠ Gmail drafts.create ≠ send",
+      },
+      {
+        id: "messages_send",
+        kind: "action",
+        label: "Send message (approval-gated)",
+        risk: "write_high",
+        apiSurface: "POST users.messages.send",
+        notes: "Default OFF — precise approval binding required",
+      },
+    ],
+  },
 };
 
 export function listConnectorVendors(): LoopConnectorVendorMeta[] {

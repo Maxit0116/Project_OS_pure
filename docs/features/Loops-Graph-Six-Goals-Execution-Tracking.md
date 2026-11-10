@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10 — security/dual-entry WIP + **Project Workflow / Materials** 权威计划入仓  
+**Updated**: 2026-11-10 — security/dual-entry WIP + PW/TM + **Gmail 只读追加**（新文档，非 5814430）  
 
 状态键：**计划** · **实现** · **contract** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
@@ -12,6 +12,7 @@
 | 文档 | 角色 |
 |------|------|
 | [`Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](./Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) | **增量 A/B 权威**：项目内真实 workflow run + 多类型任务材料；阶段依赖与验收矩阵 |
+| [`Loops-Graph-Gmail-Connector-Dev-Plan.md`](./Loops-Graph-Gmail-Connector-Dev-Plan.md) | **Gmail 追加权威**（2026-11-10）：只读首期 + 发送/push 边界；非 5814430 |
 | [`Loops-Graph-Gaps-Closure-Dev-Plan.md`](./Loops-Graph-Gaps-Closure-Dev-Plan.md) | 六机制 / 可靠性总控（GC-*） |
 | [`Loops-Graph-Workflow-Studio-Dev-Plan.md`](./Loops-Graph-Workflow-Studio-Dev-Plan.md) | Studio 壳与 D1–D9 决策基线 |
 | [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | DutyCard / Palette 手工入口 |
@@ -24,7 +25,7 @@
 
 | # | Goal | 状态摘要 |
 |---|------|----------|
-| 1 | 连接器 GitHub…PostHog（11 平台不删） | Batch1 **contract**/live待验；Batch2 Linear/Jira/Notion/Vercel-list **contract**/live待验；Batch3 **catalog_only** |
+| 1 | 连接器 GitHub…PostHog（11 平台不删）+ **Gmail 追加** | Batch1 **contract**/live待验；Batch2 Linear/Jira/Notion/Vercel-list **contract**/live待验；Batch3 **catalog_only**；Gmail readonly **实现/contract（loopback）**/真实邮箱 **未接** |
 | 2 | Condition/parallel/loop/timer/retry/pause/resume | GC 主体 **实现/contract**；DutyCard logic 表单 **实现**/UI待验 |
 | 3 | Reusable Agents + 互调 | wiring **实现**/待增强 |
 | 4 | Human review/approval | binding **contract**；DutyCard human 表单 **实现**/UI待验；OAuth **未配置** |
@@ -67,6 +68,19 @@
 
 ---
 
+## Gmail（追加；详见权威计划）
+
+| 切片 | 状态 |
+|------|------|
+| 文档 scope/push/sync 矩阵 + Limited Use | **计划权威**（本仓新文件） |
+| catalog + messages_search/get / threads_get / attachments→TM | **实现/contract**（loopback；无真邮箱） |
+| 在线 poll_history（非全天监听） | **计划/部分** |
+| users.watch → Pub/Sub | **计划**；首期不部署 |
+| 发送审批 / compose | **计划**；默认关 |
+| 真实 Gmail / OAuth live | **未配置 / 未验** |
+
+---
+
 ## 验证闸（每推送更新）
 
 ```text
@@ -76,6 +90,17 @@ npx vitest run services/loop-* workbench/src/components/LoopGraph
 # tsc --noEmit：目标不引入 loop-* 新回归；近期基线约 160 error TS（仓库既有债）
 ```
 
-近期本地闸（实现切片，非文档完成）：**29 files / 157 tests passed**；tsc **160**（无新增 loop-connectors/authoring 回归）。
+近期本地闸（实现切片，非文档完成；以当次命令为准）：
+```text
+npx vitest run --maxWorkers=1 --minWorkers=1 \
+  services/loop- services/loop-connectors contracts/loop- \
+  workbench/src/components/LoopGraph workbench/src/state/loop \
+  client/mock-loop-graph-store.test.ts
+# → Test Files 40 passed / Tests 203 passed
+# projectos tsc --noEmit：约 22 error TS（仓库既有债；gmail adapter 无新增回归）
+# workbench npm run build：tsc -b 仍失败于既有 xmlns/OrbState/ParentBatchAuth 等（基线，未抹）
+```
 
-No merge / paid live / Mac / 真实外发。
+**DOM 开链（云端 Linux）**：Vite 真实 Welcome（含打开示例入口）light/dark/键盘 **已截**；Overlay/DutyCard 需 Electron LocalApi host——Vite 不能打包 Node LocalApi（`node:fs`→500），桌面 `electron` 依赖本环境未完整装好/未跑主进程，**Overlay 真 DOM 待 Electron host**。
+
+No merge / paid live / Mac / 真实外发 / 真 Gmail。

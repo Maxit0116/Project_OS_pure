@@ -8572,10 +8572,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   }
 
   /**
-   * Test/loopback: LocalApi → settleConnectorOperation → adapter → transport → audit.
-   * Inject transport via setLoopConnectorTransportOverride; secrets via resolve map.
+   * Production SaaS connector settle — LocalApi → settleConnectorOperation →
+   * adapter → transport → audit. Tests inject transport/secret via overrides.
    */
-  async settlePendingConnectorOpForTests(
+  async settlePendingConnectorOp(
     projectId: string,
     loopId: string,
     instanceId: string,
@@ -8643,6 +8643,21 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       };
     }
     return { document: settled.doc, result: settled.result };
+  }
+
+  /** @deprecated Use settlePendingConnectorOp — same production path. */
+  settlePendingConnectorOpForTests(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    options?: {
+      resolveSecret?: (credentialRefId: string) => string | null;
+    },
+  ): Promise<{
+    document: import("../contracts/loop-graph.js").LoopGraphDocument;
+    result: import("./loop-connectors/types.js").LoopConnectorResult;
+  }> {
+    return this.settlePendingConnectorOp(projectId, loopId, instanceId, options);
   }
 
   /**
@@ -8850,8 +8865,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         (this.loopConnectorTransportOverride ||
           this.loopConnectorSecretResolver)
       ) {
-        const settled = await this.settlePendingConnectorOpForTests(
-          workspace.project.id,
+        const settled = await this.settlePendingConnectorOp(
+          workspace.project.projectId,
           loopId,
           instance.id,
         );
@@ -9300,6 +9315,11 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     loopId: string,
     specVersion?: string,
     featureNodeId?: string,
+    options?: {
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { startLoopInstance } = await import("./loop-runtime-service.js");
@@ -9310,12 +9330,18 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ? doc?.approvedSpecs.find((item) => item.version === version)
       : doc?.approvedSpecs[doc.approvedSpecs.length - 1];
     try {
+      // Production project entry: preflight + runBinding snapshot (definition edits
+      // cannot rewrite the instance binding after start).
       const started = startLoopInstance(workspace.workspaceRoot, loopId, {
         ...(version ? { specVersion: version } : {}),
         execution: this.loopExecutionHooks(workspace, selectedFeatureNodeId, {
           allowConcurrentLoopRuns: spec?.parallelMode === "multi_run",
         }),
         launch: { kind: "manual" },
+        projectId,
+        requirePreflight: options?.skipPreflight !== true,
+        ...(options?.branch ? { branch: options.branch } : {}),
+        ...(options?.materials ? { materials: options.materials } : {}),
       });
       return await this.settleLoopRuns(workspace, loopId, started);
     } catch (error) {
@@ -9530,15 +9556,46 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     request: import("../contracts/loop-graph.js").LoopAuthoringTurnRequest,
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
-    const { sendLoopAuthoringTurnAsync } = await import("./loop-graph-service.js");
+    const {
+      sendLoopAuthoringTurnAsync,
+      getLoopAuthoringCompleteOverride,
+    } = await import("./loop-graph-service.js");
+    const { createGatewayAuthoringComplete } = await import(
+      "./loop-goal-authoring-provider.js"
+    );
     try {
-      // Provider path when override/useProvider set; else heuristics (never pretends LLM).
+      const wantProvider = request.useProvider === true;
+      const override = getLoopAuthoringCompleteOverride();
+      let complete = override ?? undefined;
+      if (wantProvider && !complete) {
+        const profile = this.settingsService.resolveModelProfile(
+          workspace.settings,
+        );
+        if (!profile) {
+          throw new ProjectOSError(
+            "model_connection_failed",
+            "No model profile configured for Loop authoring. Configure a model in Settings. Refusing silent heuristic fallback.",
+          );
+        }
+        if (!this.settingsService.hasConfiguredModel(workspace.settings)) {
+          throw new ProjectOSError(
+            "model_connection_failed",
+            "Model profile has no API key ref configured for Loop authoring. Refusing silent heuristic fallback.",
+          );
+        }
+        // Production wiring: same ModelGateway as the rest of LocalApi.
+        // Loopback/tests inject override or a scripted gateway — no auto-read of
+        // unrelated user key files beyond the project's configured secretStore ref.
+        complete = createGatewayAuthoringComplete(this.modelGateway, profile);
+      }
       return await sendLoopAuthoringTurnAsync(
         workspace.workspaceRoot,
         loopId,
         request,
+        complete ? { complete } : undefined,
       );
     } catch (error) {
+      if (error instanceof ProjectOSError) throw error;
       throw new ProjectOSError(
         "loop_graph_invalid",
         error instanceof Error ? error.message : "Failed to send authoring turn",
@@ -9550,7 +9607,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
    * Test/loopback: inject authoring complete fn. Null clears.
    * Does not read user API keys or make paid live calls.
    */
-  setLoopAuthoringCompleteOverride(
+  async setLoopAuthoringCompleteOverride(
     complete:
       | ((input: {
           system: string;
@@ -9558,10 +9615,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           signal?: AbortSignal;
         }) => Promise<string>)
       | null,
-  ): void {
-    void import("./loop-graph-service.js").then((mod) => {
-      mod.setLoopAuthoringCompleteOverride(complete);
-    });
+  ): Promise<void> {
+    const mod = await import("./loop-graph-service.js");
+    mod.setLoopAuthoringCompleteOverride(complete);
   }
 
   async answerLoopGoalClarification(

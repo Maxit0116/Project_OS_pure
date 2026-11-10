@@ -4,6 +4,13 @@
  */
 import type { LoopGraphDocument, LoopInstance } from "../../contracts/loop-graph.js";
 import { feishuLarkSendMessage } from "./adapters/feishu-lark.js";
+import {
+  gmailMessagesGet,
+  gmailMessagesSearch,
+  gmailMessagesSendBlocked,
+  gmailThreadsGet,
+  gmailUsersWatchRefuse,
+} from "./adapters/gmail.js";
 import { sentryListIssues } from "./adapters/sentry.js";
 import { slackChatPostMessage } from "./adapters/slack.js";
 import type { ConnectorDispatchContext } from "./dispatch.js";
@@ -144,6 +151,55 @@ export async function settleConnectorOperation(
         credential,
         idempotencyKey: pending.idempotencyKey,
         ...(secret ? { apiToken: secret } : {}),
+      },
+      ctx,
+    );
+  } else if (pending.vendorId === "gmail" && pending.capabilityId === "messages_search") {
+    result = await gmailMessagesSearch(
+      {
+        q: String(pending.payload.q ?? ""),
+        ...(pending.payload.pageToken
+          ? { pageToken: String(pending.payload.pageToken) }
+          : {}),
+        credential,
+        idempotencyKey: pending.idempotencyKey,
+        ...(secret ? { accessToken: secret } : {}),
+      },
+      ctx,
+    );
+  } else if (pending.vendorId === "gmail" && pending.capabilityId === "messages_get") {
+    result = await gmailMessagesGet(
+      {
+        messageId: String(pending.payload.messageId ?? ""),
+        credential,
+        idempotencyKey: pending.idempotencyKey,
+        ...(secret ? { accessToken: secret } : {}),
+      },
+      ctx,
+    );
+  } else if (pending.vendorId === "gmail" && pending.capabilityId === "threads_get") {
+    result = await gmailThreadsGet(
+      {
+        threadId: String(pending.payload.threadId ?? ""),
+        credential,
+        idempotencyKey: pending.idempotencyKey,
+        ...(secret ? { accessToken: secret } : {}),
+      },
+      ctx,
+    );
+  } else if (pending.vendorId === "gmail" && pending.capabilityId === "users_watch") {
+    result = await gmailUsersWatchRefuse(
+      { idempotencyKey: pending.idempotencyKey, credential },
+      ctx,
+    );
+  } else if (pending.vendorId === "gmail" && pending.capabilityId === "messages_send") {
+    // Default path omits highRiskAuthorized — must block without explicit auth.
+    result = await gmailMessagesSendBlocked(
+      {
+        raw: String(pending.payload.raw ?? ""),
+        credential,
+        idempotencyKey: pending.idempotencyKey,
+        ...(secret ? { accessToken: secret } : {}),
       },
       ctx,
     );

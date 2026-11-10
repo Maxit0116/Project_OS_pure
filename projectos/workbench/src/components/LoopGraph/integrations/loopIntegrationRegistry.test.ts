@@ -13,9 +13,9 @@ describe('loopIntegrationRegistry', () => {
     const list = listLoopIntegrations()
     const ids = list.map((item) => item.id)
     expect(ids).toEqual(
-      expect.arrayContaining(['github', 'slack', 'feishu', 'lark', 'sentry']),
+      expect.arrayContaining(['github', 'slack', 'feishu', 'lark', 'sentry', 'gmail']),
     )
-    for (const item of ['github', 'slack', 'feishu', 'lark', 'sentry'] as const) {
+    for (const item of ['github', 'slack', 'feishu', 'lark', 'sentry', 'gmail'] as const) {
       const meta = getLoopIntegration(item)!
       const url = resolveLoopIntegrationIconUrl(meta.iconKey)
       expect(url).toBeTruthy()
@@ -49,7 +49,14 @@ describe('loopIntegrationRegistry', () => {
       path.dirname(new URL(import.meta.url).pathname),
       'icons',
     )
-    for (const file of ['github.svg', 'slack.svg', 'feishu.svg', 'lark.svg', 'sentry.svg']) {
+    for (const file of [
+      'github.svg',
+      'slack.svg',
+      'feishu.svg',
+      'lark.svg',
+      'sentry.svg',
+      'gmail.svg',
+    ]) {
       const raw = await fs.readFile(path.join(dir, file), 'utf8')
       expect(raw.toLowerCase()).not.toMatch(/<script/)
       // Allow only W3C xmlns namespace URLs — reject any other http(s) hotlinks.

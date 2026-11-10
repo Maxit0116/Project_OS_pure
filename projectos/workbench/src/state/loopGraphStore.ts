@@ -316,7 +316,8 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         mode: document.composerMode ?? 'ask',
         text,
         ...(selectedNodeId ? { selectedNodeId } : {}),
-        // Prefer provider when LocalApi has an override; server falls back to heuristic.
+        // Prefer provider. LocalApi refuses silent heuristic when useProvider is true
+        // and no model/loopback complete is configured (honest failure, not fake AI).
         useProvider: true,
       })
       const heads = await client.listLoopGraphs(project.projectId)

@@ -9,6 +9,7 @@ export type LoopIntegrationId =
   | 'feishu'
   | 'lark'
   | 'sentry'
+  | 'gmail'
   | 'http'
   | 'webhook'
 
@@ -94,6 +95,21 @@ const REGISTRY: Record<LoopIntegrationId, LoopIntegrationMeta> = {
       { id: 'issue_created', label: 'Issue created', kind: 'trigger' },
     ],
   },
+  gmail: {
+    id: 'gmail',
+    displayName: 'Gmail',
+    iconKey: 'gmail',
+    defaultRuntimeStatus: 'auth_missing',
+    brandNote:
+      'Phase-1 gmail.readonly. List IDs ≠ body. Push is users.watch→Pub/Sub (not deployed). Send default off.',
+    actions: [
+      { id: 'messages_search', label: 'Search messages', kind: 'action' },
+      { id: 'messages_get', label: 'Get message', kind: 'action' },
+      { id: 'threads_get', label: 'Get thread', kind: 'action' },
+      { id: 'attachments_get', label: 'Get attachment', kind: 'action' },
+      { id: 'poll_history', label: 'Online history poll', kind: 'trigger' },
+    ],
+  },
   http: {
     id: 'http',
     displayName: 'HTTP',
@@ -117,6 +133,7 @@ const ICON_URLS: Record<string, string> = {
   feishu: new URL('./icons/feishu.svg', import.meta.url).href,
   lark: new URL('./icons/lark.svg', import.meta.url).href,
   sentry: new URL('./icons/sentry.svg', import.meta.url).href,
+  gmail: new URL('./icons/gmail.svg', import.meta.url).href,
 }
 
 export function listLoopIntegrations(): LoopIntegrationMeta[] {
@@ -143,6 +160,7 @@ export function integrationIdFromActionNode(input: {
     raw === 'feishu' ||
     raw === 'lark' ||
     raw === 'sentry' ||
+    raw === 'gmail' ||
     raw === 'http' ||
     raw === 'webhook'
   ) {

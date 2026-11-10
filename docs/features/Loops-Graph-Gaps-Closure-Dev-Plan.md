@@ -14,7 +14,8 @@
 | [`Loops-Graph-Review-Visual-Dev-Plan.md`](./Loops-Graph-Review-Visual-Dev-Plan.md) | Review 审批台已落地 MVP；本文件要求 Path Map 支持 Parallel/Branch/Loop 容器识读，不重做审批壳。 |
 | [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | 配置卫星；本文件不改 wiring 语义。 |
 | [`Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](./Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) | **并行权威（2026-11-10）**：项目内真实 Workflow Run 绑定 + 多类型 Task Materials（PW-\* / TM-\*）。依赖本文件已落地 GC 能力；不重做六机制。验收矩阵与分期以该文件 + [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) 为准。 |
-| [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) | 六目标 + 连接器 + 双入口 + PW/TM **执行实况**（计划/实现/contract/live/待验）。 |
+| [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) | 六目标 + 连接器 + 双入口 + PW/TM + Gmail **执行实况**（计划/实现/contract/live/待验）。 |
+| [`Loops-Graph-Gmail-Connector-Dev-Plan.md`](./Loops-Graph-Gmail-Connector-Dev-Plan.md) | Gmail push=`users.watch`→Pub/Sub→`history.list`（≠普通 webhook 载信）；首期不部署 Pub/Sub。 |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | P-0–P-3 底座不变。 |
 | [`Agent-Harness-Dev-Plan.md`](./Agent-Harness-Dev-Plan.md) | Pause/Cancel/Resume 必须打到 harness。 |
 | [`Agent-Flow-Activity-Dev-Plan.md`](./Agent-Flow-Activity-Dev-Plan.md) | 节点内轨迹仍归 Agent Flow；Loops 只投影任务单元状态与产物引用。 |

@@ -14,12 +14,15 @@ export type LoopConnectorVendorId =
   | "notion"
   | "vercel"
   | "supabase"
-  | "posthog";
+  | "posthog"
+  /** Appended mail connector — does not replace the original 11-vendor inventory. */
+  | "gmail";
 
 export type LoopConnectorBatch =
   | "batch1_collab_observability"
   | "batch2_tasks_docs_deploy"
-  | "batch3_data";
+  | "batch3_data"
+  | "batch_mail";
 
 export type LoopConnectorCapabilityKind = "trigger" | "action" | "notify";
 

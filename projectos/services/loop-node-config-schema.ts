@@ -88,6 +88,16 @@ const FEISHU_LARK_OPS = new Set([
   "custom_bot_notify",
   "post_message",
 ]);
+const GMAIL_OPS = new Set([
+  "messages_search",
+  "messages_get",
+  "threads_get",
+  "attachments_get",
+  "poll_history",
+  "users_watch",
+  "draft_plan",
+  "messages_send",
+]);
 
 function allowedOperations(
   integration: LoopActionIntegration | undefined,
@@ -97,6 +107,7 @@ function allowedOperations(
   if (integration === "sentry") return SENTRY_OPS;
   if (integration === "slack") return SLACK_OPS;
   if (integration === "feishu" || integration === "lark") return FEISHU_LARK_OPS;
+  if (integration === "gmail") return GMAIL_OPS;
   if (integration === "test" || integration === "terminal") return null;
   return null;
 }
@@ -180,7 +191,8 @@ export function validateLoopNodeConfig(
         integration === "feishu" ||
         integration === "lark" ||
         integration === "sentry" ||
-        integration === "github";
+        integration === "github" ||
+        integration === "gmail";
       if (needsCred && !node.credentialRefId) {
         issues.push({
           path: "credentialRefId",

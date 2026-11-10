@@ -72,6 +72,7 @@ export const LOOP_ACTION_INTEGRATIONS = [
   "feishu",
   "lark",
   "sentry",
+  "gmail",
 ] as const;
 export type LoopActionIntegration = (typeof LOOP_ACTION_INTEGRATIONS)[number];
 

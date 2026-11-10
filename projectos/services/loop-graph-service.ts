@@ -337,19 +337,35 @@ function sendLoopAuthoringTurnHeuristic(
   });
 }
 
+export type SendLoopAuthoringTurnAsyncOptions = {
+  /**
+   * Production complete fn (usually ModelGateway-backed).
+   * When `useProvider: true`, this or the module override is required —
+   * never silently fall back to heuristics.
+   */
+  complete?: LoopAuthoringCompleteFn;
+};
+
 /**
- * Provider-capable authoring. Uses injectable complete when set / useProvider;
- * otherwise falls back to deterministic heuristics (never pretends to be LLM).
+ * Provider-capable authoring.
+ * - `useProvider: true` → must have complete (override or options); never heuristic.
+ * - `useProvider` omitted/false → deterministic heuristics (honest non-AI path).
  */
 export async function sendLoopAuthoringTurnAsync(
   workspaceRoot: string,
   loopId: string,
   request: LoopAuthoringTurnRequest,
+  options?: SendLoopAuthoringTurnAsyncOptions,
 ): Promise<LoopGraphDocument> {
   const parsed = LoopAuthoringTurnRequestSchema.parse(request);
-  const complete = authoringCompleteOverride;
-  const wantProvider = Boolean(parsed.useProvider || complete);
-  if (!wantProvider || !complete) {
+  const complete = options?.complete ?? authoringCompleteOverride;
+  if (parsed.useProvider === true) {
+    if (!complete) {
+      throw new Error(
+        "Provider authoring requested but no model complete is configured (set a model profile in Settings, or inject a loopback complete for tests). Refusing silent heuristic fallback.",
+      );
+    }
+  } else if (!complete) {
     return sendLoopAuthoringTurnHeuristic(workspaceRoot, loopId, parsed);
   }
 
@@ -364,7 +380,11 @@ export async function sendLoopAuthoringTurnAsync(
   }
 
   if (parsed.mode === "create_agent") {
-    // Not part of Ask/Edit provider authoring — fall back to heuristic edit stub.
+    if (parsed.useProvider === true) {
+      throw new Error(
+        "create_agent mode is not supported on the provider authoring path; use ask/edit",
+      );
+    }
     return sendLoopAuthoringTurnHeuristic(workspaceRoot, loopId, {
       ...parsed,
       mode: "edit",

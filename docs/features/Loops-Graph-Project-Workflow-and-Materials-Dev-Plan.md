@@ -13,6 +13,7 @@
 | [`Loops-Graph-Node-Architecture-Dev-Plan.md`](./Loops-Graph-Node-Architecture-Dev-Plan.md) | 节点类型合同；材料可绑定节点，但不改 Agent/Action/Logic/Human 分类。 |
 | [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | DutyCard / Palette；手工配置入口复用，不另造侧栏。 |
 | [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) | **执行跟踪 + 验收矩阵实况**（计划/实现/contract/live/待验）。 |
+| [`Loops-Graph-Gmail-Connector-Dev-Plan.md`](./Loops-Graph-Gmail-Connector-Dev-Plan.md) | **Gmail 追加**（2026-11-10，非 5814430）：邮件→材料/RunBinding；只读首期；发送/push 边界。 |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | Spec 冻结 / AgentRun / Evidence 底座不变。 |
 | [`backend/Security-Governance-Dev-Plan.md`](./backend/Security-Governance-Dev-Plan.md) | 审批审计；材料与 URL 读取须遵守 SSRF/密钥边界（见 §5）。 |
 | [`bugs.md`](../../bugs.md) | H3 SSRF 先例：材料 URL 读取必须默认拒内网/localhost，生产策略不放宽。 |

@@ -13,7 +13,8 @@
 | [`Loops-Graph-Review-Visual-Dev-Plan.md`](./Loops-Graph-Review-Visual-Dev-Plan.md) | **Review 可视化审批台（2026-11-09）**：Intent strip + 只读 Path Map + Gate 联动；承接并细化本文件 LG-1.4 的展示与强制确认体验。 |
 | [`Loops-Graph-Gaps-Closure-Dev-Plan.md`](./Loops-Graph-Gaps-Closure-Dev-Plan.md) | **缺口补全总控（2026-11-09）**：六机制（含受控 Parallel）+ Recovery/可观测性/触发。与本文件 LG-2–LG-6 重叠的验收以 **GC-\*** 为准；本文件仍保留 Studio 壳与决策基线。 |
 | [`Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](./Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) | **项目落地权威（2026-11-10）**：把 D4/D5 具体化为「项目内选流程→预检→隔离工作区交付」+ 多类型 Task Materials；验收见该文件矩阵与 [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md)。不另起引擎。 |
-| [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) | 六目标 / 11 平台 / 双入口 / PW·TM **执行跟踪**（计划/实现/contract/live/待验；入文档≠完成）。 |
+| [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) | 六目标 / 11 平台 / 双入口 / PW·TM / **Gmail 追加** **执行跟踪**（计划/实现/contract/live/待验；入文档≠完成）。 |
+| [`Loops-Graph-Gmail-Connector-Dev-Plan.md`](./Loops-Graph-Gmail-Connector-Dev-Plan.md) | Gmail 只读首期 + 发送/push 边界（2026-11-10 新增；非 5814430）。 |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | **已落地底座**：P-0–P-3（规格冻结、implement=AgentRun、verify=证据、HITL）。本计划在其上扩展产品与可靠性，不重做 P-0–P-3。 |
 | [`backend/Backend-Dev-Plan.md`](./backend/Backend-Dev-Plan.md) | 后端索引；Loop = 工作流定义，Run = 一次执行。 |
 | [`Live-Graph-Agent-Observability-Dev-Plan.md`](./Live-Graph-Agent-Observability-Dev-Plan.md) | C4 上的执行投影；与 Loop 共享诚实事件源。 |

@@ -598,12 +598,18 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     return Promise.resolve(mockAdvanceLoopInstance(projectId, loopId, instanceId));
   }
 
-  override sendLoopAuthoringTurn(
+  override async sendLoopAuthoringTurn(
     projectId: string,
     loopId: string,
     request: LoopAuthoringTurnRequest,
   ): Promise<LoopGraphDocument> {
-    return Promise.resolve(mockSendLoopAuthoringTurn(projectId, loopId, request));
+    // useProvider:true must not silently heuristic-pretend AI in the browser mock.
+    if (request.useProvider === true) {
+      throw new Error(
+        "Provider authoring is not available in the browser mock without a LocalApi ModelGateway / loopback complete. Refusing silent heuristic fallback. Use Electron LocalApi or omit useProvider for honest heuristics.",
+      );
+    }
+    return mockSendLoopAuthoringTurn(projectId, loopId, request);
   }
 
   override answerLoopGoalClarification(
