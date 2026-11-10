@@ -227,6 +227,228 @@ export function layoutComposeForArrow(
   )
 }
 
+/**
+ * Padding around the compose card reserved for the default expanded
+ * SpatialComposeHub satellites (left stack / right add / bottom references).
+ * Kept as numeric mirrors of hubLayout so overlay layout stays free of UI imports.
+ */
+export interface ComposeHubInsets {
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+/** HUB_GAP(44) + SATELLITE_WIDTH(200); top/bottom match default stack overhang. */
+export const DEFAULT_COMPOSE_HUB_INSETS: ComposeHubInsets = {
+  left: 244,
+  right: 244,
+  top: 120,
+  bottom: 116,
+}
+
+/** Short tip offset so the compose card stays visually near the stencil. */
+export const COMPOSE_NEAR_TARGET_GAP_PX = 48
+
+export interface ComposeNearTargetInput {
+  /** Obstacle the card should sit beside (stencil stage rect, not full-frame). */
+  target: ScreenRect
+  panelWidth: number
+  panelHeight: number
+  viewport: { width: number; height: number }
+  margin?: number
+  gap?: number
+  hubInsets?: ComposeHubInsets
+}
+
+type NearSide = 'right' | 'left' | 'below' | 'above'
+
+function tipForNearSide(
+  target: ScreenRect,
+  side: NearSide,
+  gap: number,
+): { x: number; y: number } {
+  const midX = target.x + target.width / 2
+  const midY = target.y + target.height / 2
+  switch (side) {
+    case 'right':
+      return { x: target.x + target.width + gap, y: midY }
+    case 'left':
+      return { x: target.x - gap, y: midY }
+    case 'below':
+      return { x: midX, y: target.y + target.height + gap }
+    case 'above':
+      return { x: midX, y: target.y - gap }
+  }
+}
+
+function freeSpaceForSide(
+  target: ScreenRect,
+  side: NearSide,
+  viewport: { width: number; height: number },
+  gap: number,
+): number {
+  switch (side) {
+    case 'right':
+      return viewport.width - (target.x + target.width) - gap
+    case 'left':
+      return target.x - gap
+    case 'below':
+      return viewport.height - (target.y + target.height) - gap
+    case 'above':
+      return target.y - gap
+  }
+}
+
+function hubOverflow(
+  card: ScreenRect,
+  viewport: { width: number; height: number },
+  margin: number,
+  insets: ComposeHubInsets,
+): number {
+  const left = Math.max(0, margin + insets.left - card.x)
+  const top = Math.max(0, margin + insets.top - card.y)
+  const right = Math.max(
+    0,
+    card.x + card.width + insets.right + margin - viewport.width,
+  )
+  const bottom = Math.max(
+    0,
+    card.y + card.height + insets.bottom + margin - viewport.height,
+  )
+  return left + top + right + bottom
+}
+
+/** Slide the card so card + default satellites stay inside the viewport. */
+export function shiftCardToFitHub(
+  card: ScreenRect,
+  viewport: { width: number; height: number },
+  margin = DEFAULT_MARGIN,
+  insets: ComposeHubInsets = DEFAULT_COMPOSE_HUB_INSETS,
+): ScreenRect {
+  const cardMinX = margin
+  const cardMaxX = Math.max(margin, viewport.width - margin - card.width)
+  const cardMinY = margin
+  const cardMaxY = Math.max(margin, viewport.height - margin - card.height)
+
+  const hubMinX = margin + insets.left
+  const hubMaxX = viewport.width - margin - insets.right - card.width
+  const hubMinY = margin + insets.top
+  const hubMaxY = viewport.height - margin - insets.bottom - card.height
+
+  const x =
+    hubMaxX >= hubMinX
+      ? clamp(card.x, hubMinX, hubMaxX)
+      : clamp(card.x, cardMinX, cardMaxX)
+  const y =
+    hubMaxY >= hubMinY
+      ? clamp(card.y, hubMinY, hubMaxY)
+      : clamp(card.y, cardMinY, cardMaxY)
+
+  return { ...card, x, y }
+}
+
+/**
+ * Place a compose card beside a stencil (or other small target).
+ * Prefer a short tip near the target, then slide so the card and its default
+ * satellites stay inside the viewport — never park the hub on the far right
+ * of a full-frame backdrop.
+ */
+export function layoutComposeNearTarget(
+  input: ComposeNearTargetInput,
+): ComposeLayoutResult {
+  const margin = input.margin ?? DEFAULT_MARGIN
+  const gap = input.gap ?? COMPOSE_NEAR_TARGET_GAP_PX
+  const insets = input.hubInsets ?? DEFAULT_COMPOSE_HUB_INSETS
+  const head = {
+    x: input.target.x + input.target.width / 2,
+    y: input.target.y + input.target.height / 2,
+  }
+
+  const sides = (
+    ['right', 'left', 'below', 'above'] as const
+  ).slice() as NearSide[]
+  sides.sort(
+    (a, b) =>
+      freeSpaceForSide(input.target, b, input.viewport, gap) -
+      freeSpaceForSide(input.target, a, input.viewport, gap),
+  )
+
+  let best: ComposeLayoutResult | null = null
+  let bestScore = Infinity
+
+  for (const side of sides) {
+    const rawTip = tipForNearSide(input.target, side, gap)
+    const layout = layoutComposeForArrow({
+      region: input.target,
+      headScreen: head,
+      preferredTailScreen: rawTip,
+      panelWidth: input.panelWidth,
+      panelHeight: input.panelHeight,
+      viewport: input.viewport,
+      margin,
+    })
+    const shifted = shiftCardToFitHub(
+      layout.card,
+      input.viewport,
+      margin,
+      insets,
+    )
+    const tip = composeAttachScreenPoint(shifted, layout.attach)
+    const card = cardPinnedToTip(
+      tip,
+      layout.attach,
+      input.panelWidth,
+      input.panelHeight,
+    )
+    const targetHit = overlapArea(card, input.target)
+    const overflow = hubOverflow(card, input.viewport, margin, insets)
+    const cardOnlyOverflow = viewportOverflow(card, input.viewport, margin)
+    const dist = Math.hypot(
+      card.x + card.width / 2 - head.x,
+      card.y + card.height / 2 - head.y,
+    )
+    const score =
+      overflow * 600 +
+      cardOnlyOverflow * 200 +
+      targetHit * 80 +
+      dist +
+      (arrowShaftHitsCard(head, tip, card) ? 25_000 : 0)
+
+    if (score < bestScore) {
+      bestScore = score
+      best = { card, attach: layout.attach, attachScreen: tip }
+    }
+  }
+
+  if (best) return best
+
+  const fallbackTip = tipForNearSide(input.target, 'right', gap)
+  const fallbackCard = shiftCardToFitHub(
+    cardPinnedToTip(
+      fallbackTip,
+      'left',
+      input.panelWidth,
+      input.panelHeight,
+    ),
+    input.viewport,
+    margin,
+    insets,
+  )
+  const fallbackAttach: AnnotationAnchor = 'left'
+  const fallbackDock = composeAttachScreenPoint(fallbackCard, fallbackAttach)
+  return {
+    card: cardPinnedToTip(
+      fallbackDock,
+      fallbackAttach,
+      input.panelWidth,
+      input.panelHeight,
+    ),
+    attach: fallbackAttach,
+    attachScreen: fallbackDock,
+  }
+}
+
 /** Pin using an edge attach (legacy corners collapse to edges). */
 export function cardPinnedToTipEdge(
   tip: { x: number; y: number },

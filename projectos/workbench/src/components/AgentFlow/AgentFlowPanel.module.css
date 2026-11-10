@@ -3,6 +3,16 @@
   flex-direction: column;
   height: 100%;
   padding: var(--space-lg);
+  overflow: hidden;
+  min-height: 0;
+}
+
+.panelBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -12,6 +22,7 @@
   justify-content: space-between;
   gap: var(--space-sm);
   margin-bottom: var(--space-md);
+  flex-shrink: 0;
 }
 
 .headerActions {
@@ -55,10 +66,128 @@
   font-size: var(--font-size-sm);
 }
 
+.runBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.primary {
+  flex: 0 1 520px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding-right: var(--space-sm);
+}
+
+.inspectorPane {
+  flex: 1 1 280px;
+  min-width: 260px;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .timeline {
   flex: 1;
   max-width: 520px;
+  width: 100%;
   overflow: auto;
+}
+
+.phaseMarker {
+  display: flex;
+  align-items: center;
+  width: calc(100% - 30px);
+  margin: calc(-1 * var(--space-xs)) 0 var(--space-sm) 30px;
+  padding: 2px 0 2px 8px;
+  border: 0;
+  border-left: 1px solid var(--tech-border, var(--color-border));
+  border-radius: 0;
+  background: transparent;
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.phaseMarker:hover {
+  color: var(--tech-text-primary, var(--color-text-primary));
+}
+
+.phaseMarker:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.delegationSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  width: 100%;
+  margin: 0 0 var(--space-md);
+  padding: 6px 0 6px 8px;
+  border: 0;
+  border-left: 1px solid var(--tech-border, var(--color-border));
+  border-radius: 0;
+  background: transparent;
+  color: var(--tech-text-primary, var(--color-text-primary));
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.delegationSummary span {
+  color: var(--tech-text-secondary, var(--color-text-secondary));
+}
+
+.delegationSummary:hover {
+  color: var(--tech-text-primary, var(--color-text-primary));
+}
+
+.delegationSummary:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+@media (max-width: 840px) {
+  .split {
+    flex-direction: column;
+    overflow: auto;
+  }
+
+  .primary {
+    flex: 0 0 auto;
+    max-width: none;
+    padding-right: 0;
+  }
+
+  .inspectorPane {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 240px;
+  }
+
+  .timeline {
+    max-width: none;
+  }
+
+  .inspectorPane :global([data-agent-flow-inspector]) {
+    border-left: none;
+    border-top: 1px solid var(--tech-border, var(--color-border));
+  }
 }
 
 .actionTrace {
@@ -75,11 +204,11 @@
 
 .reasoningTrace {
   margin-bottom: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--glass-border-subtle);
-  border-left: 3px solid var(--color-warning);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-elevated);
+  padding: 2px 0 6px 10px;
+  border: 0;
+  border-left: 2px solid color-mix(in srgb, var(--tech-accent, var(--color-accent)) 50%, transparent);
+  border-radius: 0;
+  background: transparent;
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
   user-select: text;
@@ -99,10 +228,10 @@
 
 .delegationTree {
   margin: var(--space-lg) 0;
-  padding: var(--space-md);
-  border: 1px solid var(--glass-border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-muted);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .delegationTree > header {
@@ -132,10 +261,11 @@
 
 .runRole {
   width: fit-content;
-  padding: 1px var(--space-xs);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 38%, transparent);
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-accent);
   font-size: var(--font-size-xs);
   font-weight: 600;
 }
@@ -150,10 +280,10 @@
 }
 
 .delegatedChild {
-  padding: var(--space-sm);
-  border-left: 3px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-elevated);
+  padding: 4px 0 4px 8px;
+  border-left: 1px solid var(--tech-border, var(--color-border));
+  border-radius: 0;
+  background: transparent;
 }
 
 .delegatedChildHeader {
@@ -185,10 +315,10 @@
 
 .statusBadge {
   flex-shrink: 0;
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-muted);
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
   font-weight: 600;
@@ -197,13 +327,11 @@
 .statusBadge[data-run-status='running'],
 .statusBadge[data-run-status='pending'] {
   color: var(--color-accent);
-  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
 
 .statusBadge[data-run-status='complete'],
 .statusBadge[data-run-status='applied'] {
   color: var(--color-success, #3d9a62);
-  border-color: color-mix(in srgb, var(--color-success, #3d9a62) 35%, transparent);
 }
 
 .statusBadge[data-run-status='error'],
@@ -211,7 +339,6 @@
 .statusBadge[data-run-status='recovery_required'],
 .statusBadge[data-run-status='not_applied'] {
   color: var(--color-error);
-  border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
 }
 
 .emptyDelegation {
@@ -263,10 +390,11 @@
   justify-content: space-between;
   gap: var(--space-sm);
   margin: var(--space-md) 0;
-  padding: var(--space-sm) var(--space-md);
-  border: 1px solid color-mix(in srgb, var(--color-success) 35%, transparent);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  padding: 6px 0 6px 10px;
+  border: 0;
+  border-left: 2px solid color-mix(in srgb, var(--color-success) 55%, transparent);
+  border-radius: 0;
+  background: transparent;
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
 }
@@ -281,7 +409,8 @@
 .footer {
   margin-top: var(--space-lg);
   padding-top: var(--space-lg);
-  border-top: 1px solid var(--glass-border-subtle);
+  border-top: 1px solid var(--tech-border, var(--glass-border-subtle));
+  flex-shrink: 0;
 }
 
 .reviewBtnPulse {

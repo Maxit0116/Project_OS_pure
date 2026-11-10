@@ -131,21 +131,9 @@
   gap: 8px;
 }
 
-.noteInput {
+.noteFieldGrow {
   flex: 1;
   min-width: 0;
-  height: 28px;
-  border-radius: 6px;
-  border: 1px solid var(--tech-border, var(--color-border));
-  background: var(--color-bg-elevated);
-  color: var(--color-text-primary);
-  padding: 0 10px;
-  font-size: 12px;
-}
-
-.noteInput:focus-visible {
-  outline: none;
-  box-shadow: var(--tech-shadow-focus, var(--glass-focus-ring));
 }
 
 .check {

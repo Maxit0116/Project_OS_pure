@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Square } from 'lucide-react'
+import { ArrowUp, Route, Square } from 'lucide-react'
 import type { AgentDefinition } from '@contracts/index'
 import { useWorkbenchStore, type ChatMode } from '../../../state/workbenchStore'
 import { useI18n } from '../../../i18n'
+import Chip from '../../ui/Chip'
 import { VoiceInputDock } from '../VoiceInputControls'
 import ComposerModeSwitch from './ComposerModeSwitch'
 import ComposerModelThinkingMenu from './ComposerModelThinkingMenu'
@@ -36,6 +37,14 @@ interface ComposerControlBarProps {
   usageMetrics: ContextUsageMetrics
   usageOpen: boolean
   onUsageToggle: () => void
+  /**
+   * Smart session route — match prompt to a session before the user sends.
+   * When `routeVisible`, the chip stays in the function bar (Settings master switch).
+   */
+  routeVisible?: boolean
+  routeDisabled?: boolean
+  routeBusy?: boolean
+  onRoute?: () => void
 }
 
 export default function ComposerControlBar({
@@ -48,6 +57,10 @@ export default function ComposerControlBar({
   usageMetrics,
   usageOpen,
   onUsageToggle,
+  routeVisible = false,
+  routeDisabled = true,
+  routeBusy = false,
+  onRoute,
 }: ComposerControlBarProps) {
   const settings = useWorkbenchStore((s) => s.settings)
   const modelSelectionPending = useWorkbenchStore((s) => s.modelSelectionPending)
@@ -175,6 +188,24 @@ export default function ComposerControlBar({
           }}
           onConfigureModels={() => setSettingsOpen(true)}
         />
+
+        {routeVisible ? (
+          <Chip
+            active
+            className={styles.routeChip}
+            disabled={routeDisabled || routeBusy || modelSelectionPending || !onRoute}
+            aria-label={ts('chat.sessionRoute.button')}
+            title={ts('chat.sessionRoute.buttonTitle')}
+            onClick={() => onRoute?.()}
+          >
+            <span className={styles.chipMode}>
+              <Route size={14} strokeWidth={2.25} className={styles.routeChipIcon} aria-hidden />
+              <span className={styles.routeChipLabel}>
+                {routeBusy ? ts('chat.sessionRoute.matching') : ts('chat.sessionRoute.button')}
+              </span>
+            </span>
+          </Chip>
+        ) : null}
       </div>
 
       <div className={styles.rightCluster}>

@@ -116,6 +116,15 @@ function upsertFlowStep(flowSteps: AgentFlowStep[], step: AgentFlowStep): AgentF
   return next
 }
 
+/** Stop/interrupt: open steps will never receive step_completed — mark them skipped. */
+export function settleOpenFlowSteps(flowSteps: AgentFlowStep[]): AgentFlowStep[] {
+  return flowSteps.map((step) =>
+    step.status === 'running' || step.status === 'pending'
+      ? { ...step, status: 'skipped' as const }
+      : step,
+  )
+}
+
 export function reduceRunEventState(
   state: RunEventStoreSlice,
   event: AgentRunEvent,
@@ -171,6 +180,7 @@ export function reduceRunEventState(
     // Stop/cancel is not an unexpected failure — keep Apply blocked.
     // Interrupted (app closed/killed) is distinct from cancelled (user Stop).
     patch.flowStatus = event.type === 'run_cancelled' ? 'cancelled' : 'interrupted'
+    patch.flowSteps = settleOpenFlowSteps(state.flowSteps)
     const revoked = new Set(state.revokedApplyRunIds ?? [])
     revoked.add(event.runId)
     patch.revokedApplyRunIds = [...revoked]

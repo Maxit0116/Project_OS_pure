@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import AppShell from './layout/AppShell'
 import WorkbenchErrorBoundary from './components/ui/WorkbenchErrorBoundary'
 import { useDesktopWindowFocus } from './hooks/useDesktopWindowFocus'
+import { useSessionSweepScheduler } from './hooks/useSessionSweepScheduler'
 import { useWorkbenchStore } from './state/workbenchStore'
 import {
   applyThemeToDocument,
@@ -14,6 +15,7 @@ export default function App() {
   const setResolvedTheme = useWorkbenchStore((s) => s.setResolvedTheme)
 
   useDesktopWindowFocus()
+  useSessionSweepScheduler()
 
   useEffect(() => {
     const resolved = resolveTheme(themePreference)

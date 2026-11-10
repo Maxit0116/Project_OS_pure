@@ -369,6 +369,28 @@
   flex-shrink: 0;
 }
 
+.routeChip {
+  flex-shrink: 0;
+  max-width: 140px;
+}
+
+.routeChip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.routeChipIcon {
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.routeChipLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
 .iconAction {
   display: inline-flex;
   align-items: center;

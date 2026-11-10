@@ -118,6 +118,8 @@ export default function WorkbenchChromeActions({ onOpenSettings, compact = false
             alt=""
             width={compact ? 16 : 18}
             height={compact ? 16 : 18}
+            referrerPolicy="no-referrer"
+            decoding="async"
           />
         ) : (
           <GitBranch size={iconSize} strokeWidth={1.75} aria-hidden />

@@ -154,6 +154,8 @@ export default function TeamGithubSection() {
                 alt=""
                 width={40}
                 height={40}
+                referrerPolicy="no-referrer"
+                decoding="async"
               />
             ) : (
               <div className={teamStyles.avatarFallback} aria-hidden>

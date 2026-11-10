@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useI18n } from '../../i18n'
 import Button from '../ui/Button'
+import TextArea from '../ui/TextArea'
 import Checkbox from '../ui/Checkbox'
 import { useAgentPoolStore } from '../AgentFlow/AgentPool/agentPoolStore'
 import toneStyles from './composer/chatModeTone.module.css'
@@ -60,16 +61,16 @@ export default function AgentPoolAcceptanceCard({ task }: Props) {
         </ul>
       </div>
 
-      <label className={styles.feedbackLabel}>
-        {ts('agentFlow.pool.continueFeedback')}
-        <textarea
-          className={styles.feedback}
-          value={feedback}
-          rows={3}
-          placeholder={ts('agentFlow.pool.continueFeedbackPlaceholder')}
-          onChange={(event) => setFeedback(event.target.value)}
-        />
-      </label>
+      <TextArea
+        fieldClassName={styles.feedbackLabel}
+        label={ts('agentFlow.pool.continueFeedback')}
+        className={styles.feedback}
+        resize="vertical"
+        value={feedback}
+        rows={3}
+        placeholder={ts('agentFlow.pool.continueFeedbackPlaceholder')}
+        onChange={(event) => setFeedback(event.target.value)}
+      />
 
       <div className={styles.actions}>
         <Button

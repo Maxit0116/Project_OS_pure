@@ -114,6 +114,12 @@ import type {
   ChatSessionIndex,
   ChatSessionRecord,
 } from "./chat-session.js";
+import type {
+  SessionAffinityHygieneJudgeRequest,
+  SessionAffinityHygieneJudgeResponse,
+  SessionAffinityRouteJudgeRequest,
+  SessionAffinityRouteJudgeResponse,
+} from "./session-affinity-llm.js";
 import type { ExecutorOption } from "./executor-selection.js";
 import type { ListSkillsResult, SkillContent } from "./skills.js";
 import type {
@@ -441,6 +447,16 @@ export interface ProjectOSApi {
     projectId: string,
     sessionId: string,
   ): Promise<ChatSessionHead | null>;
+  /** Optional L1 LLM refine for daily tidy + sweep (mode=off → empty judgments). */
+  judgeSessionAffinityHygiene(
+    projectId: string,
+    request: SessionAffinityHygieneJudgeRequest,
+  ): Promise<SessionAffinityHygieneJudgeResponse>;
+  /** Optional L1 LLM refine for smart session route. */
+  judgeSessionAffinityRoute(
+    projectId: string,
+    request: SessionAffinityRouteJudgeRequest,
+  ): Promise<SessionAffinityRouteJudgeResponse>;
   forkChatSession(
     projectId: string,
     parentSessionId: string,
@@ -965,7 +981,47 @@ export interface ProjectOSApi {
     specVersion?: string,
     featureNodeId?: string,
   ): Promise<LoopGraphDocument>;
+  startLoopInstanceWithParams(
+    projectId: string,
+    loopId: string,
+    params: Record<string, unknown>,
+    options?: { specVersion?: string; idempotencyKey?: string },
+  ): Promise<LoopGraphDocument>;
+  startLoopInstanceFromEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<LoopGraphDocument>;
+  restoreLoopInstanceFromCheckpoint(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument>;
+  listLoopRunHistory(
+    projectId: string,
+    loopId: string,
+  ): Promise<
+    Array<{
+      id: string;
+      status: string;
+      specVersion: string;
+      startedAt: string;
+      completedAt?: string;
+      round: number;
+      errorMessage?: string;
+    }>
+  >;
+  deriveDraftFromLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument>;
   pauseLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument>;
+  cancelLoopInstance(
     projectId: string,
     loopId: string,
     instanceId: string,

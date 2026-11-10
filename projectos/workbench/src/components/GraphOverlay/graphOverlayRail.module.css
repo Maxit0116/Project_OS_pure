@@ -1,3 +1,8 @@
+/*
+ * Shared left-rail chrome for Session / Loop / Diagram graph overlays.
+ * Domain accent colors set `--rail-accent` via data-* on `.item`.
+ */
+
 .slot {
   position: relative;
   width: 40px;
@@ -57,6 +62,14 @@
 
 .railExpanded .itemWrap {
   justify-content: stretch;
+  align-items: stretch;
+}
+
+.railExpanded .itemWrap > .item,
+.railExpanded .itemWrap > .folderHeader {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
 }
 
 .itemLifted {
@@ -110,8 +123,25 @@
 }
 
 .itemWrap:hover .deleteButton,
-.itemWrap:focus-within .deleteButton,
+.itemWrap:focus-within .deleteButton {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Expanded rail: full-height close strip on the right of each tab. */
 .railExpanded .deleteButton {
+  position: static;
+  top: auto;
+  right: auto;
+  flex: 0 0 26px;
+  align-self: stretch;
+  width: 26px;
+  height: auto;
+  min-height: 100%;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tech-text-muted);
   opacity: 1;
   pointer-events: auto;
 }
@@ -119,6 +149,11 @@
 .deleteButton:hover {
   color: var(--tech-error);
   background: var(--tech-bg-muted);
+}
+
+.railExpanded .deleteButton:hover {
+  background: var(--color-error-subtle, color-mix(in srgb, var(--tech-error) 16%, transparent));
+  color: var(--tech-error);
 }
 
 .deleteButton:focus-visible {
@@ -146,8 +181,8 @@
   padding: 0;
   border: 1px solid transparent;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--task, var(--tech-text-secondary)) 16%, transparent);
-  color: var(--task, var(--tech-text-secondary));
+  background: color-mix(in srgb, var(--rail-accent, var(--tech-text-secondary)) 16%, transparent);
+  color: var(--rail-accent, var(--tech-text-secondary));
   cursor: pointer;
   text-align: left;
   transition:
@@ -176,7 +211,7 @@
 
 .item:hover,
 .create:hover {
-  background: color-mix(in srgb, var(--task, var(--tech-text-secondary)) 24%, transparent);
+  background: color-mix(in srgb, var(--rail-accent, var(--tech-text-secondary)) 24%, transparent);
   color: var(--tech-text-primary);
 }
 
@@ -198,7 +233,7 @@
 }
 
 .itemActive {
-  background: color-mix(in srgb, var(--task, var(--tech-text-secondary)) 28%, transparent);
+  background: color-mix(in srgb, var(--rail-accent, var(--tech-text-secondary)) 28%, transparent);
   border-color: var(--tech-border-strong);
   color: var(--tech-text-primary);
 }
@@ -207,21 +242,54 @@
   background: var(--tech-bg-muted);
 }
 
-.item[data-task='explore'] { --task: #0f766e; }
-.item[data-task='plan'] { --task: #4338ca; }
-.item[data-task='build'] { --task: #15803d; }
-.item[data-task='fix'] { --task: #c2410c; }
-.item[data-task='design'] { --task: #be185d; }
-.item[data-task='git'] { --task: #3d5270; }
-.item[data-task='setup'] { --task: #44403c; }
+/* Session task accents */
+.item[data-task='explore'] { --rail-accent: #0f766e; }
+.item[data-task='plan'] { --rail-accent: #4338ca; }
+.item[data-task='build'] { --rail-accent: #15803d; }
+.item[data-task='fix'] { --rail-accent: #c2410c; }
+.item[data-task='design'] { --rail-accent: #be185d; }
+.item[data-task='git'] { --rail-accent: #3d5270; }
+.item[data-task='setup'] { --rail-accent: #44403c; }
 
-:global([data-theme='dark']) .item[data-task='explore'] { --task: #5eead4; }
-:global([data-theme='dark']) .item[data-task='plan'] { --task: #a5b4fc; }
-:global([data-theme='dark']) .item[data-task='build'] { --task: #6ee7b7; }
-:global([data-theme='dark']) .item[data-task='fix'] { --task: #fdba74; }
-:global([data-theme='dark']) .item[data-task='design'] { --task: #f9a8d4; }
-:global([data-theme='dark']) .item[data-task='git'] { --task: #9bb0c7; }
-:global([data-theme='dark']) .item[data-task='setup'] { --task: #d6d3d1; }
+:global([data-theme='dark']) .item[data-task='explore'] { --rail-accent: #5eead4; }
+:global([data-theme='dark']) .item[data-task='plan'] { --rail-accent: #a5b4fc; }
+:global([data-theme='dark']) .item[data-task='build'] { --rail-accent: #6ee7b7; }
+:global([data-theme='dark']) .item[data-task='fix'] { --rail-accent: #fdba74; }
+:global([data-theme='dark']) .item[data-task='design'] { --rail-accent: #f9a8d4; }
+:global([data-theme='dark']) .item[data-task='git'] { --rail-accent: #9bb0c7; }
+:global([data-theme='dark']) .item[data-task='setup'] { --rail-accent: #d6d3d1; }
+
+/* Loop status accents */
+.item[data-status='draft'] { --rail-accent: #64748b; }
+.item[data-status='compiled'] { --rail-accent: #a16207; }
+.item[data-status='approved'] { --rail-accent: #15803d; }
+.item[data-status='running'] { --rail-accent: #15803d; }
+.item[data-status='paused'] { --rail-accent: #a16207; }
+.item[data-status='complete'] { --rail-accent: #0f766e; }
+.item[data-status='error'] { --rail-accent: #c2410c; }
+
+:global([data-theme='dark']) .item[data-status='draft'] { --rail-accent: #94a3b8; }
+:global([data-theme='dark']) .item[data-status='compiled'] { --rail-accent: #fbbf24; }
+:global([data-theme='dark']) .item[data-status='approved'] { --rail-accent: #6ee7b7; }
+:global([data-theme='dark']) .item[data-status='running'] { --rail-accent: #6ee7b7; }
+:global([data-theme='dark']) .item[data-status='paused'] { --rail-accent: #fbbf24; }
+:global([data-theme='dark']) .item[data-status='complete'] { --rail-accent: #5eead4; }
+:global([data-theme='dark']) .item[data-status='error'] { --rail-accent: #fdba74; }
+
+/* Diagram visual-type accents */
+.item[data-visual-type='architecture'] { --rail-accent: #4338ca; }
+.item[data-visual-type='sequence'] { --rail-accent: #0f766e; }
+.item[data-visual-type='flowchart'] { --rail-accent: #15803d; }
+.item[data-visual-type='data-flow'] { --rail-accent: #be185d; }
+.item[data-visual-type='state'] { --rail-accent: #3d5270; }
+.item[data-visual-type='auto'] { --rail-accent: #64748b; }
+
+:global([data-theme='dark']) .item[data-visual-type='architecture'] { --rail-accent: #a5b4fc; }
+:global([data-theme='dark']) .item[data-visual-type='sequence'] { --rail-accent: #5eead4; }
+:global([data-theme='dark']) .item[data-visual-type='flowchart'] { --rail-accent: #6ee7b7; }
+:global([data-theme='dark']) .item[data-visual-type='data-flow'] { --rail-accent: #f9a8d4; }
+:global([data-theme='dark']) .item[data-visual-type='state'] { --rail-accent: #9bb0c7; }
+:global([data-theme='dark']) .item[data-visual-type='auto'] { --rail-accent: #94a3b8; }
 
 .icon,
 .createIcon {
@@ -240,8 +308,8 @@
 .railExpanded .createIcon {
   width: 28px;
   height: 28px;
-  color: var(--task, var(--tech-text-secondary));
-  background: color-mix(in srgb, var(--task, var(--tech-text-secondary)) 16%, transparent);
+  color: var(--rail-accent, var(--tech-text-secondary));
+  background: color-mix(in srgb, var(--rail-accent, var(--tech-text-secondary)) 16%, transparent);
 }
 
 .railExpanded .createIcon {
@@ -484,6 +552,9 @@
   .rail,
   .item,
   .create,
+  .itemWrap,
+  .dropGap,
+  .deleteButton,
   .folderBlock,
   .folderChildren,
   .folderIcon {

@@ -20,23 +20,23 @@ describe('buildSideBySideDiff', () => {
     expect(rows[0]?.before?.spans).toEqual([{ text: 'alpha', kind: 'equal' }])
   })
 
-  it('marks modified lines when before and after differ', () => {
+  it('marks modified lines as removed (before) and added (after)', () => {
     const rows = buildSideBySideDiff('keep\nold\n', 'keep\nnew\n')
     expect(rows).toHaveLength(2)
     expect(rows[0]?.before?.lineKind).toBe('equal')
-    expect(rows[1]?.before?.lineKind).toBe('changed')
-    expect(rows[1]?.after?.lineKind).toBe('changed')
-    expect(rows[1]?.before?.spans).toEqual([{ text: 'old', kind: 'equal' }])
-    expect(rows[1]?.after?.spans).toEqual([{ text: 'new', kind: 'equal' }])
+    expect(rows[1]?.before?.lineKind).toBe('removed')
+    expect(rows[1]?.after?.lineKind).toBe('added')
+    expect(rows[1]?.before?.spans).toEqual([{ text: 'old', kind: 'removed' }])
+    expect(rows[1]?.after?.spans).toEqual([{ text: 'new', kind: 'added' }])
   })
 
   it('keeps full-line text for modified rows without char-level spans', () => {
     const rows = buildSideBySideDiff('const x = 1\n', 'const x = 2\n')
     const row = rows[0]
-    expect(row?.before?.lineKind).toBe('changed')
-    expect(row?.after?.lineKind).toBe('changed')
-    expect(row?.before?.spans).toEqual([{ text: 'const x = 1', kind: 'equal' }])
-    expect(row?.after?.spans).toEqual([{ text: 'const x = 2', kind: 'equal' }])
+    expect(row?.before?.lineKind).toBe('removed')
+    expect(row?.after?.lineKind).toBe('added')
+    expect(row?.before?.spans).toEqual([{ text: 'const x = 1', kind: 'removed' }])
+    expect(row?.after?.spans).toEqual([{ text: 'const x = 2', kind: 'added' }])
   })
 
   it('handles pure insertions and deletions as aligned rows', () => {

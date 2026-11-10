@@ -3,3 +3,50 @@
   min-height: 200px;
   height: 100%;
 }
+
+.node {
+  border: 1px solid var(--tech-border, #30363d);
+  background: var(--tech-bg-elevated, #161b22);
+  color: var(--tech-text-primary, #e6edf3);
+  box-shadow: none;
+}
+
+.nodePending {
+  opacity: 0.85;
+}
+
+.nodeComplete {
+  border-color: color-mix(in srgb, var(--color-success, #3fb950) 70%, transparent);
+}
+
+.nodeError {
+  border-color: var(--color-error, #f85149);
+}
+
+.nodeRunning {
+  border-color: var(--tech-accent, var(--color-accent));
+  animation: graphNodeBreath 1.5s var(--ease-out, ease-in-out) infinite;
+}
+
+.edge {
+  stroke: var(--tech-accent, #58a6ff);
+}
+
+@keyframes graphNodeBreath {
+  0%,
+  100% {
+    opacity: 0.62;
+    border-color: color-mix(in srgb, var(--tech-accent, var(--color-accent)) 45%, transparent);
+  }
+  50% {
+    opacity: 1;
+    border-color: var(--tech-accent, var(--color-accent));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nodeRunning {
+    animation: none;
+    opacity: 0.92;
+  }
+}

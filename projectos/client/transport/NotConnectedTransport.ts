@@ -491,6 +491,20 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async judgeSessionAffinityHygiene(
+    _projectId: string,
+    _request: import("../../contracts/session-affinity-llm.js").SessionAffinityHygieneJudgeRequest,
+  ): Promise<import("../../contracts/session-affinity-llm.js").SessionAffinityHygieneJudgeResponse> {
+    return transportNotConnected();
+  }
+
+  async judgeSessionAffinityRoute(
+    _projectId: string,
+    _request: import("../../contracts/session-affinity-llm.js").SessionAffinityRouteJudgeRequest,
+  ): Promise<import("../../contracts/session-affinity-llm.js").SessionAffinityRouteJudgeResponse> {
+    return transportNotConnected();
+  }
+
   async forkChatSession(
     _projectId: string,
     _parentSessionId: string,
@@ -1547,7 +1561,65 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async startLoopInstanceWithParams(
+    _projectId: string,
+    _loopId: string,
+    _params: Record<string, unknown>,
+    _options?: { specVersion?: string; idempotencyKey?: string },
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async startLoopInstanceFromEvent(
+    _projectId: string,
+    _loopId: string,
+    _event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async restoreLoopInstanceFromCheckpoint(
+    _projectId: string,
+    _loopId: string,
+    _instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async listLoopRunHistory(
+    _projectId: string,
+    _loopId: string,
+  ): Promise<
+    Array<{
+      id: string;
+      status: string;
+      specVersion: string;
+      startedAt: string;
+      completedAt?: string;
+      round: number;
+      errorMessage?: string;
+    }>
+  > {
+    return transportNotConnected();
+  }
+
+  async deriveDraftFromLoopInstance(
+    _projectId: string,
+    _loopId: string,
+    _instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
   async pauseLoopInstance(
+    _projectId: string,
+    _loopId: string,
+    _instanceId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async cancelLoopInstance(
     _projectId: string,
     _loopId: string,
     _instanceId: string,

@@ -11,6 +11,7 @@ import { useI18n } from '../../i18n'
 import { getActiveLabSession } from '../../../../services/product-lab/index'
 import { useProductLabStore } from '../../state/productLabStore'
 import Button from '../ui/Button'
+import TextInput from '../ui/TextInput'
 import styles from './ProductLabSessionBar.module.css'
 
 export default function ProductLabSessionBar() {
@@ -100,8 +101,9 @@ export default function ProductLabSessionBar() {
               void recordManualFinding()
             }}
           >
-            <input
-              className={styles.noteInput}
+            <TextInput
+              fieldClassName={styles.noteFieldGrow}
+              size="sm"
               value={noteDraft}
               onChange={(event) => setNoteDraft(event.target.value)}
               placeholder={ts('productLab.notePlaceholder')}

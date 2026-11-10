@@ -17,7 +17,7 @@ import { useI18n } from '../../i18n'
 import AgentFlowStepRow from './AgentFlowStepRow'
 import AgentFlowCorrectionRow from './AgentFlowCorrectionRow'
 import AgentFlowGraph from './AgentFlowGraph'
-import AgentFlowStepDetail from './AgentFlowStepDetail'
+import AgentFlowInspector from './AgentFlowInspector'
 import AgentActionRow from './AgentActionRow'
 import AskTraceView from './AskTraceView'
 import PlanTraceView from './PlanTraceView'
@@ -57,6 +57,8 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
   const setAgentFlowViewMode = useWorkbenchStore((s) => s.setAgentFlowViewMode)
   const selectedFlowStepId = useWorkbenchStore((s) => s.selectedFlowStepId)
   const setSelectedFlowStepId = useWorkbenchStore((s) => s.setSelectedFlowStepId)
+  const flowInspectorFollowLive = useWorkbenchStore((s) => s.flowInspectorFollowLive)
+  const setFlowInspectorFollowLive = useWorkbenchStore((s) => s.setFlowInspectorFollowLive)
   const flowCorrections = useWorkbenchStore((s) => s.flowCorrections)
   const flowActions = useWorkbenchStore((s) => s.flowActions)
   const flowTransientTraces = useWorkbenchStore((s) => s.flowTransientTraces)
@@ -142,7 +144,7 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
         onChange={(id) => setAgentFlowViewMode(id as 'timeline' | 'graph' | 'pool')}
         size="sm"
       />
-      {body}
+      <div className={styles.panelBody}>{body}</div>
       {footer}
     </div>
   )
@@ -207,10 +209,30 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
     )
   }
 
-  const selectedStep = steps.find((s) => s.id === selectedFlowStepId)
-  const stepCorrections = selectedStep
-    ? flowCorrections.filter((c) => c.stepId === selectedStep.id)
+  const selectedActivity = activities.find((activity) => activity.id === selectedActivityId)
+  const inspectedStepId = resolveInspectedFlowStepId({
+    steps,
+    followLive: flowInspectorFollowLive,
+    selectedFlowStepId,
+    activityPhaseId: selectedActivity?.phaseId ?? null,
+  })
+  const inspectedStep = steps.find((step) => step.id === inspectedStepId) ?? null
+  const stepCorrections = inspectedStep
+    ? flowCorrections.filter((c) => c.stepId === inspectedStep.id)
     : []
+  const inspectedActions = inspectedStep
+    ? flowActions.filter((event) => event.phaseId === inspectedStep.id)
+    : []
+  const inspectedTraces = inspectedStep
+    ? flowTransientTraces.filter((trace) => trace.phaseId === inspectedStep.id)
+    : []
+  const inspectedActivities = inspectedStep
+    ? activities.filter((activity) => activity.phaseId === inspectedStep.id)
+    : []
+  const hasDelegationPlan = flowDelegationEvents.some((event) => event.type === 'plan_created')
+  const delegatedTaskCount = flowDelegationEvents.filter(
+    (event) => event.type === 'task_delegated',
+  ).length
 
   const phaseTimeline = groupAgentFlowPhaseTrace(steps, flowActions, flowTransientTraces)
   const timelineItems = phaseTimeline.flatMap(({ step, actions: phaseActions, traces: phaseTraces }, i) => {
@@ -221,28 +243,35 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
         isLast={i === steps.length - 1 && !flowCorrections.some((c) => c.stepId === step.id)}
         index={i}
         onSelect={() => setSelectedFlowStepId(step.id)}
-        selected={selectedFlowStepId === step.id}
+        selected={inspectedStepId === step.id}
         hasCorrection={flowCorrections.some((c) => c.stepId === step.id)}
       />,
     ]
     const phaseActivities = activities.filter((activity) => activity.phaseId === step.id)
     if (phaseActions.length > 0 || phaseTraces.length > 0 || phaseActivities.length > 0) {
       items.push(
-        <section
-          key={`${step.id}_actions`}
-          className={styles.phaseTrace}
-          aria-label={`${step.label} · ${ts('agentFlow.actionTrace')}`}
+        <button
+          key={`${step.id}_marker`}
+          type="button"
+          className={styles.phaseMarker}
+          onClick={() => setSelectedFlowStepId(step.id)}
+          aria-label={`${step.label} · ${ts('agentFlow.inspector.openInspector')}`}
+          data-phase-marker={step.id}
         >
-          {phaseActions.map((event) => (
-            <AgentActionRow key={event.eventId} event={event} />
-          ))}
-          {phaseTraces.map((trace) => (
-            <TransientReasoningTrace key={trace.traceId} trace={trace} />
-          ))}
-          {phaseActivities.length > 0 ? (
-            <AgentActivityDetails activities={phaseActivities} selectedId={selectedActivityId} />
-          ) : null}
-        </section>,
+          <span>
+            {phaseActions.length > 0
+              ? ts('agentFlow.inspector.phaseMarkerActions', { count: phaseActions.length })
+              : null}
+            {phaseActions.length > 0 && phaseTraces.length > 0 ? ' · ' : null}
+            {phaseTraces.length > 0 ? ts('agentFlow.inspector.phaseMarkerReasoning') : null}
+            {(phaseActions.length > 0 || phaseTraces.length > 0) && phaseActivities.length > 0
+              ? ' · '
+              : null}
+            {phaseActivities.length > 0
+              ? ts('agentFlow.inspector.openInspector')
+              : null}
+          </span>
+        </button>,
       )
     }
     const corrections = flowCorrections.filter((c) => c.stepId === step.id)
@@ -277,8 +306,77 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
     </>
   )
 
+  const delegationTree = hasDelegationPlan ? (
+    <DelegatedRunTree
+      events={flowDelegationEvents}
+      tracesByRun={delegatedRunTraces}
+      live={status === 'running'}
+      interrupted={status === 'interrupted'}
+    />
+  ) : null
+
+  const primaryColumn = agentFlowViewMode === 'timeline' ? (
+    <div className={styles.timeline} ref={timelineRef}>
+      {activityDetails}
+      {timelineItems}
+      {hasDelegationPlan && (
+        <button
+          type="button"
+          className={styles.delegationSummary}
+          onClick={() => {
+            const target = runningStep ?? steps[steps.length - 1]
+            if (target) setSelectedFlowStepId(target.id)
+          }}
+          data-delegation-summary
+        >
+          {ts('agentFlow.inspector.delegationSummary', { count: delegatedTaskCount })}
+          <span>{ts('agentFlow.inspector.openInspector')}</span>
+        </button>
+      )}
+      {unphasedActions.length > 0 && (
+        <section className={styles.actionTrace} aria-label={ts('agentFlow.actionTrace')}>
+          <h3>{ts('agentFlow.actionTrace')}</h3>
+          {unphasedActions.map((event) => (
+            <AgentActionRow key={event.eventId} event={event} />
+          ))}
+        </section>
+      )}
+      {status === 'running' && steps.length === 0 && (
+        <AgentActivityIndicator
+          className={styles.runningHint}
+          state="composing"
+          label={ts('agentFlow.waitingFirstStep')}
+        />
+      )}
+      {status === 'running' && steps.length > 0 && (
+        <AgentActivityIndicator
+          className={styles.runningHint}
+          state="working"
+          label={ts('agentFlow.streaming')}
+        />
+      )}
+    </div>
+  ) : (
+    <AgentFlowGraph steps={steps} status={status} onSelectStep={setSelectedFlowStepId} />
+  )
+
+  const inspector = (
+    <AgentFlowInspector
+      step={inspectedStep}
+      followLive={flowInspectorFollowLive}
+      corrections={stepCorrections}
+      actions={inspectedActions}
+      traces={inspectedTraces}
+      activities={inspectedActivities}
+      selectedActivityId={selectedActivityId}
+      delegationContent={delegationTree}
+      onFollowLive={() => setFlowInspectorFollowLive(true)}
+      onClearSelection={() => setSelectedFlowStepId(null)}
+    />
+  )
+
   const runBody = (
-    <>
+    <div className={styles.runBody}>
       {applyResult?.applied && verificationResult && (
         <AutomaticApplySummary
           applyResult={applyResult}
@@ -286,52 +384,11 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
           onReviewDiff={onReviewDiff}
         />
       )}
-      {agentFlowViewMode === 'timeline' ? (
-        <div className={styles.timeline} ref={timelineRef}>
-          {activityDetails}
-          {timelineItems}
-          {flowDelegationEvents.length > 0 && (
-            <DelegatedRunTree
-              events={flowDelegationEvents}
-              tracesByRun={delegatedRunTraces}
-              live={status === 'running'}
-              interrupted={status === 'interrupted'}
-            />
-          )}
-          {unphasedActions.length > 0 && (
-            <section className={styles.actionTrace} aria-label={ts('agentFlow.actionTrace')}>
-              <h3>{ts('agentFlow.actionTrace')}</h3>
-              {unphasedActions.map((event) => (
-                <AgentActionRow key={event.eventId} event={event} />
-              ))}
-            </section>
-          )}
-          {status === 'running' && steps.length === 0 && (
-            <AgentActivityIndicator
-              className={styles.runningHint}
-              state="composing"
-              label={ts('agentFlow.waitingFirstStep')}
-            />
-          )}
-          {status === 'running' && steps.length > 0 && (
-            <AgentActivityIndicator
-              className={styles.runningHint}
-              state="working"
-              label={ts('agentFlow.streaming')}
-            />
-          )}
-        </div>
-      ) : (
-        <AgentFlowGraph steps={steps} status={status} onSelectStep={setSelectedFlowStepId} />
-      )}
-      {selectedStep && (
-        <AgentFlowStepDetail
-          step={selectedStep}
-          corrections={stepCorrections}
-          onClose={() => setSelectedFlowStepId(null)}
-        />
-      )}
-    </>
+      <div className={styles.split} data-agent-flow-split>
+        <div className={styles.primary}>{primaryColumn}</div>
+        <div className={styles.inspectorPane}>{inspector}</div>
+      </div>
+    </div>
   )
 
   const runFooter = (
@@ -760,6 +817,20 @@ export function groupAgentFlowPhaseTrace(
     actions: actions.filter((event) => event.phaseId === step.id),
     traces: traces.filter((trace) => trace.phaseId === step.id),
   }))
+}
+
+/** Pure selection rules for the Agent Flow inspector (follow-live vs pinned). */
+export function resolveInspectedFlowStepId(input: {
+  steps: Array<Pick<AgentFlowStep, 'id' | 'status'>>
+  followLive: boolean
+  selectedFlowStepId: string | null
+  activityPhaseId: string | null
+}): string | null {
+  const runningStepId = input.steps.find((step) => step.status === 'running')?.id ?? null
+  if (input.followLive) {
+    return runningStepId ?? input.activityPhaseId ?? null
+  }
+  return input.selectedFlowStepId ?? input.activityPhaseId ?? runningStepId ?? null
 }
 
 function TransientReasoningTrace({ trace }: { trace: AgentTransientTrace }) {

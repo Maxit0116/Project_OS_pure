@@ -1,5 +1,4 @@
 import { Mic } from 'lucide-react'
-import ThinkingOrb from '../ui/ThinkingOrb'
 import styles from './VoiceInputControls.module.css'
 
 interface VoiceInputDockProps {
@@ -16,6 +15,23 @@ interface VoiceInputDockProps {
   micDisabled?: boolean
   isSupported: boolean
   onMicToggle: () => void
+}
+
+/** Compact equalizer bars — the visual metaphor for “listening / voice active”. */
+function VoiceListeningBars() {
+  return (
+    <span className={styles.listeningBars} aria-hidden>
+      <span className={styles.listeningBar} />
+      <span className={styles.listeningBar} />
+      <span className={styles.listeningBar} />
+      <span className={styles.listeningBar} />
+    </span>
+  )
+}
+
+/** Soft pulse while the model is still converting speech → text. */
+function VoiceTranscribingPulse() {
+  return <span className={styles.transcribingPulse} aria-hidden />
 }
 
 export function VoiceInputDock({
@@ -49,8 +65,10 @@ export function VoiceInputDock({
         aria-label={isActive ? labels.stop : labels.start}
         title={isActive ? labels.stop : labels.start}
       >
-        {isActive ? (
-          <ThinkingOrb state="listening" size={20} label={statusLabel} />
+        {isTranscribing ? (
+          <VoiceTranscribingPulse />
+        ) : isRecording ? (
+          <VoiceListeningBars />
         ) : (
           <Mic size={16} aria-hidden />
         )}

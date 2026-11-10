@@ -1,6 +1,7 @@
 import type { ClarifyingQuestion } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { ensureQuestionOptions, type PlanQuestionDraft } from './planClarification'
+import TextArea from '../ui/TextArea'
 import styles from './PromptRefinementCard.module.css'
 
 interface Props {
@@ -69,8 +70,9 @@ export default function PlanClarificationQuestionItem({
       </div>
 
       {customSelected ? (
-        <textarea
+        <TextArea
           className={styles.questionInput}
+          resize="vertical"
           value={draft.text}
           onChange={(event) => onChange({ kind: 'custom', text: event.target.value })}
           placeholder={ts('plan.customAnswerPlaceholder')}

@@ -1,3 +1,4 @@
+import { useRef, type KeyboardEvent } from 'react'
 import {
   isConfigNode,
   withArchitectureDefaults,
@@ -9,7 +10,14 @@ import { resolveAgentWiring } from '../../../../services/loop-agent-wiring'
 import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
+import { useComposePromptVoice } from '../ChatPanel/composer/useComposePromptVoice'
+import {
+  VoiceInputDock,
+  VoiceInputErrorBanner,
+} from '../ChatPanel/VoiceInputControls'
 import { isCommunityMcpServer } from './LoopConfigAssetPicker'
+import TextArea from '../ui/TextArea'
+import TextInput from '../ui/TextInput'
 import styles from './LoopNodeInspector.module.css'
 
 interface Props {
@@ -30,7 +38,7 @@ export default function LoopNodeInspector({
   readOnly = false,
   embedded = false,
 }: Props) {
-  const { ts } = useI18n()
+  const { ts, locale } = useI18n()
   const document = useLoopGraphStore((s) => s.document)
   const setAgentWiringOverride = useLoopGraphStore((s) => s.setAgentWiringOverride)
   const applyWiringToAgentDefinition = useLoopGraphStore(
@@ -39,6 +47,27 @@ export default function LoopNodeInspector({
   const saveWiringAsNewAgent = useLoopGraphStore((s) => s.saveWiringAsNewAgent)
   const settings = useWorkbenchStore((s) => s.settings)
   const shellClass = embedded ? styles.embedded : styles.inspector
+  const nodeRef = useRef(node)
+  nodeRef.current = node
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  const readOnlyRef = useRef(readOnly)
+  readOnlyRef.current = readOnly
+
+  const composeVoice = useComposePromptVoice({
+    locale,
+    disabled: readOnly || !node || isConfigNode(node),
+    getText: () => {
+      const current = nodeRef.current
+      return current && !isConfigNode(current) ? current.prompt : ''
+    },
+    setText: (text) => {
+      const current = nodeRef.current
+      if (!current || isConfigNode(current) || readOnlyRef.current) return
+      onChangeRef.current({ prompt: text })
+    },
+  })
+
   if (!node) {
     return (
       <aside className={shellClass} aria-label={ts('chat.loopGraph.inspector')}>
@@ -58,14 +87,13 @@ export default function LoopNodeInspector({
               <span className={styles.chip}>{node.satelliteKind}</span>
             ) : null}
           </div>
-          <label className={styles.field}>
-            <span>{ts('chat.loopGraph.inspectorTitle')}</span>
-            <input
-              value={node.title}
-              disabled={readOnly}
-              onChange={(event) => onChange({ title: event.target.value })}
-            />
-          </label>
+          <TextInput
+            fieldClassName={styles.field}
+            label={ts('chat.loopGraph.inspectorTitle')}
+            value={node.title}
+            disabled={readOnly}
+            onChange={(event) => onChange({ title: event.target.value })}
+          />
           <pre className={styles.artifactBody}>
             {JSON.stringify(node.configRef ?? {}, null, 2)}
           </pre>
@@ -87,23 +115,56 @@ export default function LoopNodeInspector({
     <aside className={shellClass} aria-label={ts('chat.loopGraph.inspector')}>
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>{ts('chat.loopGraph.inspectorDuty')}</h3>
-        <label className={styles.field}>
-          <span>{ts('chat.loopGraph.inspectorTitle')}</span>
-          <input
-            value={node.title}
-            disabled={readOnly}
-            onChange={(event) => onChange({ title: event.target.value })}
-          />
-        </label>
-        <label className={styles.field}>
-          <span>{ts('chat.loopGraph.inspectorPrompt')}</span>
-          <textarea
-            value={node.prompt}
-            disabled={readOnly}
-            rows={4}
-            onChange={(event) => onChange({ prompt: event.target.value })}
-          />
-        </label>
+        <TextInput
+          fieldClassName={styles.field}
+          label={ts('chat.loopGraph.inspectorTitle')}
+          value={node.title}
+          disabled={readOnly}
+          onChange={(event) => onChange({ title: event.target.value })}
+        />
+        <div className={styles.field}>
+          {composeVoice.voice.state.error ? (
+            <VoiceInputErrorBanner
+              errorKey={composeVoice.voice.state.error}
+              onDismiss={composeVoice.voice.dismissError}
+              labels={composeVoice.voiceLabels}
+            />
+          ) : null}
+          <div className={styles.promptWrap}>
+            <TextArea
+              label={ts('chat.loopGraph.inspectorPrompt')}
+              fieldClassName={styles.promptField}
+              resize="vertical"
+              value={node.prompt}
+              disabled={readOnly}
+              rows={4}
+              onChange={(event) => {
+                const value = event.target.value
+                onChange({ prompt: value })
+                composeVoice.syncBaseFromExternalText(value)
+              }}
+              onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                if (
+                  event.key === 'Escape' &&
+                  (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing)
+                ) {
+                  event.preventDefault()
+                  composeVoice.cancelVoice()
+                  return
+                }
+                if (
+                  (event.metaKey || event.ctrlKey) &&
+                  event.shiftKey &&
+                  event.code === 'Space'
+                ) {
+                  event.preventDefault()
+                  composeVoice.dockProps.onMicToggle()
+                }
+              }}
+            />
+            <VoiceInputDock {...composeVoice.dockProps} />
+          </div>
+        </div>
         <div className={styles.metaRow}>
           <span className={styles.chip}>{arch.type}</span>
           {arch.agentRole ? <span className={styles.chip}>{arch.agentRole}</span> : null}
@@ -230,19 +291,18 @@ export default function LoopNodeInspector({
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>{ts('chat.loopGraph.inspectorConfig')}</h3>
         {arch.type === 'logic' && arch.logicKind === 'loop' ? (
-          <label className={styles.field}>
-            <span>{ts('chat.loopGraph.inspectorMaxIterations')}</span>
-            <input
-              type="number"
-              min={1}
-              max={50}
-              disabled={readOnly}
-              value={node.maxIterations ?? 3}
-              onChange={(event) =>
-                onChange({ maxIterations: Number(event.target.value) || 1 })
-              }
-            />
-          </label>
+          <TextInput
+            fieldClassName={styles.field}
+            type="number"
+            min={1}
+            max={50}
+            label={ts('chat.loopGraph.inspectorMaxIterations')}
+            disabled={readOnly}
+            value={node.maxIterations ?? 3}
+            onChange={(event) =>
+              onChange({ maxIterations: Number(event.target.value) || 1 })
+            }
+          />
         ) : null}
         {arch.type === 'agent' && arch.agentRole === 'planner' ? (
           <p className={styles.hint}>{ts('chat.loopGraph.inspectorPlannerHint')}</p>

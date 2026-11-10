@@ -1,0 +1,133 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 100%;
+  overflow: auto;
+  padding: 10px 12px;
+  border-top: 1px solid var(--tech-border);
+  background: var(--tech-bg-side-panel);
+}
+
+.meta {
+  font-size: 12px;
+  color: var(--tech-text-secondary);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.heading {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tech-text-muted);
+}
+
+.empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tech-text-muted);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--tech-text-primary);
+}
+
+.rowId {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tech-text-secondary);
+}
+
+.rowStatus {
+  color: var(--tech-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.event {
+  font-size: 11px;
+  color: var(--tech-text-secondary);
+  line-height: 1.35;
+}
+
+.historyRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.action {
+  align-self: flex-start;
+  border: 1px solid var(--tech-border);
+  background: transparent;
+  color: var(--tech-text-secondary);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.action:hover {
+  color: var(--tech-text-primary);
+  border-color: var(--tech-accent);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--tech-text-muted);
+}
+
+.tone_pending,
+.tone_skipped {
+  background: color-mix(in srgb, var(--tech-text-muted) 80%, transparent);
+}
+
+.tone_ready {
+  background: color-mix(in srgb, var(--tech-accent) 55%, #60a5fa);
+}
+
+.tone_running,
+.tone_verifying {
+  background: #60a5fa;
+}
+
+.tone_waiting,
+.tone_waiting_approval {
+  background: #f59e0b;
+}
+
+.tone_blocked,
+.tone_failed {
+  background: #f87171;
+}
+
+.tone_succeeded {
+  background: #34d399;
+}
+
+.tone_cancelled {
+  background: #94a3b8;
+}

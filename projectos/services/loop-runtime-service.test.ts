@@ -26,10 +26,15 @@ import {
 } from "./loop-graph-service.js";
 import {
   advanceLoopInstance,
+  cancelLoopInstance,
+  listLoopRunHistory,
   pauseLoopInstance,
   resolveLoopHitl,
+  restoreLoopInstanceFromCheckpoint,
   resumeLoopInstance,
   startLoopInstance,
+  startLoopInstanceFromEvent,
+  startLoopInstanceWithParams,
   stepLoopInstance,
 } from "./loop-runtime-service.js";
 
@@ -37,6 +42,8 @@ function scriptedLoopExecution(filePath = "src/login.ts"): {
   execution: LoopExecutionHooks;
   starts: string[];
   requests: Array<{ filePath: string; goal: string }>;
+  paused: string[];
+  cancelled: string[];
   finishApply: () => void;
   finishApplyOnStart: () => void;
   setStatus: (status: LoopAgentRunView["status"], applySucceeded?: boolean) => void;
@@ -47,6 +54,8 @@ function scriptedLoopExecution(filePath = "src/login.ts"): {
   const runs = new Map<string, LoopAgentRunView>();
   const evidence = new Map<string, LoopEvidenceView>();
   const starts: string[] = [];
+  const paused: string[] = [];
+  const cancelled: string[] = [];
   const requests: Array<{ filePath: string; goal: string }> = [];
   let seq = 0;
   let completeOnStart = false;
@@ -69,12 +78,20 @@ function scriptedLoopExecution(filePath = "src/login.ts"): {
       starts.push(run.runId);
       return run;
     },
+    pauseAgentRun: (runId) => {
+      paused.push(runId);
+    },
+    cancelAgentRun: (runId) => {
+      cancelled.push(runId);
+    },
   };
   const current = () => runs.get(`run_${seq}`);
   return {
     execution,
     starts,
     requests,
+    paused,
+    cancelled,
     finishApply: () => {
       const run = current();
       if (!run) throw new Error("no run");
@@ -390,8 +407,9 @@ describe("loop-runtime-service", () => {
     expect(doc.instances[0]?.status).toBe("awaiting_review");
     expect(hooks.starts).toEqual(["run_1"]);
 
-    doc = pauseLoopInstance(root, doc.id, instanceId);
+    doc = pauseLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(doc.instances[0]?.status).toBe("paused");
+    expect(hooks.paused).toEqual(["run_1"]);
     doc = resumeLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(doc.instances[0]?.status).toBe("awaiting_review");
 
@@ -401,6 +419,203 @@ describe("loop-runtime-service", () => {
     expect(completed).toMatchObject({ agentRunId: "run_1" });
     expect(completed?.message).not.toContain("Completed implement");
     expect(doc.instances[0]?.cursorNodeId).toBe("n2");
+  });
+
+  it("takes a fallback edge instead of erroring when present", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-"));
+    roots.push(root);
+    let doc = createLoopGraph(root, "proj", "Fallback");
+    const spec: LoopSpec = {
+      version: "spec_fallback",
+      graphRevision: 1,
+      goal: "Fallback path",
+      nodes: [
+        {
+          id: "n1",
+          role: "implement",
+          type: "agent",
+          agentRole: "coder",
+          goal: "Primary",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n2",
+          role: "implement",
+          type: "agent",
+          agentRole: "coder",
+          goal: "Fallback coder",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+      ],
+      edges: [
+        {
+          id: "e_fb",
+          from: "n1",
+          to: "n2",
+          kind: "fallback",
+          when: "primary failed",
+        },
+      ],
+      acceptance: [],
+      retryPolicy: { onFailure: "fallback", maxAutoRetries: 0 },
+      stopPolicy: { maxRounds: 3 },
+      permissions: [],
+      openQuestions: [],
+      createdAt: "2026-11-09T00:00:00.000Z",
+    };
+    doc = approveLoopSpec(root, doc.id, spec);
+    const hooks = scriptedLoopExecution();
+    doc = startLoopInstance(root, doc.id, undefined, hooks.execution);
+    hooks.setStatus("error");
+    doc = advanceLoopInstance(root, doc.id, doc.instances[0]!.id, hooks.execution);
+    expect(doc.instances[0]?.status).toBe("running");
+    expect(doc.instances[0]?.cursorNodeId).toBe("n2");
+    expect(doc.instances[0]?.events.some((event) => event.type === "fallback_taken")).toBe(
+      true,
+    );
+  });
+
+  it("pauses for HITL when wall-clock budget is exceeded", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-"));
+    roots.push(root);
+    let doc = approveLinearLoop(root, "Implement");
+    const hooks = scriptedLoopExecution();
+    doc = startLoopInstance(root, doc.id, undefined, hooks.execution);
+    const instanceId = doc.instances[0]!.id;
+    const stale = {
+      ...doc,
+      instances: doc.instances.map((item) =>
+        item.id === instanceId
+          ? {
+              ...item,
+              startedAt: new Date(Date.now() - 60_000).toISOString(),
+            }
+          : item,
+      ),
+      approvedSpecs: doc.approvedSpecs.map((spec, index) =>
+        index === doc.approvedSpecs.length - 1
+          ? {
+              ...spec,
+              stopPolicy: { ...spec.stopPolicy, maxWallClockMs: 1_000 },
+            }
+          : spec,
+      ),
+    };
+    doc = upsertLoopGraph(root, stale);
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(doc.instances[0]?.status).toBe("awaiting_hitl");
+    expect(doc.instances[0]?.hitlQuestionIds).toEqual(["wall_clock_timeout"]);
+  });
+
+  it("cancels an active instance and forwards cancelAgentRun", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-"));
+    roots.push(root);
+    let doc = approveLinearLoop(root, "Implement");
+    const hooks = scriptedLoopExecution();
+    doc = startLoopInstance(root, doc.id, undefined, hooks.execution);
+    const instanceId = doc.instances[0]!.id;
+    doc = cancelLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(doc.instances[0]?.status).toBe("cancelled");
+    expect(hooks.cancelled).toEqual(["run_1"]);
+    expect(doc.instances[0]?.events.some((event) => event.type === "cancelled")).toBe(true);
+  });
+
+  it("drains parallel depends fan-out into Merge (P0 serial)", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-"));
+    roots.push(root);
+    let doc = createLoopGraph(root, "proj", "Parallel");
+    const spec: LoopSpec = {
+      version: "spec_parallel",
+      graphRevision: 1,
+      goal: "Parallel drain",
+      nodes: [
+        {
+          id: "n_start",
+          role: "implement",
+          type: "agent",
+          agentRole: "planner",
+          goal: "Start",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_a",
+          role: "implement",
+          type: "agent",
+          agentRole: "coder",
+          goal: "Branch A",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_b",
+          role: "implement",
+          type: "agent",
+          agentRole: "coder",
+          goal: "Branch B",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_merge",
+          role: "unknown",
+          type: "logic",
+          logicKind: "merge",
+          goal: "Join",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n_start", to: "n_a", kind: "depends" },
+        { id: "e2", from: "n_start", to: "n_b", kind: "depends" },
+        { id: "e3", from: "n_a", to: "n_merge", kind: "depends" },
+        { id: "e4", from: "n_b", to: "n_merge", kind: "depends" },
+      ],
+      acceptance: [],
+      retryPolicy: { onFailure: "pause_hitl", maxAutoRetries: 0 },
+      stopPolicy: { maxRounds: 5 },
+      permissions: [],
+      openQuestions: [],
+      createdAt: "2026-11-09T00:00:00.000Z",
+    };
+    doc = approveLoopSpec(root, doc.id, spec);
+    const hooks = scriptedLoopExecution();
+    doc = startLoopInstance(root, doc.id, undefined, hooks.execution);
+    // Planner emits DevPlan without AgentRun, then ready-set picks n_a.
+    expect(doc.instances[0]?.cursorNodeId).toBe("n_a");
+
+    hooks.finishApplyOnStart();
+    let guard = 0;
+    while (doc.instances[0]?.status === "running" && guard < 12) {
+      doc = advanceLoopInstance(root, doc.id, doc.instances[0]!.id, hooks.execution);
+      guard += 1;
+    }
+    expect(hooks.starts.length).toBeGreaterThanOrEqual(2);
+    expect(doc.instances[0]?.status).toBe("complete");
+    expect(doc.instances[0]?.nodeRecords?.find((r) => r.nodeId === "n_a")?.status).toBe(
+      "succeeded",
+    );
+    expect(doc.instances[0]?.nodeRecords?.find((r) => r.nodeId === "n_b")?.status).toBe(
+      "succeeded",
+    );
+    expect(doc.instances[0]?.nodeRecords?.find((r) => r.nodeId === "n_merge")?.status).toBe(
+      "succeeded",
+    );
   });
 
   it("stops a failed implement run instead of following feedback", () => {
@@ -529,6 +744,259 @@ describe("loop-runtime-service", () => {
     // Human approval now advances into the next node on resolve.
     expect(hooks.starts).toEqual(["run_1"]);
     expect(doc.instances[0]?.activeRunId).toBe("run_1");
+  });
+
+  it("persists checkpoints and restores cursor/nodeRecords (GC-4.1)", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-"));
+    roots.push(root);
+    let doc = approveLinearLoop(root, "Implement");
+    const hooks = scriptedLoopExecution();
+    doc = startLoopInstance(root, doc.id, undefined, hooks.execution);
+    const instanceId = doc.instances[0]!.id;
+    expect(doc.instances[0]?.checkpoint).toBeTruthy();
+    expect(doc.instances[0]?.events.some((e) => e.type === "checkpoint_saved")).toBe(true);
+
+    hooks.finishApply();
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    const cursorBefore = doc.instances[0]!.cursorNodeId;
+    const checkpointCursor = doc.instances[0]!.checkpoint?.cursorNodeId;
+    expect(checkpointCursor).toBeTruthy();
+
+    doc = pauseLoopInstance(root, doc.id, instanceId, hooks.execution);
+    doc = {
+      ...doc,
+      instances: doc.instances.map((item) =>
+        item.id === instanceId
+          ? {
+              ...item,
+              cursorNodeId: "n_missing",
+              status: "error" as const,
+              errorMessage: "simulated crash",
+            }
+          : item,
+      ),
+    };
+    doc = upsertLoopGraph(root, doc);
+    doc = restoreLoopInstanceFromCheckpoint(root, doc.id, instanceId, hooks.execution);
+    expect(doc.instances[0]?.cursorNodeId).toBe(checkpointCursor ?? cursorBefore);
+    expect(doc.instances[0]?.status).not.toBe("error");
+  });
+
+  it("dedupes launch by idempotencyKey and validates params (GC-4.3 / GC-5.1)", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-"));
+    roots.push(root);
+    let doc = approveLinearLoop(root, "Implement");
+    const approved = doc.approvedSpecs[0]!;
+    doc = approveLoopSpec(root, doc.id, {
+      ...approved,
+      version: "spec_params",
+      inputParams: [
+        { name: "branch", type: "string", required: true },
+        { name: "dryRun", type: "boolean", required: false, defaultValue: false },
+      ],
+    });
+
+    expect(() =>
+      startLoopInstanceWithParams(root, doc.id, {}),
+    ).toThrow(/Missing required launch param: branch/);
+
+    doc = startLoopInstanceWithParams(
+      root,
+      doc.id,
+      { branch: "feat/login", dryRun: true },
+      { idempotencyKey: "launch-1" },
+    );
+    expect(doc.instances).toHaveLength(1);
+    expect(doc.instances[0]?.launch).toMatchObject({
+      kind: "params",
+      idempotencyKey: "launch-1",
+      params: { branch: "feat/login", dryRun: true },
+    });
+
+    const again = startLoopInstanceWithParams(
+      root,
+      doc.id,
+      { branch: "other" },
+      { idempotencyKey: "launch-1" },
+    );
+    expect(again.instances).toHaveLength(1);
+    expect(again.instances[0]?.id).toBe(doc.instances[0]?.id);
+  });
+
+  it("dedupes internal event launches (GC-5.2)", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-"));
+    roots.push(root);
+    let doc = approveLinearLoop(root, "Implement");
+    doc = upsertLoopGraph(root, { ...doc, instances: [] });
+
+    doc = startLoopInstanceFromEvent(root, doc.id, {
+      eventId: "ev_1",
+      eventType: "verification.failed",
+      payload: { reason: "flake" },
+    });
+    expect(doc.instances).toHaveLength(1);
+    expect(doc.instances[0]?.launch?.kind).toBe("event");
+
+    const again = startLoopInstanceFromEvent(root, doc.id, {
+      eventId: "ev_1",
+      eventType: "verification.failed",
+    });
+    expect(again.instances).toHaveLength(1);
+  });
+
+  it("marks freshness stale and budgets wall clock (GC-4.2 / GC-4.5)", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-"));
+    roots.push(root);
+    let doc = approveLinearLoop(root, "Implement");
+    const approved = doc.approvedSpecs[0]!;
+    doc = approveLoopSpec(root, doc.id, {
+      ...approved,
+      version: "spec_fresh",
+      stalePolicy: "pause_hitl",
+      stopPolicy: { ...approved.stopPolicy, maxBudgetTokens: 1 },
+    });
+    const hooks = scriptedLoopExecution();
+    doc = startLoopInstance(root, doc.id, undefined, hooks.execution);
+    const instanceId = doc.instances[0]!.id;
+    expect(doc.instances[0]?.freshness?.status).toBe("fresh");
+    expect(doc.instances[0]?.budgetUsage).toBeTruthy();
+
+    doc = {
+      ...doc,
+      instances: doc.instances.map((item) =>
+        item.id === instanceId
+          ? {
+              ...item,
+              freshness: {
+                status: "fresh" as const,
+                baselineId: "old_baseline",
+                pathFingerprint: "old_baseline",
+                checkedAt: item.startedAt,
+              },
+              budgetUsage: { tokens: 99, wallClockMs: 0, retries: 0 },
+              status: "running" as const,
+            }
+          : item,
+      ),
+    };
+    doc = upsertLoopGraph(root, doc);
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(doc.instances[0]?.status).toBe("awaiting_hitl");
+    expect(
+      doc.instances[0]?.hitlQuestionIds?.some((id) =>
+        id === "freshness_stale" || id === "budget_exceeded",
+      ),
+    ).toBe(true);
+  });
+
+  it("blocks multi_run when shared leaf conflicts (GC-7.1)", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-"));
+    roots.push(root);
+    let doc = createLoopGraph(root, "proj", "Parallel multi");
+    const spec: LoopSpec = {
+      version: "spec_multi",
+      graphRevision: 1,
+      goal: "Parallel multi_run",
+      parallelMode: "multi_run",
+      nodes: [
+        {
+          id: "n_start",
+          role: "implement",
+          type: "agent",
+          agentRole: "planner",
+          goal: "Start",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_a",
+          role: "implement",
+          type: "agent",
+          agentRole: "coder",
+          goal: "Branch A",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_b",
+          role: "implement",
+          type: "agent",
+          agentRole: "coder",
+          goal: "Branch B",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+        {
+          id: "n_merge",
+          role: "unknown",
+          type: "logic",
+          logicKind: "merge",
+          goal: "Join",
+          constraints: [],
+          inputs: [],
+          outputs: [],
+          acceptance: [],
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n_start", to: "n_a", kind: "depends" },
+        { id: "e2", from: "n_start", to: "n_b", kind: "depends" },
+        { id: "e3", from: "n_a", to: "n_merge", kind: "depends" },
+        { id: "e4", from: "n_b", to: "n_merge", kind: "depends" },
+      ],
+      acceptance: [],
+      retryPolicy: { onFailure: "pause_hitl", maxAutoRetries: 0 },
+      stopPolicy: { maxRounds: 5 },
+      permissions: [],
+      openQuestions: [],
+      createdAt: "2026-11-09T00:00:00.000Z",
+    };
+    doc = approveLoopSpec(root, doc.id, spec);
+    const hooks = scriptedLoopExecution();
+    hooks.execution.allowConcurrentLoopRuns = true;
+    doc = startLoopInstance(root, doc.id, {
+      execution: hooks.execution,
+    });
+    expect(doc.instances[0]?.cursorNodeId).toBe("n_a");
+    const instanceId = doc.instances[0]!.id;
+    // Starting the first coder while sibling n_b is ready → shared-leaf conflict.
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(doc.instances[0]?.status).toBe("awaiting_hitl");
+    expect(doc.instances[0]?.hitlQuestionIds).toEqual(["write_conflict"]);
+    expect(doc.instances[0]?.activeRunIds?.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("lists run history (GC-6.3)", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-"));
+    roots.push(root);
+    let doc = approveLinearLoop(root, "Implement");
+    doc = startLoopInstance(root, doc.id);
+    const history = listLoopRunHistory(root, doc.id);
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    expect(history[0]?.id).toBe(doc.instances[0]?.id);
+  });
+
+  it("blocks resume when AgentRun is missing (GC-4.3)", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-"));
+    roots.push(root);
+    let doc = approveLinearLoop(root, "Implement");
+    const hooks = scriptedLoopExecution();
+    doc = startLoopInstance(root, doc.id, undefined, hooks.execution);
+    const instanceId = doc.instances[0]!.id;
+    doc = pauseLoopInstance(root, doc.id, instanceId, hooks.execution);
+    const orphanHooks: LoopExecutionHooks = {
+      ...hooks.execution,
+      readRun: () => null,
+    };
+    doc = resumeLoopInstance(root, doc.id, instanceId, orphanHooks);
+    expect(doc.instances[0]?.status).toBe("awaiting_hitl");
+    expect(doc.instances[0]?.hitlQuestionIds).toEqual(["unknown_side_effects"]);
   });
 });
 

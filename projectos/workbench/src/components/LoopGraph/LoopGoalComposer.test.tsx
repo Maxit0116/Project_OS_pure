@@ -4,7 +4,30 @@ import { normalizeLoopGraphDocument } from '@contracts/index'
 
 vi.mock('../../i18n', () => ({
   useI18n: () => ({
+    locale: 'en',
     ts: (key: string) => key,
+  }),
+}))
+
+vi.mock('../ChatPanel/composer/useComposePromptVoice', () => ({
+  useComposePromptVoice: () => ({
+    voice: {
+      state: {},
+      isRecording: false,
+      isTranscribing: false,
+      dismissError: vi.fn(),
+    },
+    voiceLabels: {},
+    dockProps: {
+      isRecording: false,
+      isTranscribing: false,
+      labels: { start: 'start', stop: 'stop', recording: 'recording' },
+      isSupported: false,
+      onMicToggle: vi.fn(),
+    },
+    syncBaseFromExternalText: vi.fn(),
+    cancelVoice: vi.fn(),
+    stopVoice: vi.fn(),
   }),
 }))
 
@@ -15,6 +38,19 @@ vi.mock('../../state/loopGraphStore', async (importOriginal) => {
     useLoopGraphStore: vi.fn(),
   }
 })
+
+vi.mock('../../state/workbenchStore', () => ({
+  useWorkbenchStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      submitCreateAgentPrompt: vi.fn(),
+      pendingWorkforceDraft: null,
+      updatePendingWorkforceDraft: vi.fn(),
+      confirmWorkforceDraft: vi.fn(),
+      dismissWorkforceDraft: vi.fn(),
+      beginCreateAgentComposer: vi.fn(),
+      cancelCreateAgentComposer: vi.fn(),
+    }),
+}))
 
 import { useLoopGraphStore } from '../../state/loopGraphStore'
 import LoopGoalComposer from './LoopGoalComposer'

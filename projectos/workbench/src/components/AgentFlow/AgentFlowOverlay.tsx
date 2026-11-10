@@ -63,7 +63,6 @@ export default function AgentFlowOverlay() {
             status={flowStatus}
             diffReady={diffReady}
             onReviewDiff={() => {
-              closeAgentFlow()
               void navigateToDiffReview()
             }}
           />

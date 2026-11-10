@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarClock, RefreshCw, X } from 'lucide-react'
+import { Bell, CalendarClock, RefreshCw, X } from 'lucide-react'
 import { sessionGraphShieldCssInsets, type ReminderTimelineItem } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useBottomDockStore } from '../../state/bottomDockStore'
 import { useChatSessionStore } from '../../state/chatSessionStore'
+import {
+  selectActiveNotifications,
+  useNotificationCenterStore,
+} from '../../state/notificationCenterStore'
 import {
   filterReminderItems,
   useReminderGraphStore,
@@ -13,6 +17,7 @@ import { useWorkbenchStore } from '../../state/workbenchStore'
 import { GraphOverlayFrame } from '../GraphOverlay/GraphOverlayFrame'
 import Button from '../ui/Button'
 import ReminderGoalComposer from './ReminderGoalComposer'
+import ReminderNotificationCenter from './ReminderNotificationCenter'
 import { ReminderTimelineRow, statusLabel } from './ReminderTimelineRow'
 import styles from './ReminderGraphOverlay.module.css'
 
@@ -45,6 +50,7 @@ export default function ReminderGraphOverlay() {
   const document = useReminderGraphStore((s) => s.document)
   const selectedId = useReminderGraphStore((s) => s.selectedId)
   const filter = useReminderGraphStore((s) => s.filter)
+  const page = useReminderGraphStore((s) => s.page)
   const busy = useReminderGraphStore((s) => s.busy)
   const syncing = useReminderGraphStore((s) => s.syncing)
   const error = useReminderGraphStore((s) => s.error)
@@ -54,11 +60,17 @@ export default function ReminderGraphOverlay() {
   const syncNow = useReminderGraphStore((s) => s.syncNow)
   const clear = useReminderGraphStore((s) => s.clear)
   const setFilter = useReminderGraphStore((s) => s.setFilter)
+  const setPage = useReminderGraphStore((s) => s.setPage)
   const selectItem = useReminderGraphStore((s) => s.selectItem)
   const beginReorderConfirm = useReminderGraphStore((s) => s.beginReorderConfirm)
   const cancelReorderConfirm = useReminderGraphStore((s) => s.cancelReorderConfirm)
   const confirmReorder = useReminderGraphStore((s) => s.confirmReorder)
   const completeMilestone = useReminderGraphStore((s) => s.completeMilestone)
+  const notificationItems = useNotificationCenterStore((s) => s.items)
+  const unreadNotifications = useMemo(
+    () => selectActiveNotifications(notificationItems).length,
+    [notificationItems],
+  )
 
   const [draggingId, setDraggingId] = useState<string | null>(null)
 
@@ -171,18 +183,46 @@ export default function ReminderGraphOverlay() {
         <div className={styles.header}>
           <CalendarClock size={16} aria-hidden />
           <h2 className={styles.title}>{ts('chat.reminderGraph.title')}</h2>
-          <span className={styles.statusChip}>{statusLabelText}</span>
+          <div className={styles.pageTabs} role="tablist" aria-label={ts('chat.reminderGraph.pages')}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={page === 'timeline'}
+              className={`${styles.pageTab} ${page === 'timeline' ? styles.pageTabActive : ''}`}
+              onClick={() => setPage('timeline')}
+            >
+              {ts('chat.reminderGraph.page.timeline')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={page === 'notifications'}
+              className={`${styles.pageTab} ${page === 'notifications' ? styles.pageTabActive : ''}`}
+              onClick={() => setPage('notifications')}
+            >
+              <Bell size={12} strokeWidth={1.75} aria-hidden />
+              {ts('chat.reminderGraph.page.notifications')}
+              {unreadNotifications > 0 ? (
+                <span className={styles.pageTabBadge}>{unreadNotifications}</span>
+              ) : null}
+            </button>
+          </div>
+          {page === 'timeline' ? (
+            <span className={styles.statusChip}>{statusLabelText}</span>
+          ) : null}
           <div className={styles.headerSpacer} />
-          <button
-            type="button"
-            className={styles.syncButton}
-            aria-label={ts('chat.reminderGraph.sync')}
-            title={ts('chat.reminderGraph.sync')}
-            disabled={syncing || busy}
-            onClick={() => void syncNow()}
-          >
-            <RefreshCw size={16} aria-hidden />
-          </button>
+          {page === 'timeline' ? (
+            <button
+              type="button"
+              className={styles.syncButton}
+              aria-label={ts('chat.reminderGraph.sync')}
+              title={ts('chat.reminderGraph.sync')}
+              disabled={syncing || busy}
+              onClick={() => void syncNow()}
+            >
+              <RefreshCw size={16} aria-hidden />
+            </button>
+          ) : null}
           <button
             type="button"
             className={styles.closeButton}
@@ -194,47 +234,55 @@ export default function ReminderGraphOverlay() {
           </button>
         </div>
 
-        <div className={styles.filters} role="group" aria-label={ts('chat.reminderGraph.filters')}>
-          {FILTERS.map((entry) => (
-            <button
-              key={entry}
-              type="button"
-              className={`${styles.filterChip} ${filterToneClass(entry)} ${
-                filter === entry ? styles.filterChipActive : ''
-              }`}
-              aria-pressed={filter === entry}
-              onClick={() => setFilter(entry)}
-            >
-              {ts(`chat.reminderGraph.filter.${entry}`)}
-            </button>
-          ))}
-        </div>
-
-        <div className={styles.body}>
-          <div className={styles.main}>
-            <div className={styles.timeline}>
-              {error ? <div className={styles.error}>{error}</div> : null}
-              {!document && busy ? (
-                <div className={styles.loading}>{ts('chat.reminderGraph.loading')}</div>
-              ) : items.length === 0 ? (
-                <div className={styles.empty}>{ts('chat.reminderGraph.empty')}</div>
-              ) : (
-                <div className={styles.track}>
-                  {past.map((item) => renderRow(item, true))}
-
-                  <div className={styles.nowLine} aria-label={ts('chat.reminderGraph.now')}>
-                    <span className={styles.nowDot} />
-                    <span className={styles.nowLabel}>{ts('chat.reminderGraph.now')}</span>
-                    <span className={styles.nowRule} />
-                  </div>
-
-                  {future.map((item) => renderRow(item, false))}
-                </div>
-              )}
+        {page === 'timeline' ? (
+          <>
+            <div className={styles.filters} role="group" aria-label={ts('chat.reminderGraph.filters')}>
+              {FILTERS.map((entry) => (
+                <button
+                  key={entry}
+                  type="button"
+                  className={`${styles.filterChip} ${filterToneClass(entry)} ${
+                    filter === entry ? styles.filterChipActive : ''
+                  }`}
+                  aria-pressed={filter === entry}
+                  onClick={() => setFilter(entry)}
+                >
+                  {ts(`chat.reminderGraph.filter.${entry}`)}
+                </button>
+              ))}
             </div>
-            <ReminderGoalComposer />
+
+            <div className={styles.body}>
+              <div className={styles.main}>
+                <div className={styles.timeline}>
+                  {error ? <div className={styles.error}>{error}</div> : null}
+                  {!document && busy ? (
+                    <div className={styles.loading}>{ts('chat.reminderGraph.loading')}</div>
+                  ) : items.length === 0 ? (
+                    <div className={styles.empty}>{ts('chat.reminderGraph.empty')}</div>
+                  ) : (
+                    <div className={styles.track}>
+                      {past.map((item) => renderRow(item, true))}
+
+                      <div className={styles.nowLine} aria-label={ts('chat.reminderGraph.now')}>
+                        <span className={styles.nowDot} />
+                        <span className={styles.nowLabel}>{ts('chat.reminderGraph.now')}</span>
+                        <span className={styles.nowRule} />
+                      </div>
+
+                      {future.map((item) => renderRow(item, false))}
+                    </div>
+                  )}
+                </div>
+                <ReminderGoalComposer />
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className={styles.body}>
+            <ReminderNotificationCenter />
           </div>
-        </div>
+        )}
 
         {confirmOpen && dragPreview ? (
           <div className={styles.modalShield} role="presentation">

@@ -55,9 +55,10 @@ export default function DiffReviewPanel({
   const selectedDiffFilePath = useWorkbenchStore((s) => s.selectedDiffFilePath)
   const clearSelectedDiffFilePath = useWorkbenchStore((s) => s.clearSelectedDiffFilePath)
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
+    const preferredPath = selectedDiffFilePath ?? diff.files[0]?.path
     const init: Record<string, boolean> = {}
     diff.files.forEach((f) => {
-      init[f.path] = f.path === selectedDiffFilePath
+      init[f.path] = f.path === preferredPath
     })
     return init
   })
@@ -65,6 +66,19 @@ export default function DiffReviewPanel({
   const [markdownDiffViewModes, setMarkdownDiffViewModes] = useState<
     Record<string, MarkdownDiffViewMode>
   >({})
+
+  useEffect(() => {
+    const preferredPath = selectedDiffFilePath ?? diff.files[0]?.path
+    setExpanded(() => {
+      const next: Record<string, boolean> = {}
+      for (const file of diff.files) {
+        next[file.path] = file.path === preferredPath
+      }
+      return next
+    })
+    // Reset expansion when a new diff run arrives; file toggles stay user-controlled within a run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional run-scoped reset
+  }, [diff.runId])
 
   useEffect(() => {
     if (!selectedDiffFilePath) return

@@ -15,6 +15,7 @@ import {
 import { isDesktopApp } from '../data/clientMode'
 import { useI18n } from '../i18n'
 import { useChatSessionStore } from '../state/chatSessionStore'
+import { selectDiffReviewAttention } from '../state/pendingChangesDrawer'
 import { useWorkbenchStore } from '../state/workbenchStore'
 import Button from '../components/ui/Button'
 import { STAGE_MANAGER_COLLAPSE_DELAY_MS } from './stageManagerHover'
@@ -30,7 +31,7 @@ export default function WorkbenchStageRail() {
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const centerTab = useWorkbenchStore((s) => s.centerTab)
   const setCenterTab = useWorkbenchStore((s) => s.setCenterTab)
-  const diffReady = useWorkbenchStore((s) => s.diffReady)
+  const diffReviewAttention = useWorkbenchStore(selectDiffReviewAttention)
   const flowStatus = useWorkbenchStore((s) => s.flowStatus)
   const refineLoading = useWorkbenchStore((s) => s.refineLoading)
 
@@ -134,7 +135,7 @@ export default function WorkbenchStageRail() {
               onClick={() => setCenterTab('code')}
             >
               <Code2 size={16} aria-hidden />
-              {diffReady ? <span className={styles.liveDot} aria-hidden /> : null}
+              {diffReviewAttention ? <span className={styles.liveDot} aria-hidden /> : null}
             </Button>
             {isDesktopApp() ? (
               <Button

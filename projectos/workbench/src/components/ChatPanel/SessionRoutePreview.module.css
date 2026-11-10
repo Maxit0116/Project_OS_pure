@@ -1,0 +1,122 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--tech-border-strong);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--tech-accent) 14%, var(--tech-bg-muted));
+  color: var(--tech-text-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.confidence {
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+}
+
+.title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.altLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+}
+
+.select {
+  appearance: none;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+  font-size: var(--font-size-xs);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.primary,
+.secondary {
+  appearance: none;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary {
+  border: 1px solid transparent;
+  background: var(--tech-accent);
+  color: var(--tech-bg-canvas);
+}
+
+.secondary {
+  border: 1px solid var(--tech-border);
+  background: transparent;
+  color: var(--tech-text-primary);
+}
+
+.primary:hover,
+.secondary:hover,
+.primary:focus-visible,
+.secondary:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.hint {
+  margin: 0;
+  font-size: 10px;
+  color: var(--tech-text-muted);
+}

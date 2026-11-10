@@ -52,6 +52,10 @@ interface PromptComposerProps {
   onStop?: () => void
   voice: VoiceProps
   onKeyDownExtra?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  routeVisible?: boolean
+  routeDisabled?: boolean
+  routeBusy?: boolean
+  onRoute?: () => void
 }
 
 export default function PromptComposer({
@@ -68,6 +72,10 @@ export default function PromptComposer({
   onStop,
   voice,
   onKeyDownExtra,
+  routeVisible = false,
+  routeDisabled = true,
+  routeBusy = false,
+  onRoute,
 }: PromptComposerProps) {
   const { ts } = useI18n()
   const textareaRef = useAutoResizeTextarea(draft.text, 240, chatMode)
@@ -252,6 +260,10 @@ export default function PromptComposer({
             setStageSlot(null)
             setUsageOpen((value) => !value)
           }}
+          routeVisible={routeVisible}
+          routeDisabled={routeDisabled}
+          routeBusy={routeBusy}
+          onRoute={onRoute}
         />
       </div>
     </div>

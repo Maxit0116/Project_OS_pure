@@ -147,6 +147,40 @@
   background: color-mix(in srgb, var(--tech-accent) 12%, transparent);
 }
 
+.itemTitleRow {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.titleFlex {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.statusDot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tech-text-secondary);
+}
+
+.statusRunning {
+  background: var(--tech-accent);
+}
+
+.statusReview {
+  background: color-mix(in srgb, var(--tech-accent) 55%, #c9a227);
+}
+
+.statusError {
+  background: #e57373;
+}
+
 .itemMeta {
   width: 100%;
   display: flex;

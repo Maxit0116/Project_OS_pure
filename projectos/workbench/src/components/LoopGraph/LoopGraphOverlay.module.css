@@ -226,6 +226,12 @@
   pointer-events: stroke;
 }
 
+.edgeFallback {
+  stroke: var(--tech-danger, #f87171);
+  stroke-dasharray: 3 5;
+  stroke-width: 1.5;
+}
+
 .edgeFeedback {
   stroke: var(--tech-warning);
   stroke-dasharray: 5 4;
@@ -260,21 +266,35 @@
   opacity: 0.85;
 }
 
-.edgeLabelBg {
-  fill: var(--tech-bg-elevated);
-  stroke: var(--tech-border);
-  stroke-width: 1;
-  opacity: 0.95;
+/* Anchor at edge midpoint; chip self-sizes and recenters via transform. */
+.edgeLabelForeign {
+  overflow: visible;
 }
 
-.edgeLabel {
-  fill: var(--tech-text-secondary);
+.edgeLabelChip {
+  display: inline-block;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 280px;
+  transform: translate(-50%, -50%);
+  padding: 2px 8px;
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-secondary);
+  font-family: var(--font-sans);
   font-size: 10px;
   font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  opacity: 0.95;
+  pointer-events: none;
 }
 
-.edgeLabelPending {
-  fill: var(--tech-text-muted);
+.edgeLabelChipPending {
+  color: var(--tech-text-muted);
   font-style: italic;
 }
 
@@ -333,6 +353,54 @@
 
 .nodeHitl {
   border-color: var(--tech-warning);
+}
+
+.nodeSucceeded {
+  border-color: color-mix(in srgb, #34d399 70%, var(--tech-border-strong));
+}
+
+.nodeFailed {
+  border-color: color-mix(in srgb, #f87171 70%, var(--tech-border-strong));
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--tech-text-muted);
+}
+
+.status_pending,
+.status_skipped {
+  background: color-mix(in srgb, var(--tech-text-muted) 80%, transparent);
+}
+
+.status_ready {
+  background: color-mix(in srgb, var(--tech-accent) 55%, #60a5fa);
+}
+
+.status_running,
+.status_verifying {
+  background: #60a5fa;
+}
+
+.status_waiting,
+.status_waiting_approval {
+  background: #f59e0b;
+}
+
+.status_blocked,
+.status_failed {
+  background: #f87171;
+}
+
+.status_succeeded {
+  background: #34d399;
+}
+
+.status_cancelled {
+  background: #94a3b8;
 }
 
 .nodeTop {

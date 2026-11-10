@@ -37,37 +37,6 @@
   color: var(--tech-warning, #b45309);
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.label {
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  color: var(--tech-text-secondary);
-}
-
-.input,
-.textarea {
-  width: 100%;
-  padding: 7px 9px;
-  border: 1px solid var(--tech-border);
-  border-radius: 4px;
-  background: var(--tech-bg-canvas);
-  color: var(--tech-text-primary);
-  font: inherit;
-  font-size: var(--font-size-sm);
-  resize: vertical;
-}
-
-.input:focus,
-.textarea:focus {
-  outline: none;
-  box-shadow: var(--tech-shadow-focus);
-}
-
 .sectionTitle {
   margin: 4px 0 0;
   font-size: var(--font-size-xs);

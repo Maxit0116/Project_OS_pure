@@ -1,14 +1,20 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Bot, ChevronUp, MessageSquare, Pencil, Undo2 } from 'lucide-react'
 import type { LoopComposerMode, LoopOpenQuestion } from '@contracts/index'
 import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea'
 import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
+import { useComposePromptVoice } from '../ChatPanel/composer/useComposePromptVoice'
+import {
+  VoiceInputDock,
+  VoiceInputErrorBanner,
+} from '../ChatPanel/VoiceInputControls'
 import AgentDraftCard from '../AgentWorkforce/AgentDraftCard'
 import AgentActivityIndicator from '../ui/AgentActivityIndicator'
 import Button from '../ui/Button'
 import Chip from '../ui/Chip'
+import TextInput from '../ui/TextInput'
 import styles from './LoopGoalComposer.module.css'
 
 const COMPOSER_MODES: LoopComposerMode[] = ['ask', 'edit', 'create_agent']
@@ -20,7 +26,7 @@ const MODE_ICON = {
 } as const
 
 export default function LoopGoalComposer() {
-  const { ts } = useI18n()
+  const { ts, locale } = useI18n()
   const loopDocument = useLoopGraphStore((s) => s.document)
   const composerDraft = useLoopGraphStore((s) => s.composerDraft)
   const composerSheet = useLoopGraphStore((s) => s.composerSheet)
@@ -77,6 +83,33 @@ export default function LoopGoalComposer() {
     return recentSteps.find((step) => step.id === trace.currentStepId) ?? recentSteps.at(-1)
   }, [recentSteps, trace?.currentStepId])
 
+  const voiceDisabled =
+    !loopDocument || authoringBusy || draftBusy || (mode === 'ask' && needsClarification)
+
+  const onSend = useCallback(
+    (overrideText?: string) => {
+      const currentMode = useLoopGraphStore.getState().document?.composerMode ?? 'ask'
+      if (currentMode === 'create_agent') {
+        const text = (overrideText ?? useLoopGraphStore.getState().composerDraft).trim()
+        if (!text) return
+        setDraftBusy(true)
+        setComposerDraft('')
+        void submitCreateAgentPrompt(text, 'loop').finally(() => setDraftBusy(false))
+        return
+      }
+      void sendAuthoringTurn()
+    },
+    [sendAuthoringTurn, setComposerDraft, submitCreateAgentPrompt],
+  )
+
+  const composeVoice = useComposePromptVoice({
+    locale,
+    disabled: voiceDisabled,
+    getText: () => useLoopGraphStore.getState().composerDraft,
+    setText: setComposerDraft,
+    onSubmit: (text) => onSend(text),
+  })
+
   useEffect(() => {
     if (!modeMenuOpen) return
     const onPointerDown = (event: MouseEvent) => {
@@ -103,22 +136,28 @@ export default function LoopGoalComposer() {
     !composerDraft.trim() ||
     (mode === 'ask' && needsClarification)
 
-  const onSend = () => {
-    if (mode === 'create_agent') {
-      const text = composerDraft.trim()
-      if (!text) return
-      setDraftBusy(true)
-      setComposerDraft('')
-      void submitCreateAgentPrompt(text, 'loop').finally(() => setDraftBusy(false))
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      event.key === 'Escape' &&
+      (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing)
+    ) {
+      event.preventDefault()
+      composeVoice.cancelVoice()
       return
     }
-    void sendAuthoringTurn()
-  }
-
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === 'Space') {
+      event.preventDefault()
+      composeVoice.dockProps.onMicToggle()
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      if (!submitDisabled) onSend()
+      if (!submitDisabled) {
+        if (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing) {
+          composeVoice.stopVoice()
+        }
+        onSend()
+      }
     }
   }
 
@@ -155,7 +194,7 @@ export default function LoopGoalComposer() {
             ))}
           </div>
         ) : null}
-        <input
+        <TextInput
           id={`loop-clarify-${question.id}`}
           className={styles.clarifyInput}
           value={value}
@@ -415,6 +454,13 @@ export default function LoopGoalComposer() {
       ) : null}
 
       <div className={styles.promptDock}>
+        {composeVoice.voice.state.error ? (
+          <VoiceInputErrorBanner
+            errorKey={composeVoice.voice.state.error}
+            onDismiss={composeVoice.voice.dismissError}
+            labels={composeVoice.voiceLabels}
+          />
+        ) : null}
         <div className={styles.inputComposer}>
           <div className={styles.composerBody}>
             <textarea
@@ -429,7 +475,11 @@ export default function LoopGoalComposer() {
                     : ts('chat.loopGraph.editPlaceholder')
               }
               disabled={authoringBusy || draftBusy || (mode === 'ask' && needsClarification)}
-              onChange={(event) => setComposerDraft(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value
+                setComposerDraft(value)
+                composeVoice.syncBaseFromExternalText(value)
+              }}
               onKeyDown={onKeyDown}
               rows={3}
               aria-label={ts('chat.loopGraph.composerInput')}
@@ -497,7 +547,18 @@ export default function LoopGoalComposer() {
                 <Undo2 size={14} aria-hidden />
                 <span>{ts('chat.loopGraph.undoDraft')}</span>
               </button>
-              <Button type="button" size="sm" disabled={submitDisabled} onClick={onSend}>
+              <VoiceInputDock {...composeVoice.dockProps} inline />
+              <Button
+                type="button"
+                size="sm"
+                disabled={submitDisabled}
+                onClick={() => {
+                  if (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing) {
+                    composeVoice.stopVoice()
+                  }
+                  onSend()
+                }}
+              >
                 {ts('chat.loopGraph.send')}
               </Button>
             </div>

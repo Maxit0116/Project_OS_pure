@@ -5,6 +5,7 @@ import {
   EMPTY_SESSION_VALID_MS,
   composerDraftHasContent,
   isDeferredEmptySessionShell,
+  isUnusedForkChildSession,
   orderSessionIdsForDeletion,
   shouldDisposeEmptySession,
 } from "./chat-session-empty.js";
@@ -187,6 +188,50 @@ describe("chat-session-empty", () => {
         ],
       ),
     ).toEqual(["child", "parent"]);
+  });
+
+  it("detects unused fork children that never continued with a prompt", () => {
+    const unused = head({ id: "child", parentSessionId: "parent" });
+    expect(
+      isUnusedForkChildSession({
+        head: unused,
+        messages: [],
+        draft: { text: "", attachments: [] },
+      }),
+    ).toBe(true);
+
+    expect(
+      isUnusedForkChildSession({
+        head: unused,
+        messages: [message("u1", "user", "keep going")],
+      }),
+    ).toBe(false);
+
+    expect(
+      isUnusedForkChildSession({
+        head: unused,
+        messages: [],
+        draft: { text: "typed but not sent", attachments: [] },
+      }),
+    ).toBe(false);
+
+    expect(
+      isUnusedForkChildSession({
+        head: head({ id: "root" }),
+        messages: [],
+      }),
+    ).toBe(false);
+
+    expect(
+      isUnusedForkChildSession({
+        head: head({
+          id: "child",
+          parentSessionId: "parent",
+          status: "awaiting_review",
+        }),
+        messages: [],
+      }),
+    ).toBe(false);
   });
 });
 

@@ -58,4 +58,23 @@ describe('resolveSessionNodePreviewPosition', () => {
     )
     expect(pos.y + 200).toBeLessThanOrEqual(800 - 12)
   })
+
+  it('tracks the vertical position of a strip-row anchor', () => {
+    const upper = resolveSessionNodePreviewPosition(
+      rect({ left: 100, top: 160, width: 228, height: 22 }),
+      280,
+      200,
+      viewport,
+    )
+    const lower = resolveSessionNodePreviewPosition(
+      rect({ left: 100, top: 226, width: 228, height: 22 }),
+      280,
+      200,
+      viewport,
+    )
+    expect(upper.x).toBe(lower.x)
+    expect(lower.y).toBeGreaterThan(upper.y)
+    expect(upper.y).toBe(160)
+    expect(lower.y).toBe(226)
+  })
 })

@@ -1,3 +1,4 @@
+import { useRef, type KeyboardEvent } from 'react'
 import type { StencilGenerationScope, StencilPlacement } from '@contracts/ui-stencil'
 import {
   combinedBriefForArrow,
@@ -13,6 +14,12 @@ import {
   type StencilUiStrings,
 } from './stencilStrings'
 import type { OverlayRegion } from '../../../overlay/overlayRegions'
+import { useI18n } from '../../../i18n'
+import { useComposePromptVoice } from '../../ChatPanel/composer/useComposePromptVoice'
+import {
+  VoiceInputDock,
+  VoiceInputErrorBanner,
+} from '../../ChatPanel/VoiceInputControls'
 import styles from './StencilComposeExtras.module.css'
 
 interface Props {
@@ -42,6 +49,18 @@ export default function StencilComposeExtras({
   onPlacementsChange,
   onFocus,
 }: Props) {
+  const { locale } = useI18n()
+  const briefRef = useRef(brief)
+  briefRef.current = brief
+  const onBriefChangeRef = useRef(onBriefChange)
+  onBriefChangeRef.current = onBriefChange
+
+  const composeVoice = useComposePromptVoice({
+    locale,
+    getText: () => briefRef.current,
+    setText: (text) => onBriefChangeRef.current(text),
+  })
+
   const linked = placementsForArrow(region, arrowId)
   if (linked.length === 0) return null
 
@@ -65,6 +84,22 @@ export default function StencilComposeExtras({
       combinedBriefForArrow(synthetic, arrowId) ??
       brief
     onBriefChange(regenerated)
+    composeVoice.syncBaseFromExternalText(regenerated)
+  }
+
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      event.key === 'Escape' &&
+      (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing)
+    ) {
+      event.preventDefault()
+      composeVoice.cancelVoice()
+      return
+    }
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === 'Space') {
+      event.preventDefault()
+      composeVoice.dockProps.onMicToggle()
+    }
   }
 
   return (
@@ -113,14 +148,30 @@ export default function StencilComposeExtras({
         </label>
       ) : null}
 
-      <textarea
-        className={styles.briefInput}
-        rows={3}
-        value={brief}
-        placeholder={strings.briefPlaceholder}
-        onChange={(event) => onBriefChange(event.target.value)}
-        onFocus={onFocus}
-      />
+      {composeVoice.voice.state.error ? (
+        <VoiceInputErrorBanner
+          errorKey={composeVoice.voice.state.error}
+          onDismiss={composeVoice.voice.dismissError}
+          labels={composeVoice.voiceLabels}
+        />
+      ) : null}
+
+      <div className={styles.briefWrap}>
+        <textarea
+          className={styles.briefInput}
+          rows={3}
+          value={brief}
+          placeholder={strings.briefPlaceholder}
+          onChange={(event) => {
+            const value = event.target.value
+            onBriefChange(value)
+            composeVoice.syncBaseFromExternalText(value)
+          }}
+          onKeyDown={onKeyDown}
+          onFocus={onFocus}
+        />
+        <VoiceInputDock {...composeVoice.dockProps} />
+      </div>
     </div>
   )
 }

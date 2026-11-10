@@ -248,15 +248,68 @@ export function findTurnElement(scrollParent: HTMLElement, messageId: string): H
   return el as HTMLElement
 }
 
-export function scrollTurnIntoView(scrollParent: HTMLElement, messageId: string): boolean {
+export function targetScrollTopForTurn(
+  scrollParent: HTMLElement,
+  messageId: string,
+  offsetPx = 8,
+): number | null {
   const el = findTurnElement(scrollParent, messageId)
-  if (!el) return false
-  const offsetPx = 8
+  if (!el) return null
   const parentTop = scrollParent.getBoundingClientRect().top
   const elTop = el.getBoundingClientRect().top
   const nextTop = scrollParent.scrollTop + (elTop - parentTop) - offsetPx
-  const behavior = prefersReducedMotion() ? 'auto' : 'smooth'
-  scrollParent.scrollTo({ top: Math.max(0, nextTop), behavior })
+  const maxScroll = Math.max(0, scrollParent.scrollHeight - scrollParent.clientHeight)
+  return Math.max(0, Math.min(maxScroll, nextTop))
+}
+
+/** Prefer the nearer transcript end as the sweep origin. */
+export function chooseSweepOrigin(
+  targetScrollTop: number,
+  maxScroll: number,
+): 'top' | 'bottom' {
+  if (maxScroll <= 0) return 'top'
+  return targetScrollTop <= maxScroll / 2 ? 'top' : 'bottom'
+}
+
+export function scrollTurnIntoView(
+  scrollParent: HTMLElement,
+  messageId: string,
+  options?: { behavior?: ScrollBehavior },
+): boolean {
+  const nextTop = targetScrollTopForTurn(scrollParent, messageId)
+  if (nextTop == null) return false
+  const behavior =
+    options?.behavior ?? (prefersReducedMotion() ? 'auto' : 'smooth')
+  scrollParent.scrollTo({ top: nextTop, behavior })
+  return true
+}
+
+/**
+ * Jump to the nearer end (top/bottom), then smooth-scroll toward the turn —
+ * used by Conversation Nav and Session Graph reveal so travel feels continuous.
+ */
+export function sweepScrollTurnIntoView(
+  scrollParent: HTMLElement,
+  messageId: string,
+): boolean {
+  const targetTop = targetScrollTopForTurn(scrollParent, messageId)
+  if (targetTop == null) return false
+  if (prefersReducedMotion()) {
+    scrollParent.scrollTo({ top: targetTop, behavior: 'auto' })
+    return true
+  }
+  const maxScroll = Math.max(0, scrollParent.scrollHeight - scrollParent.clientHeight)
+  const origin = chooseSweepOrigin(targetTop, maxScroll)
+  scrollParent.scrollTo({
+    top: origin === 'top' ? 0 : maxScroll,
+    behavior: 'auto',
+  })
+  // Dual rAF: apply the origin scroll before starting the smooth travel.
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      scrollParent.scrollTo({ top: targetTop, behavior: 'smooth' })
+    })
+  })
   return true
 }
 

@@ -45,6 +45,10 @@
   outline: none;
 }
 
+.briefWrap {
+  position: relative;
+}
+
 .briefInput {
   appearance: none;
   -webkit-appearance: none;
@@ -63,7 +67,7 @@
   caret-color: var(--tech-text-primary, #f8fafc);
   font-size: 11px;
   line-height: 1.4;
-  padding: 7px 9px;
+  padding: 7px 36px 7px 9px;
   font-family: inherit;
   outline: none;
   box-shadow: none;

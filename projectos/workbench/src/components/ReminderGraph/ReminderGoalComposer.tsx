@@ -4,6 +4,11 @@ import type { ReminderComposerMode } from '@contracts/index'
 import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea'
 import { useI18n } from '../../i18n'
 import { useReminderGraphStore } from '../../state/reminderGraphStore'
+import { useComposePromptVoice } from '../ChatPanel/composer/useComposePromptVoice'
+import {
+  VoiceInputDock,
+  VoiceInputErrorBanner,
+} from '../ChatPanel/VoiceInputControls'
 import AgentActivityIndicator from '../ui/AgentActivityIndicator'
 import Button from '../ui/Button'
 import Chip from '../ui/Chip'
@@ -17,7 +22,7 @@ const MODE_ICON = {
 } as const
 
 export default function ReminderGoalComposer() {
-  const { ts } = useI18n()
+  const { ts, locale } = useI18n()
   const document = useReminderGraphStore((s) => s.document)
   const selectedId = useReminderGraphStore((s) => s.selectedId)
   const composerDraft = useReminderGraphStore((s) => s.composerDraft)
@@ -51,6 +56,18 @@ export default function ReminderGoalComposer() {
   const activityOpen = composerSheet === 'activity'
   const contextOpen = composerSheet === 'context'
 
+  const composeVoice = useComposePromptVoice({
+    locale,
+    disabled: !document || working,
+    getText: () => useReminderGraphStore.getState().composerDraft,
+    setText: setComposerDraft,
+    onSubmit: () => {
+      const state = useReminderGraphStore.getState()
+      if (state.busy || state.syncing || !state.composerDraft.trim()) return
+      void state.sendAuthoringTurn()
+    },
+  })
+
   useEffect(() => {
     if (!modeMenuOpen) return
     const onPointerDown = (event: MouseEvent) => {
@@ -70,10 +87,26 @@ export default function ReminderGoalComposer() {
 
   const onSend = () => {
     if (submitDisabled) return
+    if (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing) {
+      composeVoice.stopVoice()
+    }
     void sendAuthoringTurn()
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      event.key === 'Escape' &&
+      (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing)
+    ) {
+      event.preventDefault()
+      composeVoice.cancelVoice()
+      return
+    }
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === 'Space') {
+      event.preventDefault()
+      composeVoice.dockProps.onMicToggle()
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       if (!submitDisabled) onSend()
@@ -208,6 +241,13 @@ export default function ReminderGoalComposer() {
       ) : null}
 
       <div className={styles.promptDock}>
+        {composeVoice.voice.state.error ? (
+          <VoiceInputErrorBanner
+            errorKey={composeVoice.voice.state.error}
+            onDismiss={composeVoice.voice.dismissError}
+            labels={composeVoice.voiceLabels}
+          />
+        ) : null}
         <div className={styles.inputComposer}>
           <div className={styles.composerBody}>
             <textarea
@@ -221,7 +261,11 @@ export default function ReminderGoalComposer() {
                   : ts('chat.reminderGraph.editPlaceholder')
               }
               aria-label={ts('chat.reminderGraph.composerInput')}
-              onChange={(event) => setComposerDraft(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value
+                setComposerDraft(value)
+                composeVoice.syncBaseFromExternalText(value)
+              }}
               onKeyDown={onKeyDown}
               rows={3}
             />
@@ -269,6 +313,7 @@ export default function ReminderGoalComposer() {
               </div>
             </div>
             <div className={styles.rightCluster}>
+              <VoiceInputDock {...composeVoice.dockProps} inline />
               <Button type="button" size="sm" disabled={submitDisabled} onClick={onSend}>
                 {ts('chat.reminderGraph.send')}
               </Button>

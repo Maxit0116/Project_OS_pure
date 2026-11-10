@@ -95,18 +95,20 @@ describe("ProjectOSLocalApi MCP catalog surface", () => {
     expect(installedCommunity?.enabled).toBe(false);
   });
 
-  it("hides disabled listings and records local reports", async () => {
+  it("keeps disabled listings visible and records local reports", async () => {
     const openExternal = vi.fn(async () => undefined);
     const { api, projectId } = await createApi(openExternal);
     const before = await api.listMcpCatalog(projectId);
     const target = before.document.listings[0]!;
     await api.disableMcpCatalogListing(projectId, target.id);
     const afterDisable = await api.listMcpCatalog(projectId);
-    expect(afterDisable.document.listings.every((l) => l.id !== target.id)).toBe(
+    expect(afterDisable.document.listings.some((l) => l.id === target.id)).toBe(
       true,
     );
 
-    const other = afterDisable.document.listings[0];
+    const other =
+      afterDisable.document.listings.find((l) => l.id !== target.id) ??
+      afterDisable.document.listings[0];
     expect(other).toBeTruthy();
     const reported = await api.reportMcpCatalogListing(projectId, {
       listingId: other!.id,

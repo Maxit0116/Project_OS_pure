@@ -16,7 +16,6 @@ export default function McpMarketplaceSection() {
   const listMcpCatalog = useWorkbenchStore((s) => s.listMcpCatalog)
   const refreshMcpCatalog = useWorkbenchStore((s) => s.refreshMcpCatalog)
   const installMcpFromCatalog = useWorkbenchStore((s) => s.installMcpFromCatalog)
-  const disableMcpCatalogListing = useWorkbenchStore((s) => s.disableMcpCatalogListing)
   const reportMcpCatalogListing = useWorkbenchStore((s) => s.reportMcpCatalogListing)
   const settings = useWorkbenchStore((s) => s.settings)
   const { ts } = useI18n()
@@ -108,18 +107,6 @@ export default function McpMarketplaceSection() {
             {installingId === listing.id
               ? ts('settings.mcp.marketInstalling')
               : ts('settings.mcp.marketInstall')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={loading}
-            onClick={() => {
-              void disableMcpCatalogListing(listing.id).then((ok) => {
-                if (ok) void load(false)
-              })
-            }}
-          >
-            {ts('settings.mcp.marketDisable')}
           </Button>
           <Button
             variant="ghost"

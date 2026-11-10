@@ -259,6 +259,31 @@ export const LOOP_PALETTE_ITEMS: LoopPaletteItem[] = [
     },
   },
   {
+    id: "logic.retry",
+    category: "logic",
+    title: "Retry",
+    description: "Bounded redirect back to a repair target",
+    seed: {
+      title: "Retry",
+      prompt: "Retry the upstream failure path until maxIterations.",
+      type: "logic",
+      logicKind: "retry",
+      maxIterations: 3,
+    },
+  },
+  {
+    id: "logic.wait",
+    category: "logic",
+    title: "Wait",
+    description: "Wait until inbound depends parents succeed",
+    seed: {
+      title: "Wait",
+      prompt: "Wait for inbound parents or an external condition.",
+      type: "logic",
+      logicKind: "wait",
+    },
+  },
+  {
     id: "human.approval",
     category: "human",
     title: "Approval",
@@ -450,6 +475,70 @@ function featureDevelopmentDraft(): IntentGraph {
   });
 }
 
+function parallelResearchDraft(): IntentGraph {
+  const nodes: IntentGraphNode[] = [
+    seedNode("n_planner", paletteSeed("agent.planner"), { x: 40, y: 40 }),
+    seedNode("n_research", {
+      ...paletteSeed("agent.coder"),
+      title: "Research",
+      prompt: "Gather related facts and constraints.",
+      agentRole: "researcher",
+    }, { x: 40, y: 160 }),
+    seedNode("n_design", {
+      ...paletteSeed("agent.coder"),
+      title: "Technical Plan",
+      prompt: "Draft a technical approach in parallel with research.",
+      agentRole: "architect",
+    }, { x: 280, y: 160 }),
+    seedNode("n_merge", paletteSeed("logic.merge"), { x: 160, y: 280 }),
+    seedNode("n_review", paletteSeed("human.review"), { x: 160, y: 400 }),
+  ];
+
+  return IntentGraphSchema.parse({
+    revision: 1,
+    graphPrompt:
+      "Parallel research: plan fans out to Research ∥ Technical Plan, then Merge and Human Review.",
+    nodes,
+    edges: [
+      {
+        id: "e1",
+        source: "n_planner",
+        target: "n_research",
+        kind: "depends",
+        prompt: "Fan-out: research branch",
+      },
+      {
+        id: "e2",
+        source: "n_planner",
+        target: "n_design",
+        kind: "depends",
+        prompt: "Fan-out: design branch",
+      },
+      {
+        id: "e3",
+        source: "n_research",
+        target: "n_merge",
+        kind: "depends",
+        prompt: "Join research",
+      },
+      {
+        id: "e4",
+        source: "n_design",
+        target: "n_merge",
+        kind: "depends",
+        prompt: "Join design",
+      },
+      {
+        id: "e5",
+        source: "n_merge",
+        target: "n_review",
+        kind: "depends",
+        prompt: "Human reviews merged results",
+      },
+    ],
+  });
+}
+
 export const LOOP_GRAPH_PRESETS: LoopGraphPreset[] = [
   LoopGraphPresetSchema.parse({
     id: "feature_development",
@@ -457,6 +546,12 @@ export const LOOP_GRAPH_PRESETS: LoopGraphPreset[] = [
     description:
       "Planner → Human Review → Coder → Tests → Condition → Reviewer → Approval → Create PR",
     draft: featureDevelopmentDraft(),
+  }),
+  LoopGraphPresetSchema.parse({
+    id: "parallel_research",
+    title: "Parallel Research",
+    description: "Planner → (Research ∥ Technical Plan) → Merge → Human Review",
+    draft: parallelResearchDraft(),
   }),
 ];
 

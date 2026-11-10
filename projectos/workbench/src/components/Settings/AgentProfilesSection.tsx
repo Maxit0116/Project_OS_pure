@@ -3,6 +3,7 @@ import type { AgentProfile, AgentProfileKind } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import Button from '../ui/Button'
+import TextArea from '../ui/TextArea'
 import TextInput from '../ui/TextInput'
 import Select from '../ui/Select'
 import { createSettingsSubmitGuard } from './settingsSubmitGuard'
@@ -119,15 +120,12 @@ export default function AgentProfilesSection() {
               })),
             ]}
           />
-          <label className={styles.textareaField}>
-            <span className={styles.label}>{ts('settings.systemPrompt')}</span>
-            <textarea
-              className={styles.textarea}
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              rows={4}
-            />
-          </label>
+          <TextArea
+            label={ts('settings.systemPrompt')}
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            rows={4}
+          />
           <div className={styles.toolList}>
             {toolOptions.map((tool) => {
               const selected = enabledTools.includes(tool)

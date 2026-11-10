@@ -99,13 +99,19 @@ import {
   mockGetLoopInstanceEvents,
   mockLinkLoopGraphToSession,
   mockListLoopGraphs,
+  mockCancelLoopInstance,
+  mockDeriveDraftFromLoopInstance,
+  mockListLoopRunHistory,
   mockPauseLoopInstance,
   mockResolveLoopHitl,
+  mockRestoreLoopInstanceFromCheckpoint,
   mockResumeLoopInstance,
   mockSendLoopAuthoringTurn,
   mockSetLastActiveLoopGraph,
   mockSetLoopComposerMode,
   mockStartLoopInstance,
+  mockStartLoopInstanceFromEvent,
+  mockStartLoopInstanceWithParams,
   mockUndoLoopDraft,
   mockUnlinkLoopGraphFromSession,
   mockUpsertLoopGraph,
@@ -135,6 +141,7 @@ import type {
 } from "../contracts/spatial-pin.js";
 import {
   buildForkedChatSession,
+  deriveSessionContextDigest,
   messagesThroughFork,
 } from "../contracts/chat-session-context.js";
 import { summarizeChatSessionContextForRecord } from "../services/chat-session-title-summarize.js";
@@ -482,12 +489,76 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     return Promise.resolve(mockStartLoopInstance(projectId, loopId, specVersion));
   }
 
+  override startLoopInstanceWithParams(
+    projectId: string,
+    loopId: string,
+    params: Record<string, unknown>,
+    options?: { specVersion?: string; idempotencyKey?: string },
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(
+      mockStartLoopInstanceWithParams(projectId, loopId, params, options),
+    );
+  }
+
+  override startLoopInstanceFromEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockStartLoopInstanceFromEvent(projectId, loopId, event));
+  }
+
+  override restoreLoopInstanceFromCheckpoint(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(
+      mockRestoreLoopInstanceFromCheckpoint(projectId, loopId, instanceId),
+    );
+  }
+
+  override listLoopRunHistory(
+    projectId: string,
+    loopId: string,
+  ): Promise<
+    Array<{
+      id: string;
+      status: string;
+      specVersion: string;
+      startedAt: string;
+      completedAt?: string;
+      round: number;
+      errorMessage?: string;
+    }>
+  > {
+    return Promise.resolve(mockListLoopRunHistory(projectId, loopId));
+  }
+
+  override deriveDraftFromLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(
+      mockDeriveDraftFromLoopInstance(projectId, loopId, instanceId),
+    );
+  }
+
   override pauseLoopInstance(
     projectId: string,
     loopId: string,
     instanceId: string,
   ): Promise<LoopGraphDocument> {
     return Promise.resolve(mockPauseLoopInstance(projectId, loopId, instanceId));
+  }
+
+  override cancelLoopInstance(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockCancelLoopInstance(projectId, loopId, instanceId));
   }
 
   override resumeLoopInstance(
@@ -658,11 +729,14 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     const workspace = this.requireLoadedWorkspace(projectId);
     if (!workspace) return null;
     const forkId = forkMessageId.trim() || undefined;
-    let inherited = parent.contextDigest ?? null;
-    if (forkId) {
-      const slice = messagesThroughFork(parent.messages, forkId);
-      if (!slice) return null;
-      const update = await summarizeChatSessionContextForRecord(
+    const slice = messagesThroughFork(parent.messages, forkId);
+    if (!slice) return null;
+    const inherited =
+      deriveSessionContextDigest(slice) ?? parent.contextDigest ?? null;
+    const child = buildForkedChatSession(parent, inherited, forkId);
+    const saved = mockUpsertChatSession(projectId, child);
+    if (slice.length > 0) {
+      void summarizeChatSessionContextForRecord(
         projectId,
         { ...parent, messages: slice },
         {
@@ -670,11 +744,23 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
           settingsService: this.settingsService,
           settings: workspace.settings,
         },
-      );
-      inherited = update?.digest ?? null;
+      ).then((update) => {
+        if (!update?.digest) return;
+        const current = mockGetChatSession(projectId, saved.head.id);
+        if (!current) return;
+        mockUpsertChatSession(projectId, {
+          ...current,
+          inheritedDigest: update.digest,
+          head: {
+            ...current.head,
+            ...(update.responsibility?.trim()
+              ? { responsibility: update.responsibility.trim() }
+              : {}),
+          },
+        });
+      });
     }
-    const child = buildForkedChatSession(parent, inherited, forkId);
-    return mockUpsertChatSession(projectId, child);
+    return saved;
   }
 
   override setChatSessionClassification(

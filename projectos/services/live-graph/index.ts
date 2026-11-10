@@ -16,7 +16,9 @@ export {
   agentFlowActivityIdsForLive,
   listTouchedPathsForNode,
   listEditedPathsForNode,
+  listNodeChangeEntries,
   type DeriveExecutionEdgesOptions,
+  type LiveNodeChangeEntry,
 } from "./edges.js";
 export {
   resolvePathToNodeIds,

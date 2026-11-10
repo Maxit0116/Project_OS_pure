@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RunDecision } from '@contracts/index'
 import { useI18n } from '../../i18n'
+import TextInput from '../ui/TextInput'
 import styles from './PendingRunDecisions.module.css'
 
 interface Props {
@@ -62,17 +63,16 @@ export default function PendingRunDecisions({ decisions, resolvingIds, focusedDe
                 {ts('decisions.recommendation', { value: decision.recommendation })}
               </p>
             ) : null}
-            <label className={styles.noteLabel}>
-              {ts('decisions.note')}
-              <input
-                value={notes[decision.id] ?? ''}
-                disabled={resolving}
-                onChange={(event) => setNotes((current) => ({
-                  ...current,
-                  [decision.id]: event.target.value,
-                }))}
-              />
-            </label>
+            <TextInput
+              fieldClassName={styles.noteLabel}
+              label={ts('decisions.note')}
+              value={notes[decision.id] ?? ''}
+              disabled={resolving}
+              onChange={(event) => setNotes((current) => ({
+                ...current,
+                [decision.id]: event.target.value,
+              }))}
+            />
             <div className={styles.options}>
               {decision.options.map((option) => (
                 <button

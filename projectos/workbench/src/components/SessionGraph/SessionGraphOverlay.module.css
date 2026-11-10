@@ -218,12 +218,14 @@
   box-shadow: var(--tech-shadow-focus);
 }
 
+/* Filter mismatch only — selection never dims sibling cards. */
 .nodeDim {
   opacity: 0.35;
 }
 
 .nodeFocused {
   border-color: var(--tech-accent);
+  box-shadow: 0 0 0 1px var(--tech-accent);
 }
 
 .node[data-task='explore'] { --task: #0f766e; }
@@ -251,6 +253,7 @@
   padding: 7px 10px 4px;
   box-sizing: border-box;
   height: 34px;
+  cursor: grab;
 }
 
 .liveChip {
@@ -289,6 +292,15 @@
   position: relative;
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+/* > MAX visible rows: scroll inside the card instead of growing forever. */
+.stripScrollable {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .strip::before {
@@ -332,32 +344,42 @@
   box-shadow: var(--tech-shadow-focus);
 }
 
+/* Match Conversation Nav stack bars: short mode-colored ticks. */
 .stripGlyph {
   justify-self: center;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: 2px solid var(--tech-text-muted);
-  background: var(--tech-bg-elevated);
+  width: 14px;
+  height: 3px;
+  border-radius: 1.5px;
+  border: 0;
+  background: var(--mode-bar-color, var(--tech-text-muted));
+  opacity: 0.7;
   box-sizing: border-box;
+  transition: opacity var(--duration-fast) var(--ease-out);
 }
 
-.stripItem[data-kind='decision'] .stripGlyph {
-  border-color: var(--tech-accent);
-  background: color-mix(in srgb, var(--tech-accent) 35%, transparent);
+.stripItem:hover .stripGlyph,
+.stripItem:focus-visible .stripGlyph {
+  opacity: 1;
 }
 
-.stripItem[data-kind='intent'] .stripGlyph {
-  border-radius: 2px;
+.modeAsk {
+  --mode-bar-color: var(--chat-mode-ask, var(--color-success));
+  --mode-color: var(--mode-bar-color);
 }
 
-.stripItem[data-kind='outcome'] .stripGlyph {
-  transform: rotate(45deg);
-  border-radius: 1px;
+.modePlan {
+  --mode-bar-color: var(--chat-mode-plan, var(--color-warning));
+  --mode-color: var(--mode-bar-color);
 }
 
-.stripItem[data-kind='question'] .stripGlyph {
-  border-style: dashed;
+.modeAgent {
+  --mode-bar-color: var(--tech-text-muted, var(--tech-text-secondary));
+  --mode-color: var(--mode-bar-color);
+}
+
+.modeDebug {
+  --mode-bar-color: var(--chat-mode-debug, var(--color-error));
+  --mode-color: var(--mode-bar-color);
 }
 
 .stripTitle {
@@ -367,6 +389,119 @@
   white-space: nowrap;
   color: var(--tech-text-secondary);
   font-size: 12px;
+}
+
+.stripItem[data-parent-cite='true'] .stripTitle {
+  color: var(--tech-text-muted);
+  font-style: italic;
+}
+
+.stripItem[data-parent-cite='true'] .stripGlyph {
+  background: var(--tech-border-strong);
+  opacity: 0.55;
+}
+
+.stripItem[data-working='true'] {
+  --mode-color: var(--mode-bar-color, var(--tech-text-secondary));
+}
+
+.stripItem[data-working='true'] .stripTitle {
+  color: var(--mode-color);
+}
+
+.stripItem[data-working='true'] .stripGlyph {
+  background: var(--mode-color);
+  opacity: 1;
+}
+
+.workingTitle {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: var(--mode-color, var(--tech-text-secondary));
+}
+
+.workingTitleLatin,
+.workingTitleCjk {
+  /* Keep cascade readable inside the dense strip row. */
+  letter-spacing: 0.01em;
+}
+
+.workingLatinUnit {
+  position: relative;
+  display: inline-block;
+  min-width: 0.55em;
+  text-align: center;
+}
+
+.workingLatinLower {
+  color: color-mix(in srgb, var(--mode-color) 48%, transparent);
+}
+
+.workingLatinUpper {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  color: var(--mode-color);
+  opacity: 0;
+  animation: sessionStripCaseWave 1.55s ease-in-out infinite;
+  animation-delay: calc(var(--unit-i, 0) * 70ms);
+}
+
+.workingCjkUnit {
+  display: inline-block;
+  color: color-mix(in srgb, var(--mode-color) 42%, var(--tech-text-muted));
+  animation: sessionStripCjkWave 1.55s ease-in-out infinite;
+  animation-delay: calc(var(--unit-i, 0) * 90ms);
+}
+
+.workingStaticUnit {
+  display: inline-block;
+  color: color-mix(in srgb, var(--mode-color) 55%, var(--tech-text-muted));
+}
+
+@keyframes sessionStripCaseWave {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  32%,
+  48% {
+    opacity: 1;
+  }
+}
+
+@keyframes sessionStripCjkWave {
+  0%,
+  100% {
+    color: color-mix(in srgb, var(--mode-color) 42%, var(--tech-text-muted));
+  }
+  32%,
+  48% {
+    color: var(--mode-color);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workingLatinUpper,
+  .workingCjkUnit {
+    animation: none !important;
+  }
+
+  .workingLatinUpper {
+    opacity: 0;
+  }
+
+  .workingLatinLower,
+  .workingCjkUnit,
+  .workingStaticUnit,
+  .workingTitle {
+    color: var(--mode-color);
+  }
 }
 
 .stripTime {
@@ -393,6 +528,13 @@
   color: var(--tech-text-muted);
   height: 26px;
   box-sizing: border-box;
+  cursor: grab;
+}
+
+.nodeFoot:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+  border-radius: 0 0 6px 6px;
 }
 
 .nodeFootMeta {
@@ -445,7 +587,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: pointer;
+  cursor: grab;
 }
 
 .nodePreview {
@@ -465,6 +607,14 @@
   -webkit-user-select: text;
 }
 
+.nodePreviewHeader {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
 .nodePreviewTitle {
   font-size: var(--font-size-sm);
   font-weight: 600;
@@ -476,12 +626,64 @@
   -webkit-line-clamp: 2;
 }
 
+.nodePreviewHeader .nodePreviewTitle {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Strip hover: prompt is the only headline; allow more lines before scroll. */
+.nodePreviewTitlePrompt {
+  -webkit-line-clamp: 8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 12em;
+  overflow-y: auto;
+  display: block;
+}
+
 .nodePreviewLabel {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--tech-text-muted);
+}
+
+.nodePreviewExpand {
+  appearance: none;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 22px;
+  margin-top: 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tech-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.nodePreviewExpand:hover:not(:disabled),
+.nodePreviewExpand:focus-visible:not(:disabled) {
+  color: var(--tech-text-primary);
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.nodePreviewExpand:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.nodePreviewExpandOpen {
+  transform: rotate(180deg);
+  color: var(--tech-text-primary);
 }
 
 .nodePreviewBody {
@@ -494,6 +696,46 @@
   color: var(--tech-text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.nodePreviewBodyLoading {
+  opacity: 0.72;
+}
+
+.nodePreviewActions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+  flex-shrink: 0;
+}
+
+.nodePreviewBranch {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--tech-border-strong);
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.nodePreviewBranch:hover:not(:disabled),
+.nodePreviewBranch:focus-visible:not(:disabled) {
+  background: var(--tech-bg-elevated);
+  border-color: var(--tech-border-strong);
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.nodePreviewBranch:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .nodeMeta {
@@ -682,10 +924,13 @@
 }
 
 .miscButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 22px;
   height: 22px;
   padding: 0;
-  font-size: 12px;
+  flex-shrink: 0;
 }
 
 .miscMore {
@@ -772,8 +1017,14 @@
   transform: scale(0.98);
 }
 
-.nodeDragging {
+.nodeDragging,
+.nodeDragging .nodeTop,
+.nodeDragging .nodeTitle,
+.nodeDragging .nodeFoot {
   cursor: grabbing;
+}
+
+.nodeDragging {
   z-index: 2;
   box-shadow: var(--tech-shadow-md);
   border-color: var(--tech-accent);

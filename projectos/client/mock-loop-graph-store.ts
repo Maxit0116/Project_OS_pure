@@ -307,6 +307,7 @@ export function mockStartLoopInstance(
   projectId: string,
   loopId: string,
   specVersion?: string,
+  launch?: LoopInstance["launch"],
 ): LoopGraphDocument {
   const doc = mockGetLoopGraph(projectId, loopId);
   if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
@@ -317,6 +318,13 @@ export function mockStartLoopInstance(
   if (!spec) throw new Error("No approved Loop Spec to run");
   const issues = validateLoopSpecTopology(spec);
   if (issues.length > 0) throw new Error(issues.map((i) => i.message).join("; "));
+
+  if (launch?.idempotencyKey) {
+    const existing = doc.instances.find(
+      (item) => item.launch?.idempotencyKey === launch.idempotencyKey,
+    );
+    if (existing) return doc;
+  }
 
   const startedAt = new Date().toISOString();
   const instance: LoopInstance = {
@@ -329,11 +337,131 @@ export function mockStartLoopInstance(
     events: [],
     startedAt,
     updatedAt: startedAt,
+    ...(launch ? { launch } : {}),
+    checkpoint: {
+      savedAt: startedAt,
+      cursorNodeId: entryNodeId(spec),
+      status: "queued",
+      round: 0,
+      attemptCounts: {},
+    },
+    freshness: {
+      status: "fresh",
+      baselineId: `mock_${spec.version}`,
+      checkedAt: startedAt,
+    },
+    budgetUsage: { tokens: 0, wallClockMs: 0, retries: 0 },
   };
   return mockUpsertLoopGraph(
     projectId,
     mockStep({ ...doc, instances: [...doc.instances, instance] }, instance.id),
   );
+}
+
+export function mockStartLoopInstanceWithParams(
+  projectId: string,
+  loopId: string,
+  params: Record<string, unknown>,
+  options?: { specVersion?: string; idempotencyKey?: string },
+): LoopGraphDocument {
+  return mockStartLoopInstance(projectId, loopId, options?.specVersion, {
+    kind: "params",
+    params,
+    ...(options?.idempotencyKey
+      ? { idempotencyKey: options.idempotencyKey }
+      : {}),
+  });
+}
+
+export function mockStartLoopInstanceFromEvent(
+  projectId: string,
+  loopId: string,
+  event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+): LoopGraphDocument {
+  return mockStartLoopInstance(projectId, loopId, undefined, {
+    kind: "event",
+    eventId: event.eventId,
+    eventType: event.eventType,
+    ...(event.payload ? { params: event.payload } : {}),
+    idempotencyKey: `event:${event.eventType}:${event.eventId}`,
+  });
+}
+
+export function mockRestoreLoopInstanceFromCheckpoint(
+  projectId: string,
+  loopId: string,
+  instanceId: string,
+): LoopGraphDocument {
+  const doc = mockGetLoopGraph(projectId, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance?.checkpoint) throw new Error(`No checkpoint on instance ${instanceId}`);
+  const checkpoint = instance.checkpoint;
+  const next: LoopInstance = {
+    ...instance,
+    status:
+      checkpoint.status === "complete" || checkpoint.status === "cancelled"
+        ? "running"
+        : checkpoint.status === "error"
+          ? "running"
+          : checkpoint.status,
+    cursorNodeId: checkpoint.cursorNodeId,
+    round: checkpoint.round,
+    attemptCounts: { ...checkpoint.attemptCounts },
+    updatedAt: new Date().toISOString(),
+  };
+  return mockUpsertLoopGraph(projectId, {
+    ...doc,
+    instances: doc.instances.map((item) => (item.id === instanceId ? next : item)),
+  });
+}
+
+export function mockListLoopRunHistory(
+  projectId: string,
+  loopId: string,
+): Array<{
+  id: string;
+  status: string;
+  specVersion: string;
+  startedAt: string;
+  completedAt?: string;
+  round: number;
+  errorMessage?: string;
+}> {
+  const doc = mockGetLoopGraph(projectId, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  return [...doc.instances]
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    .map((item) => ({
+      id: item.id,
+      status: item.status,
+      specVersion: item.specVersion,
+      startedAt: item.startedAt,
+      ...(item.completedAt ? { completedAt: item.completedAt } : {}),
+      round: item.round,
+      ...(item.errorMessage ? { errorMessage: item.errorMessage } : {}),
+    }));
+}
+
+export function mockDeriveDraftFromLoopInstance(
+  projectId: string,
+  loopId: string,
+  instanceId: string,
+): LoopGraphDocument {
+  const doc = mockGetLoopGraph(projectId, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance) throw new Error(`Instance not found: ${instanceId}`);
+  return mockUpsertLoopGraph(projectId, {
+    ...doc,
+    draft: {
+      ...doc.draft,
+      revision: doc.draft.revision + 1,
+      graphPrompt:
+        `${doc.draft.graphPrompt}\n\n[Derived from run ${instance.id}]`.slice(0, 4000),
+    },
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 export function mockPauseLoopInstance(
@@ -347,6 +475,40 @@ export function mockPauseLoopInstance(
   if (!instance) throw new Error(`Instance not found: ${instanceId}`);
   if (instance.status !== "running" && instance.status !== "queued") return doc;
   const next = pushEvent({ ...instance, status: "paused" }, "paused", "Paused by user");
+  return mockUpsertLoopGraph(projectId, {
+    ...doc,
+    instances: doc.instances.map((item) => (item.id === instanceId ? next : item)),
+  });
+}
+
+export function mockCancelLoopInstance(
+  projectId: string,
+  loopId: string,
+  instanceId: string,
+): LoopGraphDocument {
+  const doc = mockGetLoopGraph(projectId, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance) throw new Error(`Instance not found: ${instanceId}`);
+  if (
+    instance.status === "complete" ||
+    instance.status === "cancelled" ||
+    instance.status === "error"
+  ) {
+    return doc;
+  }
+  const next = pushEvent(
+    {
+      ...instance,
+      status: "cancelled",
+      completedAt: new Date().toISOString(),
+      activeRunId: undefined,
+      activeRunNodeId: undefined,
+      hitlQuestionIds: [],
+    },
+    "cancelled",
+    "Cancelled by user",
+  );
   return mockUpsertLoopGraph(projectId, {
     ...doc,
     instances: doc.instances.map((item) => (item.id === instanceId ? next : item)),

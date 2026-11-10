@@ -1,0 +1,272 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--tech-bg-canvas);
+}
+
+.pageToolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--tech-border);
+  flex-shrink: 0;
+}
+
+.pageTitleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pageTitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--tech-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.pageHint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--tech-text-muted);
+}
+
+.pageToolbarSpacer {
+  flex: 1;
+}
+
+.pageMeta {
+  font-size: 11px;
+  color: var(--tech-text-muted);
+}
+
+.pageClear {
+  appearance: none;
+  border: 1px solid var(--tech-border);
+  background: transparent;
+  color: var(--tech-text-secondary);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pageClear:hover {
+  border-color: var(--tech-border-strong);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
+}
+
+.board {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(220px, 1fr));
+  gap: 0;
+  overflow: auto;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  min-height: 0;
+  border-right: 1px solid var(--tech-border);
+  background: var(--tech-bg-canvas);
+}
+
+.column:last-child {
+  border-right: none;
+}
+
+.columnHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--tech-border);
+  flex-shrink: 0;
+  background: var(--tech-bg-chrome);
+}
+
+.columnTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.columnCount {
+  font-size: 11px;
+  color: var(--tech-text-muted);
+}
+
+.columnClear {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tech-text-muted);
+  cursor: pointer;
+}
+
+.columnClear:hover {
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+}
+
+.columnEmpty {
+  margin: 0;
+  padding: 16px 12px;
+  font-size: 12px;
+  color: var(--tech-text-muted);
+}
+
+.mailList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.mailRow {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-bottom: 1px solid var(--tech-border-subtle);
+  background: transparent;
+}
+
+.mailRow:hover {
+  background: var(--tech-bg-muted);
+}
+
+.mailRowSelected {
+  background: var(--tech-bg-muted);
+}
+
+.mailRowUnread .mailSubject {
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.mailRowUnread .mailTime {
+  font-weight: 600;
+  color: var(--tech-text-secondary);
+}
+
+.mailMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.mailTop {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mailSubject {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tech-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mailTime {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--tech-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.mailSnippet {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mailSnippetText {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--tech-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mailTag {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--tech-text-muted);
+}
+
+.mailActions {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 8px 6px 0;
+}
+
+.mailRow:hover .mailActions,
+.mailRowSelected .mailActions {
+  display: flex;
+}
+
+.mailActionBtn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-secondary);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.mailActionBtn:hover {
+  border-color: var(--tech-border-strong);
+  color: var(--tech-text-primary);
+}
+
+@media (max-width: 1100px) {
+  .board {
+    grid-template-columns: repeat(5, minmax(200px, 1fr));
+  }
+}

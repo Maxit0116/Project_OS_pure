@@ -8,11 +8,11 @@
 }
 
 .card {
-  padding: var(--space-md);
-  border: 1px solid var(--glass-border-subtle);
-  border-left: 3px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-elevated);
+  padding: 4px 0 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
 }
 
 .card h3 {
@@ -94,7 +94,7 @@
   font-size: var(--font-size-xs);
 }
 
-
 .error {
   border-left-color: var(--color-error);
+  padding-left: 10px;
 }

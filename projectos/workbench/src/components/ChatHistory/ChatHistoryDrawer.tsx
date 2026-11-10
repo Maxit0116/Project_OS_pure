@@ -10,6 +10,7 @@ import ChatHistoryEntryContextMenu, {
   type ChatHistoryEntryMenuState,
 } from './ChatHistoryEntryContextMenu'
 import {
+  chatHistoryStatusLabelKey,
   formatRelativeChatTime,
   groupChatHistorySessions,
 } from './chatHistoryGrouping'
@@ -176,6 +177,15 @@ export default function ChatHistoryDrawer({ open, onClose }: Props) {
                   const isPinned = pinnedIds.includes(sessionId)
                   const isActive = activeSessionId === sessionId
                   const title = head.title.trim() || untitled
+                  const statusLabelKey = chatHistoryStatusLabelKey(head.status)
+                  const statusClass =
+                    head.status === 'running'
+                      ? styles.statusRunning
+                      : head.status === 'awaiting_review'
+                        ? styles.statusReview
+                        : head.status === 'error'
+                          ? styles.statusError
+                          : null
 
                   return (
                     <div key={sessionId} className={styles.itemRow}>
@@ -184,9 +194,22 @@ export default function ChatHistoryDrawer({ open, onClose }: Props) {
                         className={`${styles.itemButton} ${isActive ? styles.itemButtonActive : ''}`}
                         onClick={() => void switchSession(sessionId)}
                       >
-                        <ChatHistoryScrollingTitle title={title} />
+                        <span className={styles.itemTitleRow}>
+                          {statusClass ? (
+                            <span
+                              className={`${styles.statusDot} ${statusClass}`}
+                              aria-hidden
+                            />
+                          ) : null}
+                          <ChatHistoryScrollingTitle
+                            title={title}
+                            containerClassName={styles.titleFlex}
+                          />
+                        </span>
                         <span className={styles.itemMeta}>
-                          {head.subtitle ? (
+                          {statusLabelKey ? (
+                            <span className={styles.itemSubtitle}>{ts(statusLabelKey)}</span>
+                          ) : head.subtitle ? (
                             <span className={styles.itemSubtitle}>{head.subtitle}</span>
                           ) : (
                             <span />

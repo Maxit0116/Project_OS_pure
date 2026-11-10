@@ -40,6 +40,8 @@ export interface SessionGraphNode {
   messageCount: number;
   lastUpdatedAt: string;
   forkMessageId?: string;
+  forkLayout?: "below" | "aside";
+  forkAnchorOffsetY?: number;
   previewStrip: SessionGraphStripItem[];
 }
 
@@ -59,7 +61,7 @@ export function createSessionGraphId(): string {
 }
 
 export function resolveSessionGraphId(
-  head: Pick<ChatSessionHead, "graphId" | "classification">,
+  head: Pick<ChatSessionHead, "graphId" | "classification" | "parentSessionId">,
 ): string | null {
   if (resolveChatSessionClassification(head) === "misc") return null;
   return head.graphId?.trim() || DEFAULT_SESSION_GRAPH_ID;
@@ -81,6 +83,8 @@ export function placeChatSessionOnGraph(
   };
   delete next.parentSessionId;
   delete next.forkMessageId;
+  delete next.forkLayout;
+  delete next.forkAnchorOffsetY;
   return next;
 }
 
@@ -91,8 +95,14 @@ export function demoteChatSessionToMisc(head: ChatSessionHead): ChatSessionHead 
     classificationSource: "manual",
     lastUpdatedAt: new Date().toISOString(),
   };
+  // Misc is a root-only shelf. Detach from any Session Graph parent so child
+  // chats never continue to surface under both a node card and Misc.
   delete next.graphId;
   delete next.responsibility;
+  delete next.parentSessionId;
+  delete next.forkMessageId;
+  delete next.forkLayout;
+  delete next.forkAnchorOffsetY;
   return next;
 }
 
@@ -209,9 +219,13 @@ export function extractSubtreeToNewGraph(
     if (head.id === rootId) {
       delete next.parentSessionId;
       delete next.forkMessageId;
+      delete next.forkLayout;
+      delete next.forkAnchorOffsetY;
     } else if (head.parentSessionId && !movedSet.has(head.parentSessionId)) {
       delete next.parentSessionId;
       delete next.forkMessageId;
+      delete next.forkLayout;
+      delete next.forkAnchorOffsetY;
     }
     return next;
   });
@@ -262,8 +276,14 @@ export interface SessionGraphCssInsets {
 }
 
 export function resolveChatSessionClassification(
-  head: Pick<ChatSessionHead, "classification">,
+  head: Pick<ChatSessionHead, "classification" | "parentSessionId" | "graphId">,
 ): ChatSessionClassification {
+  // Graph-attached forks belong on the Session Graph card, never in Misc.
+  // Older auto-summaries marked short child prompts as misc while leaving
+  // parentSessionId + graphId intact — heal that so the graph stays clean.
+  if (head.parentSessionId && head.graphId?.trim()) {
+    return "topic";
+  }
   return head.classification ?? "topic";
 }
 
@@ -294,9 +314,43 @@ function firstLine(content: string): string {
   return line ?? "";
 }
 
+/** Prefer the user prompt that conversation-nav / ChatPanel can reveal. */
+function resolveUserTurnForStrip(
+  messages: readonly ChatMessage[],
+  messageId: string | undefined,
+): ChatMessage | null {
+  if (!messageId) return null;
+  const index = messages.findIndex((message) => message.id === messageId);
+  if (index < 0) return null;
+  const linked = messages[index];
+  if (linked?.role === "user" && linked.content.trim()) return linked;
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const previous = messages[i];
+    if (!previous || previous.role !== "user") continue;
+    if (!previous.content.trim()) continue;
+    return previous;
+  }
+  return null;
+}
+
+function stripAnchorFromMessageId(
+  messages: readonly ChatMessage[],
+  messageId: string | undefined,
+): Pick<SessionGraphStripItem, "messageId" | "chatMode"> {
+  const user = resolveUserTurnForStrip(messages, messageId);
+  if (user) {
+    return {
+      messageId: user.id,
+      ...(user.chatMode ? { chatMode: user.chatMode } : {}),
+    };
+  }
+  return messageId ? { messageId } : {};
+}
+
 /**
  * Deterministic Session Graph card strip (newest → oldest).
  * Curated highlights only — never the full transcript.
+ * Anchors prefer user-turn ids + chatMode so card rows match Conversation Nav bars.
  */
 export function buildSessionGraphStrip(
   record: Pick<
@@ -326,29 +380,9 @@ export function buildSessionGraphStrip(
     Boolean(record.head.parentSessionId) && userCount === 0 && messages.length <= 1;
 
   if (sparseChild) {
-    const inherited = record.inheritedDigest;
-    const responsibility =
-      record.head.responsibility?.trim() || inherited?.responsibility?.trim() || "";
-    if (responsibility) {
-      push({
-        id: `note:inherited:${record.head.id}`,
-        kind: "note",
-        title: responsibility,
-        ts: inherited?.updatedAt ?? record.head.createdAt,
-      });
-    }
-    for (const [index, decision] of (inherited?.decisions ?? []).slice(0, 2).entries()) {
-      push({
-        id: `decision:inherited:${index}`,
-        kind: "decision",
-        title: decision,
-        ts: inherited?.updatedAt ?? record.head.createdAt,
-        ...(inherited?.throughMessageId
-          ? { messageId: inherited.throughMessageId }
-          : {}),
-      });
-    }
-    return finish();
+    // Forked cards cite the parent topic once — full inherited context lives in
+    // inheritedDigest / InheritedSessionCard, not as replayed parent chat rows.
+    return withParentCitationStrip(record, finish());
   }
 
   const digest = record.contextDigest;
@@ -369,7 +403,7 @@ export function buildSessionGraphStrip(
       kind: "decision",
       title: decision,
       ts: digest?.updatedAt ?? record.head.lastUpdatedAt,
-      ...(digest?.throughMessageId ? { messageId: digest.throughMessageId } : {}),
+      ...stripAnchorFromMessageId(messages, digest?.throughMessageId),
     });
   }
 
@@ -380,7 +414,7 @@ export function buildSessionGraphStrip(
       kind: "question",
       title: question,
       ts: digest?.updatedAt ?? record.head.lastUpdatedAt,
-      ...(digest?.throughMessageId ? { messageId: digest.throughMessageId } : {}),
+      ...stripAnchorFromMessageId(messages, digest?.throughMessageId),
     });
   }
 
@@ -399,6 +433,7 @@ export function buildSessionGraphStrip(
       title: firstLine(latestUser.content),
       ts: latestUser.timestamp,
       messageId: latestUser.id,
+      ...(latestUser.chatMode ? { chatMode: latestUser.chatMode } : {}),
     });
   }
 
@@ -414,12 +449,43 @@ export function buildSessionGraphStrip(
         kind: "outcome",
         title: firstLine(latestAssistant.content),
         ts: latestAssistant.timestamp,
-        messageId: latestAssistant.id,
+        ...stripAnchorFromMessageId(messages, latestAssistant.id),
       });
     }
   }
 
-  return finish();
+  return withParentCitationStrip(record, finish());
+}
+
+/** Lead forked strips with a parent-title citation (not full parent chat history). */
+function withParentCitationStrip(
+  record: Pick<
+    ChatSessionRecord,
+    "head" | "inheritedDigest"
+  >,
+  items: SessionGraphStripItem[],
+): SessionGraphStripItem[] {
+  if (!record.head.parentSessionId) return items;
+  const previousCite = record.head.previewStrip?.find((item) =>
+    item.id.startsWith("note:parent-cite:"),
+  );
+  // Prefer the preserved parent title; never the child's own evolving title.
+  const citeTitle = clampLine(
+    previousCite?.title?.trim() ||
+      record.head.responsibility?.trim() ||
+      record.inheritedDigest?.responsibility?.trim() ||
+      "",
+    SESSION_GRAPH_STRIP_TITLE_MAX,
+  );
+  if (!citeTitle) return items;
+  const cite: SessionGraphStripItem = {
+    id: `note:parent-cite:${record.head.id}`,
+    kind: "note",
+    title: citeTitle,
+    ts: previousCite?.ts ?? record.inheritedDigest?.updatedAt ?? record.head.createdAt,
+  };
+  const rest = items.filter((item) => !item.id.startsWith("note:parent-cite:"));
+  return [cite, ...rest].slice(0, SESSION_GRAPH_STRIP_MAX_ITEMS);
 }
 
 /** Refresh head.previewStrip + messageCount from the session record body. */
@@ -615,6 +681,10 @@ export function buildSessionGraph(
       messageCount: head.messageCount ?? 0,
       lastUpdatedAt: head.lastUpdatedAt,
       ...(head.forkMessageId ? { forkMessageId: head.forkMessageId } : {}),
+      ...(head.forkLayout ? { forkLayout: head.forkLayout } : {}),
+      ...(typeof head.forkAnchorOffsetY === "number"
+        ? { forkAnchorOffsetY: head.forkAnchorOffsetY }
+        : {}),
       previewStrip,
     };
   });
@@ -659,17 +729,46 @@ export function chatSessionIdsToPrune(
   return toRemove;
 }
 
+/**
+ * Whether the incoming head intentionally cleared graph lineage.
+ * Message upserts omit fields by accident — those should be restored.
+ * Manual misc demote / re-root must keep parent/graph/fork cleared.
+ */
+export function isIntentionalGraphDetach(
+  existing: Pick<ChatSessionHead, "parentSessionId">,
+  incoming: Pick<ChatSessionHead, "classification" | "classificationSource" | "parentSessionId">,
+): boolean {
+  if (incoming.classification === "misc") return true;
+  return (
+    incoming.classificationSource === "manual" &&
+    !incoming.parentSessionId &&
+    Boolean(existing.parentSessionId)
+  );
+}
+
 export function preserveChatSessionContext(
   existing: ChatSessionRecord | null,
   incoming: ChatSessionRecord,
 ): ChatSessionRecord {
   if (!existing || existing.head.id !== incoming.head.id) return incoming;
   const head: ChatSessionHead = { ...incoming.head };
-  if (!head.parentSessionId && existing.head.parentSessionId) {
-    head.parentSessionId = existing.head.parentSessionId;
-  }
-  if (!head.forkMessageId && existing.head.forkMessageId) {
-    head.forkMessageId = existing.head.forkMessageId;
+  const detach = isIntentionalGraphDetach(existing.head, incoming.head);
+  if (!detach) {
+    if (!head.parentSessionId && existing.head.parentSessionId) {
+      head.parentSessionId = existing.head.parentSessionId;
+    }
+    if (!head.forkMessageId && existing.head.forkMessageId) {
+      head.forkMessageId = existing.head.forkMessageId;
+    }
+    if (!head.forkLayout && existing.head.forkLayout) {
+      head.forkLayout = existing.head.forkLayout;
+    }
+    if (
+      typeof head.forkAnchorOffsetY !== "number" &&
+      typeof existing.head.forkAnchorOffsetY === "number"
+    ) {
+      head.forkAnchorOffsetY = existing.head.forkAnchorOffsetY;
+    }
   }
   if (!head.classification && existing.head.classification) {
     head.classification = existing.head.classification;
@@ -677,7 +776,8 @@ export function preserveChatSessionContext(
   if (!head.classificationSource && existing.head.classificationSource) {
     head.classificationSource = existing.head.classificationSource;
   }
-  if (!head.graphId && existing.head.graphId) {
+  // Misc is a root-only shelf — never reattach a cleared graphId.
+  if (head.classification !== "misc" && !head.graphId && existing.head.graphId) {
     head.graphId = existing.head.graphId;
   }
   if (
@@ -723,9 +823,20 @@ export function applyChatSessionContextUpdate(
   const now = update.now ?? new Date().toISOString();
   const manual = resolveChatSessionTitleSource(record.head.titleSource) === "manual";
   const locked = record.head.classificationSource === "manual";
-  const classification = locked
-    ? resolveChatSessionClassification(record.head)
-    : update.classification;
+  const previous = resolveChatSessionClassification(record.head);
+  let classification = locked ? previous : update.classification;
+  // Auto title/context summarize must not yank fork children off the Session
+  // Graph (empty or short prompts were being classified misc → node vanished,
+  // and the same chat then cluttered Misc). Any parent-linked session that is
+  // already on a graph — or was previously a topic — stays a topic.
+  if (
+    !locked &&
+    classification === "misc" &&
+    record.head.parentSessionId &&
+    (previous === "topic" || Boolean(record.head.graphId?.trim()))
+  ) {
+    classification = "topic";
+  }
   const nextTitle = !manual && update.title?.trim() ? update.title.trim() : record.head.title;
   const head: ChatSessionHead = {
     ...record.head,
@@ -756,11 +867,17 @@ export function applyChatSessionContextUpdate(
   return next;
 }
 
+export interface ForkSessionLayoutOptions {
+  forkLayout?: "below" | "aside";
+  forkAnchorOffsetY?: number;
+}
+
 export function buildForkedChatSession(
   parent: ChatSessionRecord,
   inheritedDigest: SessionContextDigest | null,
   forkMessageId: string | undefined,
   now = new Date().toISOString(),
+  layout?: ForkSessionLayoutOptions,
 ): ChatSessionRecord {
   const id = `chat_${globalThis.crypto.randomUUID()}`;
   // Branching from a topic session must stay on the session graph so the
@@ -771,7 +888,8 @@ export function buildForkedChatSession(
     inheritedDigest || parentIsTopic ? "topic" : "misc";
   const responsibility = inheritedDigest?.responsibility ?? parent.head.responsibility;
   const parentGraphId = resolveSessionGraphId(parent.head);
-  return withSessionGraphHeadProjection({
+  const forkLayout = layout?.forkLayout ?? "below";
+  const child = withSessionGraphHeadProjection({
     version: "0.2.0",
     head: {
       id,
@@ -783,6 +901,10 @@ export function buildForkedChatSession(
       status: "idle",
       parentSessionId: parent.head.id,
       ...(forkMessageId ? { forkMessageId } : {}),
+      forkLayout,
+      ...(forkLayout === "aside" && typeof layout?.forkAnchorOffsetY === "number"
+        ? { forkAnchorOffsetY: layout.forkAnchorOffsetY }
+        : {}),
       classification,
       classificationSource: "auto",
       ...(responsibility ? { responsibility } : {}),
@@ -791,6 +913,26 @@ export function buildForkedChatSession(
     messages: [],
     ...(inheritedDigest ? { inheritedDigest } : {}),
   });
+  // Prefer the live parent title for the citation strip when available.
+  const parentTitle = clampLine(
+    parent.head.title.trim() || responsibility?.trim() || "",
+    SESSION_GRAPH_STRIP_TITLE_MAX,
+  );
+  if (!parentTitle) return child;
+  return {
+    ...child,
+    head: {
+      ...child.head,
+      previewStrip: [
+        {
+          id: `note:parent-cite:${id}`,
+          kind: "note",
+          title: parentTitle,
+          ts: now,
+        },
+      ],
+    },
+  };
 }
 
 export function sessionGraphShieldInsets(input: SessionGraphInsetsInput): SessionGraphInsets {

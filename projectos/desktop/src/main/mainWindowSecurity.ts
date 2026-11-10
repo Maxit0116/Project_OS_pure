@@ -13,11 +13,22 @@ const PACKAGED_CONNECT_SRC = [
   'https://hf-mirror.com',
 ].join(' ')
 
+// GitHub account / marketplace publisher avatars (API returns
+// avatars.githubusercontent.com; github.com/<owner>.png redirects there).
+const PACKAGED_IMG_SRC = [
+  "'self'",
+  'data:',
+  'blob:',
+  'https://avatars.githubusercontent.com',
+  'https://*.githubusercontent.com',
+  'https://github.com',
+].join(' ')
+
 const PACKAGED_CSP = [
   "default-src 'self' data: blob:",
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  `img-src ${PACKAGED_IMG_SRC}`,
   "font-src 'self' data:",
   `connect-src ${PACKAGED_CONNECT_SRC}`,
   "frame-src http: https:",

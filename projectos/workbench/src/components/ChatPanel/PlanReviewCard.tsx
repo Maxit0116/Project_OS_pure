@@ -7,6 +7,8 @@ import type {
 } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import Button from '../ui/Button'
+import TextArea from '../ui/TextArea'
+import TextInput from '../ui/TextInput'
 import toneStyles from './composer/chatModeTone.module.css'
 import PlanClarificationQuestionItem from './PlanClarificationQuestionItem'
 import {
@@ -194,8 +196,9 @@ export default function PlanReviewCard({
           <section className={styles.section}>
             <h4>{ts('plan.objective')}</h4>
             {editing ? (
-              <textarea
+              <TextArea
                 className={styles.editArea}
+                resize="vertical"
                 value={objective}
                 onChange={(event) => setObjective(event.target.value)}
                 rows={2}
@@ -212,8 +215,9 @@ export default function PlanReviewCard({
                 {displayPlan.steps.map((step, index) => (
                   <li key={step.id}>
                     {editing ? (
-                      <textarea
+                      <TextArea
                         className={styles.editArea}
+                        resize="vertical"
                         value={stepTexts[index] ?? ''}
                         onChange={(event) => {
                           const next = [...stepTexts]
@@ -245,7 +249,7 @@ export default function PlanReviewCard({
                 {displayPlan.todos.map((todo, index) => (
                   <li key={todo.id}>
                     {editing ? (
-                      <input
+                      <TextInput
                         className={styles.editInput}
                         value={todoTexts[index] ?? ''}
                         onChange={(event) => {
@@ -277,8 +281,9 @@ export default function PlanReviewCard({
           <section className={styles.section}>
             <h4>{ts('plan.rationale')}</h4>
             {editing ? (
-              <textarea
+              <TextArea
                 className={styles.editArea}
+                resize="vertical"
                 value={rationale}
                 onChange={(event) => setRationale(event.target.value)}
                 rows={3}

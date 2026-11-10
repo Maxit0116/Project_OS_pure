@@ -5,6 +5,7 @@ import {
   getGraphCanvasPositions,
   pruneGraphCanvasPositions,
   setSessionCanvasPosition,
+  setSessionCanvasPositions,
 } from './sessionGraphCanvasLayout'
 import type { SessionGraphLayout } from './layoutSessionGraph'
 
@@ -41,6 +42,22 @@ describe('sessionGraphCanvasLayout', () => {
     expect(applied.height).toBeGreaterThan(layout.height)
   })
 
+  it('applies fork overrides for live ids before ELK emits them', () => {
+    const layout: SessionGraphLayout = {
+      width: 300,
+      height: 200,
+      positions: { parent: { x: 0, y: 0 } },
+      heights: { parent: 90 },
+    }
+    const applied = applyCanvasPositionOverrides(
+      layout,
+      { child: { x: 320, y: 40 } },
+      { liveIds: ['parent', 'child'], fallbackHeights: { child: 90 } },
+    )
+    expect(applied.positions.child).toEqual({ x: 320, y: 40 })
+    expect(applied.heights.child).toBe(90)
+  })
+
   it('prunes positions for sessions that left the graph', () => {
     const seeded = setSessionCanvasPosition(
       setSessionCanvasPosition(emptySessionGraphCanvasLayout(), 'g1', 'keep', {
@@ -55,5 +72,17 @@ describe('sessionGraphCanvasLayout', () => {
     expect(getGraphCanvasPositions(pruned, 'g1')).toEqual({
       keep: { x: 1, y: 2 },
     })
+  })
+
+  it('batch-writes canvas positions for overlap repair', () => {
+    const next = setSessionCanvasPositions(emptySessionGraphCanvasLayout(), 'g1', {
+      a: { x: 10, y: 20 },
+      b: { x: 30, y: 40 },
+    })
+    expect(getGraphCanvasPositions(next, 'g1')).toEqual({
+      a: { x: 10, y: 20 },
+      b: { x: 30, y: 40 },
+    })
+    expect(setSessionCanvasPositions(next, 'g1', { a: { x: 10, y: 20 } })).toBe(next)
   })
 })

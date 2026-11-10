@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type {
   CodeFileUnderstandingEntry,
   FileEntry,
@@ -12,21 +12,35 @@ import {
   agentFlowActivityIdsForLive,
   listEditedPathsForNode,
   listNodeActivities,
+  listNodeChangeEntries,
   listTouchedPathsForNode,
 } from '../../../../services/live-graph/index.js'
 import { useI18n } from '../../i18n'
 import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
+import { useComposePromptVoice } from '../ChatPanel/composer/useComposePromptVoice'
+import {
+  VoiceInputDock,
+  VoiceInputErrorBanner,
+} from '../ChatPanel/VoiceInputControls'
 import Button from '../ui/Button'
 import Chip from '../ui/Chip'
 import TabBar from '../ui/TabBar'
+import CompletedAgentActivityStack from './CompletedAgentActivityStack'
+import CompletedChangesStack from './CompletedChangesStack'
 import { isTrivialCodeDescription } from './codeFileDescription'
 import {
   buildNodeUnderstanding,
   type ChangeRiskLevel,
 } from './codeFileUnderstanding'
 import { codeNodeDisplayTitle, codeNodeFilePath, isCodeElementNode } from './codeNodeInteraction'
+import NodeLiveActivityCard from './NodeLiveActivityCard'
+import NodeLiveChangeCard from './NodeLiveChangeCard'
 import { nodeDetailCopy } from './nodeCopy'
+import {
+  partitionNodeActivities,
+  partitionNodeChanges,
+} from './partitionNodeActivities'
 import styles from './C4NodeDetailDrawer.module.css'
 
 interface Props {
@@ -73,7 +87,7 @@ export default function C4NodeDetailDrawer({
   onClose,
   layout = 'overlay',
 }: Props) {
-  const { ts } = useI18n()
+  const { ts, locale } = useI18n()
   const client = useWorkbenchStore((s) => s.client)
   const project = useWorkbenchStore((s) => s.project)
   const executionOverlay = useWorkbenchStore((s) => s.executionOverlay)
@@ -97,6 +111,25 @@ export default function C4NodeDetailDrawer({
   const [llmError, setLlmError] = useState<string | null>(null)
   const [tab, setTab] = useState<DetailTab>('inspect')
   const [instruction, setInstruction] = useState('')
+  const [completedStackExpanded, setCompletedStackExpanded] = useState(false)
+  const [changesStackExpanded, setChangesStackExpanded] = useState(false)
+  const instructionRef = useRef(instruction)
+  instructionRef.current = instruction
+  const nodeIdRef = useRef(node?.id)
+  nodeIdRef.current = node?.id
+
+  const composeVoice = useComposePromptVoice({
+    locale,
+    disabled: !node,
+    getText: () => instructionRef.current,
+    setText: setInstruction,
+    onSubmit: (text) => {
+      const nodeId = nodeIdRef.current
+      if (!nodeId || !text.trim()) return
+      sendGraphInstructionFromNode(nodeId, text)
+      setInstruction('')
+    },
+  })
 
   const isCodeNode = node ? isCodeElementNode(node) : false
   const filePath = node && isCodeNode ? codeNodeFilePath(node) : null
@@ -105,9 +138,21 @@ export default function C4NodeDetailDrawer({
     () => (node ? listNodeActivities(executionOverlay, node.id) : []),
     [executionOverlay, node],
   )
-  const editedPaths = useMemo(
-    () => (node ? listEditedPathsForNode(executionOverlay, node.id) : []),
+  const { active: activeActivities, completed: completedActivities } = useMemo(
+    () => partitionNodeActivities(liveActivities),
+    [liveActivities],
+  )
+  const changeEntries = useMemo(
+    () => (node ? listNodeChangeEntries(executionOverlay, node.id) : []),
     [executionOverlay, node],
+  )
+  const { active: activeChanges, completed: completedChanges } = useMemo(
+    () => partitionNodeChanges(changeEntries),
+    [changeEntries],
+  )
+  const editedPaths = useMemo(
+    () => changeEntries.map((entry) => entry.path),
+    [changeEntries],
   )
   const touchedPaths = useMemo(
     () => (node ? listTouchedPathsForNode(executionOverlay, node.id) : []),
@@ -159,6 +204,8 @@ export default function C4NodeDetailDrawer({
 
   useEffect(() => {
     setInstruction('')
+    setCompletedStackExpanded(false)
+    setChangesStackExpanded(false)
     const hasLive =
       Boolean(node) &&
       (listNodeActivities(executionOverlay, node!.id).length > 0 ||
@@ -483,48 +530,31 @@ export default function C4NodeDetailDrawer({
               {liveActivities.length === 0 ? (
                 <p className={styles.empty}>{ts('map.c4Detail.activityEmpty')}</p>
               ) : (
-                <ul className={styles.actionList}>
-                  {liveActivities.map((activity) => (
-                    <li key={activity.id} className={styles.actionCard}>
-                      <div className={styles.activityMeta}>
-                        <div className={styles.activityTitle}>
-                          <span
-                            className={`${styles.statusDot} ${activityStatusClass(activity.status)}`}
-                            aria-hidden
-                          />
-                          <span className={styles.activityTitleText}>
-                            {activity.agentId
-                              ? `${ts('map.liveGraph.agentLabel', { agent: activity.agentId })} · `
-                              : ''}
-                            {ts(`map.liveGraph.kind.${activity.kind}`)} · {activity.label}
-                          </span>
-                        </div>
-                        <span className={styles.activitySub}>
-                          {ts(
-                            `map.liveGraph.status.${
-                              activity.status === 'error'
-                                ? 'error'
-                                : activity.status === 'running'
-                                  ? 'running'
-                                  : 'complete'
-                            }`,
-                          )}
-                          {activity.taskId ? ` · ${activity.taskId}` : ''}
-                          {activity.runId ? ` · ${activity.runId.slice(0, 8)}` : ''}
-                        </span>
-                      </div>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() =>
-                          openActivityInAgentFlow(agentFlowActivityIdsForLive(activity))
-                        }
-                      >
-                        {ts('map.c4Detail.openInAgentFlow')}
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
+                <div className={styles.activityFeed}>
+                  <CompletedAgentActivityStack
+                    activities={completedActivities}
+                    expanded={completedStackExpanded}
+                    onToggle={() => setCompletedStackExpanded((open) => !open)}
+                    onOpenInAgentFlow={(activity) =>
+                      openActivityInAgentFlow(agentFlowActivityIdsForLive(activity))
+                    }
+                    statusClass={activityStatusClass}
+                  />
+                  {activeActivities.length > 0 ? (
+                    <ul className={styles.actionList}>
+                      {activeActivities.map((activity) => (
+                        <NodeLiveActivityCard
+                          key={activity.id}
+                          activity={activity}
+                          onOpenInAgentFlow={(item) =>
+                            openActivityInAgentFlow(agentFlowActivityIdsForLive(item))
+                          }
+                          statusClass={activityStatusClass}
+                        />
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
               )}
             </section>
 
@@ -627,27 +657,32 @@ export default function C4NodeDetailDrawer({
 
             <section className={styles.section}>
               <h3 className={styles.sectionTitle}>{ts('map.c4Detail.diffTitle')}</h3>
-              {editedPaths.length === 0 ? (
+              {changeEntries.length === 0 ? (
                 <p className={styles.empty}>{ts('map.c4Detail.diffEmpty')}</p>
               ) : (
-                <ul className={styles.actionList}>
-                  {editedPaths.map((path) => (
-                    <li key={path} className={styles.actionCard}>
-                      <div className={styles.diffRow}>
-                        <span className={styles.diffPath}>{path}</span>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => void navigateToDiffReviewFile(path)}
-                        >
-                          {ts('map.c4Detail.openDiff')}
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <div className={styles.activityFeed}>
+                  <CompletedChangesStack
+                    changes={completedChanges}
+                    expanded={changesStackExpanded}
+                    onToggle={() => setChangesStackExpanded((open) => !open)}
+                    onOpenDiff={(path) => void navigateToDiffReviewFile(path)}
+                    statusClass={activityStatusClass}
+                  />
+                  {activeChanges.length > 0 ? (
+                    <ul className={styles.actionList}>
+                      {activeChanges.map((change) => (
+                        <NodeLiveChangeCard
+                          key={change.path}
+                          change={change}
+                          onOpenDiff={(path) => void navigateToDiffReviewFile(path)}
+                          statusClass={activityStatusClass}
+                        />
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
               )}
-              {understanding.filePath && editedPaths.length === 0 ? (
+              {understanding.filePath && changeEntries.length === 0 ? (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -687,14 +722,46 @@ export default function C4NodeDetailDrawer({
         ) : null}
 
         <div className={styles.composer}>
-          <textarea
-            className={`tech-field ${styles.instructionInput}`}
-            rows={3}
-            value={instruction}
-            onChange={(event) => setInstruction(event.target.value)}
-            placeholder={ts('map.liveGraph.instructionPlaceholder')}
-            aria-label={ts('map.liveGraph.controlsInstruction')}
-          />
+          {composeVoice.voice.state.error ? (
+            <VoiceInputErrorBanner
+              errorKey={composeVoice.voice.state.error}
+              onDismiss={composeVoice.voice.dismissError}
+              labels={composeVoice.voiceLabels}
+            />
+          ) : null}
+          <div className={styles.instructionWrap}>
+            <textarea
+              className={`tech-field ${styles.instructionInput}`}
+              rows={3}
+              value={instruction}
+              onChange={(event) => {
+                const value = event.target.value
+                setInstruction(value)
+                composeVoice.syncBaseFromExternalText(value)
+              }}
+              onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                if (
+                  event.key === 'Escape' &&
+                  (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing)
+                ) {
+                  event.preventDefault()
+                  composeVoice.cancelVoice()
+                  return
+                }
+                if (
+                  (event.metaKey || event.ctrlKey) &&
+                  event.shiftKey &&
+                  event.code === 'Space'
+                ) {
+                  event.preventDefault()
+                  composeVoice.dockProps.onMicToggle()
+                }
+              }}
+              placeholder={ts('map.liveGraph.instructionPlaceholder')}
+              aria-label={ts('map.liveGraph.controlsInstruction')}
+            />
+            <VoiceInputDock {...composeVoice.dockProps} />
+          </div>
           <div className={styles.composerActions}>
             <div className={styles.actionRow}>
               <Button
@@ -728,6 +795,9 @@ export default function C4NodeDetailDrawer({
               size="sm"
               disabled={!instruction.trim()}
               onClick={() => {
+                if (composeVoice.voice.isRecording || composeVoice.voice.isTranscribing) {
+                  composeVoice.stopVoice()
+                }
                 sendGraphInstructionFromNode(node.id, instruction)
                 setInstruction('')
               }}

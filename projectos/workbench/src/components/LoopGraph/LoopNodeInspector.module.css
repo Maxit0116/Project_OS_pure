@@ -51,6 +51,15 @@
   color: var(--tech-text-secondary);
 }
 
+.promptWrap {
+  position: relative;
+}
+
+.promptField {
+  display: block;
+  width: 100%;
+}
+
 .field input,
 .field textarea {
   appearance: none;
@@ -77,6 +86,10 @@
   transition:
     border-color var(--duration-fast, 150ms) var(--ease-out, ease),
     box-shadow var(--duration-fast, 150ms) var(--ease-out, ease);
+}
+
+.promptWrap textarea {
+  padding-right: 36px;
 }
 
 .field input::placeholder,

@@ -105,15 +105,26 @@ describe('workbenchStore chat mode M0', () => {
       flowStatus: 'running',
       runDisposable: { dispose },
       refineLoading: true,
+      flowSteps: [
+        {
+          id: 'step_1',
+          label: 'Inspect',
+          kind: 'inspect_files',
+          status: 'running',
+          relatedNodeIds: [],
+          relatedFiles: [],
+        },
+      ],
     })
 
     await useWorkbenchStore.getState().stopAgentRun()
 
     expect(dispose).toHaveBeenCalledOnce()
     expect(cancelAgentRun).toHaveBeenCalledWith('run_1')
-    expect(useWorkbenchStore.getState().flowStatus).toBe('idle')
+    expect(useWorkbenchStore.getState().flowStatus).toBe('cancelled')
     expect(useWorkbenchStore.getState().activeRunId).toBeNull()
     expect(useWorkbenchStore.getState().refineLoading).toBe(false)
+    expect(useWorkbenchStore.getState().flowSteps[0]?.status).toBe('skipped')
   })
 
   it.each([

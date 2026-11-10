@@ -101,18 +101,24 @@ function buildModifiedRow(
   beforeLineNumber: number,
   afterLineNumber: number,
 ): SideBySideRow {
-  const lineKind = beforeLine === afterLine ? 'equal' : 'changed'
+  if (beforeLine === afterLine) {
+    return {
+      before: makeEqualLine(beforeLine, beforeLineNumber),
+      after: makeEqualLine(afterLine, afterLineNumber),
+    }
+  }
 
+  // GitHub-style: replacements render as removed (left) + added (right).
   return {
     before: {
       lineNumber: beforeLineNumber,
-      spans: [{ text: beforeLine, kind: 'equal' }],
-      lineKind,
+      spans: [{ text: beforeLine, kind: 'removed' }],
+      lineKind: 'removed',
     },
     after: {
       lineNumber: afterLineNumber,
-      spans: [{ text: afterLine, kind: 'equal' }],
-      lineKind,
+      spans: [{ text: afterLine, kind: 'added' }],
+      lineKind: 'added',
     },
   }
 }
@@ -217,9 +223,13 @@ export function countDiffStats(rows: SideBySideRow[]): DiffStats {
       removed += 1
       continue
     }
-    if (row.before?.lineKind === 'changed' || row.after?.lineKind === 'changed') {
-      added += 1
-      removed += 1
+    if (row.before && row.after) {
+      if (row.before.lineKind === 'removed' || row.before.lineKind === 'changed') {
+        removed += 1
+      }
+      if (row.after.lineKind === 'added' || row.after.lineKind === 'changed') {
+        added += 1
+      }
     }
   }
 

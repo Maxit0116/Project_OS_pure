@@ -72,6 +72,7 @@ import SatelliteCard from './SatelliteCard'
 import SatelliteConnector from './SatelliteConnector'
 import SatellitePicker from './SatellitePicker'
 import ScopeMapPicker from './ScopeMapPicker'
+import TextInput from '../ui/TextInput'
 import styles from './hubMotion.module.css'
 
 export interface SpatialComposeHubProps {
@@ -1418,8 +1419,10 @@ export default function SpatialComposeHub({
                 }
               >
                 <span className={styles.agentPort} aria-hidden />
-                <input
+                <TextInput
+                  size="sm"
                   className={styles.fieldName}
+                  fieldClassName={styles.subagentField}
                   value={slot.name}
                   aria-label={strings.subagentName}
                   onChange={(event) =>
@@ -1432,8 +1435,10 @@ export default function SpatialComposeHub({
                     })
                   }
                 />
-                <input
+                <TextInput
+                  size="sm"
                   className={styles.field}
+                  fieldClassName={styles.subagentField}
                   value={slot.brief}
                   placeholder={strings.subagentBrief}
                   aria-label={strings.subagentBrief}

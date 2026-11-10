@@ -61,6 +61,7 @@ export function controlIncomingIds(spec: LoopSpec): Set<string> {
   );
 }
 
+/** @deprecated Prefer dependsOutgoingIds — last-edge-wins map breaks Parallel fan-out. */
 export function dependsOutgoingMap(spec: LoopSpec): Map<string, string | undefined> {
   const map = new Map<string, string | undefined>();
   for (const node of spec.nodes) map.set(node.id, undefined);
@@ -68,6 +69,21 @@ export function dependsOutgoingMap(spec: LoopSpec): Map<string, string | undefin
     map.set(edge.from, edge.to);
   }
   return map;
+}
+
+/** All depends successors (Parallel fork may return multiple). */
+export function dependsOutgoingIds(spec: LoopSpec, fromId: string): string[] {
+  return spec.edges
+    .filter((edge) => edge.kind === "depends" && edge.from === fromId)
+    .map((edge) => edge.to);
+}
+
+export function fallbackOutgoing(spec: LoopSpec, fromId: string): LoopSpecEdge | undefined {
+  return spec.edges.find((edge) => edge.kind === "fallback" && edge.from === fromId);
+}
+
+export function feedbackEdges(spec: LoopSpec): LoopSpecEdge[] {
+  return spec.edges.filter((edge) => edge.kind === "feedback");
 }
 
 export function conditionalOutgoing(spec: LoopSpec, fromId: string): LoopSpecEdge[] {

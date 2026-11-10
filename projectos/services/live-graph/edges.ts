@@ -2,7 +2,38 @@ import type {
   ExecutionOverlay,
   LiveExecutionEdge,
   LiveNodeActivity,
+  LiveNodeActivityKind,
+  LiveNodeActivityStatus,
 } from "../../contracts/live-graph.js";
+
+/** One Changes-row for a node: path aggregated from edit/create/failed activities. */
+export interface LiveNodeChangeEntry {
+  path: string;
+  status: LiveNodeActivityStatus;
+  kind: Extract<LiveNodeActivityKind, "editing" | "creating" | "failed">;
+  startedAt: string;
+  completedAt?: string;
+  activityId: string;
+  label: string;
+}
+
+function isEditChangeActivity(
+  activity: LiveNodeActivity,
+): activity is LiveNodeActivity & {
+  path: string;
+  kind: Extract<LiveNodeActivityKind, "editing" | "creating" | "failed">;
+} {
+  return Boolean(
+    activity.path &&
+      (activity.kind === "editing" ||
+        activity.kind === "creating" ||
+        activity.kind === "failed"),
+  );
+}
+
+function changeRecencyKey(activity: LiveNodeActivity): string {
+  return activity.completedAt ?? activity.startedAt;
+}
 
 const MAX_READ_EDIT_EDGES = 48;
 const MAX_IMPACT_EDGES = 16;
@@ -251,20 +282,52 @@ export function listTouchedPathsForNode(
   return [...paths];
 }
 
+/**
+ * Path-level change rows for the Live Changes section.
+ * Running edits stay active; otherwise the newest terminal edit wins per path.
+ */
+export function listNodeChangeEntries(
+  overlay: ExecutionOverlay | null | undefined,
+  nodeId: string,
+): LiveNodeChangeEntry[] {
+  const byPath = new Map<string, LiveNodeActivity[]>();
+  for (const activity of listNodeActivities(overlay, nodeId)) {
+    if (!isEditChangeActivity(activity)) continue;
+    const group = byPath.get(activity.path) ?? [];
+    group.push(activity);
+    byPath.set(activity.path, group);
+  }
+
+  const entries: LiveNodeChangeEntry[] = [];
+  for (const [path, group] of byPath) {
+    const running = group
+      .filter((item) => item.status === "running")
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    const representative =
+      running[0] ??
+      [...group].sort((a, b) =>
+        changeRecencyKey(b).localeCompare(changeRecencyKey(a)),
+      )[0];
+    if (!representative || !isEditChangeActivity(representative)) continue;
+    entries.push({
+      path,
+      status: representative.status,
+      kind: representative.kind,
+      startedAt: representative.startedAt,
+      ...(representative.completedAt
+        ? { completedAt: representative.completedAt }
+        : {}),
+      activityId: representative.id,
+      label: representative.label,
+    });
+  }
+
+  return entries.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+}
+
 export function listEditedPathsForNode(
   overlay: ExecutionOverlay | null | undefined,
   nodeId: string,
 ): string[] {
-  const paths = new Set<string>();
-  for (const activity of listNodeActivities(overlay, nodeId)) {
-    if (
-      activity.path &&
-      (activity.kind === "editing" ||
-        activity.kind === "creating" ||
-        activity.kind === "failed")
-    ) {
-      paths.add(activity.path);
-    }
-  }
-  return [...paths];
+  return listNodeChangeEntries(overlay, nodeId).map((entry) => entry.path);
 }

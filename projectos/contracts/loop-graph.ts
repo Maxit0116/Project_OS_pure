@@ -140,8 +140,12 @@ export const IntentEdgeKindSchema = z.enum([
   "depends",
   "feedback",
   "conditional",
+  "fallback",
   "provides",
 ]);
+
+/** Max feedback edges per Spec (aligned with cycleGates.max). */
+export const LOOP_FEEDBACK_EDGE_MAX = 5;
 
 export const IntentEdgePortSchema = z.enum(["n", "e", "s", "w"]);
 
@@ -167,8 +171,24 @@ export const LoopInstanceStatusSchema = z.enum([
   "paused",
   "awaiting_hitl",
   "awaiting_review",
+  "blocked",
+  "cancelled",
   "complete",
   "error",
+]);
+
+export const LoopNodeRecordStatusSchema = z.enum([
+  "pending",
+  "ready",
+  "running",
+  "waiting",
+  "waiting_approval",
+  "blocked",
+  "verifying",
+  "succeeded",
+  "failed",
+  "skipped",
+  "cancelled",
 ]);
 
 export const LoopDocumentStatusSchema = z.enum([
@@ -284,7 +304,7 @@ export const LoopSpecEdgeSchema = z
     from: z.string().min(1),
     to: z.string().min(1),
     /** Spec topology never includes `provides` (folded at compile). */
-    kind: z.enum(["depends", "feedback", "conditional"]),
+    kind: z.enum(["depends", "feedback", "conditional", "fallback"]),
     when: z.string().trim().max(500).optional(),
     branchKey: z.string().trim().min(1).max(80).optional(),
     carry: z.array(z.string().trim().min(1).max(240)).max(10).optional(),
@@ -293,7 +313,7 @@ export const LoopSpecEdgeSchema = z
 
 export const LoopRetryPolicySchema = z
   .object({
-    onFailure: z.enum(["retry", "replan", "pause_hitl"]),
+    onFailure: z.enum(["retry", "replan", "pause_hitl", "fallback"]),
     maxAutoRetries: z.number().int().nonnegative().max(20),
   })
   .strict();
@@ -344,6 +364,20 @@ export const LoopCycleGateSchema = z
   })
   .strict();
 
+export const LoopInputParamSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    type: z.enum(["string", "number", "boolean"]),
+    required: z.boolean().optional(),
+    description: z.string().trim().max(500).optional(),
+    defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  })
+  .strict();
+
+export const LoopParallelModeSchema = z.enum(["serial_drain", "multi_run"]);
+
+export const LoopStalePolicySchema = z.enum(["warn", "pause_hitl"]);
+
 export const LoopSpecSchema = z
   .object({
     version: z.string().min(1),
@@ -358,6 +392,12 @@ export const LoopSpecSchema = z
     openQuestions: z.array(LoopOpenQuestionSchema).max(20),
     assumptions: z.array(LoopAssumptionSchema).max(30).optional(),
     cycleGates: z.array(LoopCycleGateSchema).max(5).optional(),
+    /** GC-5.1: declared launch parameters. */
+    inputParams: z.array(LoopInputParamSchema).max(32).optional(),
+    /** GC-7: Parallel scheduling mode (default serial_drain). */
+    parallelMode: LoopParallelModeSchema.optional(),
+    /** GC-4.2: how to react when context freshness is stale. */
+    stalePolicy: LoopStalePolicySchema.optional(),
     createdAt: z.string().min(1),
   })
   .strict();
@@ -375,13 +415,18 @@ export const LoopInstanceEventSchema = z
       "node_completed",
       "node_failed",
       "feedback_taken",
+      "fallback_taken",
       "paused",
       "resumed",
+      "cancelled",
       "awaiting_hitl",
       "hitl_resolved",
       "completed",
       "errored",
       "message",
+      "checkpoint_saved",
+      "freshness_stale",
+      "budget_exceeded",
     ]),
     nodeId: z.string().min(1).optional(),
     message: z.string().trim().max(2000).optional(),
@@ -407,6 +452,76 @@ export const LoopInstanceArtifactSchema = z
   })
   .strict();
 
+export const LoopNodeRecordSchema = z
+  .object({
+    nodeId: z.string().min(1),
+    status: LoopNodeRecordStatusSchema,
+    updatedAt: z.string().min(1),
+    agentRunId: z.string().min(1).optional(),
+    evidenceId: z.string().min(1).optional(),
+    artifactIds: z.array(z.string().min(1)).max(20).optional(),
+    errorMessage: z.string().trim().max(1000).optional(),
+    attempt: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export const LoopInstanceCheckpointSchema = z
+  .object({
+    savedAt: z.string().min(1),
+    cursorNodeId: z.string().min(1).nullable(),
+    status: LoopInstanceStatusSchema,
+    round: z.number().int().nonnegative(),
+    attemptCounts: z.record(z.string(), z.number().int().nonnegative()),
+    loopIterations: z
+      .record(z.string(), z.number().int().nonnegative())
+      .optional(),
+    nodeRecords: z.array(LoopNodeRecordSchema).max(200).optional(),
+    activeRunId: z.string().min(1).optional(),
+    activeRunNodeId: z.string().min(1).optional(),
+    activeRunIds: z.array(z.string().min(1)).max(16).optional(),
+    hitlQuestionIds: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+export const LoopFreshnessSchema = z
+  .object({
+    status: z.enum(["fresh", "stale", "unknown"]),
+    baselineId: z.string().min(1).optional(),
+    pathFingerprint: z.string().min(1).max(128).optional(),
+    checkedAt: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const LoopBudgetUsageSchema = z
+  .object({
+    tokens: z.number().int().nonnegative().optional(),
+    wallClockMs: z.number().int().nonnegative().optional(),
+    retries: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export const LoopLaunchSchema = z
+  .object({
+    kind: z.enum(["manual", "params", "event"]),
+    params: z.record(z.string(), z.unknown()).optional(),
+    eventId: z.string().min(1).max(160).optional(),
+    eventType: z.string().trim().min(1).max(120).optional(),
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
+  })
+  .strict();
+
+export const LoopReplanProposalSchema = z
+  .object({
+    reason: z.string().trim().min(1).max(500),
+    fromSpecVersion: z.string().min(1),
+    reusedNodeIds: z.array(z.string().min(1)).max(100),
+    addedNodeIds: z.array(z.string().min(1)).max(100),
+    removedNodeIds: z.array(z.string().min(1)).max(100),
+    permissionDelta: z.array(z.string().trim().min(1).max(240)).max(40),
+    riskNotes: z.array(z.string().trim().min(1).max(500)).max(20),
+  })
+  .strict();
+
 export const LoopInstanceSchema = z
   .object({
     id: z.string().min(1),
@@ -425,6 +540,10 @@ export const LoopInstanceSchema = z
     /** Run attached to the current implement or fix node. */
     activeRunId: z.string().min(1).optional(),
     activeRunNodeId: z.string().min(1).optional(),
+    /** P1 Parallel: multiple in-flight runs (optional; P0 uses activeRunId only). */
+    activeRunIds: z.array(z.string().min(1)).max(16).optional(),
+    /** Explicit per-node execution projection (GC-2.1). */
+    nodeRecords: z.array(LoopNodeRecordSchema).max(200).optional(),
     /** Artifacts produced by completed nodes (DevPlan, TestReport, …). */
     artifacts: z.array(LoopInstanceArtifactSchema).max(100).optional(),
     /** Payload approved/edited by Human Approval for the next Action. */
@@ -439,6 +558,14 @@ export const LoopInstanceSchema = z
       })
       .strict()
       .optional(),
+    /** GC-4.1 recoverable snapshot. */
+    checkpoint: LoopInstanceCheckpointSchema.optional(),
+    /** GC-4.2 context freshness (orthogonal to status). */
+    freshness: LoopFreshnessSchema.optional(),
+    /** GC-4.5 budget counters. */
+    budgetUsage: LoopBudgetUsageSchema.optional(),
+    /** GC-4.3 / GC-5 launch provenance. */
+    launch: LoopLaunchSchema.optional(),
     events: z.array(LoopInstanceEventSchema).max(LOOP_INSTANCE_EVENT_LIMIT),
     startedAt: z.string().min(1),
     updatedAt: z.string().min(1),
@@ -557,6 +684,8 @@ export const LoopGraphDocumentSchema = z
         assumptions: z.array(LoopAssumptionSchema),
         cycleGates: z.array(LoopCycleGateSchema),
         compiledAt: z.string().min(1),
+        /** GC-4.4 structured replan metadata (optional for plain compiles). */
+        replan: LoopReplanProposalSchema.optional(),
       })
       .strict()
       .optional(),
@@ -632,6 +761,16 @@ export type LoopMemoryModeParsed = z.infer<typeof LoopMemoryModeSchema>;
 export type LoopInstance = z.infer<typeof LoopInstanceSchema>;
 export type LoopInstanceEvent = z.infer<typeof LoopInstanceEventSchema>;
 export type LoopInstanceArtifact = z.infer<typeof LoopInstanceArtifactSchema>;
+export type LoopNodeRecord = z.infer<typeof LoopNodeRecordSchema>;
+export type LoopNodeRecordStatus = z.infer<typeof LoopNodeRecordStatusSchema>;
+export type LoopInstanceCheckpoint = z.infer<typeof LoopInstanceCheckpointSchema>;
+export type LoopFreshness = z.infer<typeof LoopFreshnessSchema>;
+export type LoopBudgetUsage = z.infer<typeof LoopBudgetUsageSchema>;
+export type LoopLaunch = z.infer<typeof LoopLaunchSchema>;
+export type LoopReplanProposal = z.infer<typeof LoopReplanProposalSchema>;
+export type LoopInputParam = z.infer<typeof LoopInputParamSchema>;
+export type LoopParallelMode = z.infer<typeof LoopParallelModeSchema>;
+export type LoopStalePolicy = z.infer<typeof LoopStalePolicySchema>;
 export type LoopGraphHead = z.infer<typeof LoopGraphHeadSchema>;
 export type LoopGraphIndex = z.infer<typeof LoopGraphIndexSchema>;
 export type LoopGraphDocument = z.infer<typeof LoopGraphDocumentSchema>;
@@ -921,8 +1060,13 @@ export function headFromLoopDocument(doc: LoopGraphDocument): LoopGraphHead {
         : "running";
   } else if (doc.instances.some((item) => item.status === "error")) {
     status = "error";
-  } else if (doc.instances.some((item) => item.status === "complete")) {
-    status = "complete";
+  } else if (
+    doc.instances.some(
+      (item) => item.status === "complete" || item.status === "cancelled",
+    )
+  ) {
+    status =
+      doc.instances.some((item) => item.status === "complete") ? "complete" : "draft";
   } else if (latestSpec) {
     status = "approved";
   } else if (doc.pendingCompile) {
@@ -948,8 +1092,9 @@ export interface LoopTopologyIssue {
 }
 
 /**
- * Approve topology: linear depends by default; Condition may fan out via
- * `conditional` edges; Merge may fan in; Loop nodes require maxIterations.
+ * Approve topology (GC-1): depends may fan out (Parallel); Condition fans out via
+ * `conditional`; Merge may fan in; multiple feedback allowed (≤ LOOP_FEEDBACK_EDGE_MAX);
+ * `fallback` edges for Recovery; Loop nodes require maxIterations.
  */
 export function validateLoopSpecTopology(spec: LoopSpec): LoopTopologyIssue[] {
   const issues: LoopTopologyIssue[] = [];
@@ -972,11 +1117,12 @@ export function validateLoopSpecTopology(spec: LoopSpec): LoopTopologyIssue[] {
   const depends = spec.edges.filter((edge) => edge.kind === "depends");
   const feedback = spec.edges.filter((edge) => edge.kind === "feedback");
   const conditional = spec.edges.filter((edge) => edge.kind === "conditional");
+  const fallback = spec.edges.filter((edge) => edge.kind === "fallback");
 
-  if (feedback.length > 1) {
+  if (feedback.length > LOOP_FEEDBACK_EDGE_MAX) {
     issues.push({
       path: "edges",
-      message: "At most one feedback edge is allowed in MVP",
+      message: `At most ${LOOP_FEEDBACK_EDGE_MAX} feedback edges are allowed`,
     });
   }
 
@@ -1005,6 +1151,25 @@ export function validateLoopSpecTopology(spec: LoopSpec): LoopTopologyIssue[] {
     }
   }
 
+  for (const edge of fallback) {
+    const fromNode = nodesById.get(edge.from);
+    if (!fromNode) continue;
+    const fromArch = withArchitectureDefaults(fromNode);
+    const okFrom =
+      fromArch.type === "agent" ||
+      fromArch.type === "action" ||
+      fromArch.type === "logic" ||
+      fromNode.role === "implement" ||
+      fromNode.role === "fix" ||
+      fromNode.role === "verify";
+    if (!okFrom) {
+      issues.push({
+        path: `edges.${edge.id}`,
+        message: "Fallback edges must start from an agent, action, or logic node",
+      });
+    }
+  }
+
   const conditionOut = new Map<string, number>();
   for (const edge of conditional) {
     conditionOut.set(edge.from, (conditionOut.get(edge.from) ?? 0) + 1);
@@ -1020,40 +1185,31 @@ export function validateLoopSpecTopology(spec: LoopSpec): LoopTopologyIssue[] {
     }
   }
 
-  const outgoing = new Map<string, string[]>();
   const incoming = new Map<string, number>();
   for (const node of spec.nodes) {
-    outgoing.set(node.id, []);
     incoming.set(node.id, 0);
   }
   for (const edge of depends) {
-    outgoing.get(edge.from)?.push(edge.to);
     incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1);
   }
 
-  for (const [id, outs] of outgoing) {
-    if (outs.length > 1) {
-      issues.push({
-        path: `nodes.${id}`,
-        message: "Depends edges must form a single linear chain (outdegree ≤ 1)",
-      });
-    }
-  }
+  // Parallel fork allowed (outdegree > 1). Fan-in only onto Merge nodes.
   for (const [id, count] of incoming) {
     if (count > 1) {
       const node = nodesById.get(id);
       if (node && isMergeNode(node)) continue;
       issues.push({
         path: `nodes.${id}`,
-        message: "Depends edges must form a single linear chain (indegree ≤ 1)",
+        message:
+          "Depends fan-in (indegree > 1) is only allowed on Merge logic nodes",
       });
     }
   }
 
-  // Entry = no depends/conditional inbound.
+  // Entry = no depends/conditional/fallback inbound (fallback targets are not entries).
   const inboundAny = new Map<string, number>();
   for (const node of spec.nodes) inboundAny.set(node.id, 0);
-  for (const edge of [...depends, ...conditional]) {
+  for (const edge of [...depends, ...conditional, ...fallback]) {
     inboundAny.set(edge.to, (inboundAny.get(edge.to) ?? 0) + 1);
   }
   const entries = spec.nodes.filter((node) => (inboundAny.get(node.id) ?? 0) === 0);
@@ -1064,8 +1220,7 @@ export function validateLoopSpecTopology(spec: LoopSpec): LoopTopologyIssue[] {
     });
   }
 
-  if (feedback.length === 1) {
-    const edge = feedback[0]!;
+  for (const edge of feedback) {
     const fromNode = spec.nodes.find((node) => node.id === edge.from);
     const toNode = spec.nodes.find((node) => node.id === edge.to);
     if (fromNode) {

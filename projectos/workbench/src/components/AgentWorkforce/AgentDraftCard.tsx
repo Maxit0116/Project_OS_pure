@@ -1,5 +1,7 @@
 import type { WorkforceAgentDraft } from '@contracts/index'
 import { useI18n } from '../../i18n'
+import TextArea from '../ui/TextArea'
+import TextInput from '../ui/TextInput'
 import styles from './AgentDraftCard.module.css'
 
 export interface AgentDraftCardProps {
@@ -31,38 +33,29 @@ export default function AgentDraftCard({
         <h3 className={styles.title}>{ts('workforce.draftTitle')}</h3>
       </header>
 
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('workforce.draftName')}</span>
-        <input
-          className={styles.input}
-          value={draft.displayName}
-          onChange={(event) => patch({ displayName: event.target.value })}
-          disabled={busy}
-        />
-      </label>
+      <TextInput
+        label={ts('workforce.draftName')}
+        value={draft.displayName}
+        onChange={(event) => patch({ displayName: event.target.value })}
+        disabled={busy}
+      />
 
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('workforce.draftRole')}</span>
-        <input
-          className={styles.input}
-          value={draft.roleLabel ?? ''}
-          onChange={(event) =>
-            patch({ roleLabel: event.target.value.trim() ? event.target.value : undefined })
-          }
-          disabled={busy}
-        />
-      </label>
+      <TextInput
+        label={ts('workforce.draftRole')}
+        value={draft.roleLabel ?? ''}
+        onChange={(event) =>
+          patch({ roleLabel: event.target.value.trim() ? event.target.value : undefined })
+        }
+        disabled={busy}
+      />
 
-      <label className={styles.field}>
-        <span className={styles.label}>{ts('workforce.draftInstructions')}</span>
-        <textarea
-          className={styles.textarea}
-          rows={5}
-          value={draft.instructions}
-          onChange={(event) => patch({ instructions: event.target.value })}
-          disabled={busy}
-        />
-      </label>
+      <TextArea
+        label={ts('workforce.draftInstructions')}
+        rows={5}
+        value={draft.instructions}
+        onChange={(event) => patch({ instructions: event.target.value })}
+        disabled={busy}
+      />
 
       <div className={styles.field}>
         <span className={styles.label}>{ts('workforce.draftSkills')}</span>
@@ -95,20 +88,17 @@ export default function AgentDraftCard({
       </div>
 
       {draft.permissionNotes ? (
-        <label className={styles.field}>
-          <span className={styles.label}>{ts('workforce.draftPermissions')}</span>
-          <textarea
-            className={styles.textarea}
-            rows={2}
-            value={draft.permissionNotes}
-            onChange={(event) =>
-              patch({
-                permissionNotes: event.target.value.trim() ? event.target.value : undefined,
-              })
-            }
-            disabled={busy}
-          />
-        </label>
+        <TextArea
+          label={ts('workforce.draftPermissions')}
+          rows={2}
+          value={draft.permissionNotes}
+          onChange={(event) =>
+            patch({
+              permissionNotes: event.target.value.trim() ? event.target.value : undefined,
+            })
+          }
+          disabled={busy}
+        />
       ) : null}
 
       <footer className={styles.footer}>

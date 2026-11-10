@@ -8,6 +8,14 @@
   flex-shrink: 0;
 }
 
+.liveDot {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  color: var(--color-accent);
+  background: currentColor;
+}
+
 .dot[data-state='listening'] {
   background: var(--color-warning);
 }
@@ -15,4 +23,9 @@
 .dot[data-state='error'],
 .dot[data-state='failed'] {
   background: var(--color-error);
+}
+
+.dot[data-state='complete'],
+.dot[data-state='idle'] {
+  background: var(--color-text-muted);
 }

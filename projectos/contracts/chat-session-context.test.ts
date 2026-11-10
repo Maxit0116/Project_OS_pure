@@ -20,6 +20,7 @@ import {
   collectSessionSubtreeIds,
   summarizeSessionGraphTitle,
   sessionGraphCardInsets,
+  preserveChatSessionContext,
 } from "./chat-session-context.js";
 
 const now = "2026-08-02T00:00:00.000Z";
@@ -98,6 +99,86 @@ describe("chat session context", () => {
     expect(graph.nodes.map((node) => node.id)).toEqual(["chat_hi"]);
     expect(graph.nodes[0]?.parentId).toBeNull();
     expect(promoted.head.title).toBe("Login redirect");
+  });
+
+  it("does not auto-demote a fork child off the session graph", () => {
+    const child = head({
+      id: "chat_child",
+      parentSessionId: "chat_parent",
+      classification: "topic",
+      classificationSource: "auto",
+      graphId: "g1",
+      responsibility: "Continue login fix",
+    });
+    const updated = applyChatSessionContextUpdate(
+      record({
+        head: child,
+        messages: [message("m1", "user", "ok")],
+        inheritedDigest: {
+          responsibility: "Continue login fix",
+          decisions: [],
+          openQuestions: [],
+          refs: [],
+          updatedAt: now,
+          throughMessageId: "m0",
+        },
+      }),
+      {
+        classification: "misc",
+        title: null,
+        digest: null,
+        now,
+      },
+    );
+    expect(updated.head.classification).toBe("topic");
+    expect(updated.head.graphId).toBe("g1");
+    expect(updated.head.parentSessionId).toBe("chat_parent");
+    expect(buildSessionGraph([head({ id: "chat_parent", classification: "topic", graphId: "g1" }), updated.head]).nodes.map((n) => n.id).sort()).toEqual(
+      ["chat_child", "chat_parent"].sort(),
+    );
+  });
+
+  it("keeps a stale misc fork child on the graph instead of Misc", () => {
+    // Couple_Recording-style residue: short child prompts were auto-marked misc
+    // while parentSessionId + graphId remained — chat must stay on the child card.
+    const parent = head({
+      id: "chat_parent",
+      classification: "topic",
+      classificationSource: "manual",
+      graphId: "g1",
+    });
+    const staleChild = head({
+      id: "chat_child",
+      title: "111",
+      parentSessionId: "chat_parent",
+      classification: "misc",
+      classificationSource: "auto",
+      graphId: "g1",
+      forkMessageId: "m1",
+      forkLayout: "aside",
+    });
+    const graph = buildSessionGraph([parent, staleChild]);
+    expect(graph.nodes.map((node) => node.id).sort()).toEqual(
+      ["chat_child", "chat_parent"].sort(),
+    );
+    expect(graph.edges).toEqual([{ source: "chat_parent", target: "chat_child" }]);
+    expect(graph.misc.map((item) => item.id)).toEqual([]);
+
+    const healed = applyChatSessionContextUpdate(
+      record({
+        head: staleChild,
+        messages: [message("m1", "user", "111")],
+      }),
+      {
+        classification: "misc",
+        title: "111",
+        digest: null,
+        now,
+      },
+    );
+    expect(healed.head.classification).toBe("topic");
+    expect(healed.head.graphId).toBe("g1");
+    expect(healed.head.parentSessionId).toBe("chat_parent");
   });
 
   it("keeps a manual title and a manual misc classification", () => {
@@ -179,9 +260,69 @@ describe("chat session context", () => {
     expect(joined.graphId).toBe("g_existing");
     expect(joined.parentSessionId).toBeUndefined();
 
-    const demoted = demoteChatSessionToMisc(asNew);
+    const demoted = demoteChatSessionToMisc({
+      ...asNew,
+      parentSessionId: "chat_parent",
+      forkMessageId: "m1",
+      forkLayout: "aside",
+    });
     expect(demoted.classification).toBe("misc");
     expect(demoted.graphId).toBeUndefined();
+    expect(demoted.parentSessionId).toBeUndefined();
+    expect(demoted.forkMessageId).toBeUndefined();
+    expect(demoted.forkLayout).toBeUndefined();
+  });
+
+  it("does not reattach lineage when upserting a manual misc demotion", () => {
+    const existing = record({
+      head: head({
+        id: "chat_child",
+        classification: "topic",
+        classificationSource: "auto",
+        parentSessionId: "chat_parent",
+        graphId: "g1",
+        forkMessageId: "m1",
+        forkLayout: "aside",
+      }),
+      messages: [message("m1", "user", "Keep this chat in Misc")],
+    });
+    const demotedHead = demoteChatSessionToMisc(existing.head);
+    const merged = preserveChatSessionContext(existing, {
+      ...existing,
+      head: demotedHead,
+    });
+    expect(merged.head.classification).toBe("misc");
+    expect(merged.head.classificationSource).toBe("manual");
+    expect(merged.head.parentSessionId).toBeUndefined();
+    expect(merged.head.graphId).toBeUndefined();
+    expect(merged.head.forkMessageId).toBeUndefined();
+    expect(buildSessionGraph([
+      head({ id: "chat_parent", classification: "topic", graphId: "g1" }),
+      merged.head,
+    ]).misc.map((item) => item.id)).toEqual(["chat_child"]);
+  });
+
+  it("does not restore parent when manually placing a fork child as a graph root", () => {
+    const existing = record({
+      head: head({
+        id: "chat_child",
+        classification: "topic",
+        parentSessionId: "chat_parent",
+        graphId: "g1",
+        forkMessageId: "m1",
+      }),
+    });
+    const placed = placeChatSessionOnGraph(existing.head, {
+      mode: "join-graph",
+      graphId: "g2",
+    });
+    const merged = preserveChatSessionContext(existing, {
+      ...existing,
+      head: placed,
+    });
+    expect(merged.head.parentSessionId).toBeUndefined();
+    expect(merged.head.graphId).toBe("g2");
+    expect(merged.head.forkMessageId).toBeUndefined();
   });
 
   it("extracts a node and its whole subtree onto a new graph", () => {
@@ -376,6 +517,7 @@ describe("chat session context", () => {
           role: "user",
           content: "Fix the login redirect after callback",
           timestamp: "2026-08-02T01:00:00.000Z",
+          chatMode: "plan",
         },
         {
           id: "m3",
@@ -395,22 +537,29 @@ describe("chat session context", () => {
     });
     const strip = buildSessionGraphStrip(session);
     expect(strip.length).toBeGreaterThanOrEqual(3);
-    expect(strip.length).toBeLessThanOrEqual(5);
+    expect(strip.length).toBeLessThanOrEqual(10);
     expect(strip.map((item) => item.kind)).toContain("decision");
     expect(strip.map((item) => item.kind)).toContain("intent");
     expect(strip.every((item) => item.title.length <= 80)).toBe(true);
     for (let i = 1; i < strip.length; i += 1) {
       expect(strip[i - 1]!.ts >= strip[i]!.ts).toBe(true);
     }
+    const intent = strip.find((item) => item.kind === "intent");
+    expect(intent?.messageId).toBe("m2");
+    expect(intent?.chatMode).toBe("plan");
+    const decision = strip.find((item) => item.kind === "decision");
+    expect(decision?.messageId).toBe("m2");
+    expect(decision?.chatMode).toBe("plan");
     const projected = withSessionGraphHeadProjection(session);
     expect(projected.head.previewStrip).toEqual(strip);
     expect(projected.head.messageCount).toBe(3);
   });
 
-  it("seeds a forked child strip from inherited digest", () => {
+  it("seeds a forked child strip with a parent-title citation", () => {
     const parent = record({
       head: head({
         id: "parent",
+        title: "Login redirect topic",
         classification: "topic",
         responsibility: "Fix the login redirect",
       }),
@@ -425,8 +574,13 @@ describe("chat session context", () => {
       },
     });
     const child = buildForkedChatSession(parent, parent.contextDigest ?? null, "m1", now);
-    expect(child.head.previewStrip?.some((item) => item.kind === "note")).toBe(true);
-    expect(child.head.previewStrip?.some((item) => item.kind === "decision")).toBe(true);
+    expect(child.head.previewStrip).toEqual([
+      expect.objectContaining({
+        id: `note:parent-cite:${child.head.id}`,
+        kind: "note",
+        title: "Login redirect topic",
+      }),
+    ]);
     expect(child.head.messageCount).toBe(0);
   });
 });

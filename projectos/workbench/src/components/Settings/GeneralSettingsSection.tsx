@@ -5,6 +5,7 @@ import { isDesktopApp, isMacElectronShell } from '../../data/clientMode'
 import { useWorkbenchStore, type ChatModeSwitchPreference } from '../../state/workbenchStore'
 import type { KeepAwakeMode } from '@contracts/keep-awake'
 import Button from '../ui/Button'
+import TextInput from '../ui/TextInput'
 import PresentationModeToggle from './PresentationModeToggle'
 import SettingsGroup from './SettingsGroup'
 import SettingsRow from './SettingsRow'
@@ -144,65 +145,58 @@ export default function GeneralSettingsSection() {
             {verificationCommands.map((entry, index) => (
               <div className={styles.row} key={`verify-${index}`}>
                 <div className={styles.formGrid} style={{ flex: 1 }}>
-                  <label className={styles.field}>
-                    <span className={styles.label}>{ts('settings.verificationCommand')}</span>
-                    <input
-                      className={styles.select}
-                      value={entry.command}
-                      aria-label={ts('settings.verificationCommand')}
-                      onChange={(event) => {
-                        const next = verificationCommands.map((item, itemIndex) =>
-                          itemIndex === index
-                            ? { ...item, command: event.target.value }
-                            : item,
-                        )
-                        void saveVerificationCommands(next)
-                      }}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span className={styles.label}>{ts('settings.verificationArgs')}</span>
-                    <input
-                      className={styles.select}
-                      value={entry.args.join(' ')}
-                      aria-label={ts('settings.verificationArgs')}
-                      onChange={(event) => {
-                        const args = event.target.value
-                          .split(/\s+/u)
-                          .map((part) => part.trim())
-                          .filter(Boolean)
-                        const next = verificationCommands.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, args } : item,
-                        )
-                        void saveVerificationCommands(next)
-                      }}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span className={styles.label}>{ts('settings.verificationTimeout')}</span>
-                    <input
-                      className={styles.select}
-                      type="number"
-                      min={100}
-                      max={300000}
-                      value={entry.timeoutMs}
-                      aria-label={ts('settings.verificationTimeout')}
-                      onChange={(event) => {
-                        const timeoutMs = Number(event.target.value)
-                        const next = verificationCommands.map((item, itemIndex) =>
-                          itemIndex === index
-                            ? {
-                                ...item,
-                                timeoutMs: Number.isFinite(timeoutMs)
-                                  ? Math.trunc(timeoutMs)
-                                  : item.timeoutMs,
-                              }
-                            : item,
-                        )
-                        void saveVerificationCommands(next)
-                      }}
-                    />
-                  </label>
+                  <TextInput
+                    label={ts('settings.verificationCommand')}
+                    mono
+                    value={entry.command}
+                    aria-label={ts('settings.verificationCommand')}
+                    onChange={(event) => {
+                      const next = verificationCommands.map((item, itemIndex) =>
+                        itemIndex === index
+                          ? { ...item, command: event.target.value }
+                          : item,
+                      )
+                      void saveVerificationCommands(next)
+                    }}
+                  />
+                  <TextInput
+                    label={ts('settings.verificationArgs')}
+                    mono
+                    value={entry.args.join(' ')}
+                    aria-label={ts('settings.verificationArgs')}
+                    onChange={(event) => {
+                      const args = event.target.value
+                        .split(/\s+/u)
+                        .map((part) => part.trim())
+                        .filter(Boolean)
+                      const next = verificationCommands.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, args } : item,
+                      )
+                      void saveVerificationCommands(next)
+                    }}
+                  />
+                  <TextInput
+                    label={ts('settings.verificationTimeout')}
+                    type="number"
+                    min={100}
+                    max={300000}
+                    value={entry.timeoutMs}
+                    aria-label={ts('settings.verificationTimeout')}
+                    onChange={(event) => {
+                      const timeoutMs = Number(event.target.value)
+                      const next = verificationCommands.map((item, itemIndex) =>
+                        itemIndex === index
+                          ? {
+                              ...item,
+                              timeoutMs: Number.isFinite(timeoutMs)
+                                ? Math.trunc(timeoutMs)
+                                : item.timeoutMs,
+                            }
+                          : item,
+                      )
+                      void saveVerificationCommands(next)
+                    }}
+                  />
                 </div>
                 <Button
                   variant="ghost"

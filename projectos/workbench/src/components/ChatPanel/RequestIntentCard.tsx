@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { RequestIntent } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import Button from '../ui/Button'
+import TextInput from '../ui/TextInput'
 import styles from './PromptRefinementCard.module.css'
 
 interface Props {
@@ -124,17 +125,16 @@ export default function RequestIntentCard({ intent, busy, executorLabel, validat
               ))}
             </div>
           ) : (
-            <label className={styles.sectionHelp}>
-              {ts('intent.answer')}
-              <input
-                value={answers[question.id]?.answer ?? ''}
-                disabled={busy}
-                onChange={(event) => setAnswers((current) => ({
-                  ...current,
-                  [question.id]: { answer: event.target.value },
-                }))}
-              />
-            </label>
+            <TextInput
+              fieldClassName={styles.sectionHelp}
+              label={ts('intent.answer')}
+              value={answers[question.id]?.answer ?? ''}
+              disabled={busy}
+              onChange={(event) => setAnswers((current) => ({
+                ...current,
+                [question.id]: { answer: event.target.value },
+              }))}
+            />
           )}
           {question.recommendation ? <p className={styles.sectionHelp}>{ts('intent.recommendation', { value: question.recommendation })}</p> : null}
         </section>

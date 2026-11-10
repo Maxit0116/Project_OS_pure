@@ -129,14 +129,19 @@ export function buildChatSessionRecord(
   state: ChatSessionSyncState,
   sessionId: string,
   existingHead: ChatSessionHead | undefined,
+  options?: { touchActivity?: boolean },
 ): ChatSessionRecord {
   const now = new Date().toISOString()
+  const touchActivity = options?.touchActivity ?? true
+  // Leave-flush without new activity must not float the session above peers.
+  const lastUpdatedAt =
+    touchActivity || !existingHead?.lastUpdatedAt ? now : existingHead.lastUpdatedAt
   const title = resolvePersistedChatSessionTitle(existingHead)
   const head: ChatSessionHead = {
     id: sessionId,
     title,
     createdAt: existingHead?.createdAt ?? now,
-    lastUpdatedAt: now,
+    lastUpdatedAt,
     chatMode: state.chatMode,
     isArchived: existingHead?.isArchived ?? false,
     status: deriveChatSessionStatus(state),
@@ -145,11 +150,20 @@ export function buildChatSessionRecord(
     ...(existingHead?.titleGeneratedAt ? { titleGeneratedAt: existingHead.titleGeneratedAt } : {}),
     ...(existingHead?.parentSessionId ? { parentSessionId: existingHead.parentSessionId } : {}),
     ...(existingHead?.forkMessageId ? { forkMessageId: existingHead.forkMessageId } : {}),
+    ...(existingHead?.forkLayout ? { forkLayout: existingHead.forkLayout } : {}),
+    ...(typeof existingHead?.forkAnchorOffsetY === 'number'
+      ? { forkAnchorOffsetY: existingHead.forkAnchorOffsetY }
+      : {}),
+    ...(existingHead?.graphId ? { graphId: existingHead.graphId } : {}),
     ...(existingHead?.classification ? { classification: existingHead.classification } : {}),
     ...(existingHead?.classificationSource
       ? { classificationSource: existingHead.classificationSource }
       : {}),
     ...(existingHead?.responsibility ? { responsibility: existingHead.responsibility } : {}),
+    ...(existingHead?.previewStrip ? { previewStrip: existingHead.previewStrip } : {}),
+    ...(typeof existingHead?.messageCount === 'number'
+      ? { messageCount: existingHead.messageCount }
+      : {}),
   }
   return {
     version: '0.2.0',

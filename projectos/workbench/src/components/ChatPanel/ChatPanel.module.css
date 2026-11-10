@@ -83,6 +83,23 @@
   opacity: 1;
 }
 
+.restoreCheckpointButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+.restoreCheckpointButton svg {
+  flex-shrink: 0;
+}
+
 .copyButton {
   display: inline-flex;
   align-items: center;

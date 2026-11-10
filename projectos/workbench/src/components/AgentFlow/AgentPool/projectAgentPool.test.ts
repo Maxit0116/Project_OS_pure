@@ -283,6 +283,31 @@ describe('projectAgentPool', () => {
     expect(rows.find((row) => row.taskId === 'task-a')?.definitionId).toBe('def_task_task-a')
   })
 
+  it('does not keep root/delegation rows live after Stop (idle/cancelled)', () => {
+    const rows = projectAgentPool({
+      activeRunId: null,
+      flowStatus: 'cancelled',
+      steps: [step({ id: 's1', label: 'Inspect', status: 'skipped' })],
+      flowActions: [fileRead('src/a.ts')],
+      flowDelegationEvents: [delegated('task-a', 'child-a', 'src/a.ts')],
+      delegatedRunTraces: {
+        'child-a': {
+          taskId: 'task-a',
+          filePath: 'src/a.ts',
+          events: [fileRead('src/a.ts')],
+        },
+      },
+      modelLabel: 'Fable 5.1',
+      modelId: null,
+      chatSessionId: 'chat-1',
+      poolRunId: 'pool_stop',
+      overlay: emptyOverlay,
+    })
+    expect(rows.every((row) => row.status !== 'running')).toBe(true)
+    expect(rows.find((row) => row.source === 'root')?.status).toBe('complete')
+    expect(rows.find((row) => row.taskId === 'task-a')?.status).toBe('complete')
+  })
+
   it('summarizes action events for the life-line label', () => {
     expect(summarizeActionEvent(fileRead('a.ts'))).toContain('a.ts')
   })

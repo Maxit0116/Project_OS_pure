@@ -266,8 +266,14 @@ export function routeLoopEdge(input: {
   }
 }
 
+/** Normalize whitespace for edge labels. Full text is shown; the chip sizes to content. */
+export function formatEdgeLabel(text: string): string {
+  return text.trim().replace(/\s+/g, ' ')
+}
+
+/** @deprecated Prefer formatEdgeLabel — canvas labels are no longer truncated. */
 export function truncateEdgeLabel(text: string, max = 36): string {
-  const trimmed = text.trim().replace(/\s+/g, ' ')
+  const trimmed = formatEdgeLabel(text)
   if (!trimmed) return ''
   if (trimmed.length <= max) return trimmed
   return `${trimmed.slice(0, Math.max(0, max - 1)).trimEnd()}…`

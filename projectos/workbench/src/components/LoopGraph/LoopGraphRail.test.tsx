@@ -27,6 +27,7 @@ const railProps = {
   onCreateFolder: noop,
   onRenameFolder: noop,
   onCancelRenameFolder: noop,
+  onRemoveLoop: noop,
   onRemoveFolder: noop,
   onMoveIntoFolder: noop,
   onMoveFolderIntoFolder: noop,
@@ -35,7 +36,7 @@ const railProps = {
 }
 
 describe('LoopGraphRail', () => {
-  it('keeps a collapsed icon rail with create controls', () => {
+  it('keeps a collapsed icon rail with create and delete controls', () => {
     const html = renderToStaticMarkup(
       <LoopGraphRail layout={layout} items={[head]} activeLoopId="loop_1" {...railProps} />,
     )
@@ -43,6 +44,7 @@ describe('LoopGraphRail', () => {
     expect(html).toContain('data-expanded="false"')
     expect(html).toContain('Login loop')
     expect(html.includes('新建文件夹') || html.includes('New folder')).toBe(true)
+    expect(html.includes('删除 Loop') || html.includes('Remove loop')).toBe(true)
   })
 
   it('still shows create when there are no loops', () => {

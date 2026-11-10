@@ -13,10 +13,11 @@ export function disabledListingIdSet(
 
 export function filterInstallableListings(
   document: McpCatalogDocument,
-  prefs: McpMarketplacePrefs | undefined,
+  _prefs: McpMarketplacePrefs | undefined,
 ): McpCatalogListing[] {
-  const disabled = disabledListingIdSet(prefs);
-  return document.listings.filter((listing) => !disabled.has(listing.id));
+  // Hide/disable is retired — catalog listings stay visible.
+  void _prefs;
+  return document.listings;
 }
 
 export function withDisabledListing(

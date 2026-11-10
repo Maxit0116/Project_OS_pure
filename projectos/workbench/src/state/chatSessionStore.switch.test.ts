@@ -163,3 +163,148 @@ describe('leaving a conversation', () => {
     expect(useWorkbenchStore.getState().pendingIntent).toBeNull()
   })
 })
+
+describe('persist must not revert the active session after a fork switch', () => {
+  beforeEach(() => {
+    useWorkbenchStore.setState({
+      project: { projectId: 'proj_1', name: 'Test', rootPath: '/tmp/proj', createdAt: now, updatedAt: now } as never,
+      chatMode: 'ask',
+      globalAgentActive: true,
+      selectedNodeId: null,
+      selectedFilePath: null,
+      pendingIntent: null,
+      runDecisions: [],
+      decisionRootRunId: null,
+      focusedDecisionId: null,
+      decisionResolvingIds: [],
+      activeRunId: null,
+      flowStatus: 'idle',
+      refineLoading: false,
+      messages: [],
+    })
+    useChatSessionStore.setState({
+      activeSessionId: 'chat_parent',
+      heads: [
+        {
+          id: 'chat_parent',
+          title: 'Parent',
+          createdAt: now,
+          lastUpdatedAt: now,
+          chatMode: 'ask',
+          isArchived: false,
+          status: 'idle',
+        },
+      ],
+      historyOpen: false,
+    })
+  })
+
+  it('keeps the child active when a parent persist finishes after switchSession', async () => {
+    let resolveParentUpsert: (() => void) | undefined
+    const parentUpsertGate = new Promise<void>((resolve) => {
+      resolveParentUpsert = resolve
+    })
+
+    const records = {
+      chat_parent: record('chat_parent', 'ask'),
+      chat_child: record('chat_child', 'ask'),
+    }
+    const upsertChatSession = vi.fn(async (_projectId: string, next: { head: { id: string } }) => {
+      if (next.head.id === 'chat_parent') await parentUpsertGate
+    })
+    const setLastActiveChatSession = vi.fn(async () => undefined)
+    const getChatSessionIndex = vi.fn(async () => ({
+      heads: [
+        records.chat_parent.head,
+        { ...records.chat_child.head, parentSessionId: 'chat_parent' },
+      ],
+      pinnedIds: [],
+      lastActiveId: 'chat_child',
+    }))
+
+    useWorkbenchStore.setState({
+      client: clientFor(records, {
+        upsertChatSession,
+        setLastActiveChatSession,
+        getChatSessionIndex,
+      }),
+    })
+
+    // Stale persist for the parent starts while still active.
+    const stalePersist = useChatSessionStore.getState().persistActiveSession()
+    // Switch to the forked child before that persist settles (also persists parent).
+    const switchPromise = useChatSessionStore.getState().switchSession('chat_child')
+
+    await vi.waitFor(() => expect(upsertChatSession.mock.calls.length).toBeGreaterThanOrEqual(2))
+    resolveParentUpsert?.()
+    await switchPromise
+
+    expect(useChatSessionStore.getState().activeSessionId).toBe('chat_child')
+
+    await stalePersist
+    expect(useChatSessionStore.getState().activeSessionId).toBe('chat_child')
+  })
+
+  it('activates the forked child in the same turn the card appears', async () => {
+    const parentHead = {
+      id: 'chat_parent',
+      title: 'Parent',
+      createdAt: now,
+      lastUpdatedAt: now,
+      chatMode: 'ask' as const,
+      isArchived: false,
+      status: 'idle' as const,
+      classification: 'topic' as const,
+      classificationSource: 'auto' as const,
+    }
+    const childRecord = {
+      ...record('chat_child', 'ask'),
+      head: {
+        ...record('chat_child', 'ask').head,
+        parentSessionId: 'chat_parent',
+        classification: 'topic' as const,
+        classificationSource: 'auto' as const,
+      },
+      inheritedDigest: {
+        responsibility: 'Continue from parent',
+        decisions: [],
+        openQuestions: [],
+        refs: [],
+        updatedAt: now,
+        throughMessageId: 'm1',
+      },
+    }
+    const forkChatSession = vi.fn(async () => childRecord)
+    const upsertChatSession = vi.fn(async (_projectId: string, next: typeof childRecord) => next)
+    const setLastActiveChatSession = vi.fn(async () => undefined)
+    const getChatSessionIndex = vi.fn(async () => ({
+      heads: [parentHead, childRecord.head],
+      pinnedIds: [],
+      lastActiveId: 'chat_child',
+    }))
+
+    useWorkbenchStore.setState({
+      client: clientFor(
+        { chat_parent: record('chat_parent', 'ask'), chat_child: childRecord },
+        { forkChatSession, upsertChatSession, setLastActiveChatSession, getChatSessionIndex },
+      ),
+      messages: [
+        { id: 'm1', role: 'user', content: 'Parent prompt', timestamp: now },
+      ],
+    })
+    useChatSessionStore.setState({
+      activeSessionId: 'chat_parent',
+      heads: [parentHead],
+      inheritedDigest: null,
+    })
+
+    const childId = await useChatSessionStore.getState().forkSession('chat_parent')
+    expect(childId).toBe('chat_child')
+    expect(useChatSessionStore.getState().activeSessionId).toBe('chat_child')
+    expect(useChatSessionStore.getState().inheritedDigest?.responsibility).toBe(
+      'Continue from parent',
+    )
+    expect(useWorkbenchStore.getState().messages).toEqual([])
+    expect(setLastActiveChatSession).toHaveBeenCalledWith('proj_1', 'chat_child')
+  })
+})

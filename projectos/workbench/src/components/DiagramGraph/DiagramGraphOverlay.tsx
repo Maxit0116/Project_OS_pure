@@ -17,6 +17,7 @@ import {
   collectDiagramIds,
   createDiagramRailFolder,
   emptyDiagramGraphRailLayout,
+  findDiagramFolderEntry,
   insertDiagramFolderOnRail,
   insertDiagramOnRail,
   loadDiagramGraphRailLayout,
@@ -213,14 +214,15 @@ export default function DiagramGraphOverlay() {
                 }}
                 onCancelRenameFolder={() => {
                   if (!renamingFolderId) return
-                  const folder = mergedRail.entries.find(
-                    (entry) => entry.kind === 'folder' && entry.id === renamingFolderId,
+                  const folder = findDiagramFolderEntry(
+                    railLayoutRef.current.entries,
+                    renamingFolderId,
                   )
                   if (
                     folder &&
-                    folder.kind === 'folder' &&
-                    !folder.title.trim() &&
-                    folder.children.length === 0
+                    folder.children.length === 0 &&
+                    (!folder.title.trim() ||
+                      folder.title.trim() === ts('chat.diagramGraph.folderUntitled'))
                   ) {
                     persistRail(
                       removeDiagramFolderFromLayout(railLayoutRef.current, renamingFolderId),
@@ -228,9 +230,17 @@ export default function DiagramGraphOverlay() {
                   }
                   setRenamingFolderId(null)
                 }}
-                onRemoveFolder={(folderId) =>
+                onRemoveDiagram={(diagramId) => {
+                  void deleteArtifact(diagramId).then((ok) => {
+                    if (ok) {
+                      persistRail(removeDiagramFromLayout(railLayoutRef.current, diagramId))
+                    }
+                  })
+                }}
+                onRemoveFolder={(folderId) => {
+                  if (renamingFolderId === folderId) setRenamingFolderId(null)
                   persistRail(removeDiagramFolderFromLayout(railLayoutRef.current, folderId))
-                }
+                }}
                 onMoveIntoFolder={(diagramId, folderId) =>
                   persistRail(moveDiagramIntoFolder(railLayoutRef.current, diagramId, folderId))
                 }
@@ -249,13 +259,6 @@ export default function DiagramGraphOverlay() {
                 onMoveFolderToRail={(folderId) =>
                   persistRail(insertDiagramFolderOnRail(railLayoutRef.current, folderId))
                 }
-                onDeleteDiagram={(diagramId) => {
-                  void deleteArtifact(diagramId).then((ok) => {
-                    if (ok) {
-                      persistRail(removeDiagramFromLayout(railLayoutRef.current, diagramId))
-                    }
-                  })
-                }}
               />
 
               <div className={styles.main}>

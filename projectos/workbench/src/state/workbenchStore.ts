@@ -105,11 +105,20 @@ import {
 import { appendComposerHubToPrompt } from '../components/SpatialComposeHub/composerHubPrompt'
 import type { MapWorkGroupMutationInput, UpdateMapWorkGroupPatch, WorkGroupSelectionItem } from '@contracts/index'
 import type { ExecutorOption, ExecutorSelection } from '@contracts/index'
-import { FileOwnershipErrorDetailsSchema, MAP_ARTIFACT_DEFAULT_SIZES, emptyNoteDocument } from '@contracts/index'
+import {
+  FileOwnershipErrorDetailsSchema,
+  MAP_ARTIFACT_DEFAULT_SIZES,
+  emptyNoteDocument,
+  looksLikeVisionPrompt,
+} from '@contracts/index'
 import { getActiveStackMember, getStackMembers, syncStackGeometry } from '@contracts/index'
+import {
+  FIRST_PRINCIPLES_SUGGEST_AUTO_DISMISS_MS,
+} from '../notifications/notificationCenterTypes'
 import {
   createFlowCorrection,
   handleRunEvent,
+  settleOpenFlowSteps,
   type FlowCorrection,
 } from './handleRunEvent'
 import {
@@ -243,6 +252,8 @@ import {
   resolveReminderNotificationChannel,
   shouldSuppressReminderNotification,
 } from '../notifications/reminderNotification'
+import { kindForAgentDestination } from '../notifications/notificationCenterTypes'
+import { useNotificationCenterStore } from './notificationCenterStore'
 import {
   persistDefaultModelProfile,
   persistModelProfile,
@@ -615,6 +626,8 @@ export interface WorkbenchState {
   directoryListings: Record<string, DirectoryListing>
   selectedFlowStepId: string | null
   selectedActivityId: string | null
+  /** When true, Agent Flow inspector tracks the running step; manual step select locks to that step. */
+  flowInspectorFollowLive: boolean
   bouncingNodeIds: string[]
   flashKey: number
   leftPanelOpen: boolean
@@ -824,6 +837,7 @@ export interface WorkbenchState {
   loadDirectoryListing: (relativePath: string) => Promise<void>
   setSelectedFlowStepId: (id: string | null) => void
   setSelectedActivityId: (id: string | null) => void
+  setFlowInspectorFollowLive: (follow: boolean) => void
   setLiveGraphFocusTask: (taskId: string | null) => void
   /** Attach file/node as composer context (read-only; does not expand write scope). */
   addGraphContextFromNode: (nodeId: string) => void
@@ -880,6 +894,8 @@ export interface WorkbenchState {
   setChatMode: (mode: ChatMode, options?: { isolate?: boolean }) => Promise<void>
   setAskSubMode: (mode: AskSubMode) => void
   dismissFirstPrinciplesSuggest: () => void
+  /** After Ask send: soft-suggest First Principles via ephemeral notification. */
+  maybeSuggestFirstPrinciplesAfterAskSend: (prompt: string) => void
   beginFirstPrinciplesFromVision: (vision: string) => Promise<void>
   answerFirstPrinciplesQuestion: (input: {
     questionId: string
@@ -1369,6 +1385,11 @@ function scheduleChatSessionPersist(): void {
   chatSessionStore.scheduleTitleSummarize()
 }
 
+/** Project the just-sent prompt onto Session Graph before async agent work finishes. */
+function syncChatSessionHeadNow(): void {
+  useChatSessionStore.getState().syncActiveHeadFromWorkbench()
+}
+
 function chatSessionRequestFields(): { chatSessionId?: string } {
   const chatSessionId = useChatSessionStore.getState().activeSessionId
   return chatSessionId ? { chatSessionId } : {}
@@ -1709,6 +1730,7 @@ const initialTransientState = {
   refineLoading: false,
   selectedFlowStepId: null as string | null,
   selectedActivityId: null as string | null,
+  flowInspectorFollowLive: true,
   bouncingNodeIds: [] as string[],
   semanticTreeExpansion: {} as Record<string, boolean>,
   directoryTreeExpansion: {} as Record<string, boolean>,
@@ -1852,20 +1874,19 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       pending,
       state.locale,
     )
+    const kind = kindForAgentDestination(mergedDestination)
 
-    const showInAppBanner = (
-      bannerChannel: Extract<DiffReadyNotificationChannel, 'map_banner' | 'center_banner'>,
-    ) => {
-      set({
-        diffReadyBanner: {
-          visible: true,
-          channel: bannerChannel,
-          title,
-          body,
-          destination: mergedDestination,
-          runIds,
-        },
+    const pushCenter = (deliveredViaSystem: boolean) => {
+      useNotificationCenterStore.getState().pushNotification({
+        kind,
+        title,
+        body,
+        destination: mergedDestination,
+        runIds,
+        deliveredViaSystem,
       })
+      // Legacy field cleared — UI reads NotificationStack instead.
+      set({ diffReadyBanner: null })
     }
 
     if (channel === 'system') {
@@ -1877,18 +1898,18 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             destination: mergedDestination,
             runIds,
           })
+          .then(() => pushCenter(true))
           .catch((error) => {
             console.error('[workbench] failed to show diff-ready system notification', error)
-            showInAppBanner('center_banner')
+            pushCenter(false)
           })
         return
       }
-      // Non-desktop (or missing bridge): keep an in-app banner for when the user returns.
-      showInAppBanner('center_banner')
+      pushCenter(false)
       return
     }
 
-    showInAppBanner(channel)
+    pushCenter(false)
   }
 
   const notifyPendingDecision = (decision: RunDecision) => {
@@ -1896,22 +1917,31 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     if (!state.notifyOnPendingDecision || decision.status !== 'pending' ||
       wasRunDecisionNotificationSeen(decision.id)) return
     markRunDecisionNotificationSeen(decision.id)
+    const title = getStoreMessage(state.locale, 'decisions.notificationTitle')
     const body = getStoreMessage(state.locale, 'decisions.notificationBody', {
       question: truncateDiffReadySummary(decision.question, 160),
     })
-    if (!state.windowFocused && isDesktopApp() && window.projectOS?.notify) {
-      void window.projectOS.notify.showDiffReady({
-        title: getStoreMessage(state.locale, 'decisions.notificationTitle'),
+    const pushDecision = (deliveredViaSystem: boolean) => {
+      useNotificationCenterStore.getState().pushNotification({
+        kind: 'decision',
+        title,
         body,
         destination: 'decisions',
         runIds: [decision.rootRunId],
         decisionId: decision.id,
-      }).catch((error) => {
+        deliveredViaSystem,
+      })
+    }
+    if (!state.windowFocused && isDesktopApp() && window.projectOS?.notify) {
+      void window.projectOS.notify.showDiffReady({
+        title,
+        body,
+        destination: 'decisions',
+        runIds: [decision.rootRunId],
+        decisionId: decision.id,
+      }).then(() => pushDecision(true)).catch((error) => {
         console.error('[workbench] failed to show decision notification', error)
-        get().pushToast({
-          type: 'info',
-          message: getStoreMessage(get().locale, 'decisions.notificationToast', { question: body }),
-        })
+        pushDecision(false)
       })
       return
     }
@@ -1923,10 +1953,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       rightPanelOpen: true,
       focusedDecisionId: decision.id,
     })
-    get().pushToast({
-      type: 'info',
-      message: getStoreMessage(state.locale, 'decisions.notificationToast', { question: body }),
-    })
+    pushDecision(false)
   }
 
   const maybeNotifyAgentComplete = (
@@ -2043,6 +2070,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     saveNotifyOnDiffReadyPreference(enabled)
     if (!enabled) {
       resetDiffReadyBatch()
+      useNotificationCenterStore.getState().archiveActive()
       set({ notifyOnDiffReady: enabled, diffReadyBanner: null })
       return
     }
@@ -2098,13 +2126,21 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
   setWindowFocused: (windowFocused) => set({ windowFocused }),
 
-  dismissDiffReadyBanner: () => set({ diffReadyBanner: null }),
+  dismissDiffReadyBanner: () => {
+    useNotificationCenterStore.getState().archiveActive()
+    set({ diffReadyBanner: null })
+  },
 
   navigateToDiffReview: async () => {
     await get().navigateToDiffReviewFile()
   },
 
   navigateToDiffReviewFile: async (path) => {
+    useNotificationCenterStore.getState().archiveActiveByDestination('diff')
+    // Close the center Agent Flow overlay so the Code/Diff stage is visible.
+    // Pending Changes "Review" (and other entry points) otherwise leave the
+    // floating window covering the diff the user just navigated to.
+    useChatSessionStore.getState().closeAgentFlow()
     set({
       selectedDiffFilePath: path ?? null,
       centerTab: 'code',
@@ -2125,9 +2161,18 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
   dismissPendingChanges: () => {
     const { activeRunId } = get()
+    useNotificationCenterStore.getState().archiveActiveByDestination('diff')
     set({
       pendingChangesDrawerDismissedRunId: activeRunId,
       pendingChangesDrawerExpanded: false,
+      // Discard review attention so Code/Diff no longer advertises a pending review.
+      diffReady: false,
+      diffReadyBanner: null,
+      generatedDiff: null,
+      diffFileStats: [],
+      selectedDiffFilePath: null,
+      diffReviewOnlyReason: null,
+      diffUnmetRequirements: [],
     })
   },
 
@@ -2135,11 +2180,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const undoMode = selectPendingChangesDrawerUndoMode(get())
     if (undoMode === 'restore') {
       await get().undoCurrentApply()
+      // Failed restore keeps applyResult — do not discard the reviewable diff.
+      if (get().applyResult) return
+      const { activeRunId } = get()
+      set({
+        pendingChangesDrawerDismissedRunId: activeRunId,
+        pendingChangesDrawerExpanded: false,
+      })
+      return
     }
     get().dismissPendingChanges()
   },
 
   navigateFromAgentNotification: async (destination, runId, decisionId) => {
+    useNotificationCenterStore.getState().archiveActiveByDestination(destination)
     if (destination === 'decisions') {
       if (!runId || !decisionId) return
       useChatSessionStore.getState().presentAgentFlow()
@@ -2161,6 +2215,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
     if (destination === 'reminder') {
       useChatSessionStore.getState().setReminderGraphOpen(true)
+      const { useReminderGraphStore } = await import('./reminderGraphStore')
+      useReminderGraphStore.getState().setPage('notifications')
       set({ diffReadyBanner: null })
       return
     }
@@ -2198,19 +2254,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     })
     const runIds = merged.itemIds.map((id) => `reminder:${id}`)
 
-    const showInAppBanner = (
-      bannerChannel: Extract<DiffReadyNotificationChannel, 'map_banner' | 'center_banner'>,
-    ) => {
-      set({
-        diffReadyBanner: {
-          visible: true,
-          channel: bannerChannel,
-          title: merged.title,
-          body: merged.body,
-          destination: 'reminder',
-          runIds,
-        },
+    const pushCenter = (deliveredViaSystem: boolean) => {
+      useNotificationCenterStore.getState().pushNotification({
+        kind: 'reminder',
+        title: merged.title,
+        body: merged.body,
+        destination: 'reminder',
+        runIds,
+        deliveredViaSystem,
       })
+      set({ diffReadyBanner: null })
     }
 
     if (channel === 'system') {
@@ -2222,17 +2275,18 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             destination: 'reminder',
             runIds,
           })
+          .then(() => pushCenter(true))
           .catch((error) => {
             console.error('[workbench] failed to show reminder system notification', error)
-            showInAppBanner('center_banner')
+            pushCenter(false)
           })
         return
       }
-      showInAppBanner('center_banner')
+      pushCenter(false)
       return
     }
 
-    showInAppBanner(channel)
+    pushCenter(false)
   },
 
   maybeNotifyAgentComplete,
@@ -2242,9 +2296,19 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     set({ resolvedTheme })
   },
 
-  pushToast: ({ type, message, autoDismiss = 4000 }) => {
+  pushToast: ({ type, message, autoDismiss = 5000 }) => {
     const id = toastId()
     set((s) => ({ toasts: [...s.toasts, { id, type, message }] }))
+    // Keep toast ephemeral in the corner; durable copy goes straight to Notification Center.
+    if (type === 'error' || type === 'warning' || type === 'info') {
+      useNotificationCenterStore.getState().pushNotification({
+        kind: type === 'error' ? 'toast_error' : type === 'warning' ? 'toast_warning' : 'toast_info',
+        title: getStoreMessage(get().locale, 'notificationCenter.toastTitle'),
+        body: message,
+        destination: 'none',
+        archiveImmediately: true,
+      })
+    }
     if (autoDismiss > 0) {
       setTimeout(() => get().dismissToast(id), autoDismiss)
     }
@@ -2300,8 +2364,14 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       }))
     }
   },
-  setSelectedFlowStepId: (id) => set({ selectedFlowStepId: id }),
+  setSelectedFlowStepId: (id) =>
+    set({
+      selectedFlowStepId: id,
+      // Manual selection locks the inspector; clearing restores live follow.
+      flowInspectorFollowLive: id == null,
+    }),
   setSelectedActivityId: (id) => set({ selectedActivityId: id }),
+  setFlowInspectorFollowLive: (follow) => set({ flowInspectorFollowLive: follow }),
 
   setLiveGraphFocusTask: (taskId) => set({ liveGraphFocusTaskId: taskId }),
 
@@ -2383,10 +2453,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           )
         : executionOverlay
     set({
-      flowStatus: 'idle',
+      flowStatus: 'interrupted',
       refineLoading: false,
       activeRunId: null,
       liveGraphPausedRunId: runId,
+      flowSteps: settleOpenFlowSteps(get().flowSteps),
       executionOverlay: settledOverlay,
     })
     if (client && typeof client.pauseAgentRun === 'function') {
@@ -2494,6 +2565,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       ),
       selectedFlowStepId: null,
       selectedActivityId: null,
+      flowInspectorFollowLive: true,
     }))
     pushToast({
       type: 'info',
@@ -2679,6 +2751,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
     const state = get()
     const onDiffView = tab === 'code' && state.codeSubTab === 'diff'
+    if (onDiffView) {
+      useNotificationCenterStore.getState().archiveActiveByDestination('diff')
+    }
     set({
       centerTab: tab,
       ...(onDiffView ? { diffReadyBanner: null } : {}),
@@ -2824,6 +2899,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   },
   setCodeSubTab: (tab) => {
     const state = get()
+    if (state.centerTab === 'code' && tab === 'diff') {
+      useNotificationCenterStore.getState().archiveActiveByDestination('diff')
+    }
     set({
       codeSubTab: tab,
       ...(state.centerTab === 'code' && tab === 'diff' ? { diffReadyBanner: null } : {}),
@@ -2851,9 +2929,28 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
   dismissFirstPrinciplesSuggest: () => {
     set({ firstPrinciplesSuggestDismissed: true })
   },
+  maybeSuggestFirstPrinciplesAfterAskSend: (prompt: string) => {
+    const { chatMode, askSubMode, firstPrinciplesSuggestDismissed, locale } = get()
+    if (chatMode !== 'ask' || askSubMode !== 'chat' || firstPrinciplesSuggestDismissed) return
+    if (!looksLikeVisionPrompt(prompt)) return
+    useNotificationCenterStore.getState().pushNotification({
+      kind: 'first_principles_suggest',
+      title: getStoreMessage(locale, 'firstPrinciples.suggestNotificationTitle'),
+      body: getStoreMessage(locale, 'firstPrinciples.suggestChip'),
+      destination: 'none',
+      ephemeral: true,
+      visionText: prompt.trim(),
+      autoDismissMs: FIRST_PRINCIPLES_SUGGEST_AUTO_DISMISS_MS,
+    })
+  },
   beginFirstPrinciplesFromVision: async (vision) => {
     const { project, client, locale } = get()
     if (!project || !client || !vision.trim()) return
+    for (const item of useNotificationCenterStore.getState().items) {
+      if (item.status === 'active' && item.kind === 'first_principles_suggest') {
+        useNotificationCenterStore.getState().removeNotification(item.id)
+      }
+    }
     set({
       chatMode: 'ask',
       askSubMode: 'first_principles',
@@ -3107,6 +3204,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const askScope = askWasRunning ? latestAskTrace.scope : null
     const planWasRunning = refineLoading && latestPlanTrace?.status === 'running'
     const planScope = planWasRunning ? latestPlanTrace.scope : null
+    const hadActiveAgentRun = Boolean(runId) || flowStatus === 'running'
     disposeActiveRunSubscriptions(get, set)
     const settledOverlay =
       runId && executionOverlay?.runId === runId
@@ -3121,10 +3219,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             graph?.fileIndex ?? [],
           )
         : executionOverlay
+    // Optimistic settle: stream is closed so step_completed / run_cancelled will
+    // not arrive. Keep UI from pulsing "working" after Stop (Pool + Timeline).
     set({
-      flowStatus: 'idle',
+      flowStatus: hadActiveAgentRun ? 'cancelled' : 'idle',
       refineLoading: false,
       activeRunId: null,
+      flowSteps: settleOpenFlowSteps(get().flowSteps),
       executionOverlay: settledOverlay,
       ...(askWasRunning && askScope
         ? { latestAskTrace: { status: 'cancelled' as const, scope: askScope } }
@@ -3710,6 +3811,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         rightPanelTab: 'chat',
         latestAskTrace: { status: 'running', scope: askScope },
       }))
+      syncChatSessionHeadNow()
       try {
         const answer = await client.askAgent({
           projectId: project.projectId,
@@ -3797,6 +3899,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     }
 
     if (chatMode === 'ask') {
+      get().maybeSuggestFirstPrinciplesAfterAskSend(visiblePrompt)
       const askScope: AgentConversationScope = conversationScopeFromSelection(state)
       const userMsg = buildUserMessage()
       useChatSessionStore.getState().presentAgentFlow()
@@ -3810,6 +3913,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         agentFlowSubject: 'ask',
         latestAskTrace: { status: 'running', scope: askScope },
       }))
+      syncChatSessionHeadNow()
       try {
         const answer = await client.askAgent({
           projectId: project.projectId,
@@ -3942,6 +4046,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           scope: planScope,
         },
       }))
+      syncChatSessionHeadNow()
       try {
         const plan = withPlanQuestionOptions(await client.createPlan({
           projectId: project.projectId,
@@ -4041,6 +4146,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         rightPanelTab: 'chat',
         agentFlowSubject: 'debug',
       }))
+      syncChatSessionHeadNow()
       try {
         const session = await client.startDebugSession({
           projectId: project.projectId,
@@ -4094,6 +4200,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         runDecisions: [],
         focusedDecisionId: null,
       }))
+      syncChatSessionHeadNow()
       try {
         const intent = await client.extractRequestIntent({
           projectId: project.projectId,
@@ -4155,6 +4262,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       diffFileStats: [],
       runDisposable: null,
     }))
+    syncChatSessionHeadNow()
 
     try {
       const refinement = await client.refinePrompt({
@@ -4258,7 +4366,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         verificationLoading: false,
         harnessFixRunId: null,
         selectedFlowStepId: null,
-      selectedActivityId: null,
+        selectedActivityId: null,
+        flowInspectorFollowLive: true,
         runDisposable: null,
         pendingChangesDrawerDismissedRunId: null,
         pendingChangesDrawerExpanded: true,
@@ -5295,6 +5404,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       pendingChangesDrawerExpanded: true,
       selectedFlowStepId: null,
       selectedActivityId: null,
+      flowInspectorFollowLive: true,
       runDisposable: null,
     })
 
@@ -5862,6 +5972,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           : message,
       )
       const hasUndoneMessage = nextMessages.some((message) => message.id === undoneMessageId)
+      useNotificationCenterStore.getState().archiveActiveByDestination('diff')
       set({
         applyResult: null,
         verificationResult: null,
@@ -5870,6 +5981,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         currentWork,
         editorBuffers: nextBuffers,
         editorSavedBuffers: nextBuffers,
+        // Undo removes the reviewable diff — clear attention so the stage-rail
+        // Code/Diff live dot does not keep advertising an empty Diff tab.
+        diffReady: false,
+        diffReadyBanner: null,
+        generatedDiff: null,
+        diffFileStats: [],
+        selectedDiffFilePath: null,
+        diffReviewOnlyReason: null,
+        diffUnmetRequirements: [],
         messages: hasUndoneMessage
           ? nextMessages
           : [
@@ -5978,6 +6098,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         agentFlowSubject: 'run',
         selectedFlowStepId: null,
         selectedActivityId: null,
+        flowInspectorFollowLive: true,
       })
 
       const disposable = client.streamAgentRun(run.runId, (event) => {

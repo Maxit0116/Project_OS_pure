@@ -4,12 +4,8 @@
 
 .card {
   width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
   border-radius: var(--radius-sm);
-  padding: 6px 8px;
-  cursor: pointer;
+  padding: 2px 4px;
   transition: background var(--duration-fast) var(--ease-out);
 }
 
@@ -19,19 +15,7 @@
 
 .selected {
   background: var(--color-accent-subtle);
-  box-shadow: none;
-}
-
-.running {
-  border-color: var(--color-warning);
-}
-
-.complete {
-  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
-}
-
-.error {
-  border-color: var(--color-error);
+  box-shadow: inset 2px 0 0 var(--tech-accent, var(--color-accent));
 }
 
 .pending,
@@ -42,20 +26,90 @@
 
 .row {
   display: flex;
-  gap: var(--space-md);
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.chevronBtn,
+.selectBtn {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.chevronBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 22px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  border-radius: 4px;
+}
+
+.chevronBtn:hover {
+  color: var(--color-text-primary);
+}
+
+.chevronBtn:focus-visible,
+.selectBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.chevronSpacer {
+  width: 18px;
+  flex-shrink: 0;
+}
+
+.chevron {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.selectBtn {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: var(--space-sm);
+  padding: 4px 4px 4px 0;
 }
 
 .dot {
   flex-shrink: 0;
   display: flex;
   align-items: flex-start;
-  padding-top: 2px;
+  padding-top: 4px;
+  width: 14px;
+  justify-content: center;
 }
 
-.iconComplete { color: var(--color-success); }
-.iconRunning { color: var(--color-warning); }
-.iconError { color: var(--color-error); }
-.iconPending { color: var(--color-text-muted); }
+.iconComplete {
+  color: var(--color-success);
+}
+
+.iconRunningDot {
+  color: var(--tech-accent, var(--color-accent));
+  background: currentColor;
+  margin-top: 2px;
+}
+
+.iconError {
+  color: var(--color-error);
+}
+
+.iconPending {
+  color: var(--color-text-muted);
+}
 
 .content {
   flex: 1;
@@ -70,6 +124,11 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* Keep live step title on the primary text color so opacity breath reads clearly. */
+.label [data-live='true'] {
+  color: var(--color-text-primary);
 }
 
 .correctionBadge {
@@ -121,14 +180,14 @@
 }
 
 .connector {
-  width: 2px;
-  height: 16px;
-  background: var(--glass-border);
-  margin: 4px 0 4px 20px;
+  width: 1px;
+  height: 12px;
+  background: var(--tech-border, var(--color-border));
+  margin: 2px 0 2px 28px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wrapper {
-    animation: none;
+  .chevron {
+    transition: none;
   }
 }
