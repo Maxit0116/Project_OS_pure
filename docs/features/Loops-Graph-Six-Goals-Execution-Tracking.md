@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10 — 产品入口 taskPack + Diff/exit UI + 精确 parseLevel + image vision 预检 + GitHub/Gmail offline credential gate；local deterministic E2E（非 live）  
+**Updated**: 2026-11-10 (`d424054`) — 产品入口 taskPack + Diff/exit UI + 精确 parseLevel + image vision 预检 + GitHub/Gmail offline credential gate；local deterministic E2E（非 live）  
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
