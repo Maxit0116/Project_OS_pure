@@ -158,4 +158,24 @@ describe('LoopNodeInspector logic control-flow UI', () => {
     expect(html).toContain('data-loop-open-associated-run="run_abc"')
     expect(html).toContain('chat.loopGraph.openAssociatedRun')
   })
+
+  it('GC-6.6 shows associated-run idle hint without active instance', async () => {
+    const { default: LoopNodeInspector } = await import('./LoopNodeInspector')
+    const html = renderToStaticMarkup(
+      <LoopNodeInspector
+        node={{
+          id: 'n_logic',
+          title: 'Logic',
+          prompt: '',
+          position: { x: 0, y: 0 },
+          type: 'logic',
+          logicKind: 'merge',
+          role: 'implement',
+        }}
+        onChange={() => {}}
+      />,
+    )
+    expect(html).toContain('data-testid="loop-open-associated-run-idle"')
+    expect(html).toContain('chat.loopGraph.openAssociatedRunIdle')
+  })
 })

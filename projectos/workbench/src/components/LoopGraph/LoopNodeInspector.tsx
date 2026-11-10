@@ -562,43 +562,43 @@ export default function LoopNodeInspector({
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>{ts('chat.loopGraph.inspectorRuntime')}</h3>
         {activeInstance ? (
-          <>
-            <div className={styles.kv}>
-              <div>
-                <span>status</span>
-                <strong>{activeInstance.status}</strong>
-              </div>
-              <div>
-                <span>cursor</span>
-                <strong>{isCursor ? 'yes' : 'no'}</strong>
-              </div>
-              <div>
-                <span>attempts</span>
-                <strong>{activeInstance.attemptCounts[node.id] ?? 0}</strong>
-              </div>
-              {typeof activeInstance.loopIterations?.[node.id] === 'number' ? (
-                <div>
-                  <span>loop</span>
-                  <strong>{activeInstance.loopIterations[node.id]}</strong>
-                </div>
-              ) : null}
+          <div className={styles.kv}>
+            <div>
+              <span>status</span>
+              <strong>{activeInstance.status}</strong>
             </div>
-            {activeInstance.activeRunId ? (
-              <button
-                type="button"
-                className={styles.openAssociatedRun}
-                data-testid="loop-open-associated-run"
-                data-loop-open-associated-run={activeInstance.activeRunId}
-                onClick={() => openAgentFlowForRun(activeInstance.activeRunId ?? null)}
-              >
-                {ts('chat.loopGraph.openAssociatedRun')}
-              </button>
-            ) : (
-              <p className={styles.hint}>{ts('chat.loopGraph.openAssociatedRunIdle')}</p>
-            )}
-          </>
+            <div>
+              <span>cursor</span>
+              <strong>{isCursor ? 'yes' : 'no'}</strong>
+            </div>
+            <div>
+              <span>attempts</span>
+              <strong>{activeInstance.attemptCounts[node.id] ?? 0}</strong>
+            </div>
+            {typeof activeInstance.loopIterations?.[node.id] === 'number' ? (
+              <div>
+                <span>loop</span>
+                <strong>{activeInstance.loopIterations[node.id]}</strong>
+              </div>
+            ) : null}
+          </div>
         ) : (
           <p className={styles.hint}>{ts('chat.loopGraph.inspectorRuntimeIdle')}</p>
+        )}
+        {activeInstance?.activeRunId ? (
+          <button
+            type="button"
+            className={styles.openAssociatedRun}
+            data-testid="loop-open-associated-run"
+            data-loop-open-associated-run={activeInstance.activeRunId}
+            onClick={() => openAgentFlowForRun(activeInstance.activeRunId ?? null)}
+          >
+            {ts('chat.loopGraph.openAssociatedRun')}
+          </button>
+        ) : (
+          <p className={styles.hint} data-testid="loop-open-associated-run-idle">
+            {ts('chat.loopGraph.openAssociatedRunIdle')}
+          </p>
         )}
       </section>
 
