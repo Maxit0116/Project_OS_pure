@@ -114,7 +114,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | `specVersion` | 定义版本锁 | **已实现**（Instance.specVersion） |
 | `taskInputId` / materials[] | 任务材料引用 | 计划 |
 | `budget` / `permissionSet` | 权限预算 | 部分（stopPolicy / retryPolicy） |
-| `credentialRefIds[]` | 凭证引用 | 计划（节点 `credentialRefId` 已加 Intent） |
+| `credentialRefIds[]` | 凭证引用 | 节点 `credentialRefId` + GitHub/connector offline fail-closed（缺 ref / 无 DI）；live 授权 **未接** |
 | `artifacts[]` | 产物 | **已实现**（Instance.artifacts） |
 
 ### 3.2 TaskMaterial
@@ -146,26 +146,26 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 
 | ID | 验收项 | 状态 | 证据 |
 |----|--------|------|------|
-| PW-1 | 项目内选择已保存流程并启动 | 计划 | — |
+| PW-1 | 项目内选择已保存流程并启动 | **实现/localE2E**：rail 打开已保存流程 + `openSavedFlowForRun` → Run 页 materials→preflight→start；taskPack 重开 | Overlay `data-loop-open-saved-flow-run` + Electron failfix 路径 |
 | PW-2 | Run 绑定 project/repo/workspace/branch/codeDigest/specVersion | **contract 初版** / 产品路径待验 | LocalApi start 接线 RunBinding 子集；完整字段 **未齐** |
 | PW-3 | 预检：缺配置 / 分支 / Agent / 审批点列表，确认后才开跑 | **contract** + Electron 材料/预检面板 + 孤儿审批闸 **blocker**；temp 证据测 Spec→preflight→start；无 Spec 禁用 ≠ 通过条件 | `LoopRunMaterialsPanel` + `validateApprovalGateWiring`；审批通过 ≠ 开跑 |
-| PW-4 | 隔离工作区编码+测试+人工；产出 Diff/TestReport/Preview 或 PR | **实现/证据（local deterministic E2E·非 live）**：DI-only `local_tools`（须 env allow；缺配置明确拒绝）；**语义** fail→feedback→fix→green（非 comment stamp）；ChangeSet + failed/passed TestReport + exitCode + unifiedDiff；Electron 可见产物卡 `loops-b-ui-05-*`；cancel 保留 **contract**。更深 Diff UI / 付费 live **未完** | `loop-execution-loopback-fix` + LocalApi settle；GitHub 外发 **未验** |
+| PW-4 | 隔离工作区编码+测试+人工；产出 Diff/TestReport/Preview 或 PR | **实现/localE2E（非 live）**：DI-only `local_tools`；语义 fail→fix→green；ChangeSet+TestReport+exitCode+unifiedDiff；UI Show Diff / exit DOM；`loops-b-ui-06-*`（单屏≠全文）。付费 live / 真 PR 外发 **未完** | `loop-execution-loopback` + credential fail-closed |
 | PW-5 | 失败保留证据可续；cancel/recover | 部分实现 / 证据加深 | checkpoint / cancel **已测**；failfix 路径保留 failed+passed artifacts；缺 leaf→`文件未挂接` |
-| PW-6 | 编辑定义不污染运行中 Instance 快照 | **实现/证据**（failfix 测） | Spec 冻结；start 后改 draft 不改 runBinding |
+| PW-6 | 编辑定义不污染运行中 Instance 快照 | **实现/证据**（failfix + taskPack isolation） | Spec 冻结；taskPack 不 bump draft revision；start 后改 draft 不改 runBinding |
 | PW-7 | Issue/PR/选中代码/错误上下文快捷调用同 run | 计划 | — |
-| PW-8 | GitHub/Sentry/定时事件同机制；离线排队未实现须诚实 | 部分 | GitHub/Sentry **契约已测/live待验**；离线排队 **未实现** |
+| PW-8 | GitHub/Sentry/定时事件同机制；离线排队未实现须诚实 | 部分 | GitHub write / connector 缺 credentialRef **offline fail-closed**；Sentry **契约已测/live待验**；离线排队 **未实现** |
 
 ### 4.2 增量 B（Materials）
 
 | ID | 验收项 | 状态 | 证据 |
 |----|--------|------|------|
-| TM-1 | 文字任务描述 | **实现**：材料卡预览/替换/错误 + text/`project_ref`/`file` 入 runBinding | `LoopRunMaterialsPanel` |
-| TM-2 | 图片用途标注 + 不支持提示 | **contract/实现（负例）**：image/* → `parseStatus=unsupported`（非 ok） | `loop-task-material-formats` |
-| TM-3 | 文件/API/log 卡片 + 解析状态 | **实现首批**：plaintext/md/json/csv/log **支持预览**；image/xlsx/pdf **显式 unsupported**；URL 生产读取 **未接**；SSRF 策略 **不放宽** | `LoopRunMaterialsPanel` + formats + schema |
-| TM-4 | CSV/XLSX sheet/列/范围 + 角色 | CSV 预览 **支持**；XLSX sheet/列范围 **不支持**（unsupported） | formats 矩阵 |
+| TM-1 | 文字任务描述 | **实现**：材料卡预览/替换/错误 + text/`project_ref`/`file` 入 runBinding；级别 `text_preview` | `LoopRunMaterialsPanel` |
+| TM-2 | 图片用途标注 + 不支持提示 | **实现（负例+预检）**：image → `parseLevel=unsupported` 且**保留卡片** + vision gate（`model_lacks_vision` / `eligible_not_wired`）；Pure 缩略预览；≠ 静默丢图；≠ vision ingest 完成 | `loop-material-vision-preflight` + `LoopMaterialImagePreview` |
+| TM-3 | 文件/API/log 卡片 + 解析状态 | **实现首批（精确）**：plaintext/md/json/csv/log = **text_preview**；image/xlsx/pdf = **unsupported**；`full_text_parse` / `structured_selection` **未实现**；URL 生产读取 **未接** | formats + schema |
+| TM-4 | CSV/XLSX sheet/列/范围 + 角色 | CSV = **text_preview only**（≠ sheet/列/范围）；XLSX = **unsupported** | formats 矩阵诚实文案 |
 | TM-5 | URL 来源 + 鉴权/读取失败 + SSRF 默认拒内网 | **contract**（`loop-url-fetch-policy`）；生产读取 **未接** | bugs H3 |
 | TM-6 | 项目文件/C4/测试引用免重复上传 | 计划（C4 引用底座已有） | — |
-| TM-7 | 增删替换 / 保存重开 / run 覆盖不改定义 | 计划（Electron Overlay 保存重开节点 **已截**；材料卡路径 **未验**） | — |
+| TM-7 | 增删替换 / 保存重开 / run 覆盖不改定义 | **实现/contract**：document.taskPack 持久化；select/load 恢复；create 不清污染；start 后恢复定义 pack；draft revision 不变 | `loop-task-pack.isolation.test` + store |
 | TM-8 | 材料变化提示重审；不机械全图重跑 | 计划 | — |
 
 ### 4.3 双入口 / 安全 / 连接器（交叉回归）
@@ -176,7 +176,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | DE-2 | Provider authoring loopback：空图；审批闸语义；连续陈旧负例 | **实现/证据**（**loopback·not live**）：A3 连续脚本无 fatal——改其他字段保 retry=2；改 retry→1 则保 1（不假恢复 2）；timeout 恒 7777、无 9999；重开一致。**UI Accept-disabled ≠ server reject**（分层：UI 禁用 vs `acceptLoopGraphEditOffer` / runtime gate **contract**）。付费 live **未验** |
 | SEC-1 | High-risk / catalog_only 不可调用方绕过 | **contract** |
 | SEC-2 | 非幂等 POST 不盲重试；timeout/abort unknown；脱敏全链 | **contract** |
-| CON-1 | Batch1 GitHub/Slack/Feishu/Lark/Sentry | **contract** / live未验 |
+| CON-1 | Batch1 GitHub/Slack/Feishu/Lark/Sentry | **contract** + GitHub/connector offline credential fail-closed / live未验 |
 | CON-2 | Batch2 Linear/Jira/Notion/Vercel-list | **contract** / live未验 |
 | CON-3 | Batch3 Supabase/PostHog | **catalog_only** |
 
@@ -221,3 +221,4 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | 2026-11-10 | 初版：增量 A/B 全范围、阶段依赖、契约、验收矩阵；与 Studio/GC/Six-Goals/bugs 互链 |
 | 2026-11-10 | S2→**contract 初版**（非全勾）；PW-2/3、TM-1/3/5 状态对齐实现；材料 UI/E2E 仍待验 |
 | 2026-11-10 | PW-4/5/6 + TM-2/3/4：fail→fix→green local deterministic E2E；格式显式支持/不支持矩阵；UI≠server 拒绝分层 |
+| 2026-11-10 | PW-1/TM-7 产品入口 taskPack；parseLevel 精确分层；image vision 预检+Pure 预览；Diff/exit UI；GitHub/Gmail offline credential gate；gate-attribution vs bec3dd7 + graph tip |

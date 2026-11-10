@@ -889,6 +889,19 @@ export const LoopGraphDocumentSchema = z
       .max(LOOP_DRAFT_HISTORY_MAX)
       .default([]),
     pendingGraphEditOffer: LoopPendingGraphEditOfferSchema.optional(),
+    /**
+     * Staging task pack for project manual runs — NOT Intent draft / Spec.
+     * Materials here may be edited/saved/reopened without mutating definitions.
+     * Start snapshots into Instance.runBinding; runOverride never writes back draft.
+     */
+    taskPack: z
+      .object({
+        branch: z.string().trim().min(1).max(240).optional(),
+        materials: z.array(LoopTaskMaterialSchema).max(64).default([]),
+        updatedAt: z.string().min(1),
+      })
+      .strict()
+      .optional(),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1),
   })

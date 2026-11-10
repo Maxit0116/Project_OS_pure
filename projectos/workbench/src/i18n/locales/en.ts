@@ -1910,6 +1910,7 @@ const en = {
       compile: 'Interpret',
       approve: 'Approve Loop Spec',
       start: 'Start',
+      openSavedFlowForRun: 'Open saved flow → Run',
       materialsTitle: 'Task materials & preflight',
       materialsHint:
         'Materials bind to this run only — they do not rewrite the Intent definition. Preflight via LocalApi; no silent pass.',
@@ -1919,7 +1920,8 @@ const en = {
       materialsTextBody: 'Task description…',
       materialsAddRef: 'Add project reference',
       materialsAddFile: 'Attach file',
-      materialsFileHint: 'First batch: plaintext preview only; other formats are deferred honestly.',
+      materialsFileHint:
+        'Levels: plaintext/md/json/csv/log = text_preview only (CSV ≠ sheet/column). image/xlsx/pdf = unsupported + kept as cards; vision/model preflight for images.',
       materialsList: 'Staged materials',
       materialsEmpty: 'No materials staged yet.',
       materialsRemove: 'Remove material',

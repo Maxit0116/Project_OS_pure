@@ -37,6 +37,11 @@ export const LoopChangeSetSchema = z
     contentDigest: z.string().trim().min(1).max(128).optional(),
     /** Per-path digests (bounded) for dirty detection. */
     fileDigests: z.record(z.string(), z.string().trim().min(1).max(128)).optional(),
+    /**
+     * Optional unified diff excerpt for Run UI (bounded).
+     * Presence ≠ full patch apply authority; display/evidence only.
+     */
+    unifiedDiff: z.string().max(20_000).optional(),
   })
   .strict();
 
@@ -51,6 +56,8 @@ export const LoopTestReportSchema = z
     evidenceId: z.string().min(1).optional(),
     /** Code digest this TestReport actually validated. */
     validatedCodeDigest: z.string().trim().min(1).max(128).optional(),
+    /** Process exit code when the verification command was spawned. */
+    exitCode: z.number().int().nullable().optional(),
   })
   .strict();
 

@@ -7,7 +7,7 @@
  * and exposes AgentRun/Evidence views the production Loop stepper already polls.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -239,6 +239,7 @@ export class LoopExecutionLoopbackHost {
       runId,
       status: state.status,
       applySucceeded: state.applySucceeded,
+      ...(unifiedDiff ? { unifiedDiff } : {}),
     };
   }
 
@@ -292,6 +293,7 @@ export class LoopExecutionLoopbackHost {
       runId: state.runId,
       status: state.status,
       applySucceeded: state.applySucceeded,
+      ...(state.unifiedDiff ? { unifiedDiff: state.unifiedDiff } : {}),
     };
   }
 

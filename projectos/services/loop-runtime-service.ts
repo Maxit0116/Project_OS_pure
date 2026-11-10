@@ -2219,6 +2219,7 @@ function stepImplementNode(
         : {}),
       ...(contentDigest ? { contentDigest } : {}),
       ...(fileDigests ? { fileDigests } : {}),
+      ...(run.unifiedDiff ? { unifiedDiff: run.unifiedDiff } : {}),
     });
     next = pushArtifact(next, {
       nodeId: node.id,

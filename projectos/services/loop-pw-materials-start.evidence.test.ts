@@ -362,6 +362,13 @@ describe("PW materials Spec→fail→fix→green evidence", () => {
     expect(changeSet.contentDigest).toBeTruthy();
     expect(changeSet.summary.length).toBeGreaterThan(0);
     expect(changeSet.fileDigests?.["src/greet.js"]).toBeTruthy();
+    // Diff content on the artifact (not screenshot-only acceptance).
+    expect(changeSet.unifiedDiff ?? "").toMatch(/Hello, \$\{name\}!/);
+
+    expect(passedReport!.exitCode).toBe(0);
+    expect(failedReport!.exitCode === null || failedReport!.exitCode !== 0).toBe(
+      true,
+    );
 
     const audit = api.getLoopExecutionLoopbackAudit();
     expect(audit?.exitCode).toBe(0);

@@ -9004,6 +9004,24 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         const payloadRefs = Object.fromEntries(
           Object.entries(input.payload).map(([key, value]) => [key, String(value)]),
         );
+        const credentialRefId =
+          typeof input.payload.credentialRefId === "string"
+            ? input.payload.credentialRefId.trim()
+            : "";
+        // Write-high GitHub ops require an explicit credential *ref* (offline contract).
+        // Catalog presence / brand ≠ authorized; no silent simulate without ref.
+        if (
+          (input.operation === "create_pr" ||
+            input.operation === "create_branch") &&
+          !credentialRefId
+        ) {
+          return {
+            ok: false,
+            message:
+              "Missing credentialRefId — GitHub write Action not runnable (configured ≠ authorized; offline fail-closed)",
+            refs: payloadRefs,
+          };
+        }
         // Sync stepper cannot await REST; queue create_pr/create_branch for settleLoopRuns.
         if (
           input.operation === "create_pr" ||
@@ -9012,8 +9030,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           return {
             ok: true,
             deferred: true,
-            message: `GitHub ${input.operation} queued for settle`,
-            refs: payloadRefs,
+            message: `GitHub ${input.operation} queued for settle (credentialRef=${credentialRefId})`,
+            refs: { ...payloadRefs, credentialRefId },
           };
         }
         return {

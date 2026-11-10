@@ -1,12 +1,18 @@
 /**
- * First-batch Task Materials format matrix (honest support).
- * Image / spreadsheet / URL binary previews are deferred — mark unsupported,
- * do not pretend parseStatus=ok.
+ * First-batch Task Materials format matrix (honest support levels).
+ *
+ * Levels (do not inflate):
+ * - text_preview: capped plaintext preview only — NOT full document ingest,
+ *   NOT JSON schema field pick, NOT CSV sheet/column/range selection
+ * - unsupported: deferred (image/xlsx/pdf/…) — correct safety state, not “done”
+ *
+ * Planned but NOT implemented: full_text_parse, structured_selection.
  */
+export type LoopMaterialParseLevel = "text_preview" | "unsupported";
 
-export type LoopMaterialFormatSupport = "supported_preview" | "unsupported";
+export type LoopMaterialFormatSupport = LoopMaterialParseLevel;
 
-const TEXT_LIKE_MIME = new Set([
+const TEXT_PREVIEW_MIME = new Set([
   "text/plain",
   "text/markdown",
   "application/json",
@@ -14,7 +20,7 @@ const TEXT_LIKE_MIME = new Set([
   "text/x-log",
 ]);
 
-const TEXT_LIKE_EXT = /\.(txt|md|json|csv|log)$/i;
+const TEXT_PREVIEW_EXT = /\.(txt|md|json|csv|log)$/i;
 
 /** Explicitly deferred in first batch (must not silently parse as ok). */
 const DEFERRED_MIME_PREFIXES = [
@@ -32,40 +38,100 @@ const DEFERRED_MIME_PREFIXES = [
 
 const DEFERRED_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|pdf|xlsx?|xls|pptx?|docx?)$/i;
 
+export type LoopMaterialFormatClassification = {
+  support: LoopMaterialFormatSupport;
+  /** Alias of support for call sites that prefer parseLevel naming. */
+  parseLevel: LoopMaterialParseLevel;
+  reason: string;
+  /** Human matrix row id for docs/UI. */
+  formatId:
+    | "plaintext"
+    | "markdown"
+    | "json"
+    | "csv"
+    | "log"
+    | "image"
+    | "xlsx"
+    | "pdf"
+    | "other_binary";
+};
+
+function detectFormatId(mime: string, name: string): LoopMaterialFormatClassification["formatId"] {
+  if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name)) {
+    return "image";
+  }
+  if (
+    mime.includes("spreadsheet") ||
+    mime.includes("ms-excel") ||
+    /\.xlsx?$/i.test(name)
+  ) {
+    return "xlsx";
+  }
+  if (mime === "application/pdf" || /\.pdf$/i.test(name)) return "pdf";
+  if (mime === "text/csv" || /\.csv$/i.test(name)) return "csv";
+  if (mime === "application/json" || /\.json$/i.test(name)) return "json";
+  if (mime === "text/markdown" || /\.md$/i.test(name)) return "markdown";
+  if (mime === "text/x-log" || /\.log$/i.test(name)) return "log";
+  if (mime === "text/plain" || /\.txt$/i.test(name)) return "plaintext";
+  return "other_binary";
+}
+
 export function classifyLoopMaterialFormat(input: {
   mimeType?: string | null;
   fileName?: string | null;
-}): {
-  support: LoopMaterialFormatSupport;
-  reason: string;
-} {
+}): LoopMaterialFormatClassification {
   const mime = (input.mimeType ?? "").trim().toLowerCase();
   const name = (input.fileName ?? "").trim();
+  const formatId = detectFormatId(mime, name);
 
   if (DEFERRED_EXT.test(name) || DEFERRED_MIME_PREFIXES.some((p) => mime.startsWith(p))) {
+    const deferredNote =
+      formatId === "image"
+        ? " — keep card + vision/model preflight; Pure image→prompt attach not wired"
+        : formatId === "xlsx"
+          ? " — sheet/column/range structured_selection not implemented (CSV text_preview ≠ xlsx)"
+          : formatId === "pdf"
+            ? " — full_text_parse / page extract not implemented"
+            : " — not text_preview; structured_selection not implemented";
     return {
       support: "unsupported",
-      reason: `First-batch materials only preview plaintext; “${mime || name || "binary"}” deferred`,
+      parseLevel: "unsupported",
+      formatId,
+      reason: `First-batch: “${mime || name || "binary"}” is unsupported${deferredNote}`,
     };
   }
 
-  if (TEXT_LIKE_MIME.has(mime) || TEXT_LIKE_EXT.test(name)) {
+  if (TEXT_PREVIEW_MIME.has(mime) || TEXT_PREVIEW_EXT.test(name)) {
+    const csvNote =
+      formatId === "csv"
+        ? " — raw CSV text_preview only; sheet/column/range selection NOT implemented"
+        : formatId === "json"
+          ? " — raw JSON text_preview only; field/schema selection NOT implemented"
+          : " — capped text_preview only; full_text_parse NOT implemented";
     return {
-      support: "supported_preview",
-      reason: "plaintext preview supported in first batch",
+      support: "text_preview",
+      parseLevel: "text_preview",
+      formatId,
+      reason: `First-batch ${formatId}${csvNote}`,
     };
   }
 
   if (!mime && !name) {
     return {
       support: "unsupported",
+      parseLevel: "unsupported",
+      formatId: "other_binary",
       reason: "First-batch materials require mime or filename to classify",
     };
   }
 
-  // Unknown binary → unsupported (fail closed for preview).
   return {
     support: "unsupported",
-    reason: `First-batch materials only preview plaintext; “${mime || name}” deferred`,
+    parseLevel: "unsupported",
+    formatId: "other_binary",
+    reason: `First-batch: “${mime || name}” unsupported (text_preview only for plaintext/md/json/csv/log)`,
   };
 }
+
+/** @deprecated Prefer classifyLoopMaterialFormat(...).support */
+export type { LoopMaterialFormatSupport as LoopMaterialFormatSupportAlias };

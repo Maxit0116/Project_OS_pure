@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { LoopTaskMaterial } from '@contracts/index'
 import { classifyLoopMaterialFormat } from '@contracts/loop-task-material-formats'
+import { evaluateImageMaterialCapability } from '@contracts/loop-material-vision-preflight'
 import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
+import LoopMaterialImagePreview from './LoopMaterialImagePreview'
 import styles from './LoopRunMaterialsPanel.module.css'
 
 function newMaterialId(prefix: string): string {
@@ -32,6 +34,21 @@ export default function LoopRunMaterialsPanel() {
   const [fileError, setFileError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [replacingId, setReplacingId] = useState<string | null>(null)
+  /** Ephemeral local thumbs — never written into document.taskPack / Intent. */
+  const [imageObjectUrls, setImageObjectUrls] = useState<Record<string, string>>(
+    {},
+  )
+  const [imageVisionGates, setImageVisionGates] = useState<
+    Record<string, string>
+  >({})
+
+  useEffect(() => {
+    return () => {
+      for (const url of Object.values(imageObjectUrls)) {
+        URL.revokeObjectURL(url)
+      }
+    }
+  }, [imageObjectUrls])
 
   const addText = () => {
     const title = textTitle.trim() || textBody.trim().slice(0, 80) || 'Task text'
@@ -45,6 +62,8 @@ export default function LoopRunMaterialsPanel() {
       title: title.slice(0, 240),
       source: 'composer_text',
       parseStatus: 'ok',
+      parseLevel: 'text_preview',
+      parseMessage: 'text_preview only — full_text_parse not implemented',
       textPreview: body.slice(0, 8_000),
       version: 1,
       runOverride: true,
@@ -72,7 +91,8 @@ export default function LoopRunMaterialsPanel() {
       title: path.slice(0, 240),
       source: 'project_ref',
       parseStatus: 'ok',
-      parseMessage: 'path recorded; bytes resolved at run bind',
+      parseLevel: 'text_preview',
+      parseMessage: 'path recorded; bytes resolved at run bind (text_preview path only)',
       projectRef: { path, kind: path.endsWith('/') ? 'dir' : 'file' },
       version: 1,
       runOverride: true,
@@ -98,7 +118,53 @@ export default function LoopRunMaterialsPanel() {
       mimeType: mime,
       fileName: file.name,
     })
-    if (format.support === 'unsupported') {
+    if (format.formatId === 'image') {
+      // ModelProfile has no vision flag yet — default supportsVision=false.
+      // Keep the card; never silently drop the image.
+      const vision = evaluateImageMaterialCapability({
+        mimeType: mime,
+        fileName: file.name,
+        sizeBytes: file.size,
+        supportsVision: false,
+      })
+      const materialId = replacingId ?? newMaterialId('mat_image')
+      const unsupported: LoopTaskMaterial = {
+        id: materialId,
+        kind: 'image',
+        purpose: 'error_screenshot',
+        title: file.name.slice(0, 240),
+        source: 'upload',
+        parseStatus: 'unsupported',
+        parseLevel: 'unsupported',
+        parseMessage: vision.reason,
+        mimeType: mime,
+        sizeBytes: file.size,
+        measuredSizeBytes: file.size,
+        version: 1,
+        runOverride: true,
+        createdAt: now,
+        updatedAt: now,
+      }
+      const objectUrl = URL.createObjectURL(file)
+      setImageObjectUrls((prev) => {
+        const prior = prev[materialId]
+        if (prior) URL.revokeObjectURL(prior)
+        return { ...prev, [materialId]: objectUrl }
+      })
+      setImageVisionGates((prev) => ({
+        ...prev,
+        [materialId]: vision.visionGate,
+      }))
+      if (replacingId) {
+        replaceRunMaterial(replacingId, unsupported)
+        setReplacingId(null)
+      } else {
+        addRunMaterial(unsupported)
+      }
+      setFileError(unsupported.parseMessage ?? 'unsupported')
+      return
+    }
+    if (format.parseLevel === 'unsupported') {
       const unsupported: LoopTaskMaterial = {
         id: replacingId ?? newMaterialId('mat_file'),
         kind: 'file',
@@ -106,6 +172,7 @@ export default function LoopRunMaterialsPanel() {
         title: file.name.slice(0, 240),
         source: 'upload',
         parseStatus: 'unsupported',
+        parseLevel: 'unsupported',
         parseMessage: format.reason,
         mimeType: mime,
         sizeBytes: file.size,
@@ -133,7 +200,8 @@ export default function LoopRunMaterialsPanel() {
         title: file.name.slice(0, 240),
         source: 'upload',
         parseStatus: 'ok',
-        parseMessage: 'plaintext preview available',
+        parseLevel: 'text_preview',
+        parseMessage: format.reason,
         textPreview: text.slice(0, 8_000),
         mimeType: mime || 'text/plain',
         sizeBytes: file.size,
@@ -288,8 +356,24 @@ export default function LoopRunMaterialsPanel() {
                   <span className={styles.rowTitle}>{material.title}</span>
                   <span className={styles.rowStatus}>{material.parseStatus}</span>
                 </div>
+                {material.parseLevel ? (
+                  <p
+                    className={styles.parseMsg}
+                    data-loop-material-parse-level={material.parseLevel}
+                  >
+                    level: {material.parseLevel}
+                  </p>
+                ) : null}
                 {material.parseMessage ? (
                   <p className={styles.parseMsg}>{material.parseMessage}</p>
+                ) : null}
+                {material.kind === 'image' ||
+                (material.mimeType ?? '').startsWith('image/') ? (
+                  <LoopMaterialImagePreview
+                    material={material}
+                    objectUrl={imageObjectUrls[material.id] ?? null}
+                    visionGate={imageVisionGates[material.id] ?? null}
+                  />
                 ) : null}
                 {expandedId === material.id && material.textPreview ? (
                   <pre

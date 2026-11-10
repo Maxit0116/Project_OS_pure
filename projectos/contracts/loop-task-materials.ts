@@ -34,6 +34,17 @@ export const LoopTaskMaterialParseStatusSchema = z.enum([
   "failed",
 ]);
 
+/**
+ * Honest parse *level* for first-batch materials.
+ * - text_preview: capped plaintext preview only (not full ingest, not structured select)
+ * - unsupported: deferred format (image/xlsx/pdf/…) — safety state, not “feature done”
+ * full_text_parse / structured_selection are **not implemented** yet — do not claim them.
+ */
+export const LoopTaskMaterialParseLevelSchema = z.enum([
+  "text_preview",
+  "unsupported",
+]);
+
 export const LoopTaskMaterialSourceSchema = z.enum([
   "upload",
   "paste",
@@ -59,7 +70,12 @@ export const LoopTaskMaterialSchema = z
     version: z.number().int().positive().max(1_000_000).optional(),
     parseStatus: LoopTaskMaterialParseStatusSchema.default("pending"),
     parseMessage: z.string().trim().max(500).optional(),
-    /** Table preview metadata (CSV/XLSX) — no cell dump required in contract. */
+    /**
+     * Capability level actually provided (see LoopTaskMaterialParseLevelSchema).
+     * CSV at text_preview ≠ sheet/column/range structured selection.
+     */
+    parseLevel: LoopTaskMaterialParseLevelSchema.optional(),
+    /** Table preview metadata (CSV/XLSX) — only when structured_selection exists (not yet). */
     tablePreview: z
       .object({
         sheet: z.string().trim().min(1).max(120).optional(),

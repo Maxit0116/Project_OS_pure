@@ -149,6 +149,8 @@ export function buildChangeSetFromRun(input: {
   deletedFiles?: string[];
   contentDigest?: string;
   fileDigests?: Record<string, string>;
+  /** Bounded unified diff for Run UI / evidence (optional). */
+  unifiedDiff?: string;
 }): LoopChangeSet {
   const files = [
     ...new Set(
@@ -170,6 +172,7 @@ export function buildChangeSetFromRun(input: {
     agentRunId: input.agentRunId,
     ...(input.contentDigest ? { contentDigest: input.contentDigest } : {}),
     ...(input.fileDigests ? { fileDigests: input.fileDigests } : {}),
+    ...(input.unifiedDiff ? { unifiedDiff: input.unifiedDiff.slice(0, 20_000) } : {}),
   });
 }
 

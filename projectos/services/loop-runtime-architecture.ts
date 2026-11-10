@@ -168,6 +168,9 @@ export function evidenceToTestReport(
     evidenceId: evidence.id,
     ...(resolvedCommand ? { command: resolvedCommand } : {}),
     ...(validatedCodeDigest ? { validatedCodeDigest } : {}),
+    ...(evidence.exitCode !== undefined
+      ? { exitCode: evidence.exitCode }
+      : {}),
     ...(typeof evidence.exitCode === "number"
       ? {
           total: 1,

@@ -92,6 +92,7 @@ export * from "./ui-stencil.js";
 export * from "./loop-graph.js";
 export * from "./loop-task-materials.js";
 export * from "./loop-task-material-formats.js";
+export * from "./loop-material-vision-preflight.js";
 export * from "./loop-artifacts.js";
 export * from "./loop-presets.js";
 export * from "./diagram-graph.js";

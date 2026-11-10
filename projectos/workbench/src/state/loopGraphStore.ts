@@ -203,8 +203,12 @@ interface LoopGraphStore {
   replaceRunMaterial: (materialId: string, material: LoopTaskMaterial) => void
   removeRunMaterial: (materialId: string) => void
   clearRunMaterials: () => void
+  /** Persist staging materials/branch into document.taskPack without touching draft. */
+  persistTaskPackStaging: () => void
   runPreflight: () => Promise<void>
   startRun: () => Promise<void>
+  /** Product entry: switch to Run with saved-flow taskPack materials restored. */
+  openSavedFlowForRun: () => void
   pauseRun: () => Promise<void>
   resumeRun: () => Promise<void>
   advanceRun: () => Promise<void>
@@ -541,6 +545,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       const document = activeId
         ? await client.getLoopGraph(project.projectId, activeId)
         : null
+      const pack = document?.taskPack
       set({
         heads: index.heads,
         activeLoopId: activeId,
@@ -556,6 +561,10 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         // pendingCompile / approvedSpecs stay hydrated so Review / Run tabs remain available.
         phase: 'draw',
         loading: false,
+        // Product entry: restore staging materials for the active saved flow.
+        runMaterials: pack?.materials ? [...pack.materials] : [],
+        runBranch: pack?.branch ?? '',
+        preflightResult: null,
       })
     } catch (error) {
       set({
@@ -573,6 +582,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       await client.setLastActiveLoopGraph(project.projectId, loopId)
       const document = await client.getLoopGraph(project.projectId, loopId)
       const heads = await client.listLoopGraphs(project.projectId)
+      const pack = document?.taskPack
       set({
         activeLoopId: loopId,
         document,
@@ -591,6 +601,10 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         composerDraft: '',
         composerSheet: 'none',
         authoringBusy: false,
+        // Restore staging task pack — never merges into Intent draft.
+        runMaterials: pack?.materials ? [...pack.materials] : [],
+        runBranch: pack?.branch ?? '',
+        preflightResult: null,
       })
     } catch (error) {
       set({
@@ -619,6 +633,10 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         composerDraft: '',
         composerSheet: 'none',
         authoringBusy: false,
+        // New saved flow must not inherit prior loop's staging materials.
+        runMaterials: [],
+        runBranch: '',
+        preflightResult: null,
       })
       return document.id
     } catch (error) {
@@ -1541,25 +1559,64 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     }
   },
 
-  setRunBranch: (branch) => set({ runBranch: branch, preflightResult: null }),
-  addRunMaterial: (material) =>
+  setRunBranch: (branch) => {
+    set({ runBranch: branch, preflightResult: null })
+    get().persistTaskPackStaging()
+  },
+  addRunMaterial: (material) => {
     set((state) => ({
       runMaterials: [...state.runMaterials, material],
       preflightResult: null,
-    })),
-  replaceRunMaterial: (materialId, material) =>
+    }))
+    get().persistTaskPackStaging()
+  },
+  replaceRunMaterial: (materialId, material) => {
     set((state) => ({
       runMaterials: state.runMaterials.map((item) =>
         item.id === materialId ? material : item,
       ),
       preflightResult: null,
-    })),
-  removeRunMaterial: (materialId) =>
+    }))
+    get().persistTaskPackStaging()
+  },
+  removeRunMaterial: (materialId) => {
     set((state) => ({
       runMaterials: state.runMaterials.filter((item) => item.id !== materialId),
       preflightResult: null,
-    })),
-  clearRunMaterials: () => set({ runMaterials: [], preflightResult: null }),
+    }))
+    get().persistTaskPackStaging()
+  },
+  clearRunMaterials: () => {
+    set({ runMaterials: [], preflightResult: null })
+    get().persistTaskPackStaging()
+  },
+  persistTaskPackStaging: () => {
+    const { document, runMaterials, runBranch } = get()
+    if (!document) return
+    const draftRevision = document.draft.revision
+    const branch = runBranch.trim()
+    set({
+      document: {
+        ...document,
+        // Intent draft bytes must stay identical (definition isolation).
+        draft: document.draft,
+        taskPack: {
+          ...(branch ? { branch } : {}),
+          materials: runMaterials,
+          updatedAt: new Date().toISOString(),
+        },
+        updatedAt: new Date().toISOString(),
+      },
+    })
+    // Guard: staging must not bump draft revision.
+    if (get().document?.draft.revision !== draftRevision) {
+      set({
+        error: 'taskPack staging must not mutate draft revision',
+      })
+      return
+    }
+    get().schedulePersist()
+  },
   runPreflight: async () => {
     const { client, project } = useWorkbenchStore.getState()
     const loopId = get().activeLoopId
@@ -1610,14 +1667,17 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       )
       const heads = await client.listLoopGraphs(project.projectId)
       const runHistory = await client.listLoopRunHistory(project.projectId, loopId)
+      // Instance binding holds the run snapshot; restore definition taskPack
+      // for the next prep (runOverride must not have mutated Intent draft).
+      const pack = document.taskPack
       set({
         document,
         heads,
         phase: 'run',
         loading: false,
         runHistory,
-        // Binding snapshot is on the instance — clear staging draft after start.
-        runMaterials: [],
+        runMaterials: pack?.materials ? [...pack.materials] : [],
+        runBranch: pack?.branch ?? get().runBranch,
         preflightResult: null,
       })
     } catch (error) {
@@ -1626,6 +1686,20 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         error: error instanceof Error ? error.message : 'Start failed',
       })
     }
+  },
+
+  /** Product entry: open the active saved flow on the Run tab with taskPack materials. */
+  openSavedFlowForRun: () => {
+    const document = get().document
+    if (!document) return
+    const pack = document.taskPack
+    set({
+      phase: 'run',
+      runMaterials: pack?.materials ? [...pack.materials] : get().runMaterials,
+      runBranch: pack?.branch ?? get().runBranch,
+      preflightResult: null,
+      error: null,
+    })
   },
 
   refreshRunHistory: async () => {

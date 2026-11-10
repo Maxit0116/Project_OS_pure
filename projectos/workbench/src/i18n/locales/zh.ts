@@ -1878,6 +1878,7 @@ const zh = {
       compile: '理解',
       approve: '批准 Loop Spec',
       start: '启动',
+      openSavedFlowForRun: '打开已保存流程 → 运行',
       materialsTitle: '任务材料与预检',
       materialsHint:
         '材料仅绑定本次 run，不会改写 Intent 定义。预检走 LocalApi，禁止静默通过。',
@@ -1887,7 +1888,8 @@ const zh = {
       materialsTextBody: '任务描述…',
       materialsAddRef: '添加项目引用',
       materialsAddFile: '附加文件',
-      materialsFileHint: '首批仅预览纯文本；其他格式诚实分期。',
+      materialsFileHint:
+        '级别：plaintext/md/json/csv/log = 仅 text_preview（CSV ≠ 工作表/列范围）。image/xlsx/pdf = unsupported 且保留卡片；图片按 model 能力预检。',
       materialsList: '已暂存材料',
       materialsEmpty: '尚未暂存材料。',
       materialsRemove: '移除材料',

@@ -100,6 +100,7 @@ export default function LoopGraphOverlay() {
   const loadForWorkspace = useLoopGraphStore((s) => s.loadForWorkspace)
   const clear = useLoopGraphStore((s) => s.clear)
   const setPhase = useLoopGraphStore((s) => s.setPhase)
+  const openSavedFlowForRun = useLoopGraphStore((s) => s.openSavedFlowForRun)
   const selectLoop = useLoopGraphStore((s) => s.selectLoop)
   const createLoop = useLoopGraphStore((s) => s.createLoop)
   const deleteLoop = useLoopGraphStore((s) => s.deleteLoop)
@@ -592,6 +593,17 @@ export default function LoopGraphOverlay() {
                   aria-label={ts('chat.loopGraph.compile')}
                 >
                   <Sparkles size={14} aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  className={styles.actionButton}
+                  onClick={() => openSavedFlowForRun()}
+                  disabled={!document}
+                  title={ts('chat.loopGraph.openSavedFlowForRun')}
+                  aria-label={ts('chat.loopGraph.openSavedFlowForRun')}
+                  data-loop-open-saved-flow-run=""
+                >
+                  {ts('chat.loopGraph.openSavedFlowForRun')}
                 </button>
               </>
             ) : null}

@@ -18,6 +18,8 @@ export interface LoopAgentRunView {
   runId: string;
   status: AgentRunStatus;
   applySucceeded: boolean;
+  /** Optional unified diff from the implement apply (DI/local_tools evidence). */
+  unifiedDiff?: string;
 }
 
 export interface LoopEvidenceView {

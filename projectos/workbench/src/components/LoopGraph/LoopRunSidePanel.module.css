@@ -109,6 +109,49 @@
   white-space: nowrap;
 }
 
+.artifactsScroll {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(42vh, 360px);
+  overflow: auto;
+}
+
+.diffPreview,
+.diffBlock {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  font-size: 10px;
+  line-height: 1.35;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--tech-text-secondary);
+  background: var(--tech-bg-code, rgba(0, 0, 0, 0.2));
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.diffBlock {
+  max-height: 280px;
+}
+
+.linkish {
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  color: var(--tech-accent, #6cb6ff);
+  font-size: 11px;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .action {
   align-self: flex-start;
   border: 1px solid var(--tech-border);
