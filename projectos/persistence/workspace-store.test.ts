@@ -22,6 +22,7 @@ import { withProjectWriteTransactionLock } from "../services/project-write-trans
 import { resolveContainedPath } from "../utils/path-containment.js";
 import { ProjectOSWorkspaceStore } from "./workspace-store.js";
 import { deriveGraphProductOverlay } from "../services/graph-provenance.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 
@@ -88,7 +89,7 @@ describe("ProjectOSWorkspaceStore", () => {
   it("serializes direct current-work persistence with the project transaction lock", async () => {
     const tempWorkspaceRoot = mkdtempSync(join(tmpdir(), "projectos-store-lock-"));
     temporaryRoots.push(tempWorkspaceRoot);
-    cpSync(sampleWorkspaceRoot, tempWorkspaceRoot, { recursive: true });
+    copySampleTree(sampleWorkspaceRoot, tempWorkspaceRoot);
     const targetPath = join(tempWorkspaceRoot, ".projectos", "current-work.json");
     const before = readFileSync(targetPath, "utf8");
     const temporaryPaths: string[] = [];
@@ -143,7 +144,7 @@ describe("ProjectOSWorkspaceStore", () => {
   it("keeps the old document and cleans its unique temp when replacement is interrupted", async () => {
     const tempWorkspaceRoot = mkdtempSync(join(tmpdir(), "projectos-store-interruption-"));
     temporaryRoots.push(tempWorkspaceRoot);
-    cpSync(sampleWorkspaceRoot, tempWorkspaceRoot, { recursive: true });
+    copySampleTree(sampleWorkspaceRoot, tempWorkspaceRoot);
     const targetPath = join(tempWorkspaceRoot, ".projectos", "current-work.json");
     const before = readFileSync(targetPath, "utf8");
     const attemptedTemps: string[] = [];
@@ -172,7 +173,7 @@ describe("ProjectOSWorkspaceStore", () => {
   it("loads a composed graph and prepares graph/tree documents without writing them", async () => {
     const tempWorkspaceRoot = mkdtempSync(join(tmpdir(), "projectos-provenance-"));
     temporaryRoots.push(tempWorkspaceRoot);
-    cpSync(sampleWorkspaceRoot, tempWorkspaceRoot, { recursive: true });
+    copySampleTree(sampleWorkspaceRoot, tempWorkspaceRoot);
     const store = new ProjectOSWorkspaceStore();
     const initial = store.loadWorkspace(tempWorkspaceRoot);
     const effective = structuredClone(initial.graph);
@@ -212,7 +213,7 @@ describe("ProjectOSWorkspaceStore", () => {
   it("rejects transaction-ready internal documents bound to another project", () => {
     const tempWorkspaceRoot = mkdtempSync(join(tmpdir(), "projectos-provenance-binding-"));
     temporaryRoots.push(tempWorkspaceRoot);
-    cpSync(sampleWorkspaceRoot, tempWorkspaceRoot, { recursive: true });
+    copySampleTree(sampleWorkspaceRoot, tempWorkspaceRoot);
     const store = new ProjectOSWorkspaceStore();
     const workspace = store.loadWorkspace(tempWorkspaceRoot);
     expect(() => store.prepareSemanticTreePersistence(tempWorkspaceRoot, {
@@ -224,7 +225,7 @@ describe("ProjectOSWorkspaceStore", () => {
   it("derives missing descriptions without writing, then persists user edits across analysis", async () => {
     const tempWorkspaceRoot = mkdtempSync(join(tmpdir(), "projectos-description-"));
     temporaryRoots.push(tempWorkspaceRoot);
-    cpSync(sampleWorkspaceRoot, tempWorkspaceRoot, { recursive: true });
+    copySampleTree(sampleWorkspaceRoot, tempWorkspaceRoot);
     const descriptionPath = join(tempWorkspaceRoot, ".projectos", "project-description.json");
     rmSync(descriptionPath, { force: true });
 
@@ -255,7 +256,7 @@ describe("ProjectOSWorkspaceStore", () => {
   it("rejects oversized updates and project-mismatched persisted descriptions", async () => {
     const tempWorkspaceRoot = mkdtempSync(join(tmpdir(), "projectos-description-binding-"));
     temporaryRoots.push(tempWorkspaceRoot);
-    cpSync(sampleWorkspaceRoot, tempWorkspaceRoot, { recursive: true });
+    copySampleTree(sampleWorkspaceRoot, tempWorkspaceRoot);
     const descriptionPath = join(tempWorkspaceRoot, ".projectos", "project-description.json");
     rmSync(descriptionPath, { force: true });
 
@@ -299,7 +300,7 @@ describe("ProjectOSWorkspaceStore", () => {
   it("opens a workspace even when historical agent-run events fail current schema", () => {
     const tempWorkspaceRoot = mkdtempSync(join(tmpdir(), "projectos-agent-run-legacy-"));
     temporaryRoots.push(tempWorkspaceRoot);
-    cpSync(sampleWorkspaceRoot, tempWorkspaceRoot, { recursive: true });
+    copySampleTree(sampleWorkspaceRoot, tempWorkspaceRoot);
 
     const runsDir = join(tempWorkspaceRoot, ".projectos", "agent-runs");
     mkdirSync(runsDir, { recursive: true });

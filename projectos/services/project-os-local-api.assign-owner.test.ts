@@ -1,9 +1,10 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -14,7 +15,7 @@ function copyOfSample(): string {
   const tempRoot = mkdtempSync(join(tmpdir(), "projectos-owner-"));
   roots.push(tempRoot);
   const workspaceRoot = join(tempRoot, "sample-graph-saas");
-  cpSync(resolve("..", "sample-graph-saas"), workspaceRoot, { recursive: true });
+  copySampleTree(resolve("..", "sample-graph-saas"), workspaceRoot);
   rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
   return workspaceRoot;
 }

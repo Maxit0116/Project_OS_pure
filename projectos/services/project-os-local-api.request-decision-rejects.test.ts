@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,6 +13,7 @@ import type { PromptRefinement } from "../contracts/prompt-refinement.js";
 import type { AgentOrchestrator } from "./agent-orchestrator/index.js";
 import type { LoadedProjectOSWorkspace } from "../persistence/workspace-store.js";
 import type { RunDecision } from "../contracts/run-state.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const roots: string[] = [];
@@ -24,7 +25,7 @@ afterEach(() => {
 function copySampleWorkspace(): string {
   const root = mkdtempSync(join(tmpdir(), "local-api-decision-reject-"));
   roots.push(root);
-  cpSync(sampleWorkspaceRoot, root, { recursive: true });
+  copySampleTree(sampleWorkspaceRoot, root);
   mkdirSync(join(root, ".projectos"), { recursive: true });
   return root;
 }

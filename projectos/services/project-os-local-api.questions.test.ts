@@ -1,10 +1,11 @@
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunDecision } from "../contracts/run-state.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -15,7 +16,7 @@ function copyOfSample(): string {
   const tempRoot = mkdtempSync(join(tmpdir(), "projectos-question-"));
   roots.push(tempRoot);
   const workspaceRoot = join(tempRoot, "sample-graph-saas");
-  cpSync(resolve("..", "sample-graph-saas"), workspaceRoot, { recursive: true });
+  copySampleTree(resolve("..", "sample-graph-saas"), workspaceRoot);
   return workspaceRoot;
 }
 

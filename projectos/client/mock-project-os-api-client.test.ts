@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,6 +16,7 @@ import {
 import settingsFixture from "./sample-projectos-fixtures/settings.json" with {
   type: "json",
 };
+import { copySampleTree } from "../test-support/copy-sample.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const googleLoginPrompt =
@@ -95,7 +96,7 @@ function copySampleWorkspace(): string {
   const tempRoot = mkdtempSync(join(tmpdir(), "projectos-client-"));
   temporaryRoots.push(tempRoot);
   const tempWorkspaceRoot = join(tempRoot, "sample-graph-saas");
-  cpSync(sampleWorkspaceRoot, tempWorkspaceRoot, { recursive: true });
+  copySampleTree(sampleWorkspaceRoot, tempWorkspaceRoot);
   // Keep refinement on the mock's deterministic fixture path. Deleting settings is
   // not enough: bootstrap re-seeds model profiles from the sample workspace when
   // modelProfiles is empty (including local untracked sample settings.json).

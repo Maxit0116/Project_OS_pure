@@ -18,8 +18,7 @@ import {
   readdirSync,
   rmSync,
   writeFileSync,
-  cpSync,
-} from "node:fs";
+  } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -34,6 +33,7 @@ import { LocalContextAssembler } from "./local-context-assembler.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
 import { bindExistingFileAuthorization } from "./recoverable-write-transaction.js";
 import type { AgentRun } from "../contracts/agent-run.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 
 const sampleRoot = join(process.cwd(), "..", "sample-graph-saas");
 const roots: string[] = [];
@@ -49,7 +49,7 @@ function copySampleWorkspace(): string {
   const tempRoot = mkdtempSync(join(tmpdir(), "approved-intent-public-apply-"));
   roots.push(tempRoot);
   const workspaceRoot = join(tempRoot, "sample-graph-saas");
-  cpSync(sampleRoot, workspaceRoot, { recursive: true });
+  copySampleTree(sampleRoot, workspaceRoot);
   rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
   rmSync(join(workspaceRoot, ".projectos", "apply-backups"), { recursive: true, force: true });
   const project = JSON.parse(

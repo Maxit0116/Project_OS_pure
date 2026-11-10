@@ -1,4 +1,4 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { readAuditApprovals } from "./harness/audit.js";
 import { join, resolve } from "node:path";
@@ -32,6 +32,7 @@ import { WorkspaceTransactionCoordinator } from "./workspace-transaction-coordin
 import { DependencyImpactScanner } from "./dependency-impact-scanner.js";
 import { VerificationRunner } from "./verification-runner.js";
 import { discoveryFinalIntentOutput } from "./test-support/approved-intent-harness.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const temporaryRoots: string[] = [];
@@ -5419,7 +5420,7 @@ function copySampleWorkspace(): string {
   const tempRoot = mkdtempSync(join(tmpdir(), "projectos-api-"));
   temporaryRoots.push(tempRoot);
   const tempWorkspaceRoot = join(tempRoot, "sample-graph-saas");
-  cpSync(sampleWorkspaceRoot, tempWorkspaceRoot, { recursive: true });
+  copySampleTree(sampleWorkspaceRoot, tempWorkspaceRoot);
   rmSync(join(tempWorkspaceRoot, ".projectos", "settings.json"), { force: true });
   rmSync(join(tempWorkspaceRoot, ".projectos", "apply-backups"), {
     recursive: true,

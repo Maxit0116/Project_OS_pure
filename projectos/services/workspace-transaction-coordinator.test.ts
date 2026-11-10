@@ -1,5 +1,4 @@
 import {
-  cpSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -22,6 +21,7 @@ import {
 import { computeProjectGraphHash } from "./graph-change-set-engine.js";
 import { WorkspaceTransactionCoordinator } from "./workspace-transaction-coordinator.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const temporaryRoots: string[] = [];
@@ -420,7 +420,7 @@ function copySampleWorkspace(): string {
   const tempRoot = mkdtempSync(join(tmpdir(), "projectos-workspace-transaction-"));
   temporaryRoots.push(tempRoot);
   const workspaceRoot = join(tempRoot, "sample-graph-saas");
-  cpSync(sampleWorkspaceRoot, workspaceRoot, { recursive: true });
+  copySampleTree(sampleWorkspaceRoot, workspaceRoot);
   rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
   rmSync(join(workspaceRoot, ".projectos", "apply-backups"), { recursive: true, force: true });
   rmSync(join(workspaceRoot, ".projectos", "graph-product-overlay.json"), { force: true });

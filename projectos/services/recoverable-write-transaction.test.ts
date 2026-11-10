@@ -1,5 +1,4 @@
 import {
-  cpSync,
   existsSync,
   linkSync,
   mkdirSync,
@@ -23,6 +22,7 @@ import {
   bindExistingFileAuthorization,
   readApplyBackupManifest,
 } from "./recoverable-write-transaction.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const temporaryRoots: string[] = [];
@@ -709,7 +709,7 @@ function copySampleWorkspace(): string {
   const tempRoot = mkdtempSync(join(tmpdir(), "projectos-transaction-"));
   temporaryRoots.push(tempRoot);
   const workspaceRoot = join(tempRoot, "sample-graph-saas");
-  cpSync(sampleWorkspaceRoot, workspaceRoot, { recursive: true });
+  copySampleTree(sampleWorkspaceRoot, workspaceRoot);
   rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
   rmSync(join(workspaceRoot, ".projectos", "apply-backups"), {
     recursive: true,

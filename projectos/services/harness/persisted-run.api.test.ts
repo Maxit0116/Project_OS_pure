@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ import {
   upsertLoopGraph,
 } from "../loop-graph-service.js";
 import { ProjectOSLocalApi } from "../project-os-local-api.js";
+import { copySampleTree } from "../../test-support/copy-sample.js";
 
 /** Repo-root sample; path is independent of process cwd. */
 const sampleWorkspaceRoot = fileURLToPath(
@@ -29,7 +30,7 @@ function copySampleWorkspace(): string {
   const tempRoot = mkdtempSync(join(tmpdir(), "projectos-disk-run-"));
   temporaryRoots.push(tempRoot);
   const workspaceRoot = join(tempRoot, "sample-graph-saas");
-  cpSync(sampleWorkspaceRoot, workspaceRoot, { recursive: true });
+  copySampleTree(sampleWorkspaceRoot, workspaceRoot);
   rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
   const project = JSON.parse(
     readFileSync(join(workspaceRoot, ".projectos", "project.json"), "utf8"),

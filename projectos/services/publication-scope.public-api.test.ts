@@ -15,8 +15,7 @@ import {
   readdirSync,
   rmSync,
   writeFileSync,
-  cpSync,
-} from "node:fs";
+  } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -26,6 +25,7 @@ import { ProjectOSLocalApi } from "./project-os-local-api.js";
 import {
   bindExistingFileAuthorization,
 } from "./recoverable-write-transaction.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -37,7 +37,7 @@ function copySampleWorkspace(): string {
   const root = mkdtempSync(join(tmpdir(), "publication-scope-"));
   roots.push(root);
   const workspaceRoot = join(root, "sample-graph-saas");
-  cpSync(sample, workspaceRoot, { recursive: true });
+  copySampleTree(sample, workspaceRoot);
   rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
   rmSync(join(workspaceRoot, ".projectos", "apply-backups"), { recursive: true, force: true });
   const project = JSON.parse(

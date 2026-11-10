@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,6 +15,7 @@ import type { LoadedProjectOSWorkspace } from "../persistence/workspace-store.js
 import { LocalContextAssembler } from "./local-context-assembler.js";
 import { ModelGateway } from "./model-gateway/index.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const temporaryRoots: string[] = [];
@@ -440,7 +441,7 @@ function copySampleWorkspace(): string {
   const tempRoot = mkdtempSync(join(tmpdir(), "projectos-ask-"));
   temporaryRoots.push(tempRoot);
   const workspaceRoot = join(tempRoot, "sample-graph-saas");
-  cpSync(sampleWorkspaceRoot, workspaceRoot, { recursive: true });
+  copySampleTree(sampleWorkspaceRoot, workspaceRoot);
   rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
   rmSync(join(workspaceRoot, ".projectos", "apply-backups"), {
     recursive: true,

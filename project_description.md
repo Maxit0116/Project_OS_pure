@@ -55,6 +55,8 @@ npm run fixtures:check      # sample fixtures consistent with the sample source
 npm run fixtures:restore    # seed sample-graph-saas/.projectos from the committed mirror (add -- --force to overwrite)
 ```
 
+The sample's own tests (`validation/sample-team-data-foundation`, `validation/sample-app-hardening`) run its real Prisma and Next, so they need the sample's dependencies once: `cd sample-graph-saas && npm ci` (git-ignored, about 340 MB). Tests that open a copy of the sample copy it through `projectos/test-support/copy-sample.ts`, which leaves `node_modules` behind, so the installed dependencies do not slow the other tests down. `PROJECTOS_REQUIRE_REAL_PREVIEW=1` (set by `npm test`) also runs the two tests that start a real Next dev server.
+
 ```bash
 cd projectos/workbench
 npm run dev

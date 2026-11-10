@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -46,6 +46,7 @@ import { FakeExecutorAdapter, type FakeExecutorScenario } from "../harness/fake-
 import { DurableRunStateStore } from "../harness/durable-run-state.js";
 import { buildVerificationEvidence } from "../verification-evidence.js";
 import { CREATE_FILE_MAX_BYTES } from "../create-file-content.js";
+import { copySampleTree } from "../../test-support/copy-sample.js";
 
 const sampleWorkspaceRoot = resolve("..", "sample-graph-saas");
 const temporaryRoots: string[] = [];
@@ -453,7 +454,7 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "projectos-generation-stale-"));
     temporaryRoots.push(tempRoot);
     const workspaceRoot = join(tempRoot, "sample-graph-saas");
-    cpSync(sampleWorkspaceRoot, workspaceRoot, { recursive: true });
+    copySampleTree(sampleWorkspaceRoot, workspaceRoot);
     rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
     const relativePath = "app/login/page.tsx";
     const targetPath = join(workspaceRoot, relativePath);
@@ -875,7 +876,7 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "projectos-transient-reasoning-"));
     temporaryRoots.push(tempRoot);
     const workspaceRoot = join(tempRoot, "sample-graph-saas");
-    cpSync(sampleWorkspaceRoot, workspaceRoot, { recursive: true });
+    copySampleTree(sampleWorkspaceRoot, workspaceRoot);
     rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
     const output = JSON.stringify({
       summary: "Reasoned scoped update",
