@@ -2917,6 +2917,7 @@ export function startLoopInstance(
     throw new Error(issues.map((issue) => issue.message).join("; "));
   }
 
+  let preflightNotes: string[] | undefined;
   if (options.requirePreflight === true) {
     const preflight = preflightLoopRunStart({
       document: doc,
@@ -2931,6 +2932,9 @@ export function startLoopInstance(
         .join("; ");
       throw new Error(`Loop preflight blocked start: ${blockers}`);
     }
+    preflightNotes = preflight.items
+      .map((item) => `[${item.severity}] ${item.code}: ${item.message}`)
+      .slice(0, 40);
   }
 
   validateLaunchParams(spec, options.launch?.params);
@@ -2967,11 +2971,26 @@ export function startLoopInstance(
       : {}),
     ...(execution?.leaf?.filePath ? { leafPath: execution.leaf.filePath } : {}),
   });
+  const credentialRefIds = [
+    ...new Set(
+      [
+        ...doc.draft.nodes.map((node) => node.credentialRefId),
+        ...spec.nodes.map((node) =>
+          "credentialRefId" in node
+            ? (node as { credentialRefId?: string }).credentialRefId
+            : undefined,
+        ),
+      ].filter((id): id is string => Boolean(id && id.trim())),
+    ),
+  ].slice(0, 32);
+  const repoName = workspaceRoot.split(/[/\\]/).filter(Boolean).at(-1);
   const runBinding =
     options.runBinding ??
     (options.projectId
       ? {
           projectId: options.projectId,
+          workspaceRoot,
+          ...(repoName ? { repo: repoName } : {}),
           specVersion: spec.version,
           createdAt: startedAt,
           ...(options.branch ? { branch: options.branch } : {}),
@@ -2981,6 +3000,9 @@ export function startLoopInstance(
                 materials: options.materials,
               }
             : {}),
+          ...(credentialRefIds.length ? { credentialRefIds } : {}),
+          // Present whenever production start required preflight (may be empty).
+          ...(preflightNotes ? { preflightNotes } : {}),
           codeDigest: pathFingerprint,
         }
       : undefined);

@@ -158,6 +158,10 @@ describe("ProjectOSLocalApi startLoopInstance preflight + runBinding", () => {
     expect(instance.runBinding?.projectId).toBe(project.projectId);
     expect(instance.runBinding?.specVersion).toBe(agentSpec.version);
     expect(instance.runBinding?.branch).toBe("feat/x");
+    expect(instance.runBinding?.workspaceRoot).toBe(workspaceRoot);
+    expect(instance.runBinding?.repo).toBeTruthy();
+    expect(instance.runBinding?.codeDigest).toBeTruthy();
+    expect(Array.isArray(instance.runBinding?.preflightNotes)).toBe(true);
 
     // Definition edit must not rewrite frozen binding.
     const frozen = instance.runBinding;

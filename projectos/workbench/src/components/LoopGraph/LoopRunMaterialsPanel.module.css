@@ -149,9 +149,22 @@
 .rowKind,
 .sev {
   font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   color: var(--tech-text-muted);
+}
+
+.diagnostics {
+  margin: 0;
+  padding: 4px 6px;
+  border: 1px dashed var(--tech-border);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--tech-text-muted);
+}
+
+.diagnostics summary {
+  cursor: pointer;
+  color: var(--tech-text-secondary);
 }
 
 .rowTitle {

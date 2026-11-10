@@ -15,6 +15,18 @@ function newMaterialId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+function materialLabel(
+  ts: (key: string, params?: Record<string, string | number>) => string,
+  prefix: string,
+  code: string | null | undefined,
+  fallback?: string,
+): string {
+  if (!code) return fallback ?? ''
+  const key = `chat.loopGraph.${prefix}_${code}`
+  const labeled = ts(key)
+  return labeled === key ? (fallback ?? code) : labeled
+}
+
 /**
  * First closed-loop materials + preflight UI for project manual runs.
  * Real input cards: preview / replace / error / persist via store (reopen with doc).
@@ -54,6 +66,7 @@ export default function LoopRunMaterialsPanel() {
   const [refPath, setRefPath] = useState('')
   const [fileError, setFileError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [diagnosticsId, setDiagnosticsId] = useState<string | null>(null)
   const [replacingId, setReplacingId] = useState<string | null>(null)
   /** Ephemeral local thumbs — never written into document.taskPack / Intent. */
   const [imageObjectUrls, setImageObjectUrls] = useState<Record<string, string>>(
@@ -261,7 +274,7 @@ export default function LoopRunMaterialsPanel() {
         parseStatus: 'ok',
         parseLevel: parsed.parseLevel,
         parseMessage:
-          'CSV loaded — choose columns/rows to apply structured_selection into run snapshot',
+          'CSV loaded — choose columns/rows for this run snapshot',
         textPreview: parsed.textPreview,
         tablePreview: {
           columns: parsed.table.headers,
@@ -462,7 +475,7 @@ export default function LoopRunMaterialsPanel() {
       parseLevel: parsed.parseLevel,
       parseMessage:
         parsed.parseLevel === 'structured_selection'
-          ? 'structured_selection applied — textPreview/run snapshot use selected columns/rows'
+          ? 'Selected columns/rows applied to this run snapshot'
           : current.parseMessage,
       textPreview: parsed.textPreview,
       tablePreview: {
@@ -514,17 +527,29 @@ export default function LoopRunMaterialsPanel() {
 
       {materialRereview?.requiresRereview && !materialRereview.acknowledgedAt ? (
         <div data-loop-material-rereview="" role="status">
-          <p className={styles.fileError}>TM-8: {materialRereview.reason}</p>
-          <p className={styles.hint} data-loop-material-rereview-evidence="">
-            stale evidence: {(materialRereview.staleEvidenceIds ?? []).join(', ')}
-          </p>
+          <p className={styles.fileError}>{ts('chat.loopGraph.materialsRereviewTitle')}</p>
+          <p className={styles.hint}>{ts('chat.loopGraph.materialsRereviewBody')}</p>
+          {(materialRereview.staleEvidenceIds?.length ?? 0) > 0 ? (
+            <p className={styles.hint} data-loop-material-rereview-evidence="">
+              {ts('chat.loopGraph.materialsRereviewStale', {
+                ids: (materialRereview.staleEvidenceIds ?? []).join(', '),
+              })}
+            </p>
+          ) : null}
+          <details className={styles.diagnostics}>
+            <summary>{ts('chat.loopGraph.materialsShowDiagnostics')}</summary>
+            <p className={styles.meta} data-loop-material-rereview-reason="">
+              {ts('chat.loopGraph.materialsDiagnosticsCode')}: TM-8
+              {materialRereview.reason ? ` — ${materialRereview.reason}` : ''}
+            </p>
+          </details>
           <button
             type="button"
             className={styles.secondary}
             data-loop-material-rereview-ack=""
             onClick={() => acknowledgeMaterialRereview()}
           >
-            Acknowledge re-review
+            {ts('chat.loopGraph.materialsRereviewAck')}
           </button>
         </div>
       ) : null}
@@ -544,19 +569,36 @@ export default function LoopRunMaterialsPanel() {
                 data-loop-material-status={material.parseStatus}
               >
                 <div className={styles.rowMain}>
-                  <span className={styles.rowKind}>{material.kind}</span>
+                  <span className={styles.rowKind}>
+                    {materialLabel(ts, 'materialsKind', material.kind, material.kind)}
+                  </span>
                   <span className={styles.rowTitle}>{material.title}</span>
-                  <span className={styles.rowStatus}>{material.parseStatus}</span>
+                  <span className={styles.rowStatus}>
+                    {materialLabel(
+                      ts,
+                      'materialsParseStatus',
+                      material.parseStatus,
+                      material.parseStatus,
+                    )}
+                  </span>
                 </div>
                 {material.parseLevel ? (
                   <p
                     className={styles.parseMsg}
                     data-loop-material-parse-level={material.parseLevel}
                   >
-                    level: {material.parseLevel}
+                    {materialLabel(
+                      ts,
+                      'materialsParseLevel',
+                      material.parseLevel,
+                      material.parseLevel,
+                    )}
                   </p>
                 ) : null}
-                {material.parseMessage ? (
+                {material.parseMessage &&
+                !/^(structured_selection|vision_|text_preview|ssrf_|Image bytes will attach)/i.test(
+                  material.parseMessage,
+                ) ? (
                   <p className={styles.parseMsg}>{material.parseMessage}</p>
                 ) : null}
                 {material.kind === 'image' ||
@@ -565,6 +607,12 @@ export default function LoopRunMaterialsPanel() {
                     material={material}
                     objectUrl={imageObjectUrls[material.id] ?? null}
                     visionGate={imageVisionGates[material.id] ?? null}
+                    visionLabel={materialLabel(
+                      ts,
+                      'materialsVisionGate',
+                      imageVisionGates[material.id] ?? material.parseLevel ?? null,
+                      undefined,
+                    )}
                   />
                 ) : null}
                 {material.kind === 'table' &&
@@ -576,7 +624,7 @@ export default function LoopRunMaterialsPanel() {
                     data-loop-material-csv-controls=""
                   >
                     <label className={styles.field}>
-                      <span>columns (comma)</span>
+                      <span>{ts('chat.loopGraph.materialsCsvColumns')}</span>
                       <input
                         type="text"
                         defaultValue={(material.tablePreview?.columns ?? []).join(
@@ -593,7 +641,7 @@ export default function LoopRunMaterialsPanel() {
                       />
                     </label>
                     <label className={styles.field}>
-                      <span>rows</span>
+                      <span>{ts('chat.loopGraph.materialsCsvRows')}</span>
                       <input
                         type="text"
                         defaultValue={`${material.tablePreview?.rowStart ?? 1}-${material.tablePreview?.rowEnd ?? 1}`}
@@ -620,6 +668,29 @@ export default function LoopRunMaterialsPanel() {
                     {material.textPreview}
                   </pre>
                 ) : null}
+                {diagnosticsId === material.id ? (
+                  <details
+                    className={styles.diagnostics}
+                    open
+                    data-loop-material-diagnostics=""
+                  >
+                    <summary>{ts('chat.loopGraph.materialsHideDiagnostics')}</summary>
+                    <p className={styles.meta}>
+                      {ts('chat.loopGraph.materialsDiagnosticsCode')}: kind=
+                      {material.kind}
+                      {material.parseLevel ? ` · parseLevel=${material.parseLevel}` : ''}
+                      {material.parseStatus
+                        ? ` · parseStatus=${material.parseStatus}`
+                        : ''}
+                      {imageVisionGates[material.id]
+                        ? ` · vision=${imageVisionGates[material.id]}`
+                        : ''}
+                    </p>
+                    {material.parseMessage ? (
+                      <p className={styles.meta}>{material.parseMessage}</p>
+                    ) : null}
+                  </details>
+                ) : null}
                 <div className={styles.cardActions}>
                   {material.textPreview ? (
                     <button
@@ -637,6 +708,20 @@ export default function LoopRunMaterialsPanel() {
                         : ts('chat.loopGraph.materialsShowPreview')}
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    className={styles.linkish}
+                    data-loop-material-diagnostics-toggle=""
+                    onClick={() =>
+                      setDiagnosticsId((id) =>
+                        id === material.id ? null : material.id,
+                      )
+                    }
+                  >
+                    {diagnosticsId === material.id
+                      ? ts('chat.loopGraph.materialsHideDiagnostics')
+                      : ts('chat.loopGraph.materialsShowDiagnostics')}
+                  </button>
                   <button
                     type="button"
                     className={styles.linkish}
@@ -719,11 +804,8 @@ export default function LoopRunMaterialsPanel() {
       </section>
 
       <section className={styles.section} data-loop-url-material="">
-        <h4 className={styles.heading}>URL material (DNS-pin)</h4>
-        <p className={styles.hint}>
-          Production fetch refuses private DNS, odd ports, login walls; never
-          forwards Cookie/Authorization.
-        </p>
+        <h4 className={styles.heading}>{ts('chat.loopGraph.materialsUrlTitle')}</h4>
+        <p className={styles.hint}>{ts('chat.loopGraph.materialsUrlHint')}</p>
         <input
           type="url"
           value={urlInput}
@@ -782,15 +864,15 @@ export default function LoopRunMaterialsPanel() {
             })()
           }}
         >
-          {urlBusy ? 'Fetching…' : 'Add URL material'}
+          {urlBusy
+            ? ts('chat.loopGraph.materialsUrlFetching')
+            : ts('chat.loopGraph.materialsUrlAdd')}
         </button>
       </section>
 
       <section className={styles.section} data-loop-pw7-context="">
-        <h4 className={styles.heading}>PW-7 context → same run</h4>
-        <p className={styles.hint}>
-          Issue / PR / code selection / error context as task materials (not authoring).
-        </p>
+        <h4 className={styles.heading}>{ts('chat.loopGraph.materialsPw7Title')}</h4>
+        <p className={styles.hint}>{ts('chat.loopGraph.materialsPw7Hint')}</p>
         <button
           type="button"
           className={styles.secondary}
@@ -798,9 +880,7 @@ export default function LoopRunMaterialsPanel() {
           onClick={() => {
             const selection = getEditorSelection()
             if (!selection) {
-              setFileError(
-                'PW-7: no editor selection — select code in the editor first',
-              )
+              setFileError(ts('chat.loopGraph.materialsPw7NoSelection'))
               return
             }
             setFileError(null)
@@ -812,7 +892,7 @@ export default function LoopRunMaterialsPanel() {
             })
           }}
         >
-          From editor selection
+          {ts('chat.loopGraph.materialsPw7FromEditor')}
         </button>
         <select
           value={pw7Kind}
@@ -827,29 +907,35 @@ export default function LoopRunMaterialsPanel() {
           }
           data-loop-pw7-kind=""
         >
-          <option value="issue">issue</option>
-          <option value="pull_request">pull_request</option>
-          <option value="code_selection">code_selection</option>
-          <option value="error_context">error_context</option>
+          <option value="issue">{ts('chat.loopGraph.materialsPw7Kind_issue')}</option>
+          <option value="pull_request">
+            {ts('chat.loopGraph.materialsPw7Kind_pull_request')}
+          </option>
+          <option value="code_selection">
+            {ts('chat.loopGraph.materialsPw7Kind_code_selection')}
+          </option>
+          <option value="error_context">
+            {ts('chat.loopGraph.materialsPw7Kind_error_context')}
+          </option>
         </select>
         <input
           type="text"
           value={pw7Title}
           onChange={(event) => setPw7Title(event.target.value)}
-          placeholder="title"
+          placeholder={ts('chat.loopGraph.materialsPw7TitlePh')}
           data-loop-pw7-title=""
         />
         <input
           type="text"
           value={pw7Ref}
           onChange={(event) => setPw7Ref(event.target.value)}
-          placeholder="repo#123 or path:lines"
+          placeholder={ts('chat.loopGraph.materialsPw7RefPh')}
           data-loop-pw7-ref=""
         />
         <textarea
           value={pw7Body}
           onChange={(event) => setPw7Body(event.target.value)}
-          placeholder="context body"
+          placeholder={ts('chat.loopGraph.materialsPw7BodyPh')}
           rows={2}
           data-loop-pw7-body=""
         />
@@ -871,7 +957,7 @@ export default function LoopRunMaterialsPanel() {
             setPw7Ref('')
           }}
         >
-          Add PW-7 material
+          {ts('chat.loopGraph.materialsPw7Add')}
         </button>
       </section>
 

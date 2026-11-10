@@ -11,12 +11,15 @@ type Props = {
   /** Ephemeral blob URL from the picker — never persisted into Intent/Spec. */
   objectUrl?: string | null
   visionGate?: string | null
+  /** Friendly status label for the person; contract codes stay on data-* only. */
+  visionLabel?: string | null
 }
 
 export default function LoopMaterialImagePreview({
   material,
   objectUrl,
   visionGate,
+  visionLabel,
 }: Props) {
   const [broken, setBroken] = useState(false)
   useEffect(() => {
@@ -36,12 +39,14 @@ export default function LoopMaterialImagePreview({
       ? material.contentRef
       : null
   const src = objectUrl || dataUrl
+  const gateCode = visionGate ?? material.parseLevel ?? material.parseStatus
+  const label = visionLabel?.trim() || null
 
   return (
     <div
       className={styles.imagePreview}
       data-loop-material-image-preview=""
-      data-loop-material-vision-gate={visionGate ?? material.parseLevel ?? undefined}
+      data-loop-material-vision-gate={gateCode ?? undefined}
     >
       {src && !broken ? (
         <img
@@ -53,15 +58,17 @@ export default function LoopMaterialImagePreview({
         />
       ) : (
         <div className={styles.imagePlaceholder} data-loop-material-image-placeholder="">
-          image · {material.parseLevel ?? material.parseStatus}
+          {label ?? 'image'}
         </div>
       )}
-      <p
-        className={styles.parseMsg}
-        data-loop-material-vision-gate-label=""
-      >
-        vision: {visionGate ?? material.parseLevel ?? material.parseStatus}
-      </p>
+      {label ? (
+        <p
+          className={styles.parseMsg}
+          data-loop-material-vision-gate-label=""
+        >
+          {label}
+        </p>
+      ) : null}
     </div>
   )
 }
