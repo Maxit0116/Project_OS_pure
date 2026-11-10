@@ -517,7 +517,7 @@ describe("loop approval binding (engineering baseline)", () => {
     ).toBe(true);
   });
 
-  it("queries before blind resend when dispatch was in_flight", async () => {
+  it("queries before blind resend when dispatch was in_flight (strict identity)", async () => {
     const root = mkdtempSync(join(tmpdir(), "loop-bind-inflight-"));
     roots.push(root);
     let { doc, spec } = approvePrDoc(root);
@@ -561,14 +561,57 @@ describe("loop approval binding (engineering baseline)", () => {
       create: async () => {
         throw new Error("must not create");
       },
-      lookup: async () => ({
-        ok: true as const,
-        url: "https://example/pr/3",
-        number: 3,
-        message: "recovered",
-      }),
     };
-    doc = await settlePendingGithubOpWithProbe(doc, working.id, probe, hooks);
+    // Unrelated first PR / empty identity → unknown, keep pending, 0 create.
+    doc = await settlePendingGithubOpWithProbe(
+      doc,
+      working.id,
+      probe,
+      hooks,
+      async () => ({
+        available: true,
+        pullRequests: [
+          {
+            number: 99,
+            title: "unrelated",
+            url: "https://example/pr/99",
+            headRef: "feat/other",
+            baseRef: "main",
+            state: "open" as const,
+          },
+        ],
+      }),
+    );
+    expect(probe.createCalls).toBe(0);
+    expect(probe.lookupCalls).toBe(1);
+    expect(doc.instances[0]?.pendingGithubOp?.dispatchState).toBe("in_flight");
+    expect(
+      (doc.instances[0]?.artifacts ?? []).some(
+        (item) => item.kind === "github_op_result",
+      ),
+    ).toBe(false);
+
+    // Exact head/base match recovers without create.
+    probe.lookupCalls = 0;
+    doc = await settlePendingGithubOpWithProbe(
+      doc,
+      working.id,
+      probe,
+      hooks,
+      async () => ({
+        available: true,
+        pullRequests: [
+          {
+            number: 3,
+            title: "feat",
+            url: "https://example/pr/3",
+            headRef: "feat/x",
+            baseRef: "main",
+            state: "open" as const,
+          },
+        ],
+      }),
+    );
     expect(probe.createCalls).toBe(0);
     expect(probe.lookupCalls).toBe(1);
     expect(
@@ -644,6 +687,7 @@ describe("loop approval binding (engineering baseline)", () => {
             deletedFiles: ["src/gone.ts"],
             summary: "delete gone",
             contentDigest: "pending",
+            fileDigests: {} as Record<string, string>,
           },
         },
       ],

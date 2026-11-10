@@ -589,6 +589,29 @@ export const LoopInstanceSchema = z
         idempotencyKey: z.string().trim().min(1).max(160).optional(),
         dispatchAttemptId: z.string().min(1).optional(),
         httpAttemptedAt: z.string().min(1).optional(),
+        /**
+         * Durable journal for unknown/in_flight outcomes — must not be erased by
+         * deny-before-HTTP so a later approve cannot create a second side effect.
+         */
+        dispatchJournal: z
+          .array(
+            z
+              .object({
+                at: z.string().min(1),
+                kind: z.enum([
+                  "queued",
+                  "in_flight",
+                  "unknown",
+                  "lookup_hit",
+                  "completed",
+                  "denied_preflight",
+                ]),
+                message: z.string().trim().max(500),
+              })
+              .strict(),
+          )
+          .max(20)
+          .optional(),
         /** Snapshot for TOCTOU re-check at HTTP dispatch boundary (preflight). */
         approvalBinding: z
           .object({
@@ -615,6 +638,8 @@ export const LoopInstanceSchema = z
      * Live code digest captured when verification entered; must match at stamp time.
      */
     verificationCodeDigest: z.string().trim().min(1).max(128).optional(),
+    /** Evidence id bound when verification first accepted a run result. */
+    verificationEvidenceId: z.string().min(1).optional(),
     /** GC-4.1 recoverable snapshot. */
     checkpoint: LoopInstanceCheckpointSchema.optional(),
     /** GC-4.2 context freshness (orthogonal to status). */

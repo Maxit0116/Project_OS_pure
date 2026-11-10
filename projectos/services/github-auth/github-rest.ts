@@ -5,6 +5,8 @@ export interface RestListedPullRequest {
   headRef: string;
   baseRef: string;
   state: "open" | "closed" | "merged";
+  headOwner?: string;
+  headSha?: string;
 }
 
 export function parseGithubOwnerRepo(
@@ -105,21 +107,35 @@ export async function listPullRequestsViaRest(
     number: number;
     title: string;
     html_url: string;
-    head?: { ref?: string };
+    head?: {
+      ref?: string;
+      sha?: string;
+      repo?: { owner?: { login?: string } | null } | null;
+      user?: { login?: string } | null;
+    };
     base?: { ref?: string };
     state?: string;
     merged_at?: string | null;
   }>;
   return {
     available: true,
-    pullRequests: raw.map((item) => ({
-      number: item.number,
-      title: item.title,
-      url: item.html_url,
-      headRef: item.head?.ref ?? "unknown",
-      baseRef: item.base?.ref ?? "unknown",
-      state: "open" as const,
-    })),
+    pullRequests: raw.map((item) => {
+      const headOwner =
+        item.head?.repo?.owner?.login?.trim() ||
+        item.head?.user?.login?.trim() ||
+        undefined;
+      const headSha = item.head?.sha?.trim() || undefined;
+      return {
+        number: item.number,
+        title: item.title,
+        url: item.html_url,
+        headRef: item.head?.ref ?? "unknown",
+        baseRef: item.base?.ref ?? "unknown",
+        state: "open" as const,
+        ...(headOwner ? { headOwner } : {}),
+        ...(headSha ? { headSha } : {}),
+      };
+    }),
   };
 }
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,6 +24,7 @@ import {
   createLoopGraph,
   upsertLoopGraph,
 } from "./loop-graph-service.js";
+import { createWorkspacePathDigester } from "./loop-approval-binding.js";
 import {
   advanceLoopInstance,
   cancelLoopInstance,
@@ -276,6 +277,8 @@ describe("loop-runtime-service", () => {
     expect(doc.instances[0]?.specVersion).toBe(boundVersion);
     expect(doc.instances[0]?.cursorNodeId).toBe("n2");
 
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(hooks.starts).toContain("run_2");
     hooks.failEvidence();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     const instance = doc.instances[0]!;
@@ -648,17 +651,20 @@ describe("loop-runtime-service", () => {
     const instanceId = doc.instances[0]!.id;
     hooks.finishApply();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    // Verify starts its own test run (does not stamp implement evidence).
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(hooks.starts).toEqual(["run_1", "run_2"]);
     hooks.failEvidence();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(doc.instances[0]).toMatchObject({ cursorNodeId: "n1", round: 1 });
     expect(doc.instances[0]?.activeRunId).toBeUndefined();
     expect(doc.instances[0]?.events.some((event) =>
-      event.type === "feedback_taken" && event.evidenceId === "evidence_run_1",
+      event.type === "feedback_taken" && event.evidenceId === "evidence_run_2",
     )).toBe(true);
 
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
-    expect(hooks.starts).toEqual(["run_1", "run_2"]);
-    expect(doc.instances[0]?.activeRunId).toBe("run_2");
+    expect(hooks.starts).toEqual(["run_1", "run_2", "run_3"]);
+    expect(doc.instances[0]?.activeRunId).toBe("run_3");
 
     const notRunRoot = mkdtempSync(join(tmpdir(), "loop-rt-"));
     roots.push(notRunRoot);
@@ -667,11 +673,13 @@ describe("loop-runtime-service", () => {
     notRun = startLoopInstance(notRunRoot, notRun.id, undefined, notRunHooks.execution);
     notRunHooks.finishApply();
     notRun = advanceLoopInstance(notRunRoot, notRun.id, notRun.instances[0]!.id, notRunHooks.execution);
+    notRun = advanceLoopInstance(notRunRoot, notRun.id, notRun.instances[0]!.id, notRunHooks.execution);
+    expect(notRunHooks.starts).toEqual(["run_1", "run_2"]);
     notRunHooks.markNotRun();
     notRun = advanceLoopInstance(notRunRoot, notRun.id, notRun.instances[0]!.id, notRunHooks.execution);
     expect(notRun.instances[0]?.status).toBe("awaiting_hitl");
     expect(notRun.instances[0]?.events.at(-1)?.message).toBe(LOOP_VERIFICATION_NOT_RUN);
-    expect(notRunHooks.starts).toEqual(["run_1"]);
+    expect(notRunHooks.starts).toEqual(["run_1", "run_2"]);
   });
 
   it("asks a person when stop policy is exhausted and records the answer on the instance", () => {
@@ -683,11 +691,13 @@ describe("loop-runtime-service", () => {
     const instanceId = doc.instances[0]!.id;
     hooks.finishApply();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     hooks.failEvidence();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(doc.instances[0]?.cursorNodeId).toBe("n1");
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     hooks.finishApply();
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     hooks.failEvidence();
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
@@ -696,7 +706,7 @@ describe("loop-runtime-service", () => {
     const eventCount = doc.instances[0]!.events.length;
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(doc.instances[0]?.events).toHaveLength(eventCount);
-    expect(hooks.starts).toEqual(["run_1", "run_2"]);
+    expect(hooks.starts).toEqual(["run_1", "run_2", "run_3", "run_4"]);
 
     doc = resolveLoopHitl(root, doc.id, instanceId, [
       { questionId: "stop_policy", answer: "stop" },
@@ -1005,6 +1015,57 @@ describe("loop-runtime-service", () => {
     doc = resumeLoopInstance(root, doc.id, instanceId, orphanHooks);
     expect(doc.instances[0]?.status).toBe("awaiting_hitl");
     expect(doc.instances[0]?.hitlQuestionIds).toEqual(["unknown_side_effects"]);
+  });
+
+  it("Verify starts a real test run and refuses old evidence after code changes", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-verify-"));
+    roots.push(root);
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src/login.ts"), "v1\n", "utf8");
+    const digester = createWorkspacePathDigester(root);
+    let doc = approveLinearLoop(root, "Implement");
+    const hooks = scriptedLoopExecution("src/login.ts");
+    hooks.execution.digestWorkspacePaths = digester;
+    doc = startLoopInstance(root, doc.id, undefined, hooks.execution);
+    const instanceId = doc.instances[0]!.id;
+    hooks.finishApply();
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(doc.instances[0]?.cursorNodeId).toBe("n2");
+
+    // Enter verify → must start a dedicated test run (not stamp implement evidence).
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(hooks.starts).toEqual(["run_1", "run_2"]);
+    expect(hooks.requests.at(-1)?.goal).toMatch(/Verify/i);
+    expect(doc.instances[0]?.activeRunNodeId).toBe("n2");
+    expect(doc.instances[0]?.verificationCodeDigest).toBeTruthy();
+    expect(doc.instances[0]?.status).toBe("running");
+
+    // Old implement evidence alone must not produce a test_report stamp.
+    const baseReadEvidence = hooks.execution.readEvidence;
+    hooks.execution.readEvidence = (runId) =>
+      runId === "run_1"
+        ? { id: "evidence_run_1", runId: "run_1", status: "passed" }
+        : baseReadEvidence(runId);
+    const blocked = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(
+      blocked.instances[0]?.artifacts?.some((item) => item.kind === "test_report"),
+    ).toBe(false);
+    expect(blocked.instances[0]?.verificationEvidenceId).toBeUndefined();
+
+    // Code changes after verify start → even fresh verify evidence cannot get a new stamp.
+    hooks.execution.readEvidence = baseReadEvidence;
+    writeFileSync(join(root, "src/login.ts"), "v2-new-code\n", "utf8");
+    hooks.passEvidence();
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(doc.instances[0]?.status).toBe("awaiting_hitl");
+    expect(
+      doc.instances[0]?.events.some((event) =>
+        (event.message ?? "").includes("Code changed"),
+      ),
+    ).toBe(true);
+    expect(
+      doc.instances[0]?.artifacts?.some((item) => item.kind === "test_report"),
+    ).toBe(false);
   });
 });
 

@@ -90,6 +90,10 @@ export const LoopGitHubOpResultSchema = z
      * afterward — real side effect is retained; do not redo.
      */
     deliveryStale: z.boolean().optional(),
+    /** Dispatch identity — required to reuse prior result (not nodeId alone). */
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
+    operationDigest: z.string().trim().min(1).max(128).optional(),
+    engineeringBaseline: z.string().trim().min(1).max(128).optional(),
   })
   .strict();
 

@@ -1642,7 +1642,11 @@ export function preflightPendingGithubDispatch(
   return { ok: true };
 }
 
-/** Block dispatch with zero HTTP — clear queue and re-require approval. */
+/**
+ * Block dispatch with zero HTTP — clear queue and re-require approval.
+ * Never clears `in_flight` / journaled-unknown pending: wiping would let a later
+ * approve create a second side effect after an ambiguous HTTP attempt.
+ */
 export function denyPendingGithubOpBeforeHttp(
   doc: LoopGraphDocument,
   instanceId: string,
@@ -1651,6 +1655,39 @@ export function denyPendingGithubOpBeforeHttp(
   const instance = doc.instances.find((item) => item.id === instanceId);
   if (!instance?.pendingGithubOp) return doc;
   const pending = instance.pendingGithubOp;
+  const journaledUnknown = (pending.dispatchJournal ?? []).some(
+    (item) => item.kind === "unknown",
+  );
+  if (pending.dispatchState === "in_flight" || journaledUnknown) {
+    const entry = {
+      at: nowIso(),
+      kind: "unknown" as const,
+      message: `deny-before-HTTP refused to clear in_flight/unknown: ${reason}`.slice(
+        0,
+        500,
+      ),
+    };
+    const kept: LoopInstance = {
+      ...instance,
+      status: "awaiting_hitl",
+      hitlQuestionIds: [`github_dispatch_unknown_${pending.nodeId}`],
+      cursorNodeId: pending.nodeId,
+      pendingGithubOp: {
+        ...pending,
+        dispatchState: "in_flight",
+        dispatchJournal: [...(pending.dispatchJournal ?? []), entry].slice(-20),
+      },
+      updatedAt: nowIso(),
+    };
+    return replaceInstance(
+      doc,
+      pushEvent(kept, {
+        type: "awaiting_hitl",
+        nodeId: pending.nodeId,
+        message: `GitHub dispatch unknown retained (no create#2): ${reason.slice(0, 400)}`,
+      }),
+    );
+  }
   let blocked = invalidatePendingApproval(
     {
       ...instance,
@@ -1763,20 +1800,53 @@ export function completePendingGithubOp(
     );
   }
 
+  const resultData = {
+    operation: pending.operation,
+    ok: true as const,
+    ...(result.url ? { url: result.url } : {}),
+    ...(typeof result.number === "number" ? { number: result.number } : {}),
+    ...(result.refs ? { refs: result.refs } : {}),
+    message: result.message,
+    ...(deliveryStale ? { deliveryStale: true } : {}),
+    ...(pending.idempotencyKey
+      ? { idempotencyKey: pending.idempotencyKey }
+      : {}),
+    ...(pending.approvalBinding?.operationDigest
+      ? { operationDigest: pending.approvalBinding.operationDigest }
+      : { operationDigest: digestOperationPayload(pending.payload) }),
+    ...(pending.approvalBinding?.engineeringBaseline
+      ? { engineeringBaseline: pending.approvalBinding.engineeringBaseline }
+      : {}),
+  };
+
+  // Cancelled/paused mid-flight: audit-append result, clear pending, do not resurrect.
+  if (instance.status === "cancelled" || instance.status === "paused") {
+    let next = pushArtifact(
+      { ...instance, pendingGithubOp: undefined },
+      {
+        nodeId: pending.nodeId,
+        kind: "github_op_result",
+        data: { ...resultData, deliveryStale: true },
+      },
+    );
+    next = pushEvent(next, {
+      type: "delivery_stale",
+      nodeId: pending.nodeId,
+      message: `GitHub result audited under ${instance.status} (run not resurrected)`,
+    });
+    return replaceInstance(doc, {
+      ...next,
+      status: instance.status,
+      pendingGithubOp: undefined,
+    });
+  }
+
   let next = pushArtifact(
     { ...instance, pendingGithubOp: undefined },
     {
       nodeId: pending.nodeId,
       kind: "github_op_result",
-      data: {
-        operation: pending.operation,
-        ok: true,
-        ...(result.url ? { url: result.url } : {}),
-        ...(typeof result.number === "number" ? { number: result.number } : {}),
-        ...(result.refs ? { refs: result.refs } : {}),
-        message: result.message,
-        ...(deliveryStale ? { deliveryStale: true } : {}),
-      },
+      data: resultData,
     },
   );
   if (deliveryStale) {
@@ -2080,6 +2150,84 @@ function stepVerifyNode(
         verificationCodeDigest: combineFileDigests(withTombs),
       };
     }
+    // New verification session — do not inherit a prior evidence id.
+    working = { ...working, verificationEvidenceId: undefined };
+  }
+
+  // Bind a verify-owned test run so we never stamp leftover implement evidence
+  // against a newly captured code digest (old cache + new code).
+  const ownsVerifyRun =
+    Boolean(working.activeRunId) && working.activeRunNodeId === nodeId;
+  if (!ownsVerifyRun) {
+    const leaf = execution?.leaf ?? null;
+    if (leaf && execution) {
+      try {
+        const testRun = execution.startAgentRun({
+          specNodeId: nodeId,
+          role: "fix",
+          featureNodeId: leaf.featureNodeId,
+          filePath: leaf.filePath,
+          goal: specNode?.goal ?? "Verify",
+          agentRole: "tester",
+        });
+        const priorIds = activeRunIdsOf(working);
+        working = {
+          ...working,
+          activeRunId: testRun.runId,
+          activeRunNodeId: nodeId,
+          featureNodeId: leaf.featureNodeId,
+          activeRunIds: [...new Set([...priorIds, testRun.runId])],
+          status: "running",
+          hitlQuestionIds: undefined,
+        };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : LOOP_FILES_NOT_ATTACHED;
+        return failNode(doc, working, nodeId, message, { spec });
+      }
+    } else if (working.activeRunId) {
+      const next = pushEvent(
+        {
+          ...working,
+          status: "awaiting_hitl",
+          hitlQuestionIds: ["verification_not_run"],
+          verificationEvidenceId: undefined,
+        },
+        {
+          type: "awaiting_hitl",
+          nodeId,
+          message:
+            "Refuse to stamp prior-node evidence against verify snapshot; attach leaf and re-run tests",
+          ...(working.activeRunId ? { agentRunId: working.activeRunId } : {}),
+        },
+      );
+      return replaceInstance(doc, next);
+    }
+  }
+
+  const runView =
+    working.activeRunId && execution
+      ? execution.readRun(working.activeRunId)
+      : null;
+  if (
+    runView &&
+    (runView.status === "queued" || runView.status === "running")
+  ) {
+    const evidenceWhileRunning = working.activeRunId
+      ? execution?.readEvidence(working.activeRunId) ?? null
+      : null;
+    // Stay running only while evidence has not arrived yet. Explicit not_run
+    // falls through to HITL (verification_not_run).
+    if (
+      !evidenceWhileRunning ||
+      evidenceWhileRunning.runId !== working.activeRunId
+    ) {
+      return replaceInstance(doc, {
+        ...working,
+        status: "running",
+        updatedAt: nowIso(),
+      });
+    }
   }
 
   const evidence = working.activeRunId
@@ -2091,12 +2239,98 @@ function stepVerifyNode(
         ...working,
         status: "awaiting_hitl",
         hitlQuestionIds: ["verification_not_run"],
+        // Do not clear verificationCodeDigest — still required when evidence arrives.
       },
       {
         type: "awaiting_hitl",
         nodeId,
         message: LOOP_VERIFICATION_NOT_RUN,
         ...(evidence ? { evidenceId: evidence.id } : {}),
+      },
+    );
+    return replaceInstance(doc, next);
+  }
+
+  // Bind evidence identity when first accepted; refuse stamping a different cache.
+  if (!working.verificationEvidenceId) {
+    // Re-check live digest at evidence-accept time (not only at enter/end).
+    const midScope = accumulateDeliveryScope(working);
+    const midHasClaim =
+      midScope.files.length > 0 || midScope.deletedFiles.length > 0;
+    let midDigest = combineFileDigests({});
+    if (midHasClaim && execution?.digestWorkspacePaths) {
+      const mid = execution.digestWorkspacePaths(midScope.files, {
+        deletedPaths: midScope.deletedFiles,
+      });
+      if (
+        mid.missing.length > 0 ||
+        mid.unreadable.length > 0 ||
+        (mid.undeleted?.length ?? 0) > 0
+      ) {
+        const next = pushEvent(
+          {
+            ...working,
+            status: "awaiting_hitl",
+            hitlQuestionIds: ["verification_not_run"],
+            verificationCodeDigest: undefined,
+            verificationEvidenceId: undefined,
+          },
+          {
+            type: "awaiting_hitl",
+            nodeId,
+            message:
+              "Verification blocked: delivery scope changed before evidence accept",
+          },
+        );
+        return replaceInstance(doc, next);
+      }
+      midDigest = combineFileDigests({
+        ...mid.digests,
+        ...Object.fromEntries(
+          (mid.tombstones ?? []).map((path) => [`tombstone:${path}`, "deleted"]),
+        ),
+      });
+    }
+    if (
+      working.verificationCodeDigest &&
+      working.verificationCodeDigest !== midDigest
+    ) {
+      const next = pushEvent(
+        {
+          ...working,
+          status: "awaiting_hitl",
+          hitlQuestionIds: ["verification_not_run"],
+          verificationCodeDigest: undefined,
+          verificationEvidenceId: undefined,
+        },
+        {
+          type: "awaiting_hitl",
+          nodeId,
+          message:
+            "Code changed before evidence accept; refuse to stamp cached/old evidence with new digest",
+          evidenceId: evidence.id,
+        },
+      );
+      return replaceInstance(doc, next);
+    }
+    working = {
+      ...working,
+      verificationEvidenceId: evidence.id,
+    };
+  } else if (working.verificationEvidenceId !== evidence.id) {
+    const next = pushEvent(
+      {
+        ...working,
+        status: "awaiting_hitl",
+        hitlQuestionIds: ["verification_not_run"],
+        verificationCodeDigest: undefined,
+        verificationEvidenceId: undefined,
+      },
+      {
+        type: "awaiting_hitl",
+        nodeId,
+        message: `Evidence id changed during verification (${working.verificationEvidenceId} → ${evidence.id}); re-run tests`,
+        evidenceId: evidence.id,
       },
     );
     return replaceInstance(doc, next);

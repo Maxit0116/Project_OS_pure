@@ -8478,224 +8478,104 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
   }
 
+  /**
+   * Production GitHub settle — delegates to shared `settleGithubDispatch`
+   * (same implementation exercised by LocalApi loopback probes).
+   */
   private async settlePendingGithubOp(
     workspace: LoadedProjectOSWorkspace,
     loopId: string,
     document: import("../contracts/loop-graph.js").LoopGraphDocument,
     instanceId: string,
-    completePendingGithubOp: typeof import("./loop-runtime-service.js").completePendingGithubOp,
+    _completePendingGithubOp: typeof import("./loop-runtime-service.js").completePendingGithubOp,
     upsertLoopGraph: typeof import("./loop-graph-service.js").upsertLoopGraph,
-    settleHelpers?: {
-      preflightPendingGithubDispatch: typeof import("./loop-runtime-service.js").preflightPendingGithubDispatch;
-      denyPendingGithubOpBeforeHttp: typeof import("./loop-runtime-service.js").denyPendingGithubOpBeforeHttp;
-      markPendingGithubOpInFlight: typeof import("./loop-runtime-service.js").markPendingGithubOpInFlight;
-    },
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
-    const instance = document.instances.find((item) => item.id === instanceId);
-    const pending = instance?.pendingGithubOp;
-    if (!pending) return document;
-
-    const {
-      preflightPendingGithubDispatch,
-      denyPendingGithubOpBeforeHttp,
-      markPendingGithubOpInFlight,
-    } =
-      settleHelpers ??
-      (await import("./loop-runtime-service.js"));
-
-    const hooks = this.loopHooksFor(workspace, loopId, instanceId);
-
-    // Already have a successful result for this node — never re-dispatch.
-    const priorResult = [...(instance.artifacts ?? [])]
-      .reverse()
-      .find(
-        (item) =>
-          item.kind === "github_op_result" &&
-          item.nodeId === pending.nodeId &&
-          typeof item.data === "object" &&
-          item.data &&
-          (item.data as { ok?: boolean }).ok === true,
-      );
-    if (priorResult) {
-      return upsertLoopGraph(
-        workspace.workspaceRoot,
-        completePendingGithubOp(
-          document,
-          instanceId,
-          {
-            ok: true,
-            message: "Reusing prior GitHub op result (no re-dispatch)",
-            ...((priorResult.data as { url?: string }).url
-              ? { url: (priorResult.data as { url?: string }).url }
-              : {}),
-            ...((priorResult.data as { number?: number }).number !== undefined
-              ? { number: (priorResult.data as { number?: number }).number }
-              : {}),
-            refs: (priorResult.data as { refs?: Record<string, string> }).refs,
-          },
-          hooks,
-          { httpCompleted: true },
+    const { settleGithubDispatch } = await import("./loop-github-dispatch.js");
+    const { getLoopGraph } = await import("./loop-graph-service.js");
+    void document;
+    return settleGithubDispatch({
+      instanceId,
+      loadDocument: () => getLoopGraph(workspace.workspaceRoot, loopId),
+      saveDocument: (doc) => upsertLoopGraph(workspace.workspaceRoot, doc),
+      hooksFor: (doc) =>
+        this.loopHooksFor(
+          workspace,
+          loopId,
+          doc.instances.find((item) => item.id === instanceId)?.id ?? instanceId,
         ),
-      );
-    }
-
-    // Crash / unknown in_flight: query before blind resend (zero create HTTP if found).
-    if (pending.dispatchState === "in_flight") {
-      const lookedUp = await this.lookupDeferredGithubOp(workspace, pending);
-      if (lookedUp) {
-        return upsertLoopGraph(
-          workspace.workspaceRoot,
-          completePendingGithubOp(document, instanceId, lookedUp, hooks, {
-            httpCompleted: true,
-          }),
-        );
-      }
-      // Unknown remote state — do not blind create; surface HITL without HTTP create.
-      return upsertLoopGraph(
-        workspace.workspaceRoot,
-        denyPendingGithubOpBeforeHttp(
-          document,
-          instanceId,
-          "GitHub dispatch was in_flight with unknown result; confirm remote state before retry (no blind resend)",
-        ),
-      );
-    }
-
-    const preflight = preflightPendingGithubDispatch(document, instanceId, hooks);
-    if (!preflight.ok) {
-      return upsertLoopGraph(
-        workspace.workspaceRoot,
-        denyPendingGithubOpBeforeHttp(document, instanceId, preflight.reason),
-      );
-    }
-
-    const attemptId = `gh_dispatch_${Date.now()}`;
-    let current = upsertLoopGraph(
-      workspace.workspaceRoot,
-      markPendingGithubOpInFlight(document, instanceId, attemptId),
-    );
-
-    const payload = pending.payload;
-    let result: import("./loop-execution.js").LoopGithubOperationResult;
-
-    if (pending.operation === "create_pr") {
-      const { createGithubPullRequest } = await import("./git-context-service.js");
-      const token = await this.resolveGithubAccessToken();
-      const title =
-        typeof payload.title === "string" && payload.title.trim()
-          ? payload.title.trim()
-          : "Loop Graph pull request";
-      const remote = await createGithubPullRequest(
-        workspace.workspaceRoot,
-        {
-          title,
-          ...(typeof payload.head === "string" ? { head: payload.head } : {}),
-          ...(typeof payload.base === "string" ? { base: payload.base } : {}),
-          ...(typeof payload.body === "string" ? { body: payload.body } : {}),
-        },
-        {
+      listPullRequests: async () => {
+        const { listGithubPullRequests } = await import("./git-context-service.js");
+        const token = await this.resolveGithubAccessToken();
+        const listed = await listGithubPullRequests(workspace.workspaceRoot, {
           ...(token ? { accessToken: token } : {}),
-          pushHead: true,
-        },
-      );
-      result = {
-        ok: remote.ok,
-        message: remote.message,
-        ...(remote.url ? { url: remote.url } : {}),
-        ...(typeof remote.number === "number" ? { number: remote.number } : {}),
-        refs: Object.fromEntries(
-          Object.entries(payload).map(([key, value]) => [key, String(value)]),
-        ),
-      };
-    } else if (pending.operation === "create_branch") {
-      const { createGitBranch } = await import("./git-context-service.js");
-      const token = await this.resolveGithubAccessToken();
-      const branch =
-        (typeof payload.branch === "string" && payload.branch.trim()) ||
-        (typeof payload.name === "string" && payload.name.trim()) ||
-        "";
-      const created = createGitBranch(workspace.workspaceRoot, branch, {
-        ...(typeof payload.from === "string" ? { from: payload.from } : {}),
-        push: true,
-        ...(token ? { accessToken: token } : {}),
-      });
-      result = {
-        ok: created.ok,
-        message: created.message,
-        refs: { branch, ...(typeof payload.from === "string" ? { from: payload.from } : {}) },
-      };
-    } else {
-      result = {
-        ok: false,
-        message: `Unsupported deferred GitHub operation: ${pending.operation}`,
-      };
-    }
-
-    // Post-HTTP: always record real outcome; drift → delivery_stale, never erase.
-    const postflight = preflightPendingGithubDispatch(current, instanceId, hooks);
-    return upsertLoopGraph(
-      workspace.workspaceRoot,
-      completePendingGithubOp(current, instanceId, result, hooks, {
-        httpCompleted: true,
-        deliveryStale: result.ok && !postflight.ok,
-      }),
-    );
-  }
-
-  /**
-   * Query existing remote PR/branch for an in_flight pending op (no create).
-   * Returns null when unknown — caller must not blind-resend.
-   */
-  private async lookupDeferredGithubOp(
-    workspace: LoadedProjectOSWorkspace,
-    pending: NonNullable<
-      import("../contracts/loop-graph.js").LoopInstance["pendingGithubOp"]
-    >,
-  ): Promise<import("./loop-execution.js").LoopGithubOperationResult | null> {
-    if (pending.operation !== "create_pr") return null;
-    try {
-      const { listGithubPullRequests } = await import("./git-context-service.js");
-      const token = await this.resolveGithubAccessToken();
-      const head =
-        typeof pending.payload.head === "string" ? pending.payload.head : undefined;
-      const base =
-        typeof pending.payload.base === "string" ? pending.payload.base : undefined;
-      const listed = await listGithubPullRequests(workspace.workspaceRoot, {
-        ...(token ? { accessToken: token } : {}),
-      });
-      if (!listed.available) return null;
-      const match = listed.pullRequests.find((item) => {
-        const itemHead =
-          typeof (item as { head?: string }).head === "string"
-            ? (item as { head?: string }).head
-            : typeof (item as { headRefName?: string }).headRefName === "string"
-              ? (item as { headRefName?: string }).headRefName
-              : undefined;
-        const itemBase =
-          typeof (item as { base?: string }).base === "string"
-            ? (item as { base?: string }).base
-            : typeof (item as { baseRefName?: string }).baseRefName === "string"
-              ? (item as { baseRefName?: string }).baseRefName
-              : undefined;
-        if (head && itemHead && itemHead !== head && !itemHead.endsWith(`:${head}`)) {
-          return false;
+        });
+        // per_page/limit 50 — treat as potentially incomplete when saturated.
+        return {
+          available: listed.available,
+          pullRequests: listed.pullRequests,
+          incomplete: listed.pullRequests.length >= 50,
+          ...(listed.message ? { message: listed.message } : {}),
+        };
+      },
+      createOperation: async (pending) => {
+        const payload = pending.payload;
+        if (pending.operation === "create_pr") {
+          const { createGithubPullRequest } = await import("./git-context-service.js");
+          const token = await this.resolveGithubAccessToken();
+          const title =
+            typeof payload.title === "string" && payload.title.trim()
+              ? payload.title.trim()
+              : "Loop Graph pull request";
+          const remote = await createGithubPullRequest(
+            workspace.workspaceRoot,
+            {
+              title,
+              ...(typeof payload.head === "string" ? { head: payload.head } : {}),
+              ...(typeof payload.base === "string" ? { base: payload.base } : {}),
+              ...(typeof payload.body === "string" ? { body: payload.body } : {}),
+            },
+            {
+              ...(token ? { accessToken: token } : {}),
+              pushHead: true,
+            },
+          );
+          return {
+            ok: remote.ok,
+            message: remote.message,
+            ...(remote.url ? { url: remote.url } : {}),
+            ...(typeof remote.number === "number" ? { number: remote.number } : {}),
+            refs: Object.fromEntries(
+              Object.entries(payload).map(([key, value]) => [key, String(value)]),
+            ),
+          };
         }
-        if (base && itemBase && itemBase !== base) return false;
-        return Boolean(item.number || item.url);
-      });
-      if (!match) return null;
-      return {
-        ok: true,
-        message: "Recovered existing PR (query-before-resend)",
-        ...(match.url ? { url: match.url } : {}),
-        ...(typeof match.number === "number" ? { number: match.number } : {}),
-        refs: Object.fromEntries(
-          Object.entries(pending.payload).map(([key, value]) => [key, String(value)]),
-        ),
-      };
-    } catch {
-      return null;
-    }
+        if (pending.operation === "create_branch") {
+          const { createGitBranch } = await import("./git-context-service.js");
+          const token = await this.resolveGithubAccessToken();
+          const branch =
+            (typeof payload.branch === "string" && payload.branch.trim()) ||
+            (typeof payload.name === "string" && payload.name.trim()) ||
+            "";
+          const created = createGitBranch(workspace.workspaceRoot, branch, {
+            ...(typeof payload.from === "string" ? { from: payload.from } : {}),
+            push: true,
+            ...(token ? { accessToken: token } : {}),
+          });
+          return {
+            ok: created.ok,
+            message: created.message,
+            refs: {
+              branch,
+              ...(typeof payload.from === "string" ? { from: payload.from } : {}),
+            },
+          };
+        }
+        return {
+          ok: false,
+          message: `Unsupported deferred GitHub operation: ${pending.operation}`,
+        };
+      },
+    });
   }
 
   private async settleLoopRuns(
@@ -8703,20 +8583,18 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     loopId: string,
     document: import("../contracts/loop-graph.js").LoopGraphDocument,
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
-    const {
-      advanceLoopInstance,
-      completePendingGithubOp,
-      preflightPendingGithubDispatch,
-      denyPendingGithubOpBeforeHttp,
-      markPendingGithubOpInFlight,
-    } = await import("./loop-runtime-service.js");
+    const { advanceLoopInstance, completePendingGithubOp } = await import(
+      "./loop-runtime-service.js"
+    );
     const { upsertLoopGraph } = await import("./loop-graph-service.js");
     let current = document;
     for (let attempt = 0; attempt < 6; attempt += 1) {
       const instance = [...current.instances].reverse().find((item) =>
         item.status === "queued" ||
         item.status === "running" ||
-        item.status === "awaiting_review",
+        item.status === "awaiting_review" ||
+        // Unknown in_flight may sit in awaiting_hitl while still needing lookup settle.
+        (item.status === "awaiting_hitl" && Boolean(item.pendingGithubOp)),
       );
       if (!instance) return current;
 
@@ -8728,11 +8606,6 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           instance.id,
           completePendingGithubOp,
           upsertLoopGraph,
-          {
-            preflightPendingGithubDispatch,
-            denyPendingGithubOpBeforeHttp,
-            markPendingGithubOpInFlight,
-          },
         );
         continue;
       }
