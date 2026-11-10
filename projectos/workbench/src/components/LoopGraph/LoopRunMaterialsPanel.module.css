@@ -193,6 +193,16 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 8px 0 4px;
+  background: linear-gradient(
+    to top,
+    var(--tech-bg-side-panel) 70%,
+    transparent
+  );
+  border-top: 1px solid var(--tech-border);
 }
 
 .secondary,

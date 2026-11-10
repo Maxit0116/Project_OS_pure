@@ -590,10 +590,12 @@ describe("PW materials Spec→fail→fix→green evidence", () => {
             updatedAt: nowIso(),
           },
         ],
-        skipPreflight: true,
+        // Shared create path requires preflight — no skip sneak-past.
       },
     );
     let instance = started.instances[started.instances.length - 1]!;
+    expect(instance.runBinding?.projectId).toBe(project.projectId);
+    expect(instance.runBinding?.budget).toBeTruthy();
     for (let i = 0; i < 6; i++) {
       const advanced = await api.advanceLoopInstance(
         project.projectId,
