@@ -512,6 +512,155 @@ export default function LoopRunMaterialsPanel() {
         />
       </label>
 
+      {materialRereview?.requiresRereview && !materialRereview.acknowledgedAt ? (
+        <div data-loop-material-rereview="" role="status">
+          <p className={styles.fileError}>TM-8: {materialRereview.reason}</p>
+          <p className={styles.hint} data-loop-material-rereview-evidence="">
+            stale evidence: {(materialRereview.staleEvidenceIds ?? []).join(', ')}
+          </p>
+          <button
+            type="button"
+            className={styles.secondary}
+            data-loop-material-rereview-ack=""
+            onClick={() => acknowledgeMaterialRereview()}
+          >
+            Acknowledge re-review
+          </button>
+        </div>
+      ) : null}
+
+      <section className={styles.section}>
+        <h4 className={styles.heading}>{ts('chat.loopGraph.materialsList')}</h4>
+        {materials.length === 0 ? (
+          <p className={styles.empty}>{ts('chat.loopGraph.materialsEmpty')}</p>
+        ) : (
+          <ul className={styles.list}>
+            {materials.map((material) => (
+              <li
+                key={material.id}
+                className={styles.card}
+                data-loop-material-card=""
+                data-loop-material-id={material.id}
+                data-loop-material-status={material.parseStatus}
+              >
+                <div className={styles.rowMain}>
+                  <span className={styles.rowKind}>{material.kind}</span>
+                  <span className={styles.rowTitle}>{material.title}</span>
+                  <span className={styles.rowStatus}>{material.parseStatus}</span>
+                </div>
+                {material.parseLevel ? (
+                  <p
+                    className={styles.parseMsg}
+                    data-loop-material-parse-level={material.parseLevel}
+                  >
+                    level: {material.parseLevel}
+                  </p>
+                ) : null}
+                {material.parseMessage ? (
+                  <p className={styles.parseMsg}>{material.parseMessage}</p>
+                ) : null}
+                {material.kind === 'image' ||
+                (material.mimeType ?? '').startsWith('image/') ? (
+                  <LoopMaterialImagePreview
+                    material={material}
+                    objectUrl={imageObjectUrls[material.id] ?? null}
+                    visionGate={imageVisionGates[material.id] ?? null}
+                  />
+                ) : null}
+                {material.kind === 'table' &&
+                (material.mimeType === 'text/csv' ||
+                  material.title.toLowerCase().endsWith('.csv')) &&
+                csvRawById[material.id] ? (
+                  <div
+                    className={styles.csvControls}
+                    data-loop-material-csv-controls=""
+                  >
+                    <label className={styles.field}>
+                      <span>columns (comma)</span>
+                      <input
+                        type="text"
+                        defaultValue={(material.tablePreview?.columns ?? []).join(
+                          ',',
+                        )}
+                        data-loop-material-csv-columns=""
+                        onBlur={(event) => {
+                          const columns = event.target.value
+                            .split(',')
+                            .map((part) => part.trim())
+                            .filter(Boolean)
+                          applyCsvStructure(material.id, { columns })
+                        }}
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>rows</span>
+                      <input
+                        type="text"
+                        defaultValue={`${material.tablePreview?.rowStart ?? 1}-${material.tablePreview?.rowEnd ?? 1}`}
+                        data-loop-material-csv-rows=""
+                        onBlur={(event) => {
+                          const match = /^(\d+)\s*-\s*(\d+)$/.exec(
+                            event.target.value.trim(),
+                          )
+                          if (!match) return
+                          applyCsvStructure(material.id, {
+                            rowStart: Number(match[1]),
+                            rowEnd: Number(match[2]),
+                          })
+                        }}
+                      />
+                    </label>
+                  </div>
+                ) : null}
+                {expandedId === material.id && material.textPreview ? (
+                  <pre
+                    className={styles.preview}
+                    data-loop-material-preview=""
+                  >
+                    {material.textPreview}
+                  </pre>
+                ) : null}
+                <div className={styles.cardActions}>
+                  {material.textPreview ? (
+                    <button
+                      type="button"
+                      className={styles.linkish}
+                      data-loop-material-preview-toggle=""
+                      onClick={() =>
+                        setExpandedId((id) =>
+                          id === material.id ? null : material.id,
+                        )
+                      }
+                    >
+                      {expandedId === material.id
+                        ? ts('chat.loopGraph.materialsHidePreview')
+                        : ts('chat.loopGraph.materialsShowPreview')}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={styles.linkish}
+                    data-loop-material-replace=""
+                    onClick={() => setReplacingId(material.id)}
+                  >
+                    {ts('chat.loopGraph.materialsReplace')}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.remove}
+                    onClick={() => removeRunMaterial(material.id)}
+                    aria-label={ts('chat.loopGraph.materialsRemove')}
+                  >
+                    ×
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+
       <section className={styles.section}>
         <h4 className={styles.heading}>{ts('chat.loopGraph.materialsAddText')}</h4>
         <input
@@ -724,154 +873,6 @@ export default function LoopRunMaterialsPanel() {
         >
           Add PW-7 material
         </button>
-      </section>
-
-      {materialRereview?.requiresRereview && !materialRereview.acknowledgedAt ? (
-        <div data-loop-material-rereview="" role="status">
-          <p className={styles.fileError}>TM-8: {materialRereview.reason}</p>
-          <p className={styles.hint} data-loop-material-rereview-evidence="">
-            stale evidence: {(materialRereview.staleEvidenceIds ?? []).join(', ')}
-          </p>
-          <button
-            type="button"
-            className={styles.secondary}
-            data-loop-material-rereview-ack=""
-            onClick={() => acknowledgeMaterialRereview()}
-          >
-            Acknowledge re-review
-          </button>
-        </div>
-      ) : null}
-
-      <section className={styles.section}>
-        <h4 className={styles.heading}>{ts('chat.loopGraph.materialsList')}</h4>
-        {materials.length === 0 ? (
-          <p className={styles.empty}>{ts('chat.loopGraph.materialsEmpty')}</p>
-        ) : (
-          <ul className={styles.list}>
-            {materials.map((material) => (
-              <li
-                key={material.id}
-                className={styles.card}
-                data-loop-material-card=""
-                data-loop-material-id={material.id}
-                data-loop-material-status={material.parseStatus}
-              >
-                <div className={styles.rowMain}>
-                  <span className={styles.rowKind}>{material.kind}</span>
-                  <span className={styles.rowTitle}>{material.title}</span>
-                  <span className={styles.rowStatus}>{material.parseStatus}</span>
-                </div>
-                {material.parseLevel ? (
-                  <p
-                    className={styles.parseMsg}
-                    data-loop-material-parse-level={material.parseLevel}
-                  >
-                    level: {material.parseLevel}
-                  </p>
-                ) : null}
-                {material.parseMessage ? (
-                  <p className={styles.parseMsg}>{material.parseMessage}</p>
-                ) : null}
-                {material.kind === 'image' ||
-                (material.mimeType ?? '').startsWith('image/') ? (
-                  <LoopMaterialImagePreview
-                    material={material}
-                    objectUrl={imageObjectUrls[material.id] ?? null}
-                    visionGate={imageVisionGates[material.id] ?? null}
-                  />
-                ) : null}
-                {material.kind === 'table' &&
-                (material.mimeType === 'text/csv' ||
-                  material.title.toLowerCase().endsWith('.csv')) &&
-                csvRawById[material.id] ? (
-                  <div
-                    className={styles.csvControls}
-                    data-loop-material-csv-controls=""
-                  >
-                    <label className={styles.field}>
-                      <span>columns (comma)</span>
-                      <input
-                        type="text"
-                        defaultValue={(material.tablePreview?.columns ?? []).join(
-                          ',',
-                        )}
-                        data-loop-material-csv-columns=""
-                        onBlur={(event) => {
-                          const columns = event.target.value
-                            .split(',')
-                            .map((part) => part.trim())
-                            .filter(Boolean)
-                          applyCsvStructure(material.id, { columns })
-                        }}
-                      />
-                    </label>
-                    <label className={styles.field}>
-                      <span>rows</span>
-                      <input
-                        type="text"
-                        defaultValue={`${material.tablePreview?.rowStart ?? 1}-${material.tablePreview?.rowEnd ?? 1}`}
-                        data-loop-material-csv-rows=""
-                        onBlur={(event) => {
-                          const match = /^(\d+)\s*-\s*(\d+)$/.exec(
-                            event.target.value.trim(),
-                          )
-                          if (!match) return
-                          applyCsvStructure(material.id, {
-                            rowStart: Number(match[1]),
-                            rowEnd: Number(match[2]),
-                          })
-                        }}
-                      />
-                    </label>
-                  </div>
-                ) : null}
-                {expandedId === material.id && material.textPreview ? (
-                  <pre
-                    className={styles.preview}
-                    data-loop-material-preview=""
-                  >
-                    {material.textPreview}
-                  </pre>
-                ) : null}
-                <div className={styles.cardActions}>
-                  {material.textPreview ? (
-                    <button
-                      type="button"
-                      className={styles.linkish}
-                      data-loop-material-preview-toggle=""
-                      onClick={() =>
-                        setExpandedId((id) =>
-                          id === material.id ? null : material.id,
-                        )
-                      }
-                    >
-                      {expandedId === material.id
-                        ? ts('chat.loopGraph.materialsHidePreview')
-                        : ts('chat.loopGraph.materialsShowPreview')}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className={styles.linkish}
-                    data-loop-material-replace=""
-                    onClick={() => setReplacingId(material.id)}
-                  >
-                    {ts('chat.loopGraph.materialsReplace')}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.remove}
-                    onClick={() => removeRunMaterial(material.id)}
-                    aria-label={ts('chat.loopGraph.materialsRemove')}
-                  >
-                    ×
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
 
       <div className={styles.actions}>

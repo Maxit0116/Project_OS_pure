@@ -99,14 +99,18 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 
 近期本地闸（实现切片，非文档完成；以当次命令为准；**最终 HEAD 见 gate-full/EXITS.json + pr-final**）：
 ```text
-# 全库 build（本轮实跑）：projectos/desktop `npm run build` = 0；workbench `tsc -b` = 0
-#   诚实：tsc -b=0 ≠ 仅声明 build 通过——已另记 npm run build 退出码
-# 全仓 npm test（581 files）：22 failed / 559 passed；64 failed / 3215 passed — exit 1
-#   归因（同配置可复现；不删测/不宽化类型）：多数 validation/sample-* + 既有
-#   gateway.protocol-paths EVERY_REQUEST_KIND 缺 loop_authoring（2554012 已有）；
-#   本轮 focused：security-audit / rereview / gmailIncrementalSync = 0
-# Loops 定向发现集仍可用（≠ 全项目）：历史上 61/266；不得用它冒充全仓绿
-# 完整：/opt/cursor/artifacts/gate-full/EXITS.json + projectos-npm-test.txt
+# 全库 build（本轮实跑）：projectos/desktop `npm run build` = 0
+# workbench `npm run build` = `tsc -b && vite build` = 0（tsc-b  alone ≠ 全 build）
+# 全仓 npm test 原发现：22 files / 64 cases red — 分类见
+#   /opt/cursor/artifacts/fail-classify/FAIL-64-CLASSIFICATION.json
+#   loop_authoring inventory：本栈引入 → 已修协议覆盖（13 kinds）
+#   marketplace remote：inherited vs graph（缺 resolveDns DI）→ 已修
+#   validation/sample-*：environment（prisma/next）— 仍 open
+#   local-api/orchestrator/agentConversation product gaps：本 tip 已修（deliverDecision /
+#     needsReview uncertain / forceGlobalPlanner / notification-center）
+# 可见 Electron 证据（selector 入视口）：loops-evidence-visible-0{1-4}-*.png
+# 交验包：/opt/cursor/artifacts/loops-firstbatch-review-bundle.zip
+# 首批验收条件：/opt/cursor/artifacts/pr-final/FIRST-BATCH-ACCEPTANCE.md
 ```
 
 **未完成范围（明列；不把所有余项归真账号）**：

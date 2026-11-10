@@ -71,8 +71,13 @@ describe('projectAgentActivities', () => {
     expect(summaryHtml).not.toContain('SECRET_PREVIEW_LINE')
     expect(summaryHtml).not.toContain('src/auth.ts')
 
+    // Finished rows stay collapsed until selected+expanded (inspector behavior).
     const detailHtml = renderToStaticMarkup(
-      <AgentActivityDetails activities={[explore!]} selectedId={explore!.id} />,
+      <AgentActivityDetails
+        activities={[explore!]}
+        selectedId={explore!.id}
+        preferExpandSelected
+      />,
     )
     expect(detailHtml).toContain('SECRET_PREVIEW_LINE')
     expect(detailHtml).toContain('src/auth.ts:12')
@@ -132,7 +137,11 @@ describe('projectAgentActivities', () => {
       truncated: true,
     })
     const detailHtml = renderToStaticMarkup(
-      <AgentActivityDetails activities={[activities[2]!]} selectedId={null} />,
+      <AgentActivityDetails
+        activities={[activities[2]!]}
+        selectedId={activities[2]!.id}
+        preferExpandSelected
+      />,
     )
     expect(detailHtml).toContain('FAIL_OUTPUT_BODY')
     expect(detailHtml).toMatch(/Output truncated|输出已截断/)
@@ -192,9 +201,17 @@ describe('projectAgentActivities', () => {
     expect(greps.map((item) => item.summary).join(' ')).not.toContain('ROUND_ONE_PREVIEW')
     expect(activities.find((item) => item.kind === 'read_file')?.summary).toBe('Read auth.ts')
     expect(activities.find((item) => item.kind === 'read_file')?.summary).not.toContain('EXCERPT_BODY')
-    const detail = renderToStaticMarkup(
-      <AgentActivityDetails activities={greps} selectedId={null} />,
-    )
+    const detail = greps
+      .map((activity) =>
+        renderToStaticMarkup(
+          <AgentActivityDetails
+            activities={[activity]}
+            selectedId={activity.id}
+            preferExpandSelected
+          />,
+        ),
+      )
+      .join('')
     expect(detail).toContain('ROUND_ONE_PREVIEW')
     expect(detail).toContain('ROUND_TWO_PREVIEW')
   })

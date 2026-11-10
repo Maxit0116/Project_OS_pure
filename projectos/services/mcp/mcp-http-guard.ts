@@ -78,7 +78,14 @@ export async function assertMcpHttpHostResolvesSafely(
   }
 }
 
-export function createMcpGuardedFetch(baseFetch: typeof fetch = fetch): typeof fetch {
+/**
+ * `resolveDns` is the real lookup unless a caller supplies one: tests of code behind
+ * this guard use hosts that cannot resolve (".test") and must not depend on the network.
+ */
+export function createMcpGuardedFetch(
+  baseFetch: typeof fetch = fetch,
+  resolveDns: McpDnsLookup = lookup,
+): typeof fetch {
   return async (input, init) => {
     const rawUrl =
       typeof input === "string"
@@ -87,7 +94,7 @@ export function createMcpGuardedFetch(baseFetch: typeof fetch = fetch): typeof f
           ? input.href
           : input.url;
     const url = assertMcpHttpUrlAllowed(rawUrl);
-    await assertMcpHttpHostResolvesSafely(url);
+    await assertMcpHttpHostResolvesSafely(url, resolveDns);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), MCP_HTTP_TIMEOUT_MS);

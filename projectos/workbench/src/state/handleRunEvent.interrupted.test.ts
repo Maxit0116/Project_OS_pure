@@ -41,8 +41,10 @@ describe('a run the app lost versus one the person stopped', () => {
     expect(reduceRunEventState(baseState(), event('run_interrupted')).flowStatus).toBe('interrupted')
   })
 
-  it('keeps a cancelled run as it was', () => {
-    expect(reduceRunEventState(baseState(), event('run_cancelled')).flowStatus).toBe('error')
+  it('shows a run the person stopped as cancelled, not as an error', () => {
+    expect(reduceRunEventState(baseState(), event('run_cancelled')).flowStatus).toBe(
+      'cancelled',
+    )
   })
 
   it('lists an interrupted run as an error in the session list, which has no interrupted state', () => {
@@ -59,10 +61,11 @@ describe('reconciling a flow status that was running when the app closed', () =>
     ['awaiting_review', 'awaiting_review'],
     ['error', 'error'],
     ['interrupted', 'interrupted'],
-    ['cancelled', 'idle'],
+    ['cancelled', 'cancelled'],
     ['complete', 'complete'],
   ] as const)('maps a run on disk that is %s to %s', async (runStatus, expected) => {
     // Interrupted and cancelled used to fall through to "complete", telling a person an unfinished run had finished.
+    // A run the person stopped stays "cancelled" after a reload, matching the live event word.
     await expect(reconcileStaleFlowStatus(clientWith(runStatus), 'run_1', 'running')).resolves.toBe(expected)
   })
 

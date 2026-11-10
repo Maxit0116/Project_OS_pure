@@ -1,9 +1,10 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { copySampleTree } from "../../test-support/copy-sample.js";
 import { ProjectOSSettingsSchema, type ModelProfile } from "../../contracts/settings.js";
 import type { PromptRefinement } from "../../contracts/prompt-refinement.js";
 import type { RequestIntent } from "../../contracts/request-intent.js";
@@ -453,7 +454,7 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "projectos-generation-stale-"));
     temporaryRoots.push(tempRoot);
     const workspaceRoot = join(tempRoot, "sample-graph-saas");
-    cpSync(sampleWorkspaceRoot, workspaceRoot, { recursive: true });
+    copySampleTree(sampleWorkspaceRoot, workspaceRoot);
     rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
     const relativePath = "app/login/page.tsx";
     const targetPath = join(workspaceRoot, relativePath);
@@ -875,7 +876,7 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "projectos-transient-reasoning-"));
     temporaryRoots.push(tempRoot);
     const workspaceRoot = join(tempRoot, "sample-graph-saas");
-    cpSync(sampleWorkspaceRoot, workspaceRoot, { recursive: true });
+    copySampleTree(sampleWorkspaceRoot, workspaceRoot);
     rmSync(join(workspaceRoot, ".projectos", "settings.json"), { force: true });
     const output = JSON.stringify({
       summary: "Reasoned scoped update",
@@ -2379,7 +2380,7 @@ describe("AgentOrchestrator generated diff truthfulness", () => {
 
       expect(harness.root.run.status).toBe("awaiting_review");
       const completed = harness.root.events.find((event) => event.type === "run_completed");
-      expect(completed).toMatchObject({ payload: { outcome: "whole_tree_validated_awaiting_group_apply", filesApplied: 0 } });
+      expect(completed).toMatchObject({ payload: { outcome: "whole_tree_validated_uncertain_awaiting_review", filesApplied: 0 } });
       expect(harness.root.batchReviewReason).toMatch(/could not be confirmed by reading the code/u);
       const summary = harness.root.events.find((event) => event.type === "decision_summary");
       expect(summary).toMatchObject({ payload: { summary: expect.stringMatching(/Review needed before anything is applied/u) } });
@@ -4835,7 +4836,7 @@ describe("editing a file too large to send whole", () => {
 
     expect(requests[0]?.systemPrompt).not.toContain("too large to show whole");
     expect(JSON.stringify(requests[0]?.input)).toContain('"content":"SELECTED_CONTEXT_MARKER"');
-    expect(requests[1]?.systemPrompt).toContain("The after value must be the complete modified file source");
+    expect(requests[1]?.systemPrompt).toContain("after is the complete modified file source");
     expect(requests[2]?.input).toMatchObject({ snapshot: { selectedFileContent: "SELECTED_CONTEXT_MARKER" } });
   });
 });

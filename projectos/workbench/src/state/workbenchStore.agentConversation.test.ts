@@ -14,6 +14,7 @@ import { emptyComposerDraft } from '@contracts/index'
 import { createMockSampleWorkspace, MockProjectOSApiClient } from '../../../client/mock-project-os-api-client.js'
 import { ProjectOSError } from '../../../errors.js'
 import { useChatSessionStore } from './chatSessionStore'
+import { useNotificationCenterStore } from './notificationCenterStore'
 import { canSubmitAgentPrompt, useWorkbenchStore } from './workbenchStore'
 
 const mockClient = new MockProjectOSApiClient()
@@ -1270,9 +1271,13 @@ describe('agent conversation routing', () => {
     }
     const list = vi.spyOn(client, 'listRunDecisions').mockResolvedValue([decision])
     useWorkbenchStore.setState({ notifyOnPendingDecision: true, windowFocused: true })
+    // A pending decision is announced in the notification center (it used to be a toast).
+    useNotificationCenterStore.setState({ items: [] })
+    const announced = () => useNotificationCenterStore.getState().items
+      .filter((item) => item.kind === 'decision' && item.decisionId === decision.id)
 
     await useWorkbenchStore.getState().loadRunDecisions(decision.rootRunId)
-    const firstToastCount = useWorkbenchStore.getState().toasts.length
+    const firstCount = announced().length
     await useWorkbenchStore.getState().loadRunDecisions(decision.rootRunId)
 
     expect(useWorkbenchStore.getState()).toMatchObject({
@@ -1282,8 +1287,8 @@ describe('agent conversation routing', () => {
       rightPanelTab: 'chat',
       rightPanelOpen: true,
     })
-    expect(firstToastCount).toBe(1)
-    expect(useWorkbenchStore.getState().toasts).toHaveLength(1)
+    expect(firstCount).toBe(1)
+    expect(announced()).toHaveLength(1)
     expect(list).toHaveBeenCalledTimes(2)
   })
 

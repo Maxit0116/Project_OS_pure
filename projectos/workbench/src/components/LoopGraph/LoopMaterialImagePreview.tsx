@@ -26,19 +26,27 @@ export default function LoopMaterialImagePreview({
   if (material.kind !== 'file' && material.kind !== 'image') return null
   const isImage =
     (material.mimeType ?? '').startsWith('image/') ||
+    material.parseLevel === 'vision_attach' ||
     material.parseMessage?.toLowerCase().includes('image') === true
   if (!isImage && material.kind !== 'image') return null
+
+  const dataUrl =
+    typeof material.contentRef === 'string' &&
+    material.contentRef.startsWith('data:image/')
+      ? material.contentRef
+      : null
+  const src = objectUrl || dataUrl
 
   return (
     <div
       className={styles.imagePreview}
       data-loop-material-image-preview=""
-      data-loop-material-vision-gate={visionGate ?? undefined}
+      data-loop-material-vision-gate={visionGate ?? material.parseLevel ?? undefined}
     >
-      {objectUrl && !broken ? (
+      {src && !broken ? (
         <img
           className={styles.imageThumb}
-          src={objectUrl}
+          src={src}
           alt=""
           data-loop-material-image-thumb=""
           onError={() => setBroken(true)}
@@ -48,11 +56,12 @@ export default function LoopMaterialImagePreview({
           image · {material.parseLevel ?? material.parseStatus}
         </div>
       )}
-      {visionGate ? (
-        <p className={styles.parseMsg} data-loop-material-vision-gate-label="">
-          vision: {visionGate}
-        </p>
-      ) : null}
+      <p
+        className={styles.parseMsg}
+        data-loop-material-vision-gate-label=""
+      >
+        vision: {visionGate ?? material.parseLevel ?? material.parseStatus}
+      </p>
     </div>
   )
 }

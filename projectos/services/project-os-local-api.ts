@@ -5260,6 +5260,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     // Wake the same-process waiter when present. No waiter (restart) means the
     // answer is durable for the card/history only — never auto-resume writes.
     this.orchestrator.notifyDecisionAnswer(resolved);
+    // A question the agent put to the person mid-run waits in a separate list (decision ids differ), so
+    // it has to be woken too; each call returns false for an id it does not hold.
+    this.orchestrator.deliverDecision(resolved);
     return resolved;
   }
 

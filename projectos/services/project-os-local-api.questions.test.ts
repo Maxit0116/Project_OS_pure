@@ -1,9 +1,10 @@
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunDecision } from "../contracts/run-state.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
 
 const roots: string[] = [];
@@ -15,7 +16,7 @@ function copyOfSample(): string {
   const tempRoot = mkdtempSync(join(tmpdir(), "projectos-question-"));
   roots.push(tempRoot);
   const workspaceRoot = join(tempRoot, "sample-graph-saas");
-  cpSync(resolve("..", "sample-graph-saas"), workspaceRoot, { recursive: true });
+  copySampleTree(resolve("..", "sample-graph-saas"), workspaceRoot);
   return workspaceRoot;
 }
 
@@ -100,6 +101,6 @@ describe("a question the agent put to the person", () => {
 
     expect((await api.listRunDecisions(project.projectId, "run_q"))[0]).toMatchObject({ status: "superseded" });
     // A superseded question cannot be answered later.
-    await expect(api.resolveRunDecision(project.projectId, decision.id, 2, { optionId: "option_1" })).rejects.toThrow(/no longer pending/iu);
+    await expect(api.resolveRunDecision(project.projectId, decision.id, 2, { optionId: "option_1" })).rejects.toThrow(/cannot be answered again|no longer pending/iu);
   });
 });

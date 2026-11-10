@@ -805,13 +805,26 @@
   color: var(--tech-text-primary);
 }
 
+/* Run materials must be a readable dock — not a 160px strip that crops cards. */
 .runPanel {
   border-top: 1px solid var(--tech-border);
-  padding: 8px 12px;
-  max-height: 160px;
-  overflow: auto;
+  padding: 0;
+  /* Prefer ~48% of canvas so material cards / vision / CSV controls+preview stay on-screen. */
+  height: min(48vh, 480px);
+  min-height: 280px;
+  max-height: min(56vh, 560px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   font-size: var(--font-size-xs);
   color: var(--tech-text-secondary);
+  background: var(--tech-bg-side-panel, var(--tech-bg-elevated));
+}
+
+.runPanel > [data-loop-run-materials] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .runEvent {

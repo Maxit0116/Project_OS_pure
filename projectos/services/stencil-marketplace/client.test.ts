@@ -11,6 +11,12 @@ import {
 } from "./bundled-assets.js";
 import { defaultStencilCatalogCachePath } from "./cache.js";
 
+import type { McpDnsLookup } from "../mcp/mcp-http-guard.js";
+
+// Hosts under .test cannot resolve; tests supply a public A record for the guard.
+const testDns: McpDnsLookup = async () => [{ address: "93.184.216.34" }];
+
+
 describe("StencilCatalogClient", () => {
   it("falls back to bundled when remote fails", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "stencil-cat-"));
@@ -18,6 +24,7 @@ describe("StencilCatalogClient", () => {
       cacheRoot,
       publicKeySpkiBase64: readBundledStencilCatalogPublicKey(),
       defaultCatalogUrl: "https://catalog.example.test/stencils/catalog.json",
+      resolveDns: testDns,
       fetchImpl: vi.fn(async () => {
         throw new Error("offline");
       }) as unknown as typeof fetch,
@@ -68,6 +75,7 @@ describe("StencilCatalogClient", () => {
       cacheRoot,
       publicKeySpkiBase64: readBundledStencilCatalogPublicKey(),
       defaultCatalogUrl: "https://catalog.example.test/stencils/catalog.json",
+      resolveDns: testDns,
       fetchImpl: vi.fn(async () => {
         throw new Error("offline");
       }) as unknown as typeof fetch,
@@ -85,6 +93,7 @@ describe("StencilCatalogClient", () => {
       cacheRoot,
       publicKeySpkiBase64: readBundledStencilCatalogPublicKey(),
       defaultCatalogUrl: "https://catalog.example.test/stencils/catalog.json",
+      resolveDns: testDns,
       fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith(".sig")) return new Response(sig, { status: 200 });
