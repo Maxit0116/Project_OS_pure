@@ -3259,7 +3259,8 @@ export function pauseLoopInstance(
   if (
     instance.status !== "running" &&
     instance.status !== "queued" &&
-    instance.status !== "awaiting_review"
+    instance.status !== "awaiting_review" &&
+    instance.status !== "awaiting_hitl"
   ) {
     return doc;
   }

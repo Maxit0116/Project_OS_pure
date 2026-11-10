@@ -1824,7 +1824,8 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       .find((item) =>
         item.status === 'running' ||
         item.status === 'queued' ||
-        item.status === 'awaiting_review',
+        item.status === 'awaiting_review' ||
+        item.status === 'awaiting_hitl',
       )
     if (!client || !project || !activeLoopId || !instance) return
     const next = await client.pauseLoopInstance(
