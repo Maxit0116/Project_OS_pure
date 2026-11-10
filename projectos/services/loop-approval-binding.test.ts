@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,15 +10,22 @@ import {
   upsertLoopGraph,
 } from "./loop-graph-service.js";
 import {
+  buildApprovalBinding,
+  combineFileDigests,
   computeEngineeringBaseline,
+  createWorkspacePathDigester,
   digestOperationPayload,
+  diffIntentGraphs,
   isApprovalBindingCurrent,
+  isApprovalChoice,
 } from "./loop-approval-binding.js";
 import { pushArtifact } from "./loop-runtime-architecture.js";
 import {
   advanceLoopInstance,
+  completePendingGithubOp,
   resolveLoopHitl,
   startLoopInstance,
+  stepLoopInstance,
 } from "./loop-runtime-service.js";
 
 function baseSpec(
@@ -91,28 +98,13 @@ describe("loop approval binding (engineering baseline)", () => {
     return { doc, spec };
   }
 
-  it("binds approval to artifacts + payload and executes create_pr", () => {
+  it("binds approval to action node + empty-file baseline and executes create_pr", () => {
     const root = mkdtempSync(join(tmpdir(), "loop-bind-"));
     roots.push(root);
     let { doc } = approvePrDoc(root);
     doc = startLoopInstance(root, doc.id);
     expect(doc.instances[0]?.status).toBe("awaiting_hitl");
 
-    let seeded = pushArtifact(doc.instances[0]!, {
-      nodeId: "n_coder",
-      kind: "change_set",
-      data: {
-        files: ["src/feature.ts"],
-        summary: "Added feature tree",
-        agentRunId: "run_seed",
-      },
-    });
-    doc = upsertLoopGraph(root, {
-      ...doc,
-      instances: [seeded],
-    });
-
-    const baselineBefore = computeEngineeringBaseline(doc.instances[0]!).baseline;
     const instanceId = doc.instances[0]!.id;
     const questionId = doc.instances[0]!.hitlQuestionIds![0]!;
     doc = resolveLoopHitl(root, doc.id, instanceId, [
@@ -133,27 +125,197 @@ describe("loop approval binding (engineering baseline)", () => {
       choice: "approve",
       actor: "terran",
       binding: {
-        engineeringBaseline: baselineBefore,
-        operationDigest: digestOperationPayload({
-          title: "feat: tree",
-          base: "main",
-        }),
+        nodeId: "n_pr",
+        actionIntegration: "github",
+        actionOperation: "create_pr",
+        actorKind: "local_declared",
         status: "valid",
       },
     });
     const github = after.artifacts?.find((item) => item.kind === "github_op_result");
     expect(JSON.stringify(github?.data)).toContain("feat: tree");
-    expect(after.pendingApprovalBinding).toBeUndefined();
   });
 
-  it("invalidates approval when ChangeSet changes and blocks create_pr", () => {
-    const root = mkdtempSync(join(tmpdir(), "loop-bind-stale-"));
+  it("invalidates when workspace file content drifts after ChangeSet stamp", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-bind-dirty-"));
+    roots.push(root);
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src/a.ts"), " consola = 1;\n", "utf8");
+    const digester = createWorkspacePathDigester(root);
+    const first = digester(["src/a.ts"]);
+    const contentDigest = combineFileDigests(first.digests);
+
+    const instance = {
+      id: "inst_dirty",
+      specVersion: "v1",
+      status: "running" as const,
+      cursorNodeId: "n_pr",
+      round: 0,
+      attemptCounts: {},
+      events: [],
+      startedAt: "2026-11-10T00:00:00.000Z",
+      updatedAt: "2026-11-10T00:00:00.000Z",
+      artifacts: [
+        {
+          id: "art_cs",
+          nodeId: "n_coder",
+          kind: "change_set" as const,
+          createdAt: "2026-11-10T00:00:00.000Z",
+          data: {
+            files: ["src/a.ts"],
+            summary: "v1",
+            contentDigest,
+            fileDigests: first.digests,
+          },
+        },
+      ],
+    };
+    const fresh = computeEngineeringBaseline(instance, {
+      leaf: null,
+      readRun: () => null,
+      readEvidence: () => null,
+      startAgentRun: () => {
+        throw new Error("unused");
+      },
+      digestWorkspacePaths: digester,
+    });
+    expect(fresh.evidenceFresh).toBe(true);
+
+    writeFileSync(join(root, "src/a.ts"), "consola = 2;\n", "utf8");
+    const dirty = computeEngineeringBaseline(instance, {
+      leaf: null,
+      readRun: () => null,
+      readEvidence: () => null,
+      startAgentRun: () => {
+        throw new Error("unused");
+      },
+      digestWorkspacePaths: digester,
+    });
+    expect(dirty.evidenceFresh).toBe(false);
+    expect(dirty.failClosedReason).toMatch(/drifted|dirty/i);
+  });
+
+  it("rejects approval reuse across action nodes and operations", () => {
+    const instance = {
+      id: "inst_1",
+      specVersion: "v1",
+      status: "running" as const,
+      cursorNodeId: "n_pr",
+      round: 0,
+      attemptCounts: {},
+      events: [],
+      startedAt: "2026-11-10T00:00:00.000Z",
+      updatedAt: "2026-11-10T00:00:00.000Z",
+      artifacts: [],
+    };
+    const engineering = computeEngineeringBaseline(instance);
+    const payload = { title: "feat" };
+    const binding = buildApprovalBinding({
+      instanceId: "inst_1",
+      decisionNodeId: "n_approval",
+      actionNodeId: "n_pr",
+      actionIntegration: "github",
+      actionOperation: "create_pr",
+      engineering,
+      operationDigest: digestOperationPayload(payload),
+    });
+    expect(
+      isApprovalBindingCurrent({
+        binding,
+        instance,
+        payload,
+        actionNodeId: "n_pr",
+        actionIntegration: "github",
+        actionOperation: "create_pr",
+      }),
+    ).toBe(true);
+    expect(
+      isApprovalBindingCurrent({
+        binding,
+        instance,
+        payload,
+        actionNodeId: "n_other",
+        actionIntegration: "github",
+        actionOperation: "create_pr",
+      }),
+    ).toBe(false);
+    expect(
+      isApprovalBindingCurrent({
+        binding,
+        instance,
+        payload,
+        actionNodeId: "n_pr",
+        actionIntegration: "github",
+        actionOperation: "create_branch",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not treat 'not approved' as affirmative", () => {
+    expect(isApprovalChoice("approve")).toBe(true);
+    expect(isApprovalChoice("not approved")).toBe(false);
+    expect(isApprovalChoice("不同意")).toBe(false);
+    expect(isApprovalChoice("please approve later")).toBe(false);
+  });
+
+  it("rejects 'not approved' on Human→Action topology without seeding binding", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-bind-reject-"));
+    roots.push(root);
+    let { doc } = approvePrDoc(root);
+    doc = startLoopInstance(root, doc.id);
+    const instanceId = doc.instances[0]!.id;
+    const questionId = doc.instances[0]!.hitlQuestionIds![0]!;
+    doc = resolveLoopHitl(root, doc.id, instanceId, [
+      { questionId, answer: "not approved", actor: "terran" },
+    ]);
+    expect(doc.instances[0]?.status).toBe("error");
+    expect(
+      doc.instances[0]?.artifacts?.some((item) => item.kind === "github_op_result"),
+    ).toBe(false);
+  });
+
+  it("binds default Action payload when approve has no editedPayload", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-bind-default-"));
+    roots.push(root);
+    let { doc } = approvePrDoc(root);
+    doc = startLoopInstance(root, doc.id);
+    const instanceId = doc.instances[0]!.id;
+    const questionId = doc.instances[0]!.hitlQuestionIds![0]!;
+    doc = resolveLoopHitl(root, doc.id, instanceId, [
+      { questionId, answer: "approve", actor: "terran" },
+    ]);
+    const after = doc.instances[0]!;
+    expect(after.status).toBe("complete");
+    const decision = [...(after.artifacts ?? [])]
+      .reverse()
+      .find((item) => item.kind === "human_decision");
+    expect(decision?.data).toMatchObject({
+      choice: "approve",
+      binding: {
+        nodeId: "n_pr",
+        actionIntegration: "github",
+        actionOperation: "create_pr",
+        actorKind: "local_declared",
+      },
+    });
+    expect(
+      after.artifacts?.some((item) => item.kind === "github_op_result"),
+    ).toBe(true);
+  });
+
+  it("blocks deferred GitHub settle when code digest goes stale (TOCTOU)", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-bind-toc-"));
     roots.push(root);
     let { doc, spec } = approvePrDoc(root);
+    const digester = createWorkspacePathDigester(root);
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src/a.ts"), "v1\n", "utf8");
+    const digested = digester(["src/a.ts"]);
+    const contentDigest = combineFileDigests(digested.digests);
 
     let working = pushArtifact(
       {
-        id: "inst_stale",
+        id: "inst_toc",
         specVersion: spec.version,
         status: "running",
         cursorNodeId: "n_pr",
@@ -176,78 +338,189 @@ describe("loop approval binding (engineering baseline)", () => {
         data: {
           files: ["src/a.ts"],
           summary: "v1",
-          agentRunId: "run_1",
+          contentDigest,
+          fileDigests: digested.digests,
         },
       },
     );
-    const v1 = working.artifacts![0]!;
-    const engineering = computeEngineeringBaseline(working);
+    const engineering = computeEngineeringBaseline(working, {
+      leaf: null,
+      readRun: () => null,
+      readEvidence: () => null,
+      startAgentRun: () => {
+        throw new Error("unused");
+      },
+      digestWorkspacePaths: digester,
+    });
+    const payload = { title: "feat: v1" };
+    const binding = {
+      decisionArtifactId: "art_decision",
+      instanceId: working.id,
+      nodeId: "n_pr",
+      decisionNodeId: "n_approval",
+      actionIntegration: "github",
+      actionOperation: "create_pr",
+      artifactIds: engineering.artifactIds,
+      engineeringBaseline: engineering.baseline,
+      codeDigest: engineering.codeDigest,
+      operationDigest: digestOperationPayload(payload),
+      actorKind: "local_declared" as const,
+      approvedAt: "2026-11-10T00:00:00.000Z",
+    };
     working = {
       ...working,
-      pendingActionPayload: { title: "feat: v1" },
-      pendingApprovalBinding: {
-        decisionArtifactId: "art_decision",
-        instanceId: working.id,
-        nodeId: "n_approval",
-        artifactIds: engineering.artifactIds,
-        engineeringBaseline: engineering.baseline,
-        operationDigest: digestOperationPayload({ title: "feat: v1" }),
-        actor: "reviewer",
-        approvedAt: "2026-11-10T00:00:00.000Z",
+      pendingGithubOp: {
+        nodeId: "n_pr",
+        operation: "create_pr",
+        payload,
+        queuedAt: "2026-11-10T00:00:00.000Z",
+        approvalBinding: binding,
       },
-      artifacts: [
-        ...working.artifacts!,
-        {
-          id: "art_decision",
-          nodeId: "n_approval",
-          kind: "human_decision",
-          createdAt: "2026-11-10T00:00:00.000Z",
-          data: {
-            mode: "approval",
-            choice: "approve",
-            at: "2026-11-10T00:00:00.000Z",
-            nodeId: "n_approval",
-            binding: {
-              instanceId: working.id,
-              nodeId: "n_approval",
-              artifactIds: [v1.id],
-              engineeringBaseline: engineering.baseline,
-              operationDigest: digestOperationPayload({ title: "feat: v1" }),
-              status: "valid",
-            },
-          },
-        },
-      ],
     };
-
-    // Mutate engineering evidence after approval.
-    working = pushArtifact(working, {
-      nodeId: "n_coder",
-      kind: "change_set",
-      data: {
-        files: ["src/a.ts", "src/b.ts"],
-        summary: "v2 after approval",
-        agentRunId: "run_2",
-      },
-    });
-    expect(working.pendingApprovalBinding).toBeUndefined();
-    expect(working.pendingActionPayload).toBeUndefined();
-    const decision = working.artifacts?.find((item) => item.id === "art_decision");
-    expect(
-      (decision?.data as { binding?: { status?: string } }).binding?.status,
-    ).toBe("invalidated");
-
+    writeFileSync(join(root, "src/a.ts"), "v2-dirty\n", "utf8");
     doc = upsertLoopGraph(root, { ...doc, instances: [working] });
-    doc = advanceLoopInstance(root, doc.id, working.id);
-    const after = doc.instances[0]!;
-    expect(after.status).toBe("awaiting_hitl");
-    expect(after.hitlQuestionIds?.[0]).toContain("human_approval_");
-    expect(after.events.some((event) => event.type === "approval_stale")).toBe(
-      true,
+    doc = completePendingGithubOp(
+      doc,
+      working.id,
+      { ok: true, url: "https://example/pr/1", number: 1, message: "created" },
+      {
+        leaf: null,
+        readRun: () => null,
+        readEvidence: () => null,
+        startAgentRun: () => {
+          throw new Error("unused");
+        },
+        digestWorkspacePaths: digester,
+      },
     );
+    expect(doc.instances[0]?.status).toBe("awaiting_hitl");
+    expect(doc.instances[0]?.pendingGithubOp).toBeUndefined();
     expect(
-      after.artifacts?.some((item) => item.kind === "github_op_result"),
+      doc.instances[0]?.events.some((event) => event.type === "approval_stale"),
+    ).toBe(true);
+    expect(
+      doc.instances[0]?.artifacts?.some((item) => item.kind === "github_op_result"),
     ).toBe(false);
+  });
+
+  it("diffs intent graphs for AI edit preview", () => {
+    const diff = diffIntentGraphs(
+      {
+        nodes: [{ id: "a", title: "A" }],
+        edges: [{ id: "e1" }],
+      },
+      {
+        nodes: [
+          { id: "a", title: "A2" },
+          { id: "b", title: "B" },
+        ],
+        edges: [{ id: "e2" }],
+      },
+    );
+    expect(diff.addedNodeIds).toEqual(["b"]);
+    expect(diff.changedNodeIds).toEqual(["a"]);
+    expect(diff.removedEdgeIds).toEqual(["e1"]);
+    expect(diff.summaryLines.length).toBeGreaterThan(0);
+  });
+
+  it("drains no-merge parallel fan-out terminals instead of completing early", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-par-term-"));
+    roots.push(root);
+    let doc = createLoopGraph(root, "proj", "Parallel terminals");
+    const waitNode = (
+      id: string,
+      goal: string,
+    ): LoopSpec["nodes"][number] => ({
+      id,
+      role: "unknown",
+      type: "logic",
+      logicKind: "wait",
+      goal,
+      constraints: [],
+      inputs: [],
+      outputs: [],
+      acceptance: [],
+    });
+    const spec = baseSpec({
+      version: "spec_par",
+      nodes: [
+        waitNode("n_entry", "Fan-out entry"),
+        waitNode("n_a", "Branch A"),
+        waitNode("n_b", "Branch B"),
+      ],
+      edges: [
+        { id: "e1", from: "n_entry", to: "n_a", kind: "depends" },
+        { id: "e2", from: "n_entry", to: "n_b", kind: "depends" },
+      ],
+      permissions: [],
+    });
+    doc = approveLoopSpec(root, doc.id, spec);
+    doc = startLoopInstance(root, doc.id);
+    const instanceId = doc.instances[0]!.id;
+    // startLoopInstance already advances past the entry wait into the first child.
+    expect(doc.instances[0]?.status).toBe("running");
+    const firstChild = doc.instances[0]?.cursorNodeId;
+    expect(["n_a", "n_b"]).toContain(firstChild);
+    const sibling = firstChild === "n_a" ? "n_b" : "n_a";
+    // Completing a no-child terminal must still schedule the parallel sibling.
+    doc = stepLoopInstance(doc, instanceId);
+    expect(doc.instances[0]?.status).toBe("running");
+    expect(doc.instances[0]?.cursorNodeId).toBe(sibling);
+    doc = stepLoopInstance(doc, instanceId);
+    expect(doc.instances[0]?.status).toBe("complete");
+  });
+
+  it("drains nested parallel ready peers after an inner terminal", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-par-nest-"));
+    roots.push(root);
+    let doc = createLoopGraph(root, "proj", "Nested parallel");
+    const waitNode = (
+      id: string,
+      goal: string,
+    ): LoopSpec["nodes"][number] => ({
+      id,
+      role: "unknown",
+      type: "logic",
+      logicKind: "wait",
+      goal,
+      constraints: [],
+      inputs: [],
+      outputs: [],
+      acceptance: [],
+    });
+    const spec = baseSpec({
+      version: "spec_nest",
+      nodes: [
+        waitNode("n_root", "Root"),
+        waitNode("n_left", "Left"),
+        waitNode("n_right", "Right"),
+        waitNode("n_left_a", "Left A"),
+        waitNode("n_left_b", "Left B"),
+      ],
+      edges: [
+        { id: "e1", from: "n_root", to: "n_left", kind: "depends" },
+        { id: "e2", from: "n_root", to: "n_right", kind: "depends" },
+        { id: "e3", from: "n_left", to: "n_left_a", kind: "depends" },
+        { id: "e4", from: "n_left", to: "n_left_b", kind: "depends" },
+      ],
+      permissions: [],
+    });
+    doc = approveLoopSpec(root, doc.id, spec);
+    doc = startLoopInstance(root, doc.id);
+    const instanceId = doc.instances[0]!.id;
+    const seen: string[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const before = doc.instances[0]!;
+      if (before.status === "complete") break;
+      const cursor = before.cursorNodeId;
+      if (cursor) seen.push(cursor);
+      doc = stepLoopInstance(doc, instanceId);
+    }
+    // start already consumed n_root; remaining fan-out peers must all run.
+    expect([...new Set(seen)].sort()).toEqual(
+      ["n_left", "n_left_a", "n_left_b", "n_right"].sort(),
+    );
+    expect(doc.instances[0]?.status).toBe("complete");
   });
 
   it("rejects bare historical approve without live binding", () => {
@@ -290,61 +563,6 @@ describe("loop approval binding (engineering baseline)", () => {
     expect(doc.instances[0]?.status).toBe("awaiting_hitl");
     expect(
       doc.instances[0]?.artifacts?.some((item) => item.kind === "github_op_result"),
-    ).toBe(false);
-  });
-
-  it("isApprovalBindingCurrent fails on payload tamper", () => {
-    const instance = {
-      id: "inst_1",
-      specVersion: "v1",
-      status: "running" as const,
-      cursorNodeId: "n_pr",
-      round: 0,
-      attemptCounts: {},
-      events: [],
-      startedAt: "2026-11-10T00:00:00.000Z",
-      updatedAt: "2026-11-10T00:00:00.000Z",
-      artifacts: [
-        {
-          id: "art_cs",
-          nodeId: "n_coder",
-          kind: "change_set" as const,
-          createdAt: "2026-11-10T00:00:00.000Z",
-          data: { files: ["a.ts"], summary: "x" },
-        },
-      ],
-    };
-    const engineering = computeEngineeringBaseline(instance);
-    const payload = { title: "feat" };
-    expect(
-      isApprovalBindingCurrent({
-        binding: {
-          decisionArtifactId: "d1",
-          instanceId: "inst_1",
-          nodeId: "n_approval",
-          artifactIds: engineering.artifactIds,
-          engineeringBaseline: engineering.baseline,
-          operationDigest: digestOperationPayload(payload),
-          approvedAt: "2026-11-10T00:00:00.000Z",
-        },
-        instance,
-        payload,
-      }),
-    ).toBe(true);
-    expect(
-      isApprovalBindingCurrent({
-        binding: {
-          decisionArtifactId: "d1",
-          instanceId: "inst_1",
-          nodeId: "n_approval",
-          artifactIds: engineering.artifactIds,
-          engineeringBaseline: engineering.baseline,
-          operationDigest: digestOperationPayload(payload),
-          approvedAt: "2026-11-10T00:00:00.000Z",
-        },
-        instance,
-        payload: { title: "feat-tampered" },
-      }),
     ).toBe(false);
   });
 });

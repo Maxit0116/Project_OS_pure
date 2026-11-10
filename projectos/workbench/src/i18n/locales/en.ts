@@ -1995,8 +1995,11 @@ const en = {
       clarifyCustom: 'Or type your own answer…',
       submitClarifications: 'Submit answers',
       cancelClarifications: 'Cancel',
-      acceptGraphEdit: 'Generate draft graph',
-      dismissGraphEdit: 'Not now',
+      acceptGraphEdit: 'Apply proposed edit',
+      dismissGraphEdit: 'Dismiss',
+      graphEditDiffUnavailable: 'Proposed draft is ready; structural diff summary unavailable.',
+      graphEditConfirmOffer:
+        'Goal confirmed. Accept generates a coarse draft from the confirmed goal (empty-graph path); dismiss to keep editing manually.',
       nodePromptPlaceholder: 'What should this node accomplish?',
       authoringTitle: 'Loop authoring',
       authoringNode: 'Defining node “{title}”',

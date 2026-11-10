@@ -123,6 +123,75 @@ describe('LoopGoalComposer', () => {
     const html = renderToStaticMarkup(<LoopGoalComposer />)
     expect(html).toContain('data-loop-graph-edit-offer')
     expect(html).toContain('chat.loopGraph.acceptGraphEdit')
+    expect(html).toContain('data-loop-graph-edit-confirm-offer')
+    expect(html).toContain('chat.loopGraph.graphEditConfirmOffer')
+  })
+
+  it('renders structural diff lines for AI edit offers', () => {
+    mockStore({
+      document: {
+        ...sampleDoc,
+        pendingGraphEditOffer: {
+          reason: 'Add verify node',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          baseRevision: 0,
+          proposedDraft: {
+            revision: 1,
+            graphPrompt: 'Ship',
+            nodes: [
+              {
+                id: 'n1',
+                title: 'Implement',
+                prompt: 'Build',
+                position: { x: 0, y: 0 },
+              },
+              {
+                id: 'n2',
+                title: 'Verify',
+                prompt: 'Test',
+                position: { x: 0, y: 80 },
+              },
+            ],
+            edges: [{ id: 'e1', source: 'n1', target: 'n2', kind: 'depends' }],
+          },
+          diff: {
+            addedNodeIds: ['n2'],
+            removedNodeIds: [],
+            changedNodeIds: [],
+            addedEdgeIds: ['e1'],
+            removedEdgeIds: [],
+            summaryLines: ['+1 node(s): Verify', 'edges +1/-0'],
+          },
+        },
+      },
+    })
+    const html = renderToStaticMarkup(<LoopGoalComposer />)
+    expect(html).toContain('data-loop-graph-edit-diff')
+    expect(html).toContain('+1 node(s): Verify')
+    expect(html).toContain('edges +1/-0')
+    expect(html).not.toContain('data-loop-graph-edit-diff-empty')
+    expect(html).not.toContain('data-loop-graph-edit-confirm-offer')
+  })
+
+  it('shows unavailable diff note when proposedDraft lacks summary lines', () => {
+    mockStore({
+      document: {
+        ...sampleDoc,
+        pendingGraphEditOffer: {
+          reason: 'Tweak labels',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          proposedDraft: {
+            revision: 1,
+            graphPrompt: '',
+            nodes: [],
+            edges: [],
+          },
+        },
+      },
+    })
+    const html = renderToStaticMarkup(<LoopGoalComposer />)
+    expect(html).toContain('data-loop-graph-edit-diff-empty')
+    expect(html).toContain('chat.loopGraph.graphEditDiffUnavailable')
   })
 
   it('shows clarifications as a peer bookmark sheet when questions are pending', () => {

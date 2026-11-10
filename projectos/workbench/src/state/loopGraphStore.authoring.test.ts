@@ -104,6 +104,48 @@ describe('loopGraphStore authoring actions', () => {
     expect(useLoopGraphStore.getState().composerSheet).toBe('clarify')
   })
 
+  it('clears pending AI edit offer when draft revision changes', () => {
+    useLoopGraphStore.setState({
+      document: {
+        ...baseDoc,
+        pendingGraphEditOffer: {
+          reason: 'Propose nodes',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          baseRevision: 0,
+          proposedDraft: {
+            revision: 1,
+            graphPrompt: 'Ship',
+            nodes: [
+              {
+                id: 'n1',
+                title: 'Implement',
+                prompt: 'Build',
+                position: { x: 0, y: 0 },
+              },
+            ],
+            edges: [],
+          },
+        },
+      },
+    })
+    useLoopGraphStore.getState().updateDraft({
+      revision: 1,
+      graphPrompt: 'Manual edit',
+      nodes: [
+        {
+          id: 'n_manual',
+          title: 'Manual node',
+          prompt: 'User typed',
+          position: { x: 10, y: 10 },
+        },
+      ],
+      edges: [],
+    })
+    const next = useLoopGraphStore.getState().document
+    expect(next?.draft.revision).toBe(1)
+    expect(next?.pendingGraphEditOffer).toBeUndefined()
+  })
+
   it('restores the previous prompt when canceling clarifications', async () => {
     const cancel = vi.fn(async () =>
       normalizeLoopGraphDocument({

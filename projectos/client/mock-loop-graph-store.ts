@@ -36,6 +36,7 @@ import {
   buildCompleteTrace,
   makeAuthoringMessage,
 } from "../services/loop-goal-authoring-service.js";
+import { diffIntentGraphs } from "../services/loop-intent-graph-diff.js";
 import {
   buildCoarseLoopSkeletonFromGoal,
   editLoopGraphHeuristic,
@@ -639,6 +640,7 @@ export function mockSendLoopAuthoringTurn(
     "assistant",
     `${edit.summary} Review the proposed graph edit, then Accept or Dismiss.`,
   );
+  const diff = diffIntentGraphs(doc.draft, edit.draft);
   return mockUpsertLoopGraph(projectId, {
     ...doc,
     composerMode: "edit",
@@ -651,7 +653,11 @@ export function mockSendLoopAuthoringTurn(
       createdAt: new Date().toISOString(),
       proposedDraft: edit.draft,
       baseRevision: doc.draft.revision,
+      ...(typeof goalContext?.revision === "number"
+        ? { baseGoalRevision: goalContext.revision }
+        : {}),
       summary: edit.summary.slice(0, 1000),
+      diff,
     },
   });
 }
@@ -766,6 +772,17 @@ export function mockAcceptLoopGraphEditOffer(
   ) {
     throw new Error(
       "Graph edit offer is stale relative to the current draft; dismiss and re-propose",
+    );
+  }
+  const goalRevision =
+    doc.confirmedGoalContext?.revision ?? doc.draftGoalContext?.revision;
+  if (
+    typeof offer.baseGoalRevision === "number" &&
+    typeof goalRevision === "number" &&
+    offer.baseGoalRevision !== goalRevision
+  ) {
+    throw new Error(
+      "Graph edit offer is stale relative to the goal context; dismiss and re-propose",
     );
   }
 

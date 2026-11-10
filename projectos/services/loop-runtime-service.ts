@@ -36,10 +36,13 @@ import {
 } from "./loop-terminal-action.js";
 import {
   buildApprovalBinding,
+  buildDefaultActionPayload,
+  combineFileDigests,
   computeEngineeringBaseline,
   digestOperationPayload,
   invalidatePendingApproval,
   isApprovalBindingCurrent,
+  isApprovalChoice,
 } from "./loop-approval-binding.js";
 import {
   architectureOf,
@@ -200,18 +203,14 @@ function pickNextCursor(
 
   // Prefer direct depends successors so Sequence cannot be pre-empted by an
   // earlier sibling still marked ready (e.g. skipped Test after a forced jump).
+  // Parallel: when this node has no children, still drain other ready peers
+  // (no-merge fan-out terminals, independent roots) — do NOT treat every
+  // terminal as whole-run complete.
   const readyChildren = children.filter(
     (childId) => recordStatus(next, childId) === "ready",
   );
   if (readyChildren.length > 0) {
     return { cursor: readyChildren[0]!, instance: next };
-  }
-
-  // Path terminal: do not resurrect earlier ready nodes after the final Action.
-  // Parallel sibling drain still works below when this node has Merge children
-  // that are not joinable yet.
-  if (children.length === 0) {
-    return { cursor: null, instance: next };
   }
 
   // Only "ready" (not merge "waiting") — Merge is handled above when joinable.
@@ -1256,6 +1255,13 @@ function stepActionNode(
           perm.action.includes(arch.actionIntegration ?? "")),
     );
 
+  const defaultPayload = buildDefaultActionPayload({
+    nodeId: node.id,
+    ...(arch.actionIntegration
+      ? { actionIntegration: arch.actionIntegration }
+      : {}),
+    ...(arch.actionOperation ? { actionOperation: arch.actionOperation } : {}),
+  });
   const approvedPayload = next.pendingActionPayload;
   const bindingOk = Boolean(
     next.pendingApprovalBinding &&
@@ -1264,10 +1270,18 @@ function stepActionNode(
         binding: next.pendingApprovalBinding,
         instance: next,
         payload: approvedPayload,
+        actionNodeId: node.id,
+        ...(arch.actionIntegration
+          ? { actionIntegration: arch.actionIntegration }
+          : {}),
+        ...(arch.actionOperation
+          ? { actionOperation: arch.actionOperation }
+          : {}),
+        ...(execution ? { execution } : {}),
       }),
   );
   // Fail-closed: a historical human_decision with choice≈approve is not enough.
-  // Delivery-gate Actions require a live binding to artifacts + operation params.
+  // Delivery-gate Actions require a live binding to Action node + artifacts + params.
   const hasApproval = bindingOk;
 
   if (requiresApproval && !hasApproval) {
@@ -1277,7 +1291,7 @@ function stepActionNode(
     if (stale) {
       next = invalidatePendingApproval(
         next,
-        "Approval binding no longer matches engineering baseline or payload",
+        "Approval binding no longer matches Action target, engineering baseline, or payload",
       );
       next = pushEvent(next, {
         type: "approval_stale",
@@ -1291,6 +1305,8 @@ function stepActionNode(
         ...next,
         status: "awaiting_hitl",
         hitlQuestionIds: [`human_approval_${node.id}`],
+        // Surface default params awaiting approval (not only editedPayload).
+        pendingActionPayload: approvedPayload ?? defaultPayload,
       },
       {
         type: "awaiting_hitl",
@@ -1303,10 +1319,7 @@ function stepActionNode(
     return replaceInstance(doc, next);
   }
 
-  const payload = approvedPayload ?? {
-    operation: arch.actionOperation ?? "run",
-    integration: arch.actionIntegration,
-  };
+  const payload = approvedPayload ?? defaultPayload;
 
   if (arch.actionIntegration === "github") {
     return stepGithubAction(doc, next, spec, node, execution, payload);
@@ -1365,16 +1378,19 @@ function stepGithubAction(
   }
 
   if (githubResult.deferred) {
+    const bindingSnapshot = instance.pendingApprovalBinding;
+    const pendingGithubOp = {
+      nodeId: node.id,
+      operation,
+      payload,
+      queuedAt: nowIso(),
+      ...(bindingSnapshot ? { approvalBinding: bindingSnapshot } : {}),
+    };
     const queued = {
       ...instance,
       pendingActionPayload: undefined,
       pendingApprovalBinding: undefined,
-      pendingGithubOp: {
-        nodeId: node.id,
-        operation,
-        payload,
-        queuedAt: nowIso(),
-      },
+      pendingGithubOp,
       status: "running" as const,
     };
     const withEvent = pushEvent(queued, {
@@ -1386,7 +1402,7 @@ function stepGithubAction(
       ...withEvent,
       pendingActionPayload: undefined,
       pendingApprovalBinding: undefined,
-      pendingGithubOp: queued.pendingGithubOp,
+      pendingGithubOp,
       status: "running" as const,
     });
   }
@@ -1559,6 +1575,7 @@ export function completePendingGithubOp(
   doc: LoopGraphDocument,
   instanceId: string,
   result: LoopGithubOperationResult,
+  execution?: LoopExecutionHooks,
 ): LoopGraphDocument {
   const instance = doc.instances.find((item) => item.id === instanceId);
   if (!instance?.pendingGithubOp) return doc;
@@ -1566,6 +1583,59 @@ export function completePendingGithubOp(
   if (!spec) throw new Error(`Spec not found: ${instance.specVersion}`);
 
   const pending = instance.pendingGithubOp;
+  const actionNode = spec.nodes.find((item) => item.id === pending.nodeId);
+  const arch = actionNode ? architectureOf(actionNode) : undefined;
+
+  // TOCTOU: re-validate approval snapshot against current engineering baseline
+  // before accepting settle success (HTTP may already be in flight — fail-closed
+  // blocks completion/advance; callers must follow existing idempotency).
+  if (pending.approvalBinding) {
+    const stillValid = isApprovalBindingCurrent({
+      binding: pending.approvalBinding,
+      instance: {
+        ...instance,
+        pendingActionPayload: pending.payload,
+        pendingApprovalBinding: pending.approvalBinding,
+      },
+      payload: pending.payload,
+      actionNodeId: pending.nodeId,
+      ...(arch?.actionIntegration
+        ? { actionIntegration: arch.actionIntegration }
+        : {}),
+      actionOperation: pending.operation,
+      ...(execution ? { execution } : {}),
+    });
+    if (!stillValid) {
+      let blocked = invalidatePendingApproval(
+        {
+          ...instance,
+          pendingActionPayload: pending.payload,
+          pendingApprovalBinding: pending.approvalBinding,
+        },
+        "Pending GitHub op approval became stale before settle",
+      );
+      blocked = {
+        ...blocked,
+        pendingGithubOp: undefined,
+        status: "awaiting_hitl",
+        hitlQuestionIds: [`human_approval_${pending.nodeId}`],
+        cursorNodeId: pending.nodeId,
+      };
+      blocked = pushEvent(blocked, {
+        type: "approval_stale",
+        nodeId: pending.nodeId,
+        message:
+          "GitHub settle blocked: code/params/evidence changed since approval (re-approve)",
+      });
+      blocked = pushEvent(blocked, {
+        type: "awaiting_hitl",
+        nodeId: pending.nodeId,
+        message: `Re-approve github.${pending.operation} after stale settle check`,
+      });
+      return replaceInstance(doc, blocked);
+    }
+  }
+
   if (!result.ok) {
     return failNode(
       doc,
@@ -1693,11 +1763,26 @@ function stepImplementNode(
   }
   if (run.status === "complete" && run.applySucceeded) {
     const leafPath = execution?.leaf?.filePath ?? "unknown";
+    let contentDigest: string | undefined;
+    let fileDigests: Record<string, string> | undefined;
+    if (leafPath !== "unknown" && execution?.digestWorkspacePaths) {
+      const digested = execution.digestWorkspacePaths([leafPath]);
+      if (
+        digested.missing.length === 0 &&
+        digested.unreadable.length === 0 &&
+        digested.digests[leafPath]
+      ) {
+        fileDigests = digested.digests;
+        contentDigest = combineFileDigests(digested.digests);
+      }
+    }
     const changeSet = buildChangeSetFromRun({
       filePath: leafPath,
       goal: bound.goal,
       agentRunId: run.runId,
       task: bound.task,
+      ...(contentDigest ? { contentDigest } : {}),
+      ...(fileDigests ? { fileDigests } : {}),
     });
     next = pushArtifact(next, {
       nodeId: node.id,
@@ -1777,7 +1862,21 @@ function stepVerifyNode(
     return replaceInstance(doc, next);
   }
 
-  const report = evidenceToTestReport(evidence, "configured-test");
+  const latestChange = latestArtifact(working, "change_set");
+  const changeDigest =
+    latestChange &&
+    typeof latestChange.data === "object" &&
+    latestChange.data &&
+    "contentDigest" in latestChange.data
+      ? String(
+          (latestChange.data as { contentDigest?: string }).contentDigest ?? "",
+        )
+      : "";
+  const report = evidenceToTestReport(
+    evidence,
+    "configured-test",
+    changeDigest || undefined,
+  );
   if (report) {
     working = pushArtifact(working, {
       nodeId,
@@ -2575,7 +2674,27 @@ export function resolveLoopHitl(
     }
 
     if (mode === "approval") {
-      if (/reject|deny|拒绝|驳回/i.test(choiceLower)) {
+      // Exact whitelist via isApprovalChoice — never substring-match "approve"
+      // inside phrases like "not approved".
+      const affirmative = isApprovalChoice(choice);
+      const explicitReject =
+        /^(reject|denied|deny|拒绝|驳回|not approved|not_approved|unapproved|disapprove|不同意|不批准)$/i.test(
+          choice.trim(),
+        );
+      const actionTarget = (() => {
+        if (isActionNode(cursorNode) && !isTestActionNode(cursorNode)) {
+          return cursorNode;
+        }
+        const outs = dependsOutgoingIds(spec, cursorNode.id);
+        for (const outId of outs) {
+          const candidate = spec.nodes.find((item) => item.id === outId);
+          if (candidate && isActionNode(candidate) && !isTestActionNode(candidate)) {
+            return candidate;
+          }
+        }
+        return undefined;
+      })();
+      if (explicitReject) {
         next = invalidatePendingApproval(next, "Human rejected the action");
         next = pushArtifact(next, {
           nodeId: cursorNode.id,
@@ -2603,15 +2722,59 @@ export function resolveLoopHitl(
         );
         return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
       }
-      if (answer.editedPayload) {
-        next = { ...next, pendingActionPayload: answer.editedPayload };
-      } else if (/approve|edit|批准|同意/i.test(choiceLower)) {
-        next = {
-          ...next,
-          pendingActionPayload: next.pendingActionPayload ?? {
-            approved: true,
+      // Delivery Action gates require whitelist affirmatives. Pure decide→agent
+      // gates still accept free-form answers without authorizing side effects.
+      if (!affirmative && actionTarget) {
+        next = invalidatePendingApproval(next, "Approval choice not recognized");
+        next = pushArtifact(next, {
+          nodeId: cursorNode.id,
+          kind: "human_decision",
+          data: {
+            mode: "approval",
+            choice,
+            ...(answer.actor ? { actor: answer.actor } : {}),
+            at: nowIso(),
             nodeId: cursorNode.id,
           },
+        });
+        next = pushEvent(
+          {
+            ...next,
+            status: "awaiting_hitl",
+            hitlQuestionIds: [`human_approval_${cursorNode.id}`],
+            pendingApprovalBinding: undefined,
+          },
+          {
+            type: "awaiting_hitl",
+            nodeId: cursorNode.id,
+            message: "Approval choice not recognized — re-confirm required",
+          },
+        );
+        return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
+      }
+      const actionArch = actionTarget ? architectureOf(actionTarget) : undefined;
+      const defaultPayload = buildDefaultActionPayload({
+        nodeId: actionTarget?.id ?? cursorNode.id,
+        ...(actionArch?.actionIntegration
+          ? { actionIntegration: actionArch.actionIntegration }
+          : {}),
+        ...(actionArch?.actionOperation
+          ? { actionOperation: actionArch.actionOperation }
+          : {}),
+      });
+
+      if (answer.editedPayload) {
+        next = {
+          ...next,
+          pendingActionPayload: {
+            ...defaultPayload,
+            ...answer.editedPayload,
+          },
+        };
+      } else if (affirmative) {
+        next = {
+          ...next,
+          pendingActionPayload: next.pendingActionPayload ?? defaultPayload,
         };
       }
 
@@ -2619,14 +2782,46 @@ export function resolveLoopHitl(
       let bindingPayload:
         | ReturnType<typeof buildApprovalBinding>
         | undefined;
-      if (next.pendingActionPayload && /approve|edit|批准|同意/i.test(choiceLower)) {
-        const engineering = computeEngineeringBaseline(next);
+      if (next.pendingActionPayload && affirmative) {
+        const engineering = computeEngineeringBaseline(next, execution);
+        if (!engineering.evidenceFresh || !actionTarget) {
+          next = pushEvent(
+            {
+              ...next,
+              status: "awaiting_hitl",
+              hitlQuestionIds: [`human_approval_${cursorNode.id}`],
+              pendingActionPayload: next.pendingActionPayload,
+              pendingApprovalBinding: undefined,
+            },
+            {
+              type: "approval_stale",
+              nodeId: cursorNode.id,
+              message:
+                engineering.failClosedReason ??
+                "Approval refused: missing Action target or stale/unverified engineering evidence",
+            },
+          );
+          next = pushEvent(next, {
+            type: "awaiting_hitl",
+            nodeId: cursorNode.id,
+            message: "Cannot bind approval — evidence fail-closed",
+          });
+          return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
+        }
         const operationDigest = digestOperationPayload(next.pendingActionPayload);
         bindingPayload = buildApprovalBinding({
           instanceId: next.id,
-          nodeId: cursorNode.id,
+          decisionNodeId: cursorNode.id,
+          actionNodeId: actionTarget.id,
           engineering,
           operationDigest,
+          ...(actionArch?.actionIntegration
+            ? { actionIntegration: actionArch.actionIntegration }
+            : {}),
+          ...(actionArch?.actionOperation
+            ? { actionOperation: actionArch.actionOperation }
+            : {}),
+          ...(answer.actor ? { actor: answer.actor } : {}),
         });
       }
 
@@ -2650,11 +2845,24 @@ export function resolveLoopHitl(
           pendingApprovalBinding: {
             decisionArtifactId: decisionId,
             instanceId: next.id,
-            nodeId: cursorNode.id,
+            nodeId: bindingPayload.nodeId,
+            ...(bindingPayload.decisionNodeId
+              ? { decisionNodeId: bindingPayload.decisionNodeId }
+              : {}),
+            ...(bindingPayload.actionIntegration
+              ? { actionIntegration: bindingPayload.actionIntegration }
+              : {}),
+            ...(bindingPayload.actionOperation
+              ? { actionOperation: bindingPayload.actionOperation }
+              : {}),
             artifactIds: [...bindingPayload.artifactIds],
             engineeringBaseline: bindingPayload.engineeringBaseline,
+            ...(bindingPayload.codeDigest
+              ? { codeDigest: bindingPayload.codeDigest }
+              : {}),
             operationDigest: bindingPayload.operationDigest,
             ...(answer.actor ? { actor: answer.actor } : {}),
+            actorKind: bindingPayload.actorKind ?? "unspecified",
             approvedAt: nowIso(),
           },
         };

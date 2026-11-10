@@ -14,6 +14,7 @@ import {
 } from "./loop-graph-service.js";
 import type { LoopExecutionHooks } from "./loop-execution.js";
 import {
+  combineFileDigests,
   computeEngineeringBaseline,
   digestOperationPayload,
 } from "./loop-approval-binding.js";
@@ -66,6 +67,15 @@ function dryHooks(
       runId: "run_dry",
       status: "complete",
       applySucceeded: true,
+    }),
+    // Stable digests so approval binding can fail-closed on real content checks
+    // without requiring a full workspace fixture for dry Action suites.
+    digestWorkspacePaths: (paths) => ({
+      digests: Object.fromEntries(
+        paths.map((path) => [path, `dry_${path.length}_${path}`]),
+      ),
+      missing: [],
+      unreadable: [],
     }),
     ...overrides,
   };
@@ -411,7 +421,17 @@ describe("loop-runtime Terminal + deferred GitHub", () => {
                   nodeId: "n_test",
                   kind: "test_report" as const,
                   createdAt: "2026-11-03T00:00:02.000Z",
-                  data: { status: "passed", passed: 3, total: 3 },
+                  data: {
+                    status: "passed",
+                    passed: 3,
+                    total: 3,
+                    // Match dryHooks digest for leaf so approval evidence stays fresh.
+                    validatedCodeDigest: combineFileDigests({
+                      "src/feature-tree.tsx": dryHooks().digestWorkspacePaths!([
+                        "src/feature-tree.tsx",
+                      ]).digests["src/feature-tree.tsx"]!,
+                    }),
+                  },
                 },
               ],
             }
@@ -448,13 +468,18 @@ describe("loop-runtime Terminal + deferred GitHub", () => {
 
     doc = upsertLoopGraph(
       root,
-      completePendingGithubOp(doc, instanceId, {
-        ok: true,
-        url: "https://github.com/example/repo/pull/42",
-        number: 42,
-        message: "settled",
-        refs: { title: "feat: feature tree" },
-      }),
+      completePendingGithubOp(
+        doc,
+        instanceId,
+        {
+          ok: true,
+          url: "https://github.com/example/repo/pull/42",
+          number: 42,
+          message: "settled",
+          refs: { title: "feat: feature tree" },
+        },
+        hooks,
+      ),
     );
     expect(doc.instances[0]?.status).toBe("complete");
     expect(JSON.stringify(doc.instances[0]?.artifacts)).toContain("pull/42");

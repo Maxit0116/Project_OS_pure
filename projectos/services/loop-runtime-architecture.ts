@@ -153,6 +153,7 @@ export function latestArtifact(
 export function evidenceToTestReport(
   evidence: LoopEvidenceView | null | undefined,
   command?: string,
+  validatedCodeDigest?: string,
 ): LoopTestReport | null {
   if (!evidence) return null;
   const status =
@@ -165,6 +166,7 @@ export function evidenceToTestReport(
     status,
     evidenceId: evidence.id,
     ...(command ? { command } : {}),
+    ...(validatedCodeDigest ? { validatedCodeDigest } : {}),
   });
 }
 

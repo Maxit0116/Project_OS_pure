@@ -390,6 +390,21 @@ export default function LoopGoalComposer() {
       {offer ? (
         <div className={styles.offerCard} data-loop-graph-edit-offer="">
           <p>{offer.reason}</p>
+          {offer.diff?.summaryLines?.length ? (
+            <ul className={styles.offerDiff} data-loop-graph-edit-diff="">
+              {offer.diff.summaryLines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : offer.proposedDraft ? (
+            <p className={styles.offerDiffEmpty} data-loop-graph-edit-diff-empty="">
+              {ts('chat.loopGraph.graphEditDiffUnavailable')}
+            </p>
+          ) : (
+            <p className={styles.offerDiffEmpty} data-loop-graph-edit-confirm-offer="">
+              {ts('chat.loopGraph.graphEditConfirmOffer')}
+            </p>
+          )}
           <div className={styles.offerActions}>
             <button
               type="button"

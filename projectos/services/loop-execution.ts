@@ -124,4 +124,13 @@ export interface LoopExecutionHooks {
    * (shared worktree; conflicts still surface as blocked/HITL).
    */
   allowConcurrentLoopRuns?: boolean;
+  /**
+   * Digest current workspace bytes for relative paths (approval evidence).
+   * Missing digester with non-empty ChangeSet.files → fail-closed.
+   */
+  digestWorkspacePaths?: (paths: string[]) => {
+    digests: Record<string, string>;
+    missing: string[];
+    unreadable: string[];
+  };
 }

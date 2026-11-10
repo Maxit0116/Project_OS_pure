@@ -170,6 +170,20 @@
   color: var(--tech-text-primary);
 }
 
+.offerDiff {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.offerDiffEmpty {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+}
+
 .offerActions,
 .clarifyActions {
   display: flex;

@@ -33,6 +33,7 @@ import {
   buildRunningTrace,
   makeAuthoringMessage,
 } from "./loop-goal-authoring-service.js";
+import { diffIntentGraphs } from "./loop-intent-graph-diff.js";
 import {
   buildCoarseLoopSkeletonFromGoal,
   editLoopGraphHeuristic,
@@ -274,11 +275,12 @@ export function sendLoopAuthoringTurn(
     draft: doc.draft,
     ...(goalContext ? { goalContext } : {}),
   });
+  const diff = diffIntentGraphs(doc.draft, edit.draft);
   // Propose-before-apply: do not mutate the live draft until Accept.
   // Manual canvas edits remain direct; AI Edit offers a reviewable patch.
   const assistant = makeAuthoringMessage(
     "assistant",
-    `${edit.summary} Review the proposed graph edit, then Accept or Dismiss.`,
+    `${edit.summary} Review the proposed graph diff, then Accept or Dismiss.`,
   );
   return upsertLoopGraph(workspaceRoot, {
     ...doc,
@@ -292,7 +294,11 @@ export function sendLoopAuthoringTurn(
       createdAt: new Date().toISOString(),
       proposedDraft: edit.draft,
       baseRevision: doc.draft.revision,
+      ...(typeof goalContext?.revision === "number"
+        ? { baseGoalRevision: goalContext.revision }
+        : {}),
       summary: edit.summary.slice(0, 1000),
+      diff,
     },
   });
 }
@@ -409,6 +415,17 @@ export function acceptLoopGraphEditOffer(
   ) {
     throw new Error(
       "Graph edit offer is stale relative to the current draft; dismiss and re-propose",
+    );
+  }
+  const goalRevision =
+    doc.confirmedGoalContext?.revision ?? doc.draftGoalContext?.revision;
+  if (
+    typeof offer.baseGoalRevision === "number" &&
+    typeof goalRevision === "number" &&
+    offer.baseGoalRevision !== goalRevision
+  ) {
+    throw new Error(
+      "Graph edit offer is stale relative to the goal context; dismiss and re-propose",
     );
   }
 

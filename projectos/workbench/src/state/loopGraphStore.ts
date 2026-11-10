@@ -194,10 +194,13 @@ function patchDraftDocument(
   document: LoopGraphDocument,
   draft: IntentGraph,
 ): LoopGraphDocument {
+  const revisionChanged = draft.revision !== document.draft.revision
   return {
     ...document,
     draft,
     updatedAt: new Date().toISOString(),
+    // Manual canvas/save bumps revision — drop AI offer so Accept cannot overwrite.
+    ...(revisionChanged ? { pendingGraphEditOffer: undefined } : {}),
   }
 }
 
@@ -591,10 +594,8 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     if (!current) return
     set({
       document: {
-        ...current,
+        ...patchDraftDocument(current, draft),
         title: title?.trim() || current.title,
-        draft,
-        updatedAt: new Date().toISOString(),
       },
     })
     get().schedulePersist()

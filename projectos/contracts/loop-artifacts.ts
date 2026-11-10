@@ -28,6 +28,10 @@ export const LoopChangeSetSchema = z
     unfinished: z.array(z.string().trim().min(1).max(500)).max(40).optional(),
     problems: z.array(z.string().trim().min(1).max(500)).max(40).optional(),
     agentRunId: z.string().min(1).optional(),
+    /** Combined digest of workspace file bytes at ChangeSet creation. */
+    contentDigest: z.string().trim().min(1).max(128).optional(),
+    /** Per-path digests (bounded) for dirty detection. */
+    fileDigests: z.record(z.string(), z.string().trim().min(1).max(128)).optional(),
   })
   .strict();
 
@@ -40,6 +44,8 @@ export const LoopTestReportSchema = z
     failedTests: z.array(z.string().trim().min(1).max(500)).max(200).optional(),
     command: z.string().trim().min(1).max(500).optional(),
     evidenceId: z.string().min(1).optional(),
+    /** Code digest this TestReport actually validated. */
+    validatedCodeDigest: z.string().trim().min(1).max(128).optional(),
   })
   .strict();
 
@@ -61,6 +67,8 @@ export const LoopReviewResultSchema = z
       .default([]),
     allowNext: z.boolean(),
     summary: z.string().trim().min(1).max(2000).optional(),
+    /** Code digest this ReviewResult evaluated. */
+    validatedCodeDigest: z.string().trim().min(1).max(128).optional(),
   })
   .strict();
 
@@ -75,16 +83,27 @@ export const LoopGitHubOpResultSchema = z
   })
   .strict();
 
-/** Binds an approval to a run, concrete artifacts, and operation params. */
+/** Binds an approval to a run, concrete Action, artifacts, code, and params. */
 export const LoopApprovalBindingSchema = z
   .object({
     instanceId: z.string().min(1),
+    /** Action node this approval authorizes (not merely the Human gate). */
     nodeId: z.string().min(1),
+    decisionNodeId: z.string().min(1).optional(),
+    actionIntegration: z.string().trim().min(1).max(80).optional(),
+    actionOperation: z.string().trim().min(1).max(80).optional(),
     artifactIds: z.array(z.string().min(1)).max(20),
-    /** Hash of ChangeSet / TestReport / ReviewResult material at approve time. */
+    /** Combined engineering baseline (code + evidence stamps). */
     engineeringBaseline: z.string().trim().min(1).max(128),
-    /** Hash of the approved Action payload / params. */
+    /** Workspace content digest bound at approve time. */
+    codeDigest: z.string().trim().min(1).max(128).optional(),
+    /** Hash of the approved Action payload / params (defaults included). */
     operationDigest: z.string().trim().min(1).max(128),
+    /**
+     * local_declared = UI/local actor string only; not external auth.
+     * unspecified = no actor claimed.
+     */
+    actorKind: z.enum(["local_declared", "unspecified"]).optional(),
     status: z.enum(["valid", "invalidated"]).default("valid"),
     invalidatedReason: z.string().trim().max(500).optional(),
     invalidatedAt: z.string().min(1).optional(),

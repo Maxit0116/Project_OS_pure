@@ -1961,8 +1961,11 @@ const zh = {
       clarifyCustom: '或自行输入回答…',
       submitClarifications: '提交回答',
       cancelClarifications: '取消',
-      acceptGraphEdit: '生成草稿图',
-      dismissGraphEdit: '暂不',
+      acceptGraphEdit: '应用提议修改',
+      dismissGraphEdit: '忽略',
+      graphEditDiffUnavailable: '已有提议草稿；结构化差异摘要不可用。',
+      graphEditConfirmOffer:
+        '目标已确认。接受将基于已确认目标生成粗略草稿（空图路径）；忽略则继续手动编辑。',
       nodePromptPlaceholder: '这个节点要完成什么？',
       authoringTitle: 'Loop 编写',
       authoringNode: '正在定义节点「{title}」',

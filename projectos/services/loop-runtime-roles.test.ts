@@ -23,8 +23,14 @@ import type { LoopExecutionHooks } from "./loop-execution.js";
 function scriptedCoderHooks(): LoopExecutionHooks {
   const runs = new Map<string, { runId: string; status: "queued" | "complete"; applySucceeded: boolean }>();
   let seq = 0;
+  const fileDigest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   return {
     leaf: { featureNodeId: "feat_1", filePath: "src/feature-tree.tsx" },
+    digestWorkspacePaths: (paths) => ({
+      digests: Object.fromEntries(paths.map((path) => [path, fileDigest])),
+      missing: [],
+      unreadable: [],
+    }),
     readRun: (runId) => runs.get(runId) ?? null,
     readEvidence: () => null,
     startAgentRun: () => {
@@ -257,6 +263,13 @@ describe("loop-runtime agent roles", () => {
       (node) => node.actionOperation === "create_pr",
     )!.id;
 
+    const codeDigest = (() => {
+      const change = doc.instances[0]?.artifacts?.find(
+        (item) => item.kind === "change_set",
+      );
+      const data = change?.data as { contentDigest?: string } | undefined;
+      return data?.contentDigest ?? "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    })();
     doc = {
       ...doc,
       instances: doc.instances.map((item) =>
@@ -266,6 +279,17 @@ describe("loop-runtime agent roles", () => {
               status: "running" as const,
               cursorNodeId: conditionId,
               hitlQuestionIds: [],
+              // Mark skipped Test so pickNextCursor cannot resurrect it after PR.
+              nodeRecords: [
+                ...(item.nodeRecords ?? []).filter(
+                  (record) => record.nodeId !== "n_test",
+                ),
+                {
+                  nodeId: "n_test",
+                  status: "skipped" as const,
+                  updatedAt: "2026-11-03T00:00:02.000Z",
+                },
+              ],
               artifacts: [
                 ...(item.artifacts ?? []),
                 {
@@ -273,7 +297,12 @@ describe("loop-runtime agent roles", () => {
                   nodeId: "n_test",
                   kind: "test_report" as const,
                   createdAt: "2026-11-03T00:00:02.000Z",
-                  data: { status: "passed", passed: 3, total: 3 },
+                  data: {
+                    status: "passed",
+                    passed: 3,
+                    total: 3,
+                    validatedCodeDigest: codeDigest,
+                  },
                 },
               ],
             }

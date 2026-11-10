@@ -172,6 +172,7 @@ import {
   resolveLoopLeafWriteScope,
   type LoopExecutionHooks,
 } from "./loop-execution.js";
+import { createWorkspacePathDigester } from "./loop-approval-binding.js";
 import { getLoopGraph } from "./loop-graph-service.js";
 import {
   evaluateTerminalPolicyDecision,
@@ -8688,6 +8689,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
     return {
       leaf,
+      digestWorkspacePaths: createWorkspacePathDigester(workspace.workspaceRoot),
       executeGithubOperation: (input) => {
         const payloadRefs = Object.fromEntries(
           Object.entries(input.payload).map(([key, value]) => [key, String(value)]),

@@ -558,10 +558,15 @@ export const LoopInstanceSchema = z
         decisionArtifactId: z.string().min(1),
         instanceId: z.string().min(1),
         nodeId: z.string().min(1),
+        decisionNodeId: z.string().min(1).optional(),
+        actionIntegration: z.string().trim().min(1).max(80).optional(),
+        actionOperation: z.string().trim().min(1).max(80).optional(),
         artifactIds: z.array(z.string().min(1)).max(20),
         engineeringBaseline: z.string().trim().min(1).max(128),
+        codeDigest: z.string().trim().min(1).max(128).optional(),
         operationDigest: z.string().trim().min(1).max(128),
         actor: z.string().trim().min(1).max(120).optional(),
+        actorKind: z.enum(["local_declared", "unspecified"]).optional(),
         approvedAt: z.string().min(1),
       })
       .strict()
@@ -573,6 +578,25 @@ export const LoopInstanceSchema = z
         operation: z.string().trim().min(1).max(80),
         payload: z.record(z.string(), z.unknown()),
         queuedAt: z.string().min(1),
+        /** Snapshot for TOCTOU re-check before accepting settle success. */
+        approvalBinding: z
+          .object({
+            decisionArtifactId: z.string().min(1),
+            instanceId: z.string().min(1),
+            nodeId: z.string().min(1),
+            decisionNodeId: z.string().min(1).optional(),
+            actionIntegration: z.string().trim().min(1).max(80).optional(),
+            actionOperation: z.string().trim().min(1).max(80).optional(),
+            artifactIds: z.array(z.string().min(1)).max(20),
+            engineeringBaseline: z.string().trim().min(1).max(128),
+            codeDigest: z.string().trim().min(1).max(128).optional(),
+            operationDigest: z.string().trim().min(1).max(128),
+            actor: z.string().trim().min(1).max(120).optional(),
+            actorKind: z.enum(["local_declared", "unspecified"]).optional(),
+            approvedAt: z.string().min(1),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),
@@ -679,6 +703,17 @@ export const IntentGraphHistoryEntrySchema = z
   })
   .strict();
 
+export const LoopGraphEditDiffSchema = z
+  .object({
+    addedNodeIds: z.array(z.string().min(1)).max(100),
+    removedNodeIds: z.array(z.string().min(1)).max(100),
+    changedNodeIds: z.array(z.string().min(1)).max(100),
+    addedEdgeIds: z.array(z.string().min(1)).max(200),
+    removedEdgeIds: z.array(z.string().min(1)).max(200),
+    summaryLines: z.array(z.string().trim().min(1).max(240)).max(20),
+  })
+  .strict();
+
 export const LoopPendingGraphEditOfferSchema = z
   .object({
     reason: z.string().trim().min(1).max(500),
@@ -687,7 +722,11 @@ export const LoopPendingGraphEditOfferSchema = z
     proposedDraft: IntentGraphSchema.optional(),
     /** Draft revision the proposal was computed against (reject if diverged). */
     baseRevision: z.number().int().nonnegative().optional(),
+    /** Goal-context revision at propose time (reject if goal changed). */
+    baseGoalRevision: z.number().int().nonnegative().optional(),
     summary: z.string().trim().min(1).max(1000).optional(),
+    /** Structured preview for reviewable accept/dismiss (not reason text alone). */
+    diff: LoopGraphEditDiffSchema.optional(),
   })
   .strict();
 
