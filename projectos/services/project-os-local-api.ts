@@ -9285,7 +9285,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     const { preflightLoopRunStart } = await import("./loop-run-preflight.js");
     const document = getLoopGraph(workspace.workspaceRoot, loopId);
     if (!document) {
-      throw new ProjectOSError("loop_graph_missing", `Loop not found: ${loopId}`);
+      throw new ProjectOSError("loop_graph_invalid", `Loop not found: ${loopId}`);
     }
     return preflightLoopRunStart({
       document,
