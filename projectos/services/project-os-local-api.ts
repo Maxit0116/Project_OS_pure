@@ -9267,6 +9267,34 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
   }
 
+  /**
+   * Project-workflow preflight — does not start a run.
+   * Confirm checklist; approval presence ≠ start authorization.
+   */
+  async preflightLoopRun(
+    projectId: string,
+    loopId: string,
+    options?: {
+      specVersion?: string;
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+    },
+  ): Promise<import("./loop-run-preflight.js").LoopPreflightResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getLoopGraph } = await import("./loop-graph-service.js");
+    const { preflightLoopRunStart } = await import("./loop-run-preflight.js");
+    const document = getLoopGraph(workspace.workspaceRoot, loopId);
+    if (!document) {
+      throw new ProjectOSError("loop_graph_missing", `Loop not found: ${loopId}`);
+    }
+    return preflightLoopRunStart({
+      document,
+      ...(options?.specVersion ? { specVersion: options.specVersion } : {}),
+      ...(options?.branch ? { branch: options.branch } : {}),
+      ...(options?.materials ? { materials: options.materials } : {}),
+    });
+  }
+
   async startLoopInstance(
     projectId: string,
     loopId: string,
