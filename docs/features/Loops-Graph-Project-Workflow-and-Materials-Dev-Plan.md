@@ -149,7 +149,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | PW-1 | 项目内选择已保存流程并启动 | 计划 | — |
 | PW-2 | Run 绑定 project/repo/workspace/branch/codeDigest/specVersion | **contract 初版** / 产品路径待验 | LocalApi start 接线 RunBinding 子集；完整字段 **未齐** |
 | PW-3 | 预检：缺配置 / 分支 / Agent / 审批点列表，确认后才开跑 | **contract** + Electron 材料/预检面板 + 孤儿审批闸 **blocker**；temp 证据测 Spec→preflight→start；无 Spec 禁用 ≠ 通过条件 | `LoopRunMaterialsPanel` + `validateApprovalGateWiring`；审批通过 ≠ 开跑 |
-| PW-4 | 隔离工作区编码+测试+人工；产出 Diff/TestReport/Preview 或 PR | **实现/证据**：`setLoopExecutionLoopbackMode('local_tools')`（**loopback·local_tools·not live provider**）生产 stepper 写文件→ChangeSet→跑 package test→TestReport；`instanceStatus=complete`；**禁止** run 外单测冒充。Diff/Test UI 面板 E2E **工程待续**；live 付费模型 **未验** | LocalApi settle + loopback host；GitHub 外发 **未验** |
+| PW-4 | 隔离工作区编码+测试+人工；产出 Diff/TestReport/Preview 或 PR | **实现/证据**：DI-only `local_tools`（须 env allow；缺配置明确拒绝）；ChangeSet files/digest + TestReport command/exitCode=0 + unifiedDiff；Electron 运行相产物卡可见；cancel 保留产物 **contract**。多格式/更深 Diff UI **工程未完**；live 付费 **未验** | LocalApi settle + loopback host；GitHub 外发 **未验** |
 | PW-5 | 失败保留证据可续；cancel/recover | 部分实现 | checkpoint / cancel **已有已测**；项目路径 **待验** |
 | PW-6 | 编辑定义不污染运行中 Instance 快照 | 实现（底座） / 待验（产品路径） | Spec 冻结 D5/GC-D8 |
 | PW-7 | Issue/PR/选中代码/错误上下文快捷调用同 run | 计划 | — |
@@ -173,7 +173,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | ID | 验收项 | 状态 |
 |----|--------|------|
 | DE-1 | DutyCard 类型表单 Agent/Action/Logic/Human | **实现** + 暗色实机 style 已读；SaaS 截字/密度局部整理（wrap + node z-index）；截图见 Six-Goals |
-| DE-2 | Provider authoring loopback：空图生成；审批闸重连边；陈旧负例 | **实现/证据**（**loopback·not live**）：`新建 Loop` 空图→scaffold(+6/−0)→retry=2→timeout=7777→`approval_insert` 重连 `e4:coder→approval`/`e_appr_e4:approval→test`；手工改草稿后 offer `stale=true` Accept 禁用且 7777/retry2 保留；服务端 stale reject 单测；付费 live **未验** |
+| DE-2 | Provider authoring loopback：空图；审批闸语义；连续陈旧负例 | **实现/证据**（**loopback·not live**）：A3 连续脚本无 fatal——改其他字段保 retry=2；改 retry→1 则保 1（不假恢复 2）；timeout 恒 7777、无 9999；重开一致。审批 `before_write|before_test|before_external`；runtime reject/approve/drift/orphan **contract**。付费 live **未验** |
 | SEC-1 | High-risk / catalog_only 不可调用方绕过 | **contract** |
 | SEC-2 | 非幂等 POST 不盲重试；timeout/abort unknown；脱敏全链 | **contract** |
 | CON-1 | Batch1 GitHub/Slack/Feishu/Lark/Sentry | **contract** / live未验 |

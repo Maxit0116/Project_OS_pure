@@ -51,9 +51,16 @@ describe("setLoopAuthoringLoopbackMode demo_edit", () => {
       system: "test",
       user: ["mode: edit", "user_request: insert approval"].join("\n"),
     });
-    const parsed = JSON.parse(raw) as { kind: string; summary?: string };
+    const parsed = JSON.parse(raw) as { kind: string; summary?: string; gate?: string };
     expect(parsed.kind).toBe("approval_insert");
-    expect(parsed.summary).toMatch(/insert human approval/i);
+    expect(parsed.summary).toMatch(/insert approval gate/i);
+    expect(parsed.gate).toBe("before_test");
+    const rawWrite = await complete!({
+      system: "test",
+      user: ["mode: edit", "user_request: insert approval before write"].join("\n"),
+    });
+    const writeParsed = JSON.parse(rawWrite) as { gate?: string };
+    expect(writeParsed.gate).toBe("before_write");
     await api.setLoopAuthoringLoopbackMode("off");
   });
 

@@ -58,7 +58,7 @@ function baseDraft(): IntentGraph {
 }
 
 describe("insertApprovalGate", () => {
-  it("rewires depends edges and preserves other edge ids", () => {
+  it("before_test (default) rewires coder→test and preserves other edge ids", () => {
     const next = insertApprovalGate(baseDraft(), {
       afterNodeId: "n_coder",
       approvalNodeId: "n_loopback_approval",

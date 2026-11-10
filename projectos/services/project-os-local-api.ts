@@ -9658,7 +9658,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
    */
   /**
    * Explicit loopback·local_tools for Loop implement/verify (real local file +
-   * project test script). Not a live/paid model provider.
+   * project test script). DI/evidence only — requires
+   * PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK=1; ordinary production stays off.
+   * Not a live/paid model provider and must not silently bypass permissions.
    */
   async setLoopExecutionLoopbackMode(
     mode: "off" | "local_tools",
@@ -9668,9 +9670,14 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ...next,
       label:
         mode === "local_tools"
-          ? "loopback·local_tools·not live provider"
+          ? "loopback·local_tools·not live provider·DI-only"
           : "loopback·off",
     };
+  }
+
+  /** Test/evidence: last local_tools write+verify audit (null when off/unused). */
+  getLoopExecutionLoopbackAudit(): import("./loop-execution-loopback.js").LoopbackRunAudit | null {
+    return this.loopExecutionLoopback.getLastAudit();
   }
 
   async setLoopAuthoringLoopbackMode(
@@ -9706,11 +9713,31 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           };
         }
         if (wantsApproval) {
+          // Explicit gate target from prompt — do not overclaim write gating.
+          const beforeWrite =
+            /before\s+(?:code|coding|write|implement|coder)|编码前|写前|实现前/i.test(
+              request,
+            );
+          const beforeExternal =
+            /before\s+(?:external|github|pr|terminal|saas)|外发前|PR前/i.test(
+              request,
+            );
+          const gate = beforeWrite
+            ? ("before_write" as const)
+            : beforeExternal
+              ? ("before_external" as const)
+              : ("before_test" as const);
+          const gateLabel =
+            gate === "before_write"
+              ? "before coder writes (not after)"
+              : gate === "before_external"
+                ? "before external/github/terminal Action"
+                : "before test only (does not gate prior coder writes)";
           return {
             kind: "approval_insert",
-            summary: "loopback: insert human approval node on path",
-            assistantMessage:
-              "[loopback·not live] Inserted human approval on depends path (rewired edges); review Accept/Dismiss.",
+            gate,
+            summary: `loopback: insert approval gate (${gate})`,
+            assistantMessage: `[loopback·not live] Inserted human approval ${gateLabel}; review Accept/Dismiss.`,
             approvalNodeId: "n_loopback_approval",
           };
         }

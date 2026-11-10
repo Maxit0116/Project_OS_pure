@@ -5,9 +5,22 @@
 import type { IntentGraph, IntentGraphEdge, IntentGraphNode } from "../contracts/loop-graph.js";
 import { withArchitectureDefaults } from "../contracts/loop-node-architecture.js";
 
+export type ApprovalGateTarget =
+  /** Insert immediately before the coder/implement agent (gates writes). */
+  | "before_write"
+  /** Insert immediately before github/terminal/saas Actions (gates external). */
+  | "before_external"
+  /** Insert after coder, before test/verify (gates tests only — not writes). */
+  | "before_test";
+
 export type InsertApprovalGateOptions = {
   /** Prefer splitting depends edges that leave this node. */
   afterNodeId?: string;
+  /**
+   * Semantic insert target. When set (and afterNodeId omitted), picks the
+   * predecessor of the named side-effect class — never claims broader gating.
+   */
+  gate?: ApprovalGateTarget;
   approvalNodeId?: string;
   title?: string;
   prompt?: string;
@@ -42,19 +55,56 @@ function dependsOutgoing(
   );
 }
 
-function pickInsertAfter(draft: IntentGraph, preferred?: string): string | null {
+function predecessorOf(
+  draft: IntentGraph,
+  nodeId: string,
+): string | null {
+  const inbound = draft.edges.find(
+    (edge) =>
+      edge.target === nodeId &&
+      (edge.kind === "depends" || edge.kind === undefined),
+  );
+  return inbound?.source ?? null;
+}
+
+function pickInsertAfter(
+  draft: IntentGraph,
+  preferred?: string,
+  gate?: ApprovalGateTarget,
+): string | null {
   if (preferred && draft.nodes.some((node) => node.id === preferred)) {
     return preferred;
   }
-  // Prefer coder / implement agent before test or side-effect Action.
+
+  if (gate === "before_write") {
+    // Gate coding writes: insert after planner (or entry) → before coder.
+    const coder = draft.nodes.find((node) => {
+      const arch = withArchitectureDefaults(node);
+      return (
+        (arch.type === "agent" && arch.agentRole === "coder") ||
+        node.role === "implement"
+      );
+    });
+    if (coder) {
+      return predecessorOf(draft, coder.id) ?? draft.nodes[0]?.id ?? null;
+    }
+  }
+
+  if (gate === "before_external") {
+    const external = draft.nodes.find(isSideEffectAction);
+    if (external) {
+      return predecessorOf(draft, external.id) ?? draft.nodes[0]?.id ?? null;
+    }
+  }
+
+  // before_test (default): after coder / before test — does NOT gate writes.
   const coder = draft.nodes.find((node) => {
     const arch = withArchitectureDefaults(node);
     return arch.type === "agent" && arch.agentRole === "coder";
   });
-  if (coder) return coder.id;
+  if (coder && (!gate || gate === "before_test")) return coder.id;
   const implement = draft.nodes.find((node) => node.role === "implement");
-  if (implement) return implement.id;
-  // Else: predecessor of first test action.
+  if (implement && (!gate || gate === "before_test")) return implement.id;
   const test = draft.nodes.find((node) => {
     const arch = withArchitectureDefaults(node);
     return (
@@ -62,14 +112,7 @@ function pickInsertAfter(draft: IntentGraph, preferred?: string): string | null 
       node.role === "verify"
     );
   });
-  if (test) {
-    const inbound = draft.edges.find(
-      (edge) =>
-        edge.target === test.id &&
-        (edge.kind === "depends" || edge.kind === undefined),
-    );
-    if (inbound) return inbound.source;
-  }
+  if (test) return predecessorOf(draft, test.id);
   return draft.nodes[0]?.id ?? null;
 }
 
@@ -82,7 +125,7 @@ export function insertApprovalGate(
   draft: IntentGraph,
   options: InsertApprovalGateOptions = {},
 ): IntentGraph {
-  const afterId = pickInsertAfter(draft, options.afterNodeId);
+  const afterId = pickInsertAfter(draft, options.afterNodeId, options.gate);
   if (!afterId) {
     throw new Error("Cannot insert approval gate into an empty draft");
   }

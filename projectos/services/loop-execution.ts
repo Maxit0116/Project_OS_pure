@@ -24,6 +24,10 @@ export interface LoopEvidenceView {
   id: string;
   runId: string;
   status: "passed" | "failed" | "not_run";
+  /** Command line actually executed for this evidence (when known). */
+  command?: string;
+  /** Process exit code from the verification command (null = not spawned). */
+  exitCode?: number | null;
 }
 
 export interface LoopAgentRunRequest {

@@ -89,6 +89,8 @@ const ProviderApprovalInsertSchema = z
   .object({
     kind: z.literal("approval_insert"),
     afterNodeId: z.string().min(1).optional(),
+    /** Semantic gate target — never overclaim write vs test vs external. */
+    gate: z.enum(["before_write", "before_external", "before_test"]).optional(),
     approvalNodeId: z.string().min(1).optional(),
     summary: z.string().trim().min(1).max(500),
     assistantMessage: z.string().trim().min(1).max(2000).optional(),
@@ -384,6 +386,7 @@ export async function runLoopAuthoringProvider(input: {
     try {
       const proposed = insertApprovalGate(input.draft, {
         ...(parsed.afterNodeId ? { afterNodeId: parsed.afterNodeId } : {}),
+        ...(parsed.gate ? { gate: parsed.gate } : {}),
         ...(parsed.approvalNodeId
           ? { approvalNodeId: parsed.approvalNodeId }
           : {}),

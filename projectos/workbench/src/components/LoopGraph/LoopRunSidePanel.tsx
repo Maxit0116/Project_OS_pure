@@ -127,7 +127,7 @@ export default function LoopRunSidePanel({ instance, history = [] }: Props) {
         )}
       </section>
 
-      <section className={styles.section}>
+      <section className={styles.section} data-loop-run-artifacts="">
         <h4 className={styles.heading}>{ts('chat.loopGraph.runArtifacts')}</h4>
         {evidenceLike.length === 0 ? (
           <p className={styles.empty}>{ts('chat.loopGraph.runArtifactsEmpty')}</p>
@@ -137,12 +137,74 @@ export default function LoopRunSidePanel({ instance, history = [] }: Props) {
               .slice()
               .reverse()
               .slice(0, 12)
-              .map((item) => (
-                <li key={item.id} className={styles.row}>
-                  <span className={styles.rowId}>{item.nodeId}</span>
-                  <span className={styles.rowStatus}>{item.kind}</span>
-                </li>
-              ))}
+              .map((item) => {
+                const data = item.data as Record<string, unknown>
+                const isChange = item.kind === 'change_set'
+                const isTest = item.kind === 'test_report'
+                const files = Array.isArray(data.files)
+                  ? (data.files as string[])
+                  : []
+                const summary =
+                  typeof data.summary === 'string' ? data.summary : null
+                const digest =
+                  typeof data.contentDigest === 'string'
+                    ? data.contentDigest
+                    : typeof data.validatedCodeDigest === 'string'
+                      ? data.validatedCodeDigest
+                      : null
+                const status =
+                  typeof data.status === 'string' ? data.status : null
+                const command =
+                  typeof data.command === 'string' ? data.command : null
+                return (
+                  <li
+                    key={item.id}
+                    className={styles.artifactCard}
+                    data-loop-run-artifact=""
+                    data-loop-artifact-kind={item.kind}
+                    data-loop-artifact-id={item.id}
+                  >
+                    <div className={styles.row}>
+                      <span className={styles.rowId}>{item.nodeId}</span>
+                      <span className={styles.rowStatus}>{item.kind}</span>
+                    </div>
+                    {isChange ? (
+                      <div
+                        className={styles.artifactBody}
+                        data-loop-artifact-changeset=""
+                      >
+                        {summary ? <p className={styles.artifactLine}>{summary}</p> : null}
+                        {files.length ? (
+                          <p className={styles.artifactLine}>
+                            files: {files.slice(0, 8).join(', ')}
+                          </p>
+                        ) : null}
+                        {digest ? (
+                          <p className={styles.artifactMono}>digest: {digest.slice(0, 16)}…</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {isTest ? (
+                      <div
+                        className={styles.artifactBody}
+                        data-loop-artifact-test-report=""
+                      >
+                        {status ? (
+                          <p className={styles.artifactLine}>status: {status}</p>
+                        ) : null}
+                        {command ? (
+                          <p className={styles.artifactMono}>cmd: {command}</p>
+                        ) : null}
+                        {digest ? (
+                          <p className={styles.artifactMono}>
+                            validated: {digest.slice(0, 16)}…
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </li>
+                )
+              })}
           </ul>
         )}
       </section>

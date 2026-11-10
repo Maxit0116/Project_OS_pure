@@ -77,6 +77,38 @@
   gap: 4px;
 }
 
+.artifactCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+}
+
+.artifactBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.artifactLine {
+  margin: 0;
+  font-size: 11px;
+  color: var(--tech-text-secondary);
+}
+
+.artifactMono {
+  margin: 0;
+  font-size: 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--tech-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .action {
   align-self: flex-start;
   border: 1px solid var(--tech-border);

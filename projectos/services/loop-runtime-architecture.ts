@@ -162,11 +162,19 @@ export function evidenceToTestReport(
       : evidence.status === "failed"
         ? "failed"
         : "not_run";
+  const resolvedCommand = evidence.command ?? command;
   return LoopTestReportSchema.parse({
     status,
     evidenceId: evidence.id,
-    ...(command ? { command } : {}),
+    ...(resolvedCommand ? { command: resolvedCommand } : {}),
     ...(validatedCodeDigest ? { validatedCodeDigest } : {}),
+    ...(typeof evidence.exitCode === "number"
+      ? {
+          total: 1,
+          passed: evidence.status === "passed" ? 1 : 0,
+          failed: evidence.status === "failed" ? 1 : 0,
+        }
+      : {}),
   });
 }
 

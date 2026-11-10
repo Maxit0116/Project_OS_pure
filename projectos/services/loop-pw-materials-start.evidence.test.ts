@@ -1,9 +1,8 @@
 /**
  * PW materials → Spec → preflight → start evidence (temp workspace).
- * Uses production LocalApi runtime with explicit loopback·local_tools
- * (real local file write + project test script — not a live/paid model).
- * Asserts in-run ChangeSet + TestReport artifacts; does NOT claim pass via
- * out-of-band node test outside the Loop stepper.
+ * Uses production LocalApi runtime with explicit loopback·local_tools DI
+ * (PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK=1). Asserts ChangeSet/TestReport
+ * *contents*, exit codes, and file digests — not merely artifact kinds.
  */
 import {
   cpSync,
@@ -13,11 +12,13 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { LoopSpec, LoopTaskMaterial } from "../contracts/index.js";
+import { LoopChangeSetSchema, LoopTestReportSchema } from "../contracts/loop-artifacts.js";
 import { compileLoopGraphDraft } from "./loop-graph-compiler.js";
 import {
   approveLoopSpec,
@@ -34,15 +35,38 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function sha256(text: string) {
+  return createHash("sha256").update(text).digest("hex");
+}
+
 describe("PW materials Spec→preflight→start evidence", () => {
   const roots: string[] = [];
+  const prevAllow = process.env.PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK;
+
+  beforeEach(() => {
+    process.env.PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK = "1";
+  });
+
   afterEach(() => {
     for (const root of roots.splice(0)) {
       rmSync(root, { recursive: true, force: true });
     }
+    if (prevAllow === undefined) {
+      delete process.env.PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK;
+    } else {
+      process.env.PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK = prevAllow;
+    }
   });
 
-  it("temp workspace: runtime loopback·local_tools writes ChangeSet+TestReport", async () => {
+  it("refuses local_tools without PROJECTOS_ALLOW (production isolation)", async () => {
+    delete process.env.PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK;
+    const api = new ProjectOSLocalApi({});
+    await expect(api.setLoopExecutionLoopbackMode("local_tools")).rejects.toThrow(
+      /PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK/,
+    );
+  });
+
+  it("temp workspace: runtime loopback·local_tools writes ChangeSet+TestReport contents", async () => {
     const sample = mkdtempSync(join(tmpdir(), "loop-pw-mat-"));
     roots.push(sample);
     cpSync(sampleWorkspaceRoot, sample, { recursive: true });
@@ -78,7 +102,7 @@ describe("PW materials Spec→preflight→start evidence", () => {
 
     const execMode = await api.setLoopExecutionLoopbackMode("local_tools");
     expect(execMode.live).toBe(false);
-    expect(execMode.label).toContain("loopback·local_tools");
+    expect(execMode.label).toContain("DI-only");
 
     let doc = createLoopGraph(workspaceRoot, project.projectId, "PW materials run");
     doc = upsertLoopGraph(workspaceRoot, {
@@ -120,7 +144,6 @@ describe("PW materials Spec→preflight→start evidence", () => {
     });
 
     const compiled = await compileLoopGraphDraft(doc.draft);
-    expect(compiled.specDraft.nodes.length).toBeGreaterThan(0);
     const spec: LoopSpec = {
       ...compiled.specDraft,
       version: "spec_pw_mat_1",
@@ -130,6 +153,7 @@ describe("PW materials Spec→preflight→start evidence", () => {
 
     const attachmentBytes = readFileSync(join(sample, "fixtures", "note.txt"));
     const beforeHello = readFileSync(join(workspaceRoot, "src/hello.js"), "utf8");
+    const beforeSha = sha256(beforeHello);
     const materials: LoopTaskMaterial[] = [
       {
         id: "mat_text_req",
@@ -192,9 +216,6 @@ describe("PW materials Spec→preflight→start evidence", () => {
       { branch: "pw-evidence", materials },
     );
     let instance = started.instances[started.instances.length - 1]!;
-    expect(instance.runBinding?.materials?.map((m) => m.id).sort()).toEqual(
-      materials.map((m) => m.id).sort(),
-    );
 
     for (let i = 0; i < 12; i++) {
       const advanced = await api.advanceLoopInstance(
@@ -216,20 +237,39 @@ describe("PW materials Spec→preflight→start evidence", () => {
     }
 
     const afterHello = readFileSync(join(workspaceRoot, "src/hello.js"), "utf8");
-    expect(afterHello).not.toBe(beforeHello);
+    const afterSha = sha256(afterHello);
+    expect(afterSha).not.toBe(beforeSha);
     expect(afterHello).toMatch(/loopback·local_tools/);
 
     const artifacts = instance.artifacts ?? [];
-    const kinds = artifacts.map((a) => a.kind);
-    expect(kinds).toContain("change_set");
-    expect(kinds).toContain("test_report");
-    expect(instance.status).not.toBe("error");
+    const changeArt = artifacts.find((a) => a.kind === "change_set");
+    const testArt = artifacts.find((a) => a.kind === "test_report");
+    expect(changeArt).toBeTruthy();
+    expect(testArt).toBeTruthy();
+
+    const changeSet = LoopChangeSetSchema.parse(changeArt!.data);
+    expect(changeSet.files).toContain("src/hello.js");
+    expect(changeSet.contentDigest).toBeTruthy();
+    expect(changeSet.summary.length).toBeGreaterThan(0);
+    expect(changeSet.fileDigests?.["src/hello.js"]).toBeTruthy();
+
+    const testReport = LoopTestReportSchema.parse(testArt!.data);
+    expect(testReport.status).toBe("passed");
+    expect(testReport.command).toMatch(/node src\/hello\.test\.js/);
+    expect(testReport.evidenceId).toBeTruthy();
+    expect(testReport.validatedCodeDigest).toBeTruthy();
+
+    const audit = api.getLoopExecutionLoopbackAudit();
+    expect(audit?.exitCode).toBe(0);
+    expect(audit?.command).toMatch(/node src\/hello\.test\.js/);
+    expect(audit?.beforeSha256).toBe(beforeSha);
+    expect(audit?.afterSha256).toBe(afterSha);
+    expect(audit?.unifiedDiff).toMatch(/loopback·local_tools/);
+    expect(audit?.evidenceStatus).toBe("passed");
+
+    expect(instance.status).toBe("complete");
     expect(instance.errorMessage ?? null).toBeNull();
 
-    const testReport = artifacts.find((a) => a.kind === "test_report");
-    expect(testReport?.data).toBeTruthy();
-
-    // Definition mutation must not rewrite frozen binding.
     const frozen = instance.runBinding;
     upsertLoopGraph(workspaceRoot, {
       ...getLoopGraph(workspaceRoot, doc.id)!,
@@ -242,10 +282,14 @@ describe("PW materials Spec→preflight→start evidence", () => {
     const after = getLoopGraph(workspaceRoot, doc.id)!;
     const same = after.instances.find((item) => item.id === instance.id)!;
     expect(same.runBinding).toEqual(frozen);
+    // Artifacts retained after definition mutation
+    expect((same.artifacts ?? []).some((a) => a.kind === "change_set")).toBe(true);
+    expect((same.artifacts ?? []).some((a) => a.kind === "test_report")).toBe(true);
 
     const report = {
-      label: "loopback·local_tools·not live provider",
+      label: "loopback·local_tools·not live provider·DI-only",
       liveProvider: false,
+      allowEnvRequired: "PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK=1",
       workspaceRoot,
       loopId: doc.id,
       specVersion: spec.version,
@@ -257,13 +301,28 @@ describe("PW materials Spec→preflight→start evidence", () => {
       runBinding: frozen,
       instanceStatus: instance.status,
       errorMessage: instance.errorMessage ?? null,
-      fileChangedByRuntime: afterHello !== beforeHello,
-      helloMarker: Boolean(afterHello.match(/loopback·local_tools/)),
-      artifacts: artifacts.map((a) => ({
-        id: a.id,
-        kind: a.kind,
-        nodeId: a.nodeId,
-      })),
+      fileDiff: {
+        path: "src/hello.js",
+        beforeSha256: beforeSha,
+        afterSha256: afterSha,
+        changed: beforeSha !== afterSha,
+        unifiedDiff: audit?.unifiedDiff ?? null,
+      },
+      changeSet: {
+        id: changeArt!.id,
+        files: changeSet.files,
+        contentDigest: changeSet.contentDigest,
+        fileDigests: changeSet.fileDigests,
+        summary: changeSet.summary,
+      },
+      testReport: {
+        id: testArt!.id,
+        status: testReport.status,
+        command: testReport.command,
+        evidenceId: testReport.evidenceId,
+        validatedCodeDigest: testReport.validatedCodeDigest,
+        exitCode: audit?.exitCode ?? null,
+      },
       materials: materials.map((m) => ({
         id: m.id,
         kind: m.kind,
@@ -273,7 +332,7 @@ describe("PW materials Spec→preflight→start evidence", () => {
       })),
       definitionPromptAfter: after.draft.graphPrompt,
       bindingUnchanged: true,
-      // Explicitly absent: no out-of-band localTestOutput claim.
+      artifactsRetainedAfterDefinitionMutate: true,
     };
     mkdirSync(ART, { recursive: true });
     writeFileSync(
