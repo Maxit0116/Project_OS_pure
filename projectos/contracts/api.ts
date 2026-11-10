@@ -1022,6 +1022,19 @@ export interface ProjectOSApi {
     error?: string;
     material?: import("./loop-task-materials.js").LoopTaskMaterial;
   }>;
+  /** DNS-pinned URL material ingest — failures are honest cards, not silent ok. */
+  ingestLoopUrlMaterial(
+    projectId: string,
+    input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("./loop-task-materials.js").LoopTaskMaterial;
+  }>;
   startLoopInstance(
     projectId: string,
     loopId: string,

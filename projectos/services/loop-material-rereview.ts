@@ -1,7 +1,8 @@
 /**
  * TM-8: material change → re-review impact (not mechanical full-graph re-run).
  * When materials mutate after a plan/approval, flag affected plan evidence
- * and require human re-review of impacted nodes only.
+ * and require human re-review of impacted nodes only — then write back into
+ * taskPack so reopen/preflight see the same evidence stale state.
  */
 import type { LoopTaskMaterial } from "../contracts/loop-task-materials.js";
 
@@ -16,6 +17,19 @@ export type MaterialChangeImpact = {
   mechanicalFullRerun: false;
   reason: string;
   changedMaterialIds: string[];
+};
+
+/** Persisted into document.taskPack — survives reopen; not Intent draft. */
+export type MaterialRereviewWriteback = {
+  requiresRereview: boolean;
+  affectedNodeIds: string[];
+  changedMaterialIds: string[];
+  reason: string;
+  evidenceStaleAt: string;
+  /** Human acknowledged re-review — clears start blocker until next change. */
+  acknowledgedAt?: string;
+  /** Spec / plan evidence ids marked stale (node-scoped when possible). */
+  staleEvidenceIds: string[];
 };
 
 function materialFingerprint(material: LoopTaskMaterial): string {
@@ -84,4 +98,52 @@ export function assessMaterialChangeImpact(input: {
       : `Materials changed (${changedMaterialIds.length}) — run-level re-review of plan evidence; do not mechanical full-graph re-run`,
     changedMaterialIds: [...new Set(changedMaterialIds)],
   };
+}
+
+/**
+ * Write plan/approval evidence stale markers from a material impact.
+ * Does not mutate Intent draft or auto-rerun; caller persists into taskPack.
+ */
+export function writeMaterialRereviewEvidence(input: {
+  impact: MaterialChangeImpact;
+  /** Existing writeback (e.g. after reopen) — preserved until new change. */
+  previous?: MaterialRereviewWriteback | null;
+  now?: string;
+}): MaterialRereviewWriteback | null {
+  const now = input.now ?? new Date().toISOString();
+  if (!input.impact.materialsChanged || !input.impact.requiresRereview) {
+    return input.previous ?? null;
+  }
+  const staleEvidenceIds =
+    input.impact.affectedNodeIds.length > 0
+      ? input.impact.affectedNodeIds.map((id) => `plan_evidence:${id}`)
+      : ["plan_evidence:run"];
+  return {
+    requiresRereview: true,
+    affectedNodeIds: input.impact.affectedNodeIds,
+    changedMaterialIds: input.impact.changedMaterialIds,
+    reason: input.impact.reason,
+    evidenceStaleAt: now,
+    // New material change invalidates prior acknowledgment.
+    staleEvidenceIds,
+  };
+}
+
+export function acknowledgeMaterialRereview(
+  writeback: MaterialRereviewWriteback,
+  now = new Date().toISOString(),
+): MaterialRereviewWriteback {
+  return {
+    ...writeback,
+    requiresRereview: false,
+    acknowledgedAt: now,
+    reason: `${writeback.reason} — acknowledged ${now}`,
+  };
+}
+
+/** True when start/preflight must block until human re-reviews. */
+export function materialRereviewBlocksStart(
+  writeback: MaterialRereviewWriteback | null | undefined,
+): boolean {
+  return Boolean(writeback?.requiresRereview && !writeback.acknowledgedAt);
 }

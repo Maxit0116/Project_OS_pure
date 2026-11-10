@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { assessMaterialChangeImpact } from "./loop-material-rereview.js";
+import {
+  acknowledgeMaterialRereview,
+  assessMaterialChangeImpact,
+  materialRereviewBlocksStart,
+  writeMaterialRereviewEvidence,
+} from "./loop-material-rereview.js";
 
 describe("TM-8 material change re-review", () => {
-  it("requires scoped re-review without mechanical full rerun", () => {
+  it("requires scoped re-review without mechanical full rerun and writes evidence", () => {
     const previous = [
       {
         id: "m1",
@@ -30,6 +35,12 @@ describe("TM-8 material change re-review", () => {
     expect(impact.requiresRereview).toBe(true);
     expect(impact.mechanicalFullRerun).toBe(false);
     expect(impact.affectedNodeIds).toEqual(["n1"]);
+    const writeback = writeMaterialRereviewEvidence({ impact });
+    expect(writeback?.staleEvidenceIds).toEqual(["plan_evidence:n1"]);
+    expect(materialRereviewBlocksStart(writeback)).toBe(true);
+    expect(materialRereviewBlocksStart(acknowledgeMaterialRereview(writeback!))).toBe(
+      false,
+    );
   });
 
   it("no-ops when fingerprints match", () => {

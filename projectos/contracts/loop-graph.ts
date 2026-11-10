@@ -899,6 +899,23 @@ export const LoopGraphDocumentSchema = z
         branch: z.string().trim().min(1).max(240).optional(),
         materials: z.array(LoopTaskMaterialSchema).max(64).default([]),
         updatedAt: z.string().min(1),
+        /**
+         * TM-8 writeback: material change → plan/approval evidence stale.
+         * Survives reopen; never mutates Intent draft. Acknowledge clears start
+         * blocker until the next material change.
+         */
+        materialRereview: z
+          .object({
+            requiresRereview: z.boolean(),
+            affectedNodeIds: z.array(z.string().min(1)).max(64).default([]),
+            changedMaterialIds: z.array(z.string().min(1)).max(64).default([]),
+            reason: z.string().trim().min(1).max(500),
+            evidenceStaleAt: z.string().min(1),
+            acknowledgedAt: z.string().min(1).optional(),
+            staleEvidenceIds: z.array(z.string().min(1).max(120)).max(64).default([]),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

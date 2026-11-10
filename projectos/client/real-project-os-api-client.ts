@@ -1510,6 +1510,17 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.ingestLoopTaskMaterial(projectId, input);
   }
 
+  ingestLoopUrlMaterial(
+    projectId: string,
+    input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ) {
+    return this.transport.ingestLoopUrlMaterial(projectId, input);
+  }
+
   startLoopInstance(
     projectId: string,
     loopId: string,

@@ -9411,6 +9411,27 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     });
   }
 
+  /**
+   * URL task material via DNS-pinned production fetch. No Cookie/Auth forwarding.
+   * Failures return material cards with honest codes (SSRF / login_wall / …).
+   */
+  async ingestLoopUrlMaterial(
+    projectId: string,
+    input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ): Promise<import("./loop-material-ingest.js").IngestLoopMaterialResult> {
+    this.requireLoadedWorkspace(projectId);
+    const { ingestLoopUrlMaterial } = await import("./loop-material-ingest.js");
+    return ingestLoopUrlMaterial({
+      url: input.url,
+      ...(input.materialId ? { materialId: input.materialId } : {}),
+      ...(input.title ? { title: input.title } : {}),
+    });
+  }
+
   async startLoopInstance(
     projectId: string,
     loopId: string,

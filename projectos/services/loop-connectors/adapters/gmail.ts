@@ -3,7 +3,11 @@
  * No live mailbox, no send, no Pub/Sub deploy in this module.
  */
 import type { LoopTaskMaterial } from "../../../contracts/loop-task-materials.js";
-import { dedupeConnectorIds } from "../../loop-connector-recover-dedup.js";
+import {
+  dedupeConnectorIds,
+  recoverConnectorCursor,
+  type ConnectorDedupState,
+} from "../../loop-connector-recover-dedup.js";
 import {
   blockedResult,
   dispatchConnectorRequest,
@@ -970,6 +974,159 @@ export async function gmailPollHistory(
     };
   }
   return result;
+}
+
+/**
+ * Production incremental sync path (still online-only; NOT 24/7).
+ * poll_history → on resync_required: recoverConnectorCursor + messages_search
+ * full list with seen-id dedupe. Helper alone ≠ product sync — this wires both.
+ */
+export async function gmailIncrementalSync(
+  input: {
+    startHistoryId?: string;
+    credential: LoopCredentialRef;
+    idempotencyKey: string;
+    accessToken?: string;
+    signal?: AbortSignal;
+    dedup: ConnectorDedupState;
+    /** Full-resync list query when history cursor expired. */
+    resyncQuery?: string;
+    maxResults?: number;
+  },
+  ctx: ConnectorDispatchContext,
+): Promise<
+  LoopConnectorResult<{
+    mode: "history" | "full_resync";
+    novelMessageIds: string[];
+    dedup: ConnectorDedupState;
+    historyId?: string;
+    nextPageToken?: string;
+    onlineOnly: true;
+  }>
+> {
+  if (input.startHistoryId?.trim()) {
+    const polled = await gmailPollHistory(
+      {
+        startHistoryId: input.startHistoryId,
+        credential: input.credential,
+        idempotencyKey: `${input.idempotencyKey}:poll`,
+        ...(input.accessToken ? { accessToken: input.accessToken } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+        seenHistoryIds: input.dedup.seenIds,
+      },
+      ctx,
+    );
+    if (polled.ok) {
+      const messageIds: string[] = [];
+      for (const item of polled.data.history) {
+        const added = item.messagesAdded;
+        if (!Array.isArray(added)) continue;
+        for (const entry of added) {
+          const msg = (entry as { message?: { id?: string } })?.message;
+          if (msg?.id) messageIds.push(msg.id);
+        }
+      }
+      const deduped = dedupeConnectorIds(
+        {
+          seenIds: polled.data.seenHistoryIds ?? input.dedup.seenIds,
+          ...(polled.data.historyId ? { cursor: polled.data.historyId } : {}),
+        },
+        messageIds,
+      );
+      return {
+        ok: true,
+        vendorId: "gmail",
+        capabilityId: "poll_history",
+        data: {
+          mode: "history",
+          novelMessageIds: deduped.novel,
+          dedup: {
+            ...deduped.state,
+            ...(polled.data.historyId ? { cursor: polled.data.historyId } : {}),
+          },
+          ...(polled.data.historyId ? { historyId: polled.data.historyId } : {}),
+          ...(polled.data.nextPageToken
+            ? { nextPageToken: polled.data.nextPageToken }
+            : {}),
+          onlineOnly: true,
+        },
+        audit: polled.audit,
+      };
+    }
+    if (polled.code !== "resync_required") {
+      return polled;
+    }
+    // Fall through to full resync with recovered cursor.
+    const recovered = recoverConnectorCursor(
+      {
+        seenIds: input.dedup.seenIds,
+        ...(input.startHistoryId ? { cursor: input.startHistoryId } : {}),
+      },
+      "resync_required",
+    );
+    const listed = await gmailMessagesSearch(
+      {
+        q: input.resyncQuery ?? "in:inbox",
+        credential: input.credential,
+        idempotencyKey: `${input.idempotencyKey}:resync`,
+        ...(input.accessToken ? { accessToken: input.accessToken } : {}),
+        ...(input.maxResults ? { maxResults: input.maxResults } : {}),
+      },
+      ctx,
+    );
+    if (!listed.ok) return listed;
+    const deduped = dedupeConnectorIds(
+      recovered,
+      listed.data.messages.map((m) => m.id),
+    );
+    return {
+      ok: true,
+      vendorId: "gmail",
+      capabilityId: "messages_search",
+      data: {
+        mode: "full_resync",
+        novelMessageIds: deduped.novel,
+        dedup: deduped.state,
+        ...(listed.data.nextPageToken
+          ? { nextPageToken: listed.data.nextPageToken }
+          : {}),
+        onlineOnly: true,
+      },
+      audit: listed.audit,
+    };
+  }
+
+  // No history cursor — first sync via search + dedupe.
+  const listed = await gmailMessagesSearch(
+    {
+      q: input.resyncQuery ?? "in:inbox",
+      credential: input.credential,
+      idempotencyKey: `${input.idempotencyKey}:bootstrap`,
+      ...(input.accessToken ? { accessToken: input.accessToken } : {}),
+      ...(input.maxResults ? { maxResults: input.maxResults } : {}),
+    },
+    ctx,
+  );
+  if (!listed.ok) return listed;
+  const deduped = dedupeConnectorIds(
+    input.dedup,
+    listed.data.messages.map((m) => m.id),
+  );
+  return {
+    ok: true,
+    vendorId: "gmail",
+    capabilityId: "messages_search",
+    data: {
+      mode: "full_resync",
+      novelMessageIds: deduped.novel,
+      dedup: deduped.state,
+      ...(listed.data.nextPageToken
+        ? { nextPageToken: listed.data.nextPageToken }
+        : {}),
+      onlineOnly: true,
+    },
+    audit: listed.audit,
+  };
 }
 
 /** Planned push path — phase-1 refuses execution (no Pub/Sub deploy). */

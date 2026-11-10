@@ -1597,6 +1597,21 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async ingestLoopUrlMaterial(
+    _projectId: string,
+    _input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial;
+  }> {
+    return transportNotConnected();
+  }
+
   async startLoopInstance(
     _projectId: string,
     _loopId: string,

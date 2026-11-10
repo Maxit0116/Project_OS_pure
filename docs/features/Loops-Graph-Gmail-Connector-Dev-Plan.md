@@ -56,7 +56,7 @@
 | `messages_get` | `users.messages.get` format=full；递归 MIME plain/HTML 解码；**list snippet ≠ body** | 实现 / contract |
 | `threads_get` | `users.threads.get` 完整线程正文 | 实现 / contract |
 | `attachments_get` | 附件按 MIME/大小映射 TaskMaterial；记录 `accountRef` / message / thread / attachment 来源与 **run 快照** | 实现 / contract |
-| `poll_history` | **在线轮询** `history.list`；明确「仅应用在线」；去重 / 分页 / 429 Retry-After 退避 / 取消 / scope 不足；**不得**声称全天监听；HTTP **404** 在 production `http_error` 路径 remap → `resync_required`（discard cursor / full sync），**不是**完整轮询器 | **实现/contract（loopback）**；真实账号 **未接** |
+| `poll_history` | **在线轮询** `history.list`；明确「仅应用在线」；去重 / 分页 / 429 Retry-After 退避 / 取消 / scope 不足；**不得**声称全天监听；HTTP **404** → `resync_required`。产品路径 **`gmailIncrementalSync`**（poll→recoverCursor→messages_search）；**恢复指引/helper ≠ 完整产品同步**——增量同步已接线，仍非 24/7 | **实现/contract（loopback）**；真实账号 **未接** |
 | `users_watch` / PubSub push | `users.watch` → Pub/Sub → `history.list` → 读信；≥7 日续订（官方建议每日）；expiration / historyId；乱序重复漏通知；404 → 全量重同步 | **计划**；首期**不部署** Pub/Sub / 云服务 |
 
 **预览策略（诚实）**：产品预览为 **plaintext-only**（`sanitizeGmailHtml` 已降级为去标签纯文本别名，**命名≠安全证明**）。**不**渲染 HTML、**不**执行脚本、**不**加载远程图/跟踪像素；MIME 二进制用 `Buffer` 测真实 `measuredSizeBytes`，禁止用 `Math.min(50M)` 伪造长度；正文/附件经 `gmail://…` `contentRef` + `resolveGmailMaterialContent` 按账号作用域取回。

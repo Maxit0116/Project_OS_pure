@@ -152,7 +152,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | PW-4 | 隔离工作区编码+测试+人工；产出 Diff/TestReport/Preview 或 PR | **实现/localE2E（非 live）**：DI-only `local_tools`；语义 fail→fix→green；ChangeSet+TestReport+exitCode+unifiedDiff；UI Show Diff / exit DOM；`loops-b-ui-06-*`（单屏≠全文）。付费 live / 真 PR 外发 **未完** | `loop-execution-loopback` + credential fail-closed |
 | PW-5 | 失败保留证据可续；cancel/recover | 部分实现 / 证据加深 | checkpoint / cancel **已测**；failfix 路径保留 failed+passed artifacts；缺 leaf→`文件未挂接` |
 | PW-6 | 编辑定义不污染运行中 Instance 快照 | **实现/证据**（failfix + taskPack isolation） | Spec 冻结；taskPack 不 bump draft revision；start 后改 draft 不改 runBinding |
-| PW-7 | Issue/PR/选中代码/错误上下文快捷调用同 run | **实现/contract**：`buildPw7ContextMaterial` + Run 材料面板 UI（`data-loop-pw7-*`）；非 live Issue 拉票 | `loop-pw7-context-materials` + `LoopRunMaterialsPanel` |
+| PW-7 | Issue/PR/选中代码/错误上下文快捷调用同 run | **实现/contract**：`buildPw7ContextMaterial` + 面板表单 + **`data-loop-pw7-from-editor` 实入口**（无选区诚实报错）；非 live Issue 拉票 | `loop-pw7-context-materials` + `LoopRunMaterialsPanel` + evidence-bundle-09 |
 | PW-8 | GitHub/Sentry/定时事件同机制；离线排队未实现须诚实 | 部分 | GitHub write / connector 缺 credentialRef **offline fail-closed**；Sentry **契约已测/live待验**；离线排队 **未实现** |
 
 ### 4.2 增量 B（Materials）
@@ -163,10 +163,10 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 | TM-2 | 图片用途标注 + 不支持提示 | **实现加深**：真实 bytes→contentRef；缺视觉 apiFormat **preflight blocker** + 可替换；`vision_attach`→`ModelGatewayRequest.images`（openai_chat/anthropic_messages）；Pure 预览；**live 未授权** | vision-capability + preflight + ImagePreview |
 | TM-3 | 文件/API/log 卡片 + 解析状态 | plaintext/md/json/log = text_preview；CSV/XLSX/PDF 见 TM-4；URL 见 TM-5 | formats + parsers |
 | TM-4 | CSV/XLSX sheet/列/范围 + 角色 | CSV **structured_selection**；XLSX OOXML sheet/A1 + 禁外部 rel/zip bomb；PDF 页范围 + timeout/cancel/加密/扫描空文如实；Electron `ingestLoopTaskMaterial` | `loop-material-csv` / `xlsx` / `pdf` / `ingest` |
-| TM-5 | URL 来源 + 鉴权/读取失败 + SSRF 默认拒内网 | **实现/contract**：DNS→socket pin、端口白名单、redirect 每跳、login_wall、AbortSignal、解压大小帽、无 Cookie/Auth | `loop-url-material-fetch` |
+| TM-5 | URL 来源 + 鉴权/读取失败 + SSRF 默认拒内网 | **实现/contract + UI**：DNS-pin fetch；面板 URL 入口→`ingestLoopUrlMaterial`；失败成卡（ssrf/scheme/login_wall）；无 Cookie/Auth | `loop-url-material-fetch` + evidence-bundle-08 |
 | TM-6 | 项目文件/C4/测试引用免重复上传 | 计划（C4 引用底座已有） | — |
-| TM-7 | 增删替换 / 保存重开 / run 覆盖不改定义 | **实现/contract**：document.taskPack 持久化；select/load 恢复；create 不清污染；start 后恢复定义 pack；draft revision 不变 | `loop-task-pack.isolation.test` + store |
-| TM-8 | 材料变化提示重审；不机械全图重跑 | **实现/contract**：`assessMaterialChangeImpact` + 面板 `data-loop-material-rereview`；affectedNodeIds 作用域；`mechanicalFullRerun=false` | `loop-material-rereview` |
+| TM-7 | 增删替换 / 保存重开 / run 覆盖不改定义 | **实现/contract**：document.taskPack 持久化；select/load 恢复；create 不清污染；start 后恢复定义 pack；draft revision 不变 | `loop-task-pack.isolation.test` + evidence-bundle-12/13 |
+| TM-8 | 材料变化提示重审；不机械全图重跑 | **实现/contract**：writeback→taskPack.materialRereview + ack + preflight blocker；`mechanicalFullRerun=false`；面板 stale evidence | `loop-material-rereview` + evidence-bundle-10/11 |
 
 ### 4.3 双入口 / 安全 / 连接器（交叉回归）
 

@@ -541,6 +541,24 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     });
   }
 
+  override async ingestLoopUrlMaterial(
+    _projectId: string,
+    input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ): Promise<import("../services/loop-material-ingest.js").IngestLoopMaterialResult> {
+    const { ingestLoopUrlMaterial } = await import(
+      "../services/loop-material-ingest.js"
+    );
+    return ingestLoopUrlMaterial({
+      url: input.url,
+      ...(input.materialId ? { materialId: input.materialId } : {}),
+      ...(input.title ? { title: input.title } : {}),
+    });
+  }
+
   override startLoopInstance(
     projectId: string,
     loopId: string,

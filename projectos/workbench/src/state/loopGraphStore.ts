@@ -37,6 +37,13 @@ import {
   resolveAgentWiring,
   type AgentWiringBase,
 } from '../../../services/loop-agent-wiring'
+import { buildPw7ContextMaterial } from '../../../services/loop-pw7-context-materials'
+import {
+  acknowledgeMaterialRereview,
+  assessMaterialChangeImpact,
+  writeMaterialRereviewEvidence,
+  type MaterialRereviewWriteback,
+} from '../../../services/loop-material-rereview'
 import { create } from 'zustand'
 import { useChatSessionStore } from './chatSessionStore'
 import {
@@ -205,10 +212,20 @@ interface LoopGraphStore {
   clearRunMaterials: () => void
   /** Persist staging materials/branch into document.taskPack without touching draft. */
   persistTaskPackStaging: () => void
+  /** TM-8: human acknowledged material re-review — clears start blocker. */
+  acknowledgeMaterialRereview: () => void
   runPreflight: () => Promise<void>
   startRun: () => Promise<void>
   /** Product entry: switch to Run with saved-flow taskPack materials restored. */
   openSavedFlowForRun: () => void
+  /** PW-7: add Issue/PR/code/error context material from a real product entry. */
+  addPw7ContextMaterial: (input: {
+    kind: 'issue' | 'pull_request' | 'code_selection' | 'error_context'
+    title: string
+    body?: string
+    ref?: string
+    bindingNodeIds?: string[]
+  }) => void
   pauseRun: () => Promise<void>
   resumeRun: () => Promise<void>
   advanceRun: () => Promise<void>
@@ -1595,6 +1612,18 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     if (!document) return
     const draftRevision = document.draft.revision
     const branch = runBranch.trim()
+    const priorMaterials = document.taskPack?.materials ?? []
+    const impact = assessMaterialChangeImpact({
+      previous: priorMaterials,
+      next: runMaterials,
+    })
+    const priorWriteback = document.taskPack?.materialRereview as
+      | MaterialRereviewWriteback
+      | undefined
+    const materialRereview = writeMaterialRereviewEvidence({
+      impact,
+      previous: priorWriteback ?? null,
+    })
     set({
       document: {
         ...document,
@@ -1604,6 +1633,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
           ...(branch ? { branch } : {}),
           materials: runMaterials,
           updatedAt: new Date().toISOString(),
+          ...(materialRereview ? { materialRereview } : {}),
         },
         updatedAt: new Date().toISOString(),
       },
@@ -1616,6 +1646,37 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       return
     }
     get().schedulePersist()
+  },
+  acknowledgeMaterialRereview: () => {
+    const { document } = get()
+    const writeback = document?.taskPack?.materialRereview as
+      | MaterialRereviewWriteback
+      | undefined
+    if (!document?.taskPack || !writeback) return
+    const draftRevision = document.draft.revision
+    const next = acknowledgeMaterialRereview(writeback)
+    set({
+      document: {
+        ...document,
+        draft: document.draft,
+        taskPack: {
+          ...document.taskPack,
+          materialRereview: next,
+          updatedAt: new Date().toISOString(),
+        },
+        updatedAt: new Date().toISOString(),
+      },
+      preflightResult: null,
+    })
+    if (get().document?.draft.revision !== draftRevision) {
+      set({ error: 'taskPack staging must not mutate draft revision' })
+      return
+    }
+    get().schedulePersist()
+  },
+  addPw7ContextMaterial: (input) => {
+    const material = buildPw7ContextMaterial(input)
+    get().addRunMaterial(material)
   },
   runPreflight: async () => {
     const { client, project } = useWorkbenchStore.getState()

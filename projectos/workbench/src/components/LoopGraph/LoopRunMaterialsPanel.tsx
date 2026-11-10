@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { LoopTaskMaterial } from '@contracts/index'
 import { classifyLoopMaterialFormat } from '@contracts/loop-task-material-formats'
 import { evaluateImageMaterialCapability } from '@contracts/loop-material-vision-preflight'
@@ -7,11 +7,7 @@ import { normalizeModelProfile } from '@contracts/settings'
 import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
-import { buildPw7ContextMaterial } from '../../../../services/loop-pw7-context-materials'
-import {
-  assessMaterialChangeImpact,
-  type MaterialChangeImpact,
-} from '../../../../services/loop-material-rereview'
+import { getEditorSelection } from '../CodeEditor/editorSelection'
 import LoopMaterialImagePreview from './LoopMaterialImagePreview'
 import styles from './LoopRunMaterialsPanel.module.css'
 
@@ -33,6 +29,13 @@ export default function LoopRunMaterialsPanel() {
   const addRunMaterial = useLoopGraphStore((s) => s.addRunMaterial)
   const replaceRunMaterial = useLoopGraphStore((s) => s.replaceRunMaterial)
   const removeRunMaterial = useLoopGraphStore((s) => s.removeRunMaterial)
+  const addPw7ContextMaterial = useLoopGraphStore((s) => s.addPw7ContextMaterial)
+  const acknowledgeMaterialRereview = useLoopGraphStore(
+    (s) => s.acknowledgeMaterialRereview,
+  )
+  const materialRereview = useLoopGraphStore(
+    (s) => s.document?.taskPack?.materialRereview ?? null,
+  )
   const runPreflight = useLoopGraphStore((s) => s.runPreflight)
   const startRun = useLoopGraphStore((s) => s.startRun)
   const settings = useWorkbenchStore((s) => s.settings)
@@ -67,10 +70,8 @@ export default function LoopRunMaterialsPanel() {
   const [pw7Title, setPw7Title] = useState('')
   const [pw7Body, setPw7Body] = useState('')
   const [pw7Ref, setPw7Ref] = useState('')
-  const [materialImpact, setMaterialImpact] = useState<MaterialChangeImpact | null>(
-    null,
-  )
-  const priorMaterialsRef = useRef<LoopTaskMaterial[]>([])
+  const [urlInput, setUrlInput] = useState('')
+  const [urlBusy, setUrlBusy] = useState(false)
 
   useEffect(() => {
     return () => {
@@ -79,19 +80,6 @@ export default function LoopRunMaterialsPanel() {
       }
     }
   }, [imageObjectUrls])
-
-  useEffect(() => {
-    const impact = assessMaterialChangeImpact({
-      previous: priorMaterialsRef.current,
-      next: materials,
-    })
-    if (impact.materialsChanged) {
-      setMaterialImpact(impact)
-      priorMaterialsRef.current = materials.map((item) => ({ ...item }))
-    } else if (!priorMaterialsRef.current.length && materials.length) {
-      priorMaterialsRef.current = materials.map((item) => ({ ...item }))
-    }
-  }, [materials])
 
   const addText = () => {
     const title = textTitle.trim() || textBody.trim().slice(0, 80) || 'Task text'
@@ -340,6 +328,14 @@ export default function LoopRunMaterialsPanel() {
         mimeType: mime,
         bytesBase64: btoa(binary),
         ...(replacingId ? { materialId: replacingId } : {}),
+        // First-batch default: first sheet A1:B50 so upload is structured_selection,
+        // not text_preview-only. User can still refine via table controls later.
+        ...(format.formatId === 'xlsx'
+          ? { xlsxSelection: { cellRange: 'A1:B50' } }
+          : {}),
+        ...(format.formatId === 'pdf'
+          ? { pdfSelection: { pageStart: 1, pageEnd: 1 } }
+          : {}),
       })
       if (result.material) {
         if (replacingId) {
@@ -573,11 +569,102 @@ export default function LoopRunMaterialsPanel() {
         )}
       </section>
 
+      <section className={styles.section} data-loop-url-material="">
+        <h4 className={styles.heading}>URL material (DNS-pin)</h4>
+        <p className={styles.hint}>
+          Production fetch refuses private DNS, odd ports, login walls; never
+          forwards Cookie/Authorization.
+        </p>
+        <input
+          type="url"
+          value={urlInput}
+          onChange={(event) => setUrlInput(event.target.value)}
+          placeholder="https://…"
+          data-loop-run-material-url=""
+        />
+        <button
+          type="button"
+          className={styles.secondary}
+          data-loop-run-material-url-add=""
+          disabled={urlBusy || !urlInput.trim()}
+          onClick={() => {
+            void (async () => {
+              const { client, project } = useWorkbenchStore.getState()
+              if (
+                !client ||
+                !project ||
+                typeof client.ingestLoopUrlMaterial !== 'function'
+              ) {
+                setFileError(
+                  'URL ingest requires Electron LocalApi host (DNS-pin fetch)',
+                )
+                return
+              }
+              setUrlBusy(true)
+              setFileError(null)
+              try {
+                const result = await client.ingestLoopUrlMaterial(
+                  project.projectId,
+                  { url: urlInput.trim() },
+                )
+                if (result.material) {
+                  if (replacingId) {
+                    replaceRunMaterial(replacingId, {
+                      ...result.material,
+                      id: replacingId,
+                    })
+                    setReplacingId(null)
+                  } else {
+                    addRunMaterial(result.material)
+                  }
+                }
+                if (!result.ok) {
+                  setFileError(result.error ?? 'URL ingest failed')
+                } else {
+                  setUrlInput('')
+                }
+              } catch (error) {
+                setFileError(
+                  error instanceof Error ? error.message : 'URL ingest failed',
+                )
+              } finally {
+                setUrlBusy(false)
+              }
+            })()
+          }}
+        >
+          {urlBusy ? 'Fetching…' : 'Add URL material'}
+        </button>
+      </section>
+
       <section className={styles.section} data-loop-pw7-context="">
         <h4 className={styles.heading}>PW-7 context → same run</h4>
         <p className={styles.hint}>
           Issue / PR / code selection / error context as task materials (not authoring).
         </p>
+        <button
+          type="button"
+          className={styles.secondary}
+          data-loop-pw7-from-editor=""
+          onClick={() => {
+            const selection = getEditorSelection()
+            if (!selection) {
+              setFileError(
+                'PW-7: no editor selection — select code in the editor first',
+              )
+              return
+            }
+            setFileError(null)
+            addPw7ContextMaterial({
+              kind: 'code_selection',
+              title: `${selection.path}:${selection.startLine}-${selection.endLine}`,
+              body: selection.text.slice(0, 8_000),
+              ref: `${selection.path}:${selection.startLine}-${selection.endLine}`,
+            })
+          }}
+        >
+          From editor selection
+        </button>
         <select
           value={pw7Kind}
           onChange={(event) =>
@@ -624,13 +711,12 @@ export default function LoopRunMaterialsPanel() {
           onClick={() => {
             const title = pw7Title.trim()
             if (!title) return
-            const material = buildPw7ContextMaterial({
+            addPw7ContextMaterial({
               kind: pw7Kind,
               title,
               ...(pw7Body.trim() ? { body: pw7Body.trim() } : {}),
               ...(pw7Ref.trim() ? { ref: pw7Ref.trim() } : {}),
             })
-            addRunMaterial(material)
             setPw7Title('')
             setPw7Body('')
             setPw7Ref('')
@@ -640,14 +726,21 @@ export default function LoopRunMaterialsPanel() {
         </button>
       </section>
 
-      {materialImpact?.requiresRereview ? (
-        <p
-          className={styles.fileError}
-          data-loop-material-rereview=""
-          role="status"
-        >
-          TM-8: {materialImpact.reason}
-        </p>
+      {materialRereview?.requiresRereview && !materialRereview.acknowledgedAt ? (
+        <div data-loop-material-rereview="" role="status">
+          <p className={styles.fileError}>TM-8: {materialRereview.reason}</p>
+          <p className={styles.hint} data-loop-material-rereview-evidence="">
+            stale evidence: {(materialRereview.staleEvidenceIds ?? []).join(', ')}
+          </p>
+          <button
+            type="button"
+            className={styles.secondary}
+            data-loop-material-rereview-ack=""
+            onClick={() => acknowledgeMaterialRereview()}
+          >
+            Acknowledge re-review
+          </button>
+        </div>
       ) : null}
 
       <section className={styles.section}>

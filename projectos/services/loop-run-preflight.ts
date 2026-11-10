@@ -29,6 +29,7 @@ export type LoopPreflightItem = {
     | "material_url_ssrf"
     | "material_unsupported"
     | "material_vision_blocked"
+    | "material_rereview_required"
     | "branch_unspecified"
     | "ok";
   message: string;
@@ -95,6 +96,21 @@ export function preflightLoopRunStart(input: {
       message: "No approved LoopSpec — compile and approve before starting a run",
     });
     return { ok: false, canStart: false, items };
+  }
+
+  // TM-8: material change writeback must be acknowledged before start.
+  const rereview = input.document.taskPack?.materialRereview;
+  if (rereview?.requiresRereview && !rereview.acknowledgedAt) {
+    items.push({
+      id: "pf_material_rereview",
+      severity: "blocker",
+      code: "material_rereview_required",
+      message: `TM-8 plan/approval evidence stale after material change — re-review${
+        rereview.affectedNodeIds.length
+          ? ` nodes [${rereview.affectedNodeIds.join(", ")}]`
+          : " run-level evidence"
+      } then acknowledge (not a mechanical full re-run)`,
+    });
   }
 
   if (!input.branch?.trim()) {

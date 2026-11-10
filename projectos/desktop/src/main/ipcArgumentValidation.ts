@@ -253,6 +253,7 @@ const PROJECTOS_IPC_SIGNATURES = {
   approveLoopSpec: ['string', 'string', 'record'],
   preflightLoopRun: ['string', 'string', 'record'],
   ingestLoopTaskMaterial: ['string', 'record'],
+  ingestLoopUrlMaterial: ['string', 'record'],
   startLoopInstance: ['string', 'string', 'string', 'string', 'record'],
   startLoopInstanceWithParams: ['string', 'string', 'record', 'record'],
   startLoopInstanceFromEvent: ['string', 'string', 'record'],

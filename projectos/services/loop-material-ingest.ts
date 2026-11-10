@@ -326,3 +326,68 @@ export function ingestLoopTaskMaterial(
   };
   return { ok: false, error: format.reason, material: unsupported };
 }
+
+export type IngestLoopUrlMaterialInput = {
+  url: string;
+  materialId?: string;
+  title?: string;
+  now?: string;
+  /** Test DI only — production LocalApi must omit (pinned DNS path). */
+  fetchDeps?: import("./loop-url-material-fetch.js").UrlMaterialFetchDeps;
+};
+
+/**
+ * URL → task material via DNS-pinned fetch. Failures become cards with honest
+ * parseStatus (SSRF / login_wall / http_error) — never silent success.
+ */
+export async function ingestLoopUrlMaterial(
+  input: IngestLoopUrlMaterialInput,
+): Promise<IngestLoopMaterialResult> {
+  const { fetchLoopUrlMaterial } = await import("./loop-url-material-fetch.js");
+  const now = input.now ?? new Date().toISOString();
+  const rawUrl = input.url.trim();
+  const materialId = input.materialId ?? newId("mat_url");
+  const title = (input.title?.trim() || rawUrl).slice(0, 240);
+  const fetched = await fetchLoopUrlMaterial(rawUrl, input.fetchDeps ?? {});
+  if (!fetched.ok) {
+    const material: LoopTaskMaterial = {
+      id: materialId,
+      kind: "url",
+      purpose: "requirement",
+      title,
+      source: "url",
+      parseStatus: "failed",
+      parseLevel: "unsupported",
+      parseMessage: `${fetched.code}: ${fetched.message}`.slice(0, 500),
+      contentRef: rawUrl.slice(0, 500),
+      version: 1,
+      runOverride: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    return { ok: false, error: material.parseMessage ?? fetched.code, material };
+  }
+  return {
+    ok: true,
+    material: {
+      id: materialId,
+      kind: "url",
+      purpose: "requirement",
+      title,
+      source: "url",
+      parseStatus: "ok",
+      parseLevel: "text_preview",
+      parseMessage: fetched.truncated
+        ? "URL text_preview truncated — full_text_parse not claimed"
+        : "URL text_preview via DNS-pinned fetch (no Cookie/Authorization forwarded)",
+      textPreview: fetched.textPreview,
+      mimeType: fetched.mimeType?.slice(0, 120),
+      measuredSizeBytes: fetched.measuredSizeBytes,
+      contentRef: fetched.finalUrl.slice(0, 500),
+      version: 1,
+      runOverride: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+  };
+}

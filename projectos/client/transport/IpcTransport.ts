@@ -1823,6 +1823,21 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("ingestLoopTaskMaterial", projectId, input);
   }
 
+  ingestLoopUrlMaterial(
+    projectId: string,
+    input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial;
+  }> {
+    return this.invoke("ingestLoopUrlMaterial", projectId, input);
+  }
+
   startLoopInstance(
     projectId: string,
     loopId: string,
