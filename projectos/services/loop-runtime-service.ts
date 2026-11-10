@@ -35,6 +35,13 @@ import {
   parseTerminalExecCommand,
 } from "./loop-terminal-action.js";
 import {
+  buildApprovalBinding,
+  computeEngineeringBaseline,
+  digestOperationPayload,
+  invalidatePendingApproval,
+  isApprovalBindingCurrent,
+} from "./loop-approval-binding.js";
+import {
   architectureOf,
   conditionalOutgoing,
   controlIncomingIds,
@@ -189,6 +196,22 @@ function pickNextCursor(
   if (mergeReady) {
     next = upsertNodeRecord(next, mergeReady.id, { status: "ready" });
     return { cursor: mergeReady.id, instance: next };
+  }
+
+  // Prefer direct depends successors so Sequence cannot be pre-empted by an
+  // earlier sibling still marked ready (e.g. skipped Test after a forced jump).
+  const readyChildren = children.filter(
+    (childId) => recordStatus(next, childId) === "ready",
+  );
+  if (readyChildren.length > 0) {
+    return { cursor: readyChildren[0]!, instance: next };
+  }
+
+  // Path terminal: do not resurrect earlier ready nodes after the final Action.
+  // Parallel sibling drain still works below when this node has Merge children
+  // that are not joinable yet.
+  if (children.length === 0) {
+    return { cursor: null, instance: next };
   }
 
   // Only "ready" (not merge "waiting") — Merge is handled above when joinable.
@@ -1234,18 +1257,35 @@ function stepActionNode(
     );
 
   const approvedPayload = next.pendingActionPayload;
-  const approvedDecision = latestArtifact(next, "human_decision");
-  const hasApproval = Boolean(
-    approvedPayload ||
-      (approvedDecision &&
-        typeof approvedDecision.data === "object" &&
-        approvedDecision.data !== null &&
-        /approve/i.test(
-          String((approvedDecision.data as { choice?: string }).choice ?? ""),
-        )),
+  const bindingOk = Boolean(
+    next.pendingApprovalBinding &&
+      approvedPayload &&
+      isApprovalBindingCurrent({
+        binding: next.pendingApprovalBinding,
+        instance: next,
+        payload: approvedPayload,
+      }),
   );
+  // Fail-closed: a historical human_decision with choice≈approve is not enough.
+  // Delivery-gate Actions require a live binding to artifacts + operation params.
+  const hasApproval = bindingOk;
 
   if (requiresApproval && !hasApproval) {
+    const stale =
+      Boolean(next.pendingApprovalBinding || approvedPayload) ||
+      Boolean(latestArtifact(next, "human_decision"));
+    if (stale) {
+      next = invalidatePendingApproval(
+        next,
+        "Approval binding no longer matches engineering baseline or payload",
+      );
+      next = pushEvent(next, {
+        type: "approval_stale",
+        nodeId: node.id,
+        message:
+          "Prior approval invalidated; re-approval required before side-effect Action",
+      });
+    }
     next = pushEvent(
       {
         ...next,
@@ -1255,7 +1295,9 @@ function stepActionNode(
       {
         type: "awaiting_hitl",
         nodeId: node.id,
-        message: `Action ${arch.actionOperation ?? arch.actionIntegration} requires approval`,
+        message: stale
+          ? `Action ${arch.actionOperation ?? arch.actionIntegration} approval stale — re-approve`
+          : `Action ${arch.actionOperation ?? arch.actionIntegration} requires approval`,
       },
     );
     return replaceInstance(doc, next);
@@ -1284,6 +1326,7 @@ function stepActionNode(
   next = {
     ...next,
     pendingActionPayload: undefined,
+    pendingApprovalBinding: undefined,
   };
   next = pushEvent(next, {
     type: "node_completed",
@@ -1325,6 +1368,7 @@ function stepGithubAction(
     const queued = {
       ...instance,
       pendingActionPayload: undefined,
+      pendingApprovalBinding: undefined,
       pendingGithubOp: {
         nodeId: node.id,
         operation,
@@ -1341,6 +1385,7 @@ function stepGithubAction(
     return replaceInstance(doc, {
       ...withEvent,
       pendingActionPayload: undefined,
+      pendingApprovalBinding: undefined,
       pendingGithubOp: queued.pendingGithubOp,
       status: "running" as const,
     });
@@ -1370,6 +1415,7 @@ function stepGithubAction(
   next = {
     ...next,
     pendingActionPayload: undefined,
+    pendingApprovalBinding: undefined,
     pendingGithubOp: undefined,
   };
   next = pushEvent(next, {
@@ -1422,7 +1468,11 @@ function stepTerminalAction(
         summary: `Terminal policy-gated (no executor): ${commandLine.slice(0, 240)}`,
       },
     });
-    next = { ...next, pendingActionPayload: undefined };
+    next = {
+      ...next,
+      pendingActionPayload: undefined,
+      pendingApprovalBinding: undefined,
+    };
     next = pushEvent(next, {
       type: "node_completed",
       nodeId: node.id,
@@ -1488,7 +1538,11 @@ function stepTerminalAction(
       summary: result.message.slice(0, 500),
     },
   });
-  next = { ...next, pendingActionPayload: undefined };
+  next = {
+    ...next,
+    pendingActionPayload: undefined,
+    pendingApprovalBinding: undefined,
+  };
   next = pushEvent(next, {
     type: "node_completed",
     nodeId: node.id,
@@ -2496,23 +2550,25 @@ export function resolveLoopHitl(
     const choice = answer.answer.trim();
     const choiceLower = choice.toLowerCase();
 
-    next = pushArtifact(next, {
-      nodeId: cursorNode.id,
-      kind: "human_decision",
-      data: {
-        mode:
-          mode === "legacy"
-            ? (architectureOf(cursorNode).humanMode ?? "approval")
-            : mode,
-        choice,
-        ...(answer.editedPayload ? { editedPayload: answer.editedPayload } : {}),
-        at: nowIso(),
-        nodeId: cursorNode.id,
-      },
-    });
+    const decisionMode =
+      mode === "legacy"
+        ? (architectureOf(cursorNode).humanMode ?? "approval")
+        : mode;
 
     // Legacy decide_* keeps prior semantics: stepper advances on hitl_resolved only.
     if (mode === "legacy") {
+      next = pushArtifact(next, {
+        nodeId: cursorNode.id,
+        kind: "human_decision",
+        data: {
+          mode: decisionMode,
+          choice,
+          ...(answer.editedPayload ? { editedPayload: answer.editedPayload } : {}),
+          ...(answer.actor ? { actor: answer.actor } : {}),
+          at: nowIso(),
+          nodeId: cursorNode.id,
+        },
+      });
       let nextDoc = replaceInstance(doc, next);
       nextDoc = stepLoopInstance(nextDoc, instanceId, { execution });
       return upsertLoopGraph(workspaceRoot, nextDoc);
@@ -2520,6 +2576,18 @@ export function resolveLoopHitl(
 
     if (mode === "approval") {
       if (/reject|deny|拒绝|驳回/i.test(choiceLower)) {
+        next = invalidatePendingApproval(next, "Human rejected the action");
+        next = pushArtifact(next, {
+          nodeId: cursorNode.id,
+          kind: "human_decision",
+          data: {
+            mode: "approval",
+            choice,
+            ...(answer.actor ? { actor: answer.actor } : {}),
+            at: nowIso(),
+            nodeId: cursorNode.id,
+          },
+        });
         next = pushEvent(
           {
             ...next,
@@ -2543,6 +2611,51 @@ export function resolveLoopHitl(
           pendingActionPayload: next.pendingActionPayload ?? {
             approved: true,
             nodeId: cursorNode.id,
+          },
+        };
+      }
+
+      const decisionId = `art_${randomUUID()}`;
+      let bindingPayload:
+        | ReturnType<typeof buildApprovalBinding>
+        | undefined;
+      if (next.pendingActionPayload && /approve|edit|批准|同意/i.test(choiceLower)) {
+        const engineering = computeEngineeringBaseline(next);
+        const operationDigest = digestOperationPayload(next.pendingActionPayload);
+        bindingPayload = buildApprovalBinding({
+          instanceId: next.id,
+          nodeId: cursorNode.id,
+          engineering,
+          operationDigest,
+        });
+      }
+
+      next = pushArtifact(next, {
+        id: decisionId,
+        nodeId: cursorNode.id,
+        kind: "human_decision",
+        data: {
+          mode: "approval",
+          choice,
+          ...(answer.editedPayload ? { editedPayload: answer.editedPayload } : {}),
+          ...(answer.actor ? { actor: answer.actor } : {}),
+          at: nowIso(),
+          nodeId: cursorNode.id,
+          ...(bindingPayload ? { binding: bindingPayload } : {}),
+        },
+      });
+      if (bindingPayload) {
+        next = {
+          ...next,
+          pendingApprovalBinding: {
+            decisionArtifactId: decisionId,
+            instanceId: next.id,
+            nodeId: cursorNode.id,
+            artifactIds: [...bindingPayload.artifactIds],
+            engineeringBaseline: bindingPayload.engineeringBaseline,
+            operationDigest: bindingPayload.operationDigest,
+            ...(answer.actor ? { actor: answer.actor } : {}),
+            approvedAt: nowIso(),
           },
         };
       }
@@ -2571,6 +2684,19 @@ export function resolveLoopHitl(
       }
       return upsertLoopGraph(workspaceRoot, nextDoc);
     }
+
+    next = pushArtifact(next, {
+      nodeId: cursorNode.id,
+      kind: "human_decision",
+      data: {
+        mode: decisionMode,
+        choice,
+        ...(answer.editedPayload ? { editedPayload: answer.editedPayload } : {}),
+        ...(answer.actor ? { actor: answer.actor } : {}),
+        at: nowIso(),
+        nodeId: cursorNode.id,
+      },
+    });
 
     if (mode === "review") {
       if (/reject|拒绝/i.test(choiceLower)) {

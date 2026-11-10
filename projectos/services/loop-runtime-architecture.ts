@@ -13,6 +13,10 @@ import {
   type LoopSpecNode,
 } from "../contracts/loop-graph.js";
 import type { LoopEvidenceView, LoopExecutionHooks } from "./loop-execution.js";
+import {
+  invalidatePendingApproval,
+  shouldInvalidateApprovalOnArtifactKind,
+} from "./loop-approval-binding.js";
 
 export function architectureOf(node: LoopSpecNode) {
   return withArchitectureDefaults(node);
@@ -116,10 +120,19 @@ export function pushArtifact(
     createdAt: artifact.createdAt ?? new Date().toISOString(),
     data: artifact.data,
   };
-  return {
+  let withArtifact: LoopInstance = {
     ...instance,
     artifacts: [...(instance.artifacts ?? []), next].slice(-100),
   };
+  // Engineering evidence mutation invalidates a delivery-gate approval so
+  // side-effect Actions cannot run against a stale ChangeSet/TestReport/Review.
+  if (shouldInvalidateApprovalOnArtifactKind(next.kind)) {
+    withArtifact = invalidatePendingApproval(
+      withArtifact,
+      `Engineering artifact updated (${next.kind}); prior approval invalidated`,
+    );
+  }
+  return withArtifact;
 }
 
 export function latestArtifact(

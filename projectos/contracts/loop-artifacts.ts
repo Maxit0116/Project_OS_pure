@@ -75,9 +75,25 @@ export const LoopGitHubOpResultSchema = z
   })
   .strict();
 
+/** Binds an approval to a run, concrete artifacts, and operation params. */
+export const LoopApprovalBindingSchema = z
+  .object({
+    instanceId: z.string().min(1),
+    nodeId: z.string().min(1),
+    artifactIds: z.array(z.string().min(1)).max(20),
+    /** Hash of ChangeSet / TestReport / ReviewResult material at approve time. */
+    engineeringBaseline: z.string().trim().min(1).max(128),
+    /** Hash of the approved Action payload / params. */
+    operationDigest: z.string().trim().min(1).max(128),
+    status: z.enum(["valid", "invalidated"]).default("valid"),
+    invalidatedReason: z.string().trim().max(500).optional(),
+    invalidatedAt: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const LoopHumanDecisionSchema = z
   .object({
-    mode: z.enum(["approval", "review", "input", "decision", "takeover"]),
+    mode: z.enum(["approval", "review", "input", "decision", "takeover", "gate"]),
     choice: z.string().trim().min(1).max(120),
     comment: z.string().trim().max(2000).optional(),
     /** When Approval Edit occurs, the payload the Action must execute. */
@@ -85,6 +101,8 @@ export const LoopHumanDecisionSchema = z
     at: z.string().min(1),
     actor: z.string().trim().min(1).max(120).optional(),
     nodeId: z.string().min(1).optional(),
+    /** Delivery-gate binding; required for side-effect Actions after Batch-1. */
+    binding: LoopApprovalBindingSchema.optional(),
   })
   .strict();
 
@@ -111,6 +129,7 @@ export type LoopChangeSet = z.infer<typeof LoopChangeSetSchema>;
 export type LoopTestReport = z.infer<typeof LoopTestReportSchema>;
 export type LoopReviewResult = z.infer<typeof LoopReviewResultSchema>;
 export type LoopGitHubOpResult = z.infer<typeof LoopGitHubOpResultSchema>;
+export type LoopApprovalBinding = z.infer<typeof LoopApprovalBindingSchema>;
 export type LoopHumanDecision = z.infer<typeof LoopHumanDecisionSchema>;
 export type LoopArtifactKind = z.infer<typeof LoopArtifactKindSchema>;
 export type LoopArtifactRef = z.infer<typeof LoopArtifactRefSchema>;

@@ -427,6 +427,7 @@ export const LoopInstanceEventSchema = z
       "checkpoint_saved",
       "freshness_stale",
       "budget_exceeded",
+      "approval_stale",
     ]),
     nodeId: z.string().min(1).optional(),
     message: z.string().trim().max(2000).optional(),
@@ -548,6 +549,23 @@ export const LoopInstanceSchema = z
     artifacts: z.array(LoopInstanceArtifactSchema).max(100).optional(),
     /** Payload approved/edited by Human Approval for the next Action. */
     pendingActionPayload: z.record(z.string(), z.unknown()).optional(),
+    /**
+     * Live approval gate binding for the next side-effect Action.
+     * Cleared or invalidated when engineering artifacts / payload change.
+     */
+    pendingApprovalBinding: z
+      .object({
+        decisionArtifactId: z.string().min(1),
+        instanceId: z.string().min(1),
+        nodeId: z.string().min(1),
+        artifactIds: z.array(z.string().min(1)).max(20),
+        engineeringBaseline: z.string().trim().min(1).max(128),
+        operationDigest: z.string().trim().min(1).max(128),
+        actor: z.string().trim().min(1).max(120).optional(),
+        approvedAt: z.string().min(1),
+      })
+      .strict()
+      .optional(),
     /** GitHub Action queued for async settle (REST create_pr, etc.). */
     pendingGithubOp: z
       .object({
@@ -665,6 +683,11 @@ export const LoopPendingGraphEditOfferSchema = z
   .object({
     reason: z.string().trim().min(1).max(500),
     createdAt: z.string().min(1),
+    /** When set, Accept applies this proposed draft (AI Edit propose-before-apply). */
+    proposedDraft: IntentGraphSchema.optional(),
+    /** Draft revision the proposal was computed against (reject if diverged). */
+    baseRevision: z.number().int().nonnegative().optional(),
+    summary: z.string().trim().min(1).max(1000).optional(),
   })
   .strict();
 
@@ -721,6 +744,8 @@ export const LoopHitlAnswerSchema = z
     answer: z.string().trim().min(1).max(1000),
     /** Approval Edit: Action must execute this payload, not the Agent draft. */
     editedPayload: z.record(z.string(), z.unknown()).optional(),
+    /** Authorized human actor; assignment alone does not imply this. */
+    actor: z.string().trim().min(1).max(120).optional(),
   })
   .strict();
 

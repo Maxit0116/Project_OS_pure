@@ -274,20 +274,26 @@ export function sendLoopAuthoringTurn(
     draft: doc.draft,
     ...(goalContext ? { goalContext } : {}),
   });
-  const history = pushIntentGraphHistory(doc.draftHistory, {
-    id: `hist_${randomUUID()}`,
-    at: new Date().toISOString(),
-    label: parsed.text.slice(0, 120),
-    draft: doc.draft,
-  });
-  const assistant = makeAuthoringMessage("assistant", edit.summary);
+  // Propose-before-apply: do not mutate the live draft until Accept.
+  // Manual canvas edits remain direct; AI Edit offers a reviewable patch.
+  const assistant = makeAuthoringMessage(
+    "assistant",
+    `${edit.summary} Review the proposed graph edit, then Accept or Dismiss.`,
+  );
   return upsertLoopGraph(workspaceRoot, {
     ...doc,
     composerMode: "edit",
-    draft: edit.draft,
-    draftHistory: history,
     authoringThread: [...doc.authoringThread, userMessage, assistant].slice(-200),
-    authoringTrace: buildCompleteTrace(edit.steps),
+    authoringTrace: buildCompleteTrace(
+      edit.steps.filter((step) => step.kind !== "applying_patch"),
+    ),
+    pendingGraphEditOffer: {
+      reason: edit.summary.slice(0, 500) || "Proposed graph edit",
+      createdAt: new Date().toISOString(),
+      proposedDraft: edit.draft,
+      baseRevision: doc.draft.revision,
+      summary: edit.summary.slice(0, 1000),
+    },
   });
 }
 
@@ -393,11 +399,49 @@ export function acceptLoopGraphEditOffer(
   loopId: string,
 ): LoopGraphDocument {
   const doc = requireLoop(workspaceRoot, loopId);
-  if (!doc.confirmedGoalContext) {
-    throw new Error("Confirm a goal context before generating a graph");
-  }
   if (!doc.pendingGraphEditOffer) {
     throw new Error("No pending graph edit offer");
+  }
+  const offer = doc.pendingGraphEditOffer;
+  if (
+    typeof offer.baseRevision === "number" &&
+    offer.baseRevision !== doc.draft.revision
+  ) {
+    throw new Error(
+      "Graph edit offer is stale relative to the current draft; dismiss and re-propose",
+    );
+  }
+
+  if (offer.proposedDraft) {
+    const history = pushIntentGraphHistory(doc.draftHistory, {
+      id: `hist_${randomUUID()}`,
+      at: new Date().toISOString(),
+      label: (offer.summary ?? offer.reason).slice(0, 120),
+      draft: doc.draft,
+    });
+    const assistant = makeAuthoringMessage(
+      "assistant",
+      offer.summary ?? "Applied proposed graph edit.",
+    );
+    return upsertLoopGraph(workspaceRoot, {
+      ...doc,
+      draft: offer.proposedDraft,
+      draftHistory: history,
+      pendingGraphEditOffer: undefined,
+      authoringThread: [...doc.authoringThread, assistant].slice(-200),
+      authoringTrace: buildCompleteTrace([
+        {
+          id: `step_${randomUUID()}`,
+          kind: "applying_patch",
+          label: "Applied proposed graph edit",
+          at: new Date().toISOString(),
+        },
+      ]),
+    });
+  }
+
+  if (!doc.confirmedGoalContext) {
+    throw new Error("Confirm a goal context before generating a graph");
   }
   const skeleton = buildCoarseLoopSkeletonFromGoal({
     context: doc.confirmedGoalContext,

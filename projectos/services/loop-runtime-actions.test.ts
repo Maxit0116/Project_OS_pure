@@ -14,6 +14,10 @@ import {
 } from "./loop-graph-service.js";
 import type { LoopExecutionHooks } from "./loop-execution.js";
 import {
+  computeEngineeringBaseline,
+  digestOperationPayload,
+} from "./loop-approval-binding.js";
+import {
   advanceLoopInstance,
   completePendingGithubOp,
   resolveLoopHitl,
@@ -187,21 +191,35 @@ describe("loop-runtime Terminal + deferred GitHub", () => {
         message: "Terminal policy_denied",
       }),
     });
+    const payload = { command: "echo", approved: true };
+    const seedInstance = {
+      id: "inst_term",
+      specVersion: spec.version,
+      status: "running" as const,
+      cursorNodeId: "n_term",
+      round: 0,
+      attemptCounts: {},
+      pendingActionPayload: payload,
+      events: [],
+      startedAt: "2026-11-03T00:00:00.000Z",
+      updatedAt: "2026-11-03T00:00:00.000Z",
+    };
+    const engineering = computeEngineeringBaseline(seedInstance);
     const stepped = stepLoopInstance(
       {
         ...doc,
         instances: [
           {
-            id: "inst_term",
-            specVersion: spec.version,
-            status: "running",
-            cursorNodeId: "n_term",
-            round: 0,
-            attemptCounts: {},
-            pendingActionPayload: { command: "echo", approved: true },
-            events: [],
-            startedAt: "2026-11-03T00:00:00.000Z",
-            updatedAt: "2026-11-03T00:00:00.000Z",
+            ...seedInstance,
+            pendingApprovalBinding: {
+              decisionArtifactId: "art_decision",
+              instanceId: "inst_term",
+              nodeId: "n_term",
+              artifactIds: engineering.artifactIds,
+              engineeringBaseline: engineering.baseline,
+              operationDigest: digestOperationPayload(payload),
+              approvedAt: "2026-11-03T00:00:00.000Z",
+            },
           },
         ],
       },
