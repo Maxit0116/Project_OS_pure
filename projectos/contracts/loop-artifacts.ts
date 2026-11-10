@@ -24,6 +24,11 @@ export const LoopDevPlanSchema = z
 export const LoopChangeSetSchema = z
   .object({
     files: z.array(z.string().trim().min(1).max(500)).max(200),
+    /**
+     * Paths intentionally removed/renamed-away in this ChangeSet.
+     * Expected absent at digest time (tombstones) — not unknown missing.
+     */
+    deletedFiles: z.array(z.string().trim().min(1).max(500)).max(200).optional(),
     summary: z.string().trim().min(1).max(2000),
     unfinished: z.array(z.string().trim().min(1).max(500)).max(40).optional(),
     problems: z.array(z.string().trim().min(1).max(500)).max(40).optional(),
@@ -80,6 +85,11 @@ export const LoopGitHubOpResultSchema = z
     number: z.number().int().positive().optional(),
     refs: z.record(z.string(), z.string()).optional(),
     message: z.string().trim().max(1000).optional(),
+    /**
+     * True when HTTP already succeeded but engineering baseline drifted
+     * afterward — real side effect is retained; do not redo.
+     */
+    deliveryStale: z.boolean().optional(),
   })
   .strict();
 

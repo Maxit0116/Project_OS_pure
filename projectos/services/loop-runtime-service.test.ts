@@ -59,8 +59,16 @@ function scriptedLoopExecution(filePath = "src/login.ts"): {
   const requests: Array<{ filePath: string; goal: string }> = [];
   let seq = 0;
   let completeOnStart = false;
+  const fileDigest = `scripted_${filePath.length}_${filePath}`;
   const execution: LoopExecutionHooks = {
     leaf: { featureNodeId: "feat_login", filePath },
+    digestWorkspacePaths: (paths, options) => ({
+      digests: Object.fromEntries(paths.map((path) => [path, fileDigest])),
+      missing: [],
+      unreadable: [],
+      tombstones: [...(options?.deletedPaths ?? [])],
+      undeleted: [],
+    }),
     readRun: (runId) => runs.get(runId) ?? null,
     readEvidence: (runId) => evidence.get(runId) ?? null,
     startAgentRun: (input) => {
