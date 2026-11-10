@@ -682,9 +682,13 @@ freshness?
 - [x] `loop-runtime-*.test.ts` / `loop-graph*.test.ts` / Review layout — tip full `npm test` 绿  
 - [x] Feature Development 示范 workflow NA 不变量 — roles/actions Feature Development E2E  
 
-**仍非总交验**：无付费 live、无 OAuth、无真邮箱；Electron 历史图「控件可见」≠ start/pause 已点击操作（pause/resume **状态变**以 LocalApi 测为准）。GC-6.6 关联 Run：**真实跳转**证据 = Electron `loops-gc66-run-jump-*`（`data-tour=agent-flow`）；≠ 仅 Runtime 空闲文案/按钮存在。
+**仍非总交验**：无付费 live、无 OAuth、无真邮箱。
 
-**需用户 live 授权 / 人工体验（非未实现缺口）**：真 Gmail/OAuth/云项目；付费 ModelGateway；Mac；真实外发；Run 页 Start 在 `startEnabled=true` 下点按；UI Pause 按钮操作入镜。
+**Electron UI 已核（非「人工体验」转交）**：`loops-start-pause-resume-*` Start enabled 点按→实例+runBinding→Pause paused→Resume 同实例（DI `local_tools`）。
+
+**GC-6.6**：a255 重挂图 **已撤销**；不可变失败 rawlog `eefe4b60` 保留；fresh `loops-gc66-jump-fresh-*` **ok:false**（打开 Agent 流程但是空闲页、无同 run 上下文）— **不足**，见 §9 证据图 JSON。
+
+**需用户 live 授权（非本流可自动项）**：真 Gmail/OAuth/云项目；付费 ModelGateway；Mac；真实外发。
 
 ---
 
