@@ -47,7 +47,7 @@
 3. **编辑定义不污染运行快照**（Spec 冻结；Instance 只追加事件/产物）。  
 4. 路径：项目内选流程 → 填任务材料 → **预检与确认**（工作区/分支/Agent 服务/缺配置/审批点）→ 真实隔离工作区编码测试/人工协作 → Diff / TestReport / Preview 或 PR 产物；失败保留有效证据可安全续。  
 5. 快捷调用：Issue / PR / 选中代码 / 错误上下文 → 同一 run 机制。  
-6. 事件：GitHub / Sentry / 定时 → 同 `LoopInstance` 创建路径（依赖 GC 触发；离线排队未实现则不可承诺「全天接收」）。  
+6. 事件：GitHub / Sentry / 定时 → 同 `LoopInstance` 创建路径（依赖 GC 触发；离线队列 = LocalApi/IPC 持久 enqueue/drain，**非** 24/7 live 全天接收 / 桌面自动 settle）。  
 7. **产品支持真实工作区执行 ≠ 授权碰 Terran Mac / 日常源码 / 真实外发**。
 
 ### 1.4 增量 B — 多类型输入（TM）
@@ -89,7 +89,7 @@ S3  项目手动启动「实现页面」流程 + 首批材料（文字 + 项目�
         ↓
 S4  其余格式（表/图视觉）+ Issue/PR/错误上下文快捷调用
         ↓
-S5  GitHub/Sentry 事件同 run 机制 + 定时；离线排队诚实标「未实现」
+S5  GitHub/Sentry 事件同 run 机制 + 定时；离线队列诚实标 LocalApi/IPC 已实现（≠ live 全天 / 自动 UI）
         ↓
 S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 ```
@@ -209,7 +209,7 @@ S6  11 平台其余批次 / runtime context / 观测 与六目标回归同闸
 |--------|------|
 | 另起第二套 workflow 引擎 | 复用 Spec/Instance |
 | 通用 iPaaS / 材料自动改定义 | Authoring ≠ Task pack |
-| 承诺离线全天事件接收 | 未实现则标未实现 |
+| 承诺离线全天事件接收 | LocalApi/IPC 队列已实现；**live 全天 / 自动 UI** 未承诺 |
 | Terran Mac / 真实外发 / 付费 live 冒充 | 外部缺口如实报 |
 
 ---
