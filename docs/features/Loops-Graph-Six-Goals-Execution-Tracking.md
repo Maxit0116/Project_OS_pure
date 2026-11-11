@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-11（PR10 tip-final **候选** product `4f098a5`；review-fix `b32cd67` 独立复核已过；门禁包 `pr10-4f098a5-tip-final-gate.zip`；tipDoc `271c621`+）— 三层 build+完整 npm test（598/3353，`PROJECTOS_REQUIRE_REAL_PREVIEW=1`）EXIT 0；GC-6.6 **clean** `loops-gc66-clean-4f098a5-*`；DI 合成≠live apply/undo；dirty/fresh/ab55/a255 仅历史；Start/Pause=eaf6 历史列；settle=LocalApi+IPC。**尚非正式总交验 / 非 shipped / 非 live**。
+**Updated**: 2026-11-11（PR10 tip-final **候选** product `4f098a5`；review-fix `b32cd67` 独立复核已过；门禁包 `pr10-4f098a5-tip-final-gate.zip`；tipDoc `271c621`+）— 三层 build+完整 npm test（598/3353，`PROJECTOS_REQUIRE_REAL_PREVIEW=1`）EXIT 0；GC-6.6 **clean** `loops-gc66-clean-4f098a5-*`；DI 合成≠live apply/undo；dirty/fresh/ab55/a255 仅历史；Start/Pause=eaf6 历史列；settle=LocalApi+IPC。证据补包 `pr10-4f098a5-evidence-supplement.zip`（DutyCard 关联钮视口内新拍+磁盘 reopen rawlog；原 tip zip 未改）。**尚非正式总交验 / 非 shipped / 非 live**。
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
