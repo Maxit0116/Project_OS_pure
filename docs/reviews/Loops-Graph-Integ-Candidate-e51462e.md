@@ -33,11 +33,17 @@ Under run artifacts / `/tmp/integ-gate-e51462e/`:
 - `electron-coexist/integ-coexist-*.png` + `integ-coexist-evidence.json`
 - Zip: `integ-e51462e-evidence.zip` (when packaged)
 
+## Joint DI running demo (follow-up evidence)
+
+See `docs/reviews/Loops-Graph-Integ-Joint-DI-Demo-a22fa39.md` and artifact pack `integ-joint-a22fa39-evidence.zip`.
+
+Legal UI Start → durable associated run → non-empty Agent Flow → reopen → pause/resume → HITL `approval_stale` drift fail-closed → cancel. **Not** live apply. Historical shell-only pack kept separate under `integ-e51462e-historical-shell/`.
+
 ## Honest limits
 
 | Claimed | Not claimed |
 |---------|-------------|
 | Compile + semantic merge coexistence | Live paid-model apply |
-| DI loopback Electron UI | OAuth / real cloud accounts |
+| DI loopback Electron UI + legal joint run | OAuth / real cloud accounts |
 | Forced preflight refuse path | Authorized Mac daily profile |
 | Original branches unmoved | Merge back to `graph` |
