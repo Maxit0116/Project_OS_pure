@@ -2,7 +2,7 @@
 
 **Baseline**: `graph` @ `bec3dd75ef9ab0b50e7b7b564fb91ea5adf0f398`  
 **Branch**: `cursor/loops-dispatch-evidence-cab8` (stacked on approval-binding PR9; targets `graph`)  
-**Updated**: 2026-11-10（PR10 tip `7ac2a91` 门禁包保留；product 待叠加 review-fix：index reconcile / freeze fail-closed / settle 边界诚实 / DI 无伪 backupId / skipPreflight 收敛；parent durable `219949a`）— Electron **Start→Pause→Resume** 同实例 UI ok（独立复核）；GC-6.6 a255 重挂**撤销** + ab55 不可变失败保留；**durable DI** 正式落盘可 restore（**合成 timeline ≠ live apply；无真实 undo backup**）；Studio/PDF/ACL 同前；**最终 clean 同源门禁待独立代码复核后再封**。**不宣称总交验 / 非 shipped / 非 live**。
+**Updated**: 2026-11-11（PR10 tip-final **候选** product `4f098a5`；review-fix `b32cd67` 独立复核已过；门禁包 `pr10-4f098a5-tip-final-gate.zip`；tipDoc `271c621`+）— 三层 build+完整 npm test（598/3353，`PROJECTOS_REQUIRE_REAL_PREVIEW=1`）EXIT 0；GC-6.6 **clean** `loops-gc66-clean-4f098a5-*`；DI 合成≠live apply/undo；dirty/fresh/ab55/a255 仅历史；Start/Pause=eaf6 历史列；settle=LocalApi+IPC。**尚非正式总交验 / 非 shipped / 非 live**。
 
 状态键：**计划** · **实现** · **contract** · **localE2E** · **live** · **待验** · **未配置** · **catalog_only**  
 **入文档 ≠ 完成。**
