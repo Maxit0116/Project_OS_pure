@@ -27,3 +27,10 @@
 ## Not claimed
 
 - Live OAuth / paid model / Mac / outbound / merge to `graph`
+
+## Post-merge minimal adaptations
+
+| Item | Cause | Fix |
+|------|-------|-----|
+| Marketplace `client.test.ts` ×6 | Auto-merge duplicated `testDns` / `McpDnsLookup` import | Dedupe to single testDns (graph SSRF inject) |
+| Sample prisma/next suites | integ worktree lacked `sample-graph-saas/node_modules` | `npm ci --ignore-scripts` in sample (gitignored; not committed) |

@@ -15,12 +15,6 @@ import type { McpDnsLookup } from "../mcp/mcp-http-guard.js";
 // The URL guard looks the host up; these tests use hosts that cannot resolve (".test"), so they say where it points.
 const testDns: McpDnsLookup = async () => [{ address: "93.184.216.34" }];
 
-import type { McpDnsLookup } from "../mcp/mcp-http-guard.js";
-
-// Hosts under .test cannot resolve; tests supply a public A record for the guard.
-const testDns: McpDnsLookup = async () => [{ address: "93.184.216.34" }];
-
-
 describe("WorkflowCatalogClient", () => {
   it("falls back to bundled when remote fails", async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), "workflow-cat-"));
