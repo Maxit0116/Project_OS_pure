@@ -1,56 +1,55 @@
-# Joint DI demo (legal flow) — docs tip `a22fa39`
+# Joint DI demo — claims hygiene (docs tip follows this file)
 
-Product gate pin remains **`e51462e`** (three-layer build + full 605/3394 already green).  
-This tip only adds evidence/docs for the **legal joint DI running demo**. No product source change → no full re-gate.
+Product gate pin remains **`e51462e`** (no product source change; full gate not re-run).  
+Original joint pack **`integ-joint-a22fa39-evidence.zip`** sha256 **`8d0f63d4…6768`** is **immutable** — not overwritten.
 
-## Identity
+## What the original pack (`8d0f63d4…`) actually proves
 
-| Item | Value |
-|------|-------|
-| Docs tip | `a22fa39710182b6dcf051f764f9b5576150837f8` |
-| Product gate pin | `e51462e` / tree `66679b6` |
-| Merge parents | `3b7a875` (graph) + `15138dc` (PR10) |
-| Desktop main chunk | `10f2f8766aa8ab757f0d529c0e7770dde91d2febc12a0189dbf3216cff751579` |
-| Instance | `inst_3030330b-399e-4a7d-b83e-5bafd2e3285f` |
-| Durable DI run | `run_loopback_e718fce8-378f-4e9c-82f4-2165a25c4203` |
-| Live provider | **false** (local_tools DI only) |
+### UI-verified (keep)
 
-Original PR9/PR10/graph heads unmoved (`ccf2804` / `15138dc` / `3b7a875`).
+| Claim | Evidence |
+|-------|----------|
+| Legal graph + assignee + outbound | preflight clear / Start enabled |
+| UI materials + TM-8 ack + **UI Start** | rawlog `start_ui_enabled` / `startedVia=ui` |
+| Durable DI run + runBinding | `run_loopback_e718fce8…` / `inst_3030330b…` |
+| DutyCard associated-run bound | shot `02` |
+| Same-run **non-empty** Agent Flow (DI Apply timeline) | shot `03` |
+| Reopen associated-run non-empty (API + UI bound) | shot `04` + `reopen_getAgentRun` — **closed intermediate frame was not shot** |
 
-## What was demonstrated (real interaction, not empty chrome)
+### Must **not** be read as UI button clicks (original pack)
 
-1. **Legal graph**: agent → human(approval + assignee) → exit (outbound wired)
-2. **UI materials**: Add project ref `src/hello.js` → TM-8 re-review ack → preflight clear → **Start enabled** → UI Start
-3. Durable `run_loopback_*` + runBinding; DutyCard **associated-run bound**
-4. **Non-empty Agent Flow** (Complete / Applying the change) via associated-run — co-founder agentic + Loops jointly
-5. Close Agent Flow → reopen associated-run → same-run non-empty recover
-6. Same-instance **Pause → Resume** (`pauseLoopInstance` / `resumeLoopInstance` production IPC; Run-phase Pause button not matched in this layout)
-7. HITL approve → events `hitl_resolved` → **`approval_stale`** → re-`awaiting_hitl` (binding-drift fail-closed after DI apply to `hello.js`)
-8. **Cancel** → status cancelled; advance produces no further work
+| Misleading claim in old evidence JSON | Reality in same pack |
+|----------------------------------------|----------------------|
+| `pause_clicked=true` | rawlog `pauseBtn=false`; `pause_via=ipc_pauseLoopInstance` |
+| `resume_*` as UI | `resume_via=ipc_resumeLoopInstance` |
+| `hitl_approve_clicked=true` as UI | `hitl_via=ipc_resolveLoopHitl`; shots `07/08` are Draw DutyCard, **no Approve/Reject chrome** |
+| `uiCancelClicked` | `false`; cancel via `cancelLoopInstance` IPC |
+| shots `05/06/09` as paused/cancelled UI | still Draw config card — **no visible paused/cancelled chrome difference** |
 
-## Packs (isolated)
+Production events after IPC HITL (honest negative): `hitl_resolved` → **`approval_stale`** → still `awaiting_hitl`. That is a **binding-drift fail-closed event**, not “UI Approve succeeded”.
 
-| Pack | Role |
-|------|------|
-| `integ-joint-a22fa39-evidence.zip` | **This** joint DI demo (do not mix) |
-| `integ-e51462e-historical-shell/` | Prior shell-only coexist shots (retained, not formal) |
+### Workbench fact (no design change)
 
-## Focused production tests (new identity header)
+Loop Run header exposes **Pause / Resume / Advance** when `phase==='run'`. HITL Approve/Reject render in the Run panel when `status==='awaiting_hitl'`. **There is no `cancelLoopInstance` button in workbench UI** — Cancel cannot be claimed as UI without new product work (out of scope).
 
-`loop-approval-binding` (16) + `loop-approval-runtime-gate` (4) + durable DI (1) + run-binding (11) + interrupted (6) + agent activities (8) + GC66 jump (3) = **49 passed**.
+## Supplemental pack (new; does not replace `8d0f63d4…`)
 
-## Gaps (honest)
+See `docs/reviews/Loops-Graph-Integ-Joint-DI-RunTab-Supplement.md` and artifact  
+`integ-joint-runtab-supplement-evidence.zip`.
 
-| Gap | Why | Evidence instead |
-|-----|-----|------------------|
-| Pause/Resume chrome button not clicked | Run-phase buttons not matched while overlay pressed | LocalApi `pauseLoopInstance`/`resumeLoopInstance` (same store path) |
-| No UI to forge digest mid-run | Product has no surface | Session `approval_stale` after HITL + unit suites above |
-| Live model apply | Banned / unauthorized | Explicitly **not** claimed; DI only |
+Delivered: **Run-tab UI** Pause→`Instance: paused`→Resume; HITL Approve/Reject visible; UI Approve→`approval_stale`; Agent Flow closed mid-frame. **Cancel remains UI-untested** (no product cancel button).
 
 ## Reproduce (offline, isolated)
 
-1. Branch `cursor/loops-graph-integ-cab8` @ docs tip (product pin `e51462e`)
-2. `PROJECTOS_REQUIRE_ISOLATED_USER_DATA=1` + `PROJECTOS_USER_DATA_DIR=/tmp/...` + `PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK=1`
-3. Electron CDP; legal graph + materials UI + TM-8 ack + Start
-4. Associated-run → Agent Flow; pause/resume IPC; HITL; cancel
-5. Restore `sample-graph-saas/src/hello.js` after DI apply if dirty
+```bash
+# product pin e51462e or docs tip on integ branch; clean tree
+export DISPLAY=:99
+export PROJECTOS_REQUIRE_ISOLATED_USER_DATA=1
+export PROJECTOS_USER_DATA_DIR=/tmp/integ-joint-runtab-ud-$$
+export PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK=1
+# desktop already built from e51462e tip tree
+cd projectos/desktop && npm exec electron . -- --no-sandbox --remote-debugging-port=9222
+# then Run-tab supplemental capture script (CDP) — see supplement doc
+```
+
+Restore `sample-graph-saas/src/hello.js` after DI if dirty. No OAuth / paid model / Mac daily / merge to `graph`.
