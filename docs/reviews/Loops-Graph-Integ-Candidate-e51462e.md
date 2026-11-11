@@ -35,9 +35,11 @@ Under run artifacts / `/tmp/integ-gate-e51462e/`:
 
 ## Joint DI running demo (follow-up evidence)
 
-See `docs/reviews/Loops-Graph-Integ-Joint-DI-Demo-a22fa39.md` and artifact pack `integ-joint-a22fa39-evidence.zip`.
+See `docs/reviews/Loops-Graph-Integ-Joint-DI-Demo-a22fa39.md` and immutable pack `integ-joint-a22fa39-evidence.zip` (`8d0f63d4…`).
 
-Legal UI Start → durable associated run → non-empty Agent Flow → reopen → pause/resume → HITL `approval_stale` drift fail-closed → cancel. **Not** live apply. Historical shell-only pack kept separate under `integ-e51462e-historical-shell/`.
+UI-proven in that pack: legal Start → DutyCard associated-run → same-run nonempty Agent Flow. Original pause/HITL/cancel paths were **IPC + production-event negatives** (Draw shots; not UI chrome) — see hygiene section of the joint demo doc.
+
+Run-tab UI supplement (does not overwrite original): `docs/reviews/Loops-Graph-Integ-Joint-DI-RunTab-Supplement.md` + `integ-joint-runtab-supplement-evidence.zip` (UI Pause/Resume + HITL Approve/Reject visible; Approve → `approval_stale`; Cancel **UI-untested**). **Not** live apply. Historical shell-only pack kept separate under `integ-e51462e-historical-shell/`.
 
 ## Honest limits
 
