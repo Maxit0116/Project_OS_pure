@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { containsHighConfidenceSecret } from "../high-confidence-secret-patterns.js";
+import { isAgentRunEventLogFileName } from "../harness/persisted-run.js";
 import { listJsonlFiles } from "./code-index.js";
 
 export interface RunRecordHit {
@@ -18,7 +19,9 @@ export function searchRunRecords(projectOSRoot: string, query: string): RunRecor
   const needle = query.trim();
   if (!needle) return [];
   const hits: RunRecordHit[] = [];
-  const files = listJsonlFiles(join(projectOSRoot, "agent-runs")).slice(-40);
+  const files = listJsonlFiles(join(projectOSRoot, "agent-runs"))
+    .filter((file) => isAgentRunEventLogFileName(basename(file)))
+    .slice(-40);
   for (const file of files) {
     let raw = "";
     try {

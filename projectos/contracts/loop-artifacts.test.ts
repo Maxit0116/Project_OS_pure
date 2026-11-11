@@ -76,7 +76,23 @@ describe("loop-artifacts", () => {
         choice: "approve",
         editedPayload: { title: "feat: tree" },
         at: "2026-11-03T00:00:00.000Z",
-      }).editedPayload,
-    ).toEqual({ title: "feat: tree" });
+        actor: "terran",
+        binding: {
+          instanceId: "inst_1",
+          nodeId: "n_approval",
+          artifactIds: ["art_cs"],
+          engineeringBaseline: "abc",
+          operationDigest: "def",
+          status: "valid",
+        },
+      }),
+    ).toMatchObject({
+      editedPayload: { title: "feat: tree" },
+      actor: "terran",
+      binding: {
+        engineeringBaseline: "abc",
+        status: "valid",
+      },
+    });
   });
 });

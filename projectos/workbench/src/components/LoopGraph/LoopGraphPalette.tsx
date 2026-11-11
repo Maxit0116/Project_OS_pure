@@ -15,6 +15,7 @@ import AgentPicker from '../AgentWorkforce/AgentPicker'
 import LoopConfigAssetPicker, {
   type ConfigAssetPick,
 } from './LoopConfigAssetPicker'
+import { LoopIntegrationIcon } from './integrations/LoopIntegrationIcon'
 import {
   encodePaletteDragPayload,
   LOOP_PALETTE_MIME,
@@ -339,7 +340,15 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                             : void placeItem(item.id)
                       }
                     >
-                      <Icon size={16} aria-hidden strokeWidth={1.75} />
+                      {visual.integrationIconKey ? (
+                        <LoopIntegrationIcon
+                          integrationId={visual.integrationId}
+                          iconKey={visual.integrationIconKey}
+                          size={16}
+                        />
+                      ) : (
+                        <Icon size={16} aria-hidden strokeWidth={1.75} />
+                      )}
                     </button>
                   )
                 }
@@ -350,6 +359,8 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                     className={`${styles.itemButton} ${categoryClass}`}
                     disabled={!document}
                     title={item.description}
+                    data-palette-item={item.id}
+                    data-loop-integration={visual.integrationId ?? undefined}
                     draggable={Boolean(document) && !isAgent && !needsConfigPicker}
                     onDragStart={(event) => onDragStart(event, item.id)}
                     onClick={(event) =>
@@ -362,7 +373,15 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                   >
                     <span className={styles.itemHead}>
                       <span className={`${styles.itemIcon} ${categoryClass}`}>
-                        <Icon size={14} aria-hidden strokeWidth={1.75} />
+                        {visual.integrationIconKey ? (
+                          <LoopIntegrationIcon
+                            integrationId={visual.integrationId}
+                            iconKey={visual.integrationIconKey}
+                            size={14}
+                          />
+                        ) : (
+                          <Icon size={14} aria-hidden strokeWidth={1.75} />
+                        )}
                       </span>
                       <span className={styles.itemTitle}>{item.title}</span>
                     </span>

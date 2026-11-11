@@ -144,15 +144,35 @@ export function buildChangeSetFromRun(input: {
   goal: string;
   agentRunId: string;
   task?: LoopDevPlanTask | null;
+  /** Extra delivery paths (writeScope / prior leaves) beyond the primary leaf. */
+  additionalFiles?: string[];
+  deletedFiles?: string[];
+  contentDigest?: string;
+  fileDigests?: Record<string, string>;
+  /** Bounded unified diff for Run UI / evidence (optional). */
+  unifiedDiff?: string;
 }): LoopChangeSet {
+  const files = [
+    ...new Set(
+      [input.filePath, ...(input.additionalFiles ?? []), ...(input.task?.writeScope ?? [])]
+        .map((path) => path.trim())
+        .filter(Boolean),
+    ),
+  ].slice(0, 200);
   return LoopChangeSetSchema.parse({
-    files: [input.filePath],
+    files,
+    ...(input.deletedFiles?.length
+      ? { deletedFiles: [...new Set(input.deletedFiles)].slice(0, 200) }
+      : {}),
     summary: input.task
       ? `Completed ${input.task.id}: ${input.task.title}`
       : input.goal.slice(0, 500),
     unfinished: [],
     problems: [],
     agentRunId: input.agentRunId,
+    ...(input.contentDigest ? { contentDigest: input.contentDigest } : {}),
+    ...(input.fileDigests ? { fileDigests: input.fileDigests } : {}),
+    ...(input.unifiedDiff ? { unifiedDiff: input.unifiedDiff.slice(0, 20_000) } : {}),
   });
 }
 
@@ -192,6 +212,8 @@ export function buildHeuristicReviewResult(instance: LoopInstance): LoopReviewRe
     });
   }
 
+  const validatedCodeDigest = changeSet.data.contentDigest;
+
   if (testArt) {
     const status =
       typeof testArt.data === "object" &&
@@ -212,6 +234,37 @@ export function buildHeuristicReviewResult(instance: LoopInstance): LoopReviewRe
           },
         ],
         summary: "Needs changes: tests failed",
+        ...(validatedCodeDigest ? { validatedCodeDigest } : {}),
+      });
+    }
+    const testDigest =
+      typeof testArt.data === "object" &&
+      testArt.data &&
+      "validatedCodeDigest" in testArt.data
+        ? String(
+            (testArt.data as { validatedCodeDigest?: string })
+              .validatedCodeDigest ?? "",
+          )
+        : "";
+    if (
+      validatedCodeDigest &&
+      testDigest &&
+      testDigest !== validatedCodeDigest
+    ) {
+      return LoopReviewResultSchema.parse({
+        verdict: "needs_changes",
+        allowNext: false,
+        issues: [
+          {
+            id: "stale_test_evidence",
+            severity: "error",
+            message:
+              "TestReport validated a different code digest than the latest ChangeSet",
+            suggestedFix: "Re-run tests against the current ChangeSet",
+          },
+        ],
+        summary: "Needs changes: test evidence is stale vs ChangeSet",
+        ...(validatedCodeDigest ? { validatedCodeDigest } : {}),
       });
     }
   }
@@ -226,6 +279,7 @@ export function buildHeuristicReviewResult(instance: LoopInstance): LoopReviewRe
         message: problem,
       })),
       summary: "Needs changes: coder reported unfinished problems",
+      ...(validatedCodeDigest ? { validatedCodeDigest } : {}),
     });
   }
 
@@ -236,6 +290,7 @@ export function buildHeuristicReviewResult(instance: LoopInstance): LoopReviewRe
     summary: plan
       ? `Pass: ChangeSet covers DevPlan "${plan.goal}"`
       : "Pass: ChangeSet present and no failing TestReport",
+    ...(validatedCodeDigest ? { validatedCodeDigest } : {}),
   });
 }
 

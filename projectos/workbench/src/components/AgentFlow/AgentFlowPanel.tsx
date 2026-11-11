@@ -197,6 +197,19 @@ export default function AgentFlowPanel({ steps, status, diffReady, onReviewDiff 
     )
   }
 
+  if (steps.length === 0 && status === 'error' && activities.length === 0) {
+    return renderShell(
+      ts('agentFlow.status.error'),
+      <div data-agent-flow-run-missing={activeRunId ?? ''}>
+        <EmptyState
+          icon={<Workflow size={16} />}
+          title={ts('agentFlow.runMissingTitle')}
+          description={ts('agentFlow.runMissingDesc')}
+        />
+      </div>,
+    )
+  }
+
   if (steps.length === 0 && status === 'idle' && activities.length === 0) {
     const empty = emptyFlowCopy(startError, ts)
     return renderShell(

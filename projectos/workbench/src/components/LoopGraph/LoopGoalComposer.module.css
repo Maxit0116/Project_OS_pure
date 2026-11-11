@@ -163,11 +163,35 @@
   background: var(--tech-bg-elevated);
 }
 
+.offerCard[data-loop-graph-edit-offer-stale='true'] {
+  border-color: color-mix(in srgb, var(--tech-warning, #c9a227) 55%, var(--tech-border-strong));
+}
+
+.offerStale {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-warning, #c9a227);
+}
+
 .offerCard p,
 .clarifyHint {
   margin: 0;
   font-size: var(--font-size-sm);
   color: var(--tech-text-primary);
+}
+
+.offerDiff {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.offerDiffEmpty {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
 }
 
 .offerActions,

@@ -15,6 +15,7 @@ Snapshot of `Maxit0116/Project_OS_pure` branch `graph` at the current node-harne
 
 | Area | Status | Next evidence |
 | --- | --- | --- |
+| Loops Graph (workflow studio + connectors + dual entry) | Active implementation on `cursor/loops-dispatch-evidence-cab8` | Six goals + 11-vendor connector inventory retained; **Gmail read-only appended** ([Gmail plan](docs/features/Loops-Graph-Gmail-Connector-Dev-Plan.md), not in 5814430). Security gates and provider-authoring loopback are **contract**-tested; live OAuth/paid provider **未配置**. Project-bound workflow runs + multi-type task materials: [Project Workflow + Materials](docs/features/Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md); live status in [Six Goals tracking](docs/features/Loops-Graph-Six-Goals-Execution-Tracking.md). Documenting ≠ done. |
 | Spatial product direction | Active | Capture sessions, annotations, pins, UI stencils, and visual intent composition need validation as one end-to-end user flow. |
 | Backend completion loop | Active validation | Complete a real scoped change, inspect command evidence, restart or interrupt, and review or undo without unintended re-application. |
 | Structure-graph quality | Active; a live model scan of the sample is observed (24 nodes, 16 components, all named) | Check generated maps against unfamiliar repositories and correct misleading or incomplete relationships. A cut-off model reply now retries once and then fails instead of degrading the graph. |

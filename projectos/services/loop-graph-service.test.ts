@@ -6,11 +6,14 @@ import { describe, expect, it, afterEach } from "vitest";
 
 import { compileIntentGraphHeuristic } from "./loop-graph-compiler.js";
 import {
+  acceptLoopGraphEditOffer,
   approveLoopSpec,
   createLoopGraph,
+  dismissLoopGraphEditOffer,
   getLoopGraph,
   linkLoopGraphToSession,
   listLoopGraphHeads,
+  sendLoopAuthoringTurn,
   upsertLoopGraph,
 } from "./loop-graph-service.js";
 import { startLoopInstance } from "./loop-runtime-service.js";
@@ -82,5 +85,43 @@ describe("loop-graph-service", () => {
     expect(getLoopGraph(root, doc.id)?.instances[0]?.events.some(
       (event) => event.message === "Completed implement",
     )).toBe(false);
+  });
+
+  it("AI edit offers a structural diff and rejects stale accept after manual revision", () => {
+    const root = tempRoot();
+    let doc = createLoopGraph(root, "proj_edit", "Edit offer");
+    doc = sendLoopAuthoringTurn(root, doc.id, {
+      mode: "edit",
+      text: "create skeleton graph for login",
+    });
+    expect(doc.pendingGraphEditOffer?.proposedDraft).toBeTruthy();
+    expect(doc.pendingGraphEditOffer?.diff?.summaryLines?.length).toBeGreaterThan(0);
+    expect(doc.draft.nodes).toHaveLength(0);
+
+    doc = upsertLoopGraph(root, {
+      ...doc,
+      draft: {
+        ...doc.draft,
+        revision: doc.draft.revision + 1,
+        graphPrompt: "manual touch",
+      },
+    });
+    expect(() => acceptLoopGraphEditOffer(root, doc.id)).toThrow(/stale/i);
+
+    doc = dismissLoopGraphEditOffer(root, doc.id);
+    expect(doc.pendingGraphEditOffer).toBeUndefined();
+  });
+
+  it("accept without proposedDraft requires confirmed goal (empty-graph confirm path)", () => {
+    const root = tempRoot();
+    let doc = createLoopGraph(root, "proj_empty", "Empty confirm");
+    doc = upsertLoopGraph(root, {
+      ...doc,
+      pendingGraphEditOffer: {
+        reason: "Goal context confirmed. Generate a coarse draft graph?",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    expect(() => acceptLoopGraphEditOffer(root, doc.id)).toThrow(/Confirm a goal/i);
   });
 });

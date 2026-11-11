@@ -17,6 +17,7 @@ import type {
   LoopPaletteItem,
   LoopSatelliteKind,
   LoopSpec,
+  LoopTaskMaterial,
 } from '@contracts/index'
 import {
   configPortForSatelliteKind,
@@ -36,6 +37,13 @@ import {
   resolveAgentWiring,
   type AgentWiringBase,
 } from '../../../services/loop-agent-wiring'
+import { buildPw7ContextMaterial } from '../../../services/loop-pw7-context-materials'
+import {
+  acknowledgeMaterialRereview,
+  assessMaterialChangeImpact,
+  writeMaterialRereviewEvidence,
+  type MaterialRereviewWriteback,
+} from '../../../services/loop-material-rereview'
 import { create } from 'zustand'
 import { useChatSessionStore } from './chatSessionStore'
 import {
@@ -53,6 +61,13 @@ export type LoopPhase = 'draw' | 'review' | 'run'
 
 /** Mutual-exclusive bookmark sheet above the goal composer. */
 export type LoopComposerSheet = 'none' | 'flow' | 'context' | 'clarify'
+
+/**
+ * Authoring engine for the user prompt entry.
+ * - provider (default): LocalApi → ModelGateway (useProvider:true); fails closed if unconfigured
+ * - rules: explicit heuristic / non-AI path (useProvider:false); must be user-selected
+ */
+export type LoopAuthoringEngine = 'provider' | 'rules'
 
 function sheetAfterAskTurn(document: LoopGraphDocument): LoopComposerSheet {
   const needsClarify = document.draftGoalContext?.openQuestions.some(
@@ -80,6 +95,10 @@ interface LoopGraphStore {
   composerDraft: string
   composerSheet: LoopComposerSheet
   authoringBusy: boolean
+  /** Default provider; rules only when user explicitly selects. */
+  authoringEngine: LoopAuthoringEngine
+  /** Canvas selection for AI Edit context (DutyCard / Overlay). */
+  canvasSelectedNodeId: string | null
 
   loadForWorkspace: () => Promise<void>
   clear: () => void
@@ -93,6 +112,8 @@ interface LoopGraphStore {
   setConnectingFrom: (nodeId: string | null) => void
   setPendingDelete: (target: LoopDeleteTarget | null) => void
   setComposerDraft: (value: string) => void
+  setCanvasSelectedNodeId: (nodeId: string | null) => void
+  setAuthoringEngine: (engine: LoopAuthoringEngine) => void
   /** Open a sheet, or collapse it if already open (bookmark toggle). */
   toggleComposerSheet: (sheet: Exclude<LoopComposerSheet, 'none'>) => void
   setComposerSheet: (sheet: LoopComposerSheet) => void
@@ -104,6 +125,7 @@ interface LoopGraphStore {
   acceptGraphEditOffer: () => Promise<void>
   dismissGraphEditOffer: () => Promise<void>
   undoDraft: () => Promise<void>
+  redoDraft: () => Promise<void>
   beginAuthorNode: (position: { x: number; y: number }) => Promise<string | null>
   beginAuthorNodeFromPalette: (
     paletteItemId: string,
@@ -167,7 +189,43 @@ interface LoopGraphStore {
   suggestEdgeKindForActiveSession: () => IntentEdgeKind | null
   compile: () => Promise<void>
   approve: (spec?: LoopSpec) => Promise<void>
+  /** Draft materials for the next manual start (not definition authoring). */
+  runMaterials: LoopTaskMaterial[]
+  runBranch: string
+  preflightResult: {
+    ok: boolean
+    canStart: boolean
+    items: Array<{
+      id: string
+      severity: 'blocker' | 'warning' | 'info'
+      code: string
+      message: string
+      nodeId?: string
+      materialId?: string
+    }>
+  } | null
+  preflightBusy: boolean
+  setRunBranch: (branch: string) => void
+  addRunMaterial: (material: LoopTaskMaterial) => void
+  replaceRunMaterial: (materialId: string, material: LoopTaskMaterial) => void
+  removeRunMaterial: (materialId: string) => void
+  clearRunMaterials: () => void
+  /** Persist staging materials/branch into document.taskPack without touching draft. */
+  persistTaskPackStaging: () => void
+  /** TM-8: human acknowledged material re-review — clears start blocker. */
+  acknowledgeMaterialRereview: () => void
+  runPreflight: () => Promise<void>
   startRun: () => Promise<void>
+  /** Product entry: switch to Run with saved-flow taskPack materials restored. */
+  openSavedFlowForRun: () => void
+  /** PW-7: add Issue/PR/code/error context material from a real product entry. */
+  addPw7ContextMaterial: (input: {
+    kind: 'issue' | 'pull_request' | 'code_selection' | 'error_context'
+    title: string
+    body?: string
+    ref?: string
+    bindingNodeIds?: string[]
+  }) => void
   pauseRun: () => Promise<void>
   resumeRun: () => Promise<void>
   advanceRun: () => Promise<void>
@@ -194,6 +252,9 @@ function patchDraftDocument(
   document: LoopGraphDocument,
   draft: IntentGraph,
 ): LoopGraphDocument {
+  // Keep pending AI offer after manual revision bumps so UI can mark it stale
+  // (data-loop-graph-edit-offer-stale) and Accept is disabled; server still
+  // rejects mismatched baseRevision if Accept is forced.
   return {
     ...document,
     draft,
@@ -229,6 +290,12 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   composerDraft: '',
   composerSheet: 'none',
   authoringBusy: false,
+  runMaterials: [],
+  runBranch: '',
+  preflightResult: null,
+  preflightBusy: false,
+  authoringEngine: 'provider',
+  canvasSelectedNodeId: null,
   runHistory: [],
 
   clear: () => {
@@ -252,6 +319,11 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       composerDraft: '',
       composerSheet: 'none',
       authoringBusy: false,
+      authoringEngine: 'provider',
+      runMaterials: [],
+      runBranch: '',
+      preflightResult: null,
+      preflightBusy: false,
     })
   },
 
@@ -262,6 +334,8 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   setPendingDelete: (target) => set({ pendingDelete: target }),
 
   setComposerDraft: (value) => set({ composerDraft: value }),
+  setCanvasSelectedNodeId: (nodeId) => set({ canvasSelectedNodeId: nodeId }),
+  setAuthoringEngine: (engine) => set({ authoringEngine: engine }),
 
   setComposerSheet: (sheet) => set({ composerSheet: sheet }),
 
@@ -303,9 +377,15 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
 
     set({ authoringBusy: true, composerSheet: 'flow', error: null })
     try {
+      const selectedNodeId = get().canvasSelectedNodeId ?? undefined
+      // Default engine is provider → useProvider:true on the real IPC/LocalApi path.
+      // Rules mode is explicit user choice (heuristic); never silent fallback.
+      const useProvider = get().authoringEngine !== 'rules'
       const next = await client.sendLoopAuthoringTurn(project.projectId, loopId, {
         mode: document.composerMode ?? 'ask',
         text,
+        ...(selectedNodeId ? { selectedNodeId } : {}),
+        useProvider,
       })
       const heads = await client.listLoopGraphs(project.projectId)
       set({
@@ -436,6 +516,27 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     }
   },
 
+  redoDraft: async () => {
+    const { client, project } = useWorkbenchStore.getState()
+    const loopId = get().activeLoopId
+    if (!client || !project || !loopId) return
+    if (typeof client.redoLoopDraft !== 'function') {
+      set({ error: 'redoLoopDraft unavailable on this client' })
+      return
+    }
+    set({ authoringBusy: true, error: null })
+    try {
+      const next = await client.redoLoopDraft(project.projectId, loopId)
+      const heads = await client.listLoopGraphs(project.projectId)
+      set({ document: next, heads, authoringBusy: false })
+    } catch (error) {
+      set({
+        authoringBusy: false,
+        error: error instanceof Error ? error.message : 'Redo failed',
+      })
+    }
+  },
+
   getAuthoringTargetForActiveSession: () => {
     const sessionId = useChatSessionStore.getState().activeSessionId
     return findLoopAuthoringTarget(get().document?.draft, sessionId)
@@ -461,6 +562,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       const document = activeId
         ? await client.getLoopGraph(project.projectId, activeId)
         : null
+      const pack = document?.taskPack
       set({
         heads: index.heads,
         activeLoopId: activeId,
@@ -476,6 +578,10 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         // pendingCompile / approvedSpecs stay hydrated so Review / Run tabs remain available.
         phase: 'draw',
         loading: false,
+        // Product entry: restore staging materials for the active saved flow.
+        runMaterials: pack?.materials ? [...pack.materials] : [],
+        runBranch: pack?.branch ?? '',
+        preflightResult: null,
       })
     } catch (error) {
       set({
@@ -493,6 +599,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       await client.setLastActiveLoopGraph(project.projectId, loopId)
       const document = await client.getLoopGraph(project.projectId, loopId)
       const heads = await client.listLoopGraphs(project.projectId)
+      const pack = document?.taskPack
       set({
         activeLoopId: loopId,
         document,
@@ -511,6 +618,10 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         composerDraft: '',
         composerSheet: 'none',
         authoringBusy: false,
+        // Restore staging task pack — never merges into Intent draft.
+        runMaterials: pack?.materials ? [...pack.materials] : [],
+        runBranch: pack?.branch ?? '',
+        preflightResult: null,
       })
     } catch (error) {
       set({
@@ -539,6 +650,10 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         composerDraft: '',
         composerSheet: 'none',
         authoringBusy: false,
+        // New saved flow must not inherit prior loop's staging materials.
+        runMaterials: [],
+        runBranch: '',
+        preflightResult: null,
       })
       return document.id
     } catch (error) {
@@ -591,10 +706,8 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     if (!current) return
     set({
       document: {
-        ...current,
+        ...patchDraftDocument(current, draft),
         title: title?.trim() || current.title,
-        draft,
-        updatedAt: new Date().toISOString(),
       },
     })
     get().schedulePersist()
@@ -1463,6 +1576,137 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     }
   },
 
+  setRunBranch: (branch) => {
+    set({ runBranch: branch, preflightResult: null })
+    get().persistTaskPackStaging()
+  },
+  addRunMaterial: (material) => {
+    set((state) => ({
+      runMaterials: [...state.runMaterials, material],
+      preflightResult: null,
+    }))
+    get().persistTaskPackStaging()
+  },
+  replaceRunMaterial: (materialId, material) => {
+    set((state) => ({
+      runMaterials: state.runMaterials.map((item) =>
+        item.id === materialId ? material : item,
+      ),
+      preflightResult: null,
+    }))
+    get().persistTaskPackStaging()
+  },
+  removeRunMaterial: (materialId) => {
+    set((state) => ({
+      runMaterials: state.runMaterials.filter((item) => item.id !== materialId),
+      preflightResult: null,
+    }))
+    get().persistTaskPackStaging()
+  },
+  clearRunMaterials: () => {
+    set({ runMaterials: [], preflightResult: null })
+    get().persistTaskPackStaging()
+  },
+  persistTaskPackStaging: () => {
+    const { document, runMaterials, runBranch } = get()
+    if (!document) return
+    const draftRevision = document.draft.revision
+    const branch = runBranch.trim()
+    const priorMaterials = document.taskPack?.materials ?? []
+    const impact = assessMaterialChangeImpact({
+      previous: priorMaterials,
+      next: runMaterials,
+    })
+    const priorWriteback = document.taskPack?.materialRereview as
+      | MaterialRereviewWriteback
+      | undefined
+    const materialRereview = writeMaterialRereviewEvidence({
+      impact,
+      previous: priorWriteback ?? null,
+    })
+    set({
+      document: {
+        ...document,
+        // Intent draft bytes must stay identical (definition isolation).
+        draft: document.draft,
+        taskPack: {
+          ...(branch ? { branch } : {}),
+          materials: runMaterials,
+          updatedAt: new Date().toISOString(),
+          ...(materialRereview ? { materialRereview } : {}),
+        },
+        updatedAt: new Date().toISOString(),
+      },
+    })
+    // Guard: staging must not bump draft revision.
+    if (get().document?.draft.revision !== draftRevision) {
+      set({
+        error: 'taskPack staging must not mutate draft revision',
+      })
+      return
+    }
+    get().schedulePersist()
+  },
+  acknowledgeMaterialRereview: () => {
+    const { document } = get()
+    const writeback = document?.taskPack?.materialRereview as
+      | MaterialRereviewWriteback
+      | undefined
+    if (!document?.taskPack || !writeback) return
+    const draftRevision = document.draft.revision
+    const next = acknowledgeMaterialRereview(writeback)
+    set({
+      document: {
+        ...document,
+        draft: document.draft,
+        taskPack: {
+          ...document.taskPack,
+          materialRereview: next,
+          updatedAt: new Date().toISOString(),
+        },
+        updatedAt: new Date().toISOString(),
+      },
+      preflightResult: null,
+    })
+    if (get().document?.draft.revision !== draftRevision) {
+      set({ error: 'taskPack staging must not mutate draft revision' })
+      return
+    }
+    get().schedulePersist()
+  },
+  addPw7ContextMaterial: (input) => {
+    const material = buildPw7ContextMaterial(input)
+    get().addRunMaterial(material)
+  },
+  runPreflight: async () => {
+    const { client, project } = useWorkbenchStore.getState()
+    const loopId = get().activeLoopId
+    if (!client || !project || !loopId) return
+    if (typeof client.preflightLoopRun !== 'function') {
+      set({
+        error:
+          'preflightLoopRun is unavailable on this client — Electron LocalApi host required',
+        preflightResult: null,
+      })
+      return
+    }
+    set({ preflightBusy: true, error: null })
+    try {
+      const branch = get().runBranch.trim()
+      const materials = get().runMaterials
+      const preflightResult = await client.preflightLoopRun(project.projectId, loopId, {
+        ...(branch ? { branch } : {}),
+        ...(materials.length ? { materials } : {}),
+      })
+      set({ preflightResult, preflightBusy: false })
+    } catch (error) {
+      set({
+        preflightBusy: false,
+        preflightResult: null,
+        error: error instanceof Error ? error.message : 'Preflight failed',
+      })
+    }
+  },
   startRun: async () => {
     const { client, project } = useWorkbenchStore.getState()
     const loopId = get().activeLoopId
@@ -1470,21 +1714,53 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const featureNodeId = useWorkbenchStore.getState().selectedNodeId ?? undefined
+      const branch = get().runBranch.trim()
+      const materials = get().runMaterials
       const document = await client.startLoopInstance(
         project.projectId,
         loopId,
         undefined,
         featureNodeId,
+        {
+          ...(branch ? { branch } : {}),
+          ...(materials.length ? { materials } : {}),
+        },
       )
       const heads = await client.listLoopGraphs(project.projectId)
       const runHistory = await client.listLoopRunHistory(project.projectId, loopId)
-      set({ document, heads, phase: 'run', loading: false, runHistory })
+      // Instance binding holds the run snapshot; restore definition taskPack
+      // for the next prep (runOverride must not have mutated Intent draft).
+      const pack = document.taskPack
+      set({
+        document,
+        heads,
+        phase: 'run',
+        loading: false,
+        runHistory,
+        runMaterials: pack?.materials ? [...pack.materials] : [],
+        runBranch: pack?.branch ?? get().runBranch,
+        preflightResult: null,
+      })
     } catch (error) {
       set({
         loading: false,
         error: error instanceof Error ? error.message : 'Start failed',
       })
     }
+  },
+
+  /** Product entry: open the active saved flow on the Run tab with taskPack materials. */
+  openSavedFlowForRun: () => {
+    const document = get().document
+    if (!document) return
+    const pack = document.taskPack
+    set({
+      phase: 'run',
+      runMaterials: pack?.materials ? [...pack.materials] : get().runMaterials,
+      runBranch: pack?.branch ?? get().runBranch,
+      preflightResult: null,
+      error: null,
+    })
   },
 
   refreshRunHistory: async () => {
@@ -1548,7 +1824,8 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       .find((item) =>
         item.status === 'running' ||
         item.status === 'queued' ||
-        item.status === 'awaiting_review',
+        item.status === 'awaiting_review' ||
+        item.status === 'awaiting_hitl',
       )
     if (!client || !project || !activeLoopId || !instance) return
     const next = await client.pauseLoopInstance(

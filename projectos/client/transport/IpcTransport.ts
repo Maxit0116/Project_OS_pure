@@ -1778,11 +1778,76 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("approveLoopSpec", projectId, loopId, spec);
   }
 
+  preflightLoopRun(
+    projectId: string,
+    loopId: string,
+    options?: {
+      specVersion?: string;
+      branch?: string;
+      materials?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial[];
+    },
+  ): Promise<{
+    ok: boolean;
+    canStart: boolean;
+    items: Array<{
+      id: string;
+      severity: "blocker" | "warning" | "info";
+      code: string;
+      message: string;
+      nodeId?: string;
+      materialId?: string;
+    }>;
+  }> {
+    return this.invoke("preflightLoopRun", projectId, loopId, options ?? {});
+  }
+
+  ingestLoopTaskMaterial(
+    projectId: string,
+    input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial;
+  }> {
+    return this.invoke("ingestLoopTaskMaterial", projectId, input);
+  }
+
+  ingestLoopUrlMaterial(
+    projectId: string,
+    input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial;
+  }> {
+    return this.invoke("ingestLoopUrlMaterial", projectId, input);
+  }
+
   startLoopInstance(
     projectId: string,
     loopId: string,
     specVersion?: string,
     featureNodeId?: string,
+    options?: {
+      branch?: string;
+      materials?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return this.invoke(
       "startLoopInstance",
@@ -1790,6 +1855,7 @@ export class IpcTransport implements ApiTransport {
       loopId,
       specVersion ?? "",
       featureNodeId ?? "",
+      options ?? {},
     );
   }
 
@@ -1814,6 +1880,39 @@ export class IpcTransport implements ApiTransport {
     event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return this.invoke("startLoopInstanceFromEvent", projectId, loopId, event);
+  }
+
+  enqueueOfflineLoopEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<{
+    outcome: "queued" | "dropped_duplicate";
+    dedupeKey: string;
+    queuedCount: number;
+  }> {
+    return this.invoke("enqueueOfflineLoopEvent", projectId, loopId, event);
+  }
+
+  listOfflineLoopEventQueue(projectId: string): Promise<
+    Array<{
+      dedupeKey: string;
+      loopId: string;
+      eventId: string;
+      eventType: string;
+      status: string;
+      enqueuedAt: string;
+      lastError?: string;
+    }>
+  > {
+    return this.invoke("listOfflineLoopEventQueue", projectId);
+  }
+
+  drainOfflineLoopEventQueue(
+    projectId: string,
+    options?: { max?: number },
+  ): Promise<{ drained: number; failed: number; queuedRemaining: number }> {
+    return this.invoke("drainOfflineLoopEventQueue", projectId, options ?? {});
   }
 
   restoreLoopInstanceFromCheckpoint(
@@ -1911,6 +2010,18 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("sendLoopAuthoringTurn", projectId, loopId, request);
   }
 
+  setLoopExecutionLoopbackMode(
+    mode: "off" | "local_tools",
+  ): Promise<{ mode: "off" | "local_tools"; live: false; label: string }> {
+    return this.invoke("setLoopExecutionLoopbackMode", mode);
+  }
+
+  setLoopAuthoringLoopbackMode(
+    mode: "off" | "demo_edit",
+  ): Promise<{ mode: "off" | "demo_edit"; live: false }> {
+    return this.invoke("setLoopAuthoringLoopbackMode", mode);
+  }
+
   answerLoopGoalClarification(
     projectId: string,
     loopId: string,
@@ -1952,6 +2063,13 @@ export class IpcTransport implements ApiTransport {
     loopId: string,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return this.invoke("undoLoopDraft", projectId, loopId);
+  }
+
+  redoLoopDraft(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke("redoLoopDraft", projectId, loopId);
   }
 
   setLoopComposerMode(

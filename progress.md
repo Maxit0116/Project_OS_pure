@@ -1,5 +1,14 @@
 # Progress
 
+## 2026-11-10 - Loops Graph: authority docs for project workflow + materials (Auto stream)
+
+- **Asked (PM):** Sync full Loops scope (six goals, 11 platforms, manual+real-Agent dual entry, Pure UI, security) plus increments A (project-bound workflow runs) and B (multi-type task materials) into existing authoritative docs; produce a reviewable **docs-first** commit with SHA/links; do not treat docs as completion; continue same Auto PR stream without duplicate engines.
+- **Docs landed:** New authority plan [`docs/features/Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](docs/features/Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) (full scope, stage deps, contracts, acceptance matrix with 计划/实现/contract/live/待验). Updated cross-links in Six-Goals tracking, Gaps Closure, Workflow Studio, `README.md`, `feature-list.md`, `project_description.md`, and `bugs.md` (SSRF pointer for URL materials).
+- **Gmail (2026-11-10, Terran-confirmed append; not in 5814430):** Authority [`docs/features/Loops-Graph-Gmail-Connector-Dev-Plan.md`](docs/features/Loops-Graph-Gmail-Connector-Dev-Plan.md) — readonly phase-1 + send/push boundaries; offline/loopback only; no real mailbox.
+- **Code (same stream):** Security gates, DutyCard typed forms, provider authoring→LocalApi/ModelGateway, batch2 + Gmail readonly adapter contracts on `cursor/loops-dispatch-evidence-cab8` — see tracking table for contract vs live.
+- **Offline event queue (honest):** LocalApi + IPC `enqueueOfflineLoopEvent` / `drainOfflineLoopEventQueue` + `.projectos/loop-event-queue.json` **implemented/contract** (persist/dedupe/drain/recover). **Not** desktop auto-settle UI, **not** 24/7 live push/webhook, **not** live OAuth/mailbox.
+- **Not done / external:** Live OAuth, paid model three-round, Mac, merge, production write; desktop auto-settle UI / live all-day inbound remain out of this no-account round.
+
 ## 2026-11-08 (S10) - the map for people who do not code, and language options
 
 - **Asked:** language options (interface English or Chinese), the node level showing the names of the nodes that carry the first intention and function with the file names under them, connections too, tailored to vibe coders. Details in `build_plan.md` §0 ("S10").

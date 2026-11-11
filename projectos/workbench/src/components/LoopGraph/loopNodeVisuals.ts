@@ -12,6 +12,7 @@ import {
   GitPullRequest,
   Hourglass,
   Merge,
+  MessageSquare,
   MessageSquareWarning,
   Puzzle,
   RefreshCw,
@@ -28,6 +29,11 @@ import {
   type LoopPaletteCategory,
   type LoopPaletteItem,
 } from '@contracts/index'
+import {
+  getLoopIntegration,
+  integrationIdFromActionNode,
+  type LoopIntegrationRuntimeStatus,
+} from './integrations/loopIntegrationRegistry'
 
 export const LOOP_PALETTE_MIME = 'application/x-projectos-loop-palette'
 
@@ -38,6 +44,10 @@ export type LoopVisualKey =
   | 'action.test'
   | 'action.github.create_pr'
   | 'action.github.create_branch'
+  | 'action.slack.post_message'
+  | 'action.feishu.post_message'
+  | 'action.lark.post_message'
+  | 'action.sentry.list_issues'
   | 'action.terminal'
   | 'logic.condition'
   | 'logic.loop'
@@ -61,6 +71,11 @@ export type LoopNodeVisual = {
   Icon: LucideIcon
   shortLabel: string
   categoryClass: string
+  /** Local SaaS brand icon key when present (GitHub/Slack/Lark). */
+  integrationIconKey?: string
+  integrationId?: string
+  operationLabel?: string
+  defaultRuntimeStatus?: LoopIntegrationRuntimeStatus
 }
 
 const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
@@ -98,6 +113,10 @@ const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
     Icon: GitPullRequest,
     shortLabel: 'Create PR',
     categoryClass: 'catAction',
+    integrationId: 'github',
+    integrationIconKey: 'github',
+    operationLabel: 'Create PR',
+    defaultRuntimeStatus: 'auth_missing',
   },
   'action.github.create_branch': {
     key: 'action.github.create_branch',
@@ -105,6 +124,54 @@ const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
     Icon: GitBranch,
     shortLabel: 'Branch',
     categoryClass: 'catAction',
+    integrationId: 'github',
+    integrationIconKey: 'github',
+    operationLabel: 'Create branch',
+    defaultRuntimeStatus: 'auth_missing',
+  },
+  'action.slack.post_message': {
+    key: 'action.slack.post_message',
+    category: 'action',
+    Icon: MessageSquare,
+    shortLabel: 'Slack',
+    categoryClass: 'catAction',
+    integrationId: 'slack',
+    integrationIconKey: 'slack',
+    operationLabel: 'Post message',
+    defaultRuntimeStatus: 'unconfigured',
+  },
+  'action.feishu.post_message': {
+    key: 'action.feishu.post_message',
+    category: 'action',
+    Icon: MessageSquare,
+    shortLabel: '飞书',
+    categoryClass: 'catAction',
+    integrationId: 'feishu',
+    integrationIconKey: 'feishu',
+    operationLabel: 'Send message',
+    defaultRuntimeStatus: 'unconfigured',
+  },
+  'action.lark.post_message': {
+    key: 'action.lark.post_message',
+    category: 'action',
+    Icon: MessageSquare,
+    shortLabel: 'Lark',
+    categoryClass: 'catAction',
+    integrationId: 'lark',
+    integrationIconKey: 'lark',
+    operationLabel: 'Send message',
+    defaultRuntimeStatus: 'unconfigured',
+  },
+  'action.sentry.list_issues': {
+    key: 'action.sentry.list_issues',
+    category: 'action',
+    Icon: FlaskConical,
+    shortLabel: 'Sentry',
+    categoryClass: 'catAction',
+    integrationId: 'sentry',
+    integrationIconKey: 'sentry',
+    operationLabel: 'List issues',
+    defaultRuntimeStatus: 'unconfigured',
   },
   'action.terminal': {
     key: 'action.terminal',
@@ -251,6 +318,10 @@ export function visualKeyFromArchitecture(node: {
   const operation = node.actionOperation
   if (integration === 'test') return 'action.test'
   if (integration === 'terminal') return 'action.terminal'
+  if (integration === 'slack') return 'action.slack.post_message'
+  if (integration === 'feishu') return 'action.feishu.post_message'
+  if (integration === 'lark') return 'action.lark.post_message'
+  if (integration === 'sentry') return 'action.sentry.list_issues'
   if (integration === 'github') {
     if (operation === 'create_branch') return 'action.github.create_branch'
     if (operation === 'create_pr' || !operation) return 'action.github.create_pr'
@@ -290,6 +361,33 @@ export function visualForIntentNode(node: IntentGraphNode): LoopNodeVisual {
   }
   const key = visualKeyFromArchitecture(arch)
   return VISUALS[key]
+}
+
+/** Resolve SaaS brand visual extras for an intent/architecture node. */
+export function saasVisualForNode(node: {
+  actionIntegration?: string | null
+  actionOperation?: string | null
+}): Pick<
+  LoopNodeVisual,
+  'integrationIconKey' | 'integrationId' | 'operationLabel' | 'defaultRuntimeStatus'
+> | null {
+  const id = integrationIdFromActionNode({
+    actionIntegration: node.actionIntegration,
+    actionOperation: node.actionOperation,
+  })
+  if (!id || id === 'http' || id === 'webhook') return null
+  const meta = getLoopIntegration(id)
+  if (!meta || meta.iconKey === 'fallback') return null
+  const op =
+    meta.actions.find((action) => action.id === node.actionOperation)?.label ??
+    meta.actions.find((action) => action.kind === 'action')?.label ??
+    meta.displayName
+  return {
+    integrationId: id,
+    integrationIconKey: meta.iconKey,
+    operationLabel: op,
+    defaultRuntimeStatus: meta.defaultRuntimeStatus,
+  }
 }
 
 export function encodePaletteDragPayload(paletteItemId: string): string {

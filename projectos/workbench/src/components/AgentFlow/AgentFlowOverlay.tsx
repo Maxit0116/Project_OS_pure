@@ -18,6 +18,7 @@ export default function AgentFlowOverlay() {
   const terminalOpen = useBottomDockStore((s) => s.open)
   const flowSteps = useWorkbenchStore((s) => s.flowSteps)
   const flowStatus = useWorkbenchStore((s) => s.flowStatus)
+  const activeRunId = useWorkbenchStore((s) => s.activeRunId)
   const diffReady = useWorkbenchStore((s) => s.diffReady)
   const navigateToDiffReview = useWorkbenchStore((s) => s.navigateToDiffReview)
   const { ts } = useI18n()
@@ -45,7 +46,11 @@ export default function AgentFlowOverlay() {
       resizing={panelResizing}
       label={ts('agentFlow.title')}
     >
-      <div className={styles.root} data-tour="agent-flow">
+      <div
+        className={styles.root}
+        data-tour="agent-flow"
+        data-agent-flow-active-run={activeRunId ?? ''}
+      >
         <div className={styles.toolbar}>
           <button
             type="button"

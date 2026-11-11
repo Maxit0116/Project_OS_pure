@@ -104,19 +104,31 @@ describe("loop goal authoring + edit orchestration", () => {
     expect(doc.draft.nodes).toHaveLength(0);
   });
 
-  it("Edit mode patches the graph and supports undo", () => {
+  it("Edit mode proposes a patch, applies on accept, and supports undo", () => {
     const root = tempRoot();
     let doc = createLoopGraph(root, "proj", "Edit");
     doc = sendLoopAuthoringTurn(root, doc.id, {
       mode: "edit",
       text: "Create a skeleton for shipping login",
     });
+    expect(doc.draft.nodes).toHaveLength(0);
+    expect(doc.pendingGraphEditOffer?.proposedDraft?.nodes.length).toBeGreaterThanOrEqual(
+      2,
+    );
+    doc = acceptLoopGraphEditOffer(root, doc.id);
     expect(doc.draft.nodes.length).toBeGreaterThanOrEqual(2);
+    expect(doc.pendingGraphEditOffer).toBeUndefined();
     const afterSkeleton = doc.draft.nodes.length;
+
     doc = sendLoopAuthoringTurn(root, doc.id, {
       mode: "edit",
       text: "add verify",
     });
+    expect(doc.draft.nodes).toHaveLength(afterSkeleton);
+    expect(doc.pendingGraphEditOffer?.proposedDraft?.nodes.length).toBeGreaterThan(
+      afterSkeleton,
+    );
+    doc = acceptLoopGraphEditOffer(root, doc.id);
     expect(doc.draft.nodes.length).toBeGreaterThan(afterSkeleton);
     doc = undoLoopDraft(root, doc.id);
     expect(doc.draft.nodes).toHaveLength(afterSkeleton);

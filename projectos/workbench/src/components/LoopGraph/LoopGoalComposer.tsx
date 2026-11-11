@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { Bot, ChevronUp, MessageSquare, Pencil, Undo2 } from 'lucide-react'
+import { Bot, ChevronUp, MessageSquare, Pencil, Redo2, Undo2 } from 'lucide-react'
 import type { LoopComposerMode, LoopOpenQuestion } from '@contracts/index'
 import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea'
 import { useI18n } from '../../i18n'
@@ -31,6 +31,8 @@ export default function LoopGoalComposer() {
   const composerDraft = useLoopGraphStore((s) => s.composerDraft)
   const composerSheet = useLoopGraphStore((s) => s.composerSheet)
   const authoringBusy = useLoopGraphStore((s) => s.authoringBusy)
+  const authoringEngine = useLoopGraphStore((s) => s.authoringEngine)
+  const setAuthoringEngine = useLoopGraphStore((s) => s.setAuthoringEngine)
   const setComposerDraft = useLoopGraphStore((s) => s.setComposerDraft)
   const toggleComposerSheet = useLoopGraphStore((s) => s.toggleComposerSheet)
   const setComposerMode = useLoopGraphStore((s) => s.setComposerMode)
@@ -41,6 +43,7 @@ export default function LoopGoalComposer() {
   const acceptGraphEditOffer = useLoopGraphStore((s) => s.acceptGraphEditOffer)
   const dismissGraphEditOffer = useLoopGraphStore((s) => s.dismissGraphEditOffer)
   const undoDraft = useLoopGraphStore((s) => s.undoDraft)
+  const redoDraft = useLoopGraphStore((s) => s.redoDraft)
   const beginAuthorNodeFromPalette = useLoopGraphStore((s) => s.beginAuthorNodeFromPalette)
   const expandAgentWiring = useLoopGraphStore((s) => s.expandAgentWiring)
   const submitCreateAgentPrompt = useWorkbenchStore((s) => s.submitCreateAgentPrompt)
@@ -64,6 +67,7 @@ export default function LoopGoalComposer() {
   const trace = loopDocument?.authoringTrace
   const offer = loopDocument?.pendingGraphEditOffer
   const canUndo = (loopDocument?.draftHistory?.length ?? 0) > 0
+  const canRedo = (loopDocument?.draftRedoStack?.length ?? 0) > 0
 
   const openQuestions = draftContext?.openQuestions ?? []
   const needsClarification = openQuestions.some((q) => !q.answer?.trim())
@@ -388,14 +392,53 @@ export default function LoopGoalComposer() {
       </div>
 
       {offer ? (
-        <div className={styles.offerCard} data-loop-graph-edit-offer="">
+        <div
+          className={styles.offerCard}
+          data-loop-graph-edit-offer=""
+          data-loop-graph-edit-offer-stale={
+            typeof offer.baseRevision === 'number' &&
+            offer.baseRevision !== loopDocument?.draft.revision
+              ? 'true'
+              : 'false'
+          }
+        >
+          {typeof offer.baseRevision === 'number' &&
+          offer.baseRevision !== loopDocument?.draft.revision ? (
+            <p
+              className={styles.offerStale}
+              data-loop-graph-edit-offer-stale-banner=""
+              role="status"
+            >
+              {ts('chat.loopGraph.graphEditOfferStale')}
+            </p>
+          ) : null}
           <p>{offer.reason}</p>
+          {offer.diff?.summaryLines?.length ? (
+            <ul className={styles.offerDiff} data-loop-graph-edit-diff="">
+              {offer.diff.summaryLines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : offer.proposedDraft ? (
+            <p className={styles.offerDiffEmpty} data-loop-graph-edit-diff-empty="">
+              {ts('chat.loopGraph.graphEditDiffUnavailable')}
+            </p>
+          ) : (
+            <p className={styles.offerDiffEmpty} data-loop-graph-edit-confirm-offer="">
+              {ts('chat.loopGraph.graphEditConfirmOffer')}
+            </p>
+          )}
           <div className={styles.offerActions}>
             <button
               type="button"
               className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
-              disabled={authoringBusy}
+              disabled={
+                authoringBusy ||
+                (typeof offer.baseRevision === 'number' &&
+                  offer.baseRevision !== loopDocument?.draft.revision)
+              }
               onClick={() => void acceptGraphEditOffer()}
+              data-loop-graph-edit-accept=""
             >
               {ts('chat.loopGraph.acceptGraphEdit')}
             </button>
@@ -404,6 +447,7 @@ export default function LoopGoalComposer() {
               className={styles.actionButton}
               disabled={authoringBusy}
               onClick={() => void dismissGraphEditOffer()}
+              data-loop-graph-edit-dismiss=""
             >
               {ts('chat.loopGraph.dismissGraphEdit')}
             </button>
@@ -487,6 +531,27 @@ export default function LoopGoalComposer() {
           </div>
           <div className={styles.footer}>
             <div className={styles.leftCluster}>
+              <Chip
+                active={authoringEngine === 'provider'}
+                className={styles.modeChip}
+                aria-label={ts('chat.loopGraph.authoringEngine')}
+                title={
+                  authoringEngine === 'provider'
+                    ? ts('chat.loopGraph.engineProviderHint')
+                    : ts('chat.loopGraph.engineRulesHint')
+                }
+                disabled={authoringBusy}
+                onClick={() =>
+                  setAuthoringEngine(authoringEngine === 'provider' ? 'rules' : 'provider')
+                }
+                data-testid="loop-authoring-engine"
+              >
+                <span>
+                  {authoringEngine === 'provider'
+                    ? ts('chat.loopGraph.engineProvider')
+                    : ts('chat.loopGraph.engineRules')}
+                </span>
+              </Chip>
               <div className={styles.menuWrap} ref={modeMenuRef}>
                 <Chip
                   active={modeMenuOpen}
@@ -546,6 +611,17 @@ export default function LoopGoalComposer() {
               >
                 <Undo2 size={14} aria-hidden />
                 <span>{ts('chat.loopGraph.undoDraft')}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.undoButton}
+                disabled={authoringBusy || !canRedo}
+                title={ts('chat.loopGraph.redoDraft')}
+                aria-label={ts('chat.loopGraph.redoDraft')}
+                onClick={() => void redoDraft()}
+              >
+                <Redo2 size={14} aria-hidden />
+                <span>{ts('chat.loopGraph.redoDraft')}</span>
               </button>
               <VoiceInputDock {...composeVoice.dockProps} inline />
               <Button

@@ -27,6 +27,24 @@
           "sourceNodeId": "feat_home",
           "status": "normal",
           "children": []
+        },
+        {
+          "id": "tree_file_src_hello_js_f58e7f1fee",
+          "label": "src/hello.js",
+          "kind": "file",
+          "path": "src/hello.js",
+          "sourceNodeId": "feat_home",
+          "status": "normal",
+          "children": []
+        },
+        {
+          "id": "tree_file_src_hello_test_js_2db57180df",
+          "label": "src/hello.test.js",
+          "kind": "test",
+          "path": "src/hello.test.js",
+          "sourceNodeId": "feat_home",
+          "status": "normal",
+          "children": []
         }
       ]
     },

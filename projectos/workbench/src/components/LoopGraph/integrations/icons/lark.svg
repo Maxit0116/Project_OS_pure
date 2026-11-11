@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Lark">
+  <!-- Typographic mark only — NOT an official Lark trademark glyph.
+       Distinct from Feishu; official brand SVG not available under verified compatible license. -->
+  <rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="#00D6B9"/>
+  <text x="12" y="15.2" text-anchor="middle" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="7.5" font-weight="700" fill="#0B1B1A">Lark</text>
+</svg>

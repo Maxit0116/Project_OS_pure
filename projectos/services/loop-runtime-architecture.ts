@@ -13,6 +13,10 @@ import {
   type LoopSpecNode,
 } from "../contracts/loop-graph.js";
 import type { LoopEvidenceView, LoopExecutionHooks } from "./loop-execution.js";
+import {
+  invalidatePendingApproval,
+  shouldInvalidateApprovalOnArtifactKind,
+} from "./loop-approval-binding.js";
 
 export function architectureOf(node: LoopSpecNode) {
   return withArchitectureDefaults(node);
@@ -116,10 +120,19 @@ export function pushArtifact(
     createdAt: artifact.createdAt ?? new Date().toISOString(),
     data: artifact.data,
   };
-  return {
+  let withArtifact: LoopInstance = {
     ...instance,
     artifacts: [...(instance.artifacts ?? []), next].slice(-100),
   };
+  // Engineering evidence mutation invalidates a delivery-gate approval so
+  // side-effect Actions cannot run against a stale ChangeSet/TestReport/Review.
+  if (shouldInvalidateApprovalOnArtifactKind(next.kind)) {
+    withArtifact = invalidatePendingApproval(
+      withArtifact,
+      `Engineering artifact updated (${next.kind}); prior approval invalidated`,
+    );
+  }
+  return withArtifact;
 }
 
 export function latestArtifact(
@@ -140,6 +153,7 @@ export function latestArtifact(
 export function evidenceToTestReport(
   evidence: LoopEvidenceView | null | undefined,
   command?: string,
+  validatedCodeDigest?: string,
 ): LoopTestReport | null {
   if (!evidence) return null;
   const status =
@@ -148,10 +162,22 @@ export function evidenceToTestReport(
       : evidence.status === "failed"
         ? "failed"
         : "not_run";
+  const resolvedCommand = evidence.command ?? command;
   return LoopTestReportSchema.parse({
     status,
     evidenceId: evidence.id,
-    ...(command ? { command } : {}),
+    ...(resolvedCommand ? { command: resolvedCommand } : {}),
+    ...(validatedCodeDigest ? { validatedCodeDigest } : {}),
+    ...(evidence.exitCode !== undefined
+      ? { exitCode: evidence.exitCode }
+      : {}),
+    ...(typeof evidence.exitCode === "number"
+      ? {
+          total: 1,
+          passed: evidence.status === "passed" ? 1 : 0,
+          failed: evidence.status === "failed" ? 1 : 0,
+        }
+      : {}),
   });
 }
 
@@ -263,11 +289,12 @@ export function humanQuestionId(node: LoopSpecNode): string {
 
 export function parseHumanModeFromQuestionId(
   questionId: string,
-): "approval" | "review" | "input" | "decision" | "legacy" {
+): "approval" | "review" | "input" | "decision" | "takeover" | "legacy" {
   if (questionId.startsWith("human_approval_")) return "approval";
   if (questionId.startsWith("human_review_")) return "review";
   if (questionId.startsWith("human_input_")) return "input";
   if (questionId.startsWith("human_decision_")) return "decision";
+  if (questionId.startsWith("human_takeover_")) return "takeover";
   if (questionId.startsWith("decide_")) return "legacy";
   return "legacy";
 }

@@ -90,6 +90,7 @@ describe('loopGraphStore authoring actions', () => {
       document: { ...baseDoc, composerMode: 'ask', draftGoalContext: undefined },
       composerDraft: 'Ship login',
       composerSheet: 'none',
+      authoringEngine: 'provider',
     })
     useWorkbenchStore.setState({
       client: {
@@ -101,7 +102,78 @@ describe('loopGraphStore authoring actions', () => {
 
     await useLoopGraphStore.getState().sendAuthoringTurn()
     expect(send).toHaveBeenCalled()
+    // Default user entry must request the real provider path.
+    expect(send.mock.calls[0]?.[2]).toMatchObject({ useProvider: true })
     expect(useLoopGraphStore.getState().composerSheet).toBe('clarify')
+  })
+
+  it('rules engine is explicit user choice and sends useProvider:false', async () => {
+    const send = vi.fn(async () =>
+      normalizeLoopGraphDocument({
+        ...baseDoc,
+        composerMode: 'edit',
+      }),
+    )
+    useLoopGraphStore.setState({
+      document: { ...baseDoc, composerMode: 'edit' },
+      composerDraft: 'tweak timeout',
+      authoringEngine: 'rules',
+      activeLoopId: 'loop_store',
+    })
+    useWorkbenchStore.setState({
+      client: {
+        sendLoopAuthoringTurn: send,
+        listLoopGraphs: vi.fn(async () => []),
+      } as never,
+      project: { projectId: 'proj' } as never,
+    })
+    await useLoopGraphStore.getState().sendAuthoringTurn()
+    expect(send.mock.calls[0]?.[2]).toMatchObject({ useProvider: false })
+  })
+
+  it('keeps pending AI edit offer after draft revision change (UI stale ≠ clear; server still rejects)', () => {
+    // Layering: Accept-disabled / stale badge is UI; clearing the offer here would
+    // erase the evidence surface. Server reject remains a separate contract path.
+    useLoopGraphStore.setState({
+      document: {
+        ...baseDoc,
+        pendingGraphEditOffer: {
+          reason: 'Propose nodes',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          baseRevision: 0,
+          proposedDraft: {
+            revision: 1,
+            graphPrompt: 'Ship',
+            nodes: [
+              {
+                id: 'n1',
+                title: 'Implement',
+                prompt: 'Build',
+                position: { x: 0, y: 0 },
+              },
+            ],
+            edges: [],
+          },
+        },
+      },
+    })
+    useLoopGraphStore.getState().updateDraft({
+      revision: 1,
+      graphPrompt: 'Manual edit',
+      nodes: [
+        {
+          id: 'n_manual',
+          title: 'Manual node',
+          prompt: 'User typed',
+          position: { x: 10, y: 10 },
+        },
+      ],
+      edges: [],
+    })
+    const next = useLoopGraphStore.getState().document
+    expect(next?.draft.revision).toBe(1)
+    expect(next?.pendingGraphEditOffer?.baseRevision).toBe(0)
+    expect(next?.draft.revision).not.toBe(next?.pendingGraphEditOffer?.baseRevision)
   })
 
   it('restores the previous prompt when canceling clarifications', async () => {

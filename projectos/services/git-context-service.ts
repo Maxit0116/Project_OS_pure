@@ -1363,6 +1363,10 @@ export interface ListedPullRequest {
   headRef: string;
   baseRef: string;
   state: "open" | "closed" | "merged";
+  /** Fork/head owner when the list source provides it (REST head.repo.owner). */
+  headOwner?: string;
+  /** Head commit SHA when the list source provides it. */
+  headSha?: string;
 }
 
 export type GithubApiOptions = {
@@ -1383,7 +1387,7 @@ function listGithubPullRequestsViaGh(workspaceRoot: string): {
       "--state",
       "open",
       "--json",
-      "number,title,url,headRefName,baseRefName,state",
+      "number,title,url,headRefName,baseRefName,state,headRepositoryOwner,headRefOid",
       "--limit",
       "50",
     ],
@@ -1404,17 +1408,34 @@ function listGithubPullRequestsViaGh(workspaceRoot: string): {
       headRefName: string;
       baseRefName: string;
       state?: string;
+      headRepositoryOwner?: { login?: string } | string | null;
+      headRefOid?: string | null;
     }>;
     return {
       available: true,
-      pullRequests: raw.map((item) => ({
-        number: item.number,
-        title: item.title,
-        url: item.url,
-        headRef: item.headRefName,
-        baseRef: item.baseRefName,
-        state: "open" as const,
-      })),
+      pullRequests: raw.map((item) => {
+        const ownerRaw = item.headRepositoryOwner;
+        const headOwner =
+          typeof ownerRaw === "string"
+            ? ownerRaw.trim()
+            : ownerRaw && typeof ownerRaw === "object" && ownerRaw.login
+              ? ownerRaw.login.trim()
+              : undefined;
+        const headSha =
+          typeof item.headRefOid === "string" && item.headRefOid.trim()
+            ? item.headRefOid.trim()
+            : undefined;
+        return {
+          number: item.number,
+          title: item.title,
+          url: item.url,
+          headRef: item.headRefName,
+          baseRef: item.baseRefName,
+          state: "open" as const,
+          ...(headOwner ? { headOwner } : {}),
+          ...(headSha ? { headSha } : {}),
+        };
+      }),
     };
   } catch (error) {
     return {

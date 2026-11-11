@@ -1169,6 +1169,16 @@
           "path": "lib/constants.ts",
           "role": "config",
           "summary": "向定价页面提供套餐配置。"
+        },
+        {
+          "path": "src/hello.js",
+          "role": "supporting",
+          "summary": "本地 loopback 冒烟：返回固定 ok。"
+        },
+        {
+          "path": "src/hello.test.js",
+          "role": "test",
+          "summary": "本地 loopback 冒烟：校验 hello()。"
         }
       ],
       "upstream": [],
@@ -2449,6 +2459,17 @@
       "lastModified": "2026-06-22T13:13:45.461Z"
     },
     {
+      "path": "app/admin/error.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_admin"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ]
+    },
+    {
       "path": "app/admin/layout.tsx",
       "type": "other",
       "nodeIds": [
@@ -2464,6 +2485,17 @@
       ],
       "size": 342,
       "lastModified": "2026-06-22T13:13:38.607Z"
+    },
+    {
+      "path": "app/admin/loading.tsx",
+      "type": "other",
+      "nodeIds": [
+        "feat_admin"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ]
     },
     {
       "path": "app/admin/page.tsx",
@@ -2741,6 +2773,36 @@
       "lastModified": "2026-06-22T13:13:34.307Z"
     },
     {
+      "path": "app/dashboard/[projectosDesignHost]/DesignHostClient.tsx",
+      "type": "component",
+      "nodeIds": [
+        "component_projectos_design_host"
+      ],
+      "imports": [
+        "components/ActivityItem.tsx",
+        "components/StatsCard.tsx"
+      ],
+      "exports": [
+        "default"
+      ],
+      "size": 6415
+    },
+    {
+      "path": "app/dashboard/[projectosDesignHost]/page.tsx",
+      "type": "page",
+      "nodeIds": [
+        "component_projectos_design_host"
+      ],
+      "imports": [
+        "app/dashboard/[projectosDesignHost]/DesignHostClient.tsx"
+      ],
+      "exports": [
+        "dynamic",
+        "default"
+      ],
+      "size": 933
+    },
+    {
       "path": "app/dashboard/layout.tsx",
       "type": "other",
       "nodeIds": [
@@ -2772,17 +2834,6 @@
       "lastModified": "2026-06-22T10:45:44.382Z"
     },
     {
-      "path": "app/admin/error.tsx",
-      "type": "other",
-      "nodeIds": [
-        "feat_admin"
-      ],
-      "imports": [],
-      "exports": [
-        "default"
-      ]
-    },
-    {
       "path": "app/layout.tsx",
       "type": "other",
       "nodeIds": [
@@ -2795,17 +2846,6 @@
       ],
       "size": 308,
       "lastModified": "2026-06-22T10:45:37.733Z"
-    },
-    {
-      "path": "app/admin/loading.tsx",
-      "type": "other",
-      "nodeIds": [
-        "feat_admin"
-      ],
-      "imports": [],
-      "exports": [
-        "default"
-      ]
     },
     {
       "path": "app/login/page.tsx",
@@ -2821,20 +2861,6 @@
       ],
       "size": 167,
       "lastModified": "2026-06-22T10:45:40.993Z"
-    },
-    {
-      "path": "middleware.ts",
-      "type": "other",
-      "nodeIds": [
-        "feat_login"
-      ],
-      "imports": [],
-      "exports": [
-        "middleware",
-        "config"
-      ],
-      "size": 1705,
-      "lastModified": "2026-07-24T00:00:00.000Z"
     },
     {
       "path": "app/notifications/page.tsx",
@@ -3302,25 +3328,6 @@
       "size": 4552
     },
     {
-      "path": "components/TaskForms.tsx",
-      "type": "component",
-      "nodeIds": [
-        "feat_projects"
-      ],
-      "imports": [
-        "lib/constants.ts"
-      ],
-      "exports": [
-        "TaskMemberOption",
-        "TaskFormValue",
-        "CreateTaskForm",
-        "EditTaskForm",
-        "TaskStatusForm",
-        "ArchiveTaskForm"
-      ],
-      "size": 6936
-    },
-    {
       "path": "components/SearchResults.tsx",
       "type": "component",
       "nodeIds": [
@@ -3374,28 +3381,15 @@
       "lastModified": "2026-07-24T00:00:00.000Z"
     },
     {
-      "path": "components/TeamRoleForm.tsx",
-      "type": "component",
+      "path": "components/StatsCard.module.css",
+      "type": "style",
       "nodeIds": [
-        "feat_team"
+        "feat_dashboard"
       ],
       "imports": [],
-      "exports": [
-        "TeamRoleForm"
-      ],
-      "size": 2100
-    },
-    {
-      "path": "components/WorkspaceNav.tsx",
-      "type": "component",
-      "nodeIds": [
-        "feat_projects"
-      ],
-      "imports": [],
-      "exports": [
-        "default"
-      ],
-      "size": 568
+      "exports": [],
+      "size": 98,
+      "lastModified": "2026-07-24T00:00:00.000Z"
     },
     {
       "path": "components/StatsCard.tsx",
@@ -3413,15 +3407,35 @@
       "lastModified": "2026-07-24T00:00:00.000Z"
     },
     {
-      "path": "components/StatsCard.module.css",
-      "type": "style",
+      "path": "components/TaskForms.tsx",
+      "type": "component",
       "nodeIds": [
-        "feat_dashboard"
+        "feat_projects"
+      ],
+      "imports": [
+        "lib/constants.ts"
+      ],
+      "exports": [
+        "TaskMemberOption",
+        "TaskFormValue",
+        "CreateTaskForm",
+        "EditTaskForm",
+        "TaskStatusForm",
+        "ArchiveTaskForm"
+      ],
+      "size": 6936
+    },
+    {
+      "path": "components/TeamRoleForm.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_team"
       ],
       "imports": [],
-      "exports": [],
-      "size": 98,
-      "lastModified": "2026-07-24T00:00:00.000Z"
+      "exports": [
+        "TeamRoleForm"
+      ],
+      "size": 2100
     },
     {
       "path": "components/ui/ChartContainer.tsx",
@@ -3477,6 +3491,18 @@
       ],
       "size": 271,
       "lastModified": "2026-06-22T13:15:07.210Z"
+    },
+    {
+      "path": "components/WorkspaceNav.tsx",
+      "type": "component",
+      "nodeIds": [
+        "feat_projects"
+      ],
+      "imports": [],
+      "exports": [
+        "default"
+      ],
+      "size": 568
     },
     {
       "path": "lib/admin-analytics.ts",
@@ -3719,29 +3745,6 @@
       "size": 7579
     },
     {
-      "path": "lib/workspace-context.ts",
-      "type": "lib",
-      "nodeIds": [
-        "feat_database"
-      ],
-      "imports": [
-        "lib/auth.ts",
-        "lib/db.ts",
-        "lib/request-auth.ts"
-      ],
-      "exports": [
-        "WORKSPACE_ROLES",
-        "WorkspaceRole",
-        "WorkspaceContext",
-        "WorkspaceAccessError",
-        "getWorkspaceContext",
-        "getRequestWorkspaceContext",
-        "requireWorkspaceMembership",
-        "isWorkspaceRole"
-      ],
-      "size": 1889
-    },
-    {
       "path": "lib/utils.ts",
       "type": "lib",
       "nodeIds": [],
@@ -3768,6 +3771,43 @@
       ],
       "size": 588,
       "lastModified": "2026-06-22T13:15:26.107Z"
+    },
+    {
+      "path": "lib/workspace-context.ts",
+      "type": "lib",
+      "nodeIds": [
+        "feat_database"
+      ],
+      "imports": [
+        "lib/auth.ts",
+        "lib/db.ts",
+        "lib/request-auth.ts"
+      ],
+      "exports": [
+        "WORKSPACE_ROLES",
+        "WorkspaceRole",
+        "WorkspaceContext",
+        "WorkspaceAccessError",
+        "getWorkspaceContext",
+        "getRequestWorkspaceContext",
+        "requireWorkspaceMembership",
+        "isWorkspaceRole"
+      ],
+      "size": 1889
+    },
+    {
+      "path": "middleware.ts",
+      "type": "other",
+      "nodeIds": [
+        "feat_login"
+      ],
+      "imports": [],
+      "exports": [
+        "middleware",
+        "config"
+      ],
+      "size": 1705,
+      "lastModified": "2026-07-24T00:00:00.000Z"
     },
     {
       "path": "next.config.js",
@@ -3845,52 +3885,29 @@
       "size": 11385
     },
     {
-      "path": "tsconfig.json",
-      "type": "other",
-      "nodeIds": [],
-      "imports": [],
-      "exports": [],
-      "size": 485,
-      "lastModified": "2026-06-22T10:45:33.592Z"
-    },
-    {
-      "path": "tools/projectos-source-binding-babel-plugin.cjs",
+      "path": "projectos-blocks/loaders/dashboard.ts",
       "type": "other",
       "nodeIds": [
         "feat_dashboard"
       ],
+      "imports": [
+        "lib/auth.ts",
+        "lib/data.ts"
+      ],
+      "exports": [
+        "loadDashboardViewModel"
+      ],
+      "size": 514
+    },
+    {
+      "path": "projectos-generated/design/doc1_dashboard/styles.module.css",
+      "type": "style",
+      "nodeIds": [
+        "feat_dashboard"
+      ],
       "imports": [],
-      "exports": []
-    },
-    {
-      "path": "app/dashboard/[projectosDesignHost]/page.tsx",
-      "type": "page",
-      "nodeIds": [
-        "component_projectos_design_host"
-      ],
-      "imports": [
-        "app/dashboard/[projectosDesignHost]/DesignHostClient.tsx"
-      ],
-      "exports": [
-        "dynamic",
-        "default"
-      ],
-      "size": 933
-    },
-    {
-      "path": "app/dashboard/[projectosDesignHost]/DesignHostClient.tsx",
-      "type": "component",
-      "nodeIds": [
-        "component_projectos_design_host"
-      ],
-      "imports": [
-        "components/ActivityItem.tsx",
-        "components/StatsCard.tsx"
-      ],
-      "exports": [
-        "default"
-      ],
-      "size": 6415
+      "exports": [],
+      "size": 976
     },
     {
       "path": "projectos-generated/design/doc1_dashboard/view.tsx",
@@ -3911,29 +3928,44 @@
       "size": 6229
     },
     {
-      "path": "projectos-generated/design/doc1_dashboard/styles.module.css",
-      "type": "style",
+      "path": "src/hello.js",
+      "type": "other",
       "nodeIds": [
-        "feat_dashboard"
+        "feat_home"
       ],
       "imports": [],
-      "exports": [],
-      "size": 976
+      "exports": [
+        "hello"
+      ]
     },
     {
-      "path": "projectos-blocks/loaders/dashboard.ts",
+      "path": "src/hello.test.js",
+      "type": "test",
+      "nodeIds": [
+        "feat_home"
+      ],
+      "imports": [
+        "src/hello.js"
+      ],
+      "exports": []
+    },
+    {
+      "path": "tools/projectos-source-binding-babel-plugin.cjs",
       "type": "other",
       "nodeIds": [
         "feat_dashboard"
       ],
-      "imports": [
-        "lib/auth.ts",
-        "lib/data.ts"
-      ],
-      "exports": [
-        "loadDashboardViewModel"
-      ],
-      "size": 514
+      "imports": [],
+      "exports": []
+    },
+    {
+      "path": "tsconfig.json",
+      "type": "other",
+      "nodeIds": [],
+      "imports": [],
+      "exports": [],
+      "size": 485,
+      "lastModified": "2026-06-22T10:45:33.592Z"
     }
   ],
   "topology": {

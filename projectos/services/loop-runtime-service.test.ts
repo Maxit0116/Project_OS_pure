@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,6 +24,7 @@ import {
   createLoopGraph,
   upsertLoopGraph,
 } from "./loop-graph-service.js";
+import { createWorkspacePathDigester } from "./loop-approval-binding.js";
 import {
   advanceLoopInstance,
   cancelLoopInstance,
@@ -42,6 +43,7 @@ function scriptedLoopExecution(filePath = "src/login.ts"): {
   execution: LoopExecutionHooks;
   starts: string[];
   requests: Array<{ filePath: string; goal: string }>;
+  verificationRequests: string[];
   paused: string[];
   cancelled: string[];
   finishApply: () => void;
@@ -54,15 +56,27 @@ function scriptedLoopExecution(filePath = "src/login.ts"): {
   const runs = new Map<string, LoopAgentRunView>();
   const evidence = new Map<string, LoopEvidenceView>();
   const starts: string[] = [];
+  const verificationRequests: string[] = [];
   const paused: string[] = [];
   const cancelled: string[] = [];
   const requests: Array<{ filePath: string; goal: string }> = [];
   let seq = 0;
   let completeOnStart = false;
+  const fileDigest = `scripted_${filePath.length}_${filePath}`;
   const execution: LoopExecutionHooks = {
     leaf: { featureNodeId: "feat_login", filePath },
+    digestWorkspacePaths: (paths, options) => ({
+      digests: Object.fromEntries(paths.map((path) => [path, fileDigest])),
+      missing: [],
+      unreadable: [],
+      tombstones: [...(options?.deletedPaths ?? [])],
+      undeleted: [],
+    }),
     readRun: (runId) => runs.get(runId) ?? null,
     readEvidence: (runId) => evidence.get(runId) ?? null,
+    requestVerification: (runId) => {
+      verificationRequests.push(runId);
+    },
     startAgentRun: (input) => {
       requests.push({ filePath: input.filePath, goal: input.goal });
       if (input.filePath !== filePath) {
@@ -90,6 +104,7 @@ function scriptedLoopExecution(filePath = "src/login.ts"): {
     execution,
     starts,
     requests,
+    verificationRequests,
     paused,
     cancelled,
     finishApply: () => {
@@ -279,6 +294,8 @@ describe("loop-runtime-service", () => {
     expect(doc.approvedSpecs[0]!.nodes.map((node) => node.id)).toEqual(boundNodes);
     expect(doc.pendingCompile?.specDraft.version).not.toBe(boundVersion);
     expect(doc.pendingCompile?.specDraft.nodes.map((node) => node.id)).toEqual(boundNodes);
+    expect(hooks.starts).toEqual(["run_1"]);
+    expect(hooks.verificationRequests).toContain("run_1");
 
     const replacement: LoopSpec = {
       ...approved,
@@ -647,6 +664,8 @@ describe("loop-runtime-service", () => {
     expect(doc.instances[0]?.events.some((event) =>
       event.type === "feedback_taken" && event.evidenceId === "evidence_run_1",
     )).toBe(true);
+    expect(hooks.starts).toEqual(["run_1"]);
+    expect(hooks.verificationRequests).toEqual(["run_1"]);
 
     doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
     expect(hooks.starts).toEqual(["run_1", "run_2"]);
@@ -664,6 +683,7 @@ describe("loop-runtime-service", () => {
     expect(notRun.instances[0]?.status).toBe("awaiting_hitl");
     expect(notRun.instances[0]?.events.at(-1)?.message).toBe(LOOP_VERIFICATION_NOT_RUN);
     expect(notRunHooks.starts).toEqual(["run_1"]);
+    expect(notRunHooks.verificationRequests).toEqual(["run_1"]);
   });
 
   it("asks a person when stop policy is exhausted and records the answer on the instance", () => {
@@ -997,6 +1017,87 @@ describe("loop-runtime-service", () => {
     doc = resumeLoopInstance(root, doc.id, instanceId, orphanHooks);
     expect(doc.instances[0]?.status).toBe("awaiting_hitl");
     expect(doc.instances[0]?.hitlQuestionIds).toEqual(["unknown_side_effects"]);
+  });
+
+  it("Verify requests read-only tests, blocks early evidence, refuses stamp after code change", () => {
+    const root = mkdtempSync(join(tmpdir(), "loop-rt-verify-"));
+    roots.push(root);
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src/login.ts"), "v1\n", "utf8");
+    const digester = createWorkspacePathDigester(root);
+    let doc = approveLinearLoop(root, "Implement");
+    const hooks = scriptedLoopExecution("src/login.ts");
+    hooks.execution.digestWorkspacePaths = digester;
+    doc = startLoopInstance(root, doc.id, undefined, hooks.execution);
+    const instanceId = doc.instances[0]!.id;
+
+    // Early evidence while implement still running must not complete the node.
+    hooks.setStatus("running", false);
+    hooks.passEvidence();
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(doc.instances[0]?.cursorNodeId).toBe("n1");
+    expect(
+      (doc.instances[0]?.artifacts ?? []).some(
+        (item) => item.kind === "test_report",
+      ),
+    ).toBe(false);
+
+    hooks.finishApply();
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(doc.instances[0]?.cursorNodeId).toBe("n2");
+
+    // Clear evidence so verify enter only requests tests (no stamp yet).
+    hooks.markNotRun();
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(hooks.starts).toEqual(["run_1"]);
+    expect(hooks.verificationRequests).toEqual(["run_1"]);
+    expect(doc.instances[0]?.verificationCodeDigest).toBeTruthy();
+    expect(
+      (doc.instances[0]?.artifacts ?? []).some(
+        (item) => item.kind === "test_report",
+      ),
+    ).toBe(false);
+
+    // evidence.runId must match activeRunId; foreign id cannot stamp.
+    const baseReadEvidence = hooks.execution.readEvidence;
+    hooks.execution.readEvidence = () => ({
+      id: "evidence_other",
+      runId: "run_other",
+      status: "passed",
+    });
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(
+      (doc.instances[0]?.artifacts ?? []).some(
+        (item) => item.kind === "test_report",
+      ),
+    ).toBe(false);
+
+    // Code changes after verify start → refuse stamp even with matching evidence.
+    // awaiting_hitl is not steppable — resume running while keeping the start digest.
+    hooks.execution.readEvidence = baseReadEvidence;
+    writeFileSync(join(root, "src/login.ts"), "v2-new-code\n", "utf8");
+    hooks.passEvidence();
+    doc = {
+      ...doc,
+      instances: doc.instances.map((item) =>
+        item.id === instanceId
+          ? { ...item, status: "running" as const, hitlQuestionIds: [] }
+          : item,
+      ),
+    };
+    doc = upsertLoopGraph(root, doc);
+    doc = advanceLoopInstance(root, doc.id, instanceId, hooks.execution);
+    expect(doc.instances[0]?.status).toBe("awaiting_hitl");
+    expect(
+      doc.instances[0]?.events.some((event) =>
+        (event.message ?? "").includes("Code changed"),
+      ),
+    ).toBe(true);
+    expect(
+      (doc.instances[0]?.artifacts ?? []).some(
+        (item) => item.kind === "test_report",
+      ),
+    ).toBe(false);
   });
 });
 

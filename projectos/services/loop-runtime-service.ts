@@ -35,6 +35,34 @@ import {
   parseTerminalExecCommand,
 } from "./loop-terminal-action.js";
 import {
+  buildApprovalBinding,
+  buildDefaultActionPayload,
+  accumulateDeliveryScope,
+  combineFileDigests,
+  computeEngineeringBaseline,
+  digestOperationPayload,
+  invalidatePendingApproval,
+  isApprovalBindingCurrent,
+  isApprovalChoice,
+} from "./loop-approval-binding.js";
+import {
+  assertAgentCallBudget,
+  recordAgentCallEnd,
+  recordAgentCallStart,
+  resolveAgentCallBudgetLimits,
+} from "./loop-agent-call-budget.js";
+import {
+  describeOfflineConnector,
+  invokeOfflineConnector,
+} from "./loop-connector-offline.js";
+import {
+  assertCodeDigestComplete,
+  assertCredentialAllowedByFreeze,
+  assertLaunchContextForBinding,
+  buildRunBindingSnapshot,
+} from "./loop-run-binding.js";
+import { preflightLoopRunStart } from "./loop-run-preflight.js";
+import {
   architectureOf,
   conditionalOutgoing,
   controlIncomingIds,
@@ -189,6 +217,18 @@ function pickNextCursor(
   if (mergeReady) {
     next = upsertNodeRecord(next, mergeReady.id, { status: "ready" });
     return { cursor: mergeReady.id, instance: next };
+  }
+
+  // Prefer direct depends successors so Sequence cannot be pre-empted by an
+  // earlier sibling still marked ready (e.g. skipped Test after a forced jump).
+  // Parallel: when this node has no children, still drain other ready peers
+  // (no-merge fan-out terminals, independent roots) — do NOT treat every
+  // terminal as whole-run complete.
+  const readyChildren = children.filter(
+    (childId) => recordStatus(next, childId) === "ready",
+  );
+  if (readyChildren.length > 0) {
+    return { cursor: readyChildren[0]!, instance: next };
   }
 
   // Only "ready" (not merge "waiting") — Merge is handled above when joinable.
@@ -1233,44 +1273,239 @@ function stepActionNode(
           perm.action.includes(arch.actionIntegration ?? "")),
     );
 
+  const defaultPayload = buildDefaultActionPayload({
+    nodeId: node.id,
+    ...(arch.actionIntegration
+      ? { actionIntegration: arch.actionIntegration }
+      : {}),
+    ...(arch.actionOperation ? { actionOperation: arch.actionOperation } : {}),
+  });
   const approvedPayload = next.pendingActionPayload;
-  const approvedDecision = latestArtifact(next, "human_decision");
-  const hasApproval = Boolean(
-    approvedPayload ||
-      (approvedDecision &&
-        typeof approvedDecision.data === "object" &&
-        approvedDecision.data !== null &&
-        /approve/i.test(
-          String((approvedDecision.data as { choice?: string }).choice ?? ""),
-        )),
+  const bindingOk = Boolean(
+    next.pendingApprovalBinding &&
+      approvedPayload &&
+      isApprovalBindingCurrent({
+        binding: next.pendingApprovalBinding,
+        instance: next,
+        payload: approvedPayload,
+        actionNodeId: node.id,
+        ...(arch.actionIntegration
+          ? { actionIntegration: arch.actionIntegration }
+          : {}),
+        ...(arch.actionOperation
+          ? { actionOperation: arch.actionOperation }
+          : {}),
+        ...(execution ? { execution } : {}),
+      }),
   );
+  // Fail-closed: a historical human_decision with choice≈approve is not enough.
+  // Delivery-gate Actions require a live binding to Action node + artifacts + params.
+  const hasApproval = bindingOk;
 
   if (requiresApproval && !hasApproval) {
+    const stale =
+      Boolean(next.pendingApprovalBinding || approvedPayload) ||
+      Boolean(latestArtifact(next, "human_decision"));
+    if (stale) {
+      next = invalidatePendingApproval(
+        next,
+        "Approval binding no longer matches Action target, engineering baseline, or payload",
+      );
+      next = pushEvent(next, {
+        type: "approval_stale",
+        nodeId: node.id,
+        message:
+          "Prior approval invalidated; re-approval required before side-effect Action",
+      });
+    }
     next = pushEvent(
       {
         ...next,
         status: "awaiting_hitl",
         hitlQuestionIds: [`human_approval_${node.id}`],
+        // Surface default params awaiting approval (not only editedPayload).
+        pendingActionPayload: approvedPayload ?? defaultPayload,
       },
       {
         type: "awaiting_hitl",
         nodeId: node.id,
-        message: `Action ${arch.actionOperation ?? arch.actionIntegration} requires approval`,
+        message: stale
+          ? `Action ${arch.actionOperation ?? arch.actionIntegration} approval stale — re-approve`
+          : `Action ${arch.actionOperation ?? arch.actionIntegration} requires approval`,
       },
     );
     return replaceInstance(doc, next);
   }
 
-  const payload = approvedPayload ?? {
-    operation: arch.actionOperation ?? "run",
-    integration: arch.actionIntegration,
-  };
+  const payload = approvedPayload ?? defaultPayload;
 
   if (arch.actionIntegration === "github") {
     return stepGithubAction(doc, next, spec, node, execution, payload);
   }
   if (arch.actionIntegration === "terminal") {
     return stepTerminalAction(doc, next, spec, node, execution, payload, Boolean(hasApproval));
+  }
+  // SaaS connectors (Batch1–3 + Gmail): freeze check + DI settle / fail-closed.
+  // Must not fall through to the synthetic "Executed …" success below.
+  if (
+    arch.actionIntegration === "slack" ||
+    arch.actionIntegration === "feishu" ||
+    arch.actionIntegration === "lark" ||
+    arch.actionIntegration === "sentry" ||
+    arch.actionIntegration === "gmail" ||
+    arch.actionIntegration === "supabase" ||
+    arch.actionIntegration === "posthog" ||
+    arch.actionIntegration === "linear" ||
+    arch.actionIntegration === "jira_cloud" ||
+    arch.actionIntegration === "notion" ||
+    arch.actionIntegration === "vercel"
+  ) {
+    const capabilityId = arch.actionOperation ?? "post_message";
+    const credentialRefId =
+      typeof payload.credentialRefId === "string"
+        ? payload.credentialRefId
+        : typeof (node as { credentialRefId?: string }).credentialRefId ===
+            "string"
+          ? (node as { credentialRefId?: string }).credentialRefId
+          : undefined;
+
+    const freezeCred = assertCredentialAllowedByFreeze(
+      next.runBinding,
+      credentialRefId,
+    );
+    if (!freezeCred.ok) {
+      return failNode(doc, next, node.id, freezeCred.reason, { spec });
+    }
+
+    if (execution?.executeConnectorOperation) {
+      let connectorResult: {
+        ok: boolean;
+        deferred?: boolean;
+        message?: string;
+        credentialRefId?: string;
+      };
+      try {
+        connectorResult = execution.executeConnectorOperation({
+          vendorId: arch.actionIntegration,
+          capabilityId,
+          payload,
+          ...(credentialRefId ? { credentialRefId } : {}),
+          nodeId: node.id,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Connector operation failed";
+        return failNode(doc, next, node.id, message, { spec });
+      }
+      if (connectorResult.deferred) {
+        const cred =
+          connectorResult.credentialRefId ?? credentialRefId ?? "";
+        if (!cred) {
+          return failNode(
+            doc,
+            next,
+            node.id,
+            "Connector settle requires credentialRefId (configured ≠ authorized)",
+            { spec },
+          );
+        }
+        const idempotencyKey = [
+          next.id,
+          node.id,
+          arch.actionIntegration,
+          capabilityId,
+          digestOperationPayload(payload),
+        ].join(":");
+        const pendingConnectorOp = {
+          nodeId: node.id,
+          vendorId: arch.actionIntegration,
+          capabilityId,
+          payload,
+          credentialRefId: cred,
+          idempotencyKey,
+          queuedAt: nowIso(),
+          dispatchState: "queued" as const,
+        };
+        const queued = pushEvent(
+          {
+            ...next,
+            pendingActionPayload: undefined,
+            pendingApprovalBinding: undefined,
+            pendingConnectorOp,
+            status: "running" as const,
+          },
+          {
+            type: "message",
+            nodeId: node.id,
+            message:
+              connectorResult.message ??
+              `${arch.actionIntegration}.${capabilityId} queued for settle`,
+          },
+        );
+        return replaceInstance(doc, queued);
+      }
+      if (!connectorResult.ok) {
+        return failNode(
+          doc,
+          next,
+          node.id,
+          connectorResult.message || "Connector operation failed",
+          { spec },
+        );
+      }
+      let advanced = pushArtifact(next, {
+        nodeId: node.id,
+        kind: "change_set",
+        data: {
+          summary: `Connector ${arch.actionIntegration}.${capabilityId} completed`,
+        },
+      });
+      advanced = {
+        ...advanced,
+        pendingActionPayload: undefined,
+        pendingApprovalBinding: undefined,
+        pendingConnectorOp: undefined,
+      };
+      advanced = pushEvent(advanced, {
+        type: "node_completed",
+        nodeId: node.id,
+        message: `Action ${arch.actionIntegration}.${capabilityId} completed`,
+      });
+      return advanceCursor(doc, advanced, spec, node.id);
+    }
+
+    // No DI bridge — fail closed (brand ≠ executable). Never synthetic success.
+    const offlineKind = arch.actionIntegration;
+    const blockedMessage =
+      offlineKind === "slack" ||
+      offlineKind === "feishu" ||
+      offlineKind === "lark" ||
+      offlineKind === "sentry"
+        ? invokeOfflineConnector(
+            describeOfflineConnector(
+              offlineKind,
+              credentialRefId ? "offline" : "unconfigured",
+            ),
+            capabilityId,
+          ).message
+        : credentialRefId
+          ? `${offlineKind}.${capabilityId} offline — inject connector transport/secret before settle (configured ≠ authorized / not live)`
+          : `${offlineKind}.${capabilityId} unconfigured — credentialRefId required (catalog ≠ authorized)`;
+    next = pushEvent(
+      {
+        ...next,
+        status: "error",
+        errorMessage: blockedMessage.slice(0, 1000),
+        pendingActionPayload: undefined,
+        pendingApprovalBinding: undefined,
+      },
+      {
+        type: "node_failed",
+        nodeId: node.id,
+        message: blockedMessage,
+      },
+    );
+    return replaceInstance(doc, next);
   }
 
   next = pushArtifact(next, {
@@ -1284,6 +1519,7 @@ function stepActionNode(
   next = {
     ...next,
     pendingActionPayload: undefined,
+    pendingApprovalBinding: undefined,
   };
   next = pushEvent(next, {
     type: "node_completed",
@@ -1322,15 +1558,27 @@ function stepGithubAction(
   }
 
   if (githubResult.deferred) {
+    const bindingSnapshot = instance.pendingApprovalBinding;
+    const idempotencyKey = [
+      instance.id,
+      node.id,
+      operation,
+      digestOperationPayload(payload),
+    ].join(":");
+    const pendingGithubOp = {
+      nodeId: node.id,
+      operation,
+      payload,
+      queuedAt: nowIso(),
+      dispatchState: "queued" as const,
+      idempotencyKey,
+      ...(bindingSnapshot ? { approvalBinding: bindingSnapshot } : {}),
+    };
     const queued = {
       ...instance,
       pendingActionPayload: undefined,
-      pendingGithubOp: {
-        nodeId: node.id,
-        operation,
-        payload,
-        queuedAt: nowIso(),
-      },
+      pendingApprovalBinding: undefined,
+      pendingGithubOp,
       status: "running" as const,
     };
     const withEvent = pushEvent(queued, {
@@ -1341,7 +1589,8 @@ function stepGithubAction(
     return replaceInstance(doc, {
       ...withEvent,
       pendingActionPayload: undefined,
-      pendingGithubOp: queued.pendingGithubOp,
+      pendingApprovalBinding: undefined,
+      pendingGithubOp,
       status: "running" as const,
     });
   }
@@ -1370,6 +1619,7 @@ function stepGithubAction(
   next = {
     ...next,
     pendingActionPayload: undefined,
+    pendingApprovalBinding: undefined,
     pendingGithubOp: undefined,
   };
   next = pushEvent(next, {
@@ -1422,7 +1672,11 @@ function stepTerminalAction(
         summary: `Terminal policy-gated (no executor): ${commandLine.slice(0, 240)}`,
       },
     });
-    next = { ...next, pendingActionPayload: undefined };
+    next = {
+      ...next,
+      pendingActionPayload: undefined,
+      pendingApprovalBinding: undefined,
+    };
     next = pushEvent(next, {
       type: "node_completed",
       nodeId: node.id,
@@ -1488,7 +1742,11 @@ function stepTerminalAction(
       summary: result.message.slice(0, 500),
     },
   });
-  next = { ...next, pendingActionPayload: undefined };
+  next = {
+    ...next,
+    pendingActionPayload: undefined,
+    pendingApprovalBinding: undefined,
+  };
   next = pushEvent(next, {
     type: "node_completed",
     nodeId: node.id,
@@ -1498,13 +1756,242 @@ function stepTerminalAction(
 }
 
 /**
- * Finish a deferred GitHub Action after async settle (REST / gh).
- * Clears `pendingGithubOp`, writes GitHubOpResult, and advances.
+ * Preflight approval/cancel/target checks BEFORE any HTTP dispatch.
+ * Callers that send GitHub HTTP must invoke this and abort on !ok (zero HTTP).
+ */
+export function preflightPendingGithubDispatch(
+  doc: LoopGraphDocument,
+  instanceId: string,
+  execution?: LoopExecutionHooks,
+): { ok: true } | { ok: false; reason: string } {
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance?.pendingGithubOp) {
+    return { ok: false, reason: "No pending GitHub operation" };
+  }
+  if (
+    instance.status === "cancelled" ||
+    instance.status === "paused" ||
+    instance.status === "error" ||
+    instance.status === "complete"
+  ) {
+    return {
+      ok: false,
+      reason: `Instance status ${instance.status} forbids GitHub dispatch`,
+    };
+  }
+  const pending = instance.pendingGithubOp;
+  const spec = findSpec(doc, instance.specVersion);
+  if (!spec) return { ok: false, reason: "Spec not found" };
+  const actionNode = spec.nodes.find((item) => item.id === pending.nodeId);
+  if (!actionNode) {
+    return { ok: false, reason: `Action node missing: ${pending.nodeId}` };
+  }
+  const arch = architectureOf(actionNode);
+  if ((arch.actionOperation ?? "create_pr") !== pending.operation) {
+    return {
+      ok: false,
+      reason: `Pending operation ${pending.operation} mismatches node ${arch.actionOperation}`,
+    };
+  }
+  if (!pending.approvalBinding) {
+    return { ok: false, reason: "Pending GitHub op lacks approval binding" };
+  }
+  const stillValid = isApprovalBindingCurrent({
+    binding: pending.approvalBinding,
+    instance: {
+      ...instance,
+      pendingActionPayload: pending.payload,
+      pendingApprovalBinding: pending.approvalBinding,
+    },
+    payload: pending.payload,
+    actionNodeId: pending.nodeId,
+    ...(arch.actionIntegration
+      ? { actionIntegration: arch.actionIntegration }
+      : {}),
+    actionOperation: pending.operation,
+    ...(execution ? { execution } : {}),
+  });
+  if (!stillValid) {
+    return {
+      ok: false,
+      reason:
+        "Approval binding stale vs current run/code/operation/target (preflight)",
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Block dispatch with zero HTTP — clear queue and re-require approval.
+ * Never clears `http_started` / legacy `in_flight` / journaled-unknown pending:
+ * wiping would let a later approve create a second side effect.
+ * `preparing` (no transport yet) may clear.
+ */
+export function denyPendingGithubOpBeforeHttp(
+  doc: LoopGraphDocument,
+  instanceId: string,
+  reason: string,
+): LoopGraphDocument {
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance?.pendingGithubOp) return doc;
+  const pending = instance.pendingGithubOp;
+  const journaledUnknown = (pending.dispatchJournal ?? []).some(
+    (item) => item.kind === "unknown",
+  );
+  const httpMayHaveStarted =
+    pending.dispatchState === "http_started" ||
+    pending.dispatchState === "in_flight" ||
+    journaledUnknown;
+  if (httpMayHaveStarted) {
+    const entry = {
+      at: nowIso(),
+      kind: "unknown" as const,
+      message: `deny-before-HTTP refused to clear http_started/unknown: ${reason}`.slice(
+        0,
+        500,
+      ),
+    };
+    const kept: LoopInstance = {
+      ...instance,
+      status: "awaiting_hitl",
+      hitlQuestionIds: [`github_dispatch_unknown_${pending.nodeId}`],
+      cursorNodeId: pending.nodeId,
+      pendingGithubOp: {
+        ...pending,
+        dispatchState: "http_started",
+        dispatchJournal: [...(pending.dispatchJournal ?? []), entry].slice(-20),
+      },
+      updatedAt: nowIso(),
+    };
+    return replaceInstance(
+      doc,
+      pushEvent(kept, {
+        type: "awaiting_hitl",
+        nodeId: pending.nodeId,
+        message: `GitHub dispatch unknown retained (no create#2): ${reason.slice(0, 400)}`,
+      }),
+    );
+  }
+  let blocked = invalidatePendingApproval(
+    {
+      ...instance,
+      pendingActionPayload: pending.payload,
+      pendingApprovalBinding: pending.approvalBinding,
+    },
+    reason,
+  );
+  blocked = {
+    ...blocked,
+    pendingGithubOp: undefined,
+    status: "awaiting_hitl",
+    hitlQuestionIds: [`human_approval_${pending.nodeId}`],
+    cursorNodeId: pending.nodeId,
+  };
+  blocked = pushEvent(blocked, {
+    type: "approval_stale",
+    nodeId: pending.nodeId,
+    message: `GitHub dispatch blocked before HTTP: ${reason.slice(0, 400)}`,
+  });
+  blocked = pushEvent(blocked, {
+    type: "awaiting_hitl",
+    nodeId: pending.nodeId,
+    message: `Re-approve github.${pending.operation} (zero HTTP sent)`,
+  });
+  return replaceInstance(doc, blocked);
+}
+
+/** Mark preparing (token/import window) — no remote side effect yet. */
+export function markPendingGithubOpPreparing(
+  doc: LoopGraphDocument,
+  instanceId: string,
+  attemptId: string,
+): LoopGraphDocument {
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance?.pendingGithubOp) return doc;
+  if (
+    instance.pendingGithubOp.dispatchState === "http_started" ||
+    instance.pendingGithubOp.dispatchState === "in_flight"
+  ) {
+    return doc;
+  }
+  const journal = [
+    ...(instance.pendingGithubOp.dispatchJournal ?? []),
+    {
+      at: nowIso(),
+      kind: "preparing" as const,
+      message: `Preparing dispatch ${attemptId}`,
+    },
+  ].slice(-20);
+  return replaceInstance(doc, {
+    ...instance,
+    pendingGithubOp: {
+      ...instance.pendingGithubOp,
+      dispatchState: "preparing",
+      dispatchAttemptId: attemptId,
+      dispatchJournal: journal,
+    },
+    updatedAt: nowIso(),
+  });
+}
+
+/**
+ * Atomic claim immediately before transport/push (crash → lookup, don't blind resend).
+ * Legacy alias: markPendingGithubOpInFlight.
+ */
+export function markPendingGithubOpHttpStarted(
+  doc: LoopGraphDocument,
+  instanceId: string,
+  attemptId: string,
+): LoopGraphDocument {
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance?.pendingGithubOp) return doc;
+  if (
+    instance.pendingGithubOp.dispatchState === "http_started" ||
+    instance.pendingGithubOp.dispatchState === "in_flight"
+  ) {
+    return doc;
+  }
+  const journal = [
+    ...(instance.pendingGithubOp.dispatchJournal ?? []),
+    {
+      at: nowIso(),
+      kind: "http_started" as const,
+      message: `HTTP/push claimed ${attemptId}`,
+    },
+  ].slice(-20);
+  return replaceInstance(doc, {
+    ...instance,
+    pendingGithubOp: {
+      ...instance.pendingGithubOp,
+      dispatchState: "http_started",
+      dispatchAttemptId: attemptId,
+      httpAttemptedAt: nowIso(),
+      dispatchJournal: journal,
+    },
+    updatedAt: nowIso(),
+  });
+}
+
+/** @deprecated Use markPendingGithubOpHttpStarted */
+export function markPendingGithubOpInFlight(
+  doc: LoopGraphDocument,
+  instanceId: string,
+  attemptId: string,
+): LoopGraphDocument {
+  return markPendingGithubOpHttpStarted(doc, instanceId, attemptId);
+}
+
+/**
+ * Finish a deferred GitHub Action after HTTP returned (or after lookup of an
+ * already-created remote). Never erases a successful side effect when evidence
+ * drifts post-dispatch — records delivery_stale and keeps the result.
  */
 export function completePendingGithubOp(
   doc: LoopGraphDocument,
   instanceId: string,
   result: LoopGithubOperationResult,
+  execution?: LoopExecutionHooks,
+  options?: { httpCompleted?: boolean; deliveryStale?: boolean },
 ): LoopGraphDocument {
   const instance = doc.instances.find((item) => item.id === instanceId);
   if (!instance?.pendingGithubOp) return doc;
@@ -1512,6 +1999,39 @@ export function completePendingGithubOp(
   if (!spec) throw new Error(`Spec not found: ${instance.specVersion}`);
 
   const pending = instance.pendingGithubOp;
+  const httpCompleted = options?.httpCompleted === true;
+  const actionNode = spec.nodes.find((item) => item.id === pending.nodeId);
+  const arch = actionNode ? architectureOf(actionNode) : undefined;
+
+  let deliveryStale = options?.deliveryStale === true;
+  if (httpCompleted && pending.approvalBinding && !deliveryStale) {
+    const stillValid = isApprovalBindingCurrent({
+      binding: pending.approvalBinding,
+      instance: {
+        ...instance,
+        pendingActionPayload: pending.payload,
+        pendingApprovalBinding: pending.approvalBinding,
+      },
+      payload: pending.payload,
+      actionNodeId: pending.nodeId,
+      ...(arch?.actionIntegration
+        ? { actionIntegration: arch.actionIntegration }
+        : {}),
+      actionOperation: pending.operation,
+      ...(execution ? { execution } : {}),
+    });
+    deliveryStale = !stillValid;
+  }
+
+  // Pre-HTTP path must use denyPendingGithubOpBeforeHttp — never wipe a real result.
+  if (!httpCompleted && !result.ok) {
+    return denyPendingGithubOpBeforeHttp(
+      doc,
+      instanceId,
+      result.message || "GitHub dispatch denied before HTTP",
+    );
+  }
+
   if (!result.ok) {
     return failNode(
       doc,
@@ -1524,21 +2044,63 @@ export function completePendingGithubOp(
     );
   }
 
+  const resultData = {
+    operation: pending.operation,
+    ok: true as const,
+    ...(result.url ? { url: result.url } : {}),
+    ...(typeof result.number === "number" ? { number: result.number } : {}),
+    ...(result.refs ? { refs: result.refs } : {}),
+    message: result.message,
+    ...(deliveryStale ? { deliveryStale: true } : {}),
+    ...(pending.idempotencyKey
+      ? { idempotencyKey: pending.idempotencyKey }
+      : {}),
+    ...(pending.approvalBinding?.operationDigest
+      ? { operationDigest: pending.approvalBinding.operationDigest }
+      : { operationDigest: digestOperationPayload(pending.payload) }),
+    ...(pending.approvalBinding?.engineeringBaseline
+      ? { engineeringBaseline: pending.approvalBinding.engineeringBaseline }
+      : {}),
+  };
+
+  // Cancelled/paused mid-flight: audit-append result, clear pending, do not resurrect.
+  if (instance.status === "cancelled" || instance.status === "paused") {
+    let next = pushArtifact(
+      { ...instance, pendingGithubOp: undefined },
+      {
+        nodeId: pending.nodeId,
+        kind: "github_op_result",
+        data: { ...resultData, deliveryStale: true },
+      },
+    );
+    next = pushEvent(next, {
+      type: "delivery_stale",
+      nodeId: pending.nodeId,
+      message: `GitHub result audited under ${instance.status} (run not resurrected)`,
+    });
+    return replaceInstance(doc, {
+      ...next,
+      status: instance.status,
+      pendingGithubOp: undefined,
+    });
+  }
+
   let next = pushArtifact(
     { ...instance, pendingGithubOp: undefined },
     {
       nodeId: pending.nodeId,
       kind: "github_op_result",
-      data: {
-        operation: pending.operation,
-        ok: true,
-        ...(result.url ? { url: result.url } : {}),
-        ...(typeof result.number === "number" ? { number: result.number } : {}),
-        ...(result.refs ? { refs: result.refs } : {}),
-        message: result.message,
-      },
+      data: resultData,
     },
   );
+  if (deliveryStale) {
+    next = pushEvent(next, {
+      type: "delivery_stale",
+      nodeId: pending.nodeId,
+      message:
+        "GitHub side effect retained after post-dispatch evidence drift (do not redo)",
+    });
+  }
   next = pushEvent(next, {
     type: "node_completed",
     nodeId: pending.nodeId,
@@ -1575,6 +2137,19 @@ function stepImplementNode(
     if (!leaf || !execution) {
       return failNode(doc, next, node.id, LOOP_FILES_NOT_ATTACHED, { spec });
     }
+    const frozenBudget = next.runBinding?.budget;
+    const budget = assertAgentCallBudget(
+      next,
+      frozenBudget
+        ? {
+            maxAgentCalls: frozenBudget.maxAgentCalls,
+            maxAgentCallDepth: frozenBudget.maxAgentCallDepth,
+          }
+        : resolveAgentCallBudgetLimits(spec),
+    );
+    if (!budget.ok) {
+      return failNode(doc, next, node.id, budget.reason, { spec });
+    }
     const implementRole: "implement" | "fix" =
       node.role === "fix" || node.repairMode ? "fix" : "implement";
     try {
@@ -1595,13 +2170,13 @@ function stepImplementNode(
       return failNode(doc, next, node.id, message, { spec });
     }
     const priorIds = activeRunIdsOf(next);
-    next = {
+    next = recordAgentCallStart({
       ...next,
       activeRunId: run.runId,
       activeRunNodeId: node.id,
       featureNodeId: leaf.featureNodeId,
       activeRunIds: [...new Set([...priorIds, run.runId])],
-    };
+    });
   }
 
   if (!run || !next.activeRunId) {
@@ -1639,11 +2214,53 @@ function stepImplementNode(
   }
   if (run.status === "complete" && run.applySucceeded) {
     const leafPath = execution?.leaf?.filePath ?? "unknown";
+    const priorScope = accumulateDeliveryScope(next);
+    const writeScope = bound.task?.writeScope ?? [];
+    const deliveryFiles = [
+      ...new Set(
+        [
+          ...(leafPath !== "unknown" ? [leafPath] : []),
+          ...writeScope,
+          ...priorScope.files,
+        ].filter(Boolean),
+      ),
+    ].slice(0, 200);
+    let contentDigest: string | undefined;
+    let fileDigests: Record<string, string> | undefined;
+    if (deliveryFiles.length > 0 && execution?.digestWorkspacePaths) {
+      const digested = execution.digestWorkspacePaths(deliveryFiles, {
+        deletedPaths: priorScope.deletedFiles,
+      });
+      if (
+        digested.missing.length === 0 &&
+        digested.unreadable.length === 0 &&
+        (digested.undeleted?.length ?? 0) === 0
+      ) {
+        fileDigests = digested.digests;
+        const withTombs = {
+          ...digested.digests,
+          ...Object.fromEntries(
+            (digested.tombstones ?? []).map((path) => [
+              `tombstone:${path}`,
+              "deleted",
+            ]),
+          ),
+        };
+        contentDigest = combineFileDigests(withTombs);
+      }
+    }
     const changeSet = buildChangeSetFromRun({
-      filePath: leafPath,
+      filePath: leafPath !== "unknown" ? leafPath : deliveryFiles[0] ?? "unknown",
       goal: bound.goal,
       agentRunId: run.runId,
       task: bound.task,
+      additionalFiles: deliveryFiles.filter((path) => path !== leafPath),
+      ...(priorScope.deletedFiles.length
+        ? { deletedFiles: priorScope.deletedFiles }
+        : {}),
+      ...(contentDigest ? { contentDigest } : {}),
+      ...(fileDigests ? { fileDigests } : {}),
+      ...(run.unifiedDiff ? { unifiedDiff: run.unifiedDiff } : {}),
     });
     next = pushArtifact(next, {
       nodeId: node.id,
@@ -1659,6 +2276,7 @@ function stepImplementNode(
         },
       };
     }
+    next = recordAgentCallEnd(next);
     next = pushEvent(next, {
       type: "node_completed",
       nodeId: node.id,
@@ -1672,7 +2290,7 @@ function stepImplementNode(
 
   return failNode(
     doc,
-    next,
+    recordAgentCallEnd(next),
     node.id,
     run.status === "cancelled"
       ? `Agent run ${run.runId} cancelled`
@@ -1695,23 +2313,179 @@ function stepVerifyNode(
       : node;
 
   const last = instance.events.at(-1);
+  const entering =
+    !(last?.type === "node_entered" && last.nodeId === nodeId);
   let working =
-    last?.type === "node_entered" && last.nodeId === nodeId
-      ? { ...instance, cursorNodeId: nodeId }
-      : pushEvent(
+    entering && !instance.verificationCodeDigest
+      ? pushEvent(
           { ...instance, cursorNodeId: nodeId },
-          { type: "node_entered", nodeId, message: specNode?.goal ?? "Verify" },
-        );
+          {
+            type: "node_entered",
+            nodeId,
+            message: specNode?.goal ?? "Verify",
+            ...(instance.activeRunId
+              ? { agentRunId: instance.activeRunId }
+              : {}),
+          },
+        )
+      : { ...instance, cursorNodeId: nodeId };
 
-  const evidence = working.activeRunId
-    ? execution?.readEvidence(working.activeRunId) ?? null
-    : null;
-  if (!evidence || evidence.status === "not_run" || evidence.runId !== working.activeRunId) {
+  // Capture live delivery-scope digest once per verify attempt (not ChangeSet self-stamp).
+  // Do not re-snapshot on HITL re-entry — that would let new code + old evidence stamp.
+  if (!working.verificationCodeDigest) {
+    const scope = accumulateDeliveryScope(working);
+    if (scope.parseFailed || scope.emptyIllegal) {
+      const next = pushEvent(
+        {
+          ...working,
+          status: "awaiting_hitl",
+          hitlQuestionIds: ["verification_not_run"],
+        },
+        {
+          type: "awaiting_hitl",
+          nodeId,
+          message: "Verification blocked: illegal/empty ChangeSet delivery scope",
+        },
+      );
+      return replaceInstance(doc, next);
+    }
+    const hasDeliveryClaim =
+      scope.files.length > 0 || scope.deletedFiles.length > 0;
+    if (hasDeliveryClaim && !execution?.digestWorkspacePaths) {
+      const next = pushEvent(
+        {
+          ...working,
+          status: "awaiting_hitl",
+          hitlQuestionIds: ["verification_not_run"],
+          verificationCodeDigest: undefined,
+        },
+        {
+          type: "awaiting_hitl",
+          nodeId,
+          message:
+            "Verification cannot stamp evidence without workspace digester (fail-closed)",
+        },
+      );
+      return replaceInstance(doc, next);
+    }
+    if (!hasDeliveryClaim) {
+      // No ChangeSet delivery claim — bind EMPTY only (cannot invent file coverage).
+      working = {
+        ...working,
+        verificationCodeDigest: combineFileDigests({}),
+      };
+    } else {
+      const digested = execution!.digestWorkspacePaths!(scope.files, {
+        deletedPaths: scope.deletedFiles,
+      });
+      if (
+        digested.missing.length > 0 ||
+        digested.unreadable.length > 0 ||
+        (digested.undeleted?.length ?? 0) > 0
+      ) {
+        const next = pushEvent(
+          {
+            ...working,
+            status: "awaiting_hitl",
+            hitlQuestionIds: ["verification_not_run"],
+          },
+          {
+            type: "awaiting_hitl",
+            nodeId,
+            message: `Verification blocked: delivery scope unreadable/missing (${[
+              ...digested.missing,
+              ...digested.unreadable,
+              ...(digested.undeleted ?? []),
+            ]
+              .slice(0, 6)
+              .join(", ")})`,
+          },
+        );
+        return replaceInstance(doc, next);
+      }
+      const withTombs = {
+        ...digested.digests,
+        ...Object.fromEntries(
+          (digested.tombstones ?? []).map((path) => [
+            `tombstone:${path}`,
+            "deleted",
+          ]),
+        ),
+      };
+      working = {
+        ...working,
+        verificationCodeDigest: combineFileDigests(withTombs),
+      };
+    }
+    // New verification session — do not inherit a prior evidence id.
+    working = { ...working, verificationEvidenceId: undefined };
+    // Kick read-only configured tests against the bound AgentRun (no writable agent).
+    if (working.activeRunId && execution?.requestVerification) {
+      try {
+        execution.requestVerification(working.activeRunId);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Verification request failed";
+        const next = pushEvent(
+          {
+            ...working,
+            status: "awaiting_hitl",
+            hitlQuestionIds: ["verification_not_run"],
+          },
+          {
+            type: "awaiting_hitl",
+            nodeId,
+            message: `Verification could not start: ${message.slice(0, 300)}`,
+          },
+        );
+        return replaceInstance(doc, next);
+      }
+    }
+  }
+
+  if (!working.activeRunId) {
     const next = pushEvent(
       {
         ...working,
         status: "awaiting_hitl",
         hitlQuestionIds: ["verification_not_run"],
+      },
+      {
+        type: "awaiting_hitl",
+        nodeId,
+        message: LOOP_VERIFICATION_NOT_RUN,
+      },
+    );
+    return replaceInstance(doc, next);
+  }
+
+  const runView = execution?.readRun(working.activeRunId) ?? null;
+  // Side-effect / implement run still in flight: never stamp early evidence.
+  if (
+    !runView ||
+    runView.status === "queued" ||
+    runView.status === "running" ||
+    runView.status === "awaiting_review"
+  ) {
+    return replaceInstance(doc, {
+      ...working,
+      status: "running",
+      updatedAt: nowIso(),
+    });
+  }
+
+  const evidence = execution?.readEvidence(working.activeRunId) ?? null;
+  if (
+    !evidence ||
+    evidence.status === "not_run" ||
+    evidence.runId !== working.activeRunId
+  ) {
+    const next = pushEvent(
+      {
+        ...working,
+        status: "awaiting_hitl",
+        hitlQuestionIds: ["verification_not_run"],
+        // Do not clear verificationCodeDigest — still required when evidence arrives.
       },
       {
         type: "awaiting_hitl",
@@ -1723,7 +2497,160 @@ function stepVerifyNode(
     return replaceInstance(doc, next);
   }
 
-  const report = evidenceToTestReport(evidence, "configured-test");
+  // Bind evidence identity when first accepted; refuse stamping a different cache.
+  if (!working.verificationEvidenceId) {
+    // Re-check live digest at evidence-accept time (not only at enter/end).
+    const midScope = accumulateDeliveryScope(working);
+    const midHasClaim =
+      midScope.files.length > 0 || midScope.deletedFiles.length > 0;
+    let midDigest = combineFileDigests({});
+    if (midHasClaim && execution?.digestWorkspacePaths) {
+      const mid = execution.digestWorkspacePaths(midScope.files, {
+        deletedPaths: midScope.deletedFiles,
+      });
+      if (
+        mid.missing.length > 0 ||
+        mid.unreadable.length > 0 ||
+        (mid.undeleted?.length ?? 0) > 0
+      ) {
+        const next = pushEvent(
+          {
+            ...working,
+            status: "awaiting_hitl",
+            hitlQuestionIds: ["verification_not_run"],
+            verificationCodeDigest: undefined,
+            verificationEvidenceId: undefined,
+          },
+          {
+            type: "awaiting_hitl",
+            nodeId,
+            message:
+              "Verification blocked: delivery scope changed before evidence accept",
+          },
+        );
+        return replaceInstance(doc, next);
+      }
+      midDigest = combineFileDigests({
+        ...mid.digests,
+        ...Object.fromEntries(
+          (mid.tombstones ?? []).map((path) => [`tombstone:${path}`, "deleted"]),
+        ),
+      });
+    }
+    if (
+      working.verificationCodeDigest &&
+      working.verificationCodeDigest !== midDigest
+    ) {
+      const next = pushEvent(
+        {
+          ...working,
+          status: "awaiting_hitl",
+          hitlQuestionIds: ["verification_not_run"],
+          verificationCodeDigest: undefined,
+          verificationEvidenceId: undefined,
+        },
+        {
+          type: "awaiting_hitl",
+          nodeId,
+          message:
+            "Code changed before evidence accept; refuse to stamp cached/old evidence with new digest",
+          evidenceId: evidence.id,
+        },
+      );
+      return replaceInstance(doc, next);
+    }
+    working = {
+      ...working,
+      verificationEvidenceId: evidence.id,
+    };
+  } else if (working.verificationEvidenceId !== evidence.id) {
+    const next = pushEvent(
+      {
+        ...working,
+        status: "awaiting_hitl",
+        hitlQuestionIds: ["verification_not_run"],
+        verificationCodeDigest: undefined,
+        verificationEvidenceId: undefined,
+      },
+      {
+        type: "awaiting_hitl",
+        nodeId,
+        message: `Evidence id changed during verification (${working.verificationEvidenceId} → ${evidence.id}); re-run tests`,
+        evidenceId: evidence.id,
+      },
+    );
+    return replaceInstance(doc, next);
+  }
+
+  // End-of-verify: re-digest and only stamp if snapshot unchanged.
+  const endScope = accumulateDeliveryScope(working);
+  const endHasClaim =
+    endScope.files.length > 0 || endScope.deletedFiles.length > 0;
+  let endDigest = combineFileDigests({});
+  if (endHasClaim) {
+    const endDigested = execution?.digestWorkspacePaths
+      ? execution.digestWorkspacePaths(endScope.files, {
+          deletedPaths: endScope.deletedFiles,
+        })
+      : null;
+    if (
+      !endDigested ||
+      endDigested.missing.length > 0 ||
+      endDigested.unreadable.length > 0 ||
+      (endDigested.undeleted?.length ?? 0) > 0
+    ) {
+      const next = pushEvent(
+        {
+          ...working,
+          status: "awaiting_hitl",
+          hitlQuestionIds: ["verification_not_run"],
+          verificationCodeDigest: undefined,
+        },
+        {
+          type: "awaiting_hitl",
+          nodeId,
+          message:
+            "Verification end digest failed; refuse to stamp stale/cached evidence",
+        },
+      );
+      return replaceInstance(doc, next);
+    }
+    endDigest = combineFileDigests({
+      ...endDigested.digests,
+      ...Object.fromEntries(
+        (endDigested.tombstones ?? []).map((path) => [
+          `tombstone:${path}`,
+          "deleted",
+        ]),
+      ),
+    });
+  }
+  if (
+    !working.verificationCodeDigest ||
+    working.verificationCodeDigest !== endDigest
+  ) {
+    const next = pushEvent(
+      {
+        ...working,
+        status: "awaiting_hitl",
+        hitlQuestionIds: ["verification_not_run"],
+        verificationCodeDigest: undefined,
+      },
+      {
+        type: "awaiting_hitl",
+        nodeId,
+        message:
+          "Code changed during verification (start/end snapshot mismatch); re-run tests",
+      },
+    );
+    return replaceInstance(doc, next);
+  }
+
+  const report = evidenceToTestReport(
+    evidence,
+    "configured-test",
+    endHasClaim ? endDigest : undefined,
+  );
   if (report) {
     working = pushArtifact(working, {
       nodeId,
@@ -1799,6 +2726,8 @@ function stepVerifyNode(
           cursorNodeId: failBranch.to,
           activeRunId: undefined,
           activeRunNodeId: undefined,
+          verificationCodeDigest: undefined,
+          verificationEvidenceId: undefined,
           attemptCounts: {
             ...working.attemptCounts,
             [failBranch.to]: attempts,
@@ -1829,12 +2758,17 @@ function stepVerifyNode(
     }
     const attempts = (working.attemptCounts[fb.to] ?? 0) + 1;
     const max = effectiveMaxIterations(spec, fb.to);
-    if (round > spec.stopPolicy.maxRounds || attempts > max) {
+    // Frozen budget at start wins over live Spec edits (consumption, not serialize-only).
+    const frozenMaxRounds = working.runBinding?.budget?.maxRounds;
+    const maxRounds = frozenMaxRounds ?? spec.stopPolicy.maxRounds;
+    if (round > maxRounds || attempts > max) {
       const next = pushEvent(
         {
           ...working,
           status: "awaiting_hitl",
           round,
+          verificationCodeDigest: undefined,
+          verificationEvidenceId: undefined,
           attemptCounts: {
             ...working.attemptCounts,
             [fb.to]: attempts,
@@ -1844,7 +2778,7 @@ function stepVerifyNode(
         {
           type: "awaiting_hitl",
           nodeId,
-          message: `Stop policy reached (${Math.min(spec.stopPolicy.maxRounds, max)} rounds)`,
+          message: `Stop policy reached (${Math.min(maxRounds, max)} rounds)`,
           evidenceId: evidence.id,
         },
       );
@@ -1857,6 +2791,8 @@ function stepVerifyNode(
         cursorNodeId: fb.to,
         activeRunId: undefined,
         activeRunNodeId: undefined,
+        verificationCodeDigest: undefined,
+        verificationEvidenceId: undefined,
         attemptCounts: {
           ...working.attemptCounts,
           [fb.to]: attempts,
@@ -1872,7 +2808,13 @@ function stepVerifyNode(
     return replaceInstance(doc, next);
   }
 
-  const next = pushEvent(working, {
+  const next = pushEvent(
+    {
+      ...working,
+      verificationCodeDigest: undefined,
+      verificationEvidenceId: undefined,
+    },
+    {
     type: "node_completed",
     nodeId,
     message: "Verification passed",
@@ -1975,6 +2917,19 @@ export type StartLoopInstanceOptions = {
   launch?: LoopLaunch;
   /** When restoring after crash: reuse checkpoint fields instead of fresh cursor. */
   restoreCheckpoint?: boolean;
+  /**
+   * Project-workflow binding snapshot — frozen on the Instance; editing
+   * Intent/Spec must not rewrite it after start.
+   */
+  runBinding?: LoopInstance["runBinding"];
+  /**
+   * When true, refuse start if preflight reports blockers.
+   * LocalApi project starts pass true; unit helpers may omit (default false).
+   */
+  requirePreflight?: boolean;
+  materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+  branch?: string;
+  projectId?: string;
 };
 
 export function startLoopInstance(
@@ -2005,6 +2960,43 @@ export function startLoopInstance(
   const issues = validateLoopSpecTopology(spec);
   if (issues.length > 0) {
     throw new Error(issues.map((issue) => issue.message).join("; "));
+  }
+
+  const launchKind =
+    options.launch?.kind === "event"
+      ? "event"
+      : options.launch?.kind === "params"
+        ? "params"
+        : "manual";
+  // Production project starts always freeze RunBinding via shared create+preflight.
+  // Unit helpers may omit projectId (no binding); never skip binding when projectId set
+  // without preflight — that would sneak past permission/context gates.
+  if (options.projectId) {
+    assertLaunchContextForBinding({
+      projectId: options.projectId,
+      requirePreflight: options.requirePreflight === true,
+      launchKind,
+    });
+  }
+
+  let preflightNotes: string[] | undefined;
+  if (options.requirePreflight === true) {
+    const preflight = preflightLoopRunStart({
+      document: doc,
+      specVersion: spec.version,
+      ...(options.branch ? { branch: options.branch } : {}),
+      ...(options.materials ? { materials: options.materials } : {}),
+    });
+    if (!preflight.canStart) {
+      const blockers = preflight.items
+        .filter((item) => item.severity === "blocker")
+        .map((item) => item.message)
+        .join("; ");
+      throw new Error(`Loop preflight blocked start: ${blockers}`);
+    }
+    preflightNotes = preflight.items
+      .map((item) => `[${item.severity}] ${item.code}: ${item.message}`)
+      .slice(0, 40);
   }
 
   validateLaunchParams(spec, options.launch?.params);
@@ -2041,6 +3033,26 @@ export function startLoopInstance(
       : {}),
     ...(execution?.leaf?.filePath ? { leafPath: execution.leaf.filePath } : {}),
   });
+  const runBinding =
+    options.runBinding ??
+    (options.projectId
+      ? buildRunBindingSnapshot({
+          projectId: options.projectId,
+          workspaceRoot,
+          document: doc,
+          spec,
+          createdAt: startedAt,
+          launchKind,
+          ...(options.materials ? { materials: options.materials } : {}),
+          ...(options.branch ? { declaredBranch: options.branch } : {}),
+          ...(preflightNotes ? { preflightNotes } : {}),
+        })
+      : undefined);
+  // Production starts: incomplete content digests must fail closed (not path-hash masquerade).
+  if (runBinding && options.requirePreflight === true) {
+    assertCodeDigestComplete(runBinding);
+  }
+
   let instance: LoopInstance = {
     id: `inst_${randomUUID()}`,
     specVersion: spec.version,
@@ -2061,6 +3073,7 @@ export function startLoopInstance(
     },
     budgetUsage: { tokens: 0, wallClockMs: 0, retries: 0 },
     ...(options.launch ? { launch: options.launch } : {}),
+    ...(runBinding ? { runBinding } : {}),
     events: [],
     startedAt,
     updatedAt: startedAt,
@@ -2256,7 +3269,8 @@ export function pauseLoopInstance(
   if (
     instance.status !== "running" &&
     instance.status !== "queued" &&
-    instance.status !== "awaiting_review"
+    instance.status !== "awaiting_review" &&
+    instance.status !== "awaiting_hitl"
   ) {
     return doc;
   }
@@ -2309,9 +3323,15 @@ export function cancelLoopInstance(
   if (instance.cursorNodeId) {
     next = upsertNodeRecord(next, instance.cursorNodeId, { status: "cancelled" });
   }
-  next = pushEvent(
+  // Unwind agent-call depth on cancel so nested budget cannot leak across runs.
+  let cancelled = next;
+  const depth = cancelled.budgetUsage?.agentCallDepth ?? 0;
+  for (let i = 0; i < depth; i += 1) {
+    cancelled = recordAgentCallEnd(cancelled);
+  }
+  cancelled = pushEvent(
     {
-      ...next,
+      ...cancelled,
       status: "cancelled",
       completedAt: nowIso(),
       activeRunId: undefined,
@@ -2321,7 +3341,7 @@ export function cancelLoopInstance(
     },
     { type: "cancelled", message: "Cancelled by user" },
   );
-  return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
+  return upsertLoopGraph(workspaceRoot, replaceInstance(doc, cancelled));
 }
 
 export function resumeLoopInstance(
@@ -2506,30 +3526,107 @@ export function resolveLoopHitl(
     const choice = answer.answer.trim();
     const choiceLower = choice.toLowerCase();
 
-    next = pushArtifact(next, {
-      nodeId: cursorNode.id,
-      kind: "human_decision",
-      data: {
-        mode:
-          mode === "legacy"
-            ? (architectureOf(cursorNode).humanMode ?? "approval")
-            : mode,
-        choice,
-        ...(answer.editedPayload ? { editedPayload: answer.editedPayload } : {}),
-        at: nowIso(),
-        nodeId: cursorNode.id,
-      },
-    });
+    const decisionMode =
+      mode === "legacy"
+        ? (architectureOf(cursorNode).humanMode ?? "approval")
+        : mode;
 
     // Legacy decide_* keeps prior semantics: stepper advances on hitl_resolved only.
     if (mode === "legacy") {
+      next = pushArtifact(next, {
+        nodeId: cursorNode.id,
+        kind: "human_decision",
+        data: {
+          mode: decisionMode,
+          choice,
+          ...(answer.editedPayload ? { editedPayload: answer.editedPayload } : {}),
+          ...(answer.actor ? { actor: answer.actor } : {}),
+          at: nowIso(),
+          nodeId: cursorNode.id,
+        },
+      });
       let nextDoc = replaceInstance(doc, next);
       nextDoc = stepLoopInstance(nextDoc, instanceId, { execution });
       return upsertLoopGraph(workspaceRoot, nextDoc);
     }
 
-    if (mode === "approval") {
-      if (/reject|deny|拒绝|驳回/i.test(choiceLower)) {
+    if (mode === "approval" || mode === "takeover") {
+      // Exact whitelist via isApprovalChoice — never substring-match "approve"
+      // inside phrases like "not approved".
+      const affirmative = isApprovalChoice(choice);
+      const explicitReject =
+        /^(reject|denied|deny|拒绝|驳回|not approved|not_approved|unapproved|disapprove|不同意|不批准)$/i.test(
+          choice.trim(),
+        );
+      const explicitTakeover =
+        mode === "takeover" ||
+        /^(takeover|take.?over|接管)$/i.test(choice.trim()) ||
+        Boolean(
+          answer.editedPayload &&
+            typeof answer.editedPayload === "object" &&
+            (answer.editedPayload as { humanTakeover?: unknown }).humanTakeover ===
+              true,
+        );
+      if (explicitTakeover) {
+        // Human takeover: invalidate any pending side-effect approval; pause with
+        // readable NodeRun context so a later resume/agent can continue from cursor.
+        next = invalidatePendingApproval(next, "Human took over the task");
+        next = pushArtifact(next, {
+          nodeId: cursorNode.id,
+          kind: "human_decision",
+          data: {
+            mode: "takeover",
+            choice: "takeover",
+            ...(answer.editedPayload ? { editedPayload: answer.editedPayload } : {}),
+            ...(answer.actor ? { actor: answer.actor } : {}),
+            at: nowIso(),
+            nodeId: cursorNode.id,
+            cursorNodeId: cursorNode.id,
+            preservedStatus: instance.status,
+          },
+        });
+        next = pushEvent(
+          {
+            ...next,
+            status: "paused",
+            hitlQuestionIds: [],
+            pendingActionPayload: undefined,
+            pendingApprovalBinding: undefined,
+          },
+          {
+            type: "paused",
+            nodeId: cursorNode.id,
+            message: "Human takeover — Agent must read current NodeRun context on resume",
+          },
+        );
+        return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
+      }
+      const actionTarget = (() => {
+        if (isActionNode(cursorNode) && !isTestActionNode(cursorNode)) {
+          return cursorNode;
+        }
+        const outs = dependsOutgoingIds(spec, cursorNode.id);
+        for (const outId of outs) {
+          const candidate = spec.nodes.find((item) => item.id === outId);
+          if (candidate && isActionNode(candidate) && !isTestActionNode(candidate)) {
+            return candidate;
+          }
+        }
+        return undefined;
+      })();
+      if (explicitReject) {
+        next = invalidatePendingApproval(next, "Human rejected the action");
+        next = pushArtifact(next, {
+          nodeId: cursorNode.id,
+          kind: "human_decision",
+          data: {
+            mode: "approval",
+            choice,
+            ...(answer.actor ? { actor: answer.actor } : {}),
+            at: nowIso(),
+            nodeId: cursorNode.id,
+          },
+        });
         next = pushEvent(
           {
             ...next,
@@ -2545,14 +3642,155 @@ export function resolveLoopHitl(
         );
         return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
       }
+      // Delivery Action gates require whitelist affirmatives. Pure decide→agent
+      // gates still accept free-form answers without authorizing side effects.
+      if (!affirmative && actionTarget) {
+        next = invalidatePendingApproval(next, "Approval choice not recognized");
+        next = pushArtifact(next, {
+          nodeId: cursorNode.id,
+          kind: "human_decision",
+          data: {
+            mode: "approval",
+            choice,
+            ...(answer.actor ? { actor: answer.actor } : {}),
+            at: nowIso(),
+            nodeId: cursorNode.id,
+          },
+        });
+        next = pushEvent(
+          {
+            ...next,
+            status: "awaiting_hitl",
+            hitlQuestionIds: [`human_approval_${cursorNode.id}`],
+            pendingApprovalBinding: undefined,
+          },
+          {
+            type: "awaiting_hitl",
+            nodeId: cursorNode.id,
+            message: "Approval choice not recognized — re-confirm required",
+          },
+        );
+        return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
+      }
+      const actionArch = actionTarget ? architectureOf(actionTarget) : undefined;
+      const defaultPayload = buildDefaultActionPayload({
+        nodeId: actionTarget?.id ?? cursorNode.id,
+        ...(actionArch?.actionIntegration
+          ? { actionIntegration: actionArch.actionIntegration }
+          : {}),
+        ...(actionArch?.actionOperation
+          ? { actionOperation: actionArch.actionOperation }
+          : {}),
+      });
+
       if (answer.editedPayload) {
-        next = { ...next, pendingActionPayload: answer.editedPayload };
-      } else if (/approve|edit|批准|同意/i.test(choiceLower)) {
         next = {
           ...next,
-          pendingActionPayload: next.pendingActionPayload ?? {
-            approved: true,
+          pendingActionPayload: {
+            ...defaultPayload,
+            ...answer.editedPayload,
+          },
+        };
+      } else if (affirmative) {
+        next = {
+          ...next,
+          pendingActionPayload: next.pendingActionPayload ?? defaultPayload,
+        };
+      }
+
+      const decisionId = `art_${randomUUID()}`;
+      let bindingPayload:
+        | ReturnType<typeof buildApprovalBinding>
+        | undefined;
+      if (next.pendingActionPayload && affirmative) {
+        const engineering = computeEngineeringBaseline(next, execution);
+        if (!engineering.evidenceFresh || !actionTarget) {
+          next = pushEvent(
+            {
+              ...next,
+              status: "awaiting_hitl",
+              hitlQuestionIds: [`human_approval_${cursorNode.id}`],
+              pendingActionPayload: next.pendingActionPayload,
+              pendingApprovalBinding: undefined,
+            },
+            {
+              type: "approval_stale",
+              nodeId: cursorNode.id,
+              message:
+                engineering.failClosedReason ??
+                "Approval refused: missing Action target or stale/unverified engineering evidence",
+            },
+          );
+          next = pushEvent(next, {
+            type: "awaiting_hitl",
             nodeId: cursorNode.id,
+            message: "Cannot bind approval — evidence fail-closed",
+          });
+          return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
+        }
+        const operationDigest = digestOperationPayload(next.pendingActionPayload);
+        bindingPayload = buildApprovalBinding({
+          instanceId: next.id,
+          decisionNodeId: cursorNode.id,
+          actionNodeId: actionTarget.id,
+          engineering,
+          operationDigest,
+          instance: next,
+          ...(actionArch?.actionIntegration
+            ? { actionIntegration: actionArch.actionIntegration }
+            : {}),
+          ...(actionArch?.actionOperation
+            ? { actionOperation: actionArch.actionOperation }
+            : {}),
+          ...(answer.actor ? { actor: answer.actor } : {}),
+        });
+      }
+
+      next = pushArtifact(next, {
+        id: decisionId,
+        nodeId: cursorNode.id,
+        kind: "human_decision",
+        data: {
+          mode: "approval",
+          choice,
+          ...(answer.editedPayload ? { editedPayload: answer.editedPayload } : {}),
+          ...(answer.actor ? { actor: answer.actor } : {}),
+          at: nowIso(),
+          nodeId: cursorNode.id,
+          ...(bindingPayload ? { binding: bindingPayload } : {}),
+        },
+      });
+      if (bindingPayload) {
+        next = {
+          ...next,
+          pendingApprovalBinding: {
+            decisionArtifactId: decisionId,
+            instanceId: next.id,
+            nodeId: bindingPayload.nodeId,
+            ...(bindingPayload.decisionNodeId
+              ? { decisionNodeId: bindingPayload.decisionNodeId }
+              : {}),
+            ...(bindingPayload.actionIntegration
+              ? { actionIntegration: bindingPayload.actionIntegration }
+              : {}),
+            ...(bindingPayload.actionOperation
+              ? { actionOperation: bindingPayload.actionOperation }
+              : {}),
+            artifactIds: [...bindingPayload.artifactIds],
+            engineeringBaseline: bindingPayload.engineeringBaseline,
+            ...(bindingPayload.codeDigest
+              ? { codeDigest: bindingPayload.codeDigest }
+              : {}),
+            ...(bindingPayload.runApprovalContextDigest
+              ? {
+                  runApprovalContextDigest:
+                    bindingPayload.runApprovalContextDigest,
+                }
+              : {}),
+            operationDigest: bindingPayload.operationDigest,
+            ...(answer.actor ? { actor: answer.actor } : {}),
+            actorKind: bindingPayload.actorKind ?? "unspecified",
+            approvedAt: nowIso(),
           },
         };
       }
@@ -2581,6 +3819,19 @@ export function resolveLoopHitl(
       }
       return upsertLoopGraph(workspaceRoot, nextDoc);
     }
+
+    next = pushArtifact(next, {
+      nodeId: cursorNode.id,
+      kind: "human_decision",
+      data: {
+        mode: decisionMode,
+        choice,
+        ...(answer.editedPayload ? { editedPayload: answer.editedPayload } : {}),
+        ...(answer.actor ? { actor: answer.actor } : {}),
+        at: nowIso(),
+        nodeId: cursorNode.id,
+      },
+    });
 
     if (mode === "review") {
       if (/reject|拒绝/i.test(choiceLower)) {

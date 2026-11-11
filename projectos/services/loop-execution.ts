@@ -18,12 +18,18 @@ export interface LoopAgentRunView {
   runId: string;
   status: AgentRunStatus;
   applySucceeded: boolean;
+  /** Optional unified diff from the implement apply (DI/local_tools evidence). */
+  unifiedDiff?: string;
 }
 
 export interface LoopEvidenceView {
   id: string;
   runId: string;
   status: "passed" | "failed" | "not_run";
+  /** Command line actually executed for this evidence (when known). */
+  command?: string;
+  /** Process exit code from the verification command (null = not spawned). */
+  exitCode?: number | null;
 }
 
 export interface LoopAgentRunRequest {
@@ -107,10 +113,31 @@ export interface LoopExecutionHooks {
   readRun: (runId: string) => LoopAgentRunView | null;
   readEvidence: (runId: string) => LoopEvidenceView | null;
   startAgentRun: (input: LoopAgentRunRequest) => LoopAgentRunView;
+  /**
+   * Kick configured verification/tests for an existing AgentRun (read-only).
+   * Must not start a writable fix/change agent — repairs use explicit repair nodes.
+   */
+  requestVerification?: (runId: string) => void;
   /** Optional GitHub bridge (sync). May return `deferred: true` for async settle. */
   executeGithubOperation?: (
     input: LoopGithubOperationRequest,
   ) => LoopGithubOperationResult;
+  /**
+   * Optional SaaS connector bridge. When present and returning deferred,
+   * runtime queues pendingConnectorOp for LocalApi settle (adapter→transport).
+   */
+  executeConnectorOperation?: (input: {
+    vendorId: string;
+    capabilityId: string;
+    payload: Record<string, unknown>;
+    credentialRefId?: string;
+    nodeId: string;
+  }) => {
+    ok: boolean;
+    deferred?: boolean;
+    message?: string;
+    credentialRefId?: string;
+  };
   /** Optional Terminal bridge (sync policy + optional spawn). */
   executeTerminalCommand?: (
     input: LoopTerminalCommandRequest,
@@ -124,4 +151,19 @@ export interface LoopExecutionHooks {
    * (shared worktree; conflicts still surface as blocked/HITL).
    */
   allowConcurrentLoopRuns?: boolean;
+  /**
+   * Digest current workspace bytes for relative paths (approval evidence).
+   * Missing digester with non-empty delivery scope → fail-closed.
+   * Optional deletedPaths mark expected absences (tombstones).
+   */
+  digestWorkspacePaths?: (
+    paths: string[],
+    options?: { deletedPaths?: string[] },
+  ) => {
+    digests: Record<string, string>;
+    missing: string[];
+    unreadable: string[];
+    tombstones?: string[];
+    undeleted?: string[];
+  };
 }

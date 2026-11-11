@@ -214,6 +214,7 @@ export const ModelRequestPayloadSchema = z.object({
     "agent_step",
     "question_answer",
     "chat_title",
+    "loop_authoring",
   ]),
   provider: z.string().min(1),
   model: z.string().min(1),

@@ -52,7 +52,7 @@ describe("sample fixture reconciler", () => {
     expect(checkFixtures(layout)).toMatchObject({
       ok: true,
       issues: [],
-      indexedFileCount: 106,
+      indexedFileCount: 108,
       graphNodeCount: 24,
       mirrorCount: 1,
     });
@@ -64,7 +64,7 @@ describe("sample fixture reconciler", () => {
     expect(checkFixtures(layout)).toMatchObject({
       ok: true,
       issues: [],
-      indexedFileCount: 106,
+      indexedFileCount: 108,
       graphNodeCount: 24,
       mirrorCount: 1,
     });

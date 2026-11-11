@@ -1480,13 +1480,65 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.approveLoopSpec(projectId, loopId, spec);
   }
 
+  preflightLoopRun(
+    projectId: string,
+    loopId: string,
+    options?: {
+      specVersion?: string;
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+    },
+  ) {
+    return this.transport.preflightLoopRun(projectId, loopId, options);
+  }
+
+  ingestLoopTaskMaterial(
+    projectId: string,
+    input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ) {
+    return this.transport.ingestLoopTaskMaterial(projectId, input);
+  }
+
+  ingestLoopUrlMaterial(
+    projectId: string,
+    input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ) {
+    return this.transport.ingestLoopUrlMaterial(projectId, input);
+  }
+
   startLoopInstance(
     projectId: string,
     loopId: string,
     specVersion?: string,
     featureNodeId?: string,
+    options?: {
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ) {
-    return this.transport.startLoopInstance(projectId, loopId, specVersion, featureNodeId);
+    return this.transport.startLoopInstance(
+      projectId,
+      loopId,
+      specVersion,
+      featureNodeId,
+      options,
+    );
   }
 
   startLoopInstanceWithParams(
@@ -1504,6 +1556,22 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
   ) {
     return this.transport.startLoopInstanceFromEvent(projectId, loopId, event);
+  }
+
+  enqueueOfflineLoopEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ) {
+    return this.transport.enqueueOfflineLoopEvent(projectId, loopId, event);
+  }
+
+  listOfflineLoopEventQueue(projectId: string) {
+    return this.transport.listOfflineLoopEventQueue(projectId);
+  }
+
+  drainOfflineLoopEventQueue(projectId: string, options?: { max?: number }) {
+    return this.transport.drainOfflineLoopEventQueue(projectId, options);
   }
 
   restoreLoopInstanceFromCheckpoint(
@@ -1563,6 +1631,14 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.sendLoopAuthoringTurn(projectId, loopId, request);
   }
 
+  setLoopAuthoringLoopbackMode(mode: "off" | "demo_edit") {
+    return this.transport.setLoopAuthoringLoopbackMode(mode);
+  }
+
+  setLoopExecutionLoopbackMode(mode: "off" | "local_tools") {
+    return this.transport.setLoopExecutionLoopbackMode(mode);
+  }
+
   answerLoopGoalClarification(
     projectId: string,
     loopId: string,
@@ -1589,6 +1665,10 @@ export class RealProjectOSApiClient implements ProjectOSApi {
 
   undoLoopDraft(projectId: string, loopId: string) {
     return this.transport.undoLoopDraft(projectId, loopId);
+  }
+
+  redoLoopDraft(projectId: string, loopId: string) {
+    return this.transport.redoLoopDraft(projectId, loopId);
   }
 
   setLoopComposerMode(

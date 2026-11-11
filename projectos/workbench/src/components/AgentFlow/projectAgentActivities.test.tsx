@@ -84,6 +84,7 @@ describe('projectAgentActivities', () => {
     expect(summaryHtml).not.toContain('SECRET_PREVIEW_LINE')
     expect(summaryHtml).not.toContain('src/auth.ts')
 
+    // Finished rows stay collapsed until selected+expanded (inspector behavior).
     const detailHtml = renderOpened([explore!])
     expect(detailHtml).toContain('SECRET_PREVIEW_LINE')
     expect(detailHtml).toContain('src/auth.ts:12')

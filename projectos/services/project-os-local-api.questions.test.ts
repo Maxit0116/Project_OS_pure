@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunDecision } from "../contracts/run-state.js";
+import { copySampleTree } from "../test-support/copy-sample.js";
 import { ProjectOSLocalApi } from "./project-os-local-api.js";
 import { copySampleTree } from "../test-support/copy-sample.js";
 

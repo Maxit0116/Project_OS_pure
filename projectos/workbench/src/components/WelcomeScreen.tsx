@@ -39,6 +39,7 @@ export default function WelcomeScreen({
   const setThemePreference = useWorkbenchStore((s) => s.setThemePreference)
   const locale = useWorkbenchStore((s) => s.locale)
   const setLocale = useWorkbenchStore((s) => s.setLocale)
+  const openSampleWorkspace = useWorkbenchStore((s) => s.openSampleWorkspace)
   const [dialogMode, setDialogMode] = useState<'path' | 'clone' | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [workspacePath, setWorkspacePath] = useState('')
@@ -167,6 +168,17 @@ export default function WelcomeScreen({
           >
             <GitBranch size={18} strokeWidth={1.5} aria-hidden />
             <span>{ts('welcome.cloneRepo')}</span>
+          </button>
+          <button
+            type="button"
+            className={styles.tile}
+            onClick={() => {
+              void openSampleWorkspace()
+            }}
+            disabled={busy}
+            data-testid="welcome-open-sample"
+          >
+            <span>{ts('welcome.openSample')}</span>
           </button>
         </div>
 

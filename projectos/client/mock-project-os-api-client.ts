@@ -113,6 +113,7 @@ import {
   mockStartLoopInstanceFromEvent,
   mockStartLoopInstanceWithParams,
   mockUndoLoopDraft,
+  mockRedoLoopDraft,
   mockUnlinkLoopGraphFromSession,
   mockUpsertLoopGraph,
 } from "./mock-loop-graph-store.js";
@@ -480,11 +481,94 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     return Promise.resolve(mockApproveLoopSpec(projectId, loopId, spec));
   }
 
+  override async preflightLoopRun(
+    _projectId: string,
+    _loopId: string,
+    _options?: {
+      specVersion?: string;
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+    },
+  ): Promise<import("../services/loop-run-preflight.js").LoopPreflightResult> {
+    // Browser mock has no LocalApi document — honest empty checklist, not a fake pass.
+    return {
+      ok: false,
+      canStart: false,
+      items: [
+        {
+          id: "pf_mock_host",
+          severity: "blocker",
+          code: "no_approved_spec",
+          message:
+            "preflightLoopRun requires Electron LocalApi host — browser mock cannot certify run readiness",
+        },
+      ],
+    };
+  }
+
+  override async ingestLoopTaskMaterial(
+    _projectId: string,
+    input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ): Promise<import("../services/loop-material-ingest.js").IngestLoopMaterialResult> {
+    // Node/vitest mock can run parsers; real browser without host still fails inside ingest.
+    const { ingestLoopTaskMaterial } = await import(
+      "../services/loop-material-ingest.js"
+    );
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(input.bytesBase64, "base64");
+    } catch {
+      return { ok: false, error: "Invalid bytesBase64" };
+    }
+    return ingestLoopTaskMaterial({
+      fileName: input.fileName,
+      ...(input.mimeType ? { mimeType: input.mimeType } : {}),
+      bytes: new Uint8Array(bytes),
+      ...(input.materialId ? { materialId: input.materialId } : {}),
+      ...(input.xlsxSelection ? { xlsxSelection: input.xlsxSelection } : {}),
+      ...(input.pdfSelection ? { pdfSelection: input.pdfSelection } : {}),
+    });
+  }
+
+  override async ingestLoopUrlMaterial(
+    _projectId: string,
+    input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ): Promise<import("../services/loop-material-ingest.js").IngestLoopMaterialResult> {
+    const { ingestLoopUrlMaterial } = await import(
+      "../services/loop-material-ingest.js"
+    );
+    return ingestLoopUrlMaterial({
+      url: input.url,
+      ...(input.materialId ? { materialId: input.materialId } : {}),
+      ...(input.title ? { title: input.title } : {}),
+    });
+  }
+
   override startLoopInstance(
     projectId: string,
     loopId: string,
     specVersion?: string,
     _featureNodeId?: string,
+    _options?: {
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ): Promise<LoopGraphDocument> {
     return Promise.resolve(mockStartLoopInstance(projectId, loopId, specVersion));
   }
@@ -506,6 +590,43 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
   ): Promise<LoopGraphDocument> {
     return Promise.resolve(mockStartLoopInstanceFromEvent(projectId, loopId, event));
+  }
+
+  override enqueueOfflineLoopEvent(
+    _projectId: string,
+    _loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<{
+    outcome: "queued" | "dropped_duplicate";
+    dedupeKey: string;
+    queuedCount: number;
+  }> {
+    return Promise.resolve({
+      outcome: "queued",
+      dedupeKey: `event:${event.eventType}:${event.eventId}`,
+      queuedCount: 1,
+    });
+  }
+
+  override listOfflineLoopEventQueue(_projectId: string): Promise<
+    Array<{
+      dedupeKey: string;
+      loopId: string;
+      eventId: string;
+      eventType: string;
+      status: string;
+      enqueuedAt: string;
+      lastError?: string;
+    }>
+  > {
+    return Promise.resolve([]);
+  }
+
+  override drainOfflineLoopEventQueue(
+    _projectId: string,
+    _options?: { max?: number },
+  ): Promise<{ drained: number; failed: number; queuedRemaining: number }> {
+    return Promise.resolve({ drained: 0, failed: 0, queuedRemaining: 0 });
   }
 
   override restoreLoopInstanceFromCheckpoint(
@@ -598,12 +719,36 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
     return Promise.resolve(mockAdvanceLoopInstance(projectId, loopId, instanceId));
   }
 
-  override sendLoopAuthoringTurn(
+  override async sendLoopAuthoringTurn(
     projectId: string,
     loopId: string,
     request: LoopAuthoringTurnRequest,
   ): Promise<LoopGraphDocument> {
-    return Promise.resolve(mockSendLoopAuthoringTurn(projectId, loopId, request));
+    // useProvider:true must not silently heuristic-pretend AI in the browser mock.
+    if (request.useProvider === true) {
+      throw new Error(
+        "Provider authoring is not available in the browser mock without a LocalApi ModelGateway / loopback complete. Refusing silent heuristic fallback. Use Electron LocalApi or omit useProvider for honest heuristics.",
+      );
+    }
+    return mockSendLoopAuthoringTurn(projectId, loopId, request);
+  }
+
+  override async setLoopExecutionLoopbackMode(
+    _mode: "off" | "local_tools",
+  ): Promise<{ mode: "off" | "local_tools"; live: false; label: string }> {
+    throw new Error(
+      "setLoopExecutionLoopbackMode requires Electron LocalApi host (loopback·local_tools).",
+    );
+  }
+
+  override async setLoopAuthoringLoopbackMode(
+    mode: "off" | "demo_edit",
+  ): Promise<{ mode: "off" | "demo_edit"; live: false }> {
+    // Browser mock has no LocalApi host — loopback injection is Electron-only.
+    if (mode === "off") return { mode: "off", live: false };
+    throw new Error(
+      "setLoopAuthoringLoopbackMode requires Electron LocalApi host (loopback·not live).",
+    );
   }
 
   override answerLoopGoalClarification(
@@ -644,6 +789,10 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
 
   override undoLoopDraft(projectId: string, loopId: string): Promise<LoopGraphDocument> {
     return Promise.resolve(mockUndoLoopDraft(projectId, loopId));
+  }
+
+  override redoLoopDraft(projectId: string, loopId: string): Promise<LoopGraphDocument> {
+    return Promise.resolve(mockRedoLoopDraft(projectId, loopId));
   }
 
   override setLoopComposerMode(

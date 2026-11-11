@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Pure Loops SaaS nodes · n8n-like comparison fixture</title>
+    <style>
+      :root {
+        --tech-bg-canvas: #0b1017;
+        --tech-bg-elevated: #121820;
+        --tech-bg-muted: #1a2230;
+        --tech-border: #2a3344;
+        --tech-border-strong: #3a465c;
+        --tech-text-primary: #e8eef7;
+        --tech-text-secondary: #9aa8bc;
+        --tech-accent: #5b9fd4;
+        --tech-warning: #e0b44f;
+        --tech-success: #3fbf7f;
+        --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        font-family: var(--font-sans);
+        background: var(--tech-bg-canvas);
+        color: var(--tech-text-primary);
+      }
+      header {
+        padding: 16px 20px 8px;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 16px;
+      }
+      .meta {
+        color: var(--tech-text-secondary);
+        font-size: 12px;
+      }
+      .stage {
+        position: relative;
+        margin: 12px 20px 24px;
+        height: 420px;
+        border: 1px solid var(--tech-border);
+        border-radius: 8px;
+        background:
+          linear-gradient(var(--tech-border) 1px, transparent 1px),
+          linear-gradient(90deg, var(--tech-border) 1px, transparent 1px),
+          var(--tech-bg-canvas);
+        background-size: 24px 24px, 24px 24px, auto;
+        overflow: hidden;
+      }
+      .world {
+        position: absolute;
+        inset: 0;
+        transform: scale(1);
+        transform-origin: 0 0;
+      }
+      .node {
+        position: absolute;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 148px;
+        max-width: 220px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid color-mix(in srgb, var(--tech-border) 80%, transparent);
+        background: color-mix(in srgb, var(--tech-bg-elevated) 92%, transparent);
+        box-sizing: border-box;
+      }
+      .node.selected {
+        border-color: var(--tech-accent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--tech-accent) 45%, transparent);
+      }
+      .node.blocked {
+        border-style: dashed;
+      }
+      .node.error {
+        border-color: color-mix(in srgb, #e35d6a 70%, transparent);
+      }
+      .node.hitl {
+        border-color: color-mix(in srgb, #c48bff 70%, transparent);
+      }
+      .logo {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: var(--tech-bg-muted);
+      }
+      .logo img {
+        width: 22px;
+        height: 22px;
+      }
+      .text {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .name {
+        font-size: 13px;
+        font-weight: 650;
+      }
+      .op {
+        font-size: 11px;
+        opacity: 0.72;
+      }
+      .badge {
+        margin-left: auto;
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 999px;
+        background: var(--tech-bg-muted);
+        color: var(--tech-warning);
+        white-space: nowrap;
+      }
+      .port {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        margin: -5px 0 0 -5px;
+        border-radius: 999px;
+        border: 1.5px solid var(--tech-accent);
+        background: var(--tech-bg-elevated);
+      }
+      .legacy {
+        border-radius: 6px;
+        gap: 6px;
+        padding: 8px 10px;
+      }
+      .legacy .logo {
+        width: 24px;
+        height: 24px;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--tech-success);
+      }
+      .refs {
+        padding: 0 20px 24px;
+        font-size: 12px;
+        color: var(--tech-text-secondary);
+      }
+      .refs code {
+        color: var(--tech-text-primary);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Pure Loops · SaaS node card fixture (zoom=1)</h1>
+      <p class="meta">
+        Independent n8n-like layout (logo + name + operation). Not n8n source/CSS.
+        Mixed with Agent / Human / Logic for acceptance.
+      </p>
+    </header>
+
+    <section class="stage" id="after" data-fixture="after">
+      <div class="world">
+        <div class="node selected" style="left: 40px; top: 48px" data-integration="github">
+          <span class="port" style="left: 0; top: 50%"></span>
+          <span class="port" style="left: 100%; top: 50%"></span>
+          <span class="logo"><img src="../icons/github.svg" alt="" /></span>
+          <span class="text"><span class="name">GitHub</span><span class="op">Create PR</span></span>
+          <span class="badge">未配置</span>
+        </div>
+        <div class="node blocked" style="left: 280px; top: 48px" data-integration="slack">
+          <span class="port" style="left: 0; top: 50%"></span>
+          <span class="port" style="left: 100%; top: 50%"></span>
+          <span class="logo"><img src="../icons/slack.svg" alt="" /></span>
+          <span class="text"><span class="name">Slack</span><span class="op">Post message</span></span>
+          <span class="badge">未配置</span>
+        </div>
+        <div class="node blocked" style="left: 520px; top: 48px" data-integration="lark">
+          <span class="port" style="left: 0; top: 50%"></span>
+          <span class="port" style="left: 100%; top: 50%"></span>
+          <span class="logo"><img src="../icons/lark.svg" alt="" /></span>
+          <span class="text"><span class="name">Lark</span><span class="op">Send message</span></span>
+          <span class="badge">未配置</span>
+        </div>
+        <div class="node blocked" style="left: 760px; top: 48px" data-integration="feishu">
+          <span class="port" style="left: 0; top: 50%"></span>
+          <span class="port" style="left: 100%; top: 50%"></span>
+          <span class="logo"><img src="../icons/feishu.svg" alt="" /></span>
+          <span class="text"><span class="name">飞书 Feishu</span><span class="op">Send message</span></span>
+          <span class="badge">未配置</span>
+        </div>
+        <div class="node blocked" style="left: 760px; top: 180px" data-integration="sentry">
+          <span class="port" style="left: 0; top: 50%"></span>
+          <span class="port" style="left: 100%; top: 50%"></span>
+          <span class="logo"><img src="../icons/sentry.svg" alt="" /></span>
+          <span class="text"><span class="name">Sentry</span><span class="op">List issues</span></span>
+          <span class="badge">未配置</span>
+        </div>
+        <div class="node" style="left: 40px; top: 180px" data-kind="agent">
+          <span class="port" style="left: 0; top: 50%"></span>
+          <span class="port" style="left: 100%; top: 50%"></span>
+          <span class="logo">A</span>
+          <span class="text"><span class="name">Coder</span><span class="op">Agent duty</span></span>
+        </div>
+        <div class="node hitl" style="left: 280px; top: 180px" data-kind="human">
+          <span class="port" style="left: 0; top: 50%"></span>
+          <span class="port" style="left: 100%; top: 50%"></span>
+          <span class="logo">H</span>
+          <span class="text"><span class="name">Approval</span><span class="op">等待人工</span></span>
+          <span class="badge">等待人工</span>
+        </div>
+        <div class="node error" style="left: 520px; top: 180px" data-kind="logic">
+          <span class="port" style="left: 0; top: 50%"></span>
+          <span class="port" style="left: 100%; top: 50%"></span>
+          <span class="logo">L</span>
+          <span class="text"><span class="name">Condition</span><span class="op">branch</span></span>
+          <span class="badge" style="color: #ffb4bc">错误</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage" id="before" data-fixture="before">
+      <div class="world">
+        <div class="node legacy" style="left: 40px; top: 48px">
+          <span class="logo">PR</span>
+          <span class="text"><span class="name">Create PR</span></span>
+        </div>
+        <div class="node legacy" style="left: 280px; top: 48px">
+          <span class="logo">T</span>
+          <span class="text"><span class="name">Terminal</span></span>
+        </div>
+        <div class="node legacy" style="left: 520px; top: 48px">
+          <span class="logo">?</span>
+          <span class="text"><span class="name">Action</span></span>
+        </div>
+        <div class="node legacy" style="left: 40px; top: 180px">
+          <span class="logo">A</span>
+          <span class="text"><span class="name">Coder</span></span>
+        </div>
+        <div class="node legacy" style="left: 280px; top: 180px">
+          <span class="logo">H</span>
+          <span class="text"><span class="name">Approval</span></span>
+        </div>
+        <div class="node legacy" style="left: 520px; top: 180px">
+          <span class="logo">L</span>
+          <span class="text"><span class="name">Condition</span></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="refs">
+      <p>
+        n8n UX references (behavior only; Sustainable Use License — no source copy):
+        <br />
+        <code>https://docs.n8n.io/workflows/components/nodes/</code> (fetched 2026-11-10)
+        <br />
+        <code>https://docs.n8n.io/workflows/components/connections/</code>
+        <br />
+        Brand SVGs: local Simple Icons CC0 paths (GitHub/Slack) + Pure-authored Lark mark — see
+        <code>PROVENANCE.md</code>.
+      </p>
+    </section>
+  </body>
+</html>

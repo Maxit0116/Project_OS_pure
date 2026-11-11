@@ -1552,11 +1552,76 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async preflightLoopRun(
+    _projectId: string,
+    _loopId: string,
+    _options?: {
+      specVersion?: string;
+      branch?: string;
+      materials?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial[];
+    },
+  ): Promise<{
+    ok: boolean;
+    canStart: boolean;
+    items: Array<{
+      id: string;
+      severity: "blocker" | "warning" | "info";
+      code: string;
+      message: string;
+      nodeId?: string;
+      materialId?: string;
+    }>;
+  }> {
+    return transportNotConnected();
+  }
+
+  async ingestLoopTaskMaterial(
+    _projectId: string,
+    _input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial;
+  }> {
+    return transportNotConnected();
+  }
+
+  async ingestLoopUrlMaterial(
+    _projectId: string,
+    _input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial;
+  }> {
+    return transportNotConnected();
+  }
+
   async startLoopInstance(
     _projectId: string,
     _loopId: string,
     _specVersion?: string,
     _featureNodeId?: string,
+    _options?: {
+      branch?: string;
+      materials?: import("../../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
     return transportNotConnected();
   }
@@ -1575,6 +1640,39 @@ export class NotConnectedTransport implements ProjectOSApi {
     _loopId: string,
     _event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async enqueueOfflineLoopEvent(
+    _projectId: string,
+    _loopId: string,
+    _event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<{
+    outcome: "queued" | "dropped_duplicate";
+    dedupeKey: string;
+    queuedCount: number;
+  }> {
+    return transportNotConnected();
+  }
+
+  async listOfflineLoopEventQueue(_projectId: string): Promise<
+    Array<{
+      dedupeKey: string;
+      loopId: string;
+      eventId: string;
+      eventType: string;
+      status: string;
+      enqueuedAt: string;
+      lastError?: string;
+    }>
+  > {
+    return transportNotConnected();
+  }
+
+  async drainOfflineLoopEventQueue(
+    _projectId: string,
+    _options?: { max?: number },
+  ): Promise<{ drained: number; failed: number; queuedRemaining: number }> {
     return transportNotConnected();
   }
 
@@ -1668,6 +1766,20 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async setLoopExecutionLoopbackMode(
+    _mode: "off" | "local_tools",
+  ): Promise<{ mode: "off" | "local_tools"; live: false; label: string }> {
+    throw new Error(
+      "setLoopExecutionLoopbackMode requires Electron LocalApi host (loopback·local_tools).",
+    );
+  }
+
+  async setLoopAuthoringLoopbackMode(
+    _mode: "off" | "demo_edit",
+  ): Promise<{ mode: "off" | "demo_edit"; live: false }> {
+    return transportNotConnected();
+  }
+
   async answerLoopGoalClarification(
     _projectId: string,
     _loopId: string,
@@ -1705,6 +1817,13 @@ export class NotConnectedTransport implements ProjectOSApi {
   }
 
   async undoLoopDraft(
+    _projectId: string,
+    _loopId: string,
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async redoLoopDraft(
     _projectId: string,
     _loopId: string,
   ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {

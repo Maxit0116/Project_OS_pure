@@ -5,6 +5,7 @@ import {
   isConfigNode,
   isLoopLogicNode,
   isMergeNode,
+  LOOP_ACTION_INTEGRATIONS,
   withArchitectureDefaults,
   type LoopActionIntegration,
   type LoopAgentRole,
@@ -12,6 +13,10 @@ import {
   type LoopLogicKind,
   type LoopNodeType,
 } from "./loop-node-architecture.js";
+import {
+  LoopRunBindingSchema,
+  LoopTaskMaterialSchema,
+} from "./loop-task-materials.js";
 
 export {
   LOOP_ACTION_INTEGRATIONS,
@@ -92,7 +97,7 @@ export const LoopHumanModeSchema = z.enum([
   "takeover",
 ]);
 
-export const LoopActionIntegrationSchema = z.enum(["github", "test", "terminal"]);
+export const LoopActionIntegrationSchema = z.enum(LOOP_ACTION_INTEGRATIONS);
 
 export const LoopLogicKindSchema = z.enum([
   "condition",
@@ -208,6 +213,15 @@ export const IntentGraphPositionSchema = z
   })
   .strict();
 
+export const IntentGraphNodeActionParamsSchema = z
+  .record(
+    z.string().min(1).max(80),
+    z.union([z.string().max(2000), z.number().finite(), z.boolean()]),
+  )
+  .refine((value) => Object.keys(value).length <= 32, {
+    message: "actionParams supports at most 32 keys",
+  });
+
 export const IntentGraphNodeSchema = z
   .object({
     id: z.string().min(1),
@@ -224,6 +238,23 @@ export const IntentGraphNodeSchema = z
     logicKind: LoopLogicKindSchema.optional(),
     maxIterations: z.number().int().positive().max(50).optional(),
     repairMode: z.boolean().optional(),
+    /** Credential reference id — secret material never stored on the node. */
+    credentialRefId: z.string().trim().min(1).max(120).optional(),
+    /** Per-node timeout (ms) for applicable Action/Logic waits. */
+    timeoutMs: z.number().int().positive().max(600_000).optional(),
+    /** Logic retry limit when logicKind === "retry". */
+    retryLimit: z.number().int().positive().max(20).optional(),
+    /** Logic wait duration when logicKind === "wait". */
+    waitMs: z.number().int().nonnegative().max(3_600_000).optional(),
+    /** Human assignee / approver label (not auth proof). */
+    humanAssignee: z.string().trim().min(1).max(120).optional(),
+    /** Allowed human operations for approval/decision nodes. */
+    humanAllowedActions: z
+      .array(z.string().trim().min(1).max(80))
+      .max(12)
+      .optional(),
+    /** Typed Action parameters (shared manual + AI schema). */
+    actionParams: IntentGraphNodeActionParamsSchema.optional(),
     /** Present when `type === "config"` (Agent wiring satellite). */
     satelliteKind: LoopSatelliteKindSchema.optional(),
     /** Asset pointer for a config satellite. */
@@ -427,6 +458,9 @@ export const LoopInstanceEventSchema = z
       "checkpoint_saved",
       "freshness_stale",
       "budget_exceeded",
+      "approval_stale",
+      /** HTTP side effect kept; post-dispatch evidence drifted. */
+      "delivery_stale",
     ]),
     nodeId: z.string().min(1).optional(),
     message: z.string().trim().max(2000).optional(),
@@ -497,6 +531,10 @@ export const LoopBudgetUsageSchema = z
     tokens: z.number().int().nonnegative().optional(),
     wallClockMs: z.number().int().nonnegative().optional(),
     retries: z.number().int().nonnegative().optional(),
+    /** Agent↔agent / loop-started AgentRun count (互调预算). */
+    agentCalls: z.number().int().nonnegative().optional(),
+    /** Nested agent call depth for the active chain. */
+    agentCallDepth: z.number().int().nonnegative().optional(),
   })
   .strict();
 
@@ -548,6 +586,50 @@ export const LoopInstanceSchema = z
     artifacts: z.array(LoopInstanceArtifactSchema).max(100).optional(),
     /** Payload approved/edited by Human Approval for the next Action. */
     pendingActionPayload: z.record(z.string(), z.unknown()).optional(),
+    /**
+     * Live approval gate binding for the next side-effect Action.
+     * Cleared or invalidated when engineering artifacts / payload change.
+     */
+    pendingApprovalBinding: z
+      .object({
+        decisionArtifactId: z.string().min(1),
+        instanceId: z.string().min(1),
+        nodeId: z.string().min(1),
+        decisionNodeId: z.string().min(1).optional(),
+        actionIntegration: z.string().trim().min(1).max(80).optional(),
+        actionOperation: z.string().trim().min(1).max(80).optional(),
+        artifactIds: z.array(z.string().min(1)).max(20),
+        engineeringBaseline: z.string().trim().min(1).max(128),
+        codeDigest: z.string().trim().min(1).max(128).optional(),
+        /** Materials/definition/code/budget/permission freeze at approve time. */
+        runApprovalContextDigest: z.string().trim().min(1).max(128).optional(),
+        operationDigest: z.string().trim().min(1).max(128),
+        actor: z.string().trim().min(1).max(120).optional(),
+        actorKind: z.enum(["local_declared", "unspecified"]).optional(),
+        approvedAt: z.string().min(1),
+      })
+      .strict()
+      .optional(),
+    /**
+     * SaaS connector Action queued for async settle (Slack/Feishu/Lark/Sentry/…).
+     * Settled via loop-connectors settleConnectorOperation — never auto-executes
+     * without LocalApi/transport DI.
+     */
+    pendingConnectorOp: z
+      .object({
+        nodeId: z.string().min(1),
+        vendorId: z.string().trim().min(1).max(40),
+        capabilityId: z.string().trim().min(1).max(80),
+        payload: z.record(z.string(), z.unknown()),
+        credentialRefId: z.string().trim().min(1).max(120),
+        idempotencyKey: z.string().trim().min(1).max(160),
+        queuedAt: z.string().min(1),
+        dispatchState: z
+          .enum(["queued", "preparing", "http_started", "in_flight"])
+          .optional(),
+      })
+      .strict()
+      .optional(),
     /** GitHub Action queued for async settle (REST create_pr, etc.). */
     pendingGithubOp: z
       .object({
@@ -555,9 +637,79 @@ export const LoopInstanceSchema = z
         operation: z.string().trim().min(1).max(80),
         payload: z.record(z.string(), z.unknown()),
         queuedAt: z.string().min(1),
+        /**
+         * queued = not sent;
+         * preparing = token/import window (no remote side effect yet — may clear);
+         * http_started = transport/push claimed (unknown until settled — must not clear);
+         * in_flight = legacy alias of http_started (treated as side-effect unknown).
+         */
+        dispatchState: z
+          .enum(["queued", "preparing", "http_started", "in_flight"])
+          .optional(),
+        /** Stable key for query-before-resend (instance+node+op+payload digest). */
+        idempotencyKey: z.string().trim().min(1).max(160).optional(),
+        dispatchAttemptId: z.string().min(1).optional(),
+        httpAttemptedAt: z.string().min(1).optional(),
+        /**
+         * Durable journal for http_started/unknown outcomes — must not be erased by
+         * deny-before-HTTP so a later approve cannot create a second side effect.
+         */
+        dispatchJournal: z
+          .array(
+            z
+              .object({
+                at: z.string().min(1),
+                kind: z.enum([
+                  "queued",
+                  "preparing",
+                  "http_started",
+                  "in_flight",
+                  "unknown",
+                  "lookup_hit",
+                  "completed",
+                  "denied_preflight",
+                  "orphaned_result",
+                ]),
+                message: z.string().trim().max(500),
+              })
+              .strict(),
+          )
+          .max(20)
+          .optional(),
+        /** Snapshot for TOCTOU re-check at HTTP dispatch boundary (preflight). */
+        approvalBinding: z
+          .object({
+            decisionArtifactId: z.string().min(1),
+            instanceId: z.string().min(1),
+            nodeId: z.string().min(1),
+            decisionNodeId: z.string().min(1).optional(),
+            actionIntegration: z.string().trim().min(1).max(80).optional(),
+            actionOperation: z.string().trim().min(1).max(80).optional(),
+            artifactIds: z.array(z.string().min(1)).max(20),
+            engineeringBaseline: z.string().trim().min(1).max(128),
+            codeDigest: z.string().trim().min(1).max(128).optional(),
+            runApprovalContextDigest: z.string().trim().min(1).max(128).optional(),
+            operationDigest: z.string().trim().min(1).max(128),
+            actor: z.string().trim().min(1).max(120).optional(),
+            actorKind: z.enum(["local_declared", "unspecified"]).optional(),
+            approvedAt: z.string().min(1),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),
+    /**
+     * Project/run binding snapshot for project-workflow starts.
+     * Editing Intent/Spec must not rewrite this after the run is created.
+     */
+    runBinding: LoopRunBindingSchema.optional(),
+    /**
+     * Live code digest captured when verification entered; must match at stamp time.
+     */
+    verificationCodeDigest: z.string().trim().min(1).max(128).optional(),
+    /** Evidence id bound when verification first accepted a run result. */
+    verificationEvidenceId: z.string().min(1).optional(),
     /** GC-4.1 recoverable snapshot. */
     checkpoint: LoopInstanceCheckpointSchema.optional(),
     /** GC-4.2 context freshness (orthogonal to status). */
@@ -661,10 +813,30 @@ export const IntentGraphHistoryEntrySchema = z
   })
   .strict();
 
+export const LoopGraphEditDiffSchema = z
+  .object({
+    addedNodeIds: z.array(z.string().min(1)).max(100),
+    removedNodeIds: z.array(z.string().min(1)).max(100),
+    changedNodeIds: z.array(z.string().min(1)).max(100),
+    addedEdgeIds: z.array(z.string().min(1)).max(200),
+    removedEdgeIds: z.array(z.string().min(1)).max(200),
+    summaryLines: z.array(z.string().trim().min(1).max(240)).max(20),
+  })
+  .strict();
+
 export const LoopPendingGraphEditOfferSchema = z
   .object({
     reason: z.string().trim().min(1).max(500),
     createdAt: z.string().min(1),
+    /** When set, Accept applies this proposed draft (AI Edit propose-before-apply). */
+    proposedDraft: IntentGraphSchema.optional(),
+    /** Draft revision the proposal was computed against (reject if diverged). */
+    baseRevision: z.number().int().nonnegative().optional(),
+    /** Goal-context revision at propose time (reject if goal changed). */
+    baseGoalRevision: z.number().int().nonnegative().optional(),
+    summary: z.string().trim().min(1).max(1000).optional(),
+    /** Structured preview for reviewable accept/dismiss (not reason text alone). */
+    diff: LoopGraphEditDiffSchema.optional(),
   })
   .strict();
 
@@ -701,7 +873,42 @@ export const LoopGraphDocumentSchema = z
       .array(IntentGraphHistoryEntrySchema)
       .max(LOOP_DRAFT_HISTORY_MAX)
       .default([]),
+    /** Populated by undo; cleared on new Accept / persist edits. */
+    draftRedoStack: z
+      .array(IntentGraphHistoryEntrySchema)
+      .max(LOOP_DRAFT_HISTORY_MAX)
+      .default([]),
     pendingGraphEditOffer: LoopPendingGraphEditOfferSchema.optional(),
+    /**
+     * Staging task pack for project manual runs — NOT Intent draft / Spec.
+     * Materials here may be edited/saved/reopened without mutating definitions.
+     * Start snapshots into Instance.runBinding; runOverride never writes back draft.
+     */
+    taskPack: z
+      .object({
+        branch: z.string().trim().min(1).max(240).optional(),
+        materials: z.array(LoopTaskMaterialSchema).max(64).default([]),
+        updatedAt: z.string().min(1),
+        /**
+         * TM-8 writeback: material change → plan/approval evidence stale.
+         * Survives reopen; never mutates Intent draft. Acknowledge clears start
+         * blocker until the next material change.
+         */
+        materialRereview: z
+          .object({
+            requiresRereview: z.boolean(),
+            affectedNodeIds: z.array(z.string().min(1)).max(64).default([]),
+            changedMaterialIds: z.array(z.string().min(1)).max(64).default([]),
+            reason: z.string().trim().min(1).max(500),
+            evidenceStaleAt: z.string().min(1),
+            acknowledgedAt: z.string().min(1).optional(),
+            staleEvidenceIds: z.array(z.string().min(1).max(120)).max(64).default([]),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1),
   })
@@ -721,6 +928,8 @@ export const LoopHitlAnswerSchema = z
     answer: z.string().trim().min(1).max(1000),
     /** Approval Edit: Action must execute this payload, not the Agent draft. */
     editedPayload: z.record(z.string(), z.unknown()).optional(),
+    /** Authorized human actor; assignment alone does not imply this. */
+    actor: z.string().trim().min(1).max(120).optional(),
   })
   .strict();
 
@@ -728,6 +937,16 @@ export const LoopAuthoringTurnRequestSchema = z
   .object({
     mode: LoopComposerModeSchema,
     text: z.string().trim().min(1).max(4000),
+    /**
+     * Optional canvas selection — Edit prompts may target a single node.
+     * Omitted = whole-workflow context (still includes full draft in provider path).
+     */
+    selectedNodeId: z.string().min(1).optional(),
+    /**
+     * When true, prefer the ModelGateway provider path over heuristics.
+     * Loopback/tests inject a gateway; live keys are never auto-read this round.
+     */
+    useProvider: z.boolean().optional(),
   })
   .strict();
 
@@ -925,6 +1144,9 @@ export function normalizeLoopGraphDocument(raw: unknown): LoopGraphDocument {
         : emptyAuthoringTrace(),
     draftHistory: Array.isArray(base.draftHistory)
       ? base.draftHistory.slice(0, LOOP_DRAFT_HISTORY_MAX)
+      : [],
+    draftRedoStack: Array.isArray(base.draftRedoStack)
+      ? base.draftRedoStack.slice(0, LOOP_DRAFT_HISTORY_MAX)
       : [],
   });
 }

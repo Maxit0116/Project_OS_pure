@@ -172,7 +172,17 @@ import {
   resolveLoopLeafWriteScope,
   type LoopExecutionHooks,
 } from "./loop-execution.js";
+import { LoopExecutionLoopbackHost } from "./loop-execution-loopback.js";
+import {
+  appendLoopbackDurableVerification,
+  persistLoopbackDurableAgentRun,
+} from "./loop-execution-loopback-durable.js";
+import { createWorkspacePathDigester } from "./loop-approval-binding.js";
 import { getLoopGraph } from "./loop-graph-service.js";
+
+function createLoopExecutionLoopbackHost(): LoopExecutionLoopbackHost {
+  return new LoopExecutionLoopbackHost();
+}
 import {
   evaluateTerminalPolicyDecision,
   isHighRiskTerminalCommand,
@@ -1004,6 +1014,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     { workspace: LoadedProjectOSWorkspace; runId: string }
   >();
   private readonly fallbackNotices = new Map<string, string>();
+  /** Explicit loopback·local_tools host (not live/paid model). */
+  private readonly loopExecutionLoopback = createLoopExecutionLoopbackHost();
   private readonly codeFileUnderstandingInflight = new Map<
     string,
     Promise<CodeFileUnderstandingEntry>
@@ -8481,78 +8493,354 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     };
   }
 
-  private async settlePendingGithubOp(
-    workspace: LoadedProjectOSWorkspace,
-    _loopId: string,
-    document: import("../contracts/loop-graph.js").LoopGraphDocument,
+  /**
+   * Optional DI for GitHub prepare/transport (tests). Production resolves token +
+   * git-context create/push. Prepare must not push; transport owns side effects.
+   */
+  private loopGithubTransportOverride:
+    | {
+        prepare?: () =>
+          | Promise<{ accessToken?: string }>
+          | { accessToken?: string };
+        transportCreatePr?: (input: {
+          title: string;
+          head?: string;
+          base?: string;
+          body?: string;
+          accessToken?: string;
+        }) => Promise<{
+          ok: boolean;
+          message: string;
+          url?: string;
+          number?: number;
+        }>;
+        transportCreateBranch?: (input: {
+          branch: string;
+          from?: string;
+          accessToken?: string;
+        }) => Promise<{ ok: boolean; message: string }>;
+        listPullRequests?: (accessToken?: string) => Promise<{
+          available: boolean;
+          pullRequests: import("./git-context-service.js").ListedPullRequest[];
+          incomplete?: boolean;
+          message?: string;
+        }>;
+      }
+    | undefined;
+
+  /** Test-only: inject prepare/transport for LocalApi settle without live GitHub. */
+  replaceLoopGithubTransportForTests(
+    transport:
+      | NonNullable<ProjectOSLocalApi["loopGithubTransportOverride"]>
+      | undefined,
+  ): void {
+    this.loopGithubTransportOverride = transport;
+  }
+
+  private loopConnectorTransportOverride:
+    | import("./loop-connectors/http-transport.js").LoopConnectorTransport
+    | undefined;
+
+  private loopConnectorSecretResolver:
+    | ((credentialRefId: string) => string | null)
+    | undefined;
+
+  /** Test/loopback: inject SaaS connector HTTP transport (no live OAuth). */
+  replaceLoopConnectorTransportForTests(
+    transport:
+      | import("./loop-connectors/http-transport.js").LoopConnectorTransport
+      | undefined,
+  ): void {
+    this.loopConnectorTransportOverride = transport;
+  }
+
+  replaceLoopConnectorSecretResolverForTests(
+    resolve: ((credentialRefId: string) => string | null) | undefined,
+  ): void {
+    this.loopConnectorSecretResolver = resolve;
+  }
+
+  /**
+   * Test-only: run production settlePendingGithubOp for one instance
+   * (persisted load/save + DI transport).
+   */
+  async settlePendingGithubOpForTests(
+    projectId: string,
+    loopId: string,
     instanceId: string,
-    completePendingGithubOp: typeof import("./loop-runtime-service.js").completePendingGithubOp,
-    upsertLoopGraph: typeof import("./loop-graph-service.js").upsertLoopGraph,
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getLoopGraph, upsertLoopGraph } = await import(
+      "./loop-graph-service.js"
+    );
+    const { completePendingGithubOp } = await import("./loop-runtime-service.js");
+    const document = getLoopGraph(workspace.workspaceRoot, loopId);
+    if (!document) throw new Error(`Loop not found: ${loopId}`);
+    return this.settlePendingGithubOp(
+      workspace,
+      loopId,
+      document,
+      instanceId,
+      completePendingGithubOp,
+      upsertLoopGraph,
+    );
+  }
+
+  /**
+   * Production SaaS connector settle — LocalApi → settleConnectorOperation →
+   * adapter → transport → audit. Tests inject transport/secret via overrides.
+   */
+  async settlePendingConnectorOp(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    options?: {
+      resolveSecret?: (credentialRefId: string) => string | null;
+    },
+  ): Promise<{
+    document: import("../contracts/loop-graph.js").LoopGraphDocument;
+    result: import("./loop-connectors/types.js").LoopConnectorResult;
+  }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getLoopGraph, upsertLoopGraph } = await import(
+      "./loop-graph-service.js"
+    );
+    const { settleConnectorOperation } = await import(
+      "./loop-connectors/settle-connector.js"
+    );
+    const document = getLoopGraph(workspace.workspaceRoot, loopId);
+    if (!document) throw new Error(`Loop not found: ${loopId}`);
     const instance = document.instances.find((item) => item.id === instanceId);
-    const pending = instance?.pendingGithubOp;
-    if (!pending) return document;
-
-    const payload = pending.payload;
-    let result: import("./loop-execution.js").LoopGithubOperationResult;
-
-    if (pending.operation === "create_pr") {
-      const { createGithubPullRequest } = await import("./git-context-service.js");
-      const token = await this.resolveGithubAccessToken();
-      const title =
-        typeof payload.title === "string" && payload.title.trim()
-          ? payload.title.trim()
-          : "Loop Graph pull request";
-      const remote = await createGithubPullRequest(
-        workspace.workspaceRoot,
-        {
-          title,
-          ...(typeof payload.head === "string" ? { head: payload.head } : {}),
-          ...(typeof payload.base === "string" ? { base: payload.base } : {}),
-          ...(typeof payload.body === "string" ? { body: payload.body } : {}),
-        },
-        {
-          ...(token ? { accessToken: token } : {}),
-          pushHead: true,
-        },
-      );
-      result = {
-        ok: remote.ok,
-        message: remote.message,
-        ...(remote.url ? { url: remote.url } : {}),
-        ...(typeof remote.number === "number" ? { number: remote.number } : {}),
-        refs: Object.fromEntries(
-          Object.entries(payload).map(([key, value]) => [key, String(value)]),
+    const pending = instance?.pendingConnectorOp;
+    if (!pending) throw new Error(`No pendingConnectorOp on ${instanceId}`);
+    const transport =
+      this.loopConnectorTransportOverride ??
+      (await import("./loop-connectors/http-transport.js")).createFetchTransport();
+    const settled = await settleConnectorOperation(
+      {
+        nodeId: pending.nodeId,
+        vendorId: pending.vendorId as import("./loop-connectors/types.js").LoopConnectorVendorId,
+        capabilityId: pending.capabilityId,
+        payload: pending.payload,
+        credentialRefId: pending.credentialRefId,
+        idempotencyKey: pending.idempotencyKey,
+        queuedAt: pending.queuedAt,
+        ...(pending.dispatchState
+          ? { dispatchState: pending.dispatchState }
+          : {}),
+      },
+      {
+        instanceId,
+        loadDocument: () => getLoopGraph(workspace.workspaceRoot, loopId),
+        saveDocument: (doc) => upsertLoopGraph(workspace.workspaceRoot, doc),
+        ctx: { transport },
+        resolveSecret:
+          options?.resolveSecret ??
+          this.loopConnectorSecretResolver ??
+          (() => null),
+      },
+    );
+    // Clear pending on success/known failure after audit write.
+    const after = settled.doc;
+    const inst = after.instances.find((item) => item.id === instanceId);
+    if (inst?.pendingConnectorOp) {
+      const cleared = {
+        ...after,
+        instances: after.instances.map((item) =>
+          item.id === instanceId
+            ? { ...item, pendingConnectorOp: undefined }
+            : item,
         ),
       };
-    } else if (pending.operation === "create_branch") {
-      const { createGitBranch } = await import("./git-context-service.js");
-      const token = await this.resolveGithubAccessToken();
-      const branch =
-        (typeof payload.branch === "string" && payload.branch.trim()) ||
-        (typeof payload.name === "string" && payload.name.trim()) ||
-        "";
-      const created = createGitBranch(workspace.workspaceRoot, branch, {
-        ...(typeof payload.from === "string" ? { from: payload.from } : {}),
-        push: true,
-        ...(token ? { accessToken: token } : {}),
-      });
-      result = {
-        ok: created.ok,
-        message: created.message,
-        refs: { branch, ...(typeof payload.from === "string" ? { from: payload.from } : {}) },
-      };
-    } else {
-      result = {
-        ok: false,
-        message: `Unsupported deferred GitHub operation: ${pending.operation}`,
+      return {
+        document: upsertLoopGraph(workspace.workspaceRoot, cleared),
+        result: settled.result,
       };
     }
+    return { document: settled.doc, result: settled.result };
+  }
 
-    return upsertLoopGraph(
-      workspace.workspaceRoot,
-      completePendingGithubOp(document, instanceId, result),
-    );
+  /** @deprecated Use settlePendingConnectorOp — same production path. */
+  settlePendingConnectorOpForTests(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    options?: {
+      resolveSecret?: (credentialRefId: string) => string | null;
+    },
+  ): Promise<{
+    document: import("../contracts/loop-graph.js").LoopGraphDocument;
+    result: import("./loop-connectors/types.js").LoopConnectorResult;
+  }> {
+    return this.settlePendingConnectorOp(projectId, loopId, instanceId, options);
+  }
+
+  /**
+   * Production GitHub settle — prepare (token) → final gate inside scheduler →
+   * transport (push/create). Shared `settleGithubDispatch` is the only path.
+   */
+  private async settlePendingGithubOp(
+    workspace: LoadedProjectOSWorkspace,
+    loopId: string,
+    document: import("../contracts/loop-graph.js").LoopGraphDocument,
+    instanceId: string,
+    _completePendingGithubOp: typeof import("./loop-runtime-service.js").completePendingGithubOp,
+    upsertLoopGraph: typeof import("./loop-graph-service.js").upsertLoopGraph,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const { settleGithubDispatch } = await import("./loop-github-dispatch.js");
+    const { getLoopGraph } = await import("./loop-graph-service.js");
+    void document;
+    const override = this.loopGithubTransportOverride;
+    return settleGithubDispatch({
+      instanceId,
+      loadDocument: () => getLoopGraph(workspace.workspaceRoot, loopId),
+      saveDocument: (doc) => upsertLoopGraph(workspace.workspaceRoot, doc),
+      hooksFor: (doc) =>
+        this.loopHooksFor(
+          workspace,
+          loopId,
+          doc.instances.find((item) => item.id === instanceId)?.id ?? instanceId,
+        ),
+      prepareOperation: async () => {
+        if (override?.prepare) return override.prepare();
+        const token = await this.resolveGithubAccessToken();
+        return token ? { accessToken: token } : {};
+      },
+      listPullRequests: async (prepared) => {
+        if (override?.listPullRequests) {
+          return override.listPullRequests(prepared?.accessToken);
+        }
+        const { listGithubPullRequests } = await import("./git-context-service.js");
+        const listed = await listGithubPullRequests(workspace.workspaceRoot, {
+          ...(prepared?.accessToken
+            ? { accessToken: prepared.accessToken }
+            : {}),
+        });
+        return {
+          available: listed.available,
+          pullRequests: listed.pullRequests,
+          incomplete: listed.pullRequests.length >= 50,
+          ...(listed.message ? { message: listed.message } : {}),
+        };
+      },
+      transportOperation: async (pending, prepared) => {
+        const payload = pending.payload;
+        if (pending.operation === "create_pr") {
+          const title =
+            typeof payload.title === "string" && payload.title.trim()
+              ? payload.title.trim()
+              : "Loop Graph pull request";
+          const head =
+            typeof payload.head === "string" ? payload.head : undefined;
+          const base =
+            typeof payload.base === "string" ? payload.base : undefined;
+          const body =
+            typeof payload.body === "string" ? payload.body : undefined;
+          if (override?.transportCreatePr) {
+            const remote = await override.transportCreatePr({
+              title,
+              ...(head ? { head } : {}),
+              ...(base ? { base } : {}),
+              ...(body ? { body } : {}),
+              ...(prepared.accessToken
+                ? { accessToken: prepared.accessToken }
+                : {}),
+            });
+            return {
+              ok: remote.ok,
+              message: remote.message,
+              ...(remote.url ? { url: remote.url } : {}),
+              ...(typeof remote.number === "number"
+                ? { number: remote.number }
+                : {}),
+              refs: Object.fromEntries(
+                Object.entries(payload).map(([key, value]) => [
+                  key,
+                  String(value),
+                ]),
+              ),
+            };
+          }
+          const { createGithubPullRequest } = await import(
+            "./git-context-service.js"
+          );
+          const remote = await createGithubPullRequest(
+            workspace.workspaceRoot,
+            {
+              title,
+              ...(head ? { head } : {}),
+              ...(base ? { base } : {}),
+              ...(body ? { body } : {}),
+            },
+            {
+              ...(prepared.accessToken
+                ? { accessToken: prepared.accessToken }
+                : {}),
+              pushHead: true,
+            },
+          );
+          return {
+            ok: remote.ok,
+            message: remote.message,
+            ...(remote.url ? { url: remote.url } : {}),
+            ...(typeof remote.number === "number"
+              ? { number: remote.number }
+              : {}),
+            refs: Object.fromEntries(
+              Object.entries(payload).map(([key, value]) => [
+                key,
+                String(value),
+              ]),
+            ),
+          };
+        }
+        if (pending.operation === "create_branch") {
+          const branch =
+            (typeof payload.branch === "string" && payload.branch.trim()) ||
+            (typeof payload.name === "string" && payload.name.trim()) ||
+            "";
+          const from =
+            typeof payload.from === "string" ? payload.from : undefined;
+          if (override?.transportCreateBranch) {
+            const created = await override.transportCreateBranch({
+              branch,
+              ...(from ? { from } : {}),
+              ...(prepared.accessToken
+                ? { accessToken: prepared.accessToken }
+                : {}),
+            });
+            return {
+              ok: created.ok,
+              message: created.message,
+              refs: {
+                branch,
+                ...(from ? { from } : {}),
+              },
+            };
+          }
+          const { createGitBranch } = await import("./git-context-service.js");
+          const created = createGitBranch(workspace.workspaceRoot, branch, {
+            ...(from ? { from } : {}),
+            push: true,
+            ...(prepared.accessToken
+              ? { accessToken: prepared.accessToken }
+              : {}),
+          });
+          return {
+            ok: created.ok,
+            message: created.message,
+            refs: {
+              branch,
+              ...(from ? { from } : {}),
+            },
+          };
+        }
+        return {
+          ok: false,
+          message: `Unsupported deferred GitHub operation: ${pending.operation}`,
+        };
+      },
+    });
   }
 
   private async settleLoopRuns(
@@ -8569,7 +8857,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       const instance = [...current.instances].reverse().find((item) =>
         item.status === "queued" ||
         item.status === "running" ||
-        item.status === "awaiting_review",
+        item.status === "awaiting_review" ||
+        // Unknown in_flight may sit in awaiting_hitl while still needing lookup settle.
+        (item.status === "awaiting_hitl" && Boolean(item.pendingGithubOp)),
       );
       if (!instance) return current;
 
@@ -8582,6 +8872,20 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           completePendingGithubOp,
           upsertLoopGraph,
         );
+        continue;
+      }
+
+      if (
+        instance.pendingConnectorOp &&
+        (this.loopConnectorTransportOverride ||
+          this.loopConnectorSecretResolver)
+      ) {
+        const settled = await this.settlePendingConnectorOp(
+          workspace.project.projectId,
+          loopId,
+          instance.id,
+        );
+        current = settled.document;
         continue;
       }
 
@@ -8666,23 +8970,34 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       : doc?.approvedSpecs[doc.approvedSpecs.length - 1];
     return this.loopExecutionHooks(workspace, instance?.featureNodeId, {
       allowConcurrentLoopRuns: spec?.parallelMode === "multi_run",
+      ...(instance?.runBinding?.materials
+        ? { materials: instance.runBinding.materials }
+        : {}),
     });
   }
 
   private loopExecutionHooks(
     workspace: LoadedProjectOSWorkspace,
     featureNodeId?: string,
-    options?: { allowConcurrentLoopRuns?: boolean },
+    options?: {
+      allowConcurrentLoopRuns?: boolean;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+    },
   ): LoopExecutionHooks {
     const allowConcurrentLoopRuns = Boolean(options?.allowConcurrentLoopRuns);
-    const leaf = resolveLoopLeafWriteScope(
-      workspace.graph.nodes.map((node) => ({
-        id: node.id,
-        ...(node.children !== undefined ? { children: node.children } : {}),
-        linkedFiles: node.linkedFiles.map((file) => ({ path: file.path })),
-      })),
-      featureNodeId,
-    );
+    const graphNodes = workspace.graph.nodes.map((node) => ({
+      id: node.id,
+      ...(node.children !== undefined ? { children: node.children } : {}),
+      linkedFiles: node.linkedFiles.map((file) => ({ path: file.path })),
+    }));
+    const leaf =
+      this.loopExecutionLoopback.mode === "local_tools"
+        ? this.loopExecutionLoopback.resolveLeaf({
+            nodes: graphNodes,
+            ...(featureNodeId ? { featureNodeId } : {}),
+            ...(options?.materials ? { materials: options.materials } : {}),
+          })
+        : resolveLoopLeafWriteScope(graphNodes, featureNodeId);
     const emptyMemory: MemoryInjectionSnapshot = {
       markdown: "",
       hash: hashMemoryIndex(""),
@@ -8690,12 +9005,31 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       entryCount: 0,
       skippedStaleCount: 0,
     };
-    return {
+    const productionHooks: LoopExecutionHooks = {
       leaf,
+      digestWorkspacePaths: createWorkspacePathDigester(workspace.workspaceRoot),
       executeGithubOperation: (input) => {
         const payloadRefs = Object.fromEntries(
           Object.entries(input.payload).map(([key, value]) => [key, String(value)]),
         );
+        const credentialRefId =
+          typeof input.payload.credentialRefId === "string"
+            ? input.payload.credentialRefId.trim()
+            : "";
+        // Write-high GitHub ops require an explicit credential *ref* (offline contract).
+        // Catalog presence / brand ≠ authorized; no silent simulate without ref.
+        if (
+          (input.operation === "create_pr" ||
+            input.operation === "create_branch") &&
+          !credentialRefId
+        ) {
+          return {
+            ok: false,
+            message:
+              "Missing credentialRefId — GitHub write Action not runnable (configured ≠ authorized; offline fail-closed)",
+            refs: payloadRefs,
+          };
+        }
         // Sync stepper cannot await REST; queue create_pr/create_branch for settleLoopRuns.
         if (
           input.operation === "create_pr" ||
@@ -8704,8 +9038,8 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           return {
             ok: true,
             deferred: true,
-            message: `GitHub ${input.operation} queued for settle`,
-            refs: payloadRefs,
+            message: `GitHub ${input.operation} queued for settle (credentialRef=${credentialRefId})`,
+            refs: { ...payloadRefs, credentialRefId },
           };
         }
         return {
@@ -8713,6 +9047,37 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           simulated: true,
           message: `GitHub ${input.operation} simulated after approval`,
           refs: payloadRefs,
+        };
+      },
+      executeConnectorOperation: (input) => {
+        const cred =
+          input.credentialRefId ??
+          (typeof input.payload.credentialRefId === "string"
+            ? input.payload.credentialRefId
+            : undefined);
+        if (!cred) {
+          return {
+            ok: false,
+            message:
+              "Missing credentialRefId — connector Action is not runnable (configured ≠ authorized)",
+          };
+        }
+        // Only queue when a settle transport/secret path is wired (tests/loopback).
+        // Otherwise fail closed — brand presence ≠ executable.
+        if (
+          !this.loopConnectorTransportOverride &&
+          !this.loopConnectorSecretResolver
+        ) {
+          return {
+            ok: false,
+            message: `${input.vendorId} connector offline/unconfigured for settle (no transport DI)`,
+          };
+        }
+        return {
+          ok: true,
+          deferred: true,
+          credentialRefId: cred,
+          message: `${input.vendorId}.${input.capabilityId} queued for settle`,
         };
       },
       executeTerminalCommand: (input) => {
@@ -8827,6 +9192,12 @@ export class ProjectOSLocalApi implements ProjectOSApi {
           runId,
           status: evidence.status,
         };
+      },
+      /** Read-only verification kick — never starts a writable fix/change agent. */
+      requestVerification: (runId) => {
+        void this.runVerification(runId).catch(() => {
+          // Evidence stays not_run / prior status; verify stepper polls readEvidence.
+        });
       },
       allowConcurrentLoopRuns,
       startAgentRun: (input) => {
@@ -8953,6 +9324,188 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         });
       },
     };
+
+    if (this.loopExecutionLoopback.mode !== "local_tools") {
+      return productionHooks;
+    }
+    // Explicit loopback·local_tools — real local file/test tools, not live provider.
+    // Wrap start/verify so DI runs land on the formal durable AgentRun path
+    // (snapshot + jsonl + run index), not memory-only Map masquerading as restoreable.
+    const hooks = this.loopExecutionLoopback.buildHooks({
+      workspaceRoot: workspace.workspaceRoot,
+      nodes: graphNodes,
+      ...(featureNodeId ? { featureNodeId } : {}),
+      ...(options?.materials ? { materials: options.materials } : {}),
+      fallback: productionHooks,
+    });
+    const memoryStart = hooks.startAgentRun;
+    const memoryVerify = hooks.requestVerification;
+    return {
+      ...hooks,
+      startAgentRun: (input) => {
+        const view = memoryStart(input);
+        const audit = this.loopExecutionLoopback.getLastAudit();
+        try {
+          persistLoopbackDurableAgentRun({
+            projectOSRoot: workspace.projectOSRoot,
+            projectId: workspace.project.projectId,
+            runId: view.runId,
+            featureNodeId: input.featureNodeId,
+            filePath: input.filePath,
+            ...(view.unifiedDiff
+              ? { unifiedDiff: view.unifiedDiff }
+              : audit?.unifiedDiff
+                ? { unifiedDiff: audit.unifiedDiff }
+                : {}),
+            status: view.status === "error" ? "error" : "complete",
+          });
+        } catch (error) {
+          console.error(
+            "[projectos] loopback·local_tools durable persist failed",
+            error,
+          );
+          throw new ProjectOSError(
+            "agent_orchestration_failed",
+            `loopback·local_tools could not persist durable AgentRun '${view.runId}'`,
+            { cause: error },
+          );
+        }
+        return view;
+      },
+      requestVerification: (runId) => {
+        memoryVerify?.(runId);
+        const evidence = hooks.readEvidence(runId);
+        if (!evidence) return;
+        const audit = this.loopExecutionLoopback.getLastAudit();
+        try {
+          appendLoopbackDurableVerification({
+            projectOSRoot: workspace.projectOSRoot,
+            runId,
+            command: audit?.command ?? evidence.command ?? "loopback-verify",
+            status: evidence.status,
+            exitCode:
+              audit?.exitCode !== undefined
+                ? audit.exitCode
+                : evidence.exitCode !== undefined
+                  ? evidence.exitCode
+                  : null,
+            ...(audit?.stdout ? { stdout: audit.stdout } : {}),
+            ...(audit?.stderr ? { stderr: audit.stderr } : {}),
+            evidenceId: evidence.id,
+          });
+        } catch (error) {
+          console.error(
+            "[projectos] loopback·local_tools durable verify append failed",
+            error,
+          );
+        }
+      },
+    };
+  }
+
+  /**
+   * Project-workflow preflight — does not start a run.
+   * Confirm checklist; approval presence ≠ start authorization.
+   */
+  async preflightLoopRun(
+    projectId: string,
+    loopId: string,
+    options?: {
+      specVersion?: string;
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+    },
+  ): Promise<import("./loop-run-preflight.js").LoopPreflightResult> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { getLoopGraph } = await import("./loop-graph-service.js");
+    const { preflightLoopRunStart } = await import("./loop-run-preflight.js");
+    const document = getLoopGraph(workspace.workspaceRoot, loopId);
+    if (!document) {
+      throw new ProjectOSError("loop_graph_invalid", `Loop not found: ${loopId}`);
+    }
+    let modelProfile = null as
+      | import("../contracts/settings.js").ModelProfile
+      | null;
+    try {
+      const settings = await this.getSettings(projectId);
+      const profiles = settings.modelProfiles ?? [];
+      const defaultId = settings.execution?.defaultModelProfileId;
+      modelProfile =
+        (defaultId ? profiles.find((p) => p.id === defaultId) : undefined) ??
+        profiles.find((p) => p.isDefault) ??
+        profiles[0] ??
+        null;
+    } catch {
+      modelProfile = null;
+    }
+    return preflightLoopRunStart({
+      document,
+      ...(options?.specVersion ? { specVersion: options.specVersion } : {}),
+      ...(options?.branch ? { branch: options.branch } : {}),
+      ...(options?.materials ? { materials: options.materials } : {}),
+      modelProfile,
+    });
+  }
+
+  /**
+   * Electron/LocalApi host ingest for multi-type task materials (xlsx/pdf/csv/image/text).
+   * Browser mock must not claim parse success for host-only formats.
+   */
+  async ingestLoopTaskMaterial(
+    projectId: string,
+    input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ): Promise<import("./loop-material-ingest.js").IngestLoopMaterialResult> {
+    this.requireLoadedWorkspace(projectId);
+    const { ingestLoopTaskMaterial } = await import("./loop-material-ingest.js");
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(input.bytesBase64, "base64");
+    } catch {
+      return { ok: false, error: "Invalid bytesBase64" };
+    }
+    if (!bytes.byteLength) {
+      return { ok: false, error: "Empty file bytes" };
+    }
+    return ingestLoopTaskMaterial({
+      fileName: input.fileName,
+      ...(input.mimeType ? { mimeType: input.mimeType } : {}),
+      bytes: new Uint8Array(bytes),
+      ...(input.materialId ? { materialId: input.materialId } : {}),
+      ...(input.xlsxSelection ? { xlsxSelection: input.xlsxSelection } : {}),
+      ...(input.pdfSelection ? { pdfSelection: input.pdfSelection } : {}),
+    });
+  }
+
+  /**
+   * URL task material via DNS-pinned production fetch. No Cookie/Auth forwarding.
+   * Failures return material cards with honest codes (SSRF / login_wall / …).
+   */
+  async ingestLoopUrlMaterial(
+    projectId: string,
+    input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ): Promise<import("./loop-material-ingest.js").IngestLoopMaterialResult> {
+    this.requireLoadedWorkspace(projectId);
+    const { ingestLoopUrlMaterial } = await import("./loop-material-ingest.js");
+    return ingestLoopUrlMaterial({
+      url: input.url,
+      ...(input.materialId ? { materialId: input.materialId } : {}),
+      ...(input.title ? { title: input.title } : {}),
+    });
   }
 
   async startLoopInstance(
@@ -8960,6 +9513,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     loopId: string,
     specVersion?: string,
     featureNodeId?: string,
+    options?: {
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      /**
+       * Compatibility flag only. LocalApi project starts always require preflight;
+       * skipPreflight:true is ignored (never a production bypass).
+       */
+      skipPreflight?: boolean;
+    },
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { startLoopInstance } = await import("./loop-runtime-service.js");
@@ -8970,12 +9532,19 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ? doc?.approvedSpecs.find((item) => item.version === version)
       : doc?.approvedSpecs[doc.approvedSpecs.length - 1];
     try {
+      // Production project entry: preflight + runBinding snapshot (definition edits
+      // cannot rewrite the instance binding after start).
       const started = startLoopInstance(workspace.workspaceRoot, loopId, {
         ...(version ? { specVersion: version } : {}),
         execution: this.loopExecutionHooks(workspace, selectedFeatureNodeId, {
           allowConcurrentLoopRuns: spec?.parallelMode === "multi_run",
+          ...(options?.materials ? { materials: options.materials } : {}),
         }),
         launch: { kind: "manual" },
+        projectId,
+        requirePreflight: true,
+        ...(options?.branch ? { branch: options.branch } : {}),
+        ...(options?.materials ? { materials: options.materials } : {}),
       });
       return await this.settleLoopRuns(workspace, loopId, started);
     } catch (error) {
@@ -8990,12 +9559,20 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     projectId: string,
     loopId: string,
     params: Record<string, unknown>,
-    options?: { specVersion?: string; idempotencyKey?: string },
+    options?: {
+      specVersion?: string;
+      idempotencyKey?: string;
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      /** Compatibility only — LocalApi always requires preflight. */
+      skipPreflight?: boolean;
+    },
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { startLoopInstanceWithParams } = await import("./loop-runtime-service.js");
     const version = options?.specVersion?.trim() || undefined;
     try {
+      // Same shared create/preflight/RunBinding path as manual start — no sneak-past.
       const started = startLoopInstanceWithParams(
         workspace.workspaceRoot,
         loopId,
@@ -9006,6 +9583,10 @@ export class ProjectOSLocalApi implements ProjectOSApi {
             ? { idempotencyKey: options.idempotencyKey }
             : {}),
           execution: this.loopHooksFor(workspace, loopId),
+          projectId,
+          requirePreflight: true,
+          ...(options?.branch ? { branch: options.branch } : {}),
+          ...(options?.materials ? { materials: options.materials } : {}),
         },
       );
       return await this.settleLoopRuns(workspace, loopId, started);
@@ -9021,15 +9602,29 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     projectId: string,
     loopId: string,
     event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+    options?: {
+      branch?: string;
+      materials?: import("../contracts/loop-task-materials.js").LoopTaskMaterial[];
+      /** Compatibility only — LocalApi always requires preflight. */
+      skipPreflight?: boolean;
+    },
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { startLoopInstanceFromEvent } = await import("./loop-runtime-service.js");
     try {
+      // Event entry shares the same preflight + frozen RunBinding — missing
+      // context/permissions surface as blockers, not silent bypass.
       const started = startLoopInstanceFromEvent(
         workspace.workspaceRoot,
         loopId,
         event,
-        { execution: this.loopHooksFor(workspace, loopId) },
+        {
+          execution: this.loopHooksFor(workspace, loopId),
+          projectId,
+          requirePreflight: true,
+          ...(options?.branch ? { branch: options.branch } : {}),
+          ...(options?.materials ? { materials: options.materials } : {}),
+        },
       );
       return await this.settleLoopRuns(workspace, loopId, started);
     } catch (error) {
@@ -9038,6 +9633,112 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         error instanceof Error ? error.message : "Failed to start loop from event",
       );
     }
+  }
+
+  /**
+   * PW-8: persist an internal event while offline / before drain.
+   * Dedupes by eventType:eventId across restarts. Not an external webhook inbox.
+   */
+  async enqueueOfflineLoopEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<{
+    outcome: "queued" | "dropped_duplicate";
+    dedupeKey: string;
+    queuedCount: number;
+  }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      enqueueOfflineLoopEvent,
+      listQueuedOfflineLoopEvents,
+    } = await import("./loop-event-offline-queue.js");
+    const result = enqueueOfflineLoopEvent(workspace.workspaceRoot, {
+      loopId,
+      eventId: event.eventId,
+      eventType: event.eventType,
+      ...(event.payload ? { payload: event.payload } : {}),
+    });
+    return {
+      outcome: result.outcome,
+      dedupeKey: result.entry.dedupeKey,
+      queuedCount: listQueuedOfflineLoopEvents(workspace.workspaceRoot).length,
+    };
+  }
+
+  async listOfflineLoopEventQueue(projectId: string): Promise<
+    Array<{
+      dedupeKey: string;
+      loopId: string;
+      eventId: string;
+      eventType: string;
+      status: string;
+      enqueuedAt: string;
+      lastError?: string;
+    }>
+  > {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { loadOfflineLoopEventQueue } = await import(
+      "./loop-event-offline-queue.js"
+    );
+    return loadOfflineLoopEventQueue(workspace.workspaceRoot).entries.map((e) => ({
+      dedupeKey: e.dedupeKey,
+      loopId: e.loopId,
+      eventId: e.eventId,
+      eventType: e.eventType,
+      status: e.status,
+      enqueuedAt: e.enqueuedAt,
+      ...(e.lastError ? { lastError: e.lastError } : {}),
+    }));
+  }
+
+  /**
+   * Recover + drain persisted offline events into startLoopInstanceFromEvent.
+   * Same-run preflight/RunBinding apply per start; duplicates stay dropped.
+   */
+  async drainOfflineLoopEventQueue(
+    projectId: string,
+    options?: { max?: number },
+  ): Promise<{
+    drained: number;
+    failed: number;
+    queuedRemaining: number;
+  }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const {
+      drainOfflineLoopEventQueue,
+      listQueuedOfflineLoopEvents,
+      recoverOfflineLoopEventQueue,
+    } = await import("./loop-event-offline-queue.js");
+    const { startLoopInstanceFromEvent } = await import("./loop-runtime-service.js");
+    recoverOfflineLoopEventQueue(workspace.workspaceRoot);
+    const result = drainOfflineLoopEventQueue(
+      workspace.workspaceRoot,
+      (ev) => {
+        const started = startLoopInstanceFromEvent(
+          workspace.workspaceRoot,
+          ev.loopId,
+          {
+            eventId: ev.eventId,
+            eventType: ev.eventType,
+            ...(ev.payload ? { payload: ev.payload } : {}),
+          },
+          {
+            execution: this.loopHooksFor(workspace, ev.loopId),
+            projectId,
+            requirePreflight: true,
+          },
+        );
+        const instance = started.instances[started.instances.length - 1];
+        return instance?.id ? { instanceId: instance.id } : {};
+      },
+      { max: options?.max ?? 50 },
+    );
+    return {
+      drained: result.drained.length,
+      failed: result.failed.length,
+      queuedRemaining: listQueuedOfflineLoopEvents(workspace.workspaceRoot).length,
+    };
   }
 
   async restoreLoopInstanceFromCheckpoint(
@@ -9074,7 +9775,17 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   > {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { listLoopRunHistory } = await import("./loop-runtime-service.js");
-    return listLoopRunHistory(workspace.workspaceRoot, loopId);
+    const rows = listLoopRunHistory(workspace.workspaceRoot, loopId);
+    // Map to the public history shape — do not leak launch payload through this API.
+    return rows.map((item) => ({
+      id: item.id,
+      status: item.status,
+      specVersion: item.specVersion,
+      startedAt: item.startedAt,
+      ...(item.completedAt ? { completedAt: item.completedAt } : {}),
+      round: item.round,
+      ...(item.errorMessage ? { errorMessage: item.errorMessage } : {}),
+    }));
   }
 
   async deriveDraftFromLoopInstance(
@@ -9190,15 +9901,277 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     request: import("../contracts/loop-graph.js").LoopAuthoringTurnRequest,
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
-    const { sendLoopAuthoringTurn } = await import("./loop-graph-service.js");
+    const {
+      sendLoopAuthoringTurnAsync,
+      getLoopAuthoringCompleteOverride,
+    } = await import("./loop-graph-service.js");
+    const { createGatewayAuthoringComplete } = await import(
+      "./loop-goal-authoring-provider.js"
+    );
     try {
-      return sendLoopAuthoringTurn(workspace.workspaceRoot, loopId, request);
+      const wantProvider = request.useProvider === true;
+      const override = getLoopAuthoringCompleteOverride();
+      let complete = override ?? undefined;
+      if (wantProvider && !complete) {
+        const profile = this.settingsService.resolveModelProfile(
+          workspace.settings,
+        );
+        if (!profile) {
+          throw new ProjectOSError(
+            "model_connection_failed",
+            "No model profile configured for Loop authoring. Configure a model in Settings. Refusing silent heuristic fallback.",
+          );
+        }
+        if (!this.settingsService.hasConfiguredModel(workspace.settings)) {
+          throw new ProjectOSError(
+            "model_connection_failed",
+            "Model profile has no API key ref configured for Loop authoring. Refusing silent heuristic fallback.",
+          );
+        }
+        // Production wiring: same ModelGateway as the rest of LocalApi.
+        // Loopback/tests inject override or a scripted gateway — no auto-read of
+        // unrelated user key files beyond the project's configured secretStore ref.
+        complete = createGatewayAuthoringComplete(this.modelGateway, profile);
+      }
+      return await sendLoopAuthoringTurnAsync(
+        workspace.workspaceRoot,
+        loopId,
+        request,
+        complete ? { complete } : undefined,
+      );
     } catch (error) {
+      if (error instanceof ProjectOSError) throw error;
       throw new ProjectOSError(
         "loop_graph_invalid",
         error instanceof Error ? error.message : "Failed to send authoring turn",
       );
     }
+  }
+
+  /**
+   * Test/loopback: inject authoring complete fn. Null clears.
+   * Does not read user API keys or make paid live calls.
+   */
+  async setLoopAuthoringCompleteOverride(
+    complete:
+      | ((input: {
+          system: string;
+          user: string;
+          signal?: AbortSignal;
+        }) => Promise<string>)
+      | null,
+  ): Promise<void> {
+    const mod = await import("./loop-graph-service.js");
+    mod.setLoopAuthoringCompleteOverride(complete);
+  }
+
+  /**
+   * Serializable loopback authoring mode for Electron IPC (no paid live model).
+   * `off` clears override so unconfigured provider fails closed.
+   * `demo_edit` returns deterministic JSON patches from the user prompt text.
+   */
+  /**
+   * Explicit loopback·local_tools for Loop implement/verify (real local file +
+   * project test script). DI/evidence only — requires
+   * PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK=1; ordinary production stays off.
+   * Not a live/paid model provider and must not silently bypass permissions.
+   */
+  async setLoopExecutionLoopbackMode(
+    mode: "off" | "local_tools",
+  ): Promise<{ mode: "off" | "local_tools"; live: false; label: string }> {
+    const next = this.loopExecutionLoopback.setMode(mode);
+    return {
+      ...next,
+      label:
+        mode === "local_tools"
+          ? "loopback·local_tools·not live provider·DI-only"
+          : "loopback·off",
+    };
+  }
+
+  /** Test/evidence: last local_tools write+verify audit (null when off/unused). */
+  getLoopExecutionLoopbackAudit(): import("./loop-execution-loopback.js").LoopbackRunAudit | null {
+    return this.loopExecutionLoopback.getLastAudit();
+  }
+
+  async setLoopAuthoringLoopbackMode(
+    mode: "off" | "demo_edit",
+  ): Promise<{ mode: "off" | "demo_edit"; live: false }> {
+    if (mode === "off") {
+      await this.setLoopAuthoringCompleteOverride(null);
+      return { mode: "off", live: false };
+    }
+    const { createLoopbackAuthoringComplete } = await import(
+      "./loop-goal-authoring-provider.js"
+    );
+    await this.setLoopAuthoringCompleteOverride(
+      createLoopbackAuthoringComplete((userPrompt) => {
+        // Only the user_request line — full authoring prompt embeds Human nodes
+        // and would false-match /human|approval/ against draft context.
+        const requestMatch = /^user_request:\s*(.*)$/m.exec(userPrompt);
+        const request = (requestMatch?.[1] ?? userPrompt).trim();
+        const timeoutMatch = /timeout\s*[:=]?\s*(\d{2,7})/i.exec(request);
+        const nodeIdMatch = /nodeId[:=]\s*([a-zA-Z0-9_-]+)/i.exec(request);
+        const wantsApproval =
+          /(?:\binsert\b[^\n]{0,40}\bapproval\b|\bapproval\b\s*node|\b审批\b)/i.test(
+            request,
+          );
+        if (timeoutMatch && nodeIdMatch && !wantsApproval) {
+          return {
+            kind: "node_patch",
+            nodeId: nodeIdMatch[1]!,
+            patch: { timeoutMs: Number(timeoutMatch[1]) },
+            summary: `loopback: set timeoutMs=${timeoutMatch[1]} on ${nodeIdMatch[1]}`,
+            assistantMessage:
+              "[loopback·not live] Patched timeout only; untargeted nodes/edges preserved.",
+          };
+        }
+        if (wantsApproval) {
+          // Explicit gate target from prompt — do not overclaim write gating.
+          const beforeWrite =
+            /before\s+(?:code|coding|write|implement|coder)|编码前|写前|实现前/i.test(
+              request,
+            );
+          const beforeExternal =
+            /before\s+(?:external|github|pr|terminal|saas)|外发前|PR前/i.test(
+              request,
+            );
+          const gate = beforeWrite
+            ? ("before_write" as const)
+            : beforeExternal
+              ? ("before_external" as const)
+              : ("before_test" as const);
+          const gateLabel =
+            gate === "before_write"
+              ? "before coder writes (not after)"
+              : gate === "before_external"
+                ? "before external/github/terminal Action"
+                : "before test only (does not gate prior coder writes)";
+          return {
+            kind: "approval_insert",
+            gate,
+            summary: `loopback: insert approval gate (${gate})`,
+            assistantMessage: `[loopback·not live] Inserted human approval ${gateLabel}; review Accept/Dismiss.`,
+            approvalNodeId: "n_loopback_approval",
+          };
+        }
+        const wantsScaffold =
+          /(?:\bgenerate\b|\bscaffold\b|\bcreate\b[^\n]{0,40}\bworkflow\b|\bempty\b|\b生成\b|\b创建流程\b)/i.test(
+            request,
+          );
+        if (wantsScaffold) {
+          return {
+            kind: "graph",
+            summary: "loopback: scaffold Agent/Action/Logic/Human workflow",
+            assistantMessage:
+              "[loopback·not live] Scaffolded mixed graph from empty; review Accept/Dismiss.",
+            draft: {
+              revision: 1,
+              graphPrompt: "Ship a small feature with review and tests",
+              nodes: [
+                {
+                  id: "n_planner",
+                  title: "Planner",
+                  prompt: "Analyze goal and write a DevPlan",
+                  type: "agent",
+                  agentRole: "planner",
+                  position: { x: 80, y: 40 },
+                  timeoutMs: 60_000,
+                },
+                {
+                  id: "n_retry",
+                  title: "Retry gate",
+                  prompt: "Retry failed implementation up to limit",
+                  type: "logic",
+                  logicKind: "retry",
+                  retryLimit: 1,
+                  position: { x: 80, y: 160 },
+                },
+                {
+                  id: "n_coder",
+                  title: "Coder",
+                  prompt: "Implement the next DevPlan task",
+                  type: "agent",
+                  agentRole: "coder",
+                  position: { x: 80, y: 280 },
+                  timeoutMs: 120_000,
+                },
+                {
+                  id: "n_test",
+                  title: "Run Tests",
+                  prompt: "Execute the project test command and produce a TestReport.",
+                  type: "action",
+                  actionIntegration: "test",
+                  actionOperation: "run",
+                  position: { x: 80, y: 400 },
+                  timeoutMs: 90_000,
+                },
+                {
+                  id: "n_sentry",
+                  title: "Sentry Issues",
+                  prompt: "List recent Sentry issues for triage context.",
+                  type: "action",
+                  actionIntegration: "sentry",
+                  actionOperation: "list_issues",
+                  position: { x: 320, y: 280 },
+                  timeoutMs: 30_000,
+                },
+                {
+                  id: "n_human",
+                  title: "Human Review",
+                  prompt: "Review plan before coding",
+                  type: "human",
+                  humanMode: "review",
+                  humanAssignee: "operator",
+                  position: { x: 320, y: 100 },
+                },
+              ],
+              edges: [
+                {
+                  id: "e1",
+                  source: "n_planner",
+                  target: "n_human",
+                  kind: "depends",
+                  prompt: "Hand DevPlan to human review",
+                },
+                {
+                  id: "e2",
+                  source: "n_human",
+                  target: "n_retry",
+                  kind: "depends",
+                  prompt: "On accept, enter retry-bounded implement",
+                },
+                {
+                  id: "e3",
+                  source: "n_retry",
+                  target: "n_coder",
+                  kind: "depends",
+                  prompt: "Implement next task",
+                },
+                {
+                  id: "e4",
+                  source: "n_coder",
+                  target: "n_test",
+                  kind: "depends",
+                  prompt: "Run tests after implementation",
+                },
+              ],
+            },
+          };
+        }
+        return {
+          kind: "clarify",
+          openQuestions: [
+            {
+              question:
+                "[loopback·not live] Say generate workflow, nodeId=… timeout=…, or insert approval.",
+            },
+          ],
+          assistantMessage: "[loopback·not live] Need a concrete edit target.",
+        };
+      }),
+    );
+    return { mode: "demo_edit", live: false };
   }
 
   async answerLoopGoalClarification(
@@ -9287,6 +10260,22 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       throw new ProjectOSError(
         "loop_graph_invalid",
         error instanceof Error ? error.message : "Failed to undo draft",
+      );
+    }
+  }
+
+  async redoLoopDraft(
+    projectId: string,
+    loopId: string,
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { redoLoopDraft } = await import("./loop-graph-service.js");
+    try {
+      return redoLoopDraft(workspace.workspaceRoot, loopId);
+    } catch (error) {
+      throw new ProjectOSError(
+        "loop_graph_invalid",
+        error instanceof Error ? error.message : "Failed to redo draft",
       );
     }
   }

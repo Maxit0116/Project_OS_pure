@@ -31,8 +31,13 @@ import LoopConfigAssetPicker, {
 } from './LoopConfigAssetPicker'
 import LoopGraphPalette from './LoopGraphPalette'
 import LoopNodeDutyCard from './LoopNodeDutyCard'
+import LoopGraphMinimap from './LoopGraphMinimap'
 import LoopGraphRail from './LoopGraphRail'
 import LoopRunSidePanel from './LoopRunSidePanel'
+import LoopRunMaterialsPanel from './LoopRunMaterialsPanel'
+import { LoopSaaSNodeCard } from './integrations/LoopSaaSNodeCard'
+import type { LoopSaaSNodeCardState } from './integrations/LoopSaaSNodeCard'
+import { runtimeStatusBlocksExecution } from './integrations/loopIntegrationRegistry'
 import {
   decodePaletteDragPayload,
   LOOP_PALETTE_MIME,
@@ -96,6 +101,7 @@ export default function LoopGraphOverlay() {
   const loadForWorkspace = useLoopGraphStore((s) => s.loadForWorkspace)
   const clear = useLoopGraphStore((s) => s.clear)
   const setPhase = useLoopGraphStore((s) => s.setPhase)
+  const openSavedFlowForRun = useLoopGraphStore((s) => s.openSavedFlowForRun)
   const selectLoop = useLoopGraphStore((s) => s.selectLoop)
   const createLoop = useLoopGraphStore((s) => s.createLoop)
   const deleteLoop = useLoopGraphStore((s) => s.deleteLoop)
@@ -120,7 +126,6 @@ export default function LoopGraphOverlay() {
   const removeAuthoringTarget = useLoopGraphStore((s) => s.removeAuthoringTarget)
   const compile = useLoopGraphStore((s) => s.compile)
   const approve = useLoopGraphStore((s) => s.approve)
-  const startRun = useLoopGraphStore((s) => s.startRun)
   const pauseRun = useLoopGraphStore((s) => s.pauseRun)
   const resumeRun = useLoopGraphStore((s) => s.resumeRun)
   const advanceRun = useLoopGraphStore((s) => s.advanceRun)
@@ -128,14 +133,20 @@ export default function LoopGraphOverlay() {
   const runHistory = useLoopGraphStore((s) => s.runHistory)
   const refreshRunHistory = useLoopGraphStore((s) => s.refreshRunHistory)
   const linkActiveSession = useLoopGraphStore((s) => s.linkActiveSession)
+  const setCanvasSelectedNodeId = useLoopGraphStore((s) => s.setCanvasSelectedNodeId)
 
   const [viewport, setViewport] = useState({ x: 32, y: 32, scale: 1 })
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 })
   const [dragging, setDragging] = useState(false)
   const [railLayout, setRailLayout] = useState<LoopGraphRailLayout>(() =>
     emptyLoopGraphRailLayout(),
   )
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedNodeId, setSelectedNodeIdState] = useState<string | null>(null)
+  const setSelectedNodeId = (nodeId: string | null) => {
+    setSelectedNodeIdState(nodeId)
+    setCanvasSelectedNodeId(nodeId)
+  }
   const railLayoutRef = useRef(railLayout)
   railLayoutRef.current = railLayout
   const [expandedNodeIds, setExpandedNodeIds] = useState<Record<string, boolean>>({})
@@ -243,6 +254,22 @@ export default function LoopGraphOverlay() {
       setDutyCardNodeId(null)
     }
   }, [document, dutyCardNodeId])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const el = canvasRef.current
+    if (!el) return undefined
+    const sync = () => {
+      setCanvasSize({
+        width: Math.max(1, el.clientWidth),
+        height: Math.max(1, el.clientHeight),
+      })
+    }
+    sync()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(sync) : null
+    ro?.observe(el)
+    return () => ro?.disconnect()
+  }, [open, phase, document?.id])
 
   useEffect(() => {
     if (phase !== 'run') return
@@ -585,6 +612,17 @@ export default function LoopGraphOverlay() {
                 >
                   <Sparkles size={14} aria-hidden />
                 </button>
+                <button
+                  type="button"
+                  className={styles.actionButton}
+                  onClick={() => openSavedFlowForRun()}
+                  disabled={!document}
+                  title={ts('chat.loopGraph.openSavedFlowForRun')}
+                  aria-label={ts('chat.loopGraph.openSavedFlowForRun')}
+                  data-loop-open-saved-flow-run=""
+                >
+                  {ts('chat.loopGraph.openSavedFlowForRun')}
+                </button>
               </>
             ) : null}
             {phase === 'review' ? (
@@ -606,14 +644,6 @@ export default function LoopGraphOverlay() {
             ) : null}
             {phase === 'run' ? (
               <>
-                <button
-                  type="button"
-                  className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
-                  onClick={() => void startRun()}
-                  disabled={!document?.approvedSpecs.length}
-                >
-                  {ts('chat.loopGraph.start')}
-                </button>
                 <button type="button" className={styles.actionButton} onClick={() => void pauseRun()}>
                   {ts('chat.loopGraph.pause')}
                 </button>
@@ -1022,6 +1052,13 @@ export default function LoopGraphOverlay() {
                                 : runTone === 'waiting' || runTone === 'waiting_approval'
                                   ? styles.nodeHitl
                                   : ''
+                          } ${
+                            visual.integrationIconKey ? styles.nodeSaas : ''
+                          } ${
+                            visual.defaultRuntimeStatus &&
+                            runtimeStatusBlocksExecution(visual.defaultRuntimeStatus)
+                              ? styles.nodeSaasBlocked
+                              : ''
                           }`}
                           style={{
                             left: node.position.x,
@@ -1031,6 +1068,8 @@ export default function LoopGraphOverlay() {
                           }}
                           data-loop-node={node.id}
                           data-loop-node-status={runTone ?? undefined}
+                          data-loop-integration={visual.integrationId ?? undefined}
+                          data-loop-runtime-status={visual.defaultRuntimeStatus ?? undefined}
                           aria-label={`${visual.shortLabel}: ${node.title || ts('chat.loopGraph.untitledNode')}`}
                           onDoubleClick={(event) => {
                             event.stopPropagation()
@@ -1167,46 +1206,75 @@ export default function LoopGraphOverlay() {
                                 aria-label={runTone}
                               />
                             ) : null}
-                            <span
-                              className={`${styles.nodeIcon} ${categoryClass}`}
-                              title={visual.shortLabel}
-                              aria-hidden
-                            >
-                              <NodeIcon size={15} strokeWidth={1.75} />
-                            </span>
-                            <span className={styles.nodeTitle}>
-                              {node.title || visual.shortLabel}
-                              {isAgentDuty ? (
-                                <span className={styles.nodeAgentMeta}>
-                                  {node.agentDefinitionId
-                                    ? ts('workforce.assignedAgent')
-                                    : ts('workforce.assignedGeneral')}
-                                  {node.agentDefinitionId
-                                    ? ` · ${node.agentDefinitionId.slice(0, 10)}`
-                                    : ''}
+                            {visual.integrationId && visual.integrationIconKey ? (
+                              <LoopSaaSNodeCard
+                                embedded
+                                integrationId={visual.integrationId}
+                                operationLabel={
+                                  visual.operationLabel ?? visual.shortLabel
+                                }
+                                titleOverride={node.title || undefined}
+                                runtimeStatus={visual.defaultRuntimeStatus}
+                                state={(() => {
+                                  if (selectedNodeId === node.id) return 'selected'
+                                  if (isCursor && phase === 'run') return 'running'
+                                  if (isHitl) return 'awaiting_hitl'
+                                  if (
+                                    runTone === 'failed' ||
+                                    runTone === 'blocked'
+                                  ) {
+                                    return 'error'
+                                  }
+                                  if (runTone === 'succeeded') return 'complete'
+                                  return 'idle'
+                                })() as LoopSaaSNodeCardState}
+                              />
+                            ) : (
+                              <>
+                                <span
+                                  className={`${styles.nodeIcon} ${categoryClass}`}
+                                  title={visual.shortLabel}
+                                  aria-hidden
+                                >
+                                  <NodeIcon size={15} strokeWidth={1.75} />
                                 </span>
-                              ) : null}
-                              {configSatellite &&
-                              node.satelliteKind === 'mcp' &&
-                              isCommunityMcpServer(
-                                settings?.mcpServers?.find(
-                                  (server) => server.id === node.configRef?.mcpServerId,
-                                ),
-                              ) ? (
-                                <span className={styles.communityBadge}>
-                                  {ts('chat.loopGraph.wiringMcpCommunity')}
+                                <span className={styles.nodeTitle}>
+                                  {node.title || visual.shortLabel}
+                                  {isAgentDuty ? (
+                                    <span className={styles.nodeAgentMeta}>
+                                      {node.agentDefinitionId
+                                        ? ts('workforce.assignedAgent')
+                                        : ts('workforce.assignedGeneral')}
+                                      {node.agentDefinitionId
+                                        ? ` · ${node.agentDefinitionId.slice(0, 10)}`
+                                        : ''}
+                                    </span>
+                                  ) : null}
+                                  {configSatellite &&
+                                  node.satelliteKind === 'mcp' &&
+                                  isCommunityMcpServer(
+                                    settings?.mcpServers?.find(
+                                      (server) =>
+                                        server.id === node.configRef?.mcpServerId,
+                                    ),
+                                  ) ? (
+                                    <span className={styles.communityBadge}>
+                                      {ts('chat.loopGraph.wiringMcpCommunity')}
+                                    </span>
+                                  ) : null}
+                                  {configSatellite &&
+                                  node.satelliteKind === 'mcp' &&
+                                  settings?.mcpServers?.find(
+                                    (server) =>
+                                      server.id === node.configRef?.mcpServerId,
+                                  )?.enabled === false ? (
+                                    <span className={styles.disabledBadge}>
+                                      {ts('chat.loopGraph.wiringMcpDisabled')}
+                                    </span>
+                                  ) : null}
                                 </span>
-                              ) : null}
-                              {configSatellite &&
-                              node.satelliteKind === 'mcp' &&
-                              settings?.mcpServers?.find(
-                                (server) => server.id === node.configRef?.mcpServerId,
-                              )?.enabled === false ? (
-                                <span className={styles.disabledBadge}>
-                                  {ts('chat.loopGraph.wiringMcpDisabled')}
-                                </span>
-                              ) : null}
-                            </span>
+                              </>
+                            )}
                             {incomplete ? (
                               <span className={styles.incompleteMark}>
                                 {ts('chat.loopGraph.incomplete')}
@@ -1311,48 +1379,6 @@ export default function LoopGraphOverlay() {
                       )
                     })}
                   </div>
-                  {(() => {
-                    const dutyNode = dutyCardNodeId
-                      ? draft.nodes.find((item) => item.id === dutyCardNodeId)
-                      : null
-                    if (!dutyNode) return null
-                    const canvasEl = canvasRef.current
-                    const canvasW = canvasEl?.clientWidth ?? 800
-                    const canvasH = canvasEl?.clientHeight ?? 600
-                    const cardW = 300
-                    const cardH = 420
-                    let left =
-                      viewport.x + (dutyNode.position.x + NODE_W) * viewport.scale + 12
-                    let top = viewport.y + dutyNode.position.y * viewport.scale
-                    if (left + cardW > canvasW - 8) {
-                      left =
-                        viewport.x + dutyNode.position.x * viewport.scale - cardW - 12
-                    }
-                    left = Math.max(8, Math.min(left, canvasW - cardW - 8))
-                    top = Math.max(
-                      8,
-                      Math.min(top, canvasH - Math.min(cardH, 280) - 8),
-                    )
-                    return (
-                      <LoopNodeDutyCard
-                        node={dutyNode}
-                        specNode={
-                          document?.approvedSpecs
-                            .at(-1)
-                            ?.nodes.find((item) => item.id === dutyNode.id) ?? null
-                        }
-                        activeInstance={activeInstance}
-                        readOnly={phase !== 'draw'}
-                        left={left}
-                        top={top}
-                        onClose={() => setDutyCardNodeId(null)}
-                        onChange={(patch) => {
-                          if (phase !== 'draw') return
-                          updateNode(dutyNode.id, patch)
-                        }}
-                      />
-                    )
-                  })()}
                   </>
                 )}
               </div>
@@ -1360,9 +1386,70 @@ export default function LoopGraphOverlay() {
 
             {phase === 'draw' && document ? <LoopGoalComposer /> : null}
 
-            {phase === 'run' && activeInstance ? (
+            {document && phase !== 'review' && draft.nodes.length > 0 ? (
+              <LoopGraphMinimap
+                nodes={draft.nodes}
+                viewport={viewport}
+                canvasWidth={canvasSize.width}
+                canvasHeight={canvasSize.height}
+                onPanToWorld={(worldX, worldY) => {
+                  setViewport((prev) => ({
+                    ...prev,
+                    x: canvasSize.width / 2 - worldX * prev.scale,
+                    y: canvasSize.height / 2 - worldY * prev.scale,
+                  }))
+                }}
+              />
+            ) : null}
+
+            {(() => {
+              const dutyNode = dutyCardNodeId
+                ? document?.draft.nodes.find((item) => item.id === dutyCardNodeId)
+                : null
+              if (!dutyNode || phase === 'review') return null
+              const canvasEl = canvasRef.current
+              // Host covers the whole stage (canvas + composer). Keep the card
+              // fully inside the canvas band so composer never covers the form.
+              const canvasW = canvasEl?.clientWidth ?? canvasSize.width
+              const canvasH = canvasEl?.clientHeight ?? canvasSize.height
+              const cardW = Math.min(380, Math.max(280, canvasW - 24))
+              const cardH = Math.min(520, Math.max(280, canvasH - 16))
+              let left =
+                viewport.x + (dutyNode.position.x + NODE_W) * viewport.scale + 12
+              let top = viewport.y + dutyNode.position.y * viewport.scale
+              if (left + cardW > canvasW - 8) {
+                left =
+                  viewport.x + dutyNode.position.x * viewport.scale - cardW - 12
+              }
+              left = Math.max(8, Math.min(left, canvasW - cardW - 8))
+              top = Math.max(8, Math.min(top, canvasH - cardH - 8))
+              return (
+                <div className={styles.dutyCardHost} data-loop-duty-host="">
+                  <LoopNodeDutyCard
+                    node={dutyNode}
+                    specNode={
+                      document?.approvedSpecs
+                        .at(-1)
+                        ?.nodes.find((item) => item.id === dutyNode.id) ?? null
+                    }
+                    activeInstance={activeInstance}
+                    readOnly={phase !== 'draw'}
+                    left={left}
+                    top={top}
+                    onClose={() => setDutyCardNodeId(null)}
+                    onChange={(patch) => {
+                      if (phase !== 'draw') return
+                      updateNode(dutyNode.id, patch)
+                    }}
+                  />
+                </div>
+              )
+            })()}
+
+            {phase === 'run' ? (
               <div className={styles.runPanel}>
-                {activeInstance.status === 'awaiting_hitl' ? (
+                <LoopRunMaterialsPanel />
+                {activeInstance?.status === 'awaiting_hitl' ? (
                   <div className={styles.hitlActions}>
                     {(activeInstance.hitlQuestionIds ?? ['continue']).map((questionId) => {
                       const isApproval = questionId.includes('approval')
@@ -1375,6 +1462,7 @@ export default function LoopGraphOverlay() {
                               <button
                                 type="button"
                                 className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                                data-loop-hitl-approve=""
                                 onClick={() =>
                                   void resolveHitl([
                                     {
@@ -1390,11 +1478,28 @@ export default function LoopGraphOverlay() {
                               <button
                                 type="button"
                                 className={styles.actionButton}
+                                data-loop-hitl-reject=""
                                 onClick={() =>
                                   void resolveHitl([{ questionId, answer: 'reject' }])
                                 }
                               >
                                 {ts('chat.loopGraph.hitlReject')}
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.actionButton}
+                                data-loop-hitl-takeover=""
+                                onClick={() =>
+                                  void resolveHitl([
+                                    {
+                                      questionId,
+                                      answer: 'takeover',
+                                      editedPayload: { humanTakeover: true },
+                                    },
+                                  ])
+                                }
+                              >
+                                {ts('chat.loopGraph.hitlTakeover')}
                               </button>
                             </>
                           ) : null}
@@ -1449,10 +1554,12 @@ export default function LoopGraphOverlay() {
                     })}
                   </div>
                 ) : null}
-                <LoopRunSidePanel
-                  instance={activeInstance}
-                  history={runHistory}
-                />
+                {activeInstance ? (
+                  <LoopRunSidePanel
+                    instance={activeInstance}
+                    history={runHistory}
+                  />
+                ) : null}
               </div>
             ) : null}
           </div>

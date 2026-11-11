@@ -64,7 +64,23 @@ export const LOOP_HUMAN_MODES = [
 ] as const;
 export type LoopHumanMode = (typeof LOOP_HUMAN_MODES)[number];
 
-export const LOOP_ACTION_INTEGRATIONS = ["github", "test", "terminal"] as const;
+export const LOOP_ACTION_INTEGRATIONS = [
+  "github",
+  "test",
+  "terminal",
+  "slack",
+  "feishu",
+  "lark",
+  "sentry",
+  "gmail",
+  /** Batch2/3 catalog vendors — same Action schema; settle via connector path. */
+  "linear",
+  "jira_cloud",
+  "notion",
+  "vercel",
+  "supabase",
+  "posthog",
+] as const;
 export type LoopActionIntegration = (typeof LOOP_ACTION_INTEGRATIONS)[number];
 
 export const LOOP_LOGIC_KINDS = [

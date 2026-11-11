@@ -1,6 +1,6 @@
 # Loops Graph · Gaps Closure DevPlan
 
-**状态**：Implementing（2026-11-10）。本文件是对照成熟 Human-in-the-Loop Workflow 参考图后的**缺口补全总控计划**；授权按 Phase GC-* 切片实现。GC-0–GC-3、GC-4、GC-5、GC-6.1/6.2/6.3/6.4、GC-7.1 主体已落地；GC-6.5/6.6 与 GC-7.2 总勾选待收尾（见 §13）。  
+**状态**：Implementing（2026-11-10）。本文件是对照成熟 Human-in-the-Loop Workflow 参考图后的**缺口补全总控计划**；授权按 Phase GC-* 切片实现。GC-0–GC-3、GC-4、GC-5、GC-6.*、GC-7.1 主体已落地；GC-7.2 §9 清单已可勾（见下与 §13），**仍非 shipped / 非 live / 非总交验**。  
 **范围**：补齐 Sequence / Parallel / Branch / Loop / Gate / Recovery 六机制，以及成熟 Workflow System 必备的可靠性、可观测性、触发与治理能力；复用现有 Agent Runtime / Harness / Verification，**不**另起编排引擎，**不**做成通用 iPaaS。  
 **产品定位一句话**：把已有「可编译、可批准、可步进」的 Loop Graph，升级为参考图级的工程工作流系统——控制流完备、失败可恢复、运行可看见、人可介入。
 
@@ -13,6 +13,9 @@
 | [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | Draw 识读合同；本文件扩展 Run 态投影与控制流容器可视化。 |
 | [`Loops-Graph-Review-Visual-Dev-Plan.md`](./Loops-Graph-Review-Visual-Dev-Plan.md) | Review 审批台已落地 MVP；本文件要求 Path Map 支持 Parallel/Branch/Loop 容器识读，不重做审批壳。 |
 | [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | 配置卫星；本文件不改 wiring 语义。 |
+| [`Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](./Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) | **并行权威（2026-11-10）**：项目内真实 Workflow Run 绑定 + 多类型 Task Materials（PW-\* / TM-\*）。依赖本文件已落地 GC 能力；不重做六机制。验收矩阵与分期以该文件 + [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) 为准。 |
+| [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) | 六目标 + 连接器 + 双入口 + PW/TM + Gmail **执行实况**（计划/实现/contract/live/待验）。 |
+| [`Loops-Graph-Gmail-Connector-Dev-Plan.md`](./Loops-Graph-Gmail-Connector-Dev-Plan.md) | Gmail push=`users.watch`→Pub/Sub→`history.list`（≠普通 webhook 载信）；首期不部署 Pub/Sub。 |
 | [`backend/Planning-Orchestration-Dev-Plan.md`](./backend/Planning-Orchestration-Dev-Plan.md) | P-0–P-3 底座不变。 |
 | [`Agent-Harness-Dev-Plan.md`](./Agent-Harness-Dev-Plan.md) | Pause/Cancel/Resume 必须打到 harness。 |
 | [`Agent-Flow-Activity-Dev-Plan.md`](./Agent-Flow-Activity-Dev-Plan.md) | 节点内轨迹仍归 Agent Flow；Loops 只投影任务单元状态与产物引用。 |
@@ -652,30 +655,40 @@ freshness?
 
 ## 9. 验收清单（Definition of Done）
 
+**GC-7.2 逐项可验证映射（2026-11-10）**：下列每条勾选均指向**具体测名/入口**；≠ shipped/live。UI 按钮存在 ≠ 已操作。
+
 ### 9.1 六机制
 
-- [x] **Sequence**：线性 preset 跑通  
-- [x] **Parallel**：fan-out → 串行排空 → Merge join → 继续  
-- [x] **Branch**：Condition pass/fail 双路径  
-- [x] **Loop**：有限迭代 + 达上限 HITL；≥1 条确认过的 feedback  
-- [x] **Gate**：Human approval/review/input 可暂停并恢复；Decision 可查  
-- [x] **Recovery**：retry / fallback / pause_hitl / 真 cancel 可演示  
+- [x] **Sequence**：线性 preset 跑通 → `loop-runtime-roles.test.ts` · Feature Development preset；`loop-runtime-actions.test.ts` · Feature Development E2E leaf+PR  
+- [x] **Parallel**：fan-out → 串行排空 → Merge → `loop-runtime-service.test.ts` · drains parallel depends fan-out into Merge (P0 serial)  
+- [x] **Branch**：Condition pass/fail → `loop-runtime-architecture.test.ts` · branches Condition on TestReport；Condition pass path reaches Exit  
+- [x] **Loop**：有限迭代 + 达上限 HITL → `loop-runtime-architecture.test.ts` · Loop logic node stops after maxIterations；feedback 路径见 `loop-runtime-service.test.ts` · follows failed evidence  
+- [x] **Gate**：Human approval/review + Decision → architecture · Human approval edit payload；Human review request_changes；`loop-runtime-service.test.ts` · resolves decide via HITL；LocalApi pause/resume 状态变 → `loop-pause-resume.local-api.test.ts`  
+- [x] **Recovery**：retry / fallback / pause / cancel → `takes a fallback edge`；`cancels an active instance and forwards cancelAgentRun`；`pauses an interrupted agent run`；`asks a person when stop policy is exhausted`  
 
 ### 9.2 成熟能力
 
-- [x] nodeRecords 色点在 Run 可见  
-- [x] Parallel/Loop 容器可见（Draw 或 Run 至少一处 + Review 只读）  
-- [x] pause/cancel 下传 AgentRun  
-- [x] checkpoint 可恢复  
-- [x] Fresh/Stale 正交  
-- [x] 参数化或事件启动至少一种  
-- [x] Artifacts + Decisions + History 面板  
-- [x] 旧 `loop-graphs` JSON 仍可读可跑  
+- [x] nodeRecords 色点 → runtime Merge drain 断言 nodeRecords；UI `toneFromNodeRecordStatus` / Electron Run 色点历史证据  
+- [x] Parallel/Loop 容器 → Review Path Map GC-6.4 + `loopReviewLayout.test.ts`  
+- [x] pause/cancel 下传 AgentRun → runtime pause/cancel hooks (`hooks.paused` / `cancelAgentRun`)  
+- [x] checkpoint 可恢复 → `persists checkpoints and restores cursor/nodeRecords (GC-4.1)`  
+- [x] Fresh/Stale 正交 → `marks freshness stale and budgets wall clock (GC-4.2 / GC-4.5)`  
+- [x] 参数化或事件启动 → `dedupes launch by idempotencyKey`；`dedupes internal event launches (GC-5.2)`；offline queue LocalApi drain → `loop-batch3-gmail-offline.local-api.test.ts` / `loop-offline-event-queue.local-api.test.ts`  
+- [x] Artifacts + Decisions + History → `lists run history (GC-6.3)`；UI `LoopRunSidePanel` `data-loop-run-side-panel` / artifacts / decisions  
+- [x] 旧 `loop-graphs` JSON → `loop-graph*.test.ts` normalize/compat  
 
 ### 9.3 回归
 
-- [x] `loop-runtime-*.test.ts` / `loop-graph*.test.ts` / Review layout 测试绿  
-- [x] Feature Development 示范 workflow 仍满足 NA 验收不变量  
+- [x] `loop-runtime-*.test.ts` / `loop-graph*.test.ts` / Review layout — tip full `npm test` 绿  
+- [x] Feature Development 示范 workflow NA 不变量 — roles/actions Feature Development E2E  
+
+**仍非总交验**：无付费 live、无 OAuth、无真邮箱。
+
+**Electron UI 已核（非「人工体验」转交）**：`loops-start-pause-resume-*` Start enabled→awaiting_hitl→Pause paused→Resume 同实例（DI `local_tools`；独立复核；activeRunId 可为空，不宣称同 AgentRun）。
+
+**GC-6.6**：a255 重挂图 **已撤销**；不可变失败 rawlog `eefe4b60` 保留；fresh/dirty durable 层另存。**DI durable**：正式 `agent-runs` 落盘可 restore；timeline 为 **schema 合成 DI 事件**（≠ live apply 审计；**无**可执行真实 undo backup）。最终 clean 同源捕获待修复后独立复核再封门禁。
+
+**需用户 live 授权（非本流可自动项）**：真 Gmail/OAuth/云项目；付费 ModelGateway；Mac；真实外发。完整 ACL 矩阵 = **后续增强，不入本阶段**。
 
 ---
 
@@ -728,3 +741,9 @@ GC-0 Docs
 | 2026-11-09 | **开始落地**：GC-0 文档交叉链接；GC-1 拓扑解锁（depends fan-out、多 feedback、`fallback` 边）；GC-2.1 nodeRecords；GC-2.2 `cancelLoopInstance` + pause/cancel/resume 下传 Agent hooks；GC-2.3 ready-set 串行排空 Parallel；GC-2.4 `logic.retry`/`wait` stepper；Palette `retry`/`wait`；Preset `parallel_research` |
 | 2026-11-10 | **续作**：GC-2.5 wall-clock timeout HITL；GC-2.6 fallback 全路径（failNode + Action/Verify）；GC-3.1 Merge 真 Join（sibling drain / 失败 HITL）；GC-3.3/3.4 HumanDecision + Parallel preset 验收；GC-6.1 Run 色点；GC-6.2 `LoopRunSidePanel`；GC-6.4 Review Path Map Parallel/Loop 容器 |
 | 2026-11-10 | **GC-4/5/7 落地**：Instance `checkpoint` 步进落盘 + `restoreLoopInstanceFromCheckpoint`；Fresh/Stale 正交 + `stalePolicy`；启动 `idempotencyKey` / 不明副作用 resume → HITL；`ReplanProposal` + 预算记账；`inputParams` / `startLoopInstanceWithParams` / 内部事件去重；Parallel P1 `multi_run` 共享 leaf → `write_conflict` HITL；Run History + derive draft；API/IPC/mock/UI 打通 |
+| 2026-11-10 | **交叉引用**：接入 Project Workflow + Task Materials 权威计划（PW/TM）；六目标跟踪表同步；明确离线事件全天排队仍未实现 |
+| 2026-11-10 | **GC-6.5/6.6/7.2 收尾**：`LoopGraphMinimap` 点击平移；DutyCard Runtime「打开关联 Agent Run」→ `openAgentFlowForRun(activeRunId)`；产品入口确认 = Draw **dblclick** `[data-loop-node]` / 右键 Open Duty（**不是** Review 架构节点详情）；§9 六机制/成熟能力/回归清单保持可勾；**仍非** shipped/live/总交验 |
+| 2026-11-10 | **GC-7.2 §9 逐项测映射**写入本节；Batch3/Gmail/队列 LocalApi 负例；runtime 连接器路径含 gmail/supabase/posthog（禁合成 Executed 成功）；pause/resume LocalApi 状态变；关联 Run Electron **跳转** `data-tour=agent-flow`（非按钮存在）；**仍非** shipped/live |
+| 2026-11-10 | **复审最小修复**：reconcile 跳过 `agent-runs/index.jsonl`；credential 缺 freeze fail-closed；settle/offline **交验边界 = LocalApi+IPC**（非桌面自动 UI）；DI 合成 timeline **无**伪 backupId；LocalApi `skipPreflight` 忽略。**仍非**最终 clean 门禁/总交验 |
+| 2026-11-11 | **tip-final 候选 `4f098a5`**：三层 build+full npm test EXIT0；GC66 clean 同源捕获；DI 合成 timeline 诚实；progress/PW 离线队列口径纠正。**仍非**正式总交验 |
+| 2026-11-11 | **证据补包**：DutyCard 关联钮视口内新拍；磁盘 snap/log/index reopen rawlog；store EXITS 指针→4f098a5；§9.3 **3353**。原 `pr10-4f098a5-tip-final-gate.zip` 字节未改。**仍非**总交验 |

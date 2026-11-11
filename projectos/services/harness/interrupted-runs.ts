@@ -4,7 +4,7 @@ import { join } from "node:path";
 import {
   agentRunLogPath,
   buildRunInterruptedEvent,
-  isSafeRunId,
+  isAgentRunEventLogFileName,
   markSnapshotInterrupted,
   readPersistedRunLog,
 } from "./persisted-run.js";
@@ -32,9 +32,9 @@ export function reconcileInterruptedAgentRuns(projectOSRoot: string): Interrupte
   if (!existsSync(directory)) return [];
   const notes: InterruptedRunNote[] = [];
   for (const name of readdirSync(directory)) {
-    if (!name.endsWith(".jsonl")) continue;
+    // Skip pool index and other non-run jsonl — never treat basename as runId.
+    if (!isAgentRunEventLogFileName(name)) continue;
     const runId = name.slice(0, -".jsonl".length);
-    if (!isSafeRunId(runId)) continue;
     const log = readPersistedRunLog(projectOSRoot, runId);
     if (!log) continue;
     if (log.events.length === 0 && log.corruptLines.length === 0) continue;

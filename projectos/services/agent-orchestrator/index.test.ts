@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { copySampleTree } from "../../test-support/copy-sample.js";
 import { ProjectOSSettingsSchema, type ModelProfile } from "../../contracts/settings.js";
 import type { PromptRefinement } from "../../contracts/prompt-refinement.js";
 import type { RequestIntent } from "../../contracts/request-intent.js";

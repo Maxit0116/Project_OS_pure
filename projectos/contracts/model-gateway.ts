@@ -15,6 +15,7 @@ export const ModelRequestKindSchema = z.enum([
   "agent_step",
   "question_answer",
   "chat_title",
+  "loop_authoring",
 ]);
 
 export const RedactionPolicySchema = z.enum([

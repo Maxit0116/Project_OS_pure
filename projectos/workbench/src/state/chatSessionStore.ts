@@ -264,6 +264,23 @@ interface ChatSessionStore {
   resetForDemo: () => Promise<void>
 }
 
+function markAssociatedRunMissing(runId: string): void {
+  // GC-6.6: missing durable run must look like an honest error — not the idle
+  // empty "success" page that previously masqueraded as a jump.
+  useWorkbenchStore.setState({
+    activeRunId: runId,
+    flowStatus: 'error',
+    flowSteps: [],
+    flowActions: [],
+    flowCorrections: [],
+    flowTransientTraces: [],
+    flowDelegationEvents: [],
+    refineLoading: false,
+    runDisposable: null,
+    error: `Agent run '${runId}' was not found`,
+  })
+}
+
 async function restoreRunFlow(activeRunId: string): Promise<void> {
   const { client } = useWorkbenchStore.getState()
   if (!client) return
@@ -276,12 +293,7 @@ async function restoreRunFlow(activeRunId: string): Promise<void> {
       ? (error as { code?: string }).code
       : null
     if (code === 'run_not_found') {
-      useWorkbenchStore.setState({
-        activeRunId: null,
-        flowStatus: 'idle',
-        refineLoading: false,
-        runDisposable: null,
-      })
+      markAssociatedRunMissing(activeRunId)
       return
     }
     console.error('[chatSessionStore] failed to resolve run before restore', error)
@@ -313,12 +325,7 @@ async function restoreRunFlow(activeRunId: string): Promise<void> {
       ? (error as { code?: string }).code
       : null
     if (code === 'run_not_found') {
-      useWorkbenchStore.setState({
-        activeRunId: null,
-        flowStatus: 'idle',
-        refineLoading: false,
-        runDisposable: null,
-      })
+      markAssociatedRunMissing(activeRunId)
       return
     }
     console.error('[chatSessionStore] failed to restore run flow', error)
@@ -619,6 +626,12 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     if (runId && dismissed === runId) return
     if (!runId && dismissed === AGENT_FLOW_DISMISS_IDLE) return
     setCanvasOverlayState(set, 'agent-flow')
+    // GC-6.6: opening the associated Agent Run must bind that run into the
+    // Agent Flow surface — overlay-only open leaves the idle empty page.
+    if (runId) {
+      useWorkbenchStore.setState({ activeRunId: runId })
+      void restoreRunFlow(runId)
+    }
   },
 
   closeAgentFlow: () => {

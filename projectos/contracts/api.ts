@@ -975,11 +975,76 @@ export interface ProjectOSApi {
     loopId: string,
     spec: LoopSpec,
   ): Promise<LoopGraphDocument>;
+  /**
+   * Project-workflow preflight checklist — does not start a run.
+   * Materials/branch optional; approval presence ≠ start authorization.
+   */
+  preflightLoopRun(
+    projectId: string,
+    loopId: string,
+    options?: {
+      specVersion?: string;
+      branch?: string;
+      materials?: import("./loop-task-materials.js").LoopTaskMaterial[];
+    },
+  ): Promise<{
+    ok: boolean;
+    canStart: boolean;
+    items: Array<{
+      id: string;
+      severity: "blocker" | "warning" | "info";
+      code: string;
+      message: string;
+      nodeId?: string;
+      materialId?: string;
+    }>;
+  }>;
+  /**
+   * Host-side multi-type material ingest (xlsx/pdf via unzip/pdftotext).
+   * Browser mock returns fail-closed for host-only formats.
+   */
+  ingestLoopTaskMaterial(
+    projectId: string,
+    input: {
+      fileName: string;
+      mimeType?: string;
+      bytesBase64: string;
+      materialId?: string;
+      xlsxSelection?: {
+        sheet?: string;
+        cellRange?: string;
+        role?: "requirement" | "test" | "business";
+      };
+      pdfSelection?: { pageStart?: number; pageEnd?: number };
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("./loop-task-materials.js").LoopTaskMaterial;
+  }>;
+  /** DNS-pinned URL material ingest — failures are honest cards, not silent ok. */
+  ingestLoopUrlMaterial(
+    projectId: string,
+    input: {
+      url: string;
+      materialId?: string;
+      title?: string;
+    },
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    material?: import("./loop-task-materials.js").LoopTaskMaterial;
+  }>;
   startLoopInstance(
     projectId: string,
     loopId: string,
     specVersion?: string,
     featureNodeId?: string,
+    options?: {
+      branch?: string;
+      materials?: import("./loop-task-materials.js").LoopTaskMaterial[];
+      skipPreflight?: boolean;
+    },
   ): Promise<LoopGraphDocument>;
   startLoopInstanceWithParams(
     projectId: string,
@@ -992,6 +1057,30 @@ export interface ProjectOSApi {
     loopId: string,
     event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
   ): Promise<LoopGraphDocument>;
+  enqueueOfflineLoopEvent(
+    projectId: string,
+    loopId: string,
+    event: { eventId: string; eventType: string; payload?: Record<string, unknown> },
+  ): Promise<{
+    outcome: "queued" | "dropped_duplicate";
+    dedupeKey: string;
+    queuedCount: number;
+  }>;
+  listOfflineLoopEventQueue(projectId: string): Promise<
+    Array<{
+      dedupeKey: string;
+      loopId: string;
+      eventId: string;
+      eventType: string;
+      status: string;
+      enqueuedAt: string;
+      lastError?: string;
+    }>
+  >;
+  drainOfflineLoopEventQueue(
+    projectId: string,
+    options?: { max?: number },
+  ): Promise<{ drained: number; failed: number; queuedRemaining: number }>;
   restoreLoopInstanceFromCheckpoint(
     projectId: string,
     loopId: string,
@@ -1052,6 +1141,20 @@ export interface ProjectOSApi {
     loopId: string,
     request: import("./loop-graph.js").LoopAuthoringTurnRequest,
   ): Promise<LoopGraphDocument>;
+  /**
+   * Electron/IPC-serializable loopback authoring (not live/paid).
+   * `off` clears override → unconfigured provider fails closed.
+   */
+  setLoopAuthoringLoopbackMode(
+    mode: "off" | "demo_edit",
+  ): Promise<{ mode: "off" | "demo_edit"; live: false }>;
+  /**
+   * Explicit loopback·local_tools for Loop implement/verify (local file + test).
+   * Not a live/paid model.
+   */
+  setLoopExecutionLoopbackMode(
+    mode: "off" | "local_tools",
+  ): Promise<{ mode: "off" | "local_tools"; live: false; label: string }>;
   answerLoopGoalClarification(
     projectId: string,
     loopId: string,
@@ -1062,6 +1165,7 @@ export interface ProjectOSApi {
   acceptLoopGraphEditOffer(projectId: string, loopId: string): Promise<LoopGraphDocument>;
   dismissLoopGraphEditOffer(projectId: string, loopId: string): Promise<LoopGraphDocument>;
   undoLoopDraft(projectId: string, loopId: string): Promise<LoopGraphDocument>;
+  redoLoopDraft(projectId: string, loopId: string): Promise<LoopGraphDocument>;
   setLoopComposerMode(
     projectId: string,
     loopId: string,

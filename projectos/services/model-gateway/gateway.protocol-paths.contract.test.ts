@@ -31,6 +31,7 @@ const EVERY_REQUEST_KIND = [
   "agent_step",
   "question_answer",
   "chat_title",
+  "loop_authoring",
 ] as const satisfies readonly ModelRequestKind[];
 
 const ClarifyOutputSchema = z.object({
@@ -183,7 +184,7 @@ const profiles = {
 describe("ModelGateway protocol-path contracts (production entry)", () => {
   it("every-kind inventory equals ModelRequestKindSchema exactly (fails if a kind is dropped)", () => {
     expect([...EVERY_REQUEST_KIND].sort()).toEqual([...ModelRequestKindSchema.options].sort());
-    expect(EVERY_REQUEST_KIND).toHaveLength(12);
+    expect(EVERY_REQUEST_KIND).toHaveLength(ModelRequestKindSchema.options.length);
     expect(new Set(EVERY_REQUEST_KIND).size).toBe(EVERY_REQUEST_KIND.length);
   });
 

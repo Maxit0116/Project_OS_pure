@@ -8,6 +8,7 @@ import {
 } from '@contracts/index'
 import { resolveAgentWiring } from '../../../../services/loop-agent-wiring'
 import { useI18n } from '../../i18n'
+import { useChatSessionStore } from '../../state/chatSessionStore'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import { useComposePromptVoice } from '../ChatPanel/composer/useComposePromptVoice'
@@ -16,8 +17,16 @@ import {
   VoiceInputErrorBanner,
 } from '../ChatPanel/VoiceInputControls'
 import { isCommunityMcpServer } from './LoopConfigAssetPicker'
+import { LoopIntegrationIcon } from './integrations/LoopIntegrationIcon'
+import {
+  getLoopIntegration,
+  runtimeStatusBlocksExecution,
+  runtimeStatusNextStep,
+} from './integrations/loopIntegrationRegistry'
 import TextArea from '../ui/TextArea'
 import TextInput from '../ui/TextInput'
+import Select from '../ui/Select'
+import { validateLoopNodeConfig } from '../../../../services/loop-node-config-schema'
 import styles from './LoopNodeInspector.module.css'
 
 interface Props {
@@ -45,6 +54,7 @@ export default function LoopNodeInspector({
     (s) => s.applyWiringToAgentDefinition,
   )
   const saveWiringAsNewAgent = useLoopGraphStore((s) => s.saveWiringAsNewAgent)
+  const openAgentFlowForRun = useChatSessionStore((s) => s.openAgentFlowForRun)
   const settings = useWorkbenchStore((s) => s.settings)
   const shellClass = embedded ? styles.embedded : styles.inspector
   const nodeRef = useRef(node)
@@ -178,14 +188,227 @@ export default function LoopNodeInspector({
           {arch.logicKind ? <span className={styles.chip}>{arch.logicKind}</span> : null}
         </div>
         {arch.type === 'agent' ? (
-          <p className={styles.hint}>
-            {ts('workforce.assignedAgent')}:{' '}
-            {node.agentDefinitionId
-              ? node.agentDefinitionId
-              : ts('workforce.assignedGeneral')}
-          </p>
+          <>
+            <p className={styles.hint}>
+              {ts('workforce.assignedAgent')}:{' '}
+              {node.agentDefinitionId
+                ? node.agentDefinitionId
+                : ts('workforce.assignedGeneral')}
+            </p>
+            <TextInput
+              fieldClassName={styles.field}
+              type="number"
+              min={1}
+              max={600000}
+              label="Timeout (ms)"
+              data-testid="agent-timeout-ms"
+              value={node.timeoutMs ?? ''}
+              disabled={readOnly}
+              onChange={(event) => {
+                const raw = event.target.value
+                onChange({
+                  timeoutMs: raw === '' ? undefined : Number(raw) || undefined,
+                })
+              }}
+            />
+          </>
         ) : null}
       </section>
+
+      {arch.type === 'action' && arch.actionIntegration ? (
+        <section className={styles.section} data-testid="saas-action-config">
+          <h3 className={styles.sectionTitle}>Integration</h3>
+          <div className={styles.metaRow}>
+            <span className={styles.chip} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              <LoopIntegrationIcon
+                integrationId={arch.actionIntegration}
+                size={14}
+              />
+              {getLoopIntegration(arch.actionIntegration)?.displayName ??
+                arch.actionIntegration}
+            </span>
+          </div>
+          {(() => {
+            const meta = getLoopIntegration(arch.actionIntegration)
+            const status = meta?.defaultRuntimeStatus ?? 'unconfigured'
+            const blocked = runtimeStatusBlocksExecution(status)
+            const validation = validateLoopNodeConfig(node)
+            return (
+              <>
+                <Select
+                  data-testid="saas-action-select"
+                  label="Operation"
+                  disabled={readOnly || !meta}
+                  value={arch.actionOperation ?? ''}
+                  onChange={(event) =>
+                    onChange({ actionOperation: event.target.value || undefined })
+                  }
+                  options={(meta?.actions ?? []).map((action) => ({
+                    value: action.id,
+                    label: `${action.label} (${action.kind})`,
+                  }))}
+                />
+                <TextInput
+                  fieldClassName={styles.field}
+                  label="Credential ref"
+                  data-testid="action-credential-ref"
+                  value={node.credentialRefId ?? ''}
+                  disabled={readOnly}
+                  placeholder="cred_… (secret never stored here)"
+                  onChange={(event) =>
+                    onChange({
+                      credentialRefId: event.target.value.trim() || undefined,
+                    })
+                  }
+                />
+                <TextInput
+                  fieldClassName={styles.field}
+                  type="number"
+                  min={1}
+                  max={600000}
+                  label="Timeout (ms)"
+                  data-testid="action-timeout-ms"
+                  value={node.timeoutMs ?? ''}
+                  disabled={readOnly}
+                  onChange={(event) => {
+                    const raw = event.target.value
+                    onChange({
+                      timeoutMs: raw === '' ? undefined : Number(raw) || undefined,
+                    })
+                  }}
+                />
+                {validation.issues.length > 0 ? (
+                  <ul className={styles.hint} data-testid="node-config-issues">
+                    {validation.issues.map((issue) => (
+                      <li key={`${issue.path}:${issue.code}`}>{issue.message}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {validation.blocksRun ? (
+                  <p className={styles.hint} data-testid="node-config-blocks-run">
+                    Not runnable yet — fix required fields / credentials. Configured ≠
+                    authorized to execute.
+                  </p>
+                ) : null}
+                {blocked && meta ? (
+                  <p className={styles.hint} data-testid="saas-runtime-next-step">
+                    {runtimeStatusNextStep(meta, status)}
+                  </p>
+                ) : null}
+                {meta?.brandNote ? <p className={styles.hint}>{meta.brandNote}</p> : null}
+              </>
+            )
+          })()}
+        </section>
+      ) : null}
+
+      {arch.type === 'logic' ? (
+        <section className={styles.section} data-testid="logic-node-config">
+          <h3 className={styles.sectionTitle}>Logic</h3>
+          <Select
+            label="Kind"
+            data-testid="logic-kind-select"
+            disabled={readOnly}
+            value={arch.logicKind ?? 'condition'}
+            onChange={(event) =>
+              onChange({
+                logicKind: event.target.value as IntentGraphNode['logicKind'],
+              })
+            }
+            options={[
+              { value: 'condition', label: 'Condition' },
+              { value: 'loop', label: 'Loop' },
+              { value: 'merge', label: 'Merge' },
+              { value: 'exit', label: 'Exit' },
+              { value: 'retry', label: 'Retry' },
+              { value: 'wait', label: 'Wait' },
+            ]}
+          />
+          {arch.logicKind === 'retry' ? (
+            <TextInput
+              fieldClassName={styles.field}
+              type="number"
+              min={1}
+              max={20}
+              label="Retry limit"
+              data-testid="logic-retry-limit"
+              disabled={readOnly}
+              value={node.retryLimit ?? 2}
+              onChange={(event) =>
+                onChange({ retryLimit: Number(event.target.value) || 1 })
+              }
+            />
+          ) : null}
+          {arch.logicKind === 'wait' ? (
+            <TextInput
+              fieldClassName={styles.field}
+              type="number"
+              min={0}
+              max={3600000}
+              label="Wait (ms)"
+              data-testid="logic-wait-ms"
+              disabled={readOnly}
+              value={node.waitMs ?? 0}
+              onChange={(event) =>
+                onChange({ waitMs: Number(event.target.value) || 0 })
+              }
+            />
+          ) : null}
+        </section>
+      ) : null}
+
+      {arch.type === 'human' ? (
+        <section className={styles.section} data-testid="human-node-config">
+          <h3 className={styles.sectionTitle}>Human</h3>
+          <Select
+            label="Mode"
+            data-testid="human-mode-select"
+            disabled={readOnly}
+            value={arch.humanMode ?? 'approval'}
+            onChange={(event) =>
+              onChange({
+                humanMode: event.target.value as IntentGraphNode['humanMode'],
+              })
+            }
+            options={[
+              { value: 'approval', label: 'Approval' },
+              { value: 'review', label: 'Review' },
+              { value: 'input', label: 'Input' },
+              { value: 'decision', label: 'Decision' },
+              { value: 'takeover', label: 'Takeover' },
+            ]}
+          />
+          <TextInput
+            fieldClassName={styles.field}
+            label="Assignee / approver"
+            data-testid="human-assignee"
+            disabled={readOnly}
+            value={node.humanAssignee ?? ''}
+            onChange={(event) =>
+              onChange({
+                humanAssignee: event.target.value.trim() || undefined,
+              })
+            }
+          />
+          <TextInput
+            fieldClassName={styles.field}
+            label="Allowed actions (comma-separated)"
+            data-testid="human-allowed-actions"
+            disabled={readOnly}
+            value={(node.humanAllowedActions ?? []).join(', ')}
+            onChange={(event) => {
+              const parts = event.target.value
+                .split(',')
+                .map((part) => part.trim())
+                .filter(Boolean)
+                .slice(0, 12)
+              onChange({
+                humanAllowedActions: parts.length ? parts : undefined,
+              })
+            }}
+          />
+        </section>
+      ) : null}
 
       {arch.type === 'agent' && wiring ? (
         <section className={styles.section}>
@@ -297,6 +520,7 @@ export default function LoopNodeInspector({
             min={1}
             max={50}
             label={ts('chat.loopGraph.inspectorMaxIterations')}
+            data-testid="logic-max-iterations"
             disabled={readOnly}
             value={node.maxIterations ?? 3}
             onChange={(event) =>
@@ -360,6 +584,21 @@ export default function LoopNodeInspector({
           </div>
         ) : (
           <p className={styles.hint}>{ts('chat.loopGraph.inspectorRuntimeIdle')}</p>
+        )}
+        {activeInstance?.activeRunId ? (
+          <button
+            type="button"
+            className={styles.openAssociatedRun}
+            data-testid="loop-open-associated-run"
+            data-loop-open-associated-run={activeInstance.activeRunId}
+            onClick={() => openAgentFlowForRun(activeInstance.activeRunId ?? null)}
+          >
+            {ts('chat.loopGraph.openAssociatedRun')}
+          </button>
+        ) : (
+          <p className={styles.hint} data-testid="loop-open-associated-run-idle">
+            {ts('chat.loopGraph.openAssociatedRunIdle')}
+          </p>
         )}
       </section>
 

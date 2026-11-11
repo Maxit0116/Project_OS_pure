@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="飞书 Feishu">
+  <!-- Typographic mark only — NOT an official Feishu trademark glyph.
+       Official brand SVG was not available under a verified compatible license here. -->
+  <rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="#3370FF"/>
+  <text x="12" y="15.2" text-anchor="middle" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="8" font-weight="700" fill="#FFFFFF">飞书</text>
+</svg>
