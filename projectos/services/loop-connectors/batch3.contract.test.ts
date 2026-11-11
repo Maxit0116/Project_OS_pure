@@ -152,6 +152,18 @@ describe("Batch3 adapters loopback", () => {
           round: 0,
           attemptCounts: {},
           events: [],
+          runBinding: {
+            projectId: "proj_b3",
+            workspaceRoot: "/tmp/b3",
+            specVersion: "v1",
+            createdAt: new Date().toISOString(),
+            codeDigest: "abc",
+            codeDigestStatus: "complete",
+            permissionSet: {
+              credentialRefIds: ["cred_sb"],
+              requireHitlForHighRisk: true,
+            },
+          },
         },
       ],
     };

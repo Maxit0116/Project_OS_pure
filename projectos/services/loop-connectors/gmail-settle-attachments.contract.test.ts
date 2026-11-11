@@ -7,6 +7,21 @@ import { createScriptedTransport } from "./http-transport.js";
 import { settleConnectorOperation } from "./settle-connector.js";
 import type { LoopGraphDocument } from "../../contracts/loop-graph.js";
 
+function freezeBinding(credentialRefIds: string[]) {
+  return {
+    projectId: "proj_gm",
+    workspaceRoot: "/tmp/gm",
+    specVersion: "v1",
+    createdAt: new Date().toISOString(),
+    codeDigest: "abc",
+    codeDigestStatus: "complete" as const,
+    permissionSet: {
+      credentialRefIds,
+      requireHitlForHighRisk: true as const,
+    },
+  };
+}
+
 function baseDoc(): LoopGraphDocument {
   return {
     id: "loop_gm",
@@ -25,6 +40,7 @@ function baseDoc(): LoopGraphDocument {
         round: 0,
         attemptCounts: {},
         events: [],
+        runBinding: freezeBinding(["cred_gmail"]),
       },
     ],
   };
