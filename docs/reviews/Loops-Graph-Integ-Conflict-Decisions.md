@@ -33,4 +33,48 @@
 | Item | Cause | Fix |
 |------|-------|-----|
 | Marketplace `client.test.ts` ×6 | Auto-merge duplicated `testDns` / `McpDnsLookup` import | Dedupe to single testDns (graph SSRF inject) |
-| Sample prisma/next suites | integ worktree lacked `sample-graph-saas/node_modules` | `npm ci --ignore-scripts` in sample (gitignored; not committed) |
+| Sample prisma/next suites | integ worktree lacked `sample-graph-saas/node_modules` | `npm ci --ignore-scripts` + `npx prisma generate` in sample (gitignored; not committed) |
+
+## Candidate pin (reviewable; not merged to graph)
+
+| Field | Value |
+|-------|-------|
+| Tip | `e51462e97ceebfeddd728b67373dffcaa1fdcd75` |
+| Tree | `66679b694ea4e14b68c245e093cc0bea19b8585a` |
+| Merge | `1f55050` parents `3b7a875` (graph) + `15138dc` (PR10) |
+| PR9/PR10/graph heads | Unmoved vs start pins (`ccf2804` / `15138dc` / `3b7a875`) |
+
+### Fixed gates on tip (`PROJECTOS_REQUIRE_REAL_PREVIEW=1`)
+
+| Gate | Exit | Drift |
+|------|------|-------|
+| `projectos` build | 0 | no |
+| `workbench` build | 0 | no |
+| `desktop` build | 0 | no |
+| `projectos` `npm test` | 0 (605 files / 3394 tests) | no |
+| Focused agentic+Loops (12 files / 195 tests) | 0 | n/a |
+| Electron coexist DI screenshots | 0 | n/a |
+
+### Electron coexist (isolated userData; DI loopback; **not live**)
+
+Fresh captures on tip `e51462e` (not re-hosted old PR10 images):
+
+- DutyCard Human Approve + approval mode
+- Agent Flow Idle (Timeline / Flowchart / Agent Pool)
+- Run materials + **Run preflight** / Start disabled until preflight (`b32cd67` force)
+- Same-session Loop overlay + Agent Flow chrome
+
+`startLoopInstance` without assignee/outbound wiring **fail-closed** via LocalApi preflight (expected; proves forced preflight, not a silent pass).
+
+### Safe reproduce (no authorized Mac)
+
+1. Worktree on `cursor/loops-graph-integ-cab8` @ `e51462e`
+2. `sample-graph-saas`: `npm ci --ignore-scripts && npx prisma generate`
+3. Three builds + `PROJECTOS_REQUIRE_REAL_PREVIEW=1 npm test` under gated HEAD/tree/clean
+4. Desktop: `PROJECTOS_REQUIRE_ISOLATED_USER_DATA=1 PROJECTOS_USER_DATA_DIR=/tmp/... PROJECTOS_ALLOW_LOOP_EXECUTION_LOOPBACK=1` + Electron CDP; never daily Mac profile / OAuth / paid model
+
+### Explicitly untested / not claimed
+
+- Live model apply / OAuth / paid providers / outbound network / Mac host
+- Merge into `graph`
+- DI synthetic timeline as real apply evidence
