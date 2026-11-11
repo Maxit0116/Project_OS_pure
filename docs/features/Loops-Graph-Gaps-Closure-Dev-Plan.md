@@ -745,3 +745,4 @@ GC-0 Docs
 | 2026-11-10 | **GC-6.5/6.6/7.2 收尾**：`LoopGraphMinimap` 点击平移；DutyCard Runtime「打开关联 Agent Run」→ `openAgentFlowForRun(activeRunId)`；产品入口确认 = Draw **dblclick** `[data-loop-node]` / 右键 Open Duty（**不是** Review 架构节点详情）；§9 六机制/成熟能力/回归清单保持可勾；**仍非** shipped/live/总交验 |
 | 2026-11-10 | **GC-7.2 §9 逐项测映射**写入本节；Batch3/Gmail/队列 LocalApi 负例；runtime 连接器路径含 gmail/supabase/posthog（禁合成 Executed 成功）；pause/resume LocalApi 状态变；关联 Run Electron **跳转** `data-tour=agent-flow`（非按钮存在）；**仍非** shipped/live |
 | 2026-11-10 | **复审最小修复**：reconcile 跳过 `agent-runs/index.jsonl`；credential 缺 freeze fail-closed；settle/offline **交验边界 = LocalApi+IPC**（非桌面自动 UI）；DI 合成 timeline **无**伪 backupId；LocalApi `skipPreflight` 忽略。**仍非**最终 clean 门禁/总交验 |
+| 2026-11-11 | **tip-final 候选 `4f098a5`**：三层 build+full npm test EXIT0；GC66 clean 同源捕获；DI 合成 timeline 诚实；progress/PW 离线队列口径纠正。**仍非**正式总交验 |

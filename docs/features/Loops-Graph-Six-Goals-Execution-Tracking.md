@@ -137,7 +137,7 @@ env PROJECTOS_REQUIRE_REAL_PREVIEW=1 npx vitest run --maxWorkers=1 --minWorkers=
 |------------------------|------|
 | DutyCard 入口 | Electron `loops-gc-dutycard-*` dblclick（独立复核已过） |
 | Minimap 平移 | 同上 shot02（复核确认前后平移） |
-| 关联 Run **同 run 非空** | **durable DI**：正式 `agent-runs` 落盘 + DutyCard 同 run 非空时间轴/重开/缺失诚实错误。**诚实边界**：DI timeline 为 schema 合成事件（非 live ModelGateway apply 审计；**无**可撤销真实 backupId）。历史：a255 撤销；ab55 `eefe4b60` 保留；dirty/fresh 层另存，不冒充最终 clean 同源 |
+| 关联 Run **同 run 非空** | **clean tip** `loops-gc66-clean-4f098a5-*`：DutyCard→同 run 非空时间轴→真实关闭→重开同 run→缺失诚实；正式 `agent-runs` 磁盘（index 稳定）。**诚实边界**：DI 合成 timeline ≠ live apply；**无**真实 undo backupId。历史隔离：dirty `loops-gc66-durable-*`（b30）、fresh gap、ab55 `eefe4b60`、a255 撤销 — **不**重挂 |
 | pause/resume **状态变** | Electron UI `loops-start-pause-resume-*` Start enabled→awaiting_hitl→Pause paused→Resume 同实例（DI local_tools；**非**同 AgentRun 宣称）；另 LocalApi `loop-pause-resume.local-api.test.ts` |
 | Batch3/Gmail settle LocalApi | `loop-batch3-gmail-offline.local-api.test.ts`（accountRef/50M/write seal/freeze） |
 | 离线队列跨 reopen | 同上 + `loop-offline-event-queue.local-api.test.ts` |
