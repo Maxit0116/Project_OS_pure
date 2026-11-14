@@ -12,6 +12,7 @@ import { useI18n } from '../../i18n'
 import { useLoopGraphStore } from '../../state/loopGraphStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import AgentPicker from '../AgentWorkforce/AgentPicker'
+import { openMarketplaceTalentLibrary } from '../Marketplace/openMarketplaceTalentLibrary'
 import LoopConfigAssetPicker, {
   type ConfigAssetPick,
 } from './LoopConfigAssetPicker'
@@ -32,12 +33,13 @@ function configPickerKind(
   return null
 }
 
+/** Config/capability satellites are added from Agent wiring ports, not the palette. */
 const CATEGORIES: LoopPaletteCategory[] = [
+  'workgroup',
   'agent',
   'action',
   'logic',
   'human',
-  'config',
 ]
 const EXPAND_STORAGE_KEY = 'projectos.loopGraph.paletteExpanded'
 
@@ -51,6 +53,9 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
   const { ts } = useI18n()
   const document = useLoopGraphStore((s) => s.document)
   const beginAuthorNodeFromPalette = useLoopGraphStore((s) => s.beginAuthorNodeFromPalette)
+  const placeTalentSquadAsWorkGroup = useLoopGraphStore(
+    (s) => s.placeTalentSquadAsWorkGroup,
+  )
   const applyLoopPreset = useLoopGraphStore((s) => s.applyLoopPreset)
   const client = useWorkbenchStore((s) => s.client)
   const project = useWorkbenchStore((s) => s.project)
@@ -66,6 +71,7 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
   })
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [agentPickerFor, setAgentPickerFor] = useState<string | null>(null)
+  const [squadSelectedIds, setSquadSelectedIds] = useState<string[]>([])
   const [workforceAgents, setWorkforceAgents] = useState<AgentDefinition[]>([])
   const [agentsLoading, setAgentsLoading] = useState(false)
   const [builtinPresets, setBuiltinPresets] = useState<LoopGraphPreset[]>([])
@@ -132,7 +138,13 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
     options?: {
       agentDefinitionId?: string | null
       title?: string
+      agentRole?: import('@contracts/index').LoopAgentRole
       configRef?: { modelProfileId?: string; skillId?: string; mcpServerId?: string }
+      wiringBase?: {
+        modelProfileId?: string
+        skillIds?: string[]
+        mcpServerIds?: string[]
+      }
     },
   ) => {
     if (!document) return
@@ -148,6 +160,7 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
   }
 
   const onAgentItemActivate = (paletteItemId: string) => {
+    setSquadSelectedIds([])
     setAgentPickerFor(paletteItemId)
   }
 
@@ -308,17 +321,19 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                 const visual = visualForPaletteItem(item)
                 const Icon = visual.Icon
                 const categoryClass =
-                  visual.categoryClass === 'catAgent'
-                    ? styles.catAgent
-                    : visual.categoryClass === 'catAction'
-                      ? styles.catAction
-                      : visual.categoryClass === 'catLogic'
-                        ? styles.catLogic
-                        : visual.categoryClass === 'catHuman'
-                          ? styles.catHuman
-                          : visual.categoryClass === 'catConfig'
-                            ? styles.catConfig
-                            : styles.catDraft
+                  visual.categoryClass === 'catWorkgroup'
+                    ? styles.catWorkgroup
+                    : visual.categoryClass === 'catAgent'
+                      ? styles.catAgent
+                      : visual.categoryClass === 'catAction'
+                        ? styles.catAction
+                        : visual.categoryClass === 'catLogic'
+                          ? styles.catLogic
+                          : visual.categoryClass === 'catHuman'
+                            ? styles.catHuman
+                            : visual.categoryClass === 'catConfig'
+                              ? styles.catConfig
+                              : styles.catDraft
                 const isAgent = category === 'agent'
                 const needsConfigPicker = Boolean(configPickerKind(item.id))
                 if (!expanded) {
@@ -396,22 +411,110 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                   agents={workforceAgents}
                   selectedDefinitionId={null}
                   loading={agentsLoading}
+                  squadSelectedIds={squadSelectedIds}
+                  onToggleSquadMember={(definitionId) => {
+                    setSquadSelectedIds((prev) =>
+                      prev.includes(definitionId)
+                        ? prev.filter((id) => id !== definitionId)
+                        : [...prev, definitionId],
+                    )
+                  }}
+                  onComposeWorkGroup={() => {
+                    const settings = useWorkbenchStore.getState().settings
+                    const defaultModelId =
+                      settings?.execution?.defaultModelProfileId ??
+                      settings?.modelProfiles?.find((profile) => profile.isDefault)?.id ??
+                      settings?.modelProfiles?.[0]?.id
+                    const catalogListings =
+                      useWorkbenchStore.getState().agentCatalogView?.document.listings ??
+                      []
+                    const members: Array<{
+                      agentDefinitionId: string
+                      title: string
+                      agentRole?: import('@contracts/index').LoopAgentRole
+                      wiringBase: {
+                        modelProfileId?: string
+                        skillIds: string[]
+                        mcpServerIds: string[]
+                      }
+                    }> = []
+                    for (const definitionId of squadSelectedIds) {
+                      const match = workforceAgents.find(
+                        (agent) => agent.definitionId === definitionId,
+                      )
+                      if (!match) continue
+                      const listingId = match.config.marketplaceProvenance?.listingId
+                      const template = listingId
+                        ? catalogListings.find((entry) => entry.id === listingId)
+                        : undefined
+                      members.push({
+                        agentDefinitionId: definitionId,
+                        title: match.config.displayName,
+                        ...(template?.suggestedLoopAgentRole
+                          ? { agentRole: template.suggestedLoopAgentRole }
+                          : {}),
+                        wiringBase: {
+                          modelProfileId:
+                            match.config.modelProfileId ?? defaultModelId ?? undefined,
+                          skillIds: match.config.skillIds ?? [],
+                          mcpServerIds: match.config.mcpServerIds ?? [],
+                        },
+                      })
+                    }
+                    setAgentPickerFor(null)
+                    setSquadSelectedIds([])
+                    const at = resolveClickPosition?.() ?? defaultClickPosition()
+                    void placeTalentSquadAsWorkGroup(members, at).then((wgId) => {
+                      if (wgId) onPlaced?.(wgId)
+                    })
+                  }}
                   onSelectGeneral={() => {
                     const paletteId = agentPickerFor
                     setAgentPickerFor(null)
+                    setSquadSelectedIds([])
                     void placeItem(paletteId, undefined, { agentDefinitionId: null })
                   }}
                   onSelectAgent={(definitionId) => {
                     const paletteId = agentPickerFor
                     const match = workforceAgents.find((agent) => agent.definitionId === definitionId)
+                    const listingId = match?.config.marketplaceProvenance?.listingId
+                    const catalogListings =
+                      useWorkbenchStore.getState().agentCatalogView?.document.listings ??
+                      []
+                    const template = listingId
+                      ? catalogListings.find((entry) => entry.id === listingId)
+                      : undefined
+                    const settings = useWorkbenchStore.getState().settings
+                    const defaultModelId =
+                      settings?.execution?.defaultModelProfileId ??
+                      settings?.modelProfiles?.find((profile) => profile.isDefault)?.id ??
+                      settings?.modelProfiles?.[0]?.id
                     setAgentPickerFor(null)
+                    setSquadSelectedIds([])
                     void placeItem(paletteId, undefined, {
                       agentDefinitionId: definitionId,
                       title: match?.config.displayName,
+                      ...(template?.suggestedLoopAgentRole
+                        ? { agentRole: template.suggestedLoopAgentRole }
+                        : {}),
+                      wiringBase: match
+                        ? {
+                            modelProfileId:
+                              match.config.modelProfileId ?? defaultModelId ?? undefined,
+                            skillIds: match.config.skillIds ?? [],
+                            mcpServerIds: match.config.mcpServerIds ?? [],
+                          }
+                        : undefined,
                     })
+                  }}
+                  onBrowseTalentLibrary={() => {
+                    setAgentPickerFor(null)
+                    setSquadSelectedIds([])
+                    openMarketplaceTalentLibrary()
                   }}
                   onCreateAgent={() => {
                     setAgentPickerFor(null)
+                    setSquadSelectedIds([])
                     beginCreateAgentComposer('loop')
                     void setComposerMode('create_agent')
                   }}
@@ -419,7 +522,10 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                 <button
                   type="button"
                   className={styles.agentPickerDismiss}
-                  onClick={() => setAgentPickerFor(null)}
+                  onClick={() => {
+                    setAgentPickerFor(null)
+                    setSquadSelectedIds([])
+                  }}
                 >
                   {ts('workforce.draftCancel')}
                 </button>

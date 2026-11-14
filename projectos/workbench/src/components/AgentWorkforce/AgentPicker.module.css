@@ -48,6 +48,13 @@
   border-radius: var(--radius-sm);
 }
 
+.squadCheck {
+  display: inline-flex;
+  align-items: center;
+  padding-left: 8px;
+  flex-shrink: 0;
+}
+
 .itemRow:hover {
   background: var(--color-hover-overlay);
 }

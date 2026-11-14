@@ -253,11 +253,18 @@ import {
 } from "../contracts/settings.js";
 import { McpSessionManager } from "./mcp/index.js";
 import { GitHubAuthSessionManager } from "./github-auth/session-manager.js";
+import { UserAccountSessionManager } from "./user-account/session-manager.js";
 import type {
   AccountProfile,
   BeginGitHubOAuthResult,
   GitHubAuthStatus,
 } from "../contracts/github-auth.js";
+import type {
+  BeginGoogleOAuthResult,
+  UserAccountProfile,
+  UserAccountProvider,
+  UserAccountStatus,
+} from "../contracts/user-account.js";
 import {
   filterInstallableListings,
   findCatalogListing,
@@ -284,6 +291,7 @@ import {
   exportRulesPackFromDisk,
   installProjectRulesPack,
   listInstalledRulesPackIds as listInstalledRulesPackIdsOnDisk,
+  rulesPackExists,
   RulesInstallError,
   uninstallProjectRulesPack,
 } from "./rules-catalog-service.js";
@@ -295,6 +303,7 @@ import {
   withAgentCatalogReport,
 } from "./agent-marketplace/index.js";
 import {
+  collectAgentListingDependencyIds,
   exportWorkforceAgentPack,
   installAgentFromListing,
   listInstalledMarketplaceAgentListingIds as listInstalledMarketplaceAgentListingIdsOnDisk,
@@ -551,6 +560,7 @@ import {
   getProjectSkill,
   installProjectSkill,
   listProjectSkills,
+  skillExists,
   SkillInstallError,
   uninstallProjectSkill,
 } from "./skill-catalog-service.js";
@@ -671,6 +681,8 @@ export interface ProjectOSLocalApiOptions {
   userDataPath?: string;
   /** Tests inject a fake GitHub auth session manager. */
   githubAuthSessionManager?: GitHubAuthSessionManager;
+  /** Tests inject a fake product-account session manager. */
+  userAccountSessionManager?: UserAccountSessionManager;
 }
 
 export interface VerificationRunnerDependency {
@@ -965,6 +977,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   private readonly workflowCatalogClient: WorkflowCatalogClient;
   private readonly stencilCatalogClient: StencilCatalogClient;
   private readonly githubAuthSessionManager: GitHubAuthSessionManager;
+  private readonly userAccountSessionManager: UserAccountSessionManager;
   private readonly planService: PlanService;
   private readonly intentExtractionService: RequestIntentExtractionService;
   private readonly requestIntentService: RequestIntentService;
@@ -1145,6 +1158,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       new GitHubAuthSessionManager({
         secretStore: this.secretStore,
         userDataPath: githubUserDataPath,
+        ...(options.openExternalUrl
+          ? { openExternalUrl: options.openExternalUrl }
+          : {}),
+      });
+    this.userAccountSessionManager =
+      options.userAccountSessionManager ??
+      new UserAccountSessionManager({
+        secretStore: this.secretStore,
+        userDataPath: githubUserDataPath,
+        githubAuth: this.githubAuthSessionManager,
         ...(options.openExternalUrl
           ? { openExternalUrl: options.openExternalUrl }
           : {}),
@@ -2368,11 +2391,53 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ? this.settingsService.getSettings(workspace).presentationMode
       : false;
     this.githubAuthSessionManager.setMockMode(Boolean(presentationMode));
+    this.userAccountSessionManager.setMockMode(Boolean(presentationMode));
   }
 
   async getGitHubAuthStatus(): Promise<GitHubAuthStatus> {
     this.syncGitHubAuthMockMode();
     return this.githubAuthSessionManager.getStatus();
+  }
+
+  async getUserAccountStatus(): Promise<UserAccountStatus> {
+    this.syncGitHubAuthMockMode();
+    return this.userAccountSessionManager.getStatus();
+  }
+
+  async getUserAccountProfile(): Promise<UserAccountProfile | null> {
+    this.syncGitHubAuthMockMode();
+    return this.userAccountSessionManager.getProfile();
+  }
+
+  async beginGoogleOAuth(): Promise<BeginGoogleOAuthResult> {
+    this.syncGitHubAuthMockMode();
+    const result = await this.userAccountSessionManager.beginGoogleOAuth();
+    if (result.kind === "pending") {
+      void this.userAccountSessionManager.waitForGoogleOAuth().catch(() => undefined);
+    }
+    return result;
+  }
+
+  async cancelGoogleOAuth(): Promise<UserAccountStatus> {
+    return this.userAccountSessionManager.cancelGoogleOAuth();
+  }
+
+  async activateUserAccountProvider(
+    provider: UserAccountProvider,
+  ): Promise<UserAccountStatus> {
+    this.syncGitHubAuthMockMode();
+    if (provider !== "google" && provider !== "github") {
+      throw new ProjectOSError(
+        "invalid_request",
+        "User account provider must be google or github",
+      );
+    }
+    return this.userAccountSessionManager.activateProvider(provider);
+  }
+
+  async signOutUserAccount(): Promise<UserAccountStatus> {
+    this.syncGitHubAuthMockMode();
+    return this.userAccountSessionManager.signOut();
   }
 
   async beginGitHubOAuth(): Promise<BeginGitHubOAuthResult> {
@@ -5458,12 +5523,16 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         : {}),
     }));
 
+    const agentCatalogView = await this.listAgentCatalog(parsed.projectId);
+    const agentCatalog = agentCatalogView.document.listings;
+
     if (parsed.scope === "local") {
       return assembleWorkforceAgentFromPrompt({
         prompt: parsed.prompt,
         scope: "local",
         skills: skillsResult.skills,
         mcpServers,
+        agentCatalog,
         ...(parsed.seedSkillIds ? { seedSkillIds: parsed.seedSkillIds } : {}),
         ...(parsed.seedMcpServerIds
           ? { seedMcpServerIds: parsed.seedMcpServerIds }
@@ -5496,6 +5565,7 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       scope: "local_and_catalog",
       skills: skillsResult.skills,
       mcpServers,
+      agentCatalog,
       ...(parsed.seedSkillIds ? { seedSkillIds: parsed.seedSkillIds } : {}),
       ...(parsed.seedMcpServerIds
         ? { seedMcpServerIds: parsed.seedMcpServerIds }
@@ -11670,20 +11740,203 @@ export class ProjectOSLocalApi implements ProjectOSApi {
   async installAgentFromCatalog(
     projectId: string,
     input: InstallAgentFromCatalogInput,
-  ): Promise<AgentDefinition> {
+  ): Promise<import("../contracts/agent-marketplace.js").InstallAgentFromCatalogResult> {
     const parsed = InstallAgentFromCatalogInputSchema.parse(input);
     const workspace = this.requireLoadedWorkspace(projectId);
     const view = await this.listAgentCatalog(projectId);
     const listing = findAgentCatalogListing(view.document, parsed.listingId);
+    const installDependencies = parsed.installDependencies !== false;
+    const dependencies: import("../contracts/agent-marketplace.js").AgentDependencyInstallItem[] =
+      [];
+    const boundMcpServerIds: string[] = [];
+
+    if (installDependencies) {
+      const deps = collectAgentListingDependencyIds(listing);
+
+      if (deps.skillIds.length > 0) {
+        const skillView = await this.listSkillCatalog(projectId);
+        for (const skillId of deps.skillIds) {
+          if (skillExists(workspace.workspaceRoot, skillId)) {
+            dependencies.push({
+              kind: "skill",
+              listingId: skillId,
+              status: "already_installed",
+            });
+            continue;
+          }
+          const skillListing = skillView.document.listings.find(
+            (entry) => entry.id === skillId,
+          );
+          if (!skillListing) {
+            dependencies.push({
+              kind: "skill",
+              listingId: skillId,
+              status: "missing_from_catalog",
+              message: `Skill '${skillId}' is not in the Skill catalog`,
+            });
+            continue;
+          }
+          try {
+            installProjectSkill({
+              workspaceRoot: workspace.workspaceRoot,
+              listing: skillListing,
+            });
+            dependencies.push({
+              kind: "skill",
+              listingId: skillId,
+              status: "installed",
+            });
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            if (/already exists/iu.test(message)) {
+              dependencies.push({
+                kind: "skill",
+                listingId: skillId,
+                status: "already_installed",
+              });
+            } else {
+              dependencies.push({
+                kind: "skill",
+                listingId: skillId,
+                status: "failed",
+                message,
+              });
+            }
+          }
+        }
+      }
+
+      if (deps.rulesPackIds.length > 0) {
+        const rulesView = await this.listRulesCatalog(projectId);
+        for (const rulesId of deps.rulesPackIds) {
+          if (rulesPackExists(workspace.workspaceRoot, rulesId)) {
+            dependencies.push({
+              kind: "rules",
+              listingId: rulesId,
+              status: "already_installed",
+            });
+            continue;
+          }
+          const rulesListing = rulesView.document.listings.find(
+            (entry) => entry.id === rulesId,
+          );
+          if (!rulesListing) {
+            dependencies.push({
+              kind: "rules",
+              listingId: rulesId,
+              status: "missing_from_catalog",
+              message: `Rules pack '${rulesId}' is not in the Rules catalog`,
+            });
+            continue;
+          }
+          try {
+            installProjectRulesPack({
+              workspaceRoot: workspace.workspaceRoot,
+              listing: rulesListing,
+              catalogVersion: rulesView.document.version,
+            });
+            dependencies.push({
+              kind: "rules",
+              listingId: rulesId,
+              status: "installed",
+            });
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            if (/already exists/iu.test(message)) {
+              dependencies.push({
+                kind: "rules",
+                listingId: rulesId,
+                status: "already_installed",
+              });
+            } else {
+              dependencies.push({
+                kind: "rules",
+                listingId: rulesId,
+                status: "failed",
+                message,
+              });
+            }
+          }
+        }
+      }
+
+      if (deps.mcpListingIds.length > 0) {
+        const mcpView = await this.listMcpCatalog(projectId);
+        let settings = this.requireLoadedWorkspace(projectId).settings;
+        for (const mcpId of deps.mcpListingIds) {
+          const existing = (settings.mcpServers ?? []).find(
+            (server) => server.provenance?.listingId === mcpId,
+          );
+          if (existing) {
+            boundMcpServerIds.push(existing.id);
+            dependencies.push({
+              kind: "mcp",
+              listingId: mcpId,
+              status: "already_installed",
+              serverId: existing.id,
+            });
+            continue;
+          }
+          const mcpListing = mcpView.document.listings.find(
+            (entry) => entry.id === mcpId,
+          );
+          if (!mcpListing) {
+            dependencies.push({
+              kind: "mcp",
+              listingId: mcpId,
+              status: "missing_from_catalog",
+              message: `MCP '${mcpId}' is not in the MCP catalog`,
+            });
+            continue;
+          }
+          try {
+            const enableCurated = mcpListing.trustTier === "curated";
+            const config = listingToMcpServerConfig({
+              listing: mcpListing,
+              catalogVersion: mcpView.document.version,
+              overrides: {
+                ...(enableCurated ? { enabled: true } : {}),
+              },
+            });
+            settings = await this.saveMcpServer(projectId, { config });
+            boundMcpServerIds.push(config.id);
+            dependencies.push({
+              kind: "mcp",
+              listingId: mcpId,
+              status: "installed",
+              serverId: config.id,
+              ...(mcpListing.requiresAuth
+                ? {
+                    message:
+                      "Installed; auth token may still be required before the server can connect",
+                  }
+                : {}),
+            });
+          } catch (error) {
+            dependencies.push({
+              kind: "mcp",
+              listingId: mcpId,
+              status: "failed",
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+    }
+
     try {
-      return installAgentFromListing({
+      const definition = installAgentFromListing({
         projectOSRoot: workspace.projectOSRoot,
         projectId,
         listing,
         catalogVersion: view.document.version,
         source: "catalog",
         ...(parsed.replace === true ? { replace: true } : {}),
+        ...(boundMcpServerIds.length ? { mcpServerIds: boundMcpServerIds } : {}),
       });
+      return { definition, dependencies };
     } catch (error) {
       if (error instanceof AgentInstallError) {
         throw new ProjectOSError("invalid_settings", error.message);

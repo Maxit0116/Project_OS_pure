@@ -1,6 +1,7 @@
 import {
   LOOP_CAPABILITY_INDEGREE_MAX,
   configPortForSatelliteKind,
+  effectiveConfigPort,
   isConfigNode,
   type AgentWiringOverride,
   type IntentGraph,
@@ -61,7 +62,11 @@ export function validateAgentWiringGraph(draft: IntentGraph): AgentWiringIssue[]
 
   const modelIndegree = new Map<string, number>();
   const memoryIndegree = new Map<string, number>();
+  const skillIndegree = new Map<string, number>();
+  const mcpIndegree = new Map<string, number>();
   const capabilityIndegree = new Map<string, number>();
+  /** Each satellite feeds at most one agent — no shared model/MCP/skill hubs. */
+  const satelliteOutdegree = new Map<string, number>();
 
   for (const edge of draft.edges) {
     if (edge.kind !== "provides") continue;
@@ -81,11 +86,15 @@ export function validateAgentWiringGraph(draft: IntentGraph): AgentWiringIssue[]
       });
       continue;
     }
+    satelliteOutdegree.set(
+      source.id,
+      (satelliteOutdegree.get(source.id) ?? 0) + 1,
+    );
 
     const expectedPort = source.satelliteKind
       ? configPortForSatelliteKind(source.satelliteKind)
       : undefined;
-    const port = edge.configPort ?? expectedPort;
+    const port = effectiveConfigPort(edge.configPort, source.satelliteKind);
     if (!port) {
       issues.push({
         path: `edges.${edge.id}.configPort`,
@@ -93,7 +102,10 @@ export function validateAgentWiringGraph(draft: IntentGraph): AgentWiringIssue[]
       });
       continue;
     }
-    if (expectedPort && port !== expectedPort) {
+    const legacyCapabilityAlias =
+      edge.configPort === "capability" &&
+      (expectedPort === "skill" || expectedPort === "mcp");
+    if (expectedPort && port !== expectedPort && !legacyCapabilityAlias) {
       issues.push({
         path: `edges.${edge.id}.configPort`,
         message: `satellite ${source.satelliteKind} must connect to ${expectedPort}, got ${port}`,
@@ -104,11 +116,24 @@ export function validateAgentWiringGraph(draft: IntentGraph): AgentWiringIssue[]
       modelIndegree.set(target.id, (modelIndegree.get(target.id) ?? 0) + 1);
     } else if (port === "memory") {
       memoryIndegree.set(target.id, (memoryIndegree.get(target.id) ?? 0) + 1);
+    } else if (port === "skill") {
+      skillIndegree.set(target.id, (skillIndegree.get(target.id) ?? 0) + 1);
+    } else if (port === "mcp") {
+      mcpIndegree.set(target.id, (mcpIndegree.get(target.id) ?? 0) + 1);
     } else {
       capabilityIndegree.set(
         target.id,
         (capabilityIndegree.get(target.id) ?? 0) + 1,
       );
+    }
+  }
+
+  for (const [satelliteId, count] of satelliteOutdegree) {
+    if (count > 1) {
+      issues.push({
+        path: `nodes.${satelliteId}.provides`,
+        message: `Config satellite "${satelliteId}" may provide to at most one agent`,
+      });
     }
   }
 
@@ -125,6 +150,22 @@ export function validateAgentWiringGraph(draft: IntentGraph): AgentWiringIssue[]
       issues.push({
         path: `nodes.${nodeId}.ports.memory`,
         message: `Agent "${nodeId}" Memory port accepts at most one provides edge`,
+      });
+    }
+  }
+  for (const [nodeId, count] of skillIndegree) {
+    if (count > LOOP_CAPABILITY_INDEGREE_MAX) {
+      issues.push({
+        path: `nodes.${nodeId}.ports.skill`,
+        message: `Agent "${nodeId}" Skills port accepts at most ${LOOP_CAPABILITY_INDEGREE_MAX} provides edges`,
+      });
+    }
+  }
+  for (const [nodeId, count] of mcpIndegree) {
+    if (count > LOOP_CAPABILITY_INDEGREE_MAX) {
+      issues.push({
+        path: `nodes.${nodeId}.ports.mcp`,
+        message: `Agent "${nodeId}" MCP port accepts at most ${LOOP_CAPABILITY_INDEGREE_MAX} provides edges`,
       });
     }
   }
@@ -155,18 +196,24 @@ function patchFromProvides(
     const source = nodesById.get(edge.source);
     if (!source || !isConfigNode(source)) continue;
     const port: LoopAgentConfigPort =
-      edge.configPort ??
-      (source.satelliteKind
-        ? configPortForSatelliteKind(source.satelliteKind)
-        : "capability");
+      effectiveConfigPort(edge.configPort, source.satelliteKind) ??
+      "capability";
     const ref = source.configRef ?? {};
     if (port === "model") {
       modelProfileId = ref.modelProfileId ?? modelProfileId;
     } else if (port === "memory") {
       memoryMode = ref.memoryMode ?? memoryMode;
-    } else if (source.satelliteKind === "skill" && ref.skillId) {
+    } else if (
+      (port === "skill" || port === "capability") &&
+      source.satelliteKind === "skill" &&
+      ref.skillId
+    ) {
       skillIds.push(ref.skillId);
-    } else if (source.satelliteKind === "mcp" && ref.mcpServerId) {
+    } else if (
+      (port === "mcp" || port === "capability") &&
+      source.satelliteKind === "mcp" &&
+      ref.mcpServerId
+    ) {
       mcpServerIds.push(ref.mcpServerId);
     }
   }
@@ -254,7 +301,11 @@ export interface ExpandWiringInput {
   agentNodeId: string;
   agentPosition: { x: number; y: number };
   base: AgentWiringBase;
-  /** Existing draft nodes/edges — used to avoid duplicate satellites for same ref. */
+  /**
+   * Existing draft — used to skip edges that already feed this agent.
+   * Satellites are never shared across agents: same model/MCP/skill ref
+   * still gets a dedicated satellite per agent.
+   */
   existing: IntentGraph;
   newId: () => string;
 }
@@ -264,18 +315,50 @@ export interface ExpandWiringResult {
   edges: IntentGraphEdge[];
 }
 
-function findExistingSatellite(
-  draft: IntentGraph,
-  kind: LoopSatelliteKind,
-  match: (ref: NonNullable<IntentGraphNode["configRef"]>) => boolean,
-): IntentGraphNode | undefined {
-  return draft.nodes.find(
-    (node) =>
-      isConfigNode(node) &&
-      node.satelliteKind === kind &&
-      node.configRef &&
-      match(node.configRef),
-  );
+/** Agent card width used when laying out satellite columns under wiring ports. */
+const EXPAND_AGENT_MIN_W = 280;
+const EXPAND_AGENT_CAP_SLOT_W = 36;
+const EXPAND_AGENT_BODY_H = 100;
+const EXPAND_SATELLITE_W = 36;
+const EXPAND_SATELLITE_GAP_Y = 24;
+
+/** Model 1/5 · MCP 2/5 · Skills 2/5 — keep in sync with workbench wiring layout. */
+const EXPAND_ZONE_FRAC = {
+  model: 1 / 5,
+  mcp: 2 / 5,
+  skill: 2 / 5,
+} as const;
+
+function expandAgentWidth(mcpCount: number, skillCount: number): number {
+  const extra =
+    Math.max(0, Math.max(1, mcpCount) - 1) +
+    Math.max(0, Math.max(1, skillCount) - 1);
+  return EXPAND_AGENT_MIN_W + extra * EXPAND_AGENT_CAP_SLOT_W;
+}
+
+function stripPortCenterX(
+  agentX: number,
+  agentW: number,
+  port: Extract<LoopAgentConfigPort, "model" | "mcp" | "skill">,
+  slotInPort: number,
+  portCounts: { model: number; mcp: number; skill: number },
+): number {
+  let zoneStart = 0;
+  if (port === "mcp") zoneStart = agentW * EXPAND_ZONE_FRAC.model;
+  else if (port === "skill") {
+    zoneStart = agentW * (EXPAND_ZONE_FRAC.model + EXPAND_ZONE_FRAC.mcp);
+  }
+  const zoneWidth = agentW * EXPAND_ZONE_FRAC[port];
+  const count =
+    port === "model"
+      ? Math.max(1, portCounts.model)
+      : port === "mcp"
+        ? Math.max(1, portCounts.mcp)
+        : Math.max(1, portCounts.skill);
+  const inset = Math.min(10, zoneWidth * 0.12);
+  const usable = Math.max(1, zoneWidth - inset * 2);
+  const index = Math.min(Math.max(0, slotInPort), count - 1);
+  return agentX + zoneStart + inset + (usable * (index + 0.5)) / count;
 }
 
 /** Build config satellites + provides edges from a Workforce / base definition. */
@@ -284,115 +367,82 @@ export function expandWiringFromDefinition(
 ): ExpandWiringResult {
   const nodes: IntentGraphNode[] = [];
   const edges: IntentGraphEdge[] = [];
-  const { agentNodeId, agentPosition, base, existing, newId } = input;
-  let slot = 0;
+  const { agentNodeId, agentPosition, base, newId } = input;
+  void input.existing;
+  const stackByPort: Record<"model" | "mcp" | "skill", number> = {
+    model: 0,
+    mcp: 0,
+    skill: 0,
+  };
+  const portCounts = {
+    model: base.modelProfileId ? 1 : 0,
+    mcp: base.mcpServerIds?.length ?? 0,
+    skill: base.skillIds?.length ?? 0,
+  };
+  const agentW = expandAgentWidth(portCounts.mcp, portCounts.skill);
 
   const place = (
     kind: LoopSatelliteKind,
     title: string,
     configRef: NonNullable<IntentGraphNode["configRef"]>,
-    port: LoopAgentConfigPort,
-    reuse?: IntentGraphNode,
+    port: Extract<LoopAgentConfigPort, "model" | "mcp" | "skill">,
   ) => {
-    const satellite =
-      reuse ??
-      ({
-        id: newId(),
-        title,
-        prompt: "",
-        type: "config" as const,
-        satelliteKind: kind,
-        configRef,
-        position: {
-          x: agentPosition.x - 40 + slot * 100,
-          y: agentPosition.y + 90,
-        },
-      } satisfies IntentGraphNode);
-    if (!reuse) {
-      nodes.push(satellite);
-      slot += 1;
-    }
-    const already = existing.edges.some(
-      (edge) =>
-        edge.kind === "provides" &&
-        edge.source === satellite.id &&
-        edge.target === agentNodeId,
+    const stack = stackByPort[port];
+    const centerX = stripPortCenterX(
+      agentPosition.x,
+      agentW,
+      port,
+      stack,
+      portCounts,
     );
-    const pending = edges.some(
-      (edge) => edge.source === satellite.id && edge.target === agentNodeId,
-    );
-    if (!already && !pending) {
-      edges.push({
-        id: newId(),
-        source: satellite.id,
-        target: agentNodeId,
-        kind: "provides",
-        configPort: port,
-        sourcePort: "n",
-        targetPort: "s",
-        prompt: "",
-      });
-    }
+    const satellite = {
+      id: newId(),
+      title,
+      prompt: "",
+      type: "config" as const,
+      satelliteKind: kind,
+      configRef,
+      position: {
+        x: centerX - EXPAND_SATELLITE_W / 2,
+        y:
+          agentPosition.y +
+          EXPAND_AGENT_BODY_H +
+          EXPAND_SATELLITE_GAP_Y +
+          stack * (EXPAND_SATELLITE_W + 10),
+      },
+    } satisfies IntentGraphNode;
+    nodes.push(satellite);
+    stackByPort[port] = stack + 1;
+    edges.push({
+      id: newId(),
+      source: satellite.id,
+      target: agentNodeId,
+      kind: "provides",
+      configPort: port,
+      sourcePort: "n",
+      targetPort: "s",
+      prompt: "",
+    });
   };
 
   if (base.modelProfileId) {
-    const reuse = findExistingSatellite(
-      existing,
-      "model",
-      (ref) => ref.modelProfileId === base.modelProfileId,
-    );
     place(
       "model",
       `Model · ${base.modelProfileId.slice(0, 16)}`,
       { modelProfileId: base.modelProfileId },
       "model",
-      reuse,
     );
   }
 
-  if (base.memoryMode && base.memoryMode !== "none") {
-    const reuse = findExistingSatellite(
-      existing,
-      "memory",
-      (ref) => ref.memoryMode === base.memoryMode,
-    );
-    place(
-      "memory",
-      `Memory · ${base.memoryMode}`,
-      { memoryMode: base.memoryMode },
-      "memory",
-      reuse,
-    );
+  // Memory stays on the Definition / override fold path; the Agent strip is
+  // Model / MCP / Skills only, so memory is not expanded as a canvas satellite.
+
+  for (const mcpServerId of base.mcpServerIds ?? []) {
+    place("mcp", `MCP · ${mcpServerId.slice(0, 24)}`, { mcpServerId }, "mcp");
   }
 
   for (const skillId of base.skillIds ?? []) {
-    const reuse = findExistingSatellite(
-      existing,
-      "skill",
-      (ref) => ref.skillId === skillId,
-    );
-    place(
-      "skill",
-      `Skill · ${skillId.slice(0, 24)}`,
-      { skillId },
-      "capability",
-      reuse,
-    );
-  }
-
-  for (const mcpServerId of base.mcpServerIds ?? []) {
-    const reuse = findExistingSatellite(
-      existing,
-      "mcp",
-      (ref) => ref.mcpServerId === mcpServerId,
-    );
-    place(
-      "mcp",
-      `MCP · ${mcpServerId.slice(0, 24)}`,
-      { mcpServerId },
-      "capability",
-      reuse,
-    );
+    place("skill", `Skill · ${skillId.slice(0, 24)}`, { skillId }, "skill");
   }
 
   return { nodes, edges };

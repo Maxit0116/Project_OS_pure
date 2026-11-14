@@ -5,6 +5,7 @@ import { useI18n } from '../../../i18n'
 import { GlassLens } from '../../Glass'
 import Chip from '../../ui/Chip'
 import AgentPicker from '../../AgentWorkforce/AgentPicker'
+import { openMarketplaceTalentLibrary } from '../../Marketplace/openMarketplaceTalentLibrary'
 import {
   CHAT_MODE_VISUALS,
   CYCLE_CHAT_MODES,
@@ -321,6 +322,11 @@ export default function ComposerModeSwitch({
                         match?.config.displayName ?? null,
                       )
                       onModeChange('change')
+                      setOpen(false)
+                      setModeFlyout(null)
+                    }}
+                    onBrowseTalentLibrary={() => {
+                      openMarketplaceTalentLibrary()
                       setOpen(false)
                       setModeFlyout(null)
                     }}

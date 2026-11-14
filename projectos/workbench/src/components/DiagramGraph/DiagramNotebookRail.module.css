@@ -163,53 +163,45 @@
 .block {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   padding: 8px;
   border: 1px solid var(--tech-border);
   border-radius: 6px;
-  background: var(--tech-bg-canvas);
+  background: var(--tech-bg-elevated);
 }
 
 .blockHead {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
 }
 
-.titleInput,
-.bodyInput {
+.titleField {
+  flex: 1;
+  min-width: 0;
+}
+
+.bodyField {
   width: 100%;
-  box-sizing: border-box;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--tech-text-primary);
-  font: inherit;
-  resize: vertical;
 }
 
 .titleInput {
-  flex: 1;
-  min-width: 0;
-  padding: 2px 4px;
-  font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
 .bodyInput {
   min-height: 72px;
-  padding: 4px;
-  font-size: var(--font-size-xs);
-  line-height: 1.45;
   color: var(--tech-text-secondary);
 }
 
-.titleInput:focus,
-.bodyInput:focus {
-  outline: none;
-  border-color: var(--tech-border-strong);
-  background: var(--tech-bg-muted);
+.bodyInput:focus,
+.bodyInput:focus-visible {
   color: var(--tech-text-primary);
+}
+
+.blockHead .removeBlock {
+  margin-top: 1px;
+  flex-shrink: 0;
 }
 
 .footer {

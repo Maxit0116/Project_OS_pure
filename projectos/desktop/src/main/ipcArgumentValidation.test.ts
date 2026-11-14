@@ -36,6 +36,12 @@ describe('privileged IPC argument validation', () => {
     expect(PROJECTOS_IPC_METHODS).toContain('getAccountProfile')
     expect(PROJECTOS_IPC_METHODS).toContain('saveGitHubOAuthClientId')
     expect(PROJECTOS_IPC_METHODS).toContain('importGitHubAuthFromGhCli')
+    expect(PROJECTOS_IPC_METHODS).toContain('getUserAccountStatus')
+    expect(PROJECTOS_IPC_METHODS).toContain('getUserAccountProfile')
+    expect(PROJECTOS_IPC_METHODS).toContain('beginGoogleOAuth')
+    expect(PROJECTOS_IPC_METHODS).toContain('cancelGoogleOAuth')
+    expect(PROJECTOS_IPC_METHODS).toContain('activateUserAccountProvider')
+    expect(PROJECTOS_IPC_METHODS).toContain('signOutUserAccount')
     expect(PROJECTOS_IPC_METHODS).toContain('cancelAsk')
     expect(PROJECTOS_IPC_METHODS as readonly string[]).not.toContain(
       'restoreDeterministicDesignMutationBackup',

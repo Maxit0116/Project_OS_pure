@@ -21,6 +21,50 @@
   align-items: center;
   gap: 12px;
   min-width: 0;
+  flex-wrap: wrap;
+}
+
+.wiringViewToggle {
+  display: inline-flex;
+  gap: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--tech-border);
+}
+
+.workGroupBreadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--tech-border);
+  min-width: 0;
+}
+
+.workGroupBreadcrumbText {
+  font-size: var(--font-size-xs);
+  color: var(--tech-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+.workGroupInteriorHint {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  margin: 0;
+  padding: 6px 12px;
+  max-width: min(520px, 90%);
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  color: var(--tech-text-secondary);
+  font-size: var(--font-size-xs);
+  text-align: center;
+  pointer-events: none;
 }
 
 .title {
@@ -230,6 +274,8 @@
   fill: none;
   stroke: var(--tech-border-strong);
   stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .edgeHit {
@@ -280,7 +326,7 @@
   opacity: 0.85;
 }
 
-/* Anchor at edge midpoint; chip self-sizes and recenters via transform. */
+/* Anchor at smart label park (longest clear segment); chip recenters via transform. */
 .edgeLabelForeign {
   overflow: visible;
 }
@@ -304,7 +350,19 @@
   white-space: normal;
   overflow-wrap: anywhere;
   opacity: 0.95;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.edgeLabelChip:hover {
+  border-color: var(--tech-border-strong);
+  color: var(--tech-text-primary);
+}
+
+.edgeLabelChipSelected {
+  border-color: var(--tech-accent);
+  color: var(--tech-text-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tech-accent) 45%, transparent);
 }
 
 .edgeLabelChipPending {
@@ -316,17 +374,135 @@
   position: absolute;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  width: 220px;
-  min-height: 52px;
-  padding: 8px 10px;
+  gap: 6px;
+  width: 200px;
+  min-height: 88px;
+  padding: 10px 12px;
   border: 1px solid var(--tech-border-strong);
   border-radius: 6px;
   background: var(--tech-bg-elevated);
   color: var(--tech-text-primary);
   box-shadow: var(--tech-shadow-sm);
   box-sizing: border-box;
+  overflow: visible;
   z-index: 2;
+}
+
+/**
+ * Flat diamond (Condition / Human Approval).
+ * Outer AABB is transparent and does NOT receive hits — only the SVG polygon
+ * (plus ports) is interactive, so empty corners next to the diamond pan the
+ * canvas instead of dragging the node.
+ * Ports stay at AABB mid-sides = diamond corners (N/E/S/W).
+ * Size is driven by LoopDiamondAutosize (content → diamond AABB).
+ */
+.node.nodeDiamond {
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.nodeDiamondShell {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.nodeDiamondShell polygon {
+  fill: var(--tech-bg-elevated);
+  stroke: var(--tech-border-strong);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: visiblePainted;
+  cursor: grab;
+  transition: stroke 150ms var(--ease-out, ease-out), fill 150ms var(--ease-out, ease-out);
+}
+
+.nodeDiamondBody {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: max-content;
+  max-width: 152px;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.nodeDiamond .nodeTop {
+  justify-content: center;
+  flex-wrap: wrap;
+  min-height: 0;
+  width: max-content;
+  max-width: 152px;
+}
+
+.nodeDiamond .nodeTitle {
+  flex: 0 1 auto;
+  max-width: 112px;
+  font-size: var(--font-size-xs);
+}
+
+.nodeDiamond .nodeTask {
+  flex: 0 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: 152px;
+  max-height: none;
+  -webkit-line-clamp: 3;
+  font-size: 10px;
+  text-align: center;
+}
+
+.nodeDiamond .incompleteMark {
+  padding: 1px 4px;
+  font-size: 9px;
+}
+
+.nodeDiamond.nodeActive .nodeDiamondShell polygon,
+.nodeDiamond.nodeConnecting .nodeDiamondShell polygon,
+.nodeDiamond.nodeRunning .nodeDiamondShell polygon {
+  stroke: var(--tech-accent);
+}
+
+.nodeDiamond.nodeActive,
+.nodeDiamond.nodeConnecting {
+  box-shadow: none;
+  filter: drop-shadow(
+    0 0 6px color-mix(in srgb, var(--tech-accent) 36%, transparent)
+  );
+}
+
+.nodeDiamond.nodeHitl .nodeDiamondShell polygon {
+  stroke: var(--tech-warning);
+}
+
+.nodeDiamond.nodeSucceeded .nodeDiamondShell polygon {
+  stroke: color-mix(in srgb, #34d399 70%, var(--tech-border-strong));
+}
+
+.nodeDiamond.nodeFailed .nodeDiamondShell polygon {
+  stroke: color-mix(in srgb, #f87171 70%, var(--tech-border-strong));
+}
+
+.nodeDiamond.nodeIncomplete .nodeDiamondShell polygon {
+  stroke-dasharray: 4 3;
 }
 
 .port {
@@ -346,6 +522,21 @@
 .portActive {
   background: var(--tech-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--tech-accent) 28%, transparent);
+}
+
+.portWarn {
+  border-color: color-mix(in srgb, var(--tech-warning) 75%, var(--tech-accent));
+}
+
+/*
+ * Agent config handles: real hit targets on the bottom border, centered under
+ * each icon-button zone, but not painted so they don't clutter the card.
+ */
+.portConfigHidden {
+  opacity: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .nodeActive {
@@ -421,8 +612,23 @@
 .nodeTop {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
+  min-height: 24px;
+}
+
+.nodeTask {
+  flex: 0 1 auto;
+  min-height: 0;
+  color: var(--tech-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .nodeIcon {
@@ -484,6 +690,15 @@
   text-transform: uppercase;
 }
 
+.catWorkgroup {
+  color: color-mix(in srgb, var(--tech-text-secondary) 75%, var(--tech-accent));
+}
+
+.nodeIcon.catWorkgroup {
+  background: color-mix(in srgb, var(--tech-bg-muted) 80%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--tech-border-strong) 70%, transparent);
+}
+
 .catAgent {
   color: color-mix(in srgb, #7dd3fc 85%, var(--tech-text-primary));
 }
@@ -538,6 +753,7 @@
   border: 1px solid color-mix(in srgb, #c4b5fd 32%, var(--tech-border));
 }
 
+.node.catWorkgroup,
 .node.catAgent,
 .node.catAction,
 .node.catLogic,
@@ -547,46 +763,231 @@
   color: var(--tech-text-primary);
 }
 
-.nodeConfig {
+.workGroupPanel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 200px;
+  max-width: 260px;
+  padding: 10px 12px;
+  border: 1px solid var(--tech-border);
+  border-radius: 6px;
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-sm);
+}
+
+.workGroupPanelTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.workGroupPanelRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workGroupPanelLabel {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--tech-text-muted);
+}
+
+.workGroupPanelSelect {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.workGroupPanelSelect:focus-visible {
+  box-shadow: var(--tech-shadow-focus);
+  outline: none;
+}
+
+.workGroupPanelDissolve {
+  margin-top: 2px;
   padding: 6px 8px;
-  min-height: 40px;
-  font-size: var(--font-size-xs);
+  border: 1px solid var(--tech-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tech-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.workGroupPanelDissolve:hover {
+  border-color: var(--tech-border-strong);
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-muted);
+}
+
+.nodeConfig {
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  height: 36px;
+  padding: 0;
+  gap: 0;
+  border-radius: 8px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.nodeConfigLogo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: inherit;
 }
 
 .nodeAgentWired {
-  padding-bottom: 4px;
+  min-height: 0;
+  /* Horizontal pad must stay in sync with LOOP_AGENT_NODE_PAD_X. */
+  padding: 8px 10px 0;
+  gap: 4px;
+  overflow: visible;
+}
+
+/**
+ * Work-group member chip: icon + title only.
+ * Sizes must stay in sync with LOOP_WORK_GROUP_MEMBER_* in loopWiringVisuals.
+ */
+.nodeWorkGroupMember {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  width: auto;
+  min-width: 0;
+  min-height: 28px;
+  height: 28px;
+  padding: 2px 8px 2px 3px;
+  gap: 0;
+  border: 1px solid color-mix(in srgb, var(--tech-border-strong) 70%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--tech-bg-elevated) 92%, transparent);
+  box-shadow: none;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.nodeWorkGroupMemberInner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.nodeWorkGroupMember .nodeIcon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 4px;
+}
+
+.nodeWorkGroupMember .nodeTitle {
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.2;
+}
+
+.nodeWorkGroupCrown {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--tech-warning) 75%, var(--tech-text-primary));
+}
+
+/* Matrix slot stays put while an exit ghost follows the pointer. */
+.nodeWorkGroupMemberDragging {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.nodeWorkGroupExitGhost {
+  z-index: 6;
+  opacity: 0.92;
+  box-shadow: var(--tech-shadow-md);
+  pointer-events: none;
+  border-color: color-mix(in srgb, var(--tech-accent) 55%, var(--tech-border-strong));
+}
+
+.nodeAgentWired .nodeTask {
+  -webkit-line-clamp: 2;
 }
 
 .wiringStrip {
   position: relative;
-  height: 22px;
-  margin-top: 2px;
-  border-top: 1px dashed var(--tech-border);
+  height: 36px;
+  /*
+   * Full-bleed to the node padding edge so icon `left: buttonX` matches
+   * provides-edge / hidden-port X (node-local, not content-box).
+   * 10px = LOOP_AGENT_NODE_PAD_X.
+   */
+  margin: 2px -10px 0;
+  width: calc(100% + 20px);
+  border-top: 1px solid var(--tech-border);
+  box-sizing: border-box;
 }
 
-.wiringPort {
+.wiringIconButton {
   position: absolute;
-  top: 3px;
+  top: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  /* `left` is the zone center; keep the icon visually centered on that point. */
   transform: translateX(-50%);
   border: 1px solid var(--tech-border);
+  border-radius: 5px;
   background: var(--tech-bg-muted);
   color: var(--tech-text-secondary);
-  border-radius: 3px;
-  font-size: 9px;
-  line-height: 1;
-  padding: 3px 4px;
-  cursor: crosshair;
-  white-space: nowrap;
+  cursor: pointer;
+  z-index: 2;
+  transition:
+    border-color 150ms var(--ease-out, ease-out),
+    color 150ms var(--ease-out, ease-out),
+    background 150ms var(--ease-out, ease-out);
 }
 
-.wiringPort:hover {
+.wiringIconButton:hover,
+.wiringIconButton:focus-visible {
   border-color: var(--tech-border-strong);
   color: var(--tech-text-primary);
+  background: var(--tech-bg-elevated);
 }
 
-.wiringPortWarn {
+.wiringIconButton:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.wiringIconButtonWarn {
   border-color: color-mix(in srgb, var(--tech-warning) 55%, var(--tech-border));
   color: var(--tech-warning);
+}
+
+.wiringIconButtonWired {
+  border-color: color-mix(in srgb, var(--tech-accent) 45%, var(--tech-border));
+  color: var(--tech-text-primary);
 }
 
 .communityBadge,

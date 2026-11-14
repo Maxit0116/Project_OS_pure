@@ -76,6 +76,11 @@ function mockStore(partial: Record<string, unknown>) {
     composerDraft: '',
     composerSheet: 'none',
     authoringBusy: false,
+    authoringEngine: 'provider',
+    authoringFocus: null,
+    composerFocusNonce: 0,
+    clearAuthoringFocus: vi.fn(),
+    setAuthoringEngine: vi.fn(),
     setComposerDraft: vi.fn(),
     toggleComposerSheet: vi.fn(),
     setComposerMode: vi.fn(),
@@ -86,12 +91,38 @@ function mockStore(partial: Record<string, unknown>) {
     acceptGraphEditOffer: vi.fn(),
     dismissGraphEditOffer: vi.fn(),
     undoDraft: vi.fn(),
+    redoDraft: vi.fn(),
     ...partial,
   }
   mockedUseLoopGraphStore.mockImplementation((selector) => selector(state as never))
 }
 
 describe('LoopGoalComposer', () => {
+  it('renders focused-edit chip when authoringFocus is a node', () => {
+    mockStore({
+      document: {
+        ...sampleDoc,
+        composerMode: 'edit',
+        draft: {
+          ...sampleDoc.draft,
+          nodes: [
+            {
+              id: 'n1',
+              title: 'Implement',
+              prompt: '',
+              position: { x: 0, y: 0 },
+            },
+          ],
+        },
+      },
+      authoringFocus: { type: 'node', id: 'n1' },
+    })
+    const html = renderToStaticMarkup(<LoopGoalComposer />)
+    expect(html).toContain('data-testid="loop-authoring-focus-chip"')
+    expect(html).toContain('chat.loopGraph.focusEditingNode')
+    expect(html).toContain('chat.loopGraph.editNodePlaceholder')
+  })
+
   it('renders bookmark tabs and Discuss mode chip', () => {
     mockStore({})
     const html = renderToStaticMarkup(<LoopGoalComposer />)
@@ -100,14 +131,32 @@ describe('LoopGoalComposer', () => {
     expect(html).toContain('chat.loopGraph.agentFlowSheet')
     expect(html).toContain('chat.loopGraph.goalContextSheet')
     expect(html).toContain('role="tablist"')
+    expect(html).toContain('data-testid="loop-composer-settings"')
+    expect(html).not.toContain('data-testid="loop-authoring-engine"')
   })
 
-  it('shows only one sheet panel at a time', () => {
+  it('keeps authoring engine controls inside settings, defaulting to provider', () => {
+    mockStore({})
+    const closed = renderToStaticMarkup(<LoopGoalComposer />)
+    expect(closed).not.toContain('chat.loopGraph.engineProvider')
+    expect(closed).not.toContain('chat.loopGraph.engineRules')
+  })
+
+  it('shows only one floating sheet card at a time', () => {
     mockStore({ composerSheet: 'context' })
     const html = renderToStaticMarkup(<LoopGoalComposer />)
     expect(html).toContain('data-loop-sheet="context"')
+    expect(html).toContain('data-loop-sheet-card')
     expect(html).not.toContain('data-loop-sheet="flow"')
     expect(html).toContain('chat.loopGraph.goalContextEmpty')
+  })
+
+  it('keeps sheet closed without a floating card when none selected', () => {
+    mockStore({ composerSheet: 'none' })
+    const html = renderToStaticMarkup(<LoopGoalComposer />)
+    expect(html).not.toContain('data-loop-sheet-card')
+    expect(html).not.toContain('data-loop-sheet="flow"')
+    expect(html).not.toContain('data-loop-sheet="context"')
   })
 
   it('shows graph edit offer actions when pending', () => {

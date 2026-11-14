@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildAgentDetailModel,
   buildMcpDetailModel,
   buildSkillDetailModel,
 } from './marketplaceDetailModel'
@@ -80,5 +81,69 @@ describe('marketplaceDetailModel', () => {
     expect(model.companionFiles).toEqual(['references/guide.md'])
     expect(model.documentation).toContain('# Demo')
     expect(model.riskNote).toBe('risk')
+  })
+
+  it('builds Agent Template Profile sections without claiming deps are connected', () => {
+    const model = buildAgentDetailModel(
+      {
+        id: 'curated.frontend-engineer',
+        name: 'Frontend Engineer',
+        trustTier: 'curated',
+        version: '1.0.0',
+        instructions: 'Follow the repo stack.',
+        skillIds: [],
+        department: 'software_development',
+        tagline: 'Web UI specialist',
+        description: 'Implements frontend features.',
+        modelTierHint: 'balanced',
+        suggestedLoopAgentRole: 'coder',
+        responsibilities: ['Implement UI'],
+        boundaries: ['Do not invent a framework'],
+        capabilityTags: ['React', 'TypeScript'],
+        taskTypes: ['ui-implement'],
+        dependsOn: { skills: ['community.impeccable'], mcpListings: ['curated.playwright'] },
+        permissionHints: ['read_repo', 'propose_edits'],
+      },
+      {
+        listingId: 'Listing ID',
+        installId: 'Install ID',
+        version: 'Version',
+        trust: 'Trust',
+        curated: 'Curated',
+        community: 'Community',
+        installPath: 'Path',
+        installConfig: 'Install',
+        documentation: 'Instructions',
+        gettingStartedPath: 'path step',
+        gettingStartedInvoke: 'invoke step',
+        communityRisk: 'risk',
+        dependsOnSkills: 'Skills',
+        dependsOnMcp: 'MCP',
+        dependsOnRules: 'Rules',
+        dependsOnMissing: 'Missing',
+        none: 'None',
+        department: 'Department',
+        modelTier: 'Model tier',
+        loopRole: 'Loop role',
+        responsibilities: 'Responsibilities',
+        boundaries: 'Boundaries',
+        capabilities: 'Capabilities',
+        taskTypes: 'Task types',
+        permissionHints: 'Permission hints',
+        recommendedOnly: 'Recommendations only',
+      },
+      {
+        skillIds: new Set(),
+        mcpListingIds: new Set(),
+        rulesPackIds: new Set(),
+      },
+    )
+    expect(model.overview).toContain('Web UI specialist')
+    expect(model.profileSections?.some((s) => s.title === 'Responsibilities')).toBe(true)
+    expect(model.profileSections?.some((s) => s.title === 'Capabilities')).toBe(true)
+    expect(model.dependencyLinks?.every((link) => link.missing)).toBe(true)
+    expect(model.dependencyNotes?.some((note) => note.includes('Recommendations only'))).toBe(
+      true,
+    )
   })
 })

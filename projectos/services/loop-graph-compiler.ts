@@ -17,6 +17,16 @@ import {
   validateLoopSpecTopology,
 } from "../contracts/loop-graph.js";
 import {
+  expandWorkGroupInternalEdges,
+  inferWorkGroupPort,
+  isWorkGroupEndpoint,
+  listWorkGroupSurfaceAgentIds,
+  resolveWorkGroupEntryNodeId,
+  resolveWorkGroupExitNodeIds,
+  validateLoopWorkGroups,
+  type LoopWorkGroup,
+} from "../contracts/loop-work-group.js";
+import {
   resolveAgentWiring,
   toWiringOverride,
   validateAgentWiringGraph,
@@ -24,13 +34,6 @@ import {
 
 function inferRole(node: IntentGraphNode): LoopSpecNode["role"] {
   return suggestIntentNodeRole(node);
-}
-
-function inferEdgeKind(
-  edge: IntentGraph["edges"][number],
-  nodesById: Map<string, IntentGraphNode>,
-): LoopSpecEdge["kind"] | "provides" {
-  return suggestIntentEdgeKind(edge, [...nodesById.values()]);
 }
 
 function compileSpecNode(
@@ -73,6 +76,7 @@ function compileSpecNode(
       : {}),
     ...(arch.repairMode ? { repairMode: true } : {}),
     ...(hasWiring ? { resolvedWiring } : {}),
+    ...(node.workGroupId ? { workGroupId: node.workGroupId } : {}),
     goal: node.prompt.trim() || node.title,
     constraints: [],
     inputs: [],
@@ -87,6 +91,92 @@ function compileSpecNode(
   };
 }
 
+function rewriteWorkGroupBoundaryEdges(
+  draft: IntentGraph,
+  workGroups: LoopWorkGroup[],
+): LoopSpecEdge[] {
+  const groupsById = new Map(workGroups.map((group) => [group.id, group]));
+  const rewritten: LoopSpecEdge[] = [];
+
+  for (const edge of draft.edges) {
+    const kind = suggestIntentEdgeKind(edge, draft.nodes);
+    if (kind === "provides") continue;
+
+    const sourceIsGroup = isWorkGroupEndpoint(edge.source, workGroups);
+    const targetIsGroup = isWorkGroupEndpoint(edge.target, workGroups);
+    if (!sourceIsGroup && !targetIsGroup) {
+      rewritten.push({
+        id: edge.id,
+        from: edge.source,
+        to: edge.target,
+        kind,
+        when: edge.prompt?.trim() || undefined,
+        ...(edge.branchKey ? { branchKey: edge.branchKey } : {}),
+        ...(kind === "conditional" && !edge.branchKey
+          ? { branchKey: "default" }
+          : {}),
+        carry: kind === "feedback" ? ["latest_failure_summary"] : undefined,
+      });
+      continue;
+    }
+
+    let fromIds = [edge.source];
+    let toIds = [edge.target];
+
+    if (sourceIsGroup) {
+      const group = groupsById.get(edge.source);
+      if (!group) continue;
+      const port = inferWorkGroupPort("source", edge.workGroupPort);
+      if (port !== "out") continue;
+      fromIds = resolveWorkGroupExitNodeIds(group, draft.nodes);
+    }
+    if (targetIsGroup) {
+      const group = groupsById.get(edge.target);
+      if (!group) continue;
+      const port = inferWorkGroupPort("target", edge.workGroupPort);
+      if (port !== "in") continue;
+      if (group.collaborationMode === "parallel_join") {
+        toIds = listWorkGroupSurfaceAgentIds(group, draft.nodes);
+      } else {
+        const entry = resolveWorkGroupEntryNodeId(group, draft.nodes);
+        toIds = entry ? [entry] : [];
+      }
+    }
+
+    let index = 0;
+    for (const from of fromIds) {
+      for (const to of toIds) {
+        rewritten.push({
+          id: `${edge.id}_wg_${index++}`,
+          from,
+          to,
+          kind,
+          when: edge.prompt?.trim() || undefined,
+          ...(edge.branchKey ? { branchKey: edge.branchKey } : {}),
+          ...(kind === "conditional" && !edge.branchKey
+            ? { branchKey: "default" }
+            : {}),
+          carry: kind === "feedback" ? ["latest_failure_summary"] : undefined,
+        });
+      }
+    }
+  }
+
+  return rewritten;
+}
+
+function mergeSpecEdges(base: LoopSpecEdge[], extra: LoopSpecEdge[]): LoopSpecEdge[] {
+  const seen = new Set(base.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`));
+  const merged = [...base];
+  for (const edge of extra) {
+    const key = `${edge.from}->${edge.to}:${edge.kind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(edge);
+  }
+  return merged;
+}
+
 /** Deterministic heuristic compiler used by MVP and mock path (no live LLM required). */
 export function compileIntentGraphHeuristic(
   draft: IntentGraph,
@@ -94,7 +184,6 @@ export function compileIntentGraphHeuristic(
 ): LoopCompileResult {
   const now = options?.now ?? new Date().toISOString();
   const dutyNodes = draft.nodes.filter((node) => !isConfigNode(node));
-  const nodesById = new Map(draft.nodes.map((node) => [node.id, node]));
   const assumptions: LoopAssumption[] = [];
   const cycleGates: LoopCycleGate[] = [];
 
@@ -112,6 +201,14 @@ export function compileIntentGraphHeuristic(
     });
   }
 
+  const workGroups = draft.workGroups ?? [];
+  for (const issue of validateLoopWorkGroups(draft, { forCompile: true })) {
+    assumptions.push({
+      id: `assume_${randomUUID()}`,
+      text: `Work group [${issue.code}]: ${issue.message}`,
+    });
+  }
+
   const nodes: LoopSpecNode[] = dutyNodes.map((node) => {
     const compiled = compileSpecNode(node, draft);
     if (!node.role || node.role === "unknown" || !node.type) {
@@ -123,33 +220,34 @@ export function compileIntentGraphHeuristic(
     return compiled;
   });
 
-  const edges: LoopSpecEdge[] = [];
-  for (const edge of draft.edges) {
-    const kind = inferEdgeKind(edge, nodesById);
-    if (kind === "provides") continue;
-    if (kind === "feedback") {
+  const edges: LoopSpecEdge[] = rewriteWorkGroupBoundaryEdges(draft, workGroups);
+
+  for (const edge of edges) {
+    if (edge.kind === "feedback") {
       cycleGates.push({
         edgeId: edge.id,
         isFeedback: true,
-        triggerWhen: edge.prompt?.trim() || "Verification failed",
+        triggerWhen: edge.when || "Verification failed",
         retain: ["latest_failure_summary"],
         maxRounds: 5,
         onContinuousFailure: "pause_hitl",
       });
     }
-    edges.push({
-      id: edge.id,
-      from: edge.source,
-      to: edge.target,
-      kind,
-      when: edge.prompt?.trim() || undefined,
-      ...(edge.branchKey ? { branchKey: edge.branchKey } : {}),
-      ...(kind === "conditional" && !edge.branchKey
-        ? { branchKey: "default" }
-        : {}),
-      carry: kind === "feedback" ? ["latest_failure_summary"] : undefined,
-    });
   }
+
+  const internalEdges: LoopSpecEdge[] = [];
+  for (const group of workGroups) {
+    for (const edge of expandWorkGroupInternalEdges(group, draft.nodes)) {
+      internalEdges.push({
+        id: edge.id,
+        from: edge.from,
+        to: edge.to,
+        kind: "depends",
+        when: edge.when,
+      });
+    }
+  }
+  const mergedEdges = mergeSpecEdges(edges, internalEdges);
 
   const goal =
     draft.graphPrompt.trim() ||
@@ -196,7 +294,7 @@ export function compileIntentGraphHeuristic(
               ],
             },
           ],
-    edges,
+    edges: mergedEdges,
     acceptance: [
       {
         id: "acc_global",
@@ -229,6 +327,7 @@ export function compileIntentGraphHeuristic(
     openQuestions,
     assumptions,
     cycleGates,
+    ...(workGroups.length > 0 ? { workGroups } : {}),
     createdAt: now,
   };
 

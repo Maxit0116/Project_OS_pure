@@ -17,6 +17,7 @@
 | [`Capability-Marketplace-Dev-Plan.md`](./Capability-Marketplace-Dev-Plan.md) / Skills / MCP | 已装能力库是卫星节点的主数据源 |
 | [`Agent-Memory-Dev-Plan.md`](./Agent-Memory-Dev-Plan.md) | Memory 端口语义；本计划只做挂载 UX + 解析，不重做记忆存储 |
 | [`Agent-Harness-Dev-Plan.md`](./Agent-Harness-Dev-Plan.md) | ToolPolicy / 预算；虚线配置**不得**绕过 Harness |
+| [`Loops-Graph-Agent-Work-Group-Dev-Plan.md`](./Loops-Graph-Agent-Work-Group-Dev-Plan.md) | Agent 编制工作组（虚线小队）；**provides 卫星仍挂单 Agent**，不进工作组框 |
 
 **已有实现锚点（勿重复建设）**：
 
@@ -182,8 +183,8 @@ provides 边：
 - `provides` 边：source 必须是 `type=config`；target 必须是 `type=agent`。  
 - `model` 端口入度 ≤ 1；`memory` ≤ 1；`capability` 入度有上限（建议 ≤ 16，与 draft 上限对齐）。  
 - `provides` **不计入** depends 的 outdegree≤1 等控制流约束。  
-- 删除 Agent 时：可选级联删除仅被该 Agent 引用的孤儿卫星（产品默认：**级联删除未共享卫星**）。  
-- 同一卫星可被多个 Agent `provides`（共享 Model Profile 节点）——允许；改卫星 = 改引用的资产或显示层别名（见 AW-D5）。
+- 删除 Agent 时：级联删除仅被该 Agent 引用的孤儿卫星。  
+- **每个卫星只挂一个 Agent**（Model / MCP / Skill 均独占，不因相同 ref 跨 Agent 复用）。二级节点之间不互连；相同 modelProfileId / mcpServerId / skillId 仍各自展开独立卫星。
 
 ### 3.2 Fold 规则（编译 / 运行前）
 

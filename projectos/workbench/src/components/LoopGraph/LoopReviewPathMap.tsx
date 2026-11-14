@@ -1,6 +1,10 @@
 import type { LoopSpec, LoopSpecNode } from '@contracts/index'
 import { useMemo } from 'react'
-import { visualForKey, visualKeyFromArchitecture } from './loopNodeVisuals'
+import {
+  isDiamondLoopVisualKey,
+  visualForKey,
+  visualKeyFromArchitecture,
+} from './loopNodeVisuals'
 import { layoutLoopReviewPath } from './loopReviewLayout'
 import styles from './LoopReviewPathMap.module.css'
 
@@ -47,7 +51,11 @@ export default function LoopReviewPathMap({
           <g key={group.id} pointerEvents="none">
             <rect
               className={
-                group.kind === 'parallel' ? styles.groupParallel : styles.groupLoop
+                group.kind === 'parallel'
+                  ? styles.groupParallel
+                  : group.kind === 'workgroup'
+                    ? styles.groupWorkGroup
+                    : styles.groupLoop
               }
               x={group.x}
               y={group.y}
@@ -93,6 +101,7 @@ export default function LoopReviewPathMap({
           if (!node) return null
           const visual = visualForSpecNode(node)
           const Icon = visual.Icon
+          const diamond = isDiamondLoopVisualKey(visual.key)
           const selected = selectedNodeId === box.id
           const highlighted = highlightNodeId === box.id
           return (
@@ -100,7 +109,7 @@ export default function LoopReviewPathMap({
               key={box.id}
               className={`${styles.node} ${selected ? styles.nodeSelected : ''} ${
                 highlighted ? styles.nodeHighlight : ''
-              }`}
+              } ${diamond ? styles.nodeIsDiamond : ''}`}
               transform={`translate(${box.x}, ${box.y})`}
               onClick={(event) => {
                 event.stopPropagation()
@@ -108,12 +117,19 @@ export default function LoopReviewPathMap({
               }}
             >
               <title>{node.goal}</title>
-              <rect
-                className={styles.nodeRect}
-                width={box.width}
-                height={box.height}
-                rx={6}
-              />
+              {diamond ? (
+                <polygon
+                  className={styles.nodeDiamond}
+                  points={`${box.width / 2},1 ${box.width - 1},${box.height / 2} ${box.width / 2},${box.height - 1} 1,${box.height / 2}`}
+                />
+              ) : (
+                <rect
+                  className={styles.nodeRect}
+                  width={box.width}
+                  height={box.height}
+                  rx={6}
+                />
+              )}
               <foreignObject
                 className={styles.nodeForeign}
                 x={0}
@@ -122,7 +138,9 @@ export default function LoopReviewPathMap({
                 height={box.height}
               >
                 <div
-                  className={`${styles.nodeChip} ${styles[visual.categoryClass] ?? ''}`}
+                  className={`${styles.nodeChip} ${styles[visual.categoryClass] ?? ''} ${
+                    diamond ? styles.nodeChipDiamond : ''
+                  }`}
                   aria-label={`${visual.shortLabel}: ${node.goal}`}
                 >
                   <span className={styles.nodeIcon}>

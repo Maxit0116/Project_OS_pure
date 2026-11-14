@@ -6,6 +6,7 @@ import type {
   IntentGraphEdge,
   IntentGraphNode,
   LoopAgentConfigPort,
+  LoopAuthoringFocus,
   LoopComposerMode,
   LoopCompileResult,
   LoopConfigRef,
@@ -18,15 +19,32 @@ import type {
   LoopSatelliteKind,
   LoopSpec,
   LoopTaskMaterial,
+  LoopWorkGroup,
+  LoopWorkGroupCollaborationMode,
+  LoopWorkGroupPort,
 } from '@contracts/index'
 import {
+  computeLoopWorkGroupFrameBounds,
   configPortForSatelliteKind,
+  createLoopWorkGroupId,
   createNodeFromPaletteItem,
+  defaultEmptyLoopWorkGroupFrame,
+  estimateWorkGroupMemberChipSize,
   getIntentGraphCompileIssues,
   getLoopGraphPreset,
   getLoopPaletteItem,
   isConfigNode,
   isIntentGraphReadyForCompile,
+  isNestedWorkGroupInteriorNode,
+  isWorkGroupEndpoint,
+  isWorkGroupInteriorNode,
+  isWorkGroupSurfaceAgent,
+  layoutWorkGroupMemberMatrix,
+  listWorkGroupSurfaceAgentIds,
+  LOOP_WORK_GROUP_LIMITS,
+  LOOP_WORK_GROUP_PADDING,
+  LOOP_WORK_GROUP_TITLE_BAR_HEIGHT,
+  nextLoopWorkGroupTitle,
   suggestIntentEdgeKind,
   withArchitectureDefaults,
 } from '@contracts/index'
@@ -37,6 +55,15 @@ import {
   resolveAgentWiring,
   type AgentWiringBase,
 } from '../../../services/loop-agent-wiring'
+import {
+  nodeBoxSize,
+  satelliteFollowAgentPatches,
+} from '../components/LoopGraph/loopWiringVisuals'
+import {
+  applySemanticPositionsToNodes,
+  layoutNodesSemantically,
+  SEM_ORIGIN,
+} from '../components/LoopGraph/semanticLayout'
 import { buildPw7ContextMaterial } from '../../../services/loop-pw7-context-materials'
 import {
   acknowledgeMaterialRereview,
@@ -59,6 +86,33 @@ const UNTITLED_NODE = 'Untitled'
 
 export type LoopPhase = 'draw' | 'review' | 'run'
 
+/**
+ * Draw-canvas Agent wiring presentation:
+ * - `full`: Model / MCP / Skill satellites + provides edges visible
+ * - `compact`: hide satellites & provides edges; keep Agent strip icon buttons
+ */
+export type LoopWiringViewMode = 'full' | 'compact'
+
+const WIRING_VIEW_MODE_STORAGE_KEY = 'projectos.loopGraph.wiringViewMode'
+
+function readWiringViewMode(): LoopWiringViewMode {
+  try {
+    const raw = sessionStorage.getItem(WIRING_VIEW_MODE_STORAGE_KEY)
+    if (raw === 'compact' || raw === 'full') return raw
+  } catch {
+    /* ignore */
+  }
+  return 'full'
+}
+
+function writeWiringViewMode(mode: LoopWiringViewMode): void {
+  try {
+    sessionStorage.setItem(WIRING_VIEW_MODE_STORAGE_KEY, mode)
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Mutual-exclusive bookmark sheet above the goal composer. */
 export type LoopComposerSheet = 'none' | 'flow' | 'context' | 'clarify'
 
@@ -80,11 +134,48 @@ export type LoopDeleteTarget =
   | { type: 'node'; id: string }
   | { type: 'edge'; id: string }
 
+export type SemanticLayoutActionOptions = {
+  /** Measured diamond AABBs from the canvas, so layout centers match render. */
+  diamondBoxes?: Record<string, { width: number; height: number }>
+}
+
+/**
+ * Drop manual port pins on workflow edges between re-laid-out nodes so port
+ * assignment picks sides for the new geometry.
+ */
+function clearWorkflowPortPins(
+  edges: IntentGraph['edges'],
+  movedIds: ReadonlySet<string>,
+): IntentGraph['edges'] {
+  return edges.map((edge) => {
+    if (edge.kind === 'provides') return edge
+    if (!movedIds.has(edge.source) || !movedIds.has(edge.target)) return edge
+    if (
+      edge.sourcePort == null &&
+      edge.targetPort == null &&
+      edge.sourcePortIndex == null &&
+      edge.targetPortIndex == null
+    ) {
+      return edge
+    }
+    const {
+      sourcePort: _sp,
+      targetPort: _tp,
+      sourcePortIndex: _spi,
+      targetPortIndex: _tpi,
+      ...rest
+    } = edge
+    return rest
+  })
+}
+
 interface LoopGraphStore {
   heads: LoopGraphHead[]
   activeLoopId: string | null
   document: LoopGraphDocument | null
   phase: LoopPhase
+  /** Agent wiring satellite visibility on the Intent canvas. */
+  wiringViewMode: LoopWiringViewMode
   compileResult: LoopCompileResult | null
   loading: boolean
   saving: boolean
@@ -99,10 +190,29 @@ interface LoopGraphStore {
   authoringEngine: LoopAuthoringEngine
   /** Canvas selection for AI Edit context (DutyCard / Overlay). */
   canvasSelectedNodeId: string | null
+  /** Canvas edge selection for focused transfer-description Edit. */
+  canvasSelectedEdgeId: string | null
+  /**
+   * Focused Edit target (node duty / edge transfer). Set by canvas click;
+   * drives composer mode + provider scoping.
+   */
+  authoringFocus: LoopAuthoringFocus | null
+  /** Bumped when beginFocusedEdit wants the composer textarea focused. */
+  composerFocusNonce: number
+  /** Selected Agent Work Group frame on the Draw canvas. */
+  selectedWorkGroupId: string | null
+  /**
+   * When set, the Draw canvas drills into that work group's secondary (L2) graph:
+   * Agents + interior Action/Logic/Human collaboration nodes.
+   */
+  focusedWorkGroupId: string | null
 
   loadForWorkspace: () => Promise<void>
   clear: () => void
   setPhase: (phase: LoopPhase) => void
+  setWiringViewMode: (mode: LoopWiringViewMode) => void
+  enterWorkGroupGraph: (workGroupId: string) => void
+  exitWorkGroupGraph: () => void
   selectLoop: (loopId: string) => Promise<void>
   createLoop: (title?: string) => Promise<string | null>
   deleteLoop: (loopId: string) => Promise<boolean>
@@ -113,7 +223,71 @@ interface LoopGraphStore {
   setPendingDelete: (target: LoopDeleteTarget | null) => void
   setComposerDraft: (value: string) => void
   setCanvasSelectedNodeId: (nodeId: string | null) => void
+  setCanvasSelectedEdgeId: (edgeId: string | null) => void
+  /**
+   * Select a node/edge for focused Edit planning: switch composer to edit,
+   * set focus context, and request textarea focus.
+   */
+  beginFocusedEdit: (focus: LoopAuthoringFocus) => Promise<void>
+  clearAuthoringFocus: () => void
+  setSelectedWorkGroupId: (workGroupId: string | null) => void
   setAuthoringEngine: (engine: LoopAuthoringEngine) => void
+  /** Create an empty dashed work-group frame at canvas origin. */
+  createWorkGroupAt: (position: { x: number; y: number }) => string | null
+  renameWorkGroup: (id: string, title: string) => void
+  updateWorkGroup: (
+    id: string,
+    patch: {
+      collaborationMode?: LoopWorkGroupCollaborationMode
+      coordinatorNodeId?: string | null
+      title?: string
+    },
+  ) => void
+  /** Join a specialist agent; returns false and sets error when rejected. */
+  addNodeToWorkGroup: (workGroupId: string, nodeId: string) => boolean
+  /**
+   * Leave a work group. Optional `exitPosition` places the node in the same
+   * store write as membership removal (avoids stale overlay patchDraft undoing
+   * the remove + matrix reflow).
+   */
+  removeNodeFromWorkGroup: (
+    nodeId: string,
+    options?: { exitPosition?: { x: number; y: number } },
+  ) => void
+  /**
+   * Pack L1 surface Agents into a rectangular matrix and hug the dashed frame.
+   * Call after join/leave (or when a drag-out attempt snaps back inside).
+   */
+  reflowWorkGroupSurfaceLayout: (workGroupId: string) => void
+  /**
+   * L2 interior graph: TB semantic layout with full Loops Graph cards
+   * (not L1 chips), and translate provides satellites by the same delta.
+   */
+  layoutWorkGroupInteriorGraph: (
+    workGroupId: string,
+    options?: SemanticLayoutActionOptions,
+  ) => void
+  /**
+   * L1 Draw: collapse work groups to composite nodes, then TB semantic layout.
+   * When focused on L2, delegates to {@link layoutWorkGroupInteriorGraph}.
+   */
+  layoutDraftSemantically: (options?: SemanticLayoutActionOptions) => void
+  dissolveWorkGroup: (workGroupId: string) => void
+  moveWorkGroup: (workGroupId: string, delta: { dx: number; dy: number }) => void
+  createWorkGroupFromSelection: (nodeIds: string[]) => string | null
+  /**
+   * Talent / Workforce squad: place specialist agent nodes and wrap them in a work group.
+   * Returns the new workGroupId, or null on failure.
+   */
+  placeTalentSquadAsWorkGroup: (
+    members: Array<{
+      agentDefinitionId: string
+      title: string
+      agentRole?: import('@contracts/index').LoopAgentRole
+      wiringBase?: AgentWiringBase | null
+    }>,
+    position: { x: number; y: number },
+  ) => Promise<string | null>
   /** Open a sheet, or collapse it if already open (bookmark toggle). */
   toggleComposerSheet: (sheet: Exclude<LoopComposerSheet, 'none'>) => void
   setComposerSheet: (sheet: LoopComposerSheet) => void
@@ -133,13 +307,20 @@ interface LoopGraphStore {
     options?: {
       agentDefinitionId?: string | null
       title?: string
+      agentRole?: import('@contracts/index').LoopAgentRole
       configRef?: LoopConfigRef
+      wiringBase?: AgentWiringBase | null
     },
   ) => Promise<string | null>
   setNodeAgentDefinition: (
     nodeId: string,
     agentDefinitionId: string | null,
-    options?: { title?: string; wiringBase?: AgentWiringBase | null },
+    options?: {
+      title?: string
+      wiringBase?: AgentWiringBase | null
+      /** Prefill Loop duty role from Template suggestion (optional). */
+      agentRole?: import('@contracts/index').LoopAgentRole
+    },
   ) => void
   /** Expand Model/Skill/MCP/Memory satellites from a Definition (or clear prior orphans). */
   expandAgentWiring: (
@@ -176,8 +357,12 @@ interface LoopGraphStore {
     ports?: {
       sourcePort?: IntentEdgePort
       targetPort?: IntentEdgePort
+      sourcePortIndex?: number
+      targetPortIndex?: number
       configPort?: LoopAgentConfigPort
       kind?: IntentEdgeKind
+      /** Boundary port when source or target is a LoopWorkGroup id. */
+      workGroupPort?: LoopWorkGroupPort
     },
   ) => Promise<string | null>
   applyAuthoringFromActiveSession: (options?: {
@@ -275,11 +460,45 @@ async function archiveAuthoringSession(sessionId: string | undefined): Promise<v
   await useChatSessionStore.getState().setArchived(sessionId, true)
 }
 
+function isSpecialistAgentNode(node: IntentGraphNode): boolean {
+  if (isConfigNode(node)) return false
+  if ((node.type ?? 'agent') !== 'agent') return false
+  return Boolean(node.agentDefinitionId)
+}
+
+function scrubNodesFromWorkGroups(
+  workGroups: LoopWorkGroup[] | undefined,
+  removeIds: Set<string>,
+): LoopWorkGroup[] {
+  if (!workGroups?.length || removeIds.size === 0) return workGroups ?? []
+  const now = new Date().toISOString()
+  return workGroups.map((group) => {
+    const memberNodeIds = group.memberNodeIds.filter((id) => !removeIds.has(id))
+    if (memberNodeIds.length === group.memberNodeIds.length) {
+      if (group.coordinatorNodeId && removeIds.has(group.coordinatorNodeId)) {
+        return { ...group, coordinatorNodeId: undefined, updatedAt: now }
+      }
+      return group
+    }
+    const coordinatorNodeId =
+      group.coordinatorNodeId && memberNodeIds.includes(group.coordinatorNodeId)
+        ? group.coordinatorNodeId
+        : undefined
+    return {
+      ...group,
+      memberNodeIds,
+      coordinatorNodeId,
+      updatedAt: now,
+    }
+  })
+}
+
 export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   heads: [],
   activeLoopId: null,
   document: null,
   phase: 'draw',
+  wiringViewMode: readWiringViewMode(),
   compileResult: null,
   loading: false,
   saving: false,
@@ -296,6 +515,11 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   preflightBusy: false,
   authoringEngine: 'provider',
   canvasSelectedNodeId: null,
+  canvasSelectedEdgeId: null,
+  authoringFocus: null,
+  composerFocusNonce: 0,
+  selectedWorkGroupId: null,
+  focusedWorkGroupId: null,
   runHistory: [],
 
   clear: () => {
@@ -308,6 +532,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       activeLoopId: null,
       document: null,
       phase: 'draw',
+      // Keep wiringViewMode — session preference, not loop document state.
       compileResult: null,
       loading: false,
       saving: false,
@@ -320,6 +545,12 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       composerSheet: 'none',
       authoringBusy: false,
       authoringEngine: 'provider',
+      canvasSelectedNodeId: null,
+      canvasSelectedEdgeId: null,
+      authoringFocus: null,
+      composerFocusNonce: 0,
+      selectedWorkGroupId: null,
+      focusedWorkGroupId: null,
       runMaterials: [],
       runBranch: '',
       preflightResult: null,
@@ -329,13 +560,779 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
 
   setPhase: (phase) => set({ phase }),
 
+  setWiringViewMode: (mode) => {
+    writeWiringViewMode(mode)
+    set({ wiringViewMode: mode })
+  },
+
+  enterWorkGroupGraph: (workGroupId) => {
+    const current = get().document
+    const exists = (current?.draft.workGroups ?? []).some(
+      (group) => group.id === workGroupId,
+    )
+    if (!exists) {
+      set({ error: 'Work group not found' })
+      return
+    }
+    set({
+      focusedWorkGroupId: workGroupId,
+      selectedWorkGroupId: workGroupId,
+      connectingFromId: null,
+      error: null,
+    })
+    // Expand L1 chip matrix into full Loops Graph node cards for L2 editing.
+    get().layoutWorkGroupInteriorGraph(workGroupId)
+  },
+
+  exitWorkGroupGraph: () => {
+    const focused = get().focusedWorkGroupId
+    set({ focusedWorkGroupId: null, connectingFromId: null })
+    // Restore L1 compact chip matrix for surface Agents.
+    if (focused) {
+      get().reflowWorkGroupSurfaceLayout(focused)
+    }
+  },
+
   setConnectingFrom: (nodeId) => set({ connectingFromId: nodeId }),
 
   setPendingDelete: (target) => set({ pendingDelete: target }),
 
   setComposerDraft: (value) => set({ composerDraft: value }),
   setCanvasSelectedNodeId: (nodeId) => set({ canvasSelectedNodeId: nodeId }),
+  setCanvasSelectedEdgeId: (edgeId) => set({ canvasSelectedEdgeId: edgeId }),
+  beginFocusedEdit: async (focus) => {
+    if (get().authoringBusy) return
+    const document = get().document
+    if (!document) return
+    if (focus.type === 'node') {
+      if (!document.draft.nodes.some((node) => node.id === focus.id)) return
+      set({
+        authoringFocus: focus,
+        canvasSelectedNodeId: focus.id,
+        canvasSelectedEdgeId: null,
+        selectedWorkGroupId: null,
+        composerFocusNonce: get().composerFocusNonce + 1,
+        error: null,
+      })
+    } else {
+      if (!document.draft.edges.some((edge) => edge.id === focus.id)) return
+      set({
+        authoringFocus: focus,
+        canvasSelectedNodeId: null,
+        canvasSelectedEdgeId: focus.id,
+        selectedWorkGroupId: null,
+        composerFocusNonce: get().composerFocusNonce + 1,
+        error: null,
+      })
+    }
+    if (document.composerMode !== 'edit') {
+      await get().setComposerMode('edit')
+    }
+  },
+  clearAuthoringFocus: () =>
+    set({
+      authoringFocus: null,
+      canvasSelectedEdgeId: null,
+    }),
+  setSelectedWorkGroupId: (workGroupId) => set({ selectedWorkGroupId: workGroupId }),
   setAuthoringEngine: (engine) => set({ authoringEngine: engine }),
+
+  createWorkGroupAt: (position) => {
+    const current = get().document
+    if (!current) return null
+    if (get().phase !== 'draw') {
+      set({ error: 'Work groups can only be edited while the loop is in draft' })
+      return null
+    }
+    const existing = current.draft.workGroups ?? []
+    if (existing.length >= LOOP_WORK_GROUP_LIMITS.workGroupsPerDocument) {
+      set({
+        error: `At most ${LOOP_WORK_GROUP_LIMITS.workGroupsPerDocument} work groups are allowed`,
+      })
+      return null
+    }
+    const seq = (current.draft.workGroupSeq ?? 0) + 1
+    const now = new Date().toISOString()
+    const group: LoopWorkGroup = {
+      id: createLoopWorkGroupId(),
+      title: nextLoopWorkGroupTitle(seq),
+      memberNodeIds: [],
+      collaborationMode: 'coordinator',
+      origin: { x: position.x, y: position.y },
+      createdAt: now,
+      updatedAt: now,
+    }
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      workGroups: [...existing, group],
+      workGroupSeq: seq,
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      selectedWorkGroupId: group.id,
+      canvasSelectedNodeId: null,
+      error: null,
+    })
+    get().schedulePersist()
+    return group.id
+  },
+
+  renameWorkGroup: (id, title) => {
+    get().updateWorkGroup(id, { title })
+  },
+
+  updateWorkGroup: (id, patch) => {
+    const current = get().document
+    if (!current) return
+    if (get().phase !== 'draw') {
+      set({ error: 'Work groups can only be edited while the loop is in draft' })
+      return
+    }
+    const workGroups = current.draft.workGroups ?? []
+    if (!workGroups.some((group) => group.id === id)) return
+    const now = new Date().toISOString()
+    const nextTitle = patch.title?.trim()
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      workGroups: workGroups.map((group) => {
+        if (group.id !== id) return group
+        return {
+          ...group,
+          ...(nextTitle ? { title: nextTitle.slice(0, 120) } : {}),
+          ...(patch.collaborationMode
+            ? { collaborationMode: patch.collaborationMode }
+            : {}),
+          ...(patch.coordinatorNodeId !== undefined
+            ? {
+                coordinatorNodeId: patch.coordinatorNodeId || undefined,
+              }
+            : {}),
+          updatedAt: now,
+        }
+      }),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+  },
+
+  addNodeToWorkGroup: (workGroupId, nodeId) => {
+    const current = get().document
+    if (!current) return false
+    if (get().phase !== 'draw') {
+      set({ error: 'Work groups can only be edited while the loop is in draft' })
+      return false
+    }
+    const group = (current.draft.workGroups ?? []).find((item) => item.id === workGroupId)
+    const node = current.draft.nodes.find((item) => item.id === nodeId)
+    if (!group || !node) {
+      set({ error: 'Work group or node not found' })
+      return false
+    }
+    if (isConfigNode(node)) {
+      set({ error: 'Config satellites cannot join a work group' })
+      return false
+    }
+    const surfaceAgent = isWorkGroupSurfaceAgent(node)
+    const interior = isWorkGroupInteriorNode(node)
+    if (!surfaceAgent && !interior) {
+      set({ error: 'Only Agent / Action / Logic / Human nodes can join a work group' })
+      return false
+    }
+    if (surfaceAgent && !node.agentDefinitionId) {
+      set({
+        error:
+          'Only specialist Agents with a bound definition can join a work group',
+      })
+      return false
+    }
+    if (group.memberNodeIds.includes(nodeId)) return true
+    if (group.memberNodeIds.length >= LOOP_WORK_GROUP_LIMITS.membersPerGroup) {
+      set({
+        error: `Work group "${group.title}" exceeds member limit`,
+      })
+      return false
+    }
+    const now = new Date().toISOString()
+    const priorGroupId = node.workGroupId
+    const workGroups = (current.draft.workGroups ?? []).map((item) => {
+      if (item.id === priorGroupId && priorGroupId !== workGroupId) {
+        const memberNodeIds = item.memberNodeIds.filter((id) => id !== nodeId)
+        return {
+          ...item,
+          memberNodeIds,
+          coordinatorNodeId:
+            item.coordinatorNodeId === nodeId
+              ? undefined
+              : item.coordinatorNodeId,
+          updatedAt: now,
+        }
+      }
+      if (item.id !== workGroupId) return item
+      const memberNodeIds = [...item.memberNodeIds, nodeId]
+      return {
+        ...item,
+        memberNodeIds,
+        coordinatorNodeId:
+          item.collaborationMode === 'coordinator' &&
+          !item.coordinatorNodeId &&
+          surfaceAgent
+            ? nodeId
+            : item.coordinatorNodeId,
+        updatedAt: now,
+      }
+    })
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: current.draft.nodes.map((item) =>
+        item.id === nodeId ? { ...item, workGroupId } : item,
+      ),
+      workGroups,
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+    if (surfaceAgent) {
+      get().reflowWorkGroupSurfaceLayout(workGroupId)
+    }
+    return true
+  },
+
+  removeNodeFromWorkGroup: (nodeId, options) => {
+    const current = get().document
+    if (!current) return
+    const node = current.draft.nodes.find((item) => item.id === nodeId)
+    if (!node?.workGroupId) return
+    const workGroupId = node.workGroupId
+    const wasSurface = isWorkGroupSurfaceAgent(node)
+    const exitPosition = options?.exitPosition ?? node.position
+    const now = new Date().toISOString()
+    // Size as a free-canvas agent card (not the L1 work-group chip).
+    const { workGroupId: _membership, ...agentWithoutGroup } = node
+    const agentSize = nodeBoxSize(
+      { ...agentWithoutGroup, position: exitPosition },
+      current.draft,
+      { compactWorkGroupMembers: false },
+    )
+    const satellitePatches = satelliteFollowAgentPatches({
+      agentId: nodeId,
+      previousAgentPosition: node.position,
+      nextAgentPosition: exitPosition,
+      agentSize,
+      draft: current.draft,
+    })
+    const satelliteById = new Map(
+      satellitePatches.map((patch) => [patch.id, patch.position]),
+    )
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: current.draft.nodes.map((item) => {
+        if (item.id === nodeId) {
+          const { workGroupId: _removed, ...rest } = item
+          return { ...rest, position: exitPosition }
+        }
+        const nextSat = satelliteById.get(item.id)
+        return nextSat ? { ...item, position: nextSat } : item
+      }),
+      workGroups: (current.draft.workGroups ?? []).map((group) => {
+        if (group.id !== workGroupId) return group
+        return {
+          ...group,
+          memberNodeIds: group.memberNodeIds.filter((id) => id !== nodeId),
+          coordinatorNodeId:
+            group.coordinatorNodeId === nodeId
+              ? undefined
+              : group.coordinatorNodeId,
+          updatedAt: now,
+        }
+      }),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+    if (wasSurface) {
+      get().reflowWorkGroupSurfaceLayout(workGroupId)
+    }
+  },
+
+  reflowWorkGroupSurfaceLayout: (workGroupId) => {
+    const current = get().document
+    if (!current) return
+    const group = (current.draft.workGroups ?? []).find(
+      (item) => item.id === workGroupId,
+    )
+    if (!group) return
+    const surfaceIds = listWorkGroupSurfaceAgentIds(group, current.draft.nodes)
+    if (surfaceIds.length === 0) return
+
+    const surfaceNodes = surfaceIds
+      .map((id) => current.draft.nodes.find((node) => node.id === id))
+      .filter((node): node is IntentGraphNode => Boolean(node))
+    if (surfaceNodes.length === 0) return
+
+    const members = surfaceNodes.map((node) => ({
+      id: node.id,
+      ...estimateWorkGroupMemberChipSize(node.title || 'Agent'),
+    }))
+
+    let frameOrigin = group.origin
+    if (!frameOrigin) {
+      const minX = Math.min(...surfaceNodes.map((node) => node.position.x))
+      const minY = Math.min(...surfaceNodes.map((node) => node.position.y))
+      frameOrigin = {
+        x: minX - LOOP_WORK_GROUP_PADDING,
+        y: minY - LOOP_WORK_GROUP_PADDING - LOOP_WORK_GROUP_TITLE_BAR_HEIGHT,
+      }
+    }
+
+    const laidOut = layoutWorkGroupMemberMatrix({
+      frameOrigin,
+      members,
+    })
+    const positionById = new Map(
+      laidOut.positions.map((item) => [item.id, { x: item.x, y: item.y }]),
+    )
+    const memberBounds = laidOut.positions.map((item) => {
+      const size = members.find((member) => member.id === item.id)!
+      return {
+        id: item.id,
+        x: item.x,
+        y: item.y,
+        width: size.width,
+        height: size.height,
+      }
+    })
+    const frame = computeLoopWorkGroupFrameBounds(memberBounds)
+    const now = new Date().toISOString()
+    // Keep provides satellites tethered to each surface agent through the
+    // matrix move so a later leave can carry them with the exit delta.
+    const satelliteById = new Map<string, { x: number; y: number }>()
+    for (const agent of surfaceNodes) {
+      const next = positionById.get(agent.id)
+      if (!next) continue
+      const agentSize = nodeBoxSize(agent, current.draft, {
+        compactWorkGroupMembers: true,
+      })
+      for (const patch of satelliteFollowAgentPatches({
+        agentId: agent.id,
+        previousAgentPosition: agent.position,
+        nextAgentPosition: next,
+        agentSize,
+        draft: current.draft,
+      })) {
+        satelliteById.set(patch.id, patch.position)
+      }
+    }
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: current.draft.nodes.map((node) => {
+        const next = positionById.get(node.id)
+        if (next) return { ...node, position: next }
+        const sat = satelliteById.get(node.id)
+        return sat ? { ...node, position: sat } : node
+      }),
+      workGroups: (current.draft.workGroups ?? []).map((item) =>
+        item.id === workGroupId
+          ? {
+              ...item,
+              origin: frame
+                ? { x: frame.x, y: frame.y }
+                : frameOrigin,
+              updatedAt: now,
+            }
+          : item,
+      ),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+  },
+
+  layoutWorkGroupInteriorGraph: (workGroupId, options) => {
+    const current = get().document
+    if (!current) return
+    const group = (current.draft.workGroups ?? []).find(
+      (item) => item.id === workGroupId,
+    )
+    if (!group || group.memberNodeIds.length === 0) return
+
+    const memberIds = new Set(group.memberNodeIds)
+    const memberNodes = group.memberNodeIds
+      .map((id) => current.draft.nodes.find((node) => node.id === id))
+      .filter((node): node is IntentGraphNode => Boolean(node))
+    if (memberNodes.length === 0) return
+
+    const sizeOpts = {
+      compactWorkGroupMembers: false as const,
+      diamondBoxes: options?.diamondBoxes,
+    }
+    const sizes = memberNodes.map((node) => ({
+      id: node.id,
+      ...nodeBoxSize(node, current.draft, sizeOpts),
+    }))
+
+    const laidOut = layoutNodesSemantically({
+      draft: current.draft,
+      sizes,
+      includeIds: memberIds,
+      options: { origin: { ...SEM_ORIGIN } },
+    })
+
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: applySemanticPositionsToNodes({
+        nodes: current.draft.nodes,
+        edges: current.draft.edges,
+        positions: laidOut.positions,
+      }),
+      edges: clearWorkflowPortPins(
+        current.draft.edges,
+        new Set(laidOut.positions.keys()),
+      ),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+  },
+
+  layoutDraftSemantically: (options) => {
+    const current = get().document
+    if (!current) return
+    if (get().phase !== 'draw') {
+      set({ error: 'Semantic layout is available in Draw' })
+      return
+    }
+    const focused = get().focusedWorkGroupId
+    if (focused) {
+      get().layoutWorkGroupInteriorGraph(focused, options)
+      return
+    }
+
+    const draft = current.draft
+    const workGroups = draft.workGroups ?? []
+    const chipOpts = {
+      compactWorkGroupMembers: true as const,
+      diamondBoxes: options?.diamondBoxes,
+    }
+    const redirect = new Map<string, string>()
+    const sizes: Array<{ id: string; width: number; height: number }> = []
+    const compositeOrigin = new Map<
+      string,
+      { x: number; y: number; memberIds: string[] }
+    >()
+
+    for (const group of workGroups) {
+      const surfaceIds = listWorkGroupSurfaceAgentIds(group, draft.nodes)
+      const compositeId = `wgcomp:${group.id}`
+      for (const id of surfaceIds) {
+        redirect.set(id, compositeId)
+      }
+      // Also redirect interior members so cross-boundary edges hit the frame.
+      for (const id of group.memberNodeIds) {
+        if (!redirect.has(id)) redirect.set(id, compositeId)
+      }
+
+      const memberBounds = surfaceIds
+        .map((id) => {
+          const node = draft.nodes.find((item) => item.id === id)
+          if (!node) return null
+          const size = nodeBoxSize(node, draft, chipOpts)
+          return {
+            id,
+            x: node.position.x,
+            y: node.position.y,
+            width: size.width,
+            height: size.height,
+          }
+        })
+        .filter(
+          (
+            rect,
+          ): rect is {
+            id: string
+            x: number
+            y: number
+            width: number
+            height: number
+          } => Boolean(rect),
+        )
+      const frame =
+        computeLoopWorkGroupFrameBounds(memberBounds) ??
+        defaultEmptyLoopWorkGroupFrame(
+          group.origin ?? { x: SEM_ORIGIN.x, y: SEM_ORIGIN.y },
+        )
+      sizes.push({
+        id: compositeId,
+        width: frame.width,
+        height: frame.height,
+      })
+      compositeOrigin.set(compositeId, {
+        x: frame.x,
+        y: frame.y,
+        memberIds: [...group.memberNodeIds],
+      })
+    }
+
+    for (const node of draft.nodes) {
+      if (isConfigNode(node)) continue
+      if (isNestedWorkGroupInteriorNode(node)) continue
+      if (redirect.has(node.id)) continue
+      sizes.push({
+        id: node.id,
+        ...nodeBoxSize(node, draft, chipOpts),
+      })
+    }
+
+    if (sizes.length === 0) return
+
+    const laidOut = layoutNodesSemantically({
+      draft,
+      sizes,
+      redirect,
+      options: { origin: { ...SEM_ORIGIN } },
+    })
+
+    const positions = new Map<string, { x: number; y: number }>()
+    for (const [id, pos] of laidOut.positions) {
+      if (id.startsWith('wgcomp:')) continue
+      positions.set(id, pos)
+    }
+
+    const workGroupOriginPatches = new Map<
+      string,
+      { x: number; y: number }
+    >()
+    for (const [compositeId, meta] of compositeOrigin) {
+      const next = laidOut.positions.get(compositeId)
+      if (!next) continue
+      const dx = next.x - meta.x
+      const dy = next.y - meta.y
+      const workGroupId = compositeId.slice('wgcomp:'.length)
+      workGroupOriginPatches.set(workGroupId, { x: next.x, y: next.y })
+      for (const memberId of meta.memberIds) {
+        const member = draft.nodes.find((node) => node.id === memberId)
+        if (!member) continue
+        positions.set(memberId, {
+          x: member.position.x + dx,
+          y: member.position.y + dy,
+        })
+      }
+    }
+
+    const now = new Date().toISOString()
+    const nextNodes = applySemanticPositionsToNodes({
+      nodes: draft.nodes,
+      edges: draft.edges,
+      positions,
+    })
+    const movedIds = new Set<string>()
+    for (const [id] of laidOut.positions) {
+      if (!id.startsWith('wgcomp:')) movedIds.add(id)
+    }
+    const nextDraft: IntentGraph = {
+      ...draft,
+      revision: draft.revision + 1,
+      nodes: nextNodes,
+      edges: clearWorkflowPortPins(draft.edges, movedIds),
+      workGroups: workGroups.map((group) => {
+        const origin = workGroupOriginPatches.get(group.id)
+        return origin
+          ? { ...group, origin, updatedAt: now }
+          : group
+      }),
+    }
+    set({
+      document: patchDraftDocument(current, nextDraft),
+      error: null,
+    })
+    get().schedulePersist()
+    // Re-pack surface chips inside each moved frame.
+    for (const group of workGroups) {
+      if (workGroupOriginPatches.has(group.id)) {
+        get().reflowWorkGroupSurfaceLayout(group.id)
+      }
+    }
+  },
+
+  dissolveWorkGroup: (workGroupId) => {
+    const current = get().document
+    if (!current) return
+    if (get().phase !== 'draw') {
+      set({ error: 'Work groups can only be edited while the loop is in draft' })
+      return
+    }
+    const memberIds = new Set(
+      (current.draft.workGroups ?? []).find((group) => group.id === workGroupId)
+        ?.memberNodeIds ?? [],
+    )
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: current.draft.nodes.map((node) => {
+        if (node.workGroupId !== workGroupId && !memberIds.has(node.id)) {
+          return node
+        }
+        const { workGroupId: _removed, ...rest } = node
+        return rest
+      }),
+      workGroups: (current.draft.workGroups ?? []).filter(
+        (group) => group.id !== workGroupId,
+      ),
+      edges: current.draft.edges.filter(
+        (edge) => edge.source !== workGroupId && edge.target !== workGroupId,
+      ),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      selectedWorkGroupId:
+        get().selectedWorkGroupId === workGroupId
+          ? null
+          : get().selectedWorkGroupId,
+      focusedWorkGroupId:
+        get().focusedWorkGroupId === workGroupId
+          ? null
+          : get().focusedWorkGroupId,
+      connectingFromId:
+        get().connectingFromId === workGroupId ? null : get().connectingFromId,
+      error: null,
+    })
+    get().schedulePersist()
+  },
+
+  moveWorkGroup: (workGroupId, delta) => {
+    const current = get().document
+    if (!current) return
+    if (delta.dx === 0 && delta.dy === 0) return
+    const group = (current.draft.workGroups ?? []).find(
+      (item) => item.id === workGroupId,
+    )
+    if (!group) return
+    const memberSet = new Set(group.memberNodeIds)
+    const satelliteSet = new Set<string>()
+    for (const edge of current.draft.edges) {
+      if (edge.kind !== 'provides' || !memberSet.has(edge.target)) continue
+      const sat = current.draft.nodes.find((node) => node.id === edge.source)
+      if (sat && isConfigNode(sat)) satelliteSet.add(sat.id)
+    }
+    const now = new Date().toISOString()
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: current.draft.nodes.map((node) =>
+        memberSet.has(node.id) || satelliteSet.has(node.id)
+          ? {
+              ...node,
+              position: {
+                x: node.position.x + delta.dx,
+                y: node.position.y + delta.dy,
+              },
+            }
+          : node,
+      ),
+      workGroups: (current.draft.workGroups ?? []).map((item) =>
+        item.id === workGroupId
+          ? {
+              ...item,
+              origin: {
+                x: (item.origin?.x ?? 0) + delta.dx,
+                y: (item.origin?.y ?? 0) + delta.dy,
+              },
+              updatedAt: now,
+            }
+          : item,
+      ),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+  },
+
+  createWorkGroupFromSelection: (nodeIds) => {
+    const current = get().document
+    if (!current || nodeIds.length === 0) return null
+    const specialists = nodeIds
+      .map((id) => current.draft.nodes.find((node) => node.id === id))
+      .filter((node): node is IntentGraphNode =>
+        Boolean(node && isSpecialistAgentNode(node)),
+      )
+    if (specialists.length === 0) {
+      set({
+        error:
+          'Only specialist Agents with a bound definition can join a work group',
+      })
+      return null
+    }
+    const anchor = specialists[0]!
+    const workGroupId = get().createWorkGroupAt({
+      x: anchor.position.x,
+      y: anchor.position.y,
+    })
+    if (!workGroupId) return null
+    for (const node of specialists) {
+      get().addNodeToWorkGroup(workGroupId, node.id)
+    }
+    return workGroupId
+  },
+
+  placeTalentSquadAsWorkGroup: async (members, position) => {
+    if (members.length === 0) return null
+    if (get().phase !== 'draw') {
+      set({ error: 'Work groups can only be edited while the loop is in draft' })
+      return null
+    }
+    const workGroupId = get().createWorkGroupAt(position)
+    if (!workGroupId) return null
+    const nodeIds: string[] = []
+    let index = 0
+    for (const member of members) {
+      // Match LOOP_WORK_GROUP_MEMBER_H + STACK_GAP in loopWiringVisuals.
+      const memberPitch = 28 + 10
+      const nodeId = await get().beginAuthorNodeFromPalette(
+        'agent.coder',
+        {
+          x: position.x + 24,
+          y: position.y + 40 + index * memberPitch,
+        },
+        {
+          agentDefinitionId: member.agentDefinitionId,
+          title: member.title,
+          ...(member.agentRole ? { agentRole: member.agentRole } : {}),
+          ...(member.wiringBase ? { wiringBase: member.wiringBase } : {}),
+        },
+      )
+      if (nodeId) {
+        nodeIds.push(nodeId)
+        get().addNodeToWorkGroup(workGroupId, nodeId)
+      }
+      index += 1
+    }
+    if (nodeIds.length === 0) {
+      get().dissolveWorkGroup(workGroupId)
+      set({ error: 'Could not place specialist agents for the work group' })
+      return null
+    }
+    get().updateWorkGroup(workGroupId, { coordinatorNodeId: nodeIds[0]! })
+    get().setSelectedWorkGroupId(workGroupId)
+    return workGroupId
+  },
 
   setComposerSheet: (sheet) => set({ composerSheet: sheet }),
 
@@ -377,14 +1374,24 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
 
     set({ authoringBusy: true, composerSheet: 'flow', error: null })
     try {
-      const selectedNodeId = get().canvasSelectedNodeId ?? undefined
+      const focus = get().authoringFocus
+      const selectedNodeId =
+        focus?.type === 'node'
+          ? focus.id
+          : (get().canvasSelectedNodeId ?? undefined)
+      const selectedEdgeId =
+        focus?.type === 'edge'
+          ? focus.id
+          : (get().canvasSelectedEdgeId ?? undefined)
       // Default engine is provider → useProvider:true on the real IPC/LocalApi path.
       // Rules mode is explicit user choice (heuristic); never silent fallback.
       const useProvider = get().authoringEngine !== 'rules'
       const next = await client.sendLoopAuthoringTurn(project.projectId, loopId, {
         mode: document.composerMode ?? 'ask',
         text,
+        ...(focus ? { focus } : {}),
         ...(selectedNodeId ? { selectedNodeId } : {}),
+        ...(selectedEdgeId ? { selectedEdgeId } : {}),
         useProvider,
       })
       const heads = await client.listLoopGraphs(project.projectId)
@@ -615,6 +1622,11 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         phase: 'draw',
         connectingFromId: null,
         pendingDelete: null,
+        selectedWorkGroupId: null,
+        focusedWorkGroupId: null,
+        canvasSelectedNodeId: null,
+        canvasSelectedEdgeId: null,
+        authoringFocus: null,
         composerDraft: '',
         composerSheet: 'none',
         authoringBusy: false,
@@ -647,6 +1659,11 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         error: null,
         connectingFromId: null,
         pendingDelete: null,
+        selectedWorkGroupId: null,
+        focusedWorkGroupId: null,
+        canvasSelectedNodeId: null,
+        canvasSelectedEdgeId: null,
+        authoringFocus: null,
         composerDraft: '',
         composerSheet: 'none',
         authoringBusy: false,
@@ -779,6 +1796,13 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       set({ error: `Unknown palette item: ${paletteItemId}` })
       return null
     }
+    /**
+     * Palette `workgroup.create` seeds a LoopWorkGroup frame (not a duty node).
+     * Returns the workGroupId string so Overlay/Palette `onPlaced` can select it.
+     */
+    if (paletteItemId === 'workgroup.create') {
+      return get().createWorkGroupAt(position)
+    }
     const sessionId = await ensureAuthoringSession()
     if (!sessionId) return null
 
@@ -792,6 +1816,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       ...(options?.agentDefinitionId !== undefined
         ? { agentDefinitionId: options.agentDefinitionId }
         : {}),
+      ...(options?.agentRole ? { agentRole: options.agentRole } : {}),
       ...(options?.configRef
         ? { configRef: { ...(seeded.configRef ?? {}), ...options.configRef } }
         : {}),
@@ -815,6 +1840,15 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       error: null,
     })
     get().schedulePersist()
+    if (options?.wiringBase) {
+      get().expandAgentWiring(node.id, options.wiringBase, {
+        replaceExistingProvides: true,
+      })
+    }
+    const focused = get().focusedWorkGroupId
+    if (focused && !isConfigNode(node)) {
+      get().addNodeToWorkGroup(focused, node.id)
+    }
     return node.id
   },
 
@@ -834,6 +1868,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
               ...node,
               agentDefinitionId,
               ...(options?.title ? { title: options.title.slice(0, 120) } : {}),
+              ...(options?.agentRole ? { agentRole: options.agentRole } : {}),
             }
           : node,
       ),
@@ -1191,45 +2226,75 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       return null
     }
 
+    const workGroups = current.draft.workGroups ?? []
+    const sourceIsWorkGroup = isWorkGroupEndpoint(source, workGroups)
+    const targetIsWorkGroup = isWorkGroupEndpoint(target, workGroups)
     const sourceNode = current.draft.nodes.find((node) => node.id === source)
     const targetNode = current.draft.nodes.find((node) => node.id === target)
-    if (!sourceNode || !targetNode) return null
-
-    const sourceIsConfig = isConfigNode(sourceNode)
-    const targetIsConfig = isConfigNode(targetNode)
-    const targetIsAgent =
-      !isConfigNode(targetNode) && (targetNode.type ?? 'agent') === 'agent'
-    const sourceIsAgent =
-      !isConfigNode(sourceNode) && (sourceNode.type ?? 'agent') === 'agent'
+    if ((!sourceIsWorkGroup && !sourceNode) || (!targetIsWorkGroup && !targetNode)) {
+      return null
+    }
 
     let kind = ports?.kind
     let configPort = ports?.configPort
+    let workGroupPort = ports?.workGroupPort
 
-    if (sourceIsConfig && targetIsAgent) {
-      kind = 'provides'
-      configPort =
-        configPort ??
-        (sourceNode.satelliteKind
-          ? configPortForSatelliteKind(sourceNode.satelliteKind)
-          : undefined)
-    } else if (sourceIsAgent && targetIsConfig) {
-      // Normalize direction: config → agent
-      return get().beginAuthorEdge(target, source, {
-        sourcePort: ports?.targetPort ?? 'n',
-        targetPort: ports?.sourcePort ?? 's',
-        configPort:
-          ports?.configPort ??
-          (targetNode.satelliteKind
-            ? configPortForSatelliteKind(targetNode.satelliteKind)
-            : undefined),
-        kind: 'provides',
-      })
-    } else if (sourceIsConfig || targetIsConfig) {
-      set({
-        connectingFromId: null,
-        error: 'Config satellites only connect to Agent nodes via provides',
-      })
-      return null
+    if (sourceIsWorkGroup || targetIsWorkGroup) {
+      if (
+        (sourceNode && isConfigNode(sourceNode)) ||
+        (targetNode && isConfigNode(targetNode))
+      ) {
+        set({
+          connectingFromId: null,
+          error: 'Config satellites cannot connect to work group boundaries',
+        })
+        return null
+      }
+      kind = kind ?? 'depends'
+      if (kind === 'provides') {
+        set({
+          connectingFromId: null,
+          error: 'provides edges cannot attach to work group boundaries',
+        })
+        return null
+      }
+      if (!workGroupPort) {
+        workGroupPort = sourceIsWorkGroup ? 'out' : 'in'
+      }
+    } else if (sourceNode && targetNode) {
+      const sourceIsConfig = isConfigNode(sourceNode)
+      const targetIsConfig = isConfigNode(targetNode)
+      const targetIsAgent =
+        !isConfigNode(targetNode) && (targetNode.type ?? 'agent') === 'agent'
+      const sourceIsAgent =
+        !isConfigNode(sourceNode) && (sourceNode.type ?? 'agent') === 'agent'
+
+      if (sourceIsConfig && targetIsAgent) {
+        kind = 'provides'
+        configPort =
+          configPort ??
+          (sourceNode.satelliteKind
+            ? configPortForSatelliteKind(sourceNode.satelliteKind)
+            : undefined)
+      } else if (sourceIsAgent && targetIsConfig) {
+        // Normalize direction: config → agent
+        return get().beginAuthorEdge(target, source, {
+          sourcePort: ports?.targetPort ?? 'n',
+          targetPort: ports?.sourcePort ?? 's',
+          configPort:
+            ports?.configPort ??
+            (targetNode.satelliteKind
+              ? configPortForSatelliteKind(targetNode.satelliteKind)
+              : undefined),
+          kind: 'provides',
+        })
+      } else if (sourceIsConfig || targetIsConfig) {
+        set({
+          connectingFromId: null,
+          error: 'Config satellites only connect to Agent nodes via provides',
+        })
+        return null
+      }
     }
 
     if (kind === 'provides') {
@@ -1237,6 +2302,16 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         set({
           connectingFromId: null,
           error: 'provides edge needs a config port (Model / Memory / Capability)',
+        })
+        return null
+      }
+      const satelliteAlreadyWired = current.draft.edges.some(
+        (edge) => edge.kind === 'provides' && edge.source === source,
+      )
+      if (satelliteAlreadyWired) {
+        set({
+          connectingFromId: null,
+          error: 'Config satellite already provides to an agent — create a dedicated satellite',
         })
         return null
       }
@@ -1265,8 +2340,15 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       target,
       ...(kind ? { kind } : {}),
       ...(configPort ? { configPort } : {}),
+      ...(workGroupPort ? { workGroupPort } : {}),
       ...(ports?.sourcePort ? { sourcePort: ports.sourcePort } : {}),
       ...(ports?.targetPort ? { targetPort: ports.targetPort } : {}),
+      ...(ports?.sourcePortIndex != null
+        ? { sourcePortIndex: ports.sourcePortIndex }
+        : {}),
+      ...(ports?.targetPortIndex != null
+        ? { targetPortIndex: ports.targetPortIndex }
+        : {}),
       ...(kind === 'provides' ? { prompt: '' } : {}),
       authoringSessionId: sessionId,
     }
@@ -1469,6 +2551,10 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         nodes: current.draft.nodes.filter((item) => !removeIds.has(item.id)),
         edges: current.draft.edges.filter(
           (edge) => !removeIds.has(edge.source) && !removeIds.has(edge.target),
+        ),
+        workGroups: scrubNodesFromWorkGroups(
+          current.draft.workGroups,
+          removeIds,
         ),
       }
       const linkedSessionIds = sessionId

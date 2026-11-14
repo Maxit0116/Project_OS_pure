@@ -41,3 +41,8 @@ export function createMcpAuthRef(serverId: string): string {
 export function createGitHubAuthRef(slot = "default"): string {
   return `github_auth:${slot}`;
 }
+
+/** Desktop Google product-account OAuth access token (openid/email/profile only). */
+export function createGoogleAuthRef(slot = "default"): string {
+  return `google_auth:${slot}`;
+}

@@ -197,6 +197,13 @@
   background: var(--tech-bg-muted);
 }
 
+.catWorkgroup {
+  color: color-mix(in srgb, var(--tech-text-secondary) 75%, var(--tech-accent));
+  border-color: color-mix(in srgb, var(--tech-border-strong) 70%, transparent);
+  background: color-mix(in srgb, var(--tech-bg-muted) 55%, var(--tech-bg-elevated));
+  border-style: dashed;
+}
+
 .catAgent {
   color: color-mix(in srgb, #7dd3fc 85%, var(--tech-text-primary));
   border-color: color-mix(in srgb, #7dd3fc 35%, var(--tech-border));
@@ -231,6 +238,7 @@
   color: var(--tech-text-secondary);
 }
 
+.itemIcon.catWorkgroup,
 .itemIcon.catAgent,
 .itemIcon.catAction,
 .itemIcon.catLogic,
@@ -240,6 +248,7 @@
   border: 0;
 }
 
+.itemButton.catWorkgroup,
 .itemButton.catAgent,
 .itemButton.catAction,
 .itemButton.catLogic,
@@ -250,6 +259,11 @@
   border-color: var(--tech-border);
 }
 
+.itemButton.catWorkgroup {
+  border-style: dashed;
+}
+
+.itemButton.catWorkgroup:hover:not(:disabled),
 .itemButton.catAgent:hover:not(:disabled),
 .itemButton.catAction:hover:not(:disabled),
 .itemButton.catLogic:hover:not(:disabled),

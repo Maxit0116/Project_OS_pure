@@ -87,6 +87,32 @@ export default function MarketplaceDetailSections({
         <FactGrid items={model.facts} />
       </Section>
 
+      {model.profileSections?.map((section) => (
+        <Section key={section.title} title={section.title}>
+          {section.paragraphs?.map((paragraph) => (
+            <p key={paragraph.slice(0, 48)} className={styles.description}>
+              {paragraph}
+            </p>
+          ))}
+          {section.bullets && section.bullets.length > 0 ? (
+            <ul className={styles.steps}>
+              {section.bullets.map((bullet) => (
+                <li key={bullet}>{bullet}</li>
+              ))}
+            </ul>
+          ) : null}
+          {section.chips && section.chips.length > 0 ? (
+            <ul className={styles.chipList}>
+              {section.chips.map((chip) => (
+                <li key={chip} className={styles.chip}>
+                  {chip}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </Section>
+      ))}
+
       {model.setupNotes.length > 0 ? (
         <Section title={setupTitle}>
           <ol className={styles.steps}>

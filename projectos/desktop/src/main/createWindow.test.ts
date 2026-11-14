@@ -49,6 +49,10 @@ vi.mock('./rendererResourceLifecycle.js', () => ({
 vi.mock('./ipcSenderTrust.js', () => ({
   installTrustedHostRendererAuthority: vi.fn(() => vi.fn()),
 }))
+vi.mock('./appBrandIcon.js', () => ({
+  loadAppBrandIcon: vi.fn(() => null),
+  applyWindowBrandIcon: vi.fn(),
+}))
 
 import { createMainWindow } from './createWindow.js'
 
@@ -126,5 +130,9 @@ class FakeBrowserWindow extends EventEmitter {
 
   isVisible(): boolean {
     return this.visible
+  }
+
+  setIcon(): void {
+    // Brand icon wiring is covered by appBrandIcon tests.
   }
 }

@@ -325,6 +325,32 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.importGitHubAuthFromGhCli();
   }
 
+  getUserAccountStatus() {
+    return this.transport.getUserAccountStatus();
+  }
+
+  getUserAccountProfile() {
+    return this.transport.getUserAccountProfile();
+  }
+
+  beginGoogleOAuth() {
+    return this.transport.beginGoogleOAuth();
+  }
+
+  cancelGoogleOAuth() {
+    return this.transport.cancelGoogleOAuth();
+  }
+
+  activateUserAccountProvider(
+    provider: import("../contracts/user-account.js").UserAccountProvider,
+  ) {
+    return this.transport.activateUserAccountProvider(provider);
+  }
+
+  signOutUserAccount() {
+    return this.transport.signOutUserAccount();
+  }
+
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload> {
     return this.transport.getNodeContext(projectId, nodeId);
   }
@@ -1058,7 +1084,7 @@ export class RealProjectOSApiClient implements ProjectOSApi {
   installAgentFromCatalog(
     projectId: string,
     input: import("../contracts/agent-marketplace.js").InstallAgentFromCatalogInput,
-  ): Promise<import("../contracts/agent-pool-trace.js").AgentDefinition> {
+  ): Promise<import("../contracts/agent-marketplace.js").InstallAgentFromCatalogResult> {
     return this.transport.installAgentFromCatalog(projectId, input);
   }
 

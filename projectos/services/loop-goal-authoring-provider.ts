@@ -9,6 +9,7 @@ import { z } from "zod";
 import {
   IntentGraphSchema,
   type IntentGraph,
+  type LoopAuthoringFocus,
   type LoopAuthoringTraceStep,
   type LoopGoalContext,
   type LoopOpenQuestion,
@@ -17,15 +18,29 @@ import type { ModelGateway } from "./model-gateway/gateway.js";
 import type { ModelProfile } from "../contracts/settings.js";
 import { listConnectorVendors } from "./loop-connectors/catalog.js";
 import {
+  applyIntentEdgePatch,
   applyIntentNodePatch,
   mergePreservingUntargeted,
   validateLoopNodeConfig,
+  type IntentGraphEdgePatch,
   type IntentGraphNodePatch,
 } from "./loop-node-config-schema.js";
 import {
   insertApprovalGate,
   validateApprovalGateWiring,
 } from "./loop-approval-insert.js";
+
+/** Resolve preferred focus from turn request fields. */
+export function resolveAuthoringFocus(input: {
+  focus?: LoopAuthoringFocus;
+  selectedNodeId?: string;
+  selectedEdgeId?: string;
+}): LoopAuthoringFocus | null {
+  if (input.focus) return input.focus;
+  if (input.selectedNodeId) return { type: "node", id: input.selectedNodeId };
+  if (input.selectedEdgeId) return { type: "edge", id: input.selectedEdgeId };
+  return null;
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -70,6 +85,22 @@ const ProviderNodePatchSchema = z
     kind: z.literal("node_patch"),
     nodeId: z.string().min(1),
     patch: z.record(z.string(), z.unknown()),
+    summary: z.string().trim().min(1).max(500),
+    assistantMessage: z.string().trim().min(1).max(2000).optional(),
+  })
+  .strict();
+
+const ProviderEdgePatchSchema = z
+  .object({
+    kind: z.literal("edge_patch"),
+    edgeId: z.string().min(1),
+    patch: z
+      .object({
+        prompt: z.string().trim().max(2000).optional(),
+        kind: z.string().min(1).max(40).optional(),
+        branchKey: z.string().trim().min(1).max(80).optional(),
+      })
+      .strict(),
     summary: z.string().trim().min(1).max(500),
     assistantMessage: z.string().trim().min(1).max(2000).optional(),
   })
@@ -131,6 +162,7 @@ const ProviderRejectSchema = z
 export const LoopAuthoringProviderResponseSchema = z.discriminatedUnion("kind", [
   ProviderAskResponseSchema,
   ProviderNodePatchSchema,
+  ProviderEdgePatchSchema,
   ProviderGraphReplaceSchema,
   ProviderApprovalInsertSchema,
   ProviderClarifySchema,
@@ -175,6 +207,7 @@ export function buildAuthoringResponseSchemaDoc(): string {
     "RESPONSE_SCHEMA (exactly one object; additionalProperties forbidden):",
     '{ "kind":"ask", "goal":string, "constraints"?:string[], "doneWhen"?:string[], "outOfScope"?:string[], "openQuestions"?:{question,options?}[], "assistantMessage":string }',
     '{ "kind":"node_patch", "nodeId":existingId, "patch":{allowedNodeFields}, "summary":string, "assistantMessage"?:string }',
+    '{ "kind":"edge_patch", "edgeId":existingId, "patch":{prompt?,kind?,branchKey?}, "summary":string, "assistantMessage"?:string }',
     '{ "kind":"graph", "draft":IntentGraph{revision,graphPrompt,nodes[],edges[]}, "summary":string, "targetedNodeIds"?:string[], "assistantMessage"?:string }',
     '{ "kind":"clarify", "openQuestions":[{question,options?},…1..6], "assistantMessage":string }',
     '{ "kind":"reject", "code":"unknown_connector"|"unknown_field"|"invalid_patch"|"insufficient_context", "message":string }',
@@ -190,17 +223,36 @@ export function buildAuthoringNodeFieldSchemaDoc(): string {
     "  credentialRefId?, actionParams?(≤32 scalar keys; must match capability — never invent keys),",
     "  logicKind?(condition|loop|merge|exit|retry|wait), maxIterations?, retryLimit?, waitMs?,",
     "  timeoutMs?, position{x,y}. Do not rename/delete untargeted ids or edges.",
-    "EDGES: id, source, target, kind(depends|…). Preserve untargeted edges exactly.",
+    "NODE prompt should cover: task goal, rules/constraints, expected inputs/outputs, done-when.",
+    "EDGE_FIELDS (edge_patch only): prompt (transfer/handoff description), kind?, branchKey?.",
+    "  Never change source/target/ports/id. Edge prompt describes what is passed and how the target should use it.",
+    "EDGES in graph replace: preserve untargeted edges exactly.",
   ].join("\n");
 }
 
-export function buildAuthoringSystemPrompt(): string {
+export function buildAuthoringSystemPrompt(focus?: LoopAuthoringFocus | null): string {
+  const focusRules = focus
+    ? focus.type === "node"
+      ? [
+          `FOCUSED EDIT: only modify node id="${focus.id}".`,
+          "Prefer kind=node_patch with that nodeId. Do not change other nodes, edges, or topology.",
+          "kind=graph is allowed only with targetedNodeIds containing solely that node id.",
+          "kind=edge_patch and kind=approval_insert are forbidden while a node is focused.",
+        ]
+      : [
+          `FOCUSED EDIT: only modify edge id="${focus.id}".`,
+          "You MUST use kind=edge_patch with that edgeId (prompt / kind / branchKey only).",
+          "Do not change nodes, topology, or other edges. kind=node_patch, graph, and approval_insert are forbidden.",
+        ]
+    : [
+        "For local edits, prefer kind=node_patch or kind=edge_patch and preserve all non-target fields.",
+      ];
   return [
     "You author Project OS Loops IntentGraphs.",
     "Return ONE JSON object that validates against RESPONSE_SCHEMA below.",
     "Never invent connectors, capability ids, or parameter keys outside the catalog.",
     "Never claim credentials exist. Configured ≠ authorized to run.",
-    "For local edits, prefer kind=node_patch and preserve all non-target node ids, edges, and manual fields.",
+    ...focusRules,
     "If information is missing, use kind=clarify — do not guess.",
     "Generation/edit never executes the loop.",
     "",
@@ -223,11 +275,35 @@ export function buildAuthoringUserPrompt(input: {
   text: string;
   draft: IntentGraph;
   selectedNodeId?: string;
+  selectedEdgeId?: string;
+  focus?: LoopAuthoringFocus | null;
   goalContext?: LoopGoalContext | null;
 }): string {
-  const selected = input.selectedNodeId
-    ? input.draft.nodes.find((node) => node.id === input.selectedNodeId)
-    : undefined;
+  const focus =
+    input.focus ??
+    resolveAuthoringFocus({
+      ...(input.selectedNodeId ? { selectedNodeId: input.selectedNodeId } : {}),
+      ...(input.selectedEdgeId ? { selectedEdgeId: input.selectedEdgeId } : {}),
+    });
+  const selectedNode =
+    focus?.type === "node"
+      ? input.draft.nodes.find((node) => node.id === focus.id)
+      : input.selectedNodeId
+        ? input.draft.nodes.find((node) => node.id === input.selectedNodeId)
+        : undefined;
+  const selectedEdge =
+    focus?.type === "edge"
+      ? input.draft.edges.find((edge) => edge.id === focus.id)
+      : input.selectedEdgeId
+        ? input.draft.edges.find((edge) => edge.id === input.selectedEdgeId)
+        : undefined;
+  const neighborSummary =
+    selectedEdge != null
+      ? {
+          source: input.draft.nodes.find((n) => n.id === selectedEdge.source),
+          target: input.draft.nodes.find((n) => n.id === selectedEdge.target),
+        }
+      : null;
   return [
     `mode: ${input.mode}`,
     `user_request: ${input.text}`,
@@ -240,10 +316,35 @@ export function buildAuthoringUserPrompt(input: {
           revision: input.goalContext.revision,
         })}`
       : "goal_context: (none)",
-    `selected_node_id: ${input.selectedNodeId ?? "(none)"}`,
-    selected
-      ? `selected_node: ${JSON.stringify(selected)}`
+    `focus: ${focus ? JSON.stringify(focus) : "(none)"}`,
+    `selected_node_id: ${selectedNode?.id ?? "(none)"}`,
+    selectedNode
+      ? `selected_node: ${JSON.stringify(selectedNode)}`
       : "selected_node: (none)",
+    `selected_edge_id: ${selectedEdge?.id ?? "(none)"}`,
+    selectedEdge
+      ? `selected_edge: ${JSON.stringify(selectedEdge)}`
+      : "selected_edge: (none)",
+    neighborSummary
+      ? `edge_neighbors: ${JSON.stringify({
+          source: neighborSummary.source
+            ? {
+                id: neighborSummary.source.id,
+                title: neighborSummary.source.title,
+                prompt: neighborSummary.source.prompt,
+                type: neighborSummary.source.type,
+              }
+            : null,
+          target: neighborSummary.target
+            ? {
+                id: neighborSummary.target.id,
+                title: neighborSummary.target.title,
+                prompt: neighborSummary.target.prompt,
+                type: neighborSummary.target.type,
+              }
+            : null,
+        })}`
+      : "edge_neighbors: (none)",
     `workflow_draft_revision: ${input.draft.revision}`,
     `workflow_draft: ${JSON.stringify({
       revision: input.draft.revision,
@@ -271,6 +372,8 @@ export async function runLoopAuthoringProvider(input: {
   text: string;
   draft: IntentGraph;
   selectedNodeId?: string;
+  selectedEdgeId?: string;
+  focus?: LoopAuthoringFocus | null;
   goalContext?: LoopGoalContext | null;
   threadLength: number;
   deps: LoopAuthoringProviderDeps;
@@ -284,21 +387,33 @@ export async function runLoopAuthoringProvider(input: {
   summary?: string;
   rejected?: { code: string; message: string };
 }> {
+  const focus =
+    input.focus ??
+    resolveAuthoringFocus({
+      ...(input.selectedNodeId ? { selectedNodeId: input.selectedNodeId } : {}),
+      ...(input.selectedEdgeId ? { selectedEdgeId: input.selectedEdgeId } : {}),
+    });
   const steps = [
     step("thinking", "Calling model provider for authoring"),
     step(
       input.mode === "ask" ? "writing_context" : "proposing_graph",
-      input.mode === "ask" ? "Drafting goal context via provider" : "Proposing graph edit via provider",
+      input.mode === "ask"
+        ? "Drafting goal context via provider"
+        : focus
+          ? "Proposing focused graph description via provider"
+          : "Proposing graph edit via provider",
     ),
   ];
 
   const raw = await input.deps.complete({
-    system: buildAuthoringSystemPrompt(),
+    system: buildAuthoringSystemPrompt(focus),
     user: buildAuthoringUserPrompt({
       mode: input.mode,
       text: input.text,
       draft: input.draft,
+      ...(focus ? { focus } : {}),
       ...(input.selectedNodeId ? { selectedNodeId: input.selectedNodeId } : {}),
+      ...(input.selectedEdgeId ? { selectedEdgeId: input.selectedEdgeId } : {}),
       ...(input.goalContext ? { goalContext: input.goalContext } : {}),
     }),
     ...(input.deps.signal ? { signal: input.deps.signal } : {}),
@@ -383,6 +498,18 @@ export async function runLoopAuthoringProvider(input: {
   }
 
   if (parsed.kind === "approval_insert") {
+    if (focus) {
+      return {
+        source: "provider",
+        steps,
+        assistantMessage:
+          "Focused edit cannot insert approval gates. Clear the selection or describe the focused node/edge only.",
+        rejected: {
+          code: "invalid_patch",
+          message: "approval_insert forbidden while authoring focus is set",
+        },
+      };
+    }
     try {
       const proposed = insertApprovalGate(input.draft, {
         ...(parsed.afterNodeId ? { afterNodeId: parsed.afterNodeId } : {}),
@@ -425,7 +552,84 @@ export async function runLoopAuthoringProvider(input: {
     }
   }
 
+  if (parsed.kind === "edge_patch") {
+    if (focus?.type === "node") {
+      return {
+        source: "provider",
+        steps,
+        assistantMessage:
+          "A node is focused — use node_patch for that node, not edge_patch.",
+        rejected: {
+          code: "invalid_patch",
+          message: "edge_patch forbidden while a node is focused",
+        },
+      };
+    }
+    if (focus?.type === "edge" && parsed.edgeId !== focus.id) {
+      return {
+        source: "provider",
+        steps,
+        assistantMessage: `Focused edge is ${focus.id}; refused patch for ${parsed.edgeId}.`,
+        rejected: {
+          code: "invalid_patch",
+          message: "edge_patch target does not match authoring focus",
+        },
+      };
+    }
+    const applied = applyIntentEdgePatch(
+      input.draft,
+      parsed.edgeId,
+      parsed.patch as IntentGraphEdgePatch,
+    );
+    if (!applied.ok) {
+      const safe = applied.issues
+        .map((i) => `${i.path}: ${i.code}`)
+        .join("; ");
+      return {
+        source: "provider",
+        steps,
+        assistantMessage: `Rejected edge patch (${safe || "invalid_patch"})`,
+        rejected: {
+          code: applied.issues[0]?.code ?? "invalid_patch",
+          message: safe || "invalid_patch",
+        },
+      };
+    }
+    return {
+      source: "provider",
+      steps,
+      assistantMessage:
+        parsed.assistantMessage ??
+        `${parsed.summary} Review the proposed graph diff, then Accept or Dismiss.`,
+      proposedDraft: applied.draft,
+      summary: parsed.summary,
+    };
+  }
+
   if (parsed.kind === "node_patch") {
+    if (focus?.type === "edge") {
+      return {
+        source: "provider",
+        steps,
+        assistantMessage:
+          "An edge is focused — use edge_patch for that edge, not node_patch.",
+        rejected: {
+          code: "invalid_patch",
+          message: "node_patch forbidden while an edge is focused",
+        },
+      };
+    }
+    if (focus?.type === "node" && parsed.nodeId !== focus.id) {
+      return {
+        source: "provider",
+        steps,
+        assistantMessage: `Focused node is ${focus.id}; refused patch for ${parsed.nodeId}.`,
+        rejected: {
+          code: "invalid_patch",
+          message: "node_patch target does not match authoring focus",
+        },
+      };
+    }
     const applied = applyIntentNodePatch(
       input.draft,
       parsed.nodeId,
@@ -474,6 +678,32 @@ export async function runLoopAuthoringProvider(input: {
   }
 
   // graph replace with optional targeted merge
+  if (focus?.type === "edge") {
+    return {
+      source: "provider",
+      steps,
+      assistantMessage:
+        "An edge is focused — use edge_patch instead of a full graph replace.",
+      rejected: {
+        code: "invalid_patch",
+        message: "graph replace forbidden while an edge is focused",
+      },
+    };
+  }
+  if (focus?.type === "node") {
+    const targets = parsed.targetedNodeIds ?? [];
+    if (targets.length !== 1 || targets[0] !== focus.id) {
+      return {
+        source: "provider",
+        steps,
+        assistantMessage: `Focused node edits must set targetedNodeIds to ["${focus.id}"] only.`,
+        rejected: {
+          code: "invalid_patch",
+          message: "graph targetedNodeIds must match focused node",
+        },
+      };
+    }
+  }
   const merged = mergePreservingUntargeted(
     input.draft,
     parsed.draft,

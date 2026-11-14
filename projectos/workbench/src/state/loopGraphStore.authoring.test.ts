@@ -107,6 +107,64 @@ describe('loopGraphStore authoring actions', () => {
     expect(useLoopGraphStore.getState().composerSheet).toBe('clarify')
   })
 
+  it('sendAuthoringTurn includes focus and selectedEdgeId from authoringFocus', async () => {
+    const send = vi.fn(async () =>
+      normalizeLoopGraphDocument({
+        ...baseDoc,
+        composerMode: 'edit',
+      }),
+    )
+    useLoopGraphStore.setState({
+      document: {
+        ...baseDoc,
+        composerMode: 'edit',
+        draft: {
+          ...baseDoc.draft,
+          nodes: [
+            {
+              id: 'a',
+              title: 'A',
+              prompt: '',
+              position: { x: 0, y: 0 },
+            },
+            {
+              id: 'b',
+              title: 'B',
+              prompt: '',
+              position: { x: 100, y: 0 },
+            },
+          ],
+          edges: [
+            {
+              id: 'e1',
+              source: 'a',
+              target: 'b',
+              kind: 'depends',
+            },
+          ],
+        },
+      },
+      composerDraft: 'describe the handoff',
+      authoringEngine: 'provider',
+      authoringFocus: { type: 'edge', id: 'e1' },
+      canvasSelectedEdgeId: 'e1',
+      activeLoopId: 'loop_store',
+    })
+    useWorkbenchStore.setState({
+      client: {
+        sendLoopAuthoringTurn: send,
+        listLoopGraphs: vi.fn(async () => []),
+      } as never,
+      project: { projectId: 'proj' } as never,
+    })
+    await useLoopGraphStore.getState().sendAuthoringTurn()
+    expect(send.mock.calls[0]?.[2]).toMatchObject({
+      useProvider: true,
+      focus: { type: 'edge', id: 'e1' },
+      selectedEdgeId: 'e1',
+    })
+  })
+
   it('rules engine is explicit user choice and sends useProvider:false', async () => {
     const send = vi.fn(async () =>
       normalizeLoopGraphDocument({

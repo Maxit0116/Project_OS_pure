@@ -33,9 +33,15 @@ describe('main-window navigation and capability policy', () => {
       .toContain('https://*.githubusercontent.com')
     expect(mainWindowContentSecurityPolicy(true))
       .toContain('https://github.com')
+    expect(mainWindowContentSecurityPolicy(true))
+      .toContain('https://lh3.googleusercontent.com')
+    expect(mainWindowContentSecurityPolicy(true))
+      .toContain('https://*.googleusercontent.com')
+    expect(mainWindowContentSecurityPolicy(true))
+      .toContain('https://*.ggpht.com')
     expect(imgSrcDirective(mainWindowContentSecurityPolicy(true)))
       .toBe(
-        "img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.githubusercontent.com https://github.com",
+        "img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.githubusercontent.com https://github.com https://lh3.googleusercontent.com https://*.googleusercontent.com https://*.ggpht.com",
       )
     expect(installedMainFramePolicy(false))
       .toBe(mainWindowContentSecurityPolicy(false))

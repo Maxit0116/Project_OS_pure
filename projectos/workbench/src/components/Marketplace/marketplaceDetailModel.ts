@@ -16,6 +16,13 @@ export interface MarketplaceFact {
   value: string
 }
 
+export interface MarketplaceProfileSection {
+  title: string
+  paragraphs?: string[]
+  bullets?: string[]
+  chips?: string[]
+}
+
 export interface MarketplaceDetailModel {
   facts: MarketplaceFact[]
   overview?: string
@@ -37,6 +44,8 @@ export interface MarketplaceDetailModel {
   dependencyNotes?: string[]
   /** Structured deps for jump-to-tab install (CMP-5.1). */
   dependencyLinks?: MarketplaceDependencyLink[]
+  /** Specialist Template Profile sections (Agents tab). */
+  profileSections?: MarketplaceProfileSection[]
 }
 
 function skillInstallId(listingId: string): string {
@@ -286,6 +295,20 @@ export function buildAgentDetailModel(
     dependsOnRules: string
     dependsOnMissing: string
     none: string
+    department?: string
+    modelTier?: string
+    loopRole?: string
+    responsibilities?: string
+    boundaries?: string
+    capabilities?: string
+    taskTypes?: string
+    knowledge?: string
+    inputContract?: string
+    outputContract?: string
+    handoff?: string
+    validation?: string
+    permissionHints?: string
+    recommendedOnly?: string
   },
   installed?: {
     skillIds?: Set<string>
@@ -319,20 +342,96 @@ export function buildAgentDetailModel(
             .join(', ')}`,
         ]
       : []),
+    ...(labels.recommendedOnly ? [labels.recommendedOnly] : []),
   ]
 
+  const facts: MarketplaceFact[] = [
+    { label: labels.listingId, value: listing.id },
+    { label: labels.installId, value: installId },
+    { label: labels.version, value: listing.version },
+    {
+      label: labels.trust,
+      value: community ? labels.community : labels.curated,
+    },
+    { label: labels.installPath, value: installPath },
+  ]
+  if (listing.department && labels.department) {
+    facts.push({ label: labels.department, value: listing.department })
+  }
+  if (listing.modelTierHint && labels.modelTier) {
+    facts.push({ label: labels.modelTier, value: listing.modelTierHint })
+  }
+  if (listing.suggestedLoopAgentRole && labels.loopRole) {
+    facts.push({ label: labels.loopRole, value: listing.suggestedLoopAgentRole })
+  }
+
+  const profileSections: MarketplaceProfileSection[] = []
+  if (listing.responsibilities?.length && labels.responsibilities) {
+    profileSections.push({
+      title: labels.responsibilities,
+      bullets: listing.responsibilities,
+    })
+  }
+  if (listing.boundaries?.length && labels.boundaries) {
+    profileSections.push({
+      title: labels.boundaries,
+      bullets: listing.boundaries,
+    })
+  }
+  if (listing.capabilityTags?.length && labels.capabilities) {
+    profileSections.push({
+      title: labels.capabilities,
+      chips: listing.capabilityTags,
+    })
+  }
+  if (listing.taskTypes?.length && labels.taskTypes) {
+    profileSections.push({
+      title: labels.taskTypes,
+      chips: listing.taskTypes,
+    })
+  }
+  if (listing.knowledgeContext?.trim() && labels.knowledge) {
+    profileSections.push({
+      title: labels.knowledge,
+      paragraphs: [listing.knowledgeContext.trim()],
+    })
+  }
+  if (listing.inputContract?.trim() && labels.inputContract) {
+    profileSections.push({
+      title: labels.inputContract,
+      paragraphs: [listing.inputContract.trim()],
+    })
+  }
+  if (listing.outputContract?.trim() && labels.outputContract) {
+    profileSections.push({
+      title: labels.outputContract,
+      paragraphs: [listing.outputContract.trim()],
+    })
+  }
+  if (listing.handoffRules?.trim() && labels.handoff) {
+    profileSections.push({
+      title: labels.handoff,
+      paragraphs: [listing.handoffRules.trim()],
+    })
+  }
+  if (listing.validationCriteria?.trim() && labels.validation) {
+    profileSections.push({
+      title: labels.validation,
+      paragraphs: [listing.validationCriteria.trim()],
+    })
+  }
+  if (listing.permissionHints?.length && labels.permissionHints) {
+    profileSections.push({
+      title: labels.permissionHints,
+      chips: listing.permissionHints,
+    })
+  }
+
   return {
-    facts: [
-      { label: labels.listingId, value: listing.id },
-      { label: labels.installId, value: installId },
-      { label: labels.version, value: listing.version },
-      {
-        label: labels.trust,
-        value: community ? labels.community : labels.curated,
-      },
-      { label: labels.installPath, value: installPath },
-    ],
-    overview: listing.description,
+    facts,
+    overview: listing.tagline
+      ? `${listing.tagline}${listing.description ? `\n\n${listing.description}` : ''}`
+      : listing.description,
     homepage: listing.homepage,
     riskNote: community ? labels.communityRisk : undefined,
     setupNotes: [labels.gettingStartedPath, labels.gettingStartedInvoke],
@@ -343,6 +442,7 @@ export function buildAgentDetailModel(
     installPath,
     dependencyNotes,
     dependencyLinks,
+    ...(profileSections.length ? { profileSections } : {}),
   }
 }
 

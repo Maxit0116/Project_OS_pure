@@ -54,6 +54,18 @@ export const AssembleWorkforceAgentRequestSchema = z
   })
   .strict();
 
+/** Heuristic Template suggestions (P5) — never auto-install. */
+export const SuggestedAgentTemplateSchema = z
+  .object({
+    listingId: z.string().min(1).max(120),
+    name: z.string().min(1).max(120),
+    department: z.string().min(1).max(64).optional(),
+    score: z.number().finite().nonnegative(),
+    rationale: z.string().max(512),
+    suggestedLoopAgentRole: z.string().min(1).max(40).optional(),
+  })
+  .strict();
+
 export const AssembleWorkforceAgentResultSchema = z
   .object({
     draft: WorkforceAgentDraftSchema,
@@ -62,6 +74,8 @@ export const AssembleWorkforceAgentResultSchema = z
     bindings: z.array(AssemblyBindingSchema).max(256),
     gaps: z.array(z.string().min(1).max(240)).max(32).optional(),
     rationale: z.string().max(2_000).optional(),
+    /** Ranked Agent Templates that may fit the prompt — suggestions only. */
+    suggestedAgentTemplates: z.array(SuggestedAgentTemplateSchema).max(8).optional(),
   })
   .strict();
 
@@ -77,3 +91,4 @@ export type AssembleWorkforceAgentRequest = z.infer<
 export type AssembleWorkforceAgentResult = z.infer<
   typeof AssembleWorkforceAgentResultSchema
 >;
+export type SuggestedAgentTemplate = z.infer<typeof SuggestedAgentTemplateSchema>;

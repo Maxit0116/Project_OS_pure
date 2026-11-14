@@ -49,6 +49,10 @@ import {
   visibleMarketplaceTabs,
   type MarketplaceTabId,
 } from './marketplaceKinds'
+import {
+  filterAgentListings,
+  groupAgentListingsByDepartment,
+} from './agentTalentLibrary'
 import styles from './MarketplaceOverlay.module.css'
 
 const TAB_STORAGE_KEY = 'projectos.marketplace.activeTab'
@@ -200,6 +204,9 @@ export default function MarketplaceOverlay() {
     (s) => s.confirmMarketplaceAgentAssembly,
   )
   const setActiveAgentDefinitionId = useWorkbenchStore((s) => s.setActiveAgentDefinitionId)
+  const beginWorkforceDraftFromAgentListing = useWorkbenchStore(
+    (s) => s.beginWorkforceDraftFromAgentListing,
+  )
   const sendPrompt = useWorkbenchStore((s) => s.sendPrompt)
   const setRightPanelOpen = useWorkbenchStore((s) => s.setRightPanelOpen)
   const { ts } = useI18n()
@@ -224,6 +231,8 @@ export default function MarketplaceOverlay() {
   const [assemblyResult, setAssemblyResult] = useState<AssembleWorkforceAgentResult | null>(null)
   const [createdAssemblyId, setCreatedAssemblyId] = useState<string | null>(null)
   const [assemblyInstallErrors, setAssemblyInstallErrors] = useState<string[]>([])
+  const [agentFilterQuery, setAgentFilterQuery] = useState('')
+  const [specialistPoolExpanded, setSpecialistPoolExpanded] = useState(false)
 
   useEffect(() => {
     try {
@@ -240,6 +249,13 @@ export default function MarketplaceOverlay() {
       /* ignore */
     }
   }, [viewMode])
+
+  /** Deep-link: re-read tab/view when marketplace opens (e.g. talent-library entry). */
+  useEffect(() => {
+    if (!open) return
+    setTab(loadStoredTab('mcp'))
+    setViewMode(loadStoredViewMode())
+  }, [open])
 
   useEffect(() => {
     if (!highlightListingId) return
@@ -816,12 +832,41 @@ export default function MarketplaceOverlay() {
     [installStencilFromCatalog, uninstallStencilFromCatalog],
   )
 
+  // Hooks must run unconditionally — keep agent filter/group memos above the open gate.
+  const agentListings = agentView?.document.listings ?? []
+  const filteredAgentListings = useMemo(
+    () => filterAgentListings(agentListings, agentFilterQuery),
+    [agentListings, agentFilterQuery],
+  )
+  const agentDepartmentGroups = useMemo(
+    () => groupAgentListingsByDepartment(filteredAgentListings),
+    [filteredAgentListings],
+  )
+  const agentDepartmentLabel = useCallback(
+    (department: string) => {
+      switch (department) {
+        case 'product_architecture':
+          return ts('chat.marketplace.agentDeptProductArchitecture')
+        case 'software_development':
+          return ts('chat.marketplace.agentDeptSoftwareDevelopment')
+        case 'quality_infrastructure':
+          return ts('chat.marketplace.agentDeptQualityInfrastructure')
+        case 'ai_engineering':
+          return ts('chat.marketplace.agentDeptAiEngineering')
+        case 'specialist_pool':
+          return ts('chat.marketplace.agentDeptSpecialistPool')
+        default:
+          return ts('chat.marketplace.agentDeptUngrouped')
+      }
+    },
+    [ts],
+  )
+
   if (!open) return null
 
   const mcpListings = mcpView?.document.listings ?? []
   const skillListings = skillView?.document.listings ?? []
   const rulesListings = rulesView?.document.listings ?? []
-  const agentListings = agentView?.document.listings ?? []
   const workflowListings = workflowView?.document.listings ?? []
   const stencilListings = stencilView?.document.listings ?? []
   const mcpCurated = mcpListings.filter((l) => l.trustTier === 'curated')
@@ -830,8 +875,6 @@ export default function MarketplaceOverlay() {
   const skillCommunity = skillListings.filter((l) => l.trustTier === 'community')
   const rulesCurated = rulesListings.filter((l) => l.trustTier === 'curated')
   const rulesCommunity = rulesListings.filter((l) => l.trustTier === 'community')
-  const agentCurated = agentListings.filter((l) => l.trustTier === 'curated')
-  const agentCommunity = agentListings.filter((l) => l.trustTier === 'community')
   const workflowCurated = workflowListings.filter((l) => l.trustTier === 'curated')
   const workflowCommunity = workflowListings.filter((l) => l.trustTier === 'community')
   const stencilCurated = stencilListings.filter((l) => l.trustTier === 'curated')
@@ -1046,12 +1089,16 @@ export default function MarketplaceOverlay() {
     <div className={styles.grid}>
       {listings.map((listing) => {
         const installed = installedAgentIdSet.has(listing.id)
+        const caps = (listing.capabilityTags ?? []).slice(0, 4).join(' · ')
+        const description = [listing.tagline ?? listing.description, caps]
+          .filter(Boolean)
+          .join('\n')
         return (
           <MarketplaceCard
             key={listing.id}
             id={listing.id}
             name={listing.name}
-            description={listing.description}
+            description={description || listing.description}
             homepage={listing.homepage}
             iconUrl={listing.iconUrl}
             installed={installed}
@@ -1285,6 +1332,20 @@ export default function MarketplaceOverlay() {
           dependsOnRules: ts('chat.marketplace.detailDependsOnRules'),
           dependsOnMissing: ts('chat.marketplace.detailDependsOnMissing'),
           none: ts('chat.marketplace.detailNone'),
+          department: ts('chat.marketplace.agentProfileDepartment'),
+          modelTier: ts('chat.marketplace.agentProfileModelTier'),
+          loopRole: ts('chat.marketplace.agentProfileLoopRole'),
+          responsibilities: ts('chat.marketplace.agentProfileResponsibilities'),
+          boundaries: ts('chat.marketplace.agentProfileBoundaries'),
+          capabilities: ts('chat.marketplace.agentProfileCapabilities'),
+          taskTypes: ts('chat.marketplace.agentProfileTaskTypes'),
+          knowledge: ts('chat.marketplace.agentProfileKnowledge'),
+          inputContract: ts('chat.marketplace.agentProfileInput'),
+          outputContract: ts('chat.marketplace.agentProfileOutput'),
+          handoff: ts('chat.marketplace.agentProfileHandoff'),
+          validation: ts('chat.marketplace.agentProfileValidation'),
+          permissionHints: ts('chat.marketplace.agentProfilePermissionHints'),
+          recommendedOnly: ts('chat.marketplace.agentDepsRecommendedOnly'),
         },
         {
           skillIds: installedSkillIdSet,
@@ -1317,18 +1378,33 @@ export default function MarketplaceOverlay() {
             void runAgentAction(listing, action)
           }}
           secondaryActions={
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={loading}
-              onClick={() => {
-                void reportAgentCatalogListing({ listingId: listing.id }).then((ok) => {
-                  if (ok) void loadAgents(false)
-                })
-              }}
-            >
-              {ts('chat.marketplace.report')}
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={loading || !beginWorkforceDraftFromAgentListing}
+                onClick={() => {
+                  beginWorkforceDraftFromAgentListing?.(listing, {
+                    asAdditionalInstance: installed,
+                  })
+                  setMarketplaceOpen(false)
+                }}
+              >
+                {ts('chat.marketplace.agentCreateAnotherInstance')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={loading}
+                onClick={() => {
+                  void reportAgentCatalogListing({ listingId: listing.id }).then((ok) => {
+                    if (ok) void loadAgents(false)
+                  })
+                }}
+              >
+                {ts('chat.marketplace.report')}
+              </Button>
+            </>
           }
         />
       )
@@ -1883,25 +1959,54 @@ export default function MarketplaceOverlay() {
               ) : null}
               {tab === 'agents' ? (
                 <>
-                  {agentListings.length === 0 && !loading ? (
+                  <p className={styles.help}>{ts('chat.marketplace.agentsNotRequiredHint')}</p>
+                  <TextInput
+                    label={ts('chat.marketplace.agentsFilterPlaceholder')}
+                    value={agentFilterQuery}
+                    onChange={(event) => setAgentFilterQuery(event.target.value)}
+                    placeholder={ts('chat.marketplace.agentsFilterPlaceholder')}
+                  />
+                  {filteredAgentListings.length === 0 && !loading ? (
                     <p className={styles.empty}>{ts('chat.marketplace.empty')}</p>
                   ) : null}
-                  {agentCurated.length > 0 ? (
-                    <>
-                      <h3 className={styles.sectionTitle}>
-                        {ts('chat.marketplace.curatedSection')}
-                      </h3>
-                      {renderAgentGrid(agentCurated)}
-                    </>
-                  ) : null}
-                  {agentCommunity.length > 0 ? (
-                    <>
-                      <h3 className={styles.sectionTitle}>
-                        {ts('chat.marketplace.communitySection')}
-                      </h3>
-                      {renderAgentGrid(agentCommunity)}
-                    </>
-                  ) : null}
+                  {agentDepartmentGroups.map((group) => {
+                    const isSpecialist = group.department === 'specialist_pool'
+                    if (isSpecialist && !specialistPoolExpanded && !agentFilterQuery.trim()) {
+                      return (
+                        <div key={group.department}>
+                          <h3 className={styles.sectionTitle}>
+                            {agentDepartmentLabel(group.department)}
+                          </h3>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setSpecialistPoolExpanded(true)}
+                          >
+                            {ts('chat.marketplace.agentDeptCollapse')} ({group.listings.length})
+                          </Button>
+                        </div>
+                      )
+                    }
+                    return (
+                      <div key={group.department}>
+                        <div className={styles.sectionTitleRow}>
+                          <h3 className={styles.sectionTitle}>
+                            {agentDepartmentLabel(group.department)}
+                          </h3>
+                          {isSpecialist && specialistPoolExpanded && !agentFilterQuery.trim() ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSpecialistPoolExpanded(false)}
+                            >
+                              {ts('chat.marketplace.agentDeptExpand')}
+                            </Button>
+                          ) : null}
+                        </div>
+                        {renderAgentGrid(group.listings)}
+                      </div>
+                    )
+                  })}
                 </>
               ) : null}
               {tab === 'workflows' ? (

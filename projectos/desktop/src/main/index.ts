@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { app, BrowserWindow, dialog } from 'electron'
+import { applyAppBrandIcon } from './appBrandIcon.js'
 import { applyIsolatedUserDataPath } from './applyIsolatedUserDataPath.js'
 import { createMainWindow } from './createWindow.js'
 import { registerProjectOsIpc } from './registerProjectOsIpc.js'
@@ -40,6 +41,8 @@ function resolveInitialWorkspacePath(): string | undefined {
 }
 
 void app.whenReady().then(() => {
+  // Stock Electron mark for Dock/Stage Manager; Bundle ID stays com.github.Electron (Keychain-stable).
+  applyAppBrandIcon()
   installAppMenu()
   registerWorkspaceWindowIpc()
   registerProjectOsIpc()

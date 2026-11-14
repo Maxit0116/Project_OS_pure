@@ -330,6 +330,8 @@
 
 .settingRowStacked .settingRowAction {
   max-width: none;
+  flex-direction: column;
+  align-items: stretch;
   justify-content: flex-start;
   width: 100%;
 }

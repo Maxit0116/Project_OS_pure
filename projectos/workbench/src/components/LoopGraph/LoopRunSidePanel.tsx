@@ -108,6 +108,30 @@ export default function LoopRunSidePanel({ instance, history = [] }: Props) {
         ) : null}
       </section>
 
+      {(instance.workGroupRecords?.length ?? 0) > 0 ? (
+        <section className={styles.section} data-loop-run-work-groups="">
+          <h4 className={styles.heading}>{ts('chat.loopGraph.workGroup.runStates')}</h4>
+          <ul className={styles.list}>
+            {(instance.workGroupRecords ?? []).map((group) => (
+              <li key={group.workGroupId} className={styles.row}>
+                <span
+                  className={`${styles.dot} ${styles[`tone_${group.status}`] ?? ''}`}
+                  aria-hidden
+                />
+                <span className={styles.rowId}>
+                  {group.workGroupId}
+                  <span className={styles.rowStatus}>
+                    {' '}
+                    · {group.memberNodeIds.length} · c{group.agentCalls ?? 0}
+                  </span>
+                </span>
+                <span className={styles.rowStatus}>{group.status}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <section className={styles.section}>
         <h4 className={styles.heading}>{ts('chat.loopGraph.runNodeStates')}</h4>
         {records.length === 0 ? (

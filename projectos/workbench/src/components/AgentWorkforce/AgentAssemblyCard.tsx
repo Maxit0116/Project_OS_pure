@@ -46,12 +46,13 @@ export default function AgentAssemblyCard({
   onDismissSuccess,
 }: AgentAssemblyCardProps) {
   const { ts } = useI18n()
-  const { draft, bindings, rationale, gaps } = result
+  const { draft, bindings, rationale, gaps, suggestedAgentTemplates } = result
 
   const bindRows = bindings.filter(
     (b) => b.action === 'bind' || b.action === 'install_then_bind',
   )
   const suggestRows = bindings.filter((b) => b.action === 'suggest_install_only')
+  const templateSuggestions = suggestedAgentTemplates ?? []
   const hasCommunityRisk = bindRows.some((b) => b.selected && b.risk === 'community_mcp')
   const missingSelected = bindRows.filter(
     (b) => b.selected && !b.installed && b.action === 'install_then_bind',
@@ -96,6 +97,24 @@ export default function AgentAssemblyCard({
           </p>
         ))}
       </header>
+
+      {templateSuggestions.length > 0 ? (
+        <div className={styles.field}>
+          <span className={styles.label}>{ts('workforce.assemblySuggestedTemplates')}</span>
+          <p className={styles.hint}>{ts('workforce.assemblySuggestedTemplatesHint')}</p>
+          <ul className={styles.suggestList}>
+            {templateSuggestions.map((row) => (
+              <li key={row.listingId} className={styles.suggestItem}>
+                <span className={styles.suggestName}>{row.name}</span>
+                <span className={styles.suggestMeta}>
+                  {row.department ? `${row.department} · ` : ''}
+                  {row.rationale}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <TextInput
         label={ts('workforce.draftName')}

@@ -1,11 +1,21 @@
-import type { LoopSpec, LoopSpecEdge, LoopSpecNode } from '@contracts/index'
+import type {
+  IntentGraph,
+  IntentGraphNode,
+  LoopSpec,
+  LoopSpecEdge,
+  LoopSpecNode,
+} from '@contracts/index'
+import {
+  buildOrthogonalEdgePoints,
+  pointsToRoundedPath,
+} from './loopEdgeRouting'
+import { layoutNodesSemantically } from './semanticLayout'
 
 export const REVIEW_NODE_W = 148
 export const REVIEW_NODE_H = 40
-const GAP_X = 40
-const GAP_Y = 56
+const GAP_X = 48
+const GAP_Y = 64
 const PAD = 28
-const ROW_MAX = 5
 
 export type ReviewLayoutNode = {
   id: string
@@ -28,7 +38,7 @@ export type ReviewLayoutEdge = {
 
 export type ReviewLayoutGroup = {
   id: string
-  kind: 'parallel' | 'loop'
+  kind: 'parallel' | 'loop' | 'workgroup'
   nodeIds: string[]
   x: number
   y: number
@@ -47,10 +57,32 @@ export type ReviewLayout = {
 }
 
 function detectReviewGroups(
-  spec: Pick<LoopSpec, 'nodes' | 'edges'>,
+  spec: Pick<LoopSpec, 'nodes' | 'edges' | 'workGroups'>,
   pos: Map<string, ReviewLayoutNode>,
 ): ReviewLayoutGroup[] {
   const groups: ReviewLayoutGroup[] = []
+
+  for (const workGroup of spec.workGroups ?? []) {
+    const boxes = workGroup.memberNodeIds
+      .map((id) => pos.get(id))
+      .filter((box): box is ReviewLayoutNode => Boolean(box))
+    if (boxes.length === 0) continue
+    const minX = Math.min(...boxes.map((b) => b.x)) - 14
+    const minY = Math.min(...boxes.map((b) => b.y)) - 22
+    const maxX = Math.max(...boxes.map((b) => b.x + b.width)) + 14
+    const maxY = Math.max(...boxes.map((b) => b.y + b.height)) + 14
+    groups.push({
+      id: `workgroup_${workGroup.id}`,
+      kind: 'workgroup',
+      nodeIds: [...workGroup.memberNodeIds],
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+      label: `Work Group · ${workGroup.title}`,
+    })
+  }
+
   const depends = spec.edges.filter((edge) => edge.kind === 'depends')
   const out = new Map<string, string[]>()
   const inn = new Map<string, string[]>()
@@ -154,16 +186,22 @@ function routeForward(
   from: ReviewLayoutNode,
   to: ReviewLayoutNode,
 ): { d: string; mid: { x: number; y: number } } {
-  const x1 = from.x + from.width
-  const y1 = from.y + from.height / 2
-  const x2 = to.x
-  const y2 = to.y + to.height / 2
-  const dx = Math.max(24, (x2 - x1) / 2)
-  const c1x = x1 + dx
-  const c2x = x2 - dx
+  // TB spine: south → north
+  const start = { x: from.x + from.width / 2, y: from.y + from.height }
+  const end = { x: to.x + to.width / 2, y: to.y }
+  const points = buildOrthogonalEdgePoints({
+    start,
+    end,
+    sourcePort: 's',
+    targetPort: 'n',
+    offset: 20,
+  })
   return {
-    d: `M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}`,
-    mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
+    d: pointsToRoundedPath(points),
+    mid: {
+      x: (start.x + end.x) / 2,
+      y: (start.y + end.y) / 2,
+    },
   }
 }
 
@@ -171,37 +209,80 @@ function routeFeedback(
   from: ReviewLayoutNode,
   to: ReviewLayoutNode,
 ): { d: string; mid: { x: number; y: number } } {
-  const x1 = from.x + from.width / 2
-  const y1 = from.y
-  const x2 = to.x + to.width / 2
-  const y2 = to.y
-  const lift = 36 + Math.min(48, Math.abs(x1 - x2) * 0.08)
-  const midY = Math.min(y1, y2) - lift
+  // Side corridor: exit east, re-enter east (avoids crossing the TB spine).
+  const start = { x: from.x + from.width, y: from.y + from.height / 2 }
+  const end = { x: to.x + to.width, y: to.y + to.height / 2 }
+  const points = buildOrthogonalEdgePoints({
+    start,
+    end,
+    sourcePort: 'e',
+    targetPort: 'e',
+    offset: 28,
+    laneOffset: 48,
+  })
+  const rightX = Math.max(...points.map((p) => p.x))
   return {
-    d: `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`,
-    mid: { x: (x1 + x2) / 2, y: midY + 8 },
+    d: pointsToRoundedPath(points),
+    mid: { x: rightX - 8, y: (start.y + end.y) / 2 },
   }
 }
 
-/** Auto-layout a compiled LoopSpec for the read-only Review Path Map. */
+function specToLayoutDraft(
+  spec: Pick<LoopSpec, 'nodes' | 'edges'>,
+): Pick<IntentGraph, 'nodes' | 'edges'> {
+  const nodes: IntentGraphNode[] = spec.nodes.map((node) => ({
+    id: node.id,
+    title: node.goal || node.id,
+    prompt: node.goal || '',
+    type: (node.type as IntentGraphNode['type']) ?? 'agent',
+    position: { x: 0, y: 0 },
+  }))
+  const edges: IntentGraph['edges'] = spec.edges.map((edge) => ({
+    id: edge.id,
+    source: edge.from,
+    target: edge.to,
+    kind:
+      edge.kind === 'fallback'
+        ? 'depends'
+        : (edge.kind as IntentGraph['edges'][number]['kind']),
+    prompt: edge.when ?? '',
+    ...(edge.branchKey ? { branchKey: edge.branchKey } : {}),
+  }))
+  return { nodes, edges }
+}
+
+/** Auto-layout a compiled LoopSpec for the read-only Review Path Map (TB). */
 export function layoutLoopReviewPath(
   spec: Pick<LoopSpec, 'nodes' | 'edges'>,
 ): ReviewLayout {
   const orderedIds = topoOrder(spec.nodes, spec.edges)
-  const byId = new Map(spec.nodes.map((node) => [node.id, node]))
-  const placed: ReviewLayoutNode[] = []
+  const sizes = spec.nodes.map((node) => ({
+    id: node.id,
+    width: REVIEW_NODE_W,
+    height: REVIEW_NODE_H,
+  }))
+  const laidOut = layoutNodesSemantically({
+    draft: specToLayoutDraft(spec),
+    sizes,
+    options: {
+      origin: { x: PAD, y: PAD + 28 },
+      gapX: GAP_X,
+      gapY: GAP_Y,
+    },
+  })
 
-  orderedIds.forEach((id, index) => {
-    if (!byId.has(id)) return
-    const col = index % ROW_MAX
-    const row = Math.floor(index / ROW_MAX)
-    placed.push({
-      id,
-      x: PAD + col * (REVIEW_NODE_W + GAP_X),
-      y: PAD + 28 + row * (REVIEW_NODE_H + GAP_Y),
+  const placed: ReviewLayoutNode[] = spec.nodes.map((node) => {
+    const pos = laidOut.positions.get(node.id) ?? {
+      x: PAD,
+      y: PAD + 28,
+    }
+    return {
+      id: node.id,
+      x: pos.x,
+      y: pos.y,
       width: REVIEW_NODE_W,
       height: REVIEW_NODE_H,
-    })
+    }
   })
 
   const pos = new Map(placed.map((node) => [node.id, node]))
@@ -228,11 +309,11 @@ export function layoutLoopReviewPath(
   const groups = detectReviewGroups(spec, pos)
   const maxRight = placed.reduce((m, n) => Math.max(m, n.x + n.width), PAD)
   const maxBottom = placed.reduce((m, n) => Math.max(m, n.y + n.height), PAD)
-  const feedbackLift = edges.some((e) => e.kind === 'feedback') ? 40 : 0
+  const feedbackLift = edges.some((e) => e.kind === 'feedback') ? 56 : 0
   const groupPad = groups.length > 0 ? 16 : 0
 
   return {
-    width: Math.max(320, maxRight + PAD + groupPad),
+    width: Math.max(320, maxRight + PAD + groupPad + feedbackLift),
     height: Math.max(120, maxBottom + PAD + feedbackLift + groupPad),
     nodes: placed,
     edges,

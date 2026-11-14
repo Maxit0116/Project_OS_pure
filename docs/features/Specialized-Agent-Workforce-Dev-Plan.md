@@ -14,6 +14,8 @@
 | [`Capability-Marketplace-Dev-Plan.md`](./Capability-Marketplace-Dev-Plan.md) | Agent **Export / 目录安装**（P2）+ 依赖引导跳转（P5）；本计划负责本地 CRUD 与 runtime light 注入 |
 | [`Marketplace-Installed-Agent-Compose-Dev-Plan.md`](./Marketplace-Installed-Agent-Compose-Dev-Plan.md) | **Implemented**：Marketplace Installed 第三创建入口（库可见装配 + 可选 Catalog 扩搜）；draft/create API 与本计划合流 |
 | [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | Loop 画布上把 Definition 的 model/skills/mcp **展开为虚线卫星**；Apply / Save as Agent 写回本计划 CRUD |
+| [`Specialist-Agent-Talent-Library-Dev-Plan.md`](./Specialist-Agent-Talent-Library-Dev-Plan.md) | **Planned**：按部门扩展内置 Agent Catalog（Template）；安装/创建后的 Instance 仍走本计划 CRUD |
+| [`Loops-Graph-Agent-Work-Group-Dev-Plan.md`](./Loops-Graph-Agent-Work-Group-Dev-Plan.md) | Loops 画布 **专职小队工作组**；成员必须绑定本计划 workforce Definition |
 | Settings `AgentProfile` | 继续解析 **General Agent**（`feature_change` / `debug_fix`） |
 
 ---

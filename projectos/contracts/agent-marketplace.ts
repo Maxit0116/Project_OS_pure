@@ -4,15 +4,47 @@ import {
   CapabilityDependsOnSchema,
   CapabilityTrustTierSchema,
 } from "./capability-marketplace.js";
+import { AgentDefinitionSchema } from "./agent-pool-trace.js";
+import { LOOP_AGENT_ROLES } from "./loop-node-architecture.js";
 import { WorkflowCatalogListingSchema } from "./workflow-marketplace.js";
 import { StencilCatalogListingSchema } from "./stencil-marketplace.js";
 import { RulesCatalogListingSchema } from "./rules-marketplace.js";
 
 export const AgentTrustTierSchema = CapabilityTrustTierSchema;
 
+/** Talent-library department for browsing Templates (not a runtime enum). */
+export const AgentDepartmentSchema = z.enum([
+  "product_architecture",
+  "software_development",
+  "quality_infrastructure",
+  "ai_engineering",
+  "specialist_pool",
+]);
+
+/** Suggested model capability tier — never a concrete modelProfileId. */
+export const AgentModelTierHintSchema = z.enum([
+  "fast",
+  "balanced",
+  "deep",
+  "any",
+]);
+
+/** Soft permission intent chips; does not write permissions.json. */
+export const AgentPermissionHintSchema = z.enum([
+  "read_repo",
+  "propose_edits",
+  "run_tests",
+  "use_mcp",
+  "network",
+  "secrets_ask",
+]);
+
+export const AgentSuggestedLoopRoleSchema = z.enum(LOOP_AGENT_ROLES);
+
 /**
- * Catalog / export shape for a workforce agent pack.
+ * Catalog / export shape for a workforce agent pack (Agent Template).
  * Local MCP server UUIDs are never required — use dependsOn.mcpListings instead.
+ * Extended Profile fields are optional for back-compat with older packs.
  */
 export const AgentCatalogListingSchema = z
   .object({
@@ -29,6 +61,25 @@ export const AgentCatalogListingSchema = z
     /** Skill ids to bind after install (project skill ids / catalog install ids). */
     skillIds: z.array(z.string().min(1).max(120)).max(64).default([]),
     permissionNotes: z.string().max(2000).optional(),
+    /** Department for talent-library grouping. */
+    department: AgentDepartmentSchema.optional(),
+    /** One-line card subtitle. */
+    tagline: z.string().max(160).optional(),
+    responsibilities: z.array(z.string().min(1).max(240)).max(12).optional(),
+    boundaries: z.array(z.string().min(1).max(240)).max(8).optional(),
+    capabilityTags: z.array(z.string().min(1).max(64)).max(24).optional(),
+    taskTypes: z.array(z.string().min(1).max(80)).max(16).optional(),
+    modelTierHint: AgentModelTierHintSchema.optional(),
+    knowledgeContext: z.string().max(2_000).optional(),
+    permissionHints: z.array(AgentPermissionHintSchema).max(12).optional(),
+    inputContract: z.string().max(2_000).optional(),
+    outputContract: z.string().max(2_000).optional(),
+    handoffRules: z.string().max(2_000).optional(),
+    validationCriteria: z.string().max(2_000).optional(),
+    /** Suggested Loop node agentRole when placing an Instance — not a fixed workflow. */
+    suggestedLoopAgentRole: AgentSuggestedLoopRoleSchema.optional(),
+    /** When true, UI may collapse under Specialist Pool (opt-in roles). */
+    specialistPool: z.boolean().optional(),
   })
   .strict();
 
@@ -75,6 +126,37 @@ export const InstallAgentFromCatalogInputSchema = z
   .object({
     listingId: z.string().min(1).max(120),
     replace: z.boolean().optional(),
+    /**
+     * When true (default), install recommended Skills / MCP / Rules from the
+     * Template listing and bind MCP server ids onto the Instance.
+     */
+    installDependencies: z.boolean().optional(),
+  })
+  .strict();
+
+export const AgentDependencyInstallStatusSchema = z.enum([
+  "installed",
+  "already_installed",
+  "failed",
+  "missing_from_catalog",
+]);
+
+export const AgentDependencyInstallItemSchema = z
+  .object({
+    kind: z.enum(["skill", "mcp", "rules"]),
+    listingId: z.string().min(1).max(120),
+    status: AgentDependencyInstallStatusSchema,
+    message: z.string().max(1_024).optional(),
+    /** Bound MCP server id when kind is mcp and install succeeded / reused. */
+    serverId: z.string().min(1).max(120).optional(),
+  })
+  .strict();
+
+/** Result of installing an Agent Template plus its recommended capabilities. */
+export const InstallAgentFromCatalogResultSchema = z
+  .object({
+    definition: AgentDefinitionSchema,
+    dependencies: z.array(AgentDependencyInstallItemSchema).max(128),
   })
   .strict();
 
@@ -166,6 +248,10 @@ export const AGENT_CATALOG_DEFAULT_URL =
   "https://catalog.project-os.local/agents/catalog.json";
 
 export type AgentTrustTier = z.infer<typeof AgentTrustTierSchema>;
+export type AgentDepartment = z.infer<typeof AgentDepartmentSchema>;
+export type AgentModelTierHint = z.infer<typeof AgentModelTierHintSchema>;
+export type AgentPermissionHint = z.infer<typeof AgentPermissionHintSchema>;
+export type AgentSuggestedLoopRole = z.infer<typeof AgentSuggestedLoopRoleSchema>;
 export type AgentCatalogListing = z.infer<typeof AgentCatalogListingSchema>;
 export type AgentCatalogDocument = z.infer<typeof AgentCatalogDocumentSchema>;
 export type AgentCatalogReport = z.infer<typeof AgentCatalogReportSchema>;
@@ -174,6 +260,15 @@ export type AgentCatalogSourceKind = z.infer<typeof AgentCatalogSourceKindSchema
 export type AgentCatalogView = z.infer<typeof AgentCatalogViewSchema>;
 export type InstallAgentFromCatalogInput = z.infer<
   typeof InstallAgentFromCatalogInputSchema
+>;
+export type AgentDependencyInstallStatus = z.infer<
+  typeof AgentDependencyInstallStatusSchema
+>;
+export type AgentDependencyInstallItem = z.infer<
+  typeof AgentDependencyInstallItemSchema
+>;
+export type InstallAgentFromCatalogResult = z.infer<
+  typeof InstallAgentFromCatalogResultSchema
 >;
 export type UninstallAgentFromCatalogInput = z.infer<
   typeof UninstallAgentFromCatalogInputSchema
@@ -188,3 +283,12 @@ export type InstallAgentFromExportPackInput = z.infer<
 export type InstallRulesFromExportPackInput = z.infer<
   typeof InstallRulesFromExportPackInputSchema
 >;
+
+/** Stable department order for talent-library browsing. */
+export const AGENT_DEPARTMENT_ORDER: readonly AgentDepartment[] = [
+  "product_architecture",
+  "software_development",
+  "quality_infrastructure",
+  "ai_engineering",
+  "specialist_pool",
+] as const;

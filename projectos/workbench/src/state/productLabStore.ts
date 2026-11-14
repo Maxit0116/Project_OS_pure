@@ -166,9 +166,21 @@ async function refreshMarketplaceProposalsInBackground(
   void useProductLabStore.getState().searchCapabilitiesOnWeb()
 }
 
+async function chatSessionRecordExists(sessionId: string): Promise<boolean> {
+  const ctx = projectClient()
+  if (!ctx) return false
+  try {
+    const record = await ctx.client.getChatSession(ctx.projectId, sessionId)
+    return Boolean(record)
+  } catch {
+    return false
+  }
+}
+
 async function openLabChatSession(): Promise<string> {
   const wb = useWorkbenchStore.getState()
   wb.setRightPanelOpen(true)
+  wb.setRightPanelTab('chat')
   const locale = wb.locale
   const { getStoreMessage } = await import('../i18n/storeMessages')
   const title = getStoreMessage(locale, 'productLab.title')
@@ -182,11 +194,62 @@ async function openLabChatSession(): Promise<string> {
   if (!sessionId) {
     throw new Error('Failed to create Product Lab chat session')
   }
+  // Pin so empty Lab chats are not disposed when focus briefly leaves
+  // (tryDeleteDisposableEmptySession treats unpinned empty misc as disposable).
+  try {
+    await chat.setPinned(sessionId, true)
+  } catch {
+    // Pin is best-effort; ensureLabChatSession can recreate if GC wins a race.
+  }
   // Guarantee the new Lab session is active even if a concurrent persist raced.
   if (useChatSessionStore.getState().activeSessionId !== sessionId) {
     await useChatSessionStore.getState().switchSession(sessionId)
   }
+  // Keep Chat tab selected after createSession/switchSession side effects.
+  useWorkbenchStore.getState().setRightPanelTab('chat')
   return sessionId
+}
+
+/**
+ * Bind (or re-create) the dedicated Lab chat session and make it active.
+ * Survives orphaned chatSessionId pointers after empty-session GC.
+ */
+async function ensureLabChatSession(labSessionId: string): Promise<string> {
+  const session = useProductLabStore
+    .getState()
+    .document.sessions.find((entry) => entry.id === labSessionId)
+  if (!session || session.status === 'ended') {
+    throw new Error('Lab session is not active')
+  }
+
+  const existingId = session.chatSessionId
+  if (existingId && (await chatSessionRecordExists(existingId))) {
+    const chat = useChatSessionStore.getState()
+    if (chat.activeSessionId !== existingId) {
+      await chat.switchSession(existingId)
+    }
+    if (!chat.pinnedIds.includes(existingId)) {
+      try {
+        await chat.setPinned(existingId, true)
+      } catch {
+        // best-effort
+      }
+    }
+    const wb = useWorkbenchStore.getState()
+    wb.setRightPanelOpen(true)
+    wb.setRightPanelTab('chat')
+    return existingId
+  }
+
+  const chatSessionId = await openLabChatSession()
+  let document = patchLabSession(
+    useProductLabStore.getState().document,
+    labSessionId,
+    { chatSessionId },
+  )
+  document = await persist(document)
+  useProductLabStore.setState(withDerived(document))
+  return chatSessionId
 }
 
 async function inferLaunchProfileFromListing(
@@ -340,10 +403,22 @@ async function openLabTerminalAndRunStart(
 async function kickLabStartAgent(profile: LabLaunchProfile): Promise<void> {
   const wb = useWorkbenchStore.getState()
   wb.setRightPanelOpen(true)
+  wb.setRightPanelTab('chat')
   try {
-    await wb.setChatMode('change', { isolate: true })
-    // Fire-and-forget: Lab session continues while Agent refines / runs.
-    void wb.sendPrompt(buildLabStartPrompt(profile))
+    // Stay on the dedicated Lab chat. isolate:true creates a Change session,
+    // steals activeSessionId (hides ProductLabCard), and can dispose the still-
+    // empty Lab chat via tryDeleteDisposableEmptySession.
+    const labSession = useProductLabStore.getState().activeSession()
+    if (labSession) {
+      await ensureLabChatSession(labSession.id)
+    }
+    const live = useWorkbenchStore.getState()
+    if (live.chatMode !== 'change') {
+      await live.setChatMode('change', { isolate: false })
+    }
+    useWorkbenchStore.getState().setRightPanelTab('chat')
+    // Fire-and-forget: Lab Card stays mounted while Agent starts the project.
+    void useWorkbenchStore.getState().sendPrompt(buildLabStartPrompt(profile))
   } catch {
     // Terminal start already ran; agent assist is best-effort.
   }
@@ -396,7 +471,7 @@ interface ProductLabStore {
   toggleOrStartLab: () => Promise<void>
   startLab: () => Promise<void>
   endLab: () => Promise<void>
-  focusLabSurfaces: () => void
+  focusLabSurfaces: () => Promise<void>
 
   beginReview: () => Promise<void>
   toggleDebugListItem: (findingId: string) => void
@@ -484,7 +559,9 @@ export const useProductLabStore = create<ProductLabStore>((set, get) => ({
       get().clear()
       return
     }
-    set({ busy: true, error: null })
+    // Do not set `busy` here — that flag gates startLab / endLab. Blocking the
+    // flask on workspace load made clicks silently no-op after open.
+    set({ error: null })
     try {
       const [document, profile] = await Promise.all([
         ctx.client.getLabState(ctx.projectId),
@@ -502,7 +579,7 @@ export const useProductLabStore = create<ProductLabStore>((set, get) => ({
           next = await persist(next)
         }
       }
-      set({ ...withDerived(next), busy: false, launchProfile: profile })
+      set({ ...withDerived(next), launchProfile: profile })
       const active = getActiveLabSession(get().document)
       if (active && active.status !== 'ended') {
         await healCapabilityBootstrapIfNeeded(active.id, profile)
@@ -510,20 +587,26 @@ export const useProductLabStore = create<ProductLabStore>((set, get) => ({
     } catch (error) {
       set({
         ...withDerived(createEmptyLabDocument()),
-        busy: false,
         launchProfile: null,
         error: error instanceof Error ? error.message : String(error),
       })
     }
   },
 
-  focusLabSurfaces: () => {
+  focusLabSurfaces: async () => {
     const session = get().activeSession()
     const profile = get().launchProfile
     const wb = useWorkbenchStore.getState()
     wb.setRightPanelOpen(true)
-    if (session?.chatSessionId) {
-      void useChatSessionStore.getState().switchSession(session.chatSessionId)
+    wb.setRightPanelTab('chat')
+    if (session && session.status !== 'ended') {
+      try {
+        await ensureLabChatSession(session.id)
+      } catch (error) {
+        set({
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
     }
     const linkBrowser =
       Boolean(profile?.hasWebPreview) && Boolean(session?.previewUrl)
@@ -543,28 +626,25 @@ export const useProductLabStore = create<ProductLabStore>((set, get) => ({
     const session = get().activeSession()
     if (get().busy) return
     if (session && session.status !== 'ended') {
-      // Heal legacy sessions that never got a dedicated chat session.
-      if (!session.chatSessionId) {
-        try {
-          const chatSessionId = await openLabChatSession()
-          let document = patchLabSession(get().document, session.id, {
-            chatSessionId,
-          })
-          document = await persist(document)
-          set(withDerived(document))
-        } catch (error) {
-          set({
-            error: error instanceof Error ? error.message : String(error),
-          })
-        }
+      try {
+        // Recreate chat when chatSessionId is missing OR points at a GC'd session.
+        await ensureLabChatSession(session.id)
+      } catch (error) {
+        set({
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return
       }
       const ctx = projectClient()
       if (ctx) {
         const profile = get().launchProfile ?? (await resolveLaunchProfile(ctx))
         set({ launchProfile: profile })
-        await healCapabilityBootstrapIfNeeded(session.id, profile)
+        const healed = await healCapabilityBootstrapIfNeeded(session.id, profile)
+        if (!healed && session.cardPhase === 'bootstrapping') {
+          get().openLabCapabilityPrep()
+        }
       }
-      get().focusLabSurfaces()
+      await get().focusLabSurfaces()
       set({ findingsOpen: true })
       return
     }
@@ -619,7 +699,7 @@ export const useProductLabStore = create<ProductLabStore>((set, get) => ({
         chatSessionId,
         debugListFindingIds: null,
       })
-      document = await persist(document)
+      // Commit in-memory first so Lab Card can mount before slow upsertLabState IPC.
       set({
         ...withDerived(document),
         busy: false,
@@ -628,11 +708,11 @@ export const useProductLabStore = create<ProductLabStore>((set, get) => ({
         launchProfile: profile,
         draftDebugListIds: [],
       })
+      document = await persist(document)
+      set({ ...withDerived(document), launchProfile: profile })
 
       // Stay on the Lab chat session (Marketplace overlay is separate).
-      if (useChatSessionStore.getState().activeSessionId !== chatSessionId) {
-        await useChatSessionStore.getState().switchSession(chatSessionId)
-      }
+      await ensureLabChatSession(started.session.id)
 
       const installedHits = matchInstalledCapabilities(profile.capabilityNeeds, {
         mcpServers: wb.settings?.mcpServers ?? [],
@@ -941,8 +1021,10 @@ export const useProductLabStore = create<ProductLabStore>((set, get) => ({
     }
     document = await persist(document)
     set({ ...withDerived(document), launchProfile: profile })
-    if (session.chatSessionId) {
-      await useChatSessionStore.getState().switchSession(session.chatSessionId)
+    try {
+      await ensureLabChatSession(session.id)
+    } catch {
+      // Experience can continue; Card may remount on next flask click.
     }
   },
 
@@ -1071,9 +1153,14 @@ export const useProductLabStore = create<ProductLabStore>((set, get) => ({
 
     try {
       wb.setRightPanelOpen(true)
-      get().focusLabSurfaces()
-      await wb.setChatMode('ask', { isolate: true })
-      await wb.sendPrompt(prompt)
+      wb.setRightPanelTab('chat')
+      await get().focusLabSurfaces()
+      // Keep Lab chat + Lab Card; isolating would orphan/dispose the Lab session.
+      const live = useWorkbenchStore.getState()
+      if (live.chatMode !== 'ask') {
+        await live.setChatMode('ask', { isolate: false })
+      }
+      await useWorkbenchStore.getState().sendPrompt(prompt)
 
       const messages = useWorkbenchStore.getState().messages
       const lastAssistant = [...messages]

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   decodePaletteDragPayload,
   encodePaletteDragPayload,
+  isDiamondLoopNode,
+  isDiamondLoopVisualKey,
   visualForIntentNode,
   visualForPaletteItem,
   visualKeyFromArchitecture,
@@ -73,6 +75,35 @@ describe('loopNodeVisuals', () => {
     expect(visualKeyFromArchitecture({ agentRole: 'planner' })).toBe('agent.planner')
     expect(visualKeyFromArchitecture({ logicKind: 'loop' })).toBe('logic.loop')
     expect(visualKeyFromArchitecture({ humanMode: 'approval' })).toBe('human.approval')
+  })
+
+  it('marks condition and human approval as diamond nodes', () => {
+    expect(isDiamondLoopVisualKey('logic.condition')).toBe(true)
+    expect(isDiamondLoopVisualKey('human.approval')).toBe(true)
+    expect(isDiamondLoopVisualKey('human.review')).toBe(false)
+    expect(isDiamondLoopVisualKey('logic.merge')).toBe(false)
+    expect(
+      isDiamondLoopNode({
+        id: 'c1',
+        title: 'Branch',
+        prompt: 'pass?',
+        position: { x: 0, y: 0 },
+        type: 'logic',
+        logicKind: 'condition',
+        role: 'decide',
+      }),
+    ).toBe(true)
+    expect(
+      isDiamondLoopNode({
+        id: 'h1',
+        title: 'Approve',
+        prompt: 'OK?',
+        position: { x: 0, y: 0 },
+        type: 'human',
+        humanMode: 'approval',
+        role: 'decide',
+      }),
+    ).toBe(true)
   })
 
   it('maps intent nodes via architecture defaults', () => {

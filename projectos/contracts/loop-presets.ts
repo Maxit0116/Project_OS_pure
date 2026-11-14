@@ -21,6 +21,7 @@ export const LoopPaletteCategorySchema = z.enum([
   "logic",
   "human",
   "config",
+  "workgroup",
 ]);
 
 export const LoopPaletteItemSchema = z
@@ -123,6 +124,19 @@ function seedNode(
 }
 
 export const LOOP_PALETTE_ITEMS: LoopPaletteItem[] = [
+  {
+    id: "workgroup.create",
+    category: "workgroup",
+    title: "Work Group",
+    description: "Dashed squad frame for specialist agents",
+    seed: {
+      // Placeholder seed — store creates a LoopWorkGroup, not a duty node.
+      title: "Work Group",
+      prompt: "Agent work group container",
+      type: "agent",
+      agentRole: "planner",
+    },
+  },
   {
     id: "agent.planner",
     category: "agent",

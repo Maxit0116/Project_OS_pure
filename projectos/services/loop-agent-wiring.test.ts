@@ -184,8 +184,112 @@ describe("loop-agent-wiring", () => {
       existing,
       newId: () => `gen_${n++}`,
     });
-    expect(expanded.nodes).toHaveLength(4);
+    expect(expanded.nodes).toHaveLength(3);
+    expect(expanded.nodes.map((node) => node.satelliteKind).sort()).toEqual([
+      "mcp",
+      "model",
+      "skill",
+    ]);
     expect(expanded.edges.every((edge) => edge.kind === "provides")).toBe(true);
+    expect(expanded.edges.map((edge) => edge.configPort).sort()).toEqual([
+      "mcp",
+      "model",
+      "skill",
+    ]);
+  });
+
+  it("creates dedicated satellites per agent even when model/MCP/skill refs match", () => {
+    let n = 0;
+    const newId = () => `gen_${n++}`;
+    const agentA = IntentGraphSchema.parse({
+      revision: 0,
+      graphPrompt: "",
+      nodes: [
+        {
+          id: "agent_a",
+          title: "Planner",
+          prompt: "Plan",
+          type: "agent",
+          position: { x: 0, y: 0 },
+        },
+      ],
+      edges: [],
+    });
+    const forA = expandWiringFromDefinition({
+      agentNodeId: "agent_a",
+      agentPosition: { x: 0, y: 0 },
+      base: {
+        modelProfileId: "model_shared",
+        skillIds: ["skill_shared"],
+        mcpServerIds: ["mcp_shared"],
+      },
+      existing: agentA,
+      newId,
+    });
+    const afterA = IntentGraphSchema.parse({
+      ...agentA,
+      nodes: [...agentA.nodes, ...forA.nodes],
+      edges: [...agentA.edges, ...forA.edges],
+    });
+    const forB = expandWiringFromDefinition({
+      agentNodeId: "agent_b",
+      agentPosition: { x: 400, y: 0 },
+      base: {
+        modelProfileId: "model_shared",
+        skillIds: ["skill_shared"],
+        mcpServerIds: ["mcp_shared"],
+      },
+      existing: afterA,
+      newId,
+    });
+
+    expect(forA.nodes).toHaveLength(3);
+    expect(forB.nodes).toHaveLength(3);
+    const aIds = new Set(forA.nodes.map((node) => node.id));
+    expect(forB.nodes.every((node) => !aIds.has(node.id))).toBe(true);
+    expect(forA.edges.every((edge) => edge.target === "agent_a")).toBe(true);
+    expect(forB.edges.every((edge) => edge.target === "agent_b")).toBe(true);
+
+    const merged = IntentGraphSchema.parse({
+      ...afterA,
+      nodes: [
+        ...afterA.nodes,
+        {
+          id: "agent_b",
+          title: "Coder",
+          prompt: "Code",
+          type: "agent",
+          position: { x: 400, y: 0 },
+        },
+        ...forB.nodes,
+      ],
+      edges: [...afterA.edges, ...forB.edges],
+    });
+    expect(validateAgentWiringGraph(merged)).toEqual([]);
+  });
+
+  it("rejects a satellite that provides to more than one agent", () => {
+    const draft = draftWithWiring();
+    draft.nodes.push({
+      id: "agent_2",
+      title: "Reviewer",
+      prompt: "Review",
+      type: "agent",
+      position: { x: 500, y: 100 },
+    });
+    draft.edges.push({
+      id: "p_shared",
+      source: "sat_model",
+      target: "agent_2",
+      kind: "provides",
+      configPort: "model",
+    });
+    const issues = validateAgentWiringGraph(draft);
+    expect(
+      issues.some((issue) =>
+        issue.message.includes("may provide to at most one agent"),
+      ),
+    ).toBe(true);
   });
 
   it("collects orphan satellites when an agent is removed", () => {

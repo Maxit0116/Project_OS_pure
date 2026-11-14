@@ -12,7 +12,12 @@ import {
   type LoopLogicKind,
   type LoopNodeType,
 } from "../contracts/loop-node-architecture.js";
-import type { IntentGraph, IntentGraphNode } from "../contracts/loop-graph.js";
+import type {
+  IntentGraph,
+  IntentGraphEdge,
+  IntentGraphNode,
+} from "../contracts/loop-graph.js";
+import { IntentEdgeKindSchema } from "../contracts/loop-graph.js";
 import { getConnectorVendor } from "./loop-connectors/catalog.js";
 
 export const LoopNodeScalarParamSchema = z.union([
@@ -356,6 +361,97 @@ export function applyIntentNodePatch(
     draft: {
       ...draft,
       nodes,
+      revision: draft.revision + 1,
+    },
+  };
+}
+
+/** Edge fields the focused planning agent may rewrite (never topology). */
+export type IntentGraphEdgePatch = Partial<
+  Pick<IntentGraphEdge, "prompt" | "kind" | "branchKey">
+>;
+
+/**
+ * Apply a typed edge patch without changing endpoints, ports, or id.
+ * Used by focused Edit planning for transfer / handoff descriptions.
+ */
+export function applyIntentEdgePatch(
+  draft: IntentGraph,
+  edgeId: string,
+  patch: IntentGraphEdgePatch,
+):
+  | { ok: true; draft: IntentGraph }
+  | { ok: false; issues: NodeConfigValidationIssue[] } {
+  const index = draft.edges.findIndex((edge) => edge.id === edgeId);
+  if (index < 0) {
+    return {
+      ok: false,
+      issues: [
+        {
+          path: "id",
+          message: `Unknown edge id ${edgeId}`,
+          code: "unknown_field",
+        },
+      ],
+    };
+  }
+  if (patch.kind !== undefined) {
+    const kindParsed = IntentEdgeKindSchema.safeParse(patch.kind);
+    if (!kindParsed.success) {
+      return {
+        ok: false,
+        issues: [
+          {
+            path: "kind",
+            message: "Invalid edge kind",
+            code: "type",
+          },
+        ],
+      };
+    }
+  }
+  if (patch.prompt !== undefined && patch.prompt.length > 2000) {
+    return {
+      ok: false,
+      issues: [
+        {
+          path: "prompt",
+          message: "Edge prompt exceeds 2000 characters",
+          code: "type",
+        },
+      ],
+    };
+  }
+  if (patch.branchKey !== undefined && patch.branchKey.length > 80) {
+    return {
+      ok: false,
+      issues: [
+        {
+          path: "branchKey",
+          message: "branchKey exceeds 80 characters",
+          code: "type",
+        },
+      ],
+    };
+  }
+
+  const current = draft.edges[index]!;
+  const merged: IntentGraphEdge = {
+    ...current,
+    ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
+    ...(patch.kind !== undefined ? { kind: patch.kind } : {}),
+    ...(patch.branchKey !== undefined ? { branchKey: patch.branchKey } : {}),
+    id: current.id,
+    source: current.source,
+    target: current.target,
+  };
+  const edges = draft.edges.slice();
+  edges[index] = merged;
+  return {
+    ok: true,
+    draft: {
+      ...draft,
+      edges,
       revision: draft.revision + 1,
     },
   };

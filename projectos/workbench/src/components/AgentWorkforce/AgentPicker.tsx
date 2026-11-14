@@ -1,4 +1,4 @@
-import { Bot, Plus, Share2, Sparkles } from 'lucide-react'
+import { Bot, Library, Plus, Share2, Sparkles, Users } from 'lucide-react'
 import type { AgentDefinition } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import styles from './AgentPicker.module.css'
@@ -12,10 +12,19 @@ export interface AgentPickerProps {
   onSelectGeneral: () => void
   onSelectAgent: (definitionId: string) => void
   onCreateAgent?: () => void
+  /** Open Marketplace Agents talent library (Templates). */
+  onBrowseTalentLibrary?: () => void
   /** Capability Marketplace: export agent as shareable pack JSON. */
   onExportAgent?: (definitionId: string) => void
   showCreate?: boolean
   compact?: boolean
+  /**
+   * Loop Graph squad compose: multi-select specialist ids, then form a work group.
+   * When set with onComposeWorkGroup, checkboxes appear on workforce rows.
+   */
+  squadSelectedIds?: string[]
+  onToggleSquadMember?: (definitionId: string) => void
+  onComposeWorkGroup?: () => void
 }
 
 export default function AgentPicker({
@@ -26,13 +35,18 @@ export default function AgentPicker({
   onSelectGeneral,
   onSelectAgent,
   onCreateAgent,
+  onBrowseTalentLibrary,
   onExportAgent,
   showCreate = true,
   compact = false,
+  squadSelectedIds,
+  onToggleSquadMember,
+  onComposeWorkGroup,
 }: AgentPickerProps) {
   const { ts } = useI18n()
   const generalActive =
     generalSelected ?? (selectedDefinitionId === null || selectedDefinitionId === undefined)
+  const squadMode = Boolean(onToggleSquadMember && onComposeWorkGroup)
 
   return (
     <div
@@ -64,11 +78,22 @@ export default function AgentPicker({
         agents.map((agent) => {
           const active = agent.definitionId === selectedDefinitionId
           const role = agent.config.roleLabel ?? agent.config.role
+          const squadChecked = squadSelectedIds?.includes(agent.definitionId) ?? false
           return (
             <div
               key={agent.definitionId}
               className={`${styles.itemRow} ${active ? styles.itemActive : ''}`}
             >
+              {squadMode ? (
+                <label className={styles.squadCheck}>
+                  <input
+                    type="checkbox"
+                    checked={squadChecked}
+                    onChange={() => onToggleSquadMember?.(agent.definitionId)}
+                    aria-label={`${ts('chat.loopGraph.workGroup.composeFromTalent')}: ${agent.config.displayName}`}
+                  />
+                </label>
+              ) : null}
               <button
                 type="button"
                 role="option"
@@ -101,14 +126,41 @@ export default function AgentPicker({
         })
       )}
 
+      {squadMode ? (
+        <button
+          type="button"
+          className={styles.createItem}
+          disabled={(squadSelectedIds?.length ?? 0) < 1}
+          onClick={() => onComposeWorkGroup?.()}
+        >
+          <Users size={14} aria-hidden />
+          {ts('chat.loopGraph.workGroup.composeFromTalent')}
+          {(squadSelectedIds?.length ?? 0) > 0
+            ? ` (${squadSelectedIds!.length})`
+            : ''}
+        </button>
+      ) : null}
+
+      {onBrowseTalentLibrary || (showCreate && onCreateAgent) ? (
+        <div className={styles.separator} role="separator" />
+      ) : null}
+
+      {onBrowseTalentLibrary ? (
+        <button
+          type="button"
+          className={styles.createItem}
+          onClick={onBrowseTalentLibrary}
+        >
+          <Library size={14} aria-hidden />
+          {ts('workforce.browseTalentLibrary')}
+        </button>
+      ) : null}
+
       {showCreate && onCreateAgent ? (
-        <>
-          <div className={styles.separator} role="separator" />
-          <button type="button" className={styles.createItem} onClick={onCreateAgent}>
-            <Plus size={14} aria-hidden />
-            {ts('workforce.createAgent')}
-          </button>
-        </>
+        <button type="button" className={styles.createItem} onClick={onCreateAgent}>
+          <Plus size={14} aria-hidden />
+          {ts('workforce.createAgent')}
+        </button>
       ) : null}
     </div>
   )

@@ -18,7 +18,7 @@ const baseNode = (id: string, goal = id) => ({
 })
 
 describe('loopReviewLayout', () => {
-  it('lays out a linear depends chain left-to-right', () => {
+  it('lays out a linear depends chain top-to-bottom', () => {
     const layout = layoutLoopReviewPath({
       nodes: [baseNode('a'), baseNode('b'), baseNode('c')],
       edges: [
@@ -30,10 +30,11 @@ describe('loopReviewLayout', () => {
     const a = layout.nodes.find((n) => n.id === 'a')!
     const b = layout.nodes.find((n) => n.id === 'b')!
     const c = layout.nodes.find((n) => n.id === 'c')!
-    expect(a.x).toBeLessThan(b.x)
-    expect(b.x).toBeLessThan(c.x)
+    expect(a.y).toBeLessThan(b.y)
+    expect(b.y).toBeLessThan(c.y)
     expect(layout.edges).toHaveLength(2)
     expect(layout.edges.every((e) => e.d.startsWith('M '))).toBe(true)
+    expect(layout.edges.every((e) => !e.d.includes(' C '))).toBe(true)
   })
 
   it('routes feedback distinctly and keeps topo order on forward edges', () => {

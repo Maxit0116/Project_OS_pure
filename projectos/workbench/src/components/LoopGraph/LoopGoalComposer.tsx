@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { Bot, ChevronUp, MessageSquare, Pencil, Redo2, Undo2 } from 'lucide-react'
+import { Bot, Check, ChevronUp, MessageSquare, Pencil, Redo2, Settings2, Undo2, X } from 'lucide-react'
 import type { LoopComposerMode, LoopOpenQuestion } from '@contracts/index'
 import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea'
 import { useI18n } from '../../i18n'
@@ -46,6 +46,9 @@ export default function LoopGoalComposer() {
   const redoDraft = useLoopGraphStore((s) => s.redoDraft)
   const beginAuthorNodeFromPalette = useLoopGraphStore((s) => s.beginAuthorNodeFromPalette)
   const expandAgentWiring = useLoopGraphStore((s) => s.expandAgentWiring)
+  const authoringFocus = useLoopGraphStore((s) => s.authoringFocus)
+  const clearAuthoringFocus = useLoopGraphStore((s) => s.clearAuthoringFocus)
+  const composerFocusNonce = useLoopGraphStore((s) => s.composerFocusNonce)
   const submitCreateAgentPrompt = useWorkbenchStore((s) => s.submitCreateAgentPrompt)
   const pendingWorkforceDraft = useWorkbenchStore((s) => s.pendingWorkforceDraft)
   const updatePendingWorkforceDraft = useWorkbenchStore((s) => s.updatePendingWorkforceDraft)
@@ -56,8 +59,10 @@ export default function LoopGoalComposer() {
 
   const [clarifyAnswers, setClarifyAnswers] = useState<Record<string, string>>({})
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [draftBusy, setDraftBusy] = useState(false)
   const modeMenuRef = useRef<HTMLDivElement>(null)
+  const settingsMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useAutoResizeTextarea(composerDraft, 200)
 
   const mode: LoopComposerMode = loopDocument?.composerMode ?? 'ask'
@@ -87,6 +92,29 @@ export default function LoopGoalComposer() {
     return recentSteps.find((step) => step.id === trace.currentStepId) ?? recentSteps.at(-1)
   }, [recentSteps, trace?.currentStepId])
 
+  const focusLabel = useMemo(() => {
+    if (!authoringFocus || !loopDocument) return null
+    if (authoringFocus.type === 'node') {
+      const node = loopDocument.draft.nodes.find((item) => item.id === authoringFocus.id)
+      return node?.title?.trim() || ts('chat.loopGraph.untitledNode')
+    }
+    const edge = loopDocument.draft.edges.find((item) => item.id === authoringFocus.id)
+    if (!edge) return ts('chat.loopGraph.focusEdgeFallback')
+    const source = loopDocument.draft.nodes.find((item) => item.id === edge.source)
+    const target = loopDocument.draft.nodes.find((item) => item.id === edge.target)
+    const sourceTitle = source?.title?.trim() || edge.source
+    const targetTitle = target?.title?.trim() || edge.target
+    return `${sourceTitle} → ${targetTitle}`
+  }, [authoringFocus, loopDocument, ts])
+
+  useEffect(() => {
+    if (!composerFocusNonce) return
+    const frame = window.requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [composerFocusNonce, textareaRef])
+
   const voiceDisabled =
     !loopDocument || authoringBusy || draftBusy || (mode === 'ask' && needsClarification)
 
@@ -115,15 +143,19 @@ export default function LoopGoalComposer() {
   })
 
   useEffect(() => {
-    if (!modeMenuOpen) return
+    if (!modeMenuOpen && !settingsOpen) return
     const onPointerDown = (event: MouseEvent) => {
-      if (!modeMenuRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node
+      if (modeMenuOpen && !modeMenuRef.current?.contains(target)) {
         setModeMenuOpen(false)
+      }
+      if (settingsOpen && !settingsMenuRef.current?.contains(target)) {
+        setSettingsOpen(false)
       }
     }
     window.document.addEventListener('mousedown', onPointerDown)
     return () => window.document.removeEventListener('mousedown', onPointerDown)
-  }, [modeMenuOpen])
+  }, [modeMenuOpen, settingsOpen])
 
   if (!loopDocument) return null
 
@@ -218,9 +250,164 @@ export default function LoopGoalComposer() {
   const contextOpen = composerSheet === 'context'
   const clarifyOpen = composerSheet === 'clarify' && needsClarification
 
+  const openSheetTitle = flowOpen
+    ? ts('chat.loopGraph.agentFlowSheet')
+    : contextOpen
+      ? ts('chat.loopGraph.goalContextSheet')
+      : clarifyOpen
+        ? ts('chat.loopGraph.clarifySheet')
+        : null
+
   return (
-    <div className={styles.composer} data-loop-goal-composer="">
+    <div
+      className={`${styles.composer} ${
+        flowOpen || contextOpen || clarifyOpen ? styles.composerSheetOpen : ''
+      }`}
+      data-loop-goal-composer=""
+    >
       <div className={styles.bookmarkStack}>
+        {flowOpen ? (
+          <div
+            className={styles.sheetCard}
+            role="tabpanel"
+            data-loop-sheet="flow"
+            data-loop-sheet-card=""
+          >
+            <div className={styles.sheetCardHeader}>
+              <span className={styles.sheetCardTitle}>{openSheetTitle}</span>
+            </div>
+            <div className={styles.sheetCardBody}>
+              {authoringBusy || currentStep ? (
+                <div className={styles.flowCurrent}>
+                  <AgentActivityIndicator
+                    state={
+                      authoringBusy || trace?.status === 'running' ? 'working' : 'composing'
+                    }
+                    label={
+                      authoringBusy
+                        ? ts('chat.loopGraph.authoringWorking')
+                        : (currentStep?.label ?? ts('chat.loopGraph.authoringIdle'))
+                    }
+                  />
+                </div>
+              ) : (
+                <p className={styles.contextEmpty}>{ts('chat.loopGraph.authoringIdle')}</p>
+              )}
+              {recentSteps.length > 0 ? (
+                <ul className={styles.flowSteps}>
+                  {recentSteps.map((step) => (
+                    <li
+                      key={step.id}
+                      className={`${styles.flowStep} ${
+                        step.id === currentStep?.id ? styles.flowStepCurrent : ''
+                      }`}
+                    >
+                      {step.label}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {contextOpen ? (
+          <div
+            className={styles.sheetCard}
+            role="tabpanel"
+            data-loop-sheet="context"
+            data-loop-sheet-card=""
+          >
+            <div className={styles.sheetCardHeader}>
+              <span className={styles.sheetCardTitle}>{openSheetTitle}</span>
+            </div>
+            <div className={styles.sheetCardBody}>
+              {!context ? (
+                <p className={styles.contextEmpty}>{ts('chat.loopGraph.goalContextEmpty')}</p>
+              ) : (
+                <div className={styles.contextBlock}>
+                  <h3 className={styles.contextTitle}>{context.goal}</h3>
+                  <div className={styles.contextMeta}>
+                    {ts('chat.loopGraph.goalContextStatus', {
+                      status: ts(`chat.loopGraph.goalContextStatusValue.${context.status}`),
+                      revision: String(context.revision),
+                    })}
+                  </div>
+                  {context.constraints.length > 0 ? (
+                    <p className={styles.contextSection}>
+                      <strong>{ts('chat.loopGraph.goalConstraints')}</strong>:{' '}
+                      {context.constraints.join('; ')}
+                    </p>
+                  ) : null}
+                  {context.doneWhen.length > 0 ? (
+                    <p className={styles.contextSection}>
+                      <strong>{ts('chat.loopGraph.goalDoneWhen')}</strong>:{' '}
+                      {context.doneWhen.join('; ')}
+                    </p>
+                  ) : null}
+                  {context.outOfScope.length > 0 ? (
+                    <p className={styles.contextSection}>
+                      <strong>{ts('chat.loopGraph.goalOutOfScope')}</strong>:{' '}
+                      {context.outOfScope.join('; ')}
+                    </p>
+                  ) : null}
+                  {canConfirm ? (
+                    <div className={styles.offerActions}>
+                      <button
+                        type="button"
+                        className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                        disabled={authoringBusy}
+                        onClick={() => void confirmGoalContext()}
+                      >
+                        {ts('chat.loopGraph.confirmGoalContext')}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {clarifyOpen ? (
+          <div
+            className={`${styles.sheetCard} ${styles.clarifySheetCard}`}
+            role="tabpanel"
+            data-loop-sheet="clarify"
+            data-loop-sheet-card=""
+            data-loop-goal-clarify=""
+          >
+            <div className={styles.sheetCardHeader}>
+              <span className={styles.sheetCardTitle}>{openSheetTitle}</span>
+            </div>
+            <div className={`${styles.sheetCardBody} ${styles.clarifySheetBody}`}>
+              <p className={styles.clarifyHint}>{ts('chat.loopGraph.clarifyHint')}</p>
+              {openQuestions.filter((q) => !q.answer?.trim()).map(renderQuestion)}
+              <div className={styles.clarifyActions}>
+                <button
+                  type="button"
+                  className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                  disabled={authoringBusy}
+                  onClick={submitClarifications}
+                >
+                  {ts('chat.loopGraph.submitClarifications')}
+                </button>
+                <button
+                  type="button"
+                  className={styles.actionButton}
+                  disabled={authoringBusy}
+                  onClick={() => {
+                    setClarifyAnswers({})
+                    void cancelGoalClarification()
+                  }}
+                >
+                  {ts('chat.loopGraph.cancelClarifications')}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div
           className={styles.bookmarkTabs}
           role="tablist"
@@ -274,121 +461,30 @@ export default function LoopGoalComposer() {
               {ts('chat.loopGraph.clarifySheet')}
             </button>
           ) : null}
-        </div>
-
-        {flowOpen ? (
-          <div className={styles.sheetPanel} role="tabpanel" data-loop-sheet="flow">
-            {authoringBusy || currentStep ? (
-              <div className={styles.flowCurrent}>
-                <AgentActivityIndicator
-                  state={authoringBusy || trace?.status === 'running' ? 'working' : 'composing'}
-                  label={
-                    authoringBusy
-                      ? ts('chat.loopGraph.authoringWorking')
-                      : (currentStep?.label ?? ts('chat.loopGraph.authoringIdle'))
-                  }
-                />
-              </div>
-            ) : (
-              <p className={styles.contextEmpty}>{ts('chat.loopGraph.authoringIdle')}</p>
-            )}
-            {recentSteps.length > 0 ? (
-              <ul className={styles.flowSteps}>
-                {recentSteps.map((step) => (
-                  <li
-                    key={step.id}
-                    className={`${styles.flowStep} ${
-                      step.id === currentStep?.id ? styles.flowStepCurrent : ''
-                    }`}
-                  >
-                    {step.label}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : null}
-
-        {contextOpen ? (
-          <div className={styles.sheetPanel} role="tabpanel" data-loop-sheet="context">
-            {!context ? (
-              <p className={styles.contextEmpty}>{ts('chat.loopGraph.goalContextEmpty')}</p>
-            ) : (
-              <div className={styles.contextBlock}>
-                <h3 className={styles.contextTitle}>{context.goal}</h3>
-                <div className={styles.contextMeta}>
-                  {ts('chat.loopGraph.goalContextStatus', {
-                    status: ts(`chat.loopGraph.goalContextStatusValue.${context.status}`),
-                    revision: String(context.revision),
-                  })}
-                </div>
-                {context.constraints.length > 0 ? (
-                  <p className={styles.contextSection}>
-                    <strong>{ts('chat.loopGraph.goalConstraints')}</strong>:{' '}
-                    {context.constraints.join('; ')}
-                  </p>
-                ) : null}
-                {context.doneWhen.length > 0 ? (
-                  <p className={styles.contextSection}>
-                    <strong>{ts('chat.loopGraph.goalDoneWhen')}</strong>:{' '}
-                    {context.doneWhen.join('; ')}
-                  </p>
-                ) : null}
-                {context.outOfScope.length > 0 ? (
-                  <p className={styles.contextSection}>
-                    <strong>{ts('chat.loopGraph.goalOutOfScope')}</strong>:{' '}
-                    {context.outOfScope.join('; ')}
-                  </p>
-                ) : null}
-                {canConfirm ? (
-                  <div className={styles.offerActions}>
-                    <button
-                      type="button"
-                      className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
-                      disabled={authoringBusy}
-                      onClick={() => void confirmGoalContext()}
-                    >
-                      {ts('chat.loopGraph.confirmGoalContext')}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        {clarifyOpen ? (
-          <div
-            className={`${styles.sheetPanel} ${styles.clarifySheetPanel}`}
-            role="tabpanel"
-            data-loop-sheet="clarify"
-            data-loop-goal-clarify=""
-          >
-            <p className={styles.clarifyHint}>{ts('chat.loopGraph.clarifyHint')}</p>
-            {openQuestions.filter((q) => !q.answer?.trim()).map(renderQuestion)}
-            <div className={styles.clarifyActions}>
+          {authoringFocus && focusLabel ? (
+            <div
+              className={styles.focusChip}
+              data-loop-authoring-focus={authoringFocus.type}
+              data-testid="loop-authoring-focus-chip"
+            >
+              <span className={styles.focusChipLabel}>
+                {authoringFocus.type === 'node'
+                  ? ts('chat.loopGraph.focusEditingNode', { title: focusLabel })
+                  : ts('chat.loopGraph.focusEditingEdge', { title: focusLabel })}
+              </span>
               <button
                 type="button"
-                className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                className={styles.focusChipClear}
+                aria-label={ts('chat.loopGraph.clearAuthoringFocus')}
+                title={ts('chat.loopGraph.clearAuthoringFocus')}
                 disabled={authoringBusy}
-                onClick={submitClarifications}
+                onClick={() => clearAuthoringFocus()}
               >
-                {ts('chat.loopGraph.submitClarifications')}
-              </button>
-              <button
-                type="button"
-                className={styles.actionButton}
-                disabled={authoringBusy}
-                onClick={() => {
-                  setClarifyAnswers({})
-                  void cancelGoalClarification()
-                }}
-              >
-                {ts('chat.loopGraph.cancelClarifications')}
+                <X size={12} aria-hidden />
               </button>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
 
       {offer ? (
@@ -479,10 +575,17 @@ export default function LoopGoalComposer() {
                     },
                   )
                   if (nodeId) {
+                    const workspaceSettings = useWorkbenchStore.getState().settings
+                    const defaultModelId =
+                      workspaceSettings?.execution?.defaultModelProfileId ??
+                      workspaceSettings?.modelProfiles?.find((profile) => profile.isDefault)
+                        ?.id ??
+                      workspaceSettings?.modelProfiles?.[0]?.id
                     expandAgentWiring(
                       nodeId,
                       {
-                        modelProfileId: created.config.modelProfileId ?? undefined,
+                        modelProfileId:
+                          created.config.modelProfileId ?? defaultModelId ?? undefined,
                         skillIds: created.config.skillIds ?? [],
                         mcpServerIds: created.config.mcpServerIds ?? [],
                       },
@@ -516,7 +619,11 @@ export default function LoopGoalComposer() {
                   ? ts('workforce.createAgentPlaceholder')
                   : mode === 'ask'
                     ? ts('chat.loopGraph.askPlaceholder')
-                    : ts('chat.loopGraph.editPlaceholder')
+                    : authoringFocus?.type === 'node'
+                      ? ts('chat.loopGraph.editNodePlaceholder')
+                      : authoringFocus?.type === 'edge'
+                        ? ts('chat.loopGraph.editEdgePlaceholder')
+                        : ts('chat.loopGraph.editPlaceholder')
               }
               disabled={authoringBusy || draftBusy || (mode === 'ask' && needsClarification)}
               onChange={(event) => {
@@ -531,27 +638,6 @@ export default function LoopGoalComposer() {
           </div>
           <div className={styles.footer}>
             <div className={styles.leftCluster}>
-              <Chip
-                active={authoringEngine === 'provider'}
-                className={styles.modeChip}
-                aria-label={ts('chat.loopGraph.authoringEngine')}
-                title={
-                  authoringEngine === 'provider'
-                    ? ts('chat.loopGraph.engineProviderHint')
-                    : ts('chat.loopGraph.engineRulesHint')
-                }
-                disabled={authoringBusy}
-                onClick={() =>
-                  setAuthoringEngine(authoringEngine === 'provider' ? 'rules' : 'provider')
-                }
-                data-testid="loop-authoring-engine"
-              >
-                <span>
-                  {authoringEngine === 'provider'
-                    ? ts('chat.loopGraph.engineProvider')
-                    : ts('chat.loopGraph.engineRules')}
-                </span>
-              </Chip>
               <div className={styles.menuWrap} ref={modeMenuRef}>
                 <Chip
                   active={modeMenuOpen}
@@ -560,7 +646,10 @@ export default function LoopGoalComposer() {
                   aria-haspopup="listbox"
                   aria-label={ts('chat.loopGraph.composerModes')}
                   disabled={authoringBusy}
-                  onClick={() => setModeMenuOpen((open) => !open)}
+                  onClick={() => {
+                    setSettingsOpen(false)
+                    setModeMenuOpen((open) => !open)
+                  }}
                 >
                   <ModeIcon size={14} strokeWidth={2} aria-hidden />
                   <span>{modeLabel}</span>
@@ -596,6 +685,80 @@ export default function LoopGoalComposer() {
                         </button>
                       )
                     })}
+                  </div>
+                ) : null}
+              </div>
+              <div className={styles.menuWrap} ref={settingsMenuRef}>
+                <button
+                  type="button"
+                  className={`${styles.settingsButton} ${settingsOpen ? styles.settingsButtonActive : ''}`}
+                  aria-expanded={settingsOpen}
+                  aria-haspopup="dialog"
+                  aria-label={ts('chat.loopGraph.composerSettings')}
+                  title={ts('chat.loopGraph.composerSettings')}
+                  disabled={authoringBusy}
+                  data-testid="loop-composer-settings"
+                  onClick={() => {
+                    setModeMenuOpen(false)
+                    setSettingsOpen((open) => !open)
+                  }}
+                >
+                  <Settings2 size={14} aria-hidden />
+                </button>
+                {settingsOpen ? (
+                  <div
+                    className={styles.settingsPanel}
+                    role="dialog"
+                    aria-label={ts('chat.loopGraph.composerSettings')}
+                    data-testid="loop-composer-settings-panel"
+                  >
+                    <div className={styles.settingsSection}>
+                      <div className={styles.settingsSectionLabel}>
+                        {ts('chat.loopGraph.authoringEngine')}
+                      </div>
+                      <p className={styles.settingsSectionHint}>
+                        {authoringEngine === 'provider'
+                          ? ts('chat.loopGraph.engineProviderHint')
+                          : ts('chat.loopGraph.engineRulesHint')}
+                      </p>
+                      <div
+                        className={styles.settingsOptions}
+                        role="radiogroup"
+                        aria-label={ts('chat.loopGraph.authoringEngine')}
+                        data-testid="loop-authoring-engine"
+                      >
+                        {(
+                          [
+                            {
+                              value: 'provider' as const,
+                              label: ts('chat.loopGraph.engineProvider'),
+                            },
+                            {
+                              value: 'rules' as const,
+                              label: ts('chat.loopGraph.engineRules'),
+                            },
+                          ] as const
+                        ).map((option) => {
+                          const active = authoringEngine === option.value
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              role="radio"
+                              aria-checked={active}
+                              className={`${styles.settingsOption} ${
+                                active ? styles.settingsOptionActive : ''
+                              }`}
+                              data-testid={`loop-authoring-engine-${option.value}`}
+                              onClick={() => setAuthoringEngine(option.value)}
+                            >
+                              <span>{option.label}</span>
+                              {active ? <Check size={14} aria-hidden /> : null}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
                   </div>
                 ) : null}
               </div>

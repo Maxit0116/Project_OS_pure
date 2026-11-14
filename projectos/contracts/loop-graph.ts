@@ -17,11 +17,18 @@ import {
   LoopRunBindingSchema,
   LoopTaskMaterialSchema,
 } from "./loop-task-materials.js";
+import {
+  LoopWorkGroupPortSchema,
+  LoopWorkGroupRecordSchema,
+  LoopWorkGroupSchema,
+  validateLoopWorkGroups,
+} from "./loop-work-group.js";
 
 export {
   LOOP_ACTION_INTEGRATIONS,
   LOOP_AGENT_CONFIG_PORTS,
   LOOP_AGENT_ROLES,
+  LOOP_AGENT_WIRING_STRIP_PORTS,
   LOOP_CAPABILITY_INDEGREE_MAX,
   LOOP_GITHUB_OPERATIONS,
   LOOP_HUMAN_MODES,
@@ -32,6 +39,7 @@ export {
   LOOP_SATELLITE_KINDS,
   architectureFromLegacyRole,
   configPortForSatelliteKind,
+  effectiveConfigPort,
   isConditionNode,
   isConfigNode,
   isDutyNode,
@@ -43,6 +51,7 @@ export {
   type LegacyIntentNodeRole,
   type LoopActionIntegration,
   type LoopAgentConfigPort,
+  type LoopAgentWiringStripPort,
   type LoopAgentRole,
   type LoopArchitectureMapping,
   type LoopGitHubOperation,
@@ -117,7 +126,13 @@ export const LoopSatelliteKindSchema = z.enum([
   "pack",
 ]);
 
-export const LoopAgentConfigPortSchema = z.enum(["model", "memory", "capability"]);
+export const LoopAgentConfigPortSchema = z.enum([
+  "model",
+  "memory",
+  "capability",
+  "mcp",
+  "skill",
+]);
 
 export const LoopMemoryModeSchema = z.enum(["project", "buffer", "none"]);
 
@@ -264,6 +279,8 @@ export const IntentGraphNodeSchema = z
      * and Definition when resolving runtime inject; never silently written back.
      */
     agentWiringOverride: AgentWiringOverrideSchema.optional(),
+    /** Agent Work Group membership (WG-D3: at most one group). */
+    workGroupId: z.string().min(1).optional(),
     position: IntentGraphPositionSchema,
     authoringSessionId: z.string().min(1).optional(),
   })
@@ -272,6 +289,10 @@ export const IntentGraphNodeSchema = z
 export const IntentGraphEdgeSchema = z
   .object({
     id: z.string().min(1),
+    /**
+     * Node id, or a `LoopWorkGroup.id` when connecting to a group boundary
+     * (see `workGroupPort`).
+     */
     source: z.string().min(1),
     target: z.string().min(1),
     prompt: z.string().trim().max(2000).optional(),
@@ -281,10 +302,22 @@ export const IntentGraphEdgeSchema = z
     sourcePort: IntentEdgePortSchema.optional(),
     targetPort: IntentEdgePortSchema.optional(),
     /**
+     * Slot index along `sourcePort` / `targetPort` (C4-style multi-port sides).
+     * Agent + diamond nodes stay single-slot (index 0). In/out on one node
+     * must never share the same (side, index) attach point.
+     */
+    sourcePortIndex: z.number().int().nonnegative().max(16).optional(),
+    targetPortIndex: z.number().int().nonnegative().max(16).optional(),
+    /**
      * Agent config port for `provides` edges (Model* / Memory / Capability).
      * Independent of cardinal `targetPort` used for bezier routing.
      */
     configPort: LoopAgentConfigPortSchema.optional(),
+    /**
+     * When `source` or `target` is a work-group id: which boundary port.
+     * Defaults: source→out, target→in.
+     */
+    workGroupPort: LoopWorkGroupPortSchema.optional(),
     authoringSessionId: z.string().min(1).optional(),
   })
   .strict();
@@ -295,6 +328,10 @@ export const IntentGraphSchema = z
     graphPrompt: z.string().trim().max(4000),
     nodes: z.array(IntentGraphNodeSchema),
     edges: z.array(IntentGraphEdgeSchema),
+    /** Agent Work Groups (编制小队); absent → normalize to []. */
+    workGroups: z.array(LoopWorkGroupSchema).max(64).optional(),
+    /** Monotonic seq for default titles (`Workgroup N`). */
+    workGroupSeq: z.number().int().nonnegative().optional(),
   })
   .strict();
 
@@ -321,6 +358,8 @@ export const LoopSpecNodeSchema = z
     repairMode: z.boolean().optional(),
     /** Folded Agent wiring from Intent `provides` + override (no config nodes in Spec). */
     resolvedWiring: AgentWiringOverrideSchema.optional(),
+    /** Work-group membership snapshot from Intent. */
+    workGroupId: z.string().min(1).optional(),
     goal: z.string().trim().min(1).max(1000),
     constraints: z.array(z.string().trim().min(1).max(500)).max(20),
     inputs: z.array(z.string().trim().min(1).max(240)).max(20),
@@ -429,6 +468,8 @@ export const LoopSpecSchema = z
     parallelMode: LoopParallelModeSchema.optional(),
     /** GC-4.2: how to react when context freshness is stale. */
     stalePolicy: LoopStalePolicySchema.optional(),
+    /** Agent Work Group snapshots from Intent (compile-time). */
+    workGroups: z.array(LoopWorkGroupSchema).max(64).optional(),
     createdAt: z.string().min(1),
   })
   .strict();
@@ -535,6 +576,10 @@ export const LoopBudgetUsageSchema = z
     agentCalls: z.number().int().nonnegative().optional(),
     /** Nested agent call depth for the active chain. */
     agentCallDepth: z.number().int().nonnegative().optional(),
+    /** Per work-group AgentRun counts (key = workGroupId). */
+    workGroupAgentCalls: z
+      .record(z.string(), z.number().int().nonnegative())
+      .optional(),
   })
   .strict();
 
@@ -716,6 +761,8 @@ export const LoopInstanceSchema = z
     freshness: LoopFreshnessSchema.optional(),
     /** GC-4.5 budget counters. */
     budgetUsage: LoopBudgetUsageSchema.optional(),
+    /** Agent Work Group run aggregation. */
+    workGroupRecords: z.array(LoopWorkGroupRecordSchema).max(64).optional(),
     /** GC-4.3 / GC-5 launch provenance. */
     launch: LoopLaunchSchema.optional(),
     events: z.array(LoopInstanceEventSchema).max(LOOP_INSTANCE_EVENT_LIMIT),
@@ -933,6 +980,25 @@ export const LoopHitlAnswerSchema = z
   })
   .strict();
 
+/**
+ * Canvas focus for Edit-mode local planning (node duty / edge transfer text).
+ * Prefer this over bare selectedNodeId / selectedEdgeId when both are present.
+ */
+export const LoopAuthoringFocusSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("node"),
+      id: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("edge"),
+      id: z.string().min(1),
+    })
+    .strict(),
+]);
+
 export const LoopAuthoringTurnRequestSchema = z
   .object({
     mode: LoopComposerModeSchema,
@@ -942,6 +1008,17 @@ export const LoopAuthoringTurnRequestSchema = z
      * Omitted = whole-workflow context (still includes full draft in provider path).
      */
     selectedNodeId: z.string().min(1).optional(),
+    /**
+     * Optional canvas selection — Edit prompts may target a single edge label
+     * (transfer / handoff description). Mutually exclusive with selectedNodeId
+     * when `focus` is omitted; `focus` wins when provided.
+     */
+    selectedEdgeId: z.string().min(1).optional(),
+    /**
+     * Preferred focused-edit target. When set, overrides selectedNodeId /
+     * selectedEdgeId for provider context and patch scoping.
+     */
+    focus: LoopAuthoringFocusSchema.optional(),
     /**
      * When true, prefer the ModelGateway provider path over heuristics.
      * Loopback/tests inject a gateway; live keys are never auto-read this round.
@@ -1008,6 +1085,7 @@ export type LoopAuthoringTrace = z.infer<typeof LoopAuthoringTraceSchema>;
 export type IntentGraphHistoryEntry = z.infer<typeof IntentGraphHistoryEntrySchema>;
 export type LoopPendingGraphEditOffer = z.infer<typeof LoopPendingGraphEditOfferSchema>;
 export type LoopAuthoringTurnRequest = z.infer<typeof LoopAuthoringTurnRequestSchema>;
+export type LoopAuthoringFocus = z.infer<typeof LoopAuthoringFocusSchema>;
 export type LoopGoalClarificationAnswer = z.infer<typeof LoopGoalClarificationAnswerSchema>;
 
 /**
@@ -1035,6 +1113,8 @@ export function emptyIntentGraph(revision = 0): IntentGraph {
     graphPrompt: "",
     nodes: [],
     edges: [],
+    workGroups: [],
+    workGroupSeq: 0,
   };
 }
 
@@ -1093,7 +1173,12 @@ function enrichDraftArchitecture(draft: unknown): unknown {
           : node,
       )
     : d.nodes;
-  return { ...d, nodes };
+  const workGroups = Array.isArray(d.workGroups) ? d.workGroups : [];
+  const workGroupSeq =
+    typeof d.workGroupSeq === "number" && d.workGroupSeq >= 0
+      ? d.workGroupSeq
+      : 0;
+  return { ...d, nodes, workGroups, workGroupSeq };
 }
 
 function enrichSpecArchitecture(spec: unknown): unknown {
@@ -1197,6 +1282,12 @@ export function getIntentGraphCompileIssues(draft: IntentGraph): IntentGraphRead
         message: `Edge ${edge.source} → ${edge.target} needs a kind`,
       });
     }
+  }
+  for (const wgIssue of validateLoopWorkGroups(draft, { forCompile: true })) {
+    issues.push({
+      path: wgIssue.path,
+      message: `[${wgIssue.code}] ${wgIssue.message}`,
+    });
   }
   return issues;
 }

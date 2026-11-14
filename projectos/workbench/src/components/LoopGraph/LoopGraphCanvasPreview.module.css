@@ -37,6 +37,8 @@
   fill: none;
   stroke: var(--tech-border-strong);
   stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .edgeFeedback {
@@ -102,10 +104,117 @@
   box-sizing: border-box;
 }
 
-.nodeConfig {
-  padding: 6px 8px;
-  min-height: 40px;
+.node.nodeDiamond {
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.nodeDiamondShell {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.nodeDiamondShell polygon {
+  fill: var(--tech-bg-elevated);
+  stroke: var(--tech-border-strong);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: visiblePainted;
+}
+
+.nodeDiamondBody {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: max-content;
+  max-width: 152px;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.nodeDiamond .nodeTop {
+  justify-content: center;
+  flex-wrap: wrap;
+  width: max-content;
+  max-width: 152px;
+}
+
+.nodeDiamond .nodeTitle {
+  flex: 0 1 auto;
+  max-width: 112px;
   font-size: var(--font-size-xs);
+}
+
+.nodeDiamond .nodePrompt {
+  width: 100%;
+  max-width: 152px;
+  max-height: none;
+  -webkit-line-clamp: 3;
+  text-align: center;
+}
+
+.nodeDiamond.nodeActive {
+  box-shadow: none;
+  filter: drop-shadow(
+    0 0 6px color-mix(in srgb, var(--tech-accent) 36%, transparent)
+  );
+}
+
+.nodeDiamond.nodeActive .nodeDiamondShell polygon {
+  stroke: var(--tech-accent);
+}
+
+.nodeConfig {
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  align-items: center;
+  justify-content: center;
+}
+
+.nodeWorkGroupMember {
+  flex-direction: row;
+  align-items: center;
+  min-height: 28px;
+  height: 28px;
+  padding: 2px 8px 2px 3px;
+  gap: 0;
+  border-radius: 5px;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.nodeWorkGroupMember .nodeIcon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.nodeWorkGroupMember .nodeTitle {
+  font-size: 11px;
+  font-weight: 550;
 }
 
 .nodeActive {

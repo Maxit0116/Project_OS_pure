@@ -1,8 +1,21 @@
-import { useEffect, useMemo, useRef, useState, type WheelEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type WheelEvent,
+} from 'react'
 import { createPortal } from 'react-dom'
 import {
+  computeLoopWorkGroupFrameBounds,
+  defaultEmptyLoopWorkGroupFrame,
   isConfigNode,
   isIntentGraphReadyForCompile,
+  isWorkGroupEndpoint,
+  isNestedWorkGroupInteriorNode,
+  isWorkGroupSurfaceAgent,
+  listWorkGroupSurfaceAgentIds,
   sessionGraphShieldCssInsets,
   type AgentDefinition,
   type IntentEdgePort,
@@ -11,14 +24,32 @@ import {
   type IntentGraphNode,
   type LoopAgentConfigPort,
   type LoopSatelliteKind,
+  type LoopWorkGroup,
+  type LoopWorkGroupCollaborationMode,
+  type LoopWorkGroupFrameBounds,
+  type LoopWorkGroupPort,
 } from '@contracts/index'
-import { ChevronDown, Link2, Plus, Share2, Sparkles, X } from 'lucide-react'
+import {
+  ArrowLeft,
+  Crown,
+  LayoutTemplate,
+  Link2,
+  Plus,
+  Share2,
+  Sparkles,
+  X,
+} from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useBottomDockStore } from '../../state/bottomDockStore'
 import { useChatSessionStore } from '../../state/chatSessionStore'
-import { useLoopGraphStore, type LoopPhase } from '../../state/loopGraphStore'
+import {
+  useLoopGraphStore,
+  type LoopPhase,
+  type LoopWiringViewMode,
+} from '../../state/loopGraphStore'
 import { useWorkbenchStore } from '../../state/workbenchStore'
 import AgentPicker from '../AgentWorkforce/AgentPicker'
+import { openMarketplaceTalentLibrary } from '../Marketplace/openMarketplaceTalentLibrary'
 import { GraphOverlayFrame } from '../GraphOverlay/GraphOverlayFrame'
 import LoopGoalComposer from './LoopGoalComposer'
 import LoopReviewPanel, { reviewApproveEnabled } from './LoopReviewPanel'
@@ -26,29 +57,49 @@ import LoopGraphContextMenu, {
   type LoopGraphContextMenuState,
 } from './LoopGraphContextMenu'
 import LoopConfigAssetPicker, {
-  isCommunityMcpServer,
   type ConfigAssetPick,
 } from './LoopConfigAssetPicker'
 import LoopGraphPalette from './LoopGraphPalette'
 import LoopNodeDutyCard from './LoopNodeDutyCard'
-import LoopGraphMinimap from './LoopGraphMinimap'
+import LoopWorkGroupFrame from './LoopWorkGroupFrame'
 import LoopGraphRail from './LoopGraphRail'
 import LoopRunSidePanel from './LoopRunSidePanel'
 import LoopRunMaterialsPanel from './LoopRunMaterialsPanel'
 import { LoopSaaSNodeCard } from './integrations/LoopSaaSNodeCard'
 import type { LoopSaaSNodeCardState } from './integrations/LoopSaaSNodeCard'
 import { runtimeStatusBlocksExecution } from './integrations/loopIntegrationRegistry'
+import LoopDiamondAutosize from './LoopDiamondAutosize'
+import {
+  pointInFlatDiamond,
+  type DiamondBox,
+} from './loopDiamondGeometry'
 import {
   decodePaletteDragPayload,
+  isDiamondLoopNode,
   LOOP_PALETTE_MIME,
   visualForIntentNode,
 } from './loopNodeVisuals'
 import { toneFromNodeRecordStatus } from './loopRunVisuals'
 import {
   AGENT_WIRING_PORTS,
+  agentNodeWidth,
+  agentWiringPortPoint,
+  buildAgentWiringLayout,
+  clampSatelliteToAgent,
+  clearAgentSouthCorridorPatches,
   expectedConfigPort,
+  findProvidesAgentForSatellite,
+  isWorkGroupMemberAgent,
+  LOOP_CONFIG_NODE_H,
+  LOOP_CONFIG_NODE_W,
+  LOOP_SATELLITE_BELOW_GAP,
   nodeBoxSize,
-  wiringPortOffset,
+  parkSatelliteLocalX,
+  resolveProvidesPort,
+  satelliteIcon,
+  slotLocalPoint,
+  workflowPortBoxSize,
+  workflowPortsForNode,
 } from './loopWiringVisuals'
 import {
   createLoopRailFolder,
@@ -73,12 +124,15 @@ import {
   portPoint,
   formatEdgeLabel,
   routeLoopEdge,
+  routeProvidesCurve,
+  snapGraphNodePosition,
 } from './loopEdgeRouting'
+import { loopNodePortSlots } from './loopPortAssignment'
+import { routeAllLoopWorkflowEdges } from './loopEdgeBatchRouting'
 import styles from './LoopGraphOverlay.module.css'
 
 const NODE_W = LOOP_NODE_W
 const NODE_H = LOOP_NODE_H
-const PORTS: IntentEdgePort[] = ['n', 'e', 's', 'w']
 
 export default function LoopGraphOverlay() {
   const open = useChatSessionStore((s) => s.loopGraphOpen)
@@ -94,6 +148,8 @@ export default function LoopGraphOverlay() {
   const heads = useLoopGraphStore((s) => s.heads)
   const document = useLoopGraphStore((s) => s.document)
   const phase = useLoopGraphStore((s) => s.phase)
+  const wiringViewMode = useLoopGraphStore((s) => s.wiringViewMode)
+  const setWiringViewMode = useLoopGraphStore((s) => s.setWiringViewMode)
   const compileResult = useLoopGraphStore((s) => s.compileResult)
   const error = useLoopGraphStore((s) => s.error)
   const connectingFromId = useLoopGraphStore((s) => s.connectingFromId)
@@ -134,10 +190,87 @@ export default function LoopGraphOverlay() {
   const refreshRunHistory = useLoopGraphStore((s) => s.refreshRunHistory)
   const linkActiveSession = useLoopGraphStore((s) => s.linkActiveSession)
   const setCanvasSelectedNodeId = useLoopGraphStore((s) => s.setCanvasSelectedNodeId)
+  const selectedWorkGroupId = useLoopGraphStore((s) => s.selectedWorkGroupId)
+  const setSelectedWorkGroupId = useLoopGraphStore((s) => s.setSelectedWorkGroupId)
+  const renameWorkGroup = useLoopGraphStore((s) => s.renameWorkGroup)
+  const updateWorkGroup = useLoopGraphStore((s) => s.updateWorkGroup)
+  const addNodeToWorkGroup = useLoopGraphStore((s) => s.addNodeToWorkGroup)
+  const focusedWorkGroupId = useLoopGraphStore((s) => s.focusedWorkGroupId)
+  const enterWorkGroupGraph = useLoopGraphStore((s) => s.enterWorkGroupGraph)
+  const exitWorkGroupGraph = useLoopGraphStore((s) => s.exitWorkGroupGraph)
+  const removeNodeFromWorkGroup = useLoopGraphStore((s) => s.removeNodeFromWorkGroup)
+  const reflowWorkGroupSurfaceLayout = useLoopGraphStore(
+    (s) => s.reflowWorkGroupSurfaceLayout,
+  )
+  const layoutDraftSemantically = useLoopGraphStore(
+    (s) => s.layoutDraftSemantically,
+  )
+  const dissolveWorkGroup = useLoopGraphStore((s) => s.dissolveWorkGroup)
+  const moveWorkGroup = useLoopGraphStore((s) => s.moveWorkGroup)
+  const beginFocusedEdit = useLoopGraphStore((s) => s.beginFocusedEdit)
+  const clearAuthoringFocus = useLoopGraphStore((s) => s.clearAuthoringFocus)
+  const canvasSelectedEdgeId = useLoopGraphStore((s) => s.canvasSelectedEdgeId)
 
   const [viewport, setViewport] = useState({ x: 32, y: 32, scale: 1 })
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 })
+  const [diamondBoxes, setDiamondBoxes] = useState<Record<string, DiamondBox>>(
+    {},
+  )
+  // L2 interior uses full Loops Graph cards; L1 surface keeps compact chips.
+  const sizeOpts = useMemo(
+    () => ({
+      diamondBoxes,
+      compactWorkGroupMembers: !focusedWorkGroupId,
+    }),
+    [diamondBoxes, focusedWorkGroupId],
+  )
+  const reportDiamondBox = useCallback((nodeId: string, size: DiamondBox) => {
+    setDiamondBoxes((prev) => {
+      const cur = prev[nodeId]
+      if (cur && cur.width === size.width && cur.height === size.height) {
+        return prev
+      }
+      return { ...prev, [nodeId]: size }
+    })
+  }, [])
+  const draftNodeIds = useMemo(
+    () => (document?.draft.nodes ?? []).map((node) => node.id).join('\0'),
+    [document?.draft.nodes],
+  )
+  useEffect(() => {
+    const ids = new Set(draftNodeIds ? draftNodeIds.split('\0') : [])
+    setDiamondBoxes((prev) => {
+      let changed = false
+      const next: Record<string, DiamondBox> = {}
+      for (const [id, box] of Object.entries(prev)) {
+        if (ids.has(id)) next[id] = box
+        else changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [draftNodeIds])
   const [dragging, setDragging] = useState(false)
+  /**
+   * Exit preview for a matrix-locked work-group chip.
+   * Document position stays fixed so the dashed frame does not resize while dragging.
+   * Ref stays in sync for pointer-up (React state can lag one frame).
+   */
+  const [workGroupExitGhost, setWorkGroupExitGhost] = useState<{
+    nodeId: string
+    x: number
+    y: number
+    width: number
+    height: number
+    title: string
+  } | null>(null)
+  const workGroupExitGhostRef = useRef<{
+    nodeId: string
+    x: number
+    y: number
+    width: number
+    height: number
+    title: string
+  } | null>(null)
   const [railLayout, setRailLayout] = useState<LoopGraphRailLayout>(() =>
     emptyLoopGraphRailLayout(),
   )
@@ -146,10 +279,20 @@ export default function LoopGraphOverlay() {
   const setSelectedNodeId = (nodeId: string | null) => {
     setSelectedNodeIdState(nodeId)
     setCanvasSelectedNodeId(nodeId)
+    if (nodeId) setSelectedWorkGroupId(null)
+    if (!nodeId) clearAuthoringFocus()
+  }
+  const selectWorkGroup = (workGroupId: string | null) => {
+    setSelectedWorkGroupId(workGroupId)
+    if (workGroupId) {
+      setSelectedNodeIdState(null)
+      setCanvasSelectedNodeId(null)
+      clearAuthoringFocus()
+      // Do NOT reflow here — frame size only changes on confirmed join/leave.
+    }
   }
   const railLayoutRef = useRef(railLayout)
   railLayoutRef.current = railLayout
-  const [expandedNodeIds, setExpandedNodeIds] = useState<Record<string, boolean>>({})
   const [acceptedAssumptions, setAcceptedAssumptions] = useState<Record<string, boolean>>({})
   const [confirmedCycles, setConfirmedCycles] = useState<Record<string, boolean>>({})
   const [contextMenu, setContextMenu] = useState<LoopGraphContextMenuState | null>(null)
@@ -173,16 +316,73 @@ export default function LoopGraphOverlay() {
     kind: Extract<LoopSatelliteKind, 'model' | 'skill' | 'mcp'>
     anchor: { x: number; y: number }
   } | null>(null)
-  const [capabilityChooser, setCapabilityChooser] = useState<{
-    agentNodeId: string
-    x: number
-    y: number
-  } | null>(null)
+
+  useEffect(() => {
+    if (wiringViewMode !== 'compact' || !document) return
+    const selected = selectedNodeId
+      ? document.draft.nodes.find((node) => node.id === selectedNodeId)
+      : null
+    if (selected && isConfigNode(selected)) {
+      setSelectedNodeId(null)
+    }
+    const duty = dutyCardNodeId
+      ? document.draft.nodes.find((node) => node.id === dutyCardNodeId)
+      : null
+    if (duty && isConfigNode(duty)) {
+      setDutyCardNodeId(null)
+    }
+  }, [wiringViewMode, document, selectedNodeId, dutyCardNodeId])
+
+  useEffect(() => {
+    if (phase !== 'draw' && focusedWorkGroupId) {
+      exitWorkGroupGraph()
+    }
+  }, [phase, focusedWorkGroupId, exitWorkGroupGraph])
+
+  // L2 starts at a readable origin after interior layout — reset pan/zoom.
+  useEffect(() => {
+    if (!focusedWorkGroupId) return
+    setViewport({ x: 32, y: 32, scale: 1 })
+  }, [focusedWorkGroupId])
+
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
-  const nodeDragRef = useRef<{ id: string; ox: number; oy: number; px: number; py: number } | null>(
-    null,
-  )
+  /** Blank-canvas pointer start — used to treat a short press as deselect click. */
+  const blankPointerRef = useRef<{ x: number; y: number } | null>(null)
+  const nodeDragRef = useRef<{
+    id: string
+    ox: number
+    oy: number
+    px: number
+    py: number
+    /** Config satellites that should translate with an Agent drag. */
+    followers: Array<{ id: string; ox: number; oy: number }>
+    /** Surface agent already in a work group — drag is exit-only (matrix fixed). */
+    workGroupLocked?: boolean
+    homeWorkGroupId?: string
+  } | null>(null)
+  /**
+   * While exiting a matrix chip, keep the dashed frame at the pre-drag size.
+   * Size may change only after confirmed join/leave + reflow.
+   */
+  const frozenWorkGroupFrameRef = useRef<{
+    workGroupId: string
+    bounds: LoopWorkGroupFrameBounds
+  } | null>(null)
+  const connectingSourceSlotRef = useRef<{
+    port: IntentEdgePort
+    index: number
+  } | null>(null)
+  const connectingWorkGroupPortRef = useRef<LoopWorkGroupPort | null>(null)
+
+  const workflowEdgeRoutes = useMemo(() => {
+    if (!document) return new Map()
+    return routeAllLoopWorkflowEdges({
+      draft: document.draft,
+      sizeOf: (node) => nodeBoxSize(node, document.draft, sizeOpts),
+      pendingLabel: ts('chat.loopGraph.edgeLabelPending'),
+    })
+  }, [document, sizeOpts, ts])
 
   useEffect(() => {
     if (!open || !project) return
@@ -219,6 +419,12 @@ export default function LoopGraphOverlay() {
         if (connectingFromId) {
           setConnectingFrom(null)
           setPointerWorld(null)
+          connectingWorkGroupPortRef.current = null
+          connectingSourceSlotRef.current = null
+          return
+        }
+        if (selectedWorkGroupId) {
+          setSelectedWorkGroupId(null)
           return
         }
         if (contextMenu) {
@@ -237,11 +443,13 @@ export default function LoopGraphOverlay() {
   }, [
     open,
     connectingFromId,
+    selectedWorkGroupId,
     contextMenu,
     pendingDelete,
     setConnectingFrom,
     setPendingDelete,
     setLoopGraphOpen,
+    setSelectedWorkGroupId,
   ])
 
   useEffect(() => {
@@ -307,7 +515,10 @@ export default function LoopGraphOverlay() {
     graphPrompt: '',
     nodes: [] as IntentGraphNode[],
     edges: [] as IntentGraphEdge[],
+    workGroups: [] as LoopWorkGroup[],
+    workGroupSeq: 0,
   }
+  const workGroups = draft.workGroups ?? []
 
   const compileReady = isIntentGraphReadyForCompile(draft)
 
@@ -316,9 +527,36 @@ export default function LoopGraphOverlay() {
   }
 
   const updateNode = (nodeId: string, patch: Partial<IntentGraphNode>) => {
+    // Always patch against the live store draft — a render-closure `draft`
+    // can predate remove/reflow and silently restore workgroup membership.
+    const live = useLoopGraphStore.getState().document?.draft ?? draft
+    updateDraft({
+      ...live,
+      nodes: live.nodes.map((node) =>
+        node.id === nodeId ? { ...node, ...patch } : node,
+      ),
+    })
+  }
+
+  /** Nudge MCP satellites off Agent south corridors after an S workflow link. */
+  const clearSouthCorridorsForAgents = (agentIds: string[]) => {
+    const latest = useLoopGraphStore.getState().document?.draft ?? draft
+    const unique = [...new Set(agentIds.filter(Boolean))]
+    const byId = new Map<string, { x: number; y: number }>()
+    for (const agentId of unique) {
+      const agent = latest.nodes.find((node) => node.id === agentId)
+      if (!agent || (agent.type ?? 'agent') !== 'agent') continue
+      for (const patch of clearAgentSouthCorridorPatches(agent, latest)) {
+        byId.set(patch.id, patch.position)
+      }
+    }
+    if (byId.size === 0) return
     patchDraft({
-      ...draft,
-      nodes: draft.nodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)),
+      ...latest,
+      nodes: latest.nodes.map((node) => {
+        const next = byId.get(node.id)
+        return next ? { ...node, position: next } : node
+      }),
     })
   }
 
@@ -336,6 +574,14 @@ export default function LoopGraphOverlay() {
     position: { x: number; y: number },
     screenAnchor?: { x: number; y: number },
   ) => {
+    if (paletteItemId === 'workgroup.create') {
+      const id = await beginAuthorNodeFromPalette(paletteItemId, {
+        x: Math.max(16, position.x - 140),
+        y: Math.max(16, position.y - 80),
+      })
+      if (id) selectWorkGroup(id)
+      return
+    }
     const id = await beginAuthorNodeFromPalette(paletteItemId, {
       x: Math.max(16, position.x - NODE_W / 2),
       y: Math.max(16, position.y - NODE_H / 2),
@@ -359,6 +605,114 @@ export default function LoopGraphOverlay() {
     }
   }
 
+  const workGroupFrameBounds = (
+    group: LoopWorkGroup,
+  ): LoopWorkGroupFrameBounds => {
+    // L1 frame hugs surface Agents only — interior Logic/Action/Human stay in L2.
+    const surfaceIds = new Set(listWorkGroupSurfaceAgentIds(group, draft.nodes))
+    const memberBounds = group.memberNodeIds
+      .filter((memberId) => surfaceIds.has(memberId))
+      .map((memberId) => {
+        const node = draft.nodes.find((item) => item.id === memberId)
+        if (!node) return null
+        const size = nodeBoxSize(node, draft, sizeOpts)
+        return {
+          id: node.id,
+          x: node.position.x,
+          y: node.position.y,
+          width: size.width,
+          height: size.height,
+        }
+      })
+      .filter(
+        (
+          rect,
+        ): rect is {
+          id: string
+          x: number
+          y: number
+          width: number
+          height: number
+        } => Boolean(rect),
+      )
+    return (
+      computeLoopWorkGroupFrameBounds(memberBounds) ??
+      defaultEmptyLoopWorkGroupFrame(
+        group.origin ?? { x: 80, y: 80 },
+      )
+    )
+  }
+
+  const pointInFrame = (
+    point: { x: number; y: number },
+    bounds: LoopWorkGroupFrameBounds,
+  ) =>
+    point.x >= bounds.x &&
+    point.x <= bounds.x + bounds.width &&
+    point.y >= bounds.y &&
+    point.y <= bounds.y + bounds.height
+
+  const workGroupPortWorld = (
+    bounds: LoopWorkGroupFrameBounds,
+    port: LoopWorkGroupPort,
+  ) => ({
+    x: port === 'in' ? bounds.x : bounds.x + bounds.width,
+    y: bounds.y + bounds.height / 2,
+  })
+
+  const startConnectFromWorkGroup = (
+    workGroupId: string,
+    port: LoopWorkGroupPort,
+    bounds: LoopWorkGroupFrameBounds,
+  ) => {
+    connectingWorkGroupPortRef.current = port
+    connectingSourceSlotRef.current = null
+    setConnectingFrom(workGroupId)
+    setPointerWorld(workGroupPortWorld(bounds, port))
+  }
+
+  const finishConnectToWorkGroup = (
+    workGroupId: string,
+    port: LoopWorkGroupPort,
+  ) => {
+    if (!connectingFromId || connectingFromId === workGroupId) {
+      startConnectFromWorkGroup(
+        workGroupId,
+        port,
+        workGroupFrameBounds(
+          workGroups.find((group) => group.id === workGroupId) ?? {
+            id: workGroupId,
+            title: 'Workgroup',
+            memberNodeIds: [],
+            collaborationMode: 'coordinator',
+            createdAt: '',
+            updatedAt: '',
+            origin: { x: 0, y: 0 },
+          },
+        ),
+      )
+      return
+    }
+    const sourceIsWg = isWorkGroupEndpoint(connectingFromId, workGroups)
+    const workGroupPort = sourceIsWg
+      ? (connectingWorkGroupPortRef.current ?? 'out')
+      : port
+    void beginAuthorEdge(connectingFromId, workGroupId, {
+      workGroupPort,
+      ...(sourceIsWg
+        ? {}
+        : {
+            sourcePort: connectingSourceSlotRef.current?.port,
+            sourcePortIndex: connectingSourceSlotRef.current?.index ?? 0,
+            targetPort: port === 'in' ? ('w' as IntentEdgePort) : ('e' as IntentEdgePort),
+          }),
+    }).finally(() => {
+      connectingWorkGroupPortRef.current = null
+      connectingSourceSlotRef.current = null
+      setPointerWorld(null)
+    })
+  }
+
   const openDutyCard = (nodeId: string) => {
     setSelectedNodeId(nodeId)
     setDutyCardNodeId(nodeId)
@@ -370,16 +724,50 @@ export default function LoopGraphOverlay() {
   ) => {
     const agent = draft.nodes.find((node) => node.id === agentNodeId)
     if (!agent) return
-    const base = {
-      x: agent.position.x - 20,
-      y: agent.position.y + 100,
+    const port =
+      asset.kind === 'model' ? 'model' : asset.kind === 'mcp' ? 'mcp' : 'skill'
+    const layout = buildAgentWiringLayout(agent, draft)
+    const stack = layout.slots.filter(
+      (slot) => slot.port === port && slot.satelliteId,
+    ).length
+    const mcpCount =
+      layout.slots.filter((slot) => slot.port === 'mcp' && slot.satelliteId).length +
+      (port === 'mcp' ? 1 : 0)
+    const skillCount =
+      layout.slots.filter((slot) => slot.port === 'skill' && slot.satelliteId)
+        .length + (port === 'skill' ? 1 : 0)
+    const nextWidth = agentNodeWidth(mcpCount, skillCount)
+    const anchor = agentWiringPortPoint(agent, port, { draft })
+    // Bias new satellites toward the growing end of their port group, but keep
+    // MCP (and any corridor invaders) clear of the Agent south workflow lane.
+    const group = layout.groups.find((item) => item.port === port)
+    const preferredCenter = group
+      ? group.buttonX
+      : Math.min(
+          nextWidth - LOOP_CONFIG_NODE_W / 2 - 8,
+          Math.max(LOOP_CONFIG_NODE_W / 2 + 8, anchor.x - agent.position.x),
+        )
+    const localLeft = parkSatelliteLocalX({
+      port,
+      preferredCenterX: preferredCenter,
+      agentWidth: nextWidth,
+      stackIndex: port === 'mcp' ? stack : 0,
+    })
+    const agentSize = nodeBoxSize(agent, draft, sizeOpts)
+    const position = {
+      x: agent.position.x + localLeft,
+      y:
+        agent.position.y +
+        agentSize.height +
+        LOOP_SATELLITE_BELOW_GAP +
+        stack * (LOOP_CONFIG_NODE_H + 10),
     }
     if (asset.kind === 'model') {
       await beginAuthorConfigSatellite({
         satelliteKind: 'model',
         title: `Model · ${asset.name}`,
         configRef: { modelProfileId: asset.id },
-        position: base,
+        position,
         wireToAgentId: agentNodeId,
       })
       return
@@ -389,7 +777,7 @@ export default function LoopGraphOverlay() {
         satelliteKind: 'skill',
         title: `Skill · ${asset.name}`,
         configRef: { skillId: asset.id },
-        position: { x: base.x + 110, y: base.y },
+        position,
         wireToAgentId: agentNodeId,
       })
       return
@@ -398,7 +786,7 @@ export default function LoopGraphOverlay() {
       satelliteKind: 'mcp',
       title: `MCP · ${asset.name}`,
       configRef: { mcpServerId: asset.id },
-      position: { x: base.x + 220, y: base.y },
+      position,
       wireToAgentId: agentNodeId,
     })
   }
@@ -433,50 +821,186 @@ export default function LoopGraphOverlay() {
     setViewport((current) => ({ ...current, scale: nextScale }))
   }
 
+  const workGroupBoundsById = (() => {
+    const map = new Map<string, LoopWorkGroupFrameBounds>()
+    const frozen = frozenWorkGroupFrameRef.current
+    for (const group of workGroups) {
+      if (frozen && frozen.workGroupId === group.id) {
+        map.set(group.id, frozen.bounds)
+      } else {
+        map.set(group.id, workGroupFrameBounds(group))
+      }
+    }
+    return map
+  })()
+
+  const focusedWorkGroup = focusedWorkGroupId
+    ? workGroups.find((group) => group.id === focusedWorkGroupId) ?? null
+    : null
+
+  const hideWiringSatellites = wiringViewMode === 'compact'
+  // Plain Set — must NOT use hooks here (this block runs after `if (!open) return null`).
+  const workGroupMemberIds = (() => {
+    const ids = new Set<string>()
+    for (const node of draft.nodes) {
+      if (isWorkGroupMemberAgent(node)) ids.add(node.id)
+    }
+    return ids
+  })()
+
+  const nodeVisibleOnCanvas = (node: IntentGraphNode): boolean => {
+    if (focusedWorkGroupId) {
+      if (isConfigNode(node)) {
+        if (hideWiringSatellites) return false
+        return draft.edges.some(
+          (edge) =>
+            edge.kind === 'provides' &&
+            edge.source === node.id &&
+            draft.nodes.some(
+              (target) =>
+                target.id === edge.target &&
+                target.workGroupId === focusedWorkGroupId,
+            ),
+        )
+      }
+      return node.workGroupId === focusedWorkGroupId
+    }
+    // L1: hide Action/Logic/Human only when nested in a work group (L2).
+    if (isNestedWorkGroupInteriorNode(node)) return false
+    if (isConfigNode(node)) {
+      if (hideWiringSatellites) return false
+      // Work-group surface Agents render as compact chips — hide their satellites.
+      const feedsMember = draft.edges.some(
+        (edge) =>
+          edge.kind === 'provides' &&
+          edge.source === node.id &&
+          workGroupMemberIds.has(edge.target),
+      )
+      return !feedsMember
+    }
+    return true
+  }
+
+  const canvasNodes = draft.nodes.filter(nodeVisibleOnCanvas)
+
   const worldWidth = Math.max(
     800,
-    ...draft.nodes.map((node) => {
-      const size = nodeBoxSize(node)
+    ...canvasNodes.map((node) => {
+      const size = nodeBoxSize(node, draft, sizeOpts)
       return node.position.x + size.width + 80
     }),
+    ...[...workGroupBoundsById.values()].map((bounds) => bounds.x + bounds.width + 80),
     pointerWorld ? pointerWorld.x + 40 : 0,
   )
   const worldHeight = Math.max(
     600,
-    ...draft.nodes.map((node) => {
-      const size = nodeBoxSize(node)
+    ...canvasNodes.map((node) => {
+      const size = nodeBoxSize(node, draft, sizeOpts)
       return node.position.y + size.height + 120
     }),
+    ...[...workGroupBoundsById.values()].map(
+      (bounds) => bounds.y + bounds.height + 120,
+    ),
     pointerWorld ? pointerWorld.y + 40 : 0,
   )
 
   const connectingSource = connectingFromId
     ? draft.nodes.find((node) => node.id === connectingFromId)
     : null
+  const connectingWorkGroup = connectingFromId
+    ? workGroups.find((group) => group.id === connectingFromId)
+    : null
 
   const previewRoute =
-    connectingSource && pointerWorld
-      ? routeLoopEdge({
-          source: connectingSource,
-          endPoint: pointerWorld,
-          sourcePort: nearestPort(connectingSource, pointerWorld),
-          obstacles: draft.nodes,
-        })
-      : null
+    connectingWorkGroup && pointerWorld
+      ? (() => {
+          const bounds =
+            workGroupBoundsById.get(connectingWorkGroup.id) ??
+            defaultEmptyLoopWorkGroupFrame(
+              connectingWorkGroup.origin ?? { x: 80, y: 80 },
+            )
+          const port = connectingWorkGroupPortRef.current ?? 'out'
+          const origin = workGroupPortWorld(bounds, port)
+          const synthetic: IntentGraphNode = {
+            id: connectingWorkGroup.id,
+            title: connectingWorkGroup.title,
+            prompt: '',
+            position: { x: origin.x - 1, y: origin.y - 1 },
+          }
+          return routeLoopEdge({
+            source: synthetic,
+            endPoint: pointerWorld,
+            sourcePort: port === 'in' ? 'w' : 'e',
+            sourceAllowedPorts: port === 'in' ? ['w'] : ['e'],
+            obstacles: draft.nodes,
+            obstacleSize: (node) => nodeBoxSize(node, draft, sizeOpts),
+            width: 2,
+            height: 2,
+          })
+        })()
+      : connectingSource && pointerWorld
+        ? (() => {
+            const ports = workflowPortBoxSize(connectingSource, draft, sizeOpts)
+            const allowed = workflowPortsForNode(connectingSource, draft)
+            return routeLoopEdge({
+              source: connectingSource,
+              endPoint: pointerWorld,
+              sourcePort: nearestPort(
+                connectingSource,
+                pointerWorld,
+                ports.width,
+                ports.height,
+                allowed,
+              ),
+              sourceAllowedPorts: allowed,
+              obstacles: draft.nodes,
+              obstacleSize: (node) => nodeBoxSize(node, draft, sizeOpts),
+              width: ports.width,
+              height: ports.height,
+            })
+          })()
+        : null
 
   const startConnectFrom = (
     nodeId: string,
     seedWorld?: { x: number; y: number },
     sourcePort?: IntentEdgePort,
+    sourcePortIndex = 0,
   ) => {
     const node = draft.nodes.find((item) => item.id === nodeId)
     setConnectingFrom(nodeId)
+    if (sourcePort) {
+      connectingSourceSlotRef.current = {
+        port: sourcePort,
+        index: sourcePortIndex,
+      }
+    } else {
+      connectingSourceSlotRef.current = null
+    }
     if (seedWorld) {
       setPointerWorld(seedWorld)
       return
     }
     if (node) {
-      setPointerWorld(portPoint(node, sourcePort ?? 's'))
+      const ports = workflowPortBoxSize(node, draft, sizeOpts)
+      const allowed = workflowPortsForNode(node, draft)
+      const fallback = allowed.includes('s') ? 's' : (allowed[0] ?? 'e')
+      const port =
+        sourcePort && allowed.includes(sourcePort) ? sourcePort : fallback
+      const slots = loopNodePortSlots(node, ports.width, ports.height, allowed)
+      const slot =
+        slots.find(
+          (item) => item.port === port && item.index === sourcePortIndex,
+        ) ?? slots.find((item) => item.port === port)
+      setPointerWorld(
+        portPoint(
+          node,
+          port,
+          ports.width,
+          ports.height,
+          slot?.along ?? 0.5,
+        ),
+      )
     }
   }
 
@@ -484,6 +1008,11 @@ export default function LoopGraphOverlay() {
     { id: 'draw', label: ts('chat.loopGraph.phase.draw') },
     { id: 'review', label: ts('chat.loopGraph.phase.review') },
     { id: 'run', label: ts('chat.loopGraph.phase.run') },
+  ]
+
+  const wiringViewModes: Array<{ id: LoopWiringViewMode; label: string }> = [
+    { id: 'full', label: ts('chat.loopGraph.wiringView.full') },
+    { id: 'compact', label: ts('chat.loopGraph.wiringView.compact') },
   ]
 
   const pendingDeleteLabel =
@@ -588,6 +1117,50 @@ export default function LoopGraphOverlay() {
                 </button>
               ))}
             </div>
+            {phase === 'draw' && !focusedWorkGroupId ? (
+              <div
+                className={styles.wiringViewToggle}
+                role="tablist"
+                aria-label={ts('chat.loopGraph.wiringView.label')}
+              >
+                {wiringViewModes.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={wiringViewMode === mode.id}
+                    className={`${styles.step} ${
+                      wiringViewMode === mode.id ? styles.stepActive : ''
+                    }`}
+                    title={ts(`chat.loopGraph.wiringView.${mode.id}Hint`)}
+                    onClick={() => setWiringViewMode(mode.id)}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {phase === 'draw' && focusedWorkGroup ? (
+              <div
+                className={styles.workGroupBreadcrumb}
+                aria-label={ts('chat.loopGraph.workGroup.interiorLabel')}
+              >
+                <button
+                  type="button"
+                  className={styles.iconButton}
+                  onClick={() => exitWorkGroupGraph()}
+                  title={ts('chat.loopGraph.workGroup.exitInterior')}
+                  aria-label={ts('chat.loopGraph.workGroup.exitInterior')}
+                >
+                  <ArrowLeft size={14} aria-hidden />
+                </button>
+                <span className={styles.workGroupBreadcrumbText}>
+                  {ts('chat.loopGraph.workGroup.interiorBreadcrumb', {
+                    title: focusedWorkGroup.title,
+                  })}
+                </span>
+              </div>
+            ) : null}
           </div>
           <div className={styles.headerActions}>
             {phase === 'draw' ? (
@@ -601,6 +1174,16 @@ export default function LoopGraphOverlay() {
                   aria-label={ts('chat.loopGraph.addNode')}
                 >
                   <Plus size={14} aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  className={styles.iconButton}
+                  onClick={() => layoutDraftSemantically({ diamondBoxes })}
+                  disabled={!document || (document.draft.nodes.length === 0)}
+                  title={ts('chat.loopGraph.layoutSemantically')}
+                  aria-label={ts('chat.loopGraph.layoutSemantically')}
+                >
+                  <LayoutTemplate size={14} aria-hidden />
                 </button>
                 <button
                   type="button"
@@ -830,10 +1413,19 @@ export default function LoopGraphOverlay() {
                   if (event.button !== 0) return
                   if ((event.target as HTMLElement).closest('[data-loop-node]')) return
                   if ((event.target as HTMLElement).closest('[data-loop-edge]')) return
+                  if (
+                    (event.target as HTMLElement).closest('[data-loop-work-group]')
+                  ) {
+                    return
+                  }
                   if (connectingFromId && event.button === 0) {
                     setConnectingFrom(null)
                     setPointerWorld(null)
                     return
+                  }
+                  blankPointerRef.current = {
+                    x: event.clientX,
+                    y: event.clientY,
                   }
                   dragRef.current = {
                     x: viewport.x,
@@ -852,9 +1444,95 @@ export default function LoopGraphOverlay() {
                   if (nodeDrag && document) {
                     const dx = (event.clientX - nodeDrag.px) / viewport.scale
                     const dy = (event.clientY - nodeDrag.py) / viewport.scale
-                    updateNode(nodeDrag.id, {
-                      position: { x: nodeDrag.ox + dx, y: nodeDrag.oy + dy },
-                    })
+                    // Matrix-locked chips: never write positions during drag —
+                    // that would resize the AABB frame. Ghost only.
+                    if (nodeDrag.workGroupLocked) {
+                      const locked = draft.nodes.find((n) => n.id === nodeDrag.id)
+                      const size = locked
+                        ? nodeBoxSize(locked, draft, sizeOpts)
+                        : { width: 104, height: 28 }
+                      const ghost = {
+                        nodeId: nodeDrag.id,
+                        x: nodeDrag.ox + dx,
+                        y: nodeDrag.oy + dy,
+                        width: size.width,
+                        height: size.height,
+                        title: locked?.title || 'Agent',
+                      }
+                      workGroupExitGhostRef.current = ghost
+                      setWorkGroupExitGhost(ghost)
+                      return
+                    }
+                    const rawAgentPos = {
+                      x: nodeDrag.ox + dx,
+                      y: nodeDrag.oy + dy,
+                    }
+                    const draggingNode = draft.nodes.find(
+                      (node) => node.id === nodeDrag.id,
+                    )
+                    // Solo config satellite drag: keep it under its provides agent.
+                    if (
+                      draggingNode &&
+                      isConfigNode(draggingNode) &&
+                      nodeDrag.followers.length === 0
+                    ) {
+                      const host = findProvidesAgentForSatellite(
+                        draggingNode.id,
+                        draft,
+                      )
+                      const clamped = host
+                        ? clampSatelliteToAgent({
+                            agentPosition: host.position,
+                            agentSize: nodeBoxSize(host, draft, sizeOpts),
+                            satellitePosition: rawAgentPos,
+                          })
+                        : rawAgentPos
+                      updateNode(nodeDrag.id, { position: clamped })
+                      return
+                    }
+                    const nextById = new Map<string, { x: number; y: number }>([
+                      [nodeDrag.id, rawAgentPos],
+                    ])
+                    if (draggingNode && !isConfigNode(draggingNode)) {
+                      const agentSize = nodeBoxSize(
+                        draggingNode,
+                        draft,
+                        sizeOpts,
+                      )
+                      for (const follower of nodeDrag.followers) {
+                        nextById.set(
+                          follower.id,
+                          clampSatelliteToAgent({
+                            agentPosition: rawAgentPos,
+                            agentSize,
+                            satellitePosition: {
+                              x: follower.ox + dx,
+                              y: follower.oy + dy,
+                            },
+                          }),
+                        )
+                      }
+                    } else {
+                      for (const follower of nodeDrag.followers) {
+                        nextById.set(follower.id, {
+                          x: follower.ox + dx,
+                          y: follower.oy + dy,
+                        })
+                      }
+                    }
+                    if (nextById.size === 1) {
+                      updateNode(nodeDrag.id, {
+                        position: nextById.get(nodeDrag.id)!,
+                      })
+                    } else {
+                      patchDraft({
+                        ...draft,
+                        nodes: draft.nodes.map((node) => {
+                          const next = nextById.get(node.id)
+                          return next ? { ...node, position: next } : node
+                        }),
+                      })
+                    }
                     return
                   }
                   const drag = dragRef.current
@@ -865,18 +1543,254 @@ export default function LoopGraphOverlay() {
                     y: drag.y + event.clientY - drag.py,
                   }))
                 }}
-                onPointerUp={() => {
+                onPointerUp={(event) => {
+                  const blankStart = blankPointerRef.current
+                  blankPointerRef.current = null
+                  if (
+                    blankStart &&
+                    !nodeDragRef.current &&
+                    Math.hypot(
+                      event.clientX - blankStart.x,
+                      event.clientY - blankStart.y,
+                    ) < 5
+                  ) {
+                    setSelectedNodeId(null)
+                    selectWorkGroup(null)
+                    clearAuthoringFocus()
+                  }
+
+                  const nodeDrag = nodeDragRef.current
+                  const exitGhost = workGroupExitGhostRef.current
+                  workGroupExitGhostRef.current = null
+                  setWorkGroupExitGhost(null)
+                  if (nodeDrag && document) {
+                    const latestDraft =
+                      useLoopGraphStore.getState().document?.draft ?? draft
+                    const moving =
+                      latestDraft.nodes.find((n) => n.id === nodeDrag.id) ??
+                      draft.nodes.find((n) => n.id === nodeDrag.id)
+                    if (moving && !isConfigNode(moving)) {
+                      const surfaceLocked =
+                        Boolean(nodeDrag.workGroupLocked) &&
+                        isWorkGroupSurfaceAgent(moving)
+
+                      const resolveFrame = (group: LoopWorkGroup) => {
+                        const frozen = frozenWorkGroupFrameRef.current
+                        if (frozen && frozen.workGroupId === group.id) {
+                          return frozen.bounds
+                        }
+                        return (
+                          workGroupBoundsById.get(group.id) ??
+                          workGroupFrameBounds(group)
+                        )
+                      }
+
+                      if (surfaceLocked && phase === 'draw') {
+                        // Leave: ghost center vs frozen home frame.
+                        const ghostPos = exitGhost
+                          ? { x: exitGhost.x, y: exitGhost.y }
+                          : {
+                              x:
+                                nodeDrag.ox +
+                                (event.clientX - nodeDrag.px) / viewport.scale,
+                              y:
+                                nodeDrag.oy +
+                                (event.clientY - nodeDrag.py) / viewport.scale,
+                            }
+                        const settledSize = exitGhost
+                          ? {
+                              width: exitGhost.width,
+                              height: exitGhost.height,
+                            }
+                          : nodeBoxSize(moving, latestDraft, sizeOpts)
+                        const center = {
+                          x: ghostPos.x + settledSize.width / 2,
+                          y: ghostPos.y + settledSize.height / 2,
+                        }
+                        const homeGroupId =
+                          nodeDrag.homeWorkGroupId ?? moving.workGroupId
+                        const homeGroup = homeGroupId
+                          ? (latestDraft.workGroups ?? []).find(
+                              (group) => group.id === homeGroupId,
+                            )
+                          : undefined
+                        const exitFrame = homeGroup
+                          ? resolveFrame(homeGroup)
+                          : null
+                        const stillInside =
+                          exitFrame && pointInFrame(center, exitFrame)
+                        frozenWorkGroupFrameRef.current = null
+                        if (!stillInside && homeGroupId) {
+                          // Atomic leave + exit position (do NOT follow with
+                          // updateNode on a stale render draft — that restored
+                          // membership and undid matrix reflow).
+                          removeNodeFromWorkGroup(moving.id, {
+                            exitPosition: ghostPos,
+                          })
+                        }
+                      } else if (phase === 'draw') {
+                        // Join/leave for free-canvas agents: hit-test the *drop*
+                        // position BEFORE workflow snap (snap can yank the node
+                        // outside the dashed frame and cancel a valid join).
+                        const movingSize = nodeBoxSize(
+                          moving,
+                          latestDraft,
+                          sizeOpts,
+                        )
+                        const dropCenter = {
+                          x: moving.position.x + movingSize.width / 2,
+                          y: moving.position.y + movingSize.height / 2,
+                        }
+                        const hitGroup = (latestDraft.workGroups ?? []).find(
+                          (group) =>
+                            pointInFrame(dropCenter, resolveFrame(group)),
+                        )
+
+                        if (
+                          hitGroup &&
+                          moving.workGroupId !== hitGroup.id
+                        ) {
+                          const ok = addNodeToWorkGroup(hitGroup.id, moving.id)
+                          if (!ok) {
+                            const isAgent =
+                              !isConfigNode(moving) &&
+                              (moving.type ?? 'agent') === 'agent'
+                            pushToast({
+                              type: 'info',
+                              message: ts(
+                                isAgent && !moving.agentDefinitionId
+                                  ? 'chat.loopGraph.workGroup.addRejectedGeneral'
+                                  : 'chat.loopGraph.workGroup.addRejectedType',
+                              ),
+                              autoDismiss: 4200,
+                            })
+                          }
+                          // Joined → matrix reflow owns position; skip snap.
+                        } else if (
+                          !hitGroup &&
+                          moving.workGroupId &&
+                          isWorkGroupSurfaceAgent(moving)
+                        ) {
+                          // Free-dragged surface agent ended outside any frame.
+                          removeNodeFromWorkGroup(moving.id)
+                        } else {
+                          // Free canvas: keep existing neighbor snap.
+                          const neighbors = latestDraft.edges
+                            .filter(
+                              (edge) =>
+                                edge.kind !== 'provides' &&
+                                (edge.source === moving.id ||
+                                  edge.target === moving.id),
+                            )
+                            .map((edge) => {
+                              const otherId =
+                                edge.source === moving.id
+                                  ? edge.target
+                                  : edge.source
+                              const other = latestDraft.nodes.find(
+                                (n) => n.id === otherId,
+                              )
+                              if (!other) return null
+                              const otherSize = nodeBoxSize(
+                                other,
+                                latestDraft,
+                                sizeOpts,
+                              )
+                              const localPort =
+                                edge.source === moving.id
+                                  ? edge.sourcePort
+                                  : edge.targetPort
+                              return {
+                                position: other.position,
+                                width: otherSize.width,
+                                height: otherSize.height,
+                                localPort,
+                              }
+                            })
+                            .filter(
+                              (
+                                item,
+                              ): item is {
+                                position: { x: number; y: number }
+                                width: number
+                                height: number
+                                localPort: IntentEdgePort | undefined
+                              } => Boolean(item),
+                            )
+                          const snapped = snapGraphNodePosition({
+                            position: moving.position,
+                            width: movingSize.width,
+                            height: movingSize.height,
+                            neighbors,
+                          })
+                          if (
+                            Math.abs(snapped.x - moving.position.x) > 0.5 ||
+                            Math.abs(snapped.y - moving.position.y) > 0.5
+                          ) {
+                            const dx = snapped.x - moving.position.x
+                            const dy = snapped.y - moving.position.y
+                            if (nodeDrag.followers.length === 0) {
+                              updateNode(moving.id, { position: snapped })
+                            } else {
+                              const live =
+                                useLoopGraphStore.getState().document?.draft ??
+                                latestDraft
+                              const agentSize = nodeBoxSize(
+                                moving,
+                                live,
+                                sizeOpts,
+                              )
+                              patchDraft({
+                                ...live,
+                                nodes: live.nodes.map((node) => {
+                                  if (node.id === moving.id) {
+                                    return { ...node, position: snapped }
+                                  }
+                                  const follower = nodeDrag.followers.find(
+                                    (f) => f.id === node.id,
+                                  )
+                                  if (!follower) return node
+                                  return {
+                                    ...node,
+                                    position: clampSatelliteToAgent({
+                                      agentPosition: snapped,
+                                      agentSize,
+                                      satellitePosition: {
+                                        x: node.position.x + dx,
+                                        y: node.position.y + dy,
+                                      },
+                                    }),
+                                  }
+                                }),
+                              })
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                  frozenWorkGroupFrameRef.current = null
                   dragRef.current = null
                   nodeDragRef.current = null
                   setDragging(false)
+                  try {
+                    canvasRef.current?.releasePointerCapture?.(event.pointerId)
+                  } catch {
+                    /* ignore */
+                  }
                 }}
               >
                 {!document ? (
                   <p className={styles.empty}>{ts('chat.loopGraph.empty')}</p>
-                ) : draft.nodes.length === 0 ? (
+                ) : draft.nodes.length === 0 && workGroups.length === 0 ? (
                   <p className={styles.empty}>{ts('chat.loopGraph.canvasEmpty')}</p>
                 ) : (
                   <>
+                  {focusedWorkGroup ? (
+                    <p className={styles.workGroupInteriorHint} role="status">
+                      {ts('chat.loopGraph.workGroup.interiorHint')}
+                    </p>
+                  ) : null}
                   <div
                     className={styles.world}
                     style={{
@@ -885,33 +1799,215 @@ export default function LoopGraphOverlay() {
                       transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
                     }}
                   >
+                    {!focusedWorkGroupId
+                      ? workGroups.map((group) => {
+                          const bounds =
+                            workGroupBoundsById.get(group.id) ??
+                            defaultEmptyLoopWorkGroupFrame(
+                              group.origin ?? { x: 80, y: 80 },
+                            )
+                          const coordinator = group.coordinatorNodeId
+                            ? draft.nodes.find(
+                                (node) => node.id === group.coordinatorNodeId,
+                              )
+                            : null
+                          const surfaceCount = listWorkGroupSurfaceAgentIds(
+                            group,
+                            draft.nodes,
+                          ).length
+                          return (
+                            <LoopWorkGroupFrame
+                              key={group.id}
+                              workGroupId={group.id}
+                              title={group.title}
+                              bounds={bounds}
+                              memberCount={surfaceCount}
+                              selected={selectedWorkGroupId === group.id}
+                              collaborationMode={group.collaborationMode}
+                              coordinatorTitle={coordinator?.title}
+                              showPorts={phase === 'draw'}
+                              onSelect={() => selectWorkGroup(group.id)}
+                              onRename={(title) => renameWorkGroup(group.id, title)}
+                              onTitleDragMove={({ dx, dy }) => {
+                                moveWorkGroup(group.id, {
+                                  dx: dx / viewport.scale,
+                                  dy: dy / viewport.scale,
+                                })
+                              }}
+                              onDissolve={() => dissolveWorkGroup(group.id)}
+                              onOpenInterior={() => enterWorkGroupGraph(group.id)}
+                              onPortPointerDown={(workGroupId, port) => {
+                                finishConnectToWorkGroup(workGroupId, port)
+                              }}
+                            />
+                          )
+                        })
+                      : null}
                     <svg className={styles.edges} width={worldWidth} height={worldHeight}>
                       {draft.edges.map((edge) => {
-                        const source = draft.nodes.find((node) => node.id === edge.source)
-                        const target = draft.nodes.find((node) => node.id === edge.target)
-                        if (!source || !target) return null
-                        const sourceSize = nodeBoxSize(source)
-                        const targetSize = nodeBoxSize(target)
+                        if (edge.kind === 'provides') {
+                          if (hideWiringSatellites) return null
+                          if (
+                            !focusedWorkGroupId &&
+                            workGroupMemberIds.has(edge.target)
+                          ) {
+                            return null
+                          }
+                        }
+                        const sourceNode = draft.nodes.find((node) => node.id === edge.source)
+                        const targetNode = draft.nodes.find((node) => node.id === edge.target)
+                        // L1: hide collaboration edges that stay entirely inside one work group.
+                        if (
+                          !focusedWorkGroupId &&
+                          sourceNode?.workGroupId &&
+                          sourceNode.workGroupId === targetNode?.workGroupId
+                        ) {
+                          return null
+                        }
+                        const sourceWg = !sourceNode
+                          ? workGroups.find((group) => group.id === edge.source)
+                          : null
+                        const targetWg = !targetNode
+                          ? workGroups.find((group) => group.id === edge.target)
+                          : null
+                        // L2: only edges between nodes visible in the focused subgraph.
+                        if (focusedWorkGroupId) {
+                          if (sourceWg || targetWg) return null
+                          if (
+                            !sourceNode ||
+                            !targetNode ||
+                            !nodeVisibleOnCanvas(sourceNode) ||
+                            !nodeVisibleOnCanvas(targetNode)
+                          ) {
+                            return null
+                          }
+                        }
+                        if ((!sourceNode && !sourceWg) || (!targetNode && !targetWg)) {
+                          return null
+                        }
+                        const source: IntentGraphNode = sourceNode
+                          ? sourceNode
+                          : (() => {
+                              const bounds =
+                                workGroupBoundsById.get(sourceWg!.id) ??
+                                defaultEmptyLoopWorkGroupFrame(
+                                  sourceWg!.origin ?? { x: 80, y: 80 },
+                                )
+                              const port =
+                                edge.workGroupPort === 'in' ? 'in' : 'out'
+                              const origin = workGroupPortWorld(bounds, port)
+                              return {
+                                id: sourceWg!.id,
+                                title: sourceWg!.title,
+                                prompt: '',
+                                position: { x: origin.x - 1, y: origin.y - 1 },
+                              }
+                            })()
+                        const target: IntentGraphNode = targetNode
+                          ? targetNode
+                          : (() => {
+                              const bounds =
+                                workGroupBoundsById.get(targetWg!.id) ??
+                                defaultEmptyLoopWorkGroupFrame(
+                                  targetWg!.origin ?? { x: 80, y: 80 },
+                                )
+                              const port =
+                                edge.workGroupPort === 'out' ? 'out' : 'in'
+                              const origin = workGroupPortWorld(bounds, port)
+                              return {
+                                id: targetWg!.id,
+                                title: targetWg!.title,
+                                prompt: '',
+                                position: { x: origin.x - 1, y: origin.y - 1 },
+                              }
+                            })()
+                        const sourceSize = sourceNode
+                          ? nodeBoxSize(sourceNode, draft, sizeOpts)
+                          : { width: 2, height: 2 }
                         const provides = edge.kind === 'provides'
-                        const routed = routeLoopEdge({
-                          source,
-                          target,
-                          sourcePort: edge.sourcePort ?? (provides ? 'n' : undefined),
-                          targetPort: edge.targetPort ?? (provides ? 's' : undefined),
-                          obstacles: draft.nodes,
-                          width: sourceSize.width,
-                          height: sourceSize.height,
-                          targetWidth: targetSize.width,
-                          targetHeight: targetSize.height,
-                        })
+                        const providesPort =
+                          provides && sourceNode
+                            ? resolveProvidesPort(edge.configPort, sourceNode) ??
+                              expectedConfigPort(sourceNode) ??
+                              'model'
+                            : null
+                        let routed: { d: string; mid: { x: number; y: number } }
+                        if (provides && providesPort && sourceNode && targetNode) {
+                          // Capability wiring stays curved so it reads as Agent↔config,
+                          // not as a normal workflow depends/conditional edge.
+                          const start = {
+                            x: source.position.x + sourceSize.width / 2,
+                            y: source.position.y,
+                          }
+                          const end = agentWiringPortPoint(target, providesPort, {
+                            draft,
+                            satelliteId: source.id,
+                          })
+                          routed = routeProvidesCurve({ start, end })
+                        } else {
+                          const batched =
+                            sourceNode && targetNode
+                              ? workflowEdgeRoutes.get(edge.id)
+                              : undefined
+                          if (batched) {
+                            routed = {
+                              d: batched.d,
+                              mid: batched.mid,
+                            }
+                          } else {
+                            const sourcePorts = sourceNode
+                              ? workflowPortBoxSize(sourceNode, draft, sizeOpts)
+                              : { width: 2, height: 2 }
+                            const targetPorts = targetNode
+                              ? workflowPortBoxSize(targetNode, draft, sizeOpts)
+                              : { width: 2, height: 2 }
+                            const labelForRoute =
+                              formatEdgeLabel(
+                                edge.branchKey
+                                  ? `${edge.branchKey}: ${edge.prompt ?? ''}`
+                                  : (edge.prompt ?? ''),
+                              ) || ts('chat.loopGraph.edgeLabelPending')
+                            routed = routeLoopEdge({
+                              source,
+                              target,
+                              sourcePort: sourceNode
+                                ? edge.sourcePort
+                                : edge.workGroupPort === 'in'
+                                  ? 'w'
+                                  : 'e',
+                              targetPort: targetNode
+                                ? edge.targetPort
+                                : edge.workGroupPort === 'out'
+                                  ? 'e'
+                                  : 'w',
+                              sourceAllowedPorts: sourceNode
+                                ? workflowPortsForNode(sourceNode, draft)
+                                : edge.workGroupPort === 'in'
+                                  ? ['w']
+                                  : ['e'],
+                              targetAllowedPorts: targetNode
+                                ? workflowPortsForNode(targetNode, draft)
+                                : edge.workGroupPort === 'out'
+                                  ? ['e']
+                                  : ['w'],
+                              obstacles: draft.nodes,
+                              obstacleSize: (node) =>
+                                nodeBoxSize(node, draft, sizeOpts),
+                              width: sourcePorts.width,
+                              height: sourcePorts.height,
+                              targetWidth: targetPorts.width,
+                              targetHeight: targetPorts.height,
+                              labelText: labelForRoute,
+                            })
+                          }
+                        }
                         const incomplete =
                           !provides && (!edge.prompt?.trim() || !edge.kind)
                         const feedback = edge.kind === 'feedback'
                         const conditional = edge.kind === 'conditional'
                         const fallback = edge.kind === 'fallback'
                         const label = provides
-                          ? edge.configPort ??
-                            expectedConfigPort(source) ??
+                          ? providesPort ??
                             ts('chat.loopGraph.wiringProvides')
                           : formatEdgeLabel(
                               edge.branchKey
@@ -954,28 +2050,51 @@ export default function LoopGraphOverlay() {
                                 y={routed.mid.y}
                                 width={1}
                                 height={1}
-                                pointerEvents="none"
+                                pointerEvents="auto"
                               >
                                 <div
                                   className={`${styles.edgeLabelChip} ${
                                     incomplete ? styles.edgeLabelChipPending : ''
+                                  } ${
+                                    canvasSelectedEdgeId === edge.id
+                                      ? styles.edgeLabelChipSelected
+                                      : ''
                                   }`}
                                   title={label}
+                                  data-loop-edge-label={edge.id}
+                                  role="button"
+                                  tabIndex={phase === 'draw' ? 0 : -1}
+                                  onPointerDown={(event) => {
+                                    if (phase !== 'draw' || event.button !== 0) return
+                                    event.stopPropagation()
+                                  }}
+                                  onClick={(event) => {
+                                    if (phase !== 'draw') return
+                                    event.stopPropagation()
+                                    setSelectedNodeId(null)
+                                    selectWorkGroup(null)
+                                    void beginFocusedEdit({
+                                      type: 'edge',
+                                      id: edge.id,
+                                    })
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (phase !== 'draw') return
+                                    if (event.key !== 'Enter' && event.key !== ' ') return
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    setSelectedNodeId(null)
+                                    selectWorkGroup(null)
+                                    void beginFocusedEdit({
+                                      type: 'edge',
+                                      id: edge.id,
+                                    })
+                                  }}
                                 >
                                   {label}
                                 </div>
                               </foreignObject>
-                            ) : (
-                              <text
-                                className={styles.edgeProvidesLabel}
-                                x={routed.mid.x}
-                                y={routed.mid.y + 3}
-                                textAnchor="middle"
-                                pointerEvents="none"
-                              >
-                                {label}
-                              </text>
-                            )}
+                            ) : null}
                           </g>
                         )
                       })}
@@ -988,6 +2107,8 @@ export default function LoopGraphOverlay() {
                       ) : null}
                     </svg>
                     {draft.nodes.map((node) => {
+                      if (!nodeVisibleOnCanvas(node)) return null
+                      const configSatellite = isConfigNode(node)
                       const isCursor = activeInstance?.cursorNodeId === node.id
                       const isHitl =
                         activeInstance?.status === 'awaiting_hitl' && isCursor
@@ -1002,16 +2123,24 @@ export default function LoopGraphOverlay() {
                                 activeInstance?.status === 'awaiting_hitl',
                             })
                           : null
-                      const configSatellite = isConfigNode(node)
                       const isAgentDuty =
                         !configSatellite && (node.type ?? 'agent') === 'agent'
+                      // Compact chip only on L1 surface; L2 shows full Agent cards + wiring.
+                      const inWorkGroup =
+                        !focusedWorkGroupId && isWorkGroupMemberAgent(node)
                       const incomplete = configSatellite
                         ? !node.satelliteKind
                         : !node.prompt.trim()
-                      const size = nodeBoxSize(node)
-                      const expanded = Boolean(expandedNodeIds[node.id])
+                      const wiringLayout =
+                        isAgentDuty && !inWorkGroup
+                          ? buildAgentWiringLayout(node, draft)
+                          : null
+                      const size = nodeBoxSize(node, draft, sizeOpts)
+                      const portSize = workflowPortBoxSize(node, draft, sizeOpts)
                       const visual = visualForIntentNode(node)
+                      const diamond = isDiamondLoopNode(node)
                       const NodeIcon = visual.Icon
+                      const ConfigIcon = satelliteIcon(node.satelliteKind)
                       const categoryClass =
                         visual.categoryClass === 'catAgent'
                           ? styles.catAgent
@@ -1024,24 +2153,27 @@ export default function LoopGraphOverlay() {
                                 : visual.categoryClass === 'catConfig'
                                   ? styles.catConfig
                                   : styles.catDraft
-                      const modelWired = draft.edges.some(
-                        (edge) =>
-                          edge.kind === 'provides' &&
-                          edge.target === node.id &&
-                          (edge.configPort === 'model' ||
-                            expectedConfigPort(
-                              draft.nodes.find((n) => n.id === edge.source) ?? node,
-                            ) === 'model'),
+                      const modelWired = Boolean(
+                        wiringLayout?.slots.some(
+                          (slot) => slot.port === 'model' && slot.satelliteId,
+                        ),
+                      )
+                      const isCoordinator = workGroups.some(
+                        (group) => group.coordinatorNodeId === node.id,
                       )
                       return (
                         <div
                           key={node.id}
                           className={`${styles.node} ${categoryClass} ${
                             configSatellite ? styles.nodeConfig : ''
-                          } ${isAgentDuty ? styles.nodeAgentWired : ''} ${
+                          } ${
+                            isAgentDuty && !inWorkGroup ? styles.nodeAgentWired : ''
+                          } ${inWorkGroup ? styles.nodeWorkGroupMember : ''} ${
+                            diamond ? styles.nodeDiamond : ''
+                          } ${
                             selectedNodeId === node.id ? styles.nodeActive : ''
                           } ${connectingFromId === node.id ? styles.nodeConnecting : ''} ${
-                            incomplete ? styles.nodeIncomplete : ''
+                            incomplete && !inWorkGroup ? styles.nodeIncomplete : ''
                           } ${isCursor && phase === 'run' ? styles.nodeRunning : ''} ${
                             isHitl ? styles.nodeHitl : ''
                           } ${
@@ -1053,11 +2185,17 @@ export default function LoopGraphOverlay() {
                                   ? styles.nodeHitl
                                   : ''
                           } ${
-                            visual.integrationIconKey ? styles.nodeSaas : ''
+                            visual.integrationIconKey && !inWorkGroup
+                              ? styles.nodeSaas
+                              : ''
                           } ${
                             visual.defaultRuntimeStatus &&
                             runtimeStatusBlocksExecution(visual.defaultRuntimeStatus)
                               ? styles.nodeSaasBlocked
+                              : ''
+                          } ${
+                            workGroupExitGhost?.nodeId === node.id
+                              ? styles.nodeWorkGroupMemberDragging
                               : ''
                           }`}
                           style={{
@@ -1065,6 +2203,9 @@ export default function LoopGraphOverlay() {
                             top: node.position.y,
                             width: size.width,
                             minHeight: size.height,
+                            ...(diamond || inWorkGroup
+                              ? { height: size.height, minHeight: size.height }
+                              : null),
                           }}
                           data-loop-node={node.id}
                           data-loop-node-status={runTone ?? undefined}
@@ -1072,6 +2213,15 @@ export default function LoopGraphOverlay() {
                           data-loop-runtime-status={visual.defaultRuntimeStatus ?? undefined}
                           aria-label={`${visual.shortLabel}: ${node.title || ts('chat.loopGraph.untitledNode')}`}
                           onDoubleClick={(event) => {
+                            if (diamond) {
+                              const t = event.target as Element | null
+                              if (
+                                !t?.closest?.('[data-loop-diamond-hit]') &&
+                                !t?.closest?.('[data-loop-port]')
+                              ) {
+                                return
+                              }
+                            }
                             event.stopPropagation()
                             if (configSatellite) {
                               const kind =
@@ -1093,6 +2243,15 @@ export default function LoopGraphOverlay() {
                           }}
                           onContextMenu={(event) => {
                             if (phase !== 'draw') return
+                            if (diamond) {
+                              const t = event.target as Element | null
+                              if (
+                                !t?.closest?.('[data-loop-diamond-hit]') &&
+                                !t?.closest?.('[data-loop-port]')
+                              ) {
+                                return
+                              }
+                            }
                             event.preventDefault()
                             event.stopPropagation()
                             // Cancel any accidental drag started before contextmenu.
@@ -1111,38 +2270,197 @@ export default function LoopGraphOverlay() {
                             // Ignore right/middle click so contextmenu is not stolen by
                             // pointer capture on the canvas (which only showed "Add node").
                             if (event.button !== 0) return
-                            event.stopPropagation()
-                            setSelectedNodeId(node.id)
                             const clickWorld = clientToWorld(event.clientX, event.clientY)
-                            const hitPortAttr = (event.target as HTMLElement | null)
-                              ?.closest?.('[data-loop-port]')
-                              ?.getAttribute('data-loop-port') as IntentEdgePort | null
+                            const hitPortEl = (event.target as HTMLElement | null)
+                              ?.closest?.('[data-loop-port]') as HTMLElement | null
+                            const hitPortAttr = hitPortEl?.getAttribute(
+                              'data-loop-port',
+                            ) as IntentEdgePort | null
+                            const hitPortIndexRaw =
+                              hitPortEl?.getAttribute('data-loop-port-index')
+                            const hitPortIndex = hitPortIndexRaw
+                              ? Number.parseInt(hitPortIndexRaw, 10)
+                              : 0
                             const hitConfigPort = (event.target as HTMLElement | null)
                               ?.closest?.('[data-loop-config-port]')
                               ?.getAttribute('data-loop-config-port') as
                               | LoopAgentConfigPort
                               | null
-                            if (connectingFromId) {
-                              if (connectingFromId !== node.id && connectingSource) {
-                                const targetPort =
-                                  hitPortAttr ??
-                                  nearestPort(node, clickWorld, size.width, size.height)
-                                const sourceSize = nodeBoxSize(connectingSource)
-                                const sourcePort = nearestPort(
-                                  connectingSource,
-                                  portPoint(node, targetPort, size.width, size.height),
-                                  sourceSize.width,
-                                  sourceSize.height,
+                            const hitDiamondSurface = Boolean(
+                              (event.target as HTMLElement | null)?.closest?.(
+                                '[data-loop-diamond-hit]',
+                              ),
+                            )
+                            // Diamond AABB corners are empty — only the painted
+                            // rhombus (or its ports) may start a drag/select.
+                            if (diamond && !hitPortAttr && !hitConfigPort) {
+                              const inShape =
+                                hitDiamondSurface ||
+                                pointInFlatDiamond(
+                                  clickWorld.x - node.position.x,
+                                  clickWorld.y - node.position.y,
+                                  size.width,
+                                  size.height,
                                 )
+                              if (!inShape) return
+                            }
+                            event.stopPropagation()
+                            setSelectedNodeId(node.id)
+                            if (
+                              phase === 'draw' &&
+                              !configSatellite &&
+                              !connectingFromId
+                            ) {
+                              void beginFocusedEdit({ type: 'node', id: node.id })
+                            }
+                            if (connectingFromId) {
+                              if (
+                                connectingFromId !== node.id &&
+                                connectingWorkGroup
+                              ) {
+                                const targetAllowed = workflowPortsForNode(
+                                  node,
+                                  draft,
+                                )
+                                const targetPort =
+                                  hitPortAttr && targetAllowed.includes(hitPortAttr)
+                                    ? hitPortAttr
+                                    : nearestPort(
+                                        node,
+                                        clickWorld,
+                                        portSize.width,
+                                        portSize.height,
+                                        targetAllowed,
+                                      )
+                                void beginAuthorEdge(connectingFromId, node.id, {
+                                  workGroupPort:
+                                    connectingWorkGroupPortRef.current ?? 'out',
+                                  targetPort,
+                                  targetPortIndex: Number.isFinite(hitPortIndex)
+                                    ? hitPortIndex
+                                    : 0,
+                                }).then(() => {
+                                  setPointerWorld(null)
+                                  connectingWorkGroupPortRef.current = null
+                                  connectingSourceSlotRef.current = null
+                                })
+                              } else if (
+                                connectingFromId !== node.id &&
+                                connectingSource
+                              ) {
+                                const targetAllowed = workflowPortsForNode(
+                                  node,
+                                  draft,
+                                )
+                                const sourceAllowed = workflowPortsForNode(
+                                  connectingSource,
+                                  draft,
+                                )
+                                // Config hit → provides into strip ports; otherwise
+                                // full N/E/S/W workflow (Agent S kept clear of MCP).
+                                const targetPort = hitConfigPort
+                                  ? ('s' as IntentEdgePort)
+                                  : hitPortAttr &&
+                                      targetAllowed.includes(hitPortAttr)
+                                    ? hitPortAttr
+                                    : nearestPort(
+                                        node,
+                                        clickWorld,
+                                        portSize.width,
+                                        portSize.height,
+                                        targetAllowed,
+                                      )
+                                const sourcePorts = workflowPortBoxSize(
+                                  connectingSource,
+                                  draft,
+                                  sizeOpts,
+                                )
+                                const sourceSlot = connectingSourceSlotRef.current
+                                const sourcePort =
+                                  sourceSlot?.port &&
+                                  sourceAllowed.includes(sourceSlot.port)
+                                    ? sourceSlot.port
+                                    : nearestPort(
+                                        connectingSource,
+                                        portPoint(
+                                          node,
+                                          targetPort,
+                                          portSize.width,
+                                          portSize.height,
+                                        ),
+                                        sourcePorts.width,
+                                        sourcePorts.height,
+                                        sourceAllowed,
+                                      )
                                 void beginAuthorEdge(connectingFromId, node.id, {
                                   sourcePort,
                                   targetPort,
+                                  sourcePortIndex: sourceSlot?.index ?? 0,
+                                  targetPortIndex: Number.isFinite(hitPortIndex)
+                                    ? hitPortIndex
+                                    : 0,
                                   ...(hitConfigPort
                                     ? { configPort: hitConfigPort, kind: 'provides' }
                                     : {}),
-                                }).then(() => setPointerWorld(null))
+                                }).then(() => {
+                                  setPointerWorld(null)
+                                  connectingSourceSlotRef.current = null
+                                  if (hitConfigPort) return
+                                  const agents: string[] = []
+                                  if (sourcePort === 's') agents.push(connectingFromId)
+                                  if (targetPort === 's') agents.push(node.id)
+                                  if (agents.length > 0) clearSouthCorridorsForAgents(agents)
+                                })
                               }
                               return
+                            }
+                            const followers =
+                              isAgentDuty
+                                ? draft.edges
+                                    .filter(
+                                      (edge) =>
+                                        edge.kind === 'provides' &&
+                                        edge.target === node.id,
+                                    )
+                                    .map((edge) =>
+                                      draft.nodes.find(
+                                        (item) =>
+                                          item.id === edge.source &&
+                                          isConfigNode(item),
+                                      ),
+                                    )
+                                    .filter(
+                                      (item): item is IntentGraphNode =>
+                                        Boolean(item),
+                                    )
+                                    .map((item) => ({
+                                      id: item.id,
+                                      ox: item.position.x,
+                                      oy: item.position.y,
+                                    }))
+                                : []
+                            const homeWorkGroupId = !focusedWorkGroupId
+                              ? node.workGroupId ||
+                                workGroups.find((group) =>
+                                  group.memberNodeIds.includes(node.id),
+                                )?.id
+                              : undefined
+                            const lockToMatrix =
+                              Boolean(homeWorkGroupId) &&
+                              isWorkGroupSurfaceAgent(node)
+                            if (lockToMatrix && homeWorkGroupId) {
+                              const homeGroup = workGroups.find(
+                                (group) => group.id === homeWorkGroupId,
+                              )
+                              if (homeGroup) {
+                                // Freeze dashed frame for the whole exit gesture.
+                                frozenWorkGroupFrameRef.current = {
+                                  workGroupId: homeWorkGroupId,
+                                  bounds: workGroupFrameBounds(homeGroup),
+                                }
+                              }
+                            } else {
+                              frozenWorkGroupFrameRef.current = null
                             }
                             nodeDragRef.current = {
                               id: node.id,
@@ -1150,26 +2468,47 @@ export default function LoopGraphOverlay() {
                               oy: node.position.y,
                               px: event.clientX,
                               py: event.clientY,
+                              followers: lockToMatrix ? [] : followers,
+                              workGroupLocked: lockToMatrix,
+                              ...(homeWorkGroupId
+                                ? { homeWorkGroupId }
+                                : {}),
                             }
-                            ;(event.currentTarget.parentElement?.parentElement as HTMLElement | null)
-                              ?.setPointerCapture?.(event.pointerId)
+                            // Capture on the canvas so locked-drag moves hit the
+                            // handler that refuses to mutate member positions.
+                            canvasRef.current?.setPointerCapture?.(event.pointerId)
                           }}
                         >
-                          {(connectingFromId || selectedNodeId === node.id) &&
-                            PORTS.map((port) => {
-                              const point = portPoint(node, port, size.width, size.height)
+                          {!configSatellite &&
+                            (connectingFromId || selectedNodeId === node.id) &&
+                            loopNodePortSlots(
+                              node,
+                              portSize.width,
+                              portSize.height,
+                              workflowPortsForNode(node, draft),
+                            ).map((slot) => {
+                              const point = portPoint(
+                                node,
+                                slot.port,
+                                portSize.width,
+                                portSize.height,
+                                slot.along,
+                              )
                               const active =
                                 connectingFromId === node.id &&
-                                previewRoute?.sourcePort === port
+                                previewRoute?.sourcePort === slot.port &&
+                                (connectingSourceSlotRef.current?.index ??
+                                  0) === slot.index
                               return (
                                 <span
-                                  key={port}
+                                  key={`${slot.port}:${slot.index}`}
                                   className={`${styles.port} ${active ? styles.portActive : ''}`}
                                   style={{
                                     left: point.x - node.position.x,
                                     top: point.y - node.position.y,
                                   }}
-                                  data-loop-port={port}
+                                  data-loop-port={slot.port}
+                                  data-loop-port-index={slot.index}
                                   aria-hidden
                                   onPointerDown={(event) => {
                                     event.stopPropagation()
@@ -1180,57 +2519,112 @@ export default function LoopGraphOverlay() {
                                       connectingFromId !== node.id &&
                                       connectingSource
                                     ) {
-                                      const sourceSize = nodeBoxSize(connectingSource)
-                                      const sourcePort = nearestPort(
+                                      const sourcePorts = workflowPortBoxSize(
                                         connectingSource,
-                                        portPoint(node, port, size.width, size.height),
-                                        sourceSize.width,
-                                        sourceSize.height,
+                                        draft,
+                                        sizeOpts,
                                       )
-                                      void beginAuthorEdge(connectingFromId, node.id, {
-                                        sourcePort,
-                                        targetPort: port,
-                                      }).then(() => setPointerWorld(null))
+                                      const sourceSlot =
+                                        connectingSourceSlotRef.current
+                                      const sourcePort =
+                                        sourceSlot?.port ??
+                                        nearestPort(
+                                          connectingSource,
+                                          portPoint(
+                                            node,
+                                            slot.port,
+                                            portSize.width,
+                                            portSize.height,
+                                            slot.along,
+                                          ),
+                                          sourcePorts.width,
+                                          sourcePorts.height,
+                                          workflowPortsForNode(
+                                            connectingSource,
+                                            draft,
+                                          ),
+                                        )
+                                      void beginAuthorEdge(
+                                        connectingFromId,
+                                        node.id,
+                                        {
+                                          sourcePort,
+                                          targetPort: slot.port,
+                                          sourcePortIndex:
+                                            sourceSlot?.index ?? 0,
+                                          targetPortIndex: slot.index,
+                                        },
+                                      ).then(() => {
+                                        setPointerWorld(null)
+                                        connectingSourceSlotRef.current = null
+                                        const agents: string[] = []
+                                        if (sourcePort === 's') {
+                                          agents.push(connectingFromId)
+                                        }
+                                        if (slot.port === 's') {
+                                          agents.push(node.id)
+                                        }
+                                        if (agents.length > 0) {
+                                          clearSouthCorridorsForAgents(agents)
+                                        }
+                                      })
                                       return
                                     }
-                                    startConnectFrom(node.id, seed, port)
+                                    startConnectFrom(
+                                      node.id,
+                                      seed,
+                                      slot.port,
+                                      slot.index,
+                                    )
                                   }}
                                 />
                               )
                             })}
-                          <div className={styles.nodeTop}>
-                            {runTone ? (
-                              <span
-                                className={`${styles.statusDot} ${styles[`status_${runTone}`] ?? ''}`}
-                                title={runTone}
-                                aria-label={runTone}
-                              />
-                            ) : null}
-                            {visual.integrationId && visual.integrationIconKey ? (
-                              <LoopSaaSNodeCard
-                                embedded
-                                integrationId={visual.integrationId}
-                                operationLabel={
-                                  visual.operationLabel ?? visual.shortLabel
+                          {configSatellite ? (
+                            <span
+                              className={`${styles.nodeConfigLogo} ${categoryClass}`}
+                              title={node.title || visual.shortLabel}
+                              aria-hidden
+                            >
+                              <ConfigIcon size={18} strokeWidth={1.75} />
+                            </span>
+                          ) : visual.integrationId && visual.integrationIconKey ? (
+                            <LoopSaaSNodeCard
+                              embedded
+                              integrationId={visual.integrationId}
+                              operationLabel={
+                                visual.operationLabel ?? visual.shortLabel
+                              }
+                              titleOverride={node.title || undefined}
+                              runtimeStatus={visual.defaultRuntimeStatus}
+                              state={(() => {
+                                if (selectedNodeId === node.id) return 'selected'
+                                if (isCursor && phase === 'run') return 'running'
+                                if (isHitl) return 'awaiting_hitl'
+                                if (
+                                  runTone === 'failed' ||
+                                  runTone === 'blocked'
+                                ) {
+                                  return 'error'
                                 }
-                                titleOverride={node.title || undefined}
-                                runtimeStatus={visual.defaultRuntimeStatus}
-                                state={(() => {
-                                  if (selectedNodeId === node.id) return 'selected'
-                                  if (isCursor && phase === 'run') return 'running'
-                                  if (isHitl) return 'awaiting_hitl'
-                                  if (
-                                    runTone === 'failed' ||
-                                    runTone === 'blocked'
-                                  ) {
-                                    return 'error'
-                                  }
-                                  if (runTone === 'succeeded') return 'complete'
-                                  return 'idle'
-                                })() as LoopSaaSNodeCardState}
-                              />
-                            ) : (
-                              <>
+                                if (runTone === 'succeeded') return 'complete'
+                                return 'idle'
+                              })() as LoopSaaSNodeCardState}
+                            />
+                          ) : diamond ? (
+                            <LoopDiamondAutosize
+                              shellClassName={styles.nodeDiamondShell}
+                              bodyClassName={styles.nodeDiamondBody}
+                              onBoxSize={(box) => reportDiamondBox(node.id, box)}
+                            >
+                              <div className={styles.nodeTop}>
+                                {runTone ? (
+                                  <span
+                                    className={`${styles.statusDot} ${styles[`status_${runTone}`] ?? ''}`}
+                                    title={runTone}
+                                    aria-label={runTone}
+                                  />
+                                ) : null}
                                 <span
                                   className={`${styles.nodeIcon} ${categoryClass}`}
                                   title={visual.shortLabel}
@@ -1240,84 +2634,149 @@ export default function LoopGraphOverlay() {
                                 </span>
                                 <span className={styles.nodeTitle}>
                                   {node.title || visual.shortLabel}
-                                  {isAgentDuty ? (
-                                    <span className={styles.nodeAgentMeta}>
-                                      {node.agentDefinitionId
-                                        ? ts('workforce.assignedAgent')
-                                        : ts('workforce.assignedGeneral')}
-                                      {node.agentDefinitionId
-                                        ? ` · ${node.agentDefinitionId.slice(0, 10)}`
-                                        : ''}
-                                    </span>
-                                  ) : null}
-                                  {configSatellite &&
-                                  node.satelliteKind === 'mcp' &&
-                                  isCommunityMcpServer(
-                                    settings?.mcpServers?.find(
-                                      (server) =>
-                                        server.id === node.configRef?.mcpServerId,
-                                    ),
-                                  ) ? (
-                                    <span className={styles.communityBadge}>
-                                      {ts('chat.loopGraph.wiringMcpCommunity')}
-                                    </span>
-                                  ) : null}
-                                  {configSatellite &&
-                                  node.satelliteKind === 'mcp' &&
-                                  settings?.mcpServers?.find(
-                                    (server) =>
-                                      server.id === node.configRef?.mcpServerId,
-                                  )?.enabled === false ? (
-                                    <span className={styles.disabledBadge}>
-                                      {ts('chat.loopGraph.wiringMcpDisabled')}
-                                    </span>
-                                  ) : null}
                                 </span>
-                              </>
-                            )}
-                            {incomplete ? (
-                              <span className={styles.incompleteMark}>
-                                {ts('chat.loopGraph.incomplete')}
-                              </span>
-                            ) : null}
-                            {!configSatellite ? (
-                              <button
-                                type="button"
-                                className={`${styles.chevronButton} ${
-                                  expanded ? styles.chevronOpen : ''
-                                }`}
-                                title={ts('chat.loopGraph.viewDescription')}
-                                aria-label={ts('chat.loopGraph.viewDescription')}
-                                aria-expanded={expanded}
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  setExpandedNodeIds((current) => ({
-                                    ...current,
-                                    [node.id]: !current[node.id],
-                                  }))
-                                }}
-                                onPointerDown={(event) => event.stopPropagation()}
+                                {incomplete ? (
+                                  <span className={styles.incompleteMark}>
+                                    {ts('chat.loopGraph.incomplete')}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className={styles.nodeTask}>
+                                {node.prompt.trim()
+                                  ? node.prompt
+                                  : ts('chat.loopGraph.descriptionEmpty')}
+                              </div>
+                            </LoopDiamondAutosize>
+                          ) : inWorkGroup ? (
+                            <div className={styles.nodeWorkGroupMemberInner}>
+                              {runTone ? (
+                                <span
+                                  className={`${styles.statusDot} ${styles[`status_${runTone}`] ?? ''}`}
+                                  title={runTone}
+                                  aria-label={runTone}
+                                />
+                              ) : null}
+                              <span
+                                className={`${styles.nodeIcon} ${categoryClass}`}
+                                title={visual.shortLabel}
+                                aria-hidden
                               >
-                                <ChevronDown size={12} aria-hidden />
-                              </button>
-                            ) : null}
-                          </div>
-                          {isAgentDuty ? (
-                            <div className={styles.wiringStrip} aria-hidden>
-                              {AGENT_WIRING_PORTS.map((port) => {
-                                const offset = wiringPortOffset(port.id, size.width)
-                                const warn = port.id === 'model' && !modelWired
+                                <NodeIcon size={13} strokeWidth={1.75} />
+                              </span>
+                              <span className={styles.nodeTitle}>
+                                {node.title || visual.shortLabel}
+                              </span>
+                              {isCoordinator ? (
+                                <span
+                                  className={styles.nodeWorkGroupCrown}
+                                  title={ts('chat.loopGraph.workGroup.coordinator')}
+                                >
+                                  <Crown size={11} strokeWidth={1.75} aria-hidden />
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <>
+                              <div className={styles.nodeTop}>
+                                {runTone ? (
+                                  <span
+                                    className={`${styles.statusDot} ${styles[`status_${runTone}`] ?? ''}`}
+                                    title={runTone}
+                                    aria-label={runTone}
+                                  />
+                                ) : null}
+                                <span
+                                  className={`${styles.nodeIcon} ${categoryClass}`}
+                                  title={visual.shortLabel}
+                                  aria-hidden
+                                >
+                                  <NodeIcon size={15} strokeWidth={1.75} />
+                                </span>
+                                <span className={styles.nodeTitle}>
+                                  {node.title || visual.shortLabel}
+                                </span>
+                                {incomplete ? (
+                                  <span className={styles.incompleteMark}>
+                                    {ts('chat.loopGraph.incomplete')}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className={styles.nodeTask}>
+                                {node.prompt.trim()
+                                  ? node.prompt
+                                  : ts('chat.loopGraph.descriptionEmpty')}
+                              </div>
+                            </>
+                          )}
+                          {isAgentDuty && wiringLayout ? (
+                            <>
+                              <div className={styles.wiringStrip}>
+                                {wiringLayout.groups.map((group) => {
+                                  const def = AGENT_WIRING_PORTS.find(
+                                    (item) => item.id === group.port,
+                                  )
+                                  if (!def) return null
+                                  const PortIcon = def.Icon
+                                  const warn =
+                                    group.port === 'model' && !modelWired
+                                  const wired = group.slotIndexes.some(
+                                    (index) =>
+                                      wiringLayout.slots[index]?.satelliteId,
+                                  )
+                                  return (
+                                    <button
+                                      key={group.port}
+                                      type="button"
+                                      className={`${styles.wiringIconButton} ${
+                                        warn ? styles.wiringIconButtonWarn : ''
+                                      } ${wired ? styles.wiringIconButtonWired : ''}`}
+                                      style={{ left: group.buttonX }}
+                                      title={ts(
+                                        `chat.loopGraph.wiringPort_${group.port}`,
+                                      )}
+                                      aria-label={ts(
+                                        `chat.loopGraph.wiringPort_${group.port}`,
+                                      )}
+                                      onClick={(event) => {
+                                        event.stopPropagation()
+                                        setWiringPicker({
+                                          agentNodeId: node.id,
+                                          kind:
+                                            group.port === 'skill'
+                                              ? 'skill'
+                                              : group.port,
+                                          anchor: {
+                                            x: event.clientX,
+                                            y: event.clientY,
+                                          },
+                                        })
+                                      }}
+                                      onPointerDown={(event) =>
+                                        event.stopPropagation()
+                                      }
+                                    >
+                                      <PortIcon
+                                        size={14}
+                                        strokeWidth={1.75}
+                                        aria-hidden
+                                      />
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                              {wiringLayout.slots.map((slot, slotIndex) => {
+                                const point = slotLocalPoint(
+                                  wiringLayout,
+                                  slotIndex,
+                                )
                                 return (
-                                  <button
-                                    key={port.id}
-                                    type="button"
-                                    className={`${styles.wiringPort} ${
-                                      warn ? styles.wiringPortWarn : ''
-                                    }`}
-                                    style={{ left: offset.x - 14 }}
-                                    data-loop-config-port={port.id}
-                                    title={ts(`chat.loopGraph.wiringPort_${port.id}`)}
-                                    aria-label={ts(`chat.loopGraph.wiringPort_${port.id}`)}
+                                  <span
+                                    key={slot.key}
+                                    className={`${styles.port} ${styles.portConfigHidden}`}
+                                    style={{ left: point.x, top: point.y }}
+                                    data-loop-config-port={slot.port}
+                                    data-loop-config-slot={slot.key}
+                                    aria-hidden
                                     onPointerDown={(event) => {
                                       event.stopPropagation()
                                       event.preventDefault()
@@ -1326,58 +2785,55 @@ export default function LoopGraphOverlay() {
                                         connectingFromId !== node.id &&
                                         connectingSource
                                       ) {
-                                        void beginAuthorEdge(connectingFromId, node.id, {
-                                          sourcePort: 'n',
-                                          targetPort: 's',
-                                          configPort: port.id,
-                                          kind: 'provides',
-                                        }).then(() => setPointerWorld(null))
-                                        return
-                                      }
-                                      if (port.id === 'model') {
-                                        setWiringPicker({
-                                          agentNodeId: node.id,
-                                          kind: 'model',
-                                          anchor: { x: event.clientX, y: event.clientY },
-                                        })
-                                        return
-                                      }
-                                      if (port.id === 'memory') {
-                                        void beginAuthorConfigSatellite({
-                                          satelliteKind: 'memory',
-                                          title: 'Memory · Project',
-                                          configRef: { memoryMode: 'project' },
-                                          position: {
-                                            x: node.position.x + 40,
-                                            y: node.position.y + 100,
+                                        void beginAuthorEdge(
+                                          connectingFromId,
+                                          node.id,
+                                          {
+                                            sourcePort: 'n',
+                                            targetPort: 's',
+                                            configPort: slot.port,
+                                            kind: 'provides',
                                           },
-                                          wireToAgentId: node.id,
-                                        })
+                                        ).then(() => setPointerWorld(null))
                                         return
                                       }
-                                      setCapabilityChooser({
-                                        agentNodeId: node.id,
-                                        x: event.clientX,
-                                        y: event.clientY,
-                                      })
+                                      startConnectFrom(
+                                        node.id,
+                                        {
+                                          x: node.position.x + point.x,
+                                          y: node.position.y + point.y,
+                                        },
+                                        's',
+                                      )
                                     }}
-                                  >
-                                    {port.label}
-                                  </button>
+                                  />
                                 )
                               })}
-                            </div>
-                          ) : null}
-                          {expanded && !configSatellite ? (
-                            <div className={styles.nodeDrawer}>
-                              {node.prompt.trim()
-                                ? node.prompt
-                                : ts('chat.loopGraph.descriptionEmpty')}
-                            </div>
+                            </>
                           ) : null}
                         </div>
                       )
                     })}
+                    {workGroupExitGhost ? (
+                      <div
+                        className={`${styles.node} ${styles.catAgent} ${styles.nodeWorkGroupMember} ${styles.nodeWorkGroupExitGhost}`}
+                        style={{
+                          left: workGroupExitGhost.x,
+                          top: workGroupExitGhost.y,
+                          width: workGroupExitGhost.width,
+                          height: workGroupExitGhost.height,
+                          minHeight: workGroupExitGhost.height,
+                        }}
+                        data-loop-work-group-exit-ghost=""
+                        aria-hidden
+                      >
+                        <div className={styles.nodeWorkGroupMemberInner}>
+                          <span className={styles.nodeTitle}>
+                            {workGroupExitGhost.title}
+                          </span>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   </>
                 )}
@@ -1385,22 +2841,6 @@ export default function LoopGraphOverlay() {
             )}
 
             {phase === 'draw' && document ? <LoopGoalComposer /> : null}
-
-            {document && phase !== 'review' && draft.nodes.length > 0 ? (
-              <LoopGraphMinimap
-                nodes={draft.nodes}
-                viewport={viewport}
-                canvasWidth={canvasSize.width}
-                canvasHeight={canvasSize.height}
-                onPanToWorld={(worldX, worldY) => {
-                  setViewport((prev) => ({
-                    ...prev,
-                    x: canvasSize.width / 2 - worldX * prev.scale,
-                    y: canvasSize.height / 2 - worldY * prev.scale,
-                  }))
-                }}
-              />
-            ) : null}
 
             {(() => {
               const dutyNode = dutyCardNodeId
@@ -1562,10 +3002,94 @@ export default function LoopGraphOverlay() {
                 ) : null}
               </div>
             ) : null}
+            {phase === 'draw' && selectedWorkGroupId
+              ? (() => {
+                  const selectedGroup = workGroups.find(
+                    (group) => group.id === selectedWorkGroupId,
+                  )
+                  if (!selectedGroup) return null
+                  const members = selectedGroup.memberNodeIds
+                    .map((id) => draft.nodes.find((node) => node.id === id))
+                    .filter((node): node is IntentGraphNode => Boolean(node))
+                  return (
+                    <div className={styles.workGroupPanel} data-loop-work-group-panel="">
+                      <h3 className={styles.workGroupPanelTitle}>
+                        {selectedGroup.title}
+                      </h3>
+                      <div className={styles.workGroupPanelRow}>
+                        <label className={styles.workGroupPanelLabel} htmlFor="loop-wg-mode">
+                          {ts('chat.loopGraph.workGroup.mode.label')}
+                        </label>
+                        <select
+                          id="loop-wg-mode"
+                          className={styles.workGroupPanelSelect}
+                          value={selectedGroup.collaborationMode}
+                          onChange={(event) =>
+                            updateWorkGroup(selectedGroup.id, {
+                              collaborationMode: event.target
+                                .value as LoopWorkGroupCollaborationMode,
+                            })
+                          }
+                        >
+                          <option value="coordinator">
+                            {ts('chat.loopGraph.workGroup.mode.coordinator')}
+                          </option>
+                          <option value="serial">
+                            {ts('chat.loopGraph.workGroup.mode.serial')}
+                          </option>
+                          <option value="parallel_join">
+                            {ts('chat.loopGraph.workGroup.mode.parallel_join')}
+                          </option>
+                        </select>
+                      </div>
+                      {selectedGroup.collaborationMode === 'coordinator' ? (
+                        <div className={styles.workGroupPanelRow}>
+                          <label
+                            className={styles.workGroupPanelLabel}
+                            htmlFor="loop-wg-coordinator"
+                          >
+                            {ts('chat.loopGraph.workGroup.coordinator')}
+                          </label>
+                          <select
+                            id="loop-wg-coordinator"
+                            className={styles.workGroupPanelSelect}
+                            value={selectedGroup.coordinatorNodeId ?? ''}
+                            onChange={(event) =>
+                              updateWorkGroup(selectedGroup.id, {
+                                coordinatorNodeId: event.target.value || null,
+                              })
+                            }
+                          >
+                            <option value="">—</option>
+                            {members.map((node) => (
+                              <option key={node.id} value={node.id}>
+                                {node.title || ts('chat.loopGraph.untitledNode')}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        className={styles.workGroupPanelDissolve}
+                        onClick={() => dissolveWorkGroup(selectedGroup.id)}
+                      >
+                        {ts('chat.loopGraph.workGroup.dissolve')}
+                      </button>
+                    </div>
+                  )
+                })()
+              : null}
           </div>
           {phase === 'draw' ? (
             <LoopGraphPalette
-              onPlaced={(nodeId) => setSelectedNodeId(nodeId)}
+              onPlaced={(id) => {
+                const isWorkGroup = (document?.draft.workGroups ?? []).some(
+                  (group) => group.id === id,
+                )
+                if (isWorkGroup) selectWorkGroup(id)
+                else setSelectedNodeId(id)
+              }}
               resolveClickPosition={() => {
                 const rect = canvasRef.current?.getBoundingClientRect()
                 if (!rect) return { x: 80, y: 80 }
@@ -1627,57 +3151,6 @@ export default function LoopGraphOverlay() {
         onDeleteNode={(nodeId) => setPendingDelete({ type: 'node', id: nodeId })}
         onDeleteEdge={(edgeId) => setPendingDelete({ type: 'edge', id: edgeId })}
       />
-
-      {capabilityChooser
-        ? createPortal(
-            <div
-              className={styles.capabilityChooser}
-              style={{ left: capabilityChooser.x, top: capabilityChooser.y }}
-              role="menu"
-              data-zone-interactive
-              onMouseDown={(event) => event.stopPropagation()}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                className={styles.capabilityChooserItem}
-                onClick={() => {
-                  setWiringPicker({
-                    agentNodeId: capabilityChooser.agentNodeId,
-                    kind: 'skill',
-                    anchor: { x: capabilityChooser.x, y: capabilityChooser.y },
-                  })
-                  setCapabilityChooser(null)
-                }}
-              >
-                {ts('chat.loopGraph.wiringPickSkill')}
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className={styles.capabilityChooserItem}
-                onClick={() => {
-                  setWiringPicker({
-                    agentNodeId: capabilityChooser.agentNodeId,
-                    kind: 'mcp',
-                    anchor: { x: capabilityChooser.x, y: capabilityChooser.y },
-                  })
-                  setCapabilityChooser(null)
-                }}
-              >
-                {ts('chat.loopGraph.wiringPickMcp')}
-              </button>
-              <button
-                type="button"
-                className={styles.capabilityChooserItem}
-                onClick={() => setCapabilityChooser(null)}
-              >
-                {ts('chat.loopGraph.wiringPickerCancel')}
-              </button>
-            </div>,
-            globalThis.document.body,
-          )
-        : null}
 
       {wiringPicker
         ? createPortal(
@@ -1751,17 +3224,35 @@ export default function LoopGraphOverlay() {
                 }}
                 onSelectAgent={(definitionId) => {
                   const match = workforceAgents.find((agent) => agent.definitionId === definitionId)
+                  const listingId = match?.config.marketplaceProvenance?.listingId
+                  const catalogListings =
+                    useWorkbenchStore.getState().agentCatalogView?.document.listings ?? []
+                  const template = listingId
+                    ? catalogListings.find((entry) => entry.id === listingId)
+                    : undefined
+                  const defaultModelId =
+                    settings?.execution?.defaultModelProfileId ??
+                    settings?.modelProfiles?.find((profile) => profile.isDefault)?.id ??
+                    settings?.modelProfiles?.[0]?.id
                   setNodeAgentDefinition(switchAgentMenu.nodeId, definitionId, {
                     title: match?.config.displayName,
                     wiringBase: match
                       ? {
-                          modelProfileId: match.config.modelProfileId ?? undefined,
+                          modelProfileId:
+                            match.config.modelProfileId ?? defaultModelId ?? undefined,
                           skillIds: match.config.skillIds ?? [],
                           mcpServerIds: match.config.mcpServerIds ?? [],
                         }
                       : undefined,
+                    ...(template?.suggestedLoopAgentRole
+                      ? { agentRole: template.suggestedLoopAgentRole }
+                      : {}),
                   })
                   setSwitchAgentMenu(null)
+                }}
+                onBrowseTalentLibrary={() => {
+                  setSwitchAgentMenu(null)
+                  openMarketplaceTalentLibrary()
                 }}
                 onCreateAgent={() => {
                   setSwitchAgentMenu(null)

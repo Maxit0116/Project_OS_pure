@@ -398,7 +398,9 @@ export async function sendLoopAuthoringTurnAsync(
     draft: doc.draft,
     threadLength: doc.authoringThread.length,
     deps: { complete },
+    ...(parsed.focus ? { focus: parsed.focus } : {}),
     ...(parsed.selectedNodeId ? { selectedNodeId: parsed.selectedNodeId } : {}),
+    ...(parsed.selectedEdgeId ? { selectedEdgeId: parsed.selectedEdgeId } : {}),
     ...(goalContext ? { goalContext } : {}),
   });
 

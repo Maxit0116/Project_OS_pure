@@ -4,7 +4,10 @@ import { join } from "node:path";
 import type { AgentCatalogListing } from "../contracts/agent-marketplace.js";
 import { AgentCatalogListingSchema } from "../contracts/agent-marketplace.js";
 import type { AgentDefinition } from "../contracts/agent-pool-trace.js";
-import { isWorkforceAgent } from "../contracts/agent-workforce.js";
+import {
+  isWorkforceAgent,
+  type WorkforceAgentDraft,
+} from "../contracts/agent-workforce.js";
 import type { McpServerConfig } from "../contracts/settings.js";
 import {
   agentDefinitionPath,
@@ -18,6 +21,58 @@ export class AgentInstallError extends Error {
     super(message);
     this.name = "AgentInstallError";
   }
+}
+
+/** Collect recommended capability listing ids from an Agent Template. */
+export function collectAgentListingDependencyIds(listing: AgentCatalogListing): {
+  skillIds: string[];
+  mcpListingIds: string[];
+  rulesPackIds: string[];
+} {
+  const parsed = AgentCatalogListingSchema.parse(listing);
+  return {
+    skillIds: [
+      ...new Set([...(parsed.skillIds ?? []), ...(parsed.dependsOn?.skills ?? [])]),
+    ],
+    mcpListingIds: [...new Set(parsed.dependsOn?.mcpListings ?? [])],
+    rulesPackIds: [...new Set(parsed.dependsOn?.rules ?? [])],
+  };
+}
+
+/**
+ * Map an Agent Template (catalog listing) into a Workforce draft for a new
+ * Instance (`agent_<uuid>`). Catalog install still uses stable `agent_mkt_*`.
+ */
+export function workforceDraftFromAgentListing(
+  listing: AgentCatalogListing,
+  options?: {
+    displayNameSuffix?: string;
+    mcpServerIds?: string[];
+  },
+): WorkforceAgentDraft {
+  const parsed = AgentCatalogListingSchema.parse(listing);
+  const { skillIds } = collectAgentListingDependencyIds(parsed);
+  const hintLine =
+    parsed.permissionHints && parsed.permissionHints.length > 0
+      ? `Permission hints: ${parsed.permissionHints.join(", ")}`
+      : undefined;
+  const permissionNotes = [parsed.permissionNotes?.trim(), hintLine]
+    .filter((part): part is string => Boolean(part && part.length > 0))
+    .join("\n");
+  const baseName = parsed.name.trim();
+  const suffix = options?.displayNameSuffix?.trim();
+  const mcpServerIds = [
+    ...new Set((options?.mcpServerIds ?? []).map((id) => id.trim()).filter(Boolean)),
+  ];
+  return {
+    displayName: suffix ? `${baseName} ${suffix}`.slice(0, 120) : baseName,
+    ...(parsed.roleLabel ? { roleLabel: parsed.roleLabel } : {}),
+    instructions: parsed.instructions ?? "",
+    modelProfileId: null,
+    skillIds,
+    mcpServerIds,
+    ...(permissionNotes ? { permissionNotes: permissionNotes.slice(0, 2000) } : {}),
+  };
 }
 
 /** Stable definition id for catalog / export installs. */
@@ -73,6 +128,8 @@ export function installAgentFromListing(input: {
   catalogVersion: string;
   source?: "catalog" | "export-reimport" | "git-url";
   replace?: boolean;
+  /** MCP server ids already installed for this Template's dependsOn.mcpListings. */
+  mcpServerIds?: string[];
 }): AgentDefinition {
   const listing = AgentCatalogListingSchema.parse(input.listing);
   const definitionId = marketplaceAgentDefinitionId(listing.id);
@@ -83,12 +140,9 @@ export function installAgentFromListing(input: {
     );
   }
   const now = new Date().toISOString();
-  const skillIds = [
-    ...new Set([
-      ...listing.skillIds,
-      ...(listing.dependsOn?.skills ?? []),
-    ]),
-  ];
+  const draft = workforceDraftFromAgentListing(listing, {
+    ...(input.mcpServerIds?.length ? { mcpServerIds: input.mcpServerIds } : {}),
+  });
   return upsertAgentDefinition(input.projectOSRoot, {
     definitionId,
     ...(input.projectId ? { projectId: input.projectId } : {}),
@@ -96,16 +150,16 @@ export function installAgentFromListing(input: {
     updatedAt: now,
     config: {
       kind: "workforce",
-      displayName: listing.name,
-      ...(listing.roleLabel
-        ? { role: listing.roleLabel, roleLabel: listing.roleLabel }
+      displayName: draft.displayName,
+      ...(draft.roleLabel
+        ? { role: draft.roleLabel, roleLabel: draft.roleLabel }
         : {}),
-      instructions: listing.instructions,
+      instructions: draft.instructions,
       modelProfileId: null,
-      skillIds,
-      mcpServerIds: [],
-      ...(listing.permissionNotes
-        ? { permissionNotes: listing.permissionNotes }
+      skillIds: draft.skillIds,
+      mcpServerIds: draft.mcpServerIds,
+      ...(draft.permissionNotes
+        ? { permissionNotes: draft.permissionNotes }
         : {}),
       marketplaceProvenance: {
         listingId: listing.id,

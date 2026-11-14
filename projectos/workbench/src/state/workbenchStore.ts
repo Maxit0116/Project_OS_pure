@@ -40,6 +40,7 @@ import type {
   InstallRulesFromCatalogInput,
   AgentCatalogView,
   InstallAgentFromCatalogInput,
+  InstallAgentFromCatalogResult,
   ExportCapabilityPackInput,
   ExportCapabilityPackResult,
   InstallAgentFromExportPackInput,
@@ -95,6 +96,7 @@ import type {
 import type {
   GitHubAuthStatus,
   GitHubDeviceAuthPending,
+  UserAccountStatus,
 } from '@contracts/index'
 import {
   buildPromptComposerFields,
@@ -782,6 +784,10 @@ export interface WorkbenchState {
   dailyBrief: DailyBrief | null
   dailyBriefNarrative: DailyBriefNarrative | null
   githubAuthStatus: GitHubAuthStatus | null
+  userAccountStatus: UserAccountStatus | null
+  userAccountGooglePending: boolean
+  /** True while account-menu GitHub sign-in awaits Device Flow completion. */
+  userAccountGitHubSignInIntent: boolean
   gitSyncStatus: GitSyncStatus | null
   activeHandoffId: string | null
   teamLoading: boolean
@@ -793,6 +799,7 @@ export interface WorkbenchState {
   meetingImportOpen: boolean
   githubDeviceAuthPending: GitHubDeviceAuthPending | null
   githubAuthPollTimer: ReturnType<typeof setInterval> | null
+  googleAuthPollTimer: ReturnType<typeof setInterval> | null
   handoffOverwriteHandoffId: string | null
   chatAnchor: AnchorRef | null
   lastAnchoredAnswer: TeamBrainAnswer | null
@@ -970,6 +977,11 @@ export interface WorkbenchState {
     displayName?: string | null,
   ) => void
   beginCreateAgentComposer: (source?: 'chat' | 'loop') => void
+  /** Prefill Draft Card from an Agent Template (catalog listing). */
+  beginWorkforceDraftFromAgentListing: (
+    listing: import('@contracts/index').AgentCatalogListing,
+    options?: { asAdditionalInstance?: boolean; source?: 'chat' | 'loop' },
+  ) => void
   cancelCreateAgentComposer: () => void
   submitCreateAgentPrompt: (prompt: string, source?: 'chat' | 'loop') => Promise<void>
   confirmWorkforceDraft: (options?: {
@@ -1080,7 +1092,7 @@ export interface WorkbenchState {
   refreshAgentCatalog: () => Promise<AgentCatalogView | null>
   installAgentFromCatalog: (
     input: InstallAgentFromCatalogInput,
-  ) => Promise<AgentDefinition | null>
+  ) => Promise<InstallAgentFromCatalogResult | null>
   uninstallAgentFromCatalog: (listingId: string) => Promise<boolean>
   disableAgentCatalogListing: (listingId: string) => Promise<boolean>
   reportAgentCatalogListing: (input: { listingId: string; note?: string }) => Promise<boolean>
@@ -1160,6 +1172,11 @@ export interface WorkbenchState {
   setMeetingImportOpen: (open: boolean) => void
   setGitHubDeviceAuthPending: (pending: GitHubDeviceAuthPending | null) => void
   refreshGitHubAuthStatus: () => Promise<void>
+  refreshUserAccountStatus: () => Promise<void>
+  connectGoogleAccount: () => Promise<void>
+  cancelGoogleOAuth: () => Promise<void>
+  signInUserAccountWithGitHub: () => Promise<void>
+  signOutUserAccount: () => Promise<void>
   refreshGitSyncStatus: () => Promise<void>
   connectGitHub: () => Promise<void>
   importGitHubFromGhCli: () => Promise<void>
@@ -1744,6 +1761,9 @@ const initialTransientState = {
   dailyBrief: null as DailyBrief | null,
   dailyBriefNarrative: null as DailyBriefNarrative | null,
   githubAuthStatus: null as GitHubAuthStatus | null,
+  userAccountStatus: null as UserAccountStatus | null,
+  userAccountGooglePending: false,
+  userAccountGitHubSignInIntent: false,
   gitSyncStatus: null as GitSyncStatus | null,
   activeHandoffId: null as string | null,
   teamLoading: false,
@@ -1755,6 +1775,7 @@ const initialTransientState = {
   meetingImportOpen: false,
   githubDeviceAuthPending: null,
   githubAuthPollTimer: null,
+  googleAuthPollTimer: null,
   handoffOverwriteHandoffId: null as string | null,
   chatAnchor: null as AnchorRef | null,
   lastAnchoredAnswer: null as TeamBrainAnswer | null,
@@ -4900,6 +4921,43 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     })
   },
 
+  beginWorkforceDraftFromAgentListing: (listing, options) => {
+    const skillIds = [
+      ...new Set([...(listing.skillIds ?? []), ...(listing.dependsOn?.skills ?? [])]),
+    ]
+    const hintLine =
+      listing.permissionHints && listing.permissionHints.length > 0
+        ? `Permission hints: ${listing.permissionHints.join(', ')}`
+        : undefined
+    const permissionNotes = [listing.permissionNotes?.trim(), hintLine]
+      .filter((part): part is string => Boolean(part && part.length > 0))
+      .join('\n')
+    const suffix = options?.asAdditionalInstance ? '(copy)' : undefined
+    const displayName = suffix
+      ? `${listing.name} ${suffix}`.slice(0, 120)
+      : listing.name
+    const draft: import('@contracts/index').WorkforceAgentDraft = {
+      displayName,
+      ...(listing.roleLabel ? { roleLabel: listing.roleLabel } : {}),
+      instructions: listing.instructions ?? '',
+      modelProfileId: null,
+      skillIds,
+      mcpServerIds: [],
+      ...(permissionNotes ? { permissionNotes: permissionNotes.slice(0, 2000) } : {}),
+    }
+    set({
+      pendingWorkforceDraft: {
+        draft,
+        sourcePrompt: `template:${listing.id}`,
+        source: options?.source ?? 'chat',
+      },
+      createAgentComposerActive: true,
+      chatMode: 'change',
+      activeCustomModeSkillId: null,
+      customModePreviousChatMode: null,
+    })
+  },
+
   cancelCreateAgentComposer: () => {
     set({ createAgentComposerActive: false, pendingWorkforceDraft: null })
   },
@@ -6967,8 +7025,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     if (!project) return null
     const projectId = project.projectId
     try {
-      const definition = await client.installAgentFromCatalog(projectId, input)
+      const result = await client.installAgentFromCatalog(projectId, input)
       if (get().project?.projectId !== projectId) return null
+      const definition = result.definition
       const listingId = definition.config.marketplaceProvenance?.listingId ?? input.listingId
       set((s) => ({
         installedMarketplaceAgentListingIds: s.installedMarketplaceAgentListingIds.includes(
@@ -6977,11 +7036,40 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ? s.installedMarketplaceAgentListingIds
           : [...s.installedMarketplaceAgentListingIds, listingId],
       }))
-      pushToast({
-        type: 'success',
-        message: getStoreMessage(locale, 'settings.agentMarketInstalled'),
+      // Refresh Skill / Rules / MCP mirrors so Installed views stay accurate.
+      void get().refreshInstalledMarketplaceSkills()
+      void get().refreshInstalledMarketplaceRulesPacks()
+      void client.getSettings(projectId).then((settings) => {
+        if (get().project?.projectId !== projectId || !settings) return
+        set({ settings, error: null })
       })
-      return definition
+      const deps = result.dependencies ?? []
+      const failed = deps.filter((d) => d.status === 'failed' || d.status === 'missing_from_catalog')
+      const ready = deps.filter(
+        (d) => d.status === 'installed' || d.status === 'already_installed',
+      )
+      if (failed.length > 0) {
+        pushToast({
+          type: 'warning',
+          message: getStoreMessage(locale, 'settings.agentMarketInstalledWithGaps', {
+            ready: ready.length,
+            failed: failed.length,
+          }),
+        })
+      } else if (deps.length > 0) {
+        pushToast({
+          type: 'success',
+          message: getStoreMessage(locale, 'settings.agentMarketInstalledWithDeps', {
+            count: ready.length,
+          }),
+        })
+      } else {
+        pushToast({
+          type: 'success',
+          message: getStoreMessage(locale, 'settings.agentMarketInstalled'),
+        })
+      }
+      return result
     } catch (error) {
       if (get().project?.projectId === projectId) {
         reportSettingsMutationFailure(error, 'Failed to install agent pack')
@@ -8113,11 +8201,141 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           githubDeviceAuthPending: null,
           githubAuthPollTimer: null,
         })
+        if (get().userAccountGitHubSignInIntent) {
+          try {
+            const account = await client.activateUserAccountProvider('github')
+            set({
+              userAccountStatus: account,
+              userAccountGitHubSignInIntent: false,
+            })
+          } catch {
+            set({ userAccountGitHubSignInIntent: false })
+            void get().refreshUserAccountStatus()
+          }
+        } else {
+          void get().refreshUserAccountStatus()
+        }
         return
       }
       set({ githubAuthStatus: status, ...(pending ? {} : {}) })
     } catch {
       set({ githubAuthStatus: { connected: false, oauthConfigured: false } })
+    }
+  },
+
+  refreshUserAccountStatus: async () => {
+    const { client } = get()
+    try {
+      const status = await client.getUserAccountStatus()
+      const pending = Boolean(status.googleOAuthPending)
+      if (!pending && get().googleAuthPollTimer) {
+        clearInterval(get().googleAuthPollTimer!)
+        set({
+          userAccountStatus: status,
+          userAccountGooglePending: false,
+          googleAuthPollTimer: null,
+        })
+        return
+      }
+      set({
+        userAccountStatus: status,
+        userAccountGooglePending: pending,
+      })
+    } catch {
+      set({
+        userAccountStatus: { connected: false, googleOAuthConfigured: false },
+        userAccountGooglePending: false,
+      })
+    }
+  },
+
+  connectGoogleAccount: async () => {
+    const { client, googleAuthPollTimer } = get()
+    if (googleAuthPollTimer) clearInterval(googleAuthPollTimer)
+    try {
+      const result = await client.beginGoogleOAuth()
+      if (result.kind === 'connected') {
+        set({
+          userAccountStatus: result.status,
+          userAccountGooglePending: false,
+          googleAuthPollTimer: null,
+        })
+        return
+      }
+      set({
+        userAccountStatus: result.status,
+        userAccountGooglePending: true,
+      })
+      const timer = setInterval(() => {
+        void get().refreshUserAccountStatus()
+      }, 2000)
+      set({ googleAuthPollTimer: timer })
+    } catch (error) {
+      set({ userAccountGooglePending: false, googleAuthPollTimer: null })
+      const message =
+        error instanceof Error ? error.message : 'Google sign-in failed'
+      get().pushToast({ type: 'error', message })
+      throw error
+    }
+  },
+
+  cancelGoogleOAuth: async () => {
+    const { client, googleAuthPollTimer } = get()
+    if (googleAuthPollTimer) clearInterval(googleAuthPollTimer)
+    set({ userAccountGooglePending: false, googleAuthPollTimer: null })
+    try {
+      const status = await client.cancelGoogleOAuth()
+      set({ userAccountStatus: status })
+    } catch {
+      /* keep local pending cleared */
+    }
+  },
+
+  signInUserAccountWithGitHub: async () => {
+    const { client, githubAuthStatus } = get()
+    set({ userAccountGitHubSignInIntent: true })
+    try {
+      if (!githubAuthStatus?.connected) {
+        await get().connectGitHub()
+      }
+      const latest = get().githubAuthStatus
+      if (latest?.connected) {
+        const status = await client.activateUserAccountProvider('github')
+        set({
+          userAccountStatus: status,
+          userAccountGitHubSignInIntent: false,
+        })
+      }
+    } catch (error) {
+      set({ userAccountGitHubSignInIntent: false })
+      const message =
+        error instanceof Error ? error.message : 'GitHub sign-in failed'
+      get().pushToast({ type: 'error', message })
+      throw error
+    }
+  },
+
+  signOutUserAccount: async () => {
+    const { client, githubAuthPollTimer, googleAuthPollTimer } = get()
+    if (githubAuthPollTimer) clearInterval(githubAuthPollTimer)
+    if (googleAuthPollTimer) clearInterval(googleAuthPollTimer)
+    set({
+      githubDeviceAuthPending: null,
+      githubAuthPollTimer: null,
+      userAccountGooglePending: false,
+      googleAuthPollTimer: null,
+      userAccountGitHubSignInIntent: false,
+    })
+    try {
+      const status = await client.signOutUserAccount()
+      set({ userAccountStatus: status })
+      await get().refreshGitHubAuthStatus()
+    } catch (error) {
+      set({ userAccountStatus: { connected: false } })
+      const message =
+        error instanceof Error ? error.message : 'Sign out failed'
+      get().pushToast({ type: 'error', message })
+      throw error
     }
   },
 
@@ -8136,6 +8354,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           githubDeviceAuthPending: null,
           githubAuthPollTimer: null,
         })
+        void get().refreshUserAccountStatus()
         return
       }
       set({
@@ -8200,8 +8419,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     try {
       const status = await client.disconnectGitHub()
       set({ githubAuthStatus: status })
+      void get().refreshUserAccountStatus()
     } catch {
       set({ githubAuthStatus: { connected: false } })
+      void get().refreshUserAccountStatus()
     }
   },
 

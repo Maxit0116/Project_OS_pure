@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AgentCatalogListingSchema,
   AgentResponseLanguageSchema,
   AgentRunSchema,
   ApplyBackupManifestSchema,
@@ -638,6 +639,80 @@ describe("contracts schema hardening", () => {
         disabledListingIds: ["community.prompt-engineer"],
       },
     }).success).toBe(true);
+  });
+
+  it("accepts Agent Template Profile fields and rejects unknown keys", () => {
+    const minimal = {
+      id: "curated.frontend-engineer",
+      name: "Frontend Engineer",
+      trustTier: "curated" as const,
+      version: "1.0.0",
+      instructions: "Follow the repo stack.",
+      skillIds: [] as string[],
+    };
+    expect(AgentCatalogListingSchema.safeParse(minimal).success).toBe(true);
+    expect(
+      AgentCatalogListingSchema.safeParse({
+        ...minimal,
+        department: "software_development",
+        tagline: "Web UI",
+        modelTierHint: "balanced",
+        suggestedLoopAgentRole: "coder",
+        specialistPool: false,
+        capabilityTags: ["React"],
+        permissionHints: ["read_repo", "propose_edits"],
+        responsibilities: ["Implement UI"],
+        boundaries: ["Do not invent a new framework"],
+      }).success,
+    ).toBe(true);
+    expect(
+      AgentCatalogListingSchema.safeParse({
+        ...minimal,
+        department: "not_a_real_department",
+      }).success,
+    ).toBe(false);
+    expect(
+      AgentCatalogListingSchema.safeParse({
+        ...minimal,
+        modelProfileId: "gpt-whatever",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts InstallAgentFromCatalogResult with dependency report", async () => {
+    const { InstallAgentFromCatalogResultSchema } = await import(
+      "./agent-marketplace.js"
+    );
+    expect(
+      InstallAgentFromCatalogResultSchema.safeParse({
+        definition: {
+          definitionId: "agent_mkt_curated.frontend-engineer",
+          createdAt: "2026-11-13T00:00:00.000Z",
+          updatedAt: "2026-11-13T00:00:00.000Z",
+          config: {
+            kind: "workforce",
+            displayName: "Frontend Engineer",
+            instructions: "Ship UI.",
+            modelProfileId: null,
+            skillIds: ["community.impeccable"],
+            mcpServerIds: ["mcp_playwright_abcd"],
+          },
+        },
+        dependencies: [
+          {
+            kind: "skill",
+            listingId: "community.impeccable",
+            status: "installed",
+          },
+          {
+            kind: "mcp",
+            listingId: "curated.playwright",
+            status: "already_installed",
+            serverId: "mcp_playwright_abcd",
+          },
+        ],
+      }).success,
+    ).toBe(true);
   });
 
   it("requires finite nonnegative integer model-gateway metrics", () => {

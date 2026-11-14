@@ -1,0 +1,37 @@
+.chromeImg {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+  display: block;
+  flex-shrink: 0;
+}
+
+.menuImg {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  display: block;
+  flex-shrink: 0;
+}
+
+.fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.chromeFallback {
+  border-radius: 4px;
+}
+
+.menuFallback {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-secondary);
+}

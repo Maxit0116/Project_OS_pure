@@ -4,6 +4,7 @@ import type {
   AssemblySearchScope,
 } from "../contracts/agent-assembly.js";
 import { AssembleWorkforceAgentResultSchema } from "../contracts/agent-assembly.js";
+import type { AgentCatalogListing } from "../contracts/agent-marketplace.js";
 import type { SkillCatalogListing } from "../contracts/skill-marketplace.js";
 import type { McpCatalogListing } from "../contracts/mcp-catalog.js";
 import type { RulesCatalogListing } from "../contracts/rules-marketplace.js";
@@ -11,6 +12,7 @@ import type { WorkflowCatalogListing } from "../contracts/workflow-marketplace.j
 import type { StencilCatalogListing } from "../contracts/stencil-marketplace.js";
 import type { SkillDescriptor } from "../contracts/skills.js";
 import { draftWorkforceAgentFromPrompt } from "./workforce-agent-draft.js";
+import { suggestAgentTemplatesFromPrompt } from "./suggest-agent-templates.js";
 
 const MAX_SELECTED_SKILLS = 5;
 const MAX_SELECTED_MCP = 3;
@@ -70,6 +72,7 @@ export function assembleWorkforceAgentFromPrompt(input: {
   rulesCatalog?: RulesCatalogListing[];
   workflowCatalog?: WorkflowCatalogListing[];
   stencilCatalog?: StencilCatalogListing[];
+  agentCatalog?: AgentCatalogListing[];
   installedSkillIds?: Set<string>;
   installedMcpListingIds?: Set<string>;
   installedRulesPackIds?: Set<string>;
@@ -359,6 +362,23 @@ export function assembleWorkforceAgentFromPrompt(input: {
     `${bindings.filter((b) => b.selected).length} capabilities selected by default — review checkboxes before creating.`,
   ];
 
+  const suggestedAgentTemplates =
+    input.agentCatalog && input.agentCatalog.length > 0
+      ? suggestAgentTemplatesFromPrompt({
+          prompt,
+          listings: input.agentCatalog,
+          limit: 5,
+        })
+      : [];
+
+  if (suggestedAgentTemplates.length > 0) {
+    rationaleParts.push(
+      `Suggested specialist Templates: ${suggestedAgentTemplates
+        .map((row) => row.name)
+        .join(", ")} (install from Agents tab — not auto-bound).`,
+    );
+  }
+
   return AssembleWorkforceAgentResultSchema.parse({
     draft,
     sourcePrompt: prompt,
@@ -366,6 +386,9 @@ export function assembleWorkforceAgentFromPrompt(input: {
     bindings,
     ...(gaps.length ? { gaps } : {}),
     rationale: rationaleParts.join(" "),
+    ...(suggestedAgentTemplates.length
+      ? { suggestedAgentTemplates }
+      : {}),
   });
 }
 

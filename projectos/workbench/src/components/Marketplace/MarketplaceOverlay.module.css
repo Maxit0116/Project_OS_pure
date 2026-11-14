@@ -138,6 +138,13 @@
   letter-spacing: 0.04em;
 }
 
+.sectionTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .help {
   margin: 0;
   font-size: var(--font-size-xs);

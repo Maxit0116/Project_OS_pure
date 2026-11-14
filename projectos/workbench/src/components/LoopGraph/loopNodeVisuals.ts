@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Terminal,
   TextCursorInput,
+  Users,
 } from 'lucide-react'
 import {
   withArchitectureDefaults,
@@ -38,6 +39,7 @@ import {
 export const LOOP_PALETTE_MIME = 'application/x-projectos-loop-palette'
 
 export type LoopVisualKey =
+  | 'workgroup.create'
   | 'agent.planner'
   | 'agent.coder'
   | 'agent.reviewer'
@@ -79,6 +81,13 @@ export type LoopNodeVisual = {
 }
 
 const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
+  'workgroup.create': {
+    key: 'workgroup.create',
+    category: 'workgroup',
+    Icon: Users,
+    shortLabel: 'Work Group',
+    categoryClass: 'catWorkgroup',
+  },
   'agent.planner': {
     key: 'agent.planner',
     category: 'agent',
@@ -347,6 +356,22 @@ export function visualKeyFromArchitecture(node: {
 
 export function visualForKey(key: LoopVisualKey): LoopNodeVisual {
   return VISUALS[key] ?? VISUALS.draft
+}
+
+/** Condition + human approval render as flat diamonds (corners = N/E/S/W ports). */
+export const DIAMOND_LOOP_VISUAL_KEYS = [
+  'logic.condition',
+  'human.approval',
+] as const satisfies readonly LoopVisualKey[]
+
+export type DiamondLoopVisualKey = (typeof DIAMOND_LOOP_VISUAL_KEYS)[number]
+
+export function isDiamondLoopVisualKey(key: LoopVisualKey): key is DiamondLoopVisualKey {
+  return (DIAMOND_LOOP_VISUAL_KEYS as readonly string[]).includes(key)
+}
+
+export function isDiamondLoopNode(node: IntentGraphNode): boolean {
+  return isDiamondLoopVisualKey(visualForIntentNode(node).key)
 }
 
 export function visualForIntentNode(node: IntentGraphNode): LoopNodeVisual {

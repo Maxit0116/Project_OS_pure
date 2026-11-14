@@ -33,9 +33,24 @@ export const LOOP_SATELLITE_KINDS = [
 ] as const;
 export type LoopSatelliteKind = (typeof LOOP_SATELLITE_KINDS)[number];
 
-/** Agent bottom config ports (n8n-style). */
-export const LOOP_AGENT_CONFIG_PORTS = ["model", "memory", "capability"] as const;
+/**
+ * Agent bottom config ports.
+ * UI strip uses model / mcp / skill. `memory` and `capability` remain for
+ * persisted graphs and fold (capability = legacy Skill+MCP shared port).
+ */
+export const LOOP_AGENT_CONFIG_PORTS = [
+  "model",
+  "memory",
+  "capability",
+  "mcp",
+  "skill",
+] as const;
 export type LoopAgentConfigPort = (typeof LOOP_AGENT_CONFIG_PORTS)[number];
+
+/** Ports shown as icon buttons on the Agent card (not workflow N/E/S/W). */
+export const LOOP_AGENT_WIRING_STRIP_PORTS = ["model", "mcp", "skill"] as const;
+export type LoopAgentWiringStripPort =
+  (typeof LOOP_AGENT_WIRING_STRIP_PORTS)[number];
 
 export const LOOP_MEMORY_MODES = ["project", "buffer", "none"] as const;
 export type LoopMemoryMode = (typeof LOOP_MEMORY_MODES)[number];
@@ -272,5 +287,21 @@ export function configPortForSatelliteKind(
 ): LoopAgentConfigPort {
   if (kind === "model") return "model";
   if (kind === "memory") return "memory";
+  if (kind === "mcp") return "mcp";
+  if (kind === "skill") return "skill";
+  // rules / pack still fold through the legacy shared capability port
   return "capability";
+}
+
+/** Normalize legacy `capability` edges onto skill/mcp when kind is known. */
+export function effectiveConfigPort(
+  port: LoopAgentConfigPort | undefined,
+  satelliteKind: LoopSatelliteKind | undefined,
+): LoopAgentConfigPort | undefined {
+  if (port && port !== "capability") return port;
+  if (satelliteKind === "mcp") return "mcp";
+  if (satelliteKind === "skill") return "skill";
+  if (satelliteKind === "model") return "model";
+  if (satelliteKind === "memory") return "memory";
+  return port ?? (satelliteKind ? configPortForSatelliteKind(satelliteKind) : undefined);
 }

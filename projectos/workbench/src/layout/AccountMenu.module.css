@@ -1,0 +1,203 @@
+.root {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.trigger:hover,
+.triggerOpen,
+.triggerSignedIn {
+  color: var(--color-text-primary);
+}
+
+.trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus, var(--glass-focus-ring));
+}
+
+.compact .trigger {
+  width: 28px;
+  height: 28px;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 80;
+  width: 280px;
+  padding: 6px;
+  border: 1px solid var(--tech-border);
+  border-radius: 10px;
+  background: var(--tech-bg-elevated);
+  box-shadow: var(--tech-shadow-md);
+  color: var(--tech-text-primary);
+}
+
+.identity {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 8px 10px;
+}
+
+.identityText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.identityName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tech-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identityEmail,
+.identityProvider {
+  font-size: 11px;
+  color: var(--tech-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signedOutHeader {
+  padding: 8px 8px 10px;
+}
+
+.signedOutTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tech-text-primary);
+}
+
+.signedOutHint {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--tech-text-muted);
+}
+
+.divider {
+  height: 1px;
+  margin: 4px 4px;
+  background: var(--tech-border);
+}
+
+.item,
+.backRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 8px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tech-text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover:not(:disabled),
+.backRow:hover,
+.itemActive {
+  background: var(--tech-bg-muted);
+  color: var(--tech-text-primary);
+}
+
+.item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.item:focus-visible,
+.backRow:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.chevron {
+  margin-left: auto;
+  opacity: 0.7;
+}
+
+.meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--tech-text-muted);
+}
+
+.hint {
+  margin: 0;
+  padding: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--tech-text-muted);
+}
+
+.pendingBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.deviceCode {
+  margin: 0 8px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--tech-text-primary);
+}
+
+.profileBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+
+.profileRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.profileKey {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tech-text-muted);
+}
+
+.profileValue {
+  font-size: 12px;
+  color: var(--tech-text-primary);
+  word-break: break-word;
+}

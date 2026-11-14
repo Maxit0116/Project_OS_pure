@@ -47,8 +47,10 @@ import {
 } from "./loop-approval-binding.js";
 import {
   assertAgentCallBudget,
+  assertWorkGroupAgentCallBudget,
   recordAgentCallEnd,
   recordAgentCallStart,
+  recordWorkGroupAgentCall,
   resolveAgentCallBudgetLimits,
 } from "./loop-agent-call-budget.js";
 import {
@@ -2150,6 +2152,12 @@ function stepImplementNode(
     if (!budget.ok) {
       return failNode(doc, next, node.id, budget.reason, { spec });
     }
+    if (node.workGroupId) {
+      const wgBudget = assertWorkGroupAgentCallBudget(next, node.workGroupId);
+      if (!wgBudget.ok) {
+        return failNode(doc, next, node.id, wgBudget.reason, { spec });
+      }
+    }
     const implementRole: "implement" | "fix" =
       node.role === "fix" || node.repairMode ? "fix" : "implement";
     try {
@@ -2177,6 +2185,9 @@ function stepImplementNode(
       featureNodeId: leaf.featureNodeId,
       activeRunIds: [...new Set([...priorIds, run.runId])],
     });
+    if (node.workGroupId) {
+      next = recordWorkGroupAgentCall(next, node.workGroupId);
+    }
   }
 
   if (!run || !next.activeRunId) {
@@ -3065,13 +3076,20 @@ export function startLoopInstance(
       status: node.id === entry ? ("ready" as const) : ("pending" as const),
       updatedAt: startedAt,
     })),
+    workGroupRecords: (spec.workGroups ?? []).map((group) => ({
+      workGroupId: group.id,
+      status: "pending" as const,
+      updatedAt: startedAt,
+      memberNodeIds: [...group.memberNodeIds],
+      agentCalls: 0,
+    })),
     freshness: {
       status: "fresh",
       baselineId: pathFingerprint,
       pathFingerprint,
       checkedAt: startedAt,
     },
-    budgetUsage: { tokens: 0, wallClockMs: 0, retries: 0 },
+    budgetUsage: { tokens: 0, wallClockMs: 0, retries: 0, workGroupAgentCalls: {} },
     ...(options.launch ? { launch: options.launch } : {}),
     ...(runBinding ? { runBinding } : {}),
     events: [],

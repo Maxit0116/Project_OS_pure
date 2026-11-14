@@ -336,6 +336,42 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async getUserAccountStatus(): Promise<
+    import("../../contracts/user-account.js").UserAccountStatus
+  > {
+    return transportNotConnected();
+  }
+
+  async getUserAccountProfile(): Promise<
+    import("../../contracts/user-account.js").UserAccountProfile | null
+  > {
+    return transportNotConnected();
+  }
+
+  async beginGoogleOAuth(): Promise<
+    import("../../contracts/user-account.js").BeginGoogleOAuthResult
+  > {
+    return transportNotConnected();
+  }
+
+  async cancelGoogleOAuth(): Promise<
+    import("../../contracts/user-account.js").UserAccountStatus
+  > {
+    return transportNotConnected();
+  }
+
+  async activateUserAccountProvider(
+    _provider: import("../../contracts/user-account.js").UserAccountProvider,
+  ): Promise<import("../../contracts/user-account.js").UserAccountStatus> {
+    return transportNotConnected();
+  }
+
+  async signOutUserAccount(): Promise<
+    import("../../contracts/user-account.js").UserAccountStatus
+  > {
+    return transportNotConnected();
+  }
+
   async saveGitHubOAuthClientId(
     _clientId: string,
   ): Promise<import("../../contracts/github-auth.js").GitHubAuthStatus> {
@@ -1095,7 +1131,7 @@ export class NotConnectedTransport implements ProjectOSApi {
   async installAgentFromCatalog(
     _projectId: string,
     _input: import("../../contracts/agent-marketplace.js").InstallAgentFromCatalogInput,
-  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+  ): Promise<import("../../contracts/agent-marketplace.js").InstallAgentFromCatalogResult> {
     return transportNotConnected();
   }
 

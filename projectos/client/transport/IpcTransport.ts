@@ -506,6 +506,34 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("importGitHubAuthFromGhCli");
   }
 
+  getUserAccountStatus(): Promise<import("../../contracts/user-account.js").UserAccountStatus> {
+    return this.invoke("getUserAccountStatus");
+  }
+
+  getUserAccountProfile(): Promise<
+    import("../../contracts/user-account.js").UserAccountProfile | null
+  > {
+    return this.invoke("getUserAccountProfile");
+  }
+
+  beginGoogleOAuth(): Promise<import("../../contracts/user-account.js").BeginGoogleOAuthResult> {
+    return this.invoke("beginGoogleOAuth");
+  }
+
+  cancelGoogleOAuth(): Promise<import("../../contracts/user-account.js").UserAccountStatus> {
+    return this.invoke("cancelGoogleOAuth");
+  }
+
+  activateUserAccountProvider(
+    provider: import("../../contracts/user-account.js").UserAccountProvider,
+  ): Promise<import("../../contracts/user-account.js").UserAccountStatus> {
+    return this.invoke("activateUserAccountProvider", provider);
+  }
+
+  signOutUserAccount(): Promise<import("../../contracts/user-account.js").UserAccountStatus> {
+    return this.invoke("signOutUserAccount");
+  }
+
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload> {
     return this.invoke("getNodeContext", projectId, nodeId);
   }
@@ -1299,7 +1327,7 @@ export class IpcTransport implements ApiTransport {
   installAgentFromCatalog(
     projectId: string,
     input: import("../../contracts/agent-marketplace.js").InstallAgentFromCatalogInput,
-  ): Promise<import("../../contracts/agent-pool-trace.js").AgentDefinition> {
+  ): Promise<import("../../contracts/agent-marketplace.js").InstallAgentFromCatalogResult> {
     return this.invoke("installAgentFromCatalog", projectId, input);
   }
 

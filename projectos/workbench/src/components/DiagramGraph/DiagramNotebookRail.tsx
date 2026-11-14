@@ -3,6 +3,8 @@ import { NotebookPen, Pin, PinOff, Plus, Trash2 } from 'lucide-react'
 import type { DiagramNoteBlock } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useDiagramGraphStore } from '../../state/diagramGraphStore'
+import TextArea from '../ui/TextArea'
+import TextInput from '../ui/TextInput'
 import styles from './DiagramNotebookRail.module.css'
 
 const EXPAND_DELAY_MS = 220
@@ -214,7 +216,9 @@ export default function DiagramNotebookRail() {
                   draftBlocks.map((block) => (
                     <article key={block.id} className={styles.block} data-note-block={block.id}>
                       <div className={styles.blockHead}>
-                        <input
+                        <TextInput
+                          size="sm"
+                          fieldClassName={styles.titleField}
                           className={styles.titleInput}
                           value={block.title}
                           placeholder={ts('chat.diagramGraph.notebook.blockTitle')}
@@ -246,12 +250,15 @@ export default function DiagramNotebookRail() {
                           <Trash2 size={13} aria-hidden />
                         </button>
                       </div>
-                      <textarea
+                      <TextArea
+                        size="sm"
+                        rows={4}
+                        resize="none"
+                        fieldClassName={styles.bodyField}
                         className={styles.bodyInput}
                         value={block.body}
                         placeholder={ts('chat.diagramGraph.notebook.blockBody')}
                         aria-label={ts('chat.diagramGraph.notebook.blockBody')}
-                        rows={4}
                         onChange={(event) => {
                           const body = event.target.value
                           updateBlocks(

@@ -11,6 +11,7 @@
 | [`Skills-Marketplace-Dev-Plan.md`](./Skills-Marketplace-Dev-Plan.md) | **已落地**：Skill catalog / install / Overlay tab（本计划继承，不重做） |
 | [`Agent-Harness-Dev-Plan.md`](./Agent-Harness-Dev-Plan.md) / [`Agent-Harness-Tool-Registry.md`](./Agent-Harness-Tool-Registry.md) | Rules / Skills / permissions 消费面；catalog install ≠ policy allow |
 | [`Specialized-Agent-Workforce-Dev-Plan.md`](./Specialized-Agent-Workforce-Dev-Plan.md) | Workforce Agent 本地 CRUD；本计划增加 **导出 / 目录安装** |
+| [`Specialist-Agent-Talent-Library-Dev-Plan.md`](./Specialist-Agent-Talent-Library-Dev-Plan.md) | **Planned**：内置专职岗位 Catalog 扩容 + Template Profile 字段；仍经本计划 Agents tab / Install |
 | [`Marketplace-Installed-Agent-Compose-Dev-Plan.md`](./Marketplace-Installed-Agent-Compose-Dev-Plan.md) | **Implemented**：Installed 视图 NL 装配专职 Agent（Consent + 可勾选提案）；创建仍走 Workforce |
 | [`Loops-Graph-Workflow-Studio-Dev-Plan.md`](./Loops-Graph-Workflow-Studio-Dev-Plan.md) | Loop presets；文档已标 marketplace 延期——本计划承接 |
 | [`UI-Stencil-on-Capture-Dev-Plan.md`](./UI-Stencil-on-Capture-Dev-Plan.md) | 本地 Stencil catalog；本计划增加 **可分享 pack** |
@@ -74,7 +75,8 @@
 **组合关系（不变量）**：
 
 - Agent / Workflow 是 **组合层**：可声明依赖 `skillIds` / `mcpListingIds`（或本地 server ids）。
-- 安装组合包时：**不**自动装齐依赖；UI 展示缺失依赖并引导去对应 tab 安装。
+- **Agent Install（2026-11-13）**：默认一并安装 Template 推荐的 Skills / MCP / Rules，并把 MCP server ids 绑定到 Instance（`installDependencies` 可关）。Community MCP 默认仍关闭；鉴权 MCP 可能仍需补 token。
+- **Workflow Install**：仍不自动装齐依赖；UI 展示缺失依赖并引导去对应 tab 安装。
 - Skill 与 Rules 都是指令，但 **Rules = 常驻**，**Skill = 按需**；市场分 tab，不合并。
 
 ### 1.3 明确不进 Marketplace
@@ -199,7 +201,9 @@ Export v1：**下载/复制到剪贴板或写入用户选择路径**；UI 展示
 
 ### 3.3 依赖引导
 
-安装 Agent / Workflow 时若 `dependsOn` 未满足：
+**Agent Install**：默认下载 `dependsOn` + `skillIds` 推荐能力并绑定 MCP；个别失败/缺 catalog 项时本体仍可装上，toast 报告 ready/failed 计数。
+
+**Workflow Install**（及显式 `installDependencies: false` 的 Agent）若 `dependsOn` 未满足：
 
 1. 仍允许安装本体。  
 2. Detail / 成功 toast 列出缺失 Skill / MCP / Rules。  

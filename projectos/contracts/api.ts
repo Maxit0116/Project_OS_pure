@@ -391,6 +391,23 @@ export interface ProjectOSApi {
   importGitHubAuthFromGhCli(): Promise<
     import("./github-auth.js").BeginGitHubOAuthResult
   >;
+  /**
+   * Product account chrome status (Google or GitHub identity).
+   * Distinct from Loop Gmail connector and from GitHub repo capability alone.
+   */
+  getUserAccountStatus(): Promise<import("./user-account.js").UserAccountStatus>;
+  getUserAccountProfile(): Promise<import("./user-account.js").UserAccountProfile | null>;
+  beginGoogleOAuth(): Promise<import("./user-account.js").BeginGoogleOAuthResult>;
+  cancelGoogleOAuth(): Promise<import("./user-account.js").UserAccountStatus>;
+  /**
+   * Mark an already-backed provider as the product account (e.g. after GitHub OAuth).
+   * Google activate requires a stored Google session; GitHub requires connected GitHub auth.
+   */
+  activateUserAccountProvider(
+    provider: import("./user-account.js").UserAccountProvider,
+  ): Promise<import("./user-account.js").UserAccountStatus>;
+  /** Clear product account; GitHub identity also disconnects GitHub capability (MVP). */
+  signOutUserAccount(): Promise<import("./user-account.js").UserAccountStatus>;
   getNodeContext(projectId: string, nodeId: string): Promise<ContextPayload>;
   getFileContext(projectId: string, path: string): Promise<ContextPayload>;
   getGlobalAgentContext(
@@ -737,7 +754,7 @@ export interface ProjectOSApi {
   installAgentFromCatalog(
     projectId: string,
     input: InstallAgentFromCatalogInput,
-  ): Promise<AgentDefinition>;
+  ): Promise<import("./agent-marketplace.js").InstallAgentFromCatalogResult>;
   uninstallAgentFromCatalog(
     projectId: string,
     input: UninstallAgentFromCatalogInput,

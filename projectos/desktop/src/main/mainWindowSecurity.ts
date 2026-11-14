@@ -13,8 +13,9 @@ const PACKAGED_CONNECT_SRC = [
   'https://hf-mirror.com',
 ].join(' ')
 
-// GitHub account / marketplace publisher avatars (API returns
-// avatars.githubusercontent.com; github.com/<owner>.png redirects there).
+// Account / marketplace avatars:
+// - GitHub: avatars.githubusercontent.com (API); github.com/<owner>.png redirects there
+// - Google product account: lh*.googleusercontent.com (OpenID `picture`)
 const PACKAGED_IMG_SRC = [
   "'self'",
   'data:',
@@ -22,6 +23,9 @@ const PACKAGED_IMG_SRC = [
   'https://avatars.githubusercontent.com',
   'https://*.githubusercontent.com',
   'https://github.com',
+  'https://lh3.googleusercontent.com',
+  'https://*.googleusercontent.com',
+  'https://*.ggpht.com',
 ].join(' ')
 
 const PACKAGED_CSP = [

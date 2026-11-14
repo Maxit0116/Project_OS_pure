@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { applyWindowBrandIcon, loadAppBrandIcon } from './appBrandIcon.js'
 import {
   disposeStreamSubscriptionsForWebContents,
 } from './registerProjectOsIpc.js'
@@ -35,12 +36,16 @@ export function createMainWindow(initialWorkspacePath?: string): BrowserWindow {
     : pathToFileURL(rendererPath).toString()
   const requestedWidth = Number(process.env.PROJECTOS_WINDOW_WIDTH)
   const requestedHeight = Number(process.env.PROJECTOS_WINDOW_HEIGHT)
+  // macOS Stage Manager / Dock read Electron.app's bundle icon only. Passing
+  // BrowserWindow.icon / setIcon here can leave a stale non-Electron badge.
+  const brandIcon = isMac ? null : loadAppBrandIcon()
   const win = new BrowserWindow({
     width: Number.isFinite(requestedWidth) && requestedWidth >= 1280 ? requestedWidth : 1400,
     height: Number.isFinite(requestedHeight) && requestedHeight >= 720 ? requestedHeight : 900,
     minWidth: 1280,
     minHeight: 720,
     show: false,
+    ...(brandIcon ? { icon: brandIcon } : {}),
     ...(isMac
       ? {
           titleBarStyle: 'hidden' as const,
@@ -56,6 +61,9 @@ export function createMainWindow(initialWorkspacePath?: string): BrowserWindow {
       webviewTag: true,
     },
   })
+  if (!isMac) {
+    applyWindowBrandIcon(win, brandIcon)
+  }
 
   const webContentsId = win.webContents.id
   if (initialWorkspacePath) {

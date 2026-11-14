@@ -13,6 +13,7 @@
 | [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | Draw 识读合同；本文件扩展 Run 态投影与控制流容器可视化。 |
 | [`Loops-Graph-Review-Visual-Dev-Plan.md`](./Loops-Graph-Review-Visual-Dev-Plan.md) | Review 审批台已落地 MVP；本文件要求 Path Map 支持 Parallel/Branch/Loop 容器识读，不重做审批壳。 |
 | [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | 配置卫星；本文件不改 wiring 语义。 |
+| [`Loops-Graph-Agent-Work-Group-Dev-Plan.md`](./Loops-Graph-Agent-Work-Group-Dev-Plan.md) | **Agent 编制工作组**（虚线小队框）；与本文件 Parallel/Loop **拓扑容器**语义分离、可并存；不替代 GC Parallel。 |
 | [`Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md`](./Loops-Graph-Project-Workflow-and-Materials-Dev-Plan.md) | **并行权威（2026-11-10）**：项目内真实 Workflow Run 绑定 + 多类型 Task Materials（PW-\* / TM-\*）。依赖本文件已落地 GC 能力；不重做六机制。验收矩阵与分期以该文件 + [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) 为准。 |
 | [`Loops-Graph-Six-Goals-Execution-Tracking.md`](./Loops-Graph-Six-Goals-Execution-Tracking.md) | 六目标 + 连接器 + 双入口 + PW/TM + Gmail **执行实况**（计划/实现/contract/live/待验）。 |
 | [`Loops-Graph-Gmail-Connector-Dev-Plan.md`](./Loops-Graph-Gmail-Connector-Dev-Plan.md) | Gmail push=`users.watch`→Pub/Sub→`history.list`（≠普通 webhook 载信）；首期不部署 Pub/Sub。 |

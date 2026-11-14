@@ -113,6 +113,120 @@ describe("loop authoring provider path (loopback)", () => {
     expect(doc.draft.nodes.find((n) => n.id === "verify")?.timeoutMs).toBe(10_000);
   });
 
+  it("applies edge_patch for focused edge transfer text", async () => {
+    const root = tempRoot();
+    let doc = createLoopGraph(root, "proj", "EdgeFocus");
+    doc = upsertLoopGraph(root, {
+      ...doc,
+      draft: {
+        revision: 1,
+        graphPrompt: "Ship",
+        nodes: [
+          {
+            id: "a",
+            title: "Plan",
+            prompt: "plan",
+            type: "agent",
+            position: { x: 0, y: 0 },
+          },
+          {
+            id: "b",
+            title: "Build",
+            prompt: "build",
+            type: "agent",
+            position: { x: 200, y: 0 },
+          },
+        ],
+        edges: [
+          {
+            id: "e1",
+            source: "a",
+            target: "b",
+            kind: "depends",
+            prompt: "",
+          },
+        ],
+      },
+    });
+
+    setLoopAuthoringCompleteOverride(
+      createLoopbackAuthoringComplete({
+        kind: "edge_patch",
+        edgeId: "e1",
+        patch: {
+          prompt: "Pass the approved implementation plan as markdown.",
+        },
+        summary: "Describe plan→build handoff",
+      }),
+    );
+
+    doc = await sendLoopAuthoringTurnAsync(root, doc.id, {
+      mode: "edit",
+      text: "this edge carries the approved plan",
+      focus: { type: "edge", id: "e1" },
+      useProvider: true,
+    });
+    expect(
+      doc.pendingGraphEditOffer?.proposedDraft?.edges.find((e) => e.id === "e1")
+        ?.prompt,
+    ).toMatch(/approved implementation plan/i);
+    expect(doc.pendingGraphEditOffer?.proposedDraft?.nodes).toHaveLength(2);
+  });
+
+  it("rejects node_patch when an edge is focused", async () => {
+    const root = tempRoot();
+    let doc = createLoopGraph(root, "proj", "EdgeGuard");
+    doc = upsertLoopGraph(root, {
+      ...doc,
+      draft: {
+        revision: 1,
+        graphPrompt: "Ship",
+        nodes: [
+          {
+            id: "a",
+            title: "A",
+            prompt: "",
+            type: "agent",
+            position: { x: 0, y: 0 },
+          },
+          {
+            id: "b",
+            title: "B",
+            prompt: "",
+            type: "agent",
+            position: { x: 120, y: 0 },
+          },
+        ],
+        edges: [
+          {
+            id: "e1",
+            source: "a",
+            target: "b",
+            kind: "depends",
+          },
+        ],
+      },
+    });
+
+    setLoopAuthoringCompleteOverride(
+      createLoopbackAuthoringComplete({
+        kind: "node_patch",
+        nodeId: "a",
+        patch: { prompt: "should not apply" },
+        summary: "wrong target",
+      }),
+    );
+
+    doc = await sendLoopAuthoringTurnAsync(root, doc.id, {
+      mode: "edit",
+      text: "rewrite node",
+      selectedEdgeId: "e1",
+      useProvider: true,
+    });
+    expect(doc.pendingGraphEditOffer).toBeUndefined();
+    expect(doc.authoringThread.at(-1)?.content).toMatch(/edge is focused|edge_patch/i);
+  });
+
   it("rejects unknown connector fields from provider", async () => {
     const root = tempRoot();
     let doc = createLoopGraph(root, "proj", "Reject");

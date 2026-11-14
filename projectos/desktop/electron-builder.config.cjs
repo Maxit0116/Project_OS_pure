@@ -16,6 +16,8 @@ module.exports = {
   appId: 'com.projectos.app',
   productName: 'Project OS',
   directories: { output: 'release', buildResources: 'build' },
+  // build/icon.* currently mirrors stock Electron until post-MVP Project OS logo.
+  // electron-builder picks build/icon.* automatically for mac/win/linux.
   files: ['out/**/*', 'package.json'],
   // node-pty ships prebuilt N-API binaries for darwin-arm64 and darwin-x64, so nothing needs compiling
   // at package time (the rebuild step needs node-gyp, which fails without Python distutils).
@@ -28,7 +30,12 @@ module.exports = {
     '**/node_modules/typescript/**',
     '**/node_modules/typescript-language-server/**',
   ],
-  extraResources: [{ from: '../../sample-graph-saas', to: 'sample-graph-saas', filter: ['**/*'] }],
+  extraResources: [
+    { from: '../../sample-graph-saas', to: 'sample-graph-saas', filter: ['**/*'] },
+    // Runtime Dock/About helpers; mac .app icon itself comes from build/icon.icns via buildResources.
+    { from: 'build/icon.png', to: 'icon.png' },
+    { from: 'build/icon.icns', to: 'icon.icns' },
+  ],
   mac: {
     ...(signing ? {} : { identity: null }),
     // Apple silicon and Intel: node-pty is the only native module and ships prebuilt binaries for both.

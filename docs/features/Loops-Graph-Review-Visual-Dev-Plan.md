@@ -10,6 +10,7 @@
 |------|------|
 | [`Loops-Graph-Workflow-Studio-Dev-Plan.md`](./Loops-Graph-Workflow-Studio-Dev-Plan.md) | Studio 壳 / `draw \| review \| run` / LG-1.4 假设·CycleGate 门闩；本计划承接 **Review 展示层**，并补强 LG-1.4 的扫读体验 |
 | [`Loops-Graph-Gaps-Closure-Dev-Plan.md`](./Loops-Graph-Gaps-Closure-Dev-Plan.md) | **缺口补全总控**：GC-6.4 要求 Path Map 增强 Parallel/Loop 容器只读识读；不改变本计划「Review ≠ 第二张 Draw」边界 |
+| [`Loops-Graph-Semantic-Layout-Dev-Plan.md`](./Loops-Graph-Semantic-Layout-Dev-Plan.md) | **TB 语义布局**：替换 Path Map 横向蛇形；Review 只读消费同一 Semantic Layout Engine |
 | [`Loops-Graph-UI-Visual-Authoring-Dev-Plan.md`](./Loops-Graph-UI-Visual-Authoring-Dev-Plan.md) | 图标节点、`loopNodeVisuals`、Duty 卡；本计划 **复用同一识读合同**，Review 只读 |
 | [`Loops-Graph-Node-Architecture-Dev-Plan.md`](./Loops-Graph-Node-Architecture-Dev-Plan.md) | 四类 Node / Edge kind；Path Map 只投影已编译 `LoopSpec` |
 | [`Loops-Graph-Agent-Wiring-Dev-Plan.md`](./Loops-Graph-Agent-Wiring-Dev-Plan.md) | `provides` 配置边；Review Path Map **默认折叠/省略**配置卫星，避免审批噪音 |
